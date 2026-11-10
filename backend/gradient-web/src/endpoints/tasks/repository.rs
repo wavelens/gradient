@@ -9,6 +9,7 @@ use super::refusal::TaskRefusal;
 use super::{RepositoryFetchStatus, error_message_if_caller_can_edit_task};
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::TaskPath;
+use crate::audit::Audit;
 use crate::endpoints::projects::integrations::{IncomingWebhookDeliveryResponse, WebhookBase};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -19,6 +20,8 @@ use axum::Json;
 use gradient_ci::IntegrationKind;
 use gradient_sources::format_public_key;
 use gradient_types::actions::ActionConfig;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::triggers::TriggerConfig;
 use gradient_types::*;
@@ -337,6 +340,7 @@ fn integration_of_kind(
 )]
 pub async fn put_task_repository(
     scope: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
+    audit: Audit,
     JsonBody(body): JsonBody<UpdateTaskRepositoryRequest>,
 ) -> WebResult<Json<BaseResponse<TaskRepositoryResponse>>> {
     let TaskScope {
@@ -444,7 +448,21 @@ pub async fn put_task_repository(
     sync_status_action(&txn, task, wiring.status.map(|(a, _)| a), status, now).await?;
     txn.commit().await?;
 
-    Ok(ok_json(repository_response(&scope).await?))
+    let response = repository_response(&scope).await?;
+    audit
+        .write(
+            Action::TaskRepositorySettingsReplaced,
+            EventOwner::task(project.id, task.id),
+            serde_json::json!({
+                "inbound_integration": inbound.map(|id| id.to_string()),
+                "outbound_integration": outbound.map(|id| id.to_string()),
+                "build_on_push": body.build_on_push,
+                "build_on_pull_request": body.build_on_pull_request,
+                "report_status": body.report_status,
+            }),
+        )
+        .await;
+    Ok(ok_json(response))
 }
 
 fn clean(patterns: &[String]) -> Vec<String> {

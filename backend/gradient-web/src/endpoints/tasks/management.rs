@@ -564,18 +564,10 @@ pub async fn delete_task(
     responses((status = OK, description = "Enabled", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn post_task_active(
-    TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    scope: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut atask: ATask = task.into();
-    atask.active = Set(true);
-    gradient_db::tasks::update(&db.web_db, atask).await?;
-
-    let res = BaseResponse {
-        error: false,
-        message: "Task enabled".to_string(),
-    };
-
-    Ok(Json(res))
+    set_task_active_flag_and_write_audit_log(scope, &audit, true).await
 }
 
 #[utoipa::path(
@@ -589,18 +581,35 @@ pub async fn post_task_active(
     responses((status = OK, description = "Disabled", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn delete_task_active(
-    TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    scope: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    set_task_active_flag_and_write_audit_log(scope, &audit, false).await
+}
+
+async fn set_task_active_flag_and_write_audit_log(
+    TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    audit: &Audit,
+    active: bool,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let owner = EventOwner::task(task.project, task.id);
     let mut atask: ATask = task.into();
-    atask.active = Set(false);
+    atask.active = Set(active);
     gradient_db::tasks::update(&db.web_db, atask).await?;
+    audit
+        .write(
+            Action::TaskActiveFlagChanged,
+            owner,
+            serde_json::json!({ "active": active }),
+        )
+        .await;
 
-    let res = BaseResponse {
-        error: false,
-        message: "Task disabled".to_string(),
+    let message = if active {
+        "Task enabled"
+    } else {
+        "Task disabled"
     };
-
-    Ok(Json(res))
+    Ok(ok_json(message.to_string()))
 }
 
 #[utoipa::path(

@@ -7,6 +7,7 @@
 use super::refusal::ProjectRefusal;
 use crate::access::{CacheAccess, Caller, cache_admin_emails, has_cache_permission, load_cache};
 use crate::api_spec::ProjectPath;
+use crate::audit::Audit;
 use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -21,6 +22,8 @@ use gradient_db::lookup::by_ids;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::permissions::CachePermission;
 use gradient_types::*;
 use sea_orm::IntoActiveModel;
@@ -161,6 +164,7 @@ pub async fn post_project_subscribe_cache(
         ..
     }: ProjectScope<Requires<can::ManageSubscriptions>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     body: Option<Json<Option<SubscribeCacheRequest>>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -196,6 +200,7 @@ pub async fn post_project_subscribe_cache(
     let mode = body
         .and_then(|Json(b)| b?.mode)
         .unwrap_or(CacheSubscriptionMode::ReadWrite);
+    let owner = EventOwner::project_cache(project.id, cache.id);
 
     let may_approve = user.superuser
         || has_cache_permission(
@@ -223,11 +228,19 @@ pub async fn post_project_subscribe_cache(
         .map_err(|e| WebError::from_db_err(e, Resource::SubscriptionRequest))?;
 
         notify_cache_admins(&state.ci(), &project, &cache, &user, &mode).await;
+        audit
+            .write(
+                Action::CacheSubscriptionRequest,
+                owner,
+                serde_json::json!({ "mode": mode_label(&mode), "approved": false }),
+            )
+            .await;
 
         return Ok(ok_json("Subscription requested".to_string()));
     }
 
     let unparks_builds = mode.writes_build_outputs_to_cache();
+    let mode_name = mode_label(&mode);
 
     gradient_db::rows::insert::<EProjectCache, _>(
         &state.web_db,
@@ -256,6 +269,13 @@ pub async fn post_project_subscribe_cache(
     }
 
     enqueue_backfill_signatures(&state.web_db, project.id, cache.id).await;
+    audit
+        .write(
+            Action::CacheSubscriptionRequest,
+            owner,
+            serde_json::json!({ "mode": mode_name, "approved": true }),
+        )
+        .await;
 
     Ok(ok_json("Cache subscribed".to_string()))
 }
@@ -389,6 +409,7 @@ pub async fn delete_project_subscribe_cache(
         params,
         ..
     }: ProjectScope<Requires<can::ManageSubscriptions>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache: String = params.param("cache")?;
 
@@ -412,11 +433,25 @@ pub async fn delete_project_subscribe_cache(
         .ok_or(ProjectRefusal::NotSubscribedToCache)?;
 
         gradient_db::rows::delete::<ECacheSubscriptionRequest, _>(&db.web_db, request).await?;
+        audit
+            .write(
+                Action::CacheSubscriptionCancel,
+                EventOwner::project_cache(project.id, cache.id),
+                serde_json::json!({ "pending": true }),
+            )
+            .await;
 
         return Ok(ok_json("Subscription request cancelled".to_string()));
     };
 
     gradient_db::rows::delete::<EProjectCache, _>(&db.web_db, subscription).await?;
+    audit
+        .write(
+            Action::CacheSubscriptionCancel,
+            EventOwner::project_cache(project.id, cache.id),
+            serde_json::json!({ "pending": false }),
+        )
+        .await;
 
     Ok(ok_json("Cache unsubscribed".to_string()))
 }

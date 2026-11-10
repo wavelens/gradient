@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, caller_cache_mask, load_cache};
-use crate::audit::Audit;
+use crate::audit::{Audit, changed_fields};
 use crate::authorization::{
     MaybeUser, can_disconnect, generate_api_key, hash_api_key, session_claims,
 };
@@ -990,6 +990,7 @@ pub async fn get_settings(
 )]
 pub async fn patch_settings(
     state: State<Arc<ServerState>>,
+    audit: Audit,
     Extension(user): Extension<MUser>,
     JsonBody(body): JsonBody<PatchUserSettingsRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -1003,6 +1004,11 @@ pub async fn patch_settings(
     }
 
     let user_id = user.id;
+    let fields = changed_fields([
+        ("username", body.username.is_some()),
+        ("name", body.name.is_some()),
+        ("email", body.email.is_some()),
+    ]);
     let mut auser: AUser = user.into();
 
     if let Some(username) = body.username {
@@ -1036,6 +1042,13 @@ pub async fn patch_settings(
     gradient_db::rows::update::<EUser, _>(&state.web_db, auser)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Username))?;
+    audit
+        .write(
+            Action::UserUpdateAccountSettings,
+            EventOwner::default(),
+            fields,
+        )
+        .await;
 
     let res = BaseResponse {
         error: false,

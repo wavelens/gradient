@@ -691,6 +691,7 @@ pub async fn regenerate_token(
         task: proj, params, ..
     }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use rand::RngExt as _;
@@ -720,11 +721,18 @@ pub async fn regenerate_token(
     let mut am: ATaskAction = existing.into();
     am.config = Set(cfg.to_db_json());
     am.updated_at = Set(Utc::now().naive_utc());
-    gradient_db::actions::update(&state.web_db, am, read_at)
+    let updated = gradient_db::actions::update(&state.web_db, am, read_at)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?
         .or_not_found(Resource::Action)?;
 
+    record_action_event(
+        &audit,
+        Action::TaskActionTokenRegenerated,
+        proj.project,
+        &updated,
+    )
+    .await;
     Ok(ok_json(serde_json::json!({ "token": plaintext_token })))
 }
 

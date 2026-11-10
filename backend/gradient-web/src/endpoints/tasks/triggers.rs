@@ -7,6 +7,7 @@
 use super::DeletedResponse;
 use super::refusal::TaskRefusal;
 use crate::api_spec::TaskPath;
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
@@ -24,6 +25,8 @@ use gradient_db::lookup::by_ids;
 use gradient_entity::evaluation::WalkMode;
 use gradient_scheduler::Scheduler;
 use gradient_sources::head_commit;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -110,6 +113,14 @@ pub(super) fn trigger_integration_id(
         })
 }
 
+fn build_trigger_audit_log_json(trigger: &MTaskTrigger) -> serde_json::Value {
+    serde_json::json!({
+        "trigger_id": trigger.id.to_string(),
+        "trigger_type": trigger.trigger_type,
+        "active": trigger.active,
+    })
+}
+
 async fn load_integrations_for_triggers<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -192,6 +203,7 @@ pub async fn list(
 )]
 pub async fn create(
     TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
+    audit: Audit,
     Json(body): Json<CreateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     body.config
@@ -223,6 +235,13 @@ pub async fn create(
     let integrations =
         load_integrations_for_triggers(&db.web_db, proj.project, std::slice::from_ref(&row))
             .await?;
+    audit
+        .write(
+            Action::TaskEvaluationTriggerCreate,
+            EventOwner::task(proj.project, proj.id),
+            build_trigger_audit_log_json(&row),
+        )
+        .await;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
@@ -272,6 +291,7 @@ pub async fn update(
         params,
         ..
     }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
+    audit: Audit,
     Json(body): Json<UpdateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
@@ -307,6 +327,13 @@ pub async fn update(
     let integrations =
         load_integrations_for_triggers(&db.web_db, proj.project, std::slice::from_ref(&updated))
             .await?;
+    audit
+        .write(
+            Action::TaskEvaluationTriggerChanged,
+            EventOwner::task(proj.project, proj.id),
+            build_trigger_audit_log_json(&updated),
+        )
+        .await;
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
@@ -326,6 +353,7 @@ pub async fn delete_one(
         params,
         ..
     }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let id: TaskTriggerId = params.param("id")?;
 
@@ -337,7 +365,15 @@ pub async fn delete_one(
         return Err(TaskRefusal::DefaultTriggerDeletion.into());
     }
 
+    let metadata = build_trigger_audit_log_json(&row);
     gradient_db::triggers::delete(&db.web_db, row).await?;
+    audit
+        .write(
+            Action::TaskEvaluationTriggerDelete,
+            EventOwner::task(proj.project, proj.id),
+            metadata,
+        )
+        .await;
 
     Ok(ok_json(DeletedResponse::deleted()))
 }
@@ -359,6 +395,7 @@ pub async fn set_default(
         params,
         ..
     }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
 
@@ -373,6 +410,13 @@ pub async fn set_default(
     let integrations =
         load_integrations_for_triggers(&db.web_db, proj.project, std::slice::from_ref(&updated))
             .await?;
+    audit
+        .write(
+            Action::TriggerBecameDefaultForTask,
+            EventOwner::task(proj.project, proj.id),
+            build_trigger_audit_log_json(&updated),
+        )
+        .await;
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 

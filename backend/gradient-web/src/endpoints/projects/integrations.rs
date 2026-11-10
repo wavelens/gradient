@@ -10,6 +10,7 @@
 use super::refusal::ProjectRefusal;
 use crate::access::{load_integration_in_project, reject_managed_integration};
 use crate::api_spec::ProjectPath;
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -27,6 +28,8 @@ use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_core::ServerState;
 use gradient_types::GitHostType;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{IntoActiveModel, TransactionTrait};
@@ -118,6 +121,15 @@ async fn integration_response(
     };
     let webhook_url = base.url_for(&m);
     Ok(IntegrationResponse::new(m, install, webhook_url))
+}
+
+fn integration_audit_metadata(integration: &IntegrationResponse) -> serde_json::Value {
+    serde_json::json!({
+        "integration_id": integration.id.to_string(),
+        "name": integration.name,
+        "kind": integration.kind,
+        "git_host_type": integration.git_host_type,
+    })
 }
 
 fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
@@ -322,6 +334,7 @@ pub async fn get_integration_summaries(
 pub async fn put_integration(
     ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let git_host = parse_git_host(&body.git_host_type)?;
@@ -375,6 +388,13 @@ pub async fn put_integration(
         if link.created_any_integration {
             response.connected_tasks = connect_tasks(&state.web_db, project.id).await?;
         }
+        audit
+            .write(
+                Action::ProjectGitHostIntegrationCreatedOrReplaced,
+                EventOwner::project(project.id),
+                integration_audit_metadata(&response),
+            )
+            .await;
         return Ok(ok_json(response));
     }
 
@@ -438,6 +458,13 @@ pub async fn put_integration(
         .into_iter()
         .next()
         .context("The integration insert returned no rows.")?;
+    audit
+        .write(
+            Action::ProjectGitHostIntegrationCreatedOrReplaced,
+            EventOwner::project(project.id),
+            integration_audit_metadata(&response),
+        )
+        .await;
     Ok(ok_json(response))
 }
 
@@ -579,6 +606,7 @@ pub(super) fn new_webhook_secret() -> String {
 pub async fn post_connect_git_host(
     ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<ConnectGitHostRequest>,
 ) -> WebResult<Json<BaseResponse<ConnectGitHostResponse>>> {
     let git_host = parse_git_host(&body.git_host_type)?;
@@ -642,6 +670,15 @@ pub async fn post_connect_git_host(
         .next()
         .context("The integration insert returned no rows.")?;
     let outbound = created.next();
+    for integration in std::iter::once(&inbound).chain(outbound.as_ref()) {
+        audit
+            .write(
+                Action::ProjectGitHostIntegrationCreatedOrReplaced,
+                EventOwner::project(project.id),
+                integration_audit_metadata(integration),
+            )
+            .await;
+    }
     Ok(ok_json(ConnectGitHostResponse { inbound, outbound }))
 }
 
@@ -719,6 +756,7 @@ pub async fn patch_integration(
         project, params, ..
     }: ProjectScope<Requires<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let integration_id: IntegrationId = params.param("id")?;
@@ -813,9 +851,15 @@ pub async fn patch_integration(
         serve_url: &state.config.server.serve_url,
         project: &project.name,
     };
-    Ok(ok_json(
-        integration_response(&state.web_db, &base, updated).await?,
-    ))
+    let response = integration_response(&state.web_db, &base, updated).await?;
+    audit
+        .write(
+            Action::ProjectGitHostIntegrationChanged,
+            EventOwner::project(project.id),
+            integration_audit_metadata(&response),
+        )
+        .await;
+    Ok(ok_json(response))
 }
 
 #[utoipa::path(
@@ -835,11 +879,18 @@ pub async fn delete_integration(
         params,
         ..
     }: ProjectScope<Requires<can::ManageIntegrations>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let integration_id: IntegrationId = params.param("id")?;
 
     let integration = load_integration_in_project(&db.web_db, project.id, integration_id).await?;
     reject_managed_integration(&integration)?;
+    let metadata = serde_json::json!({
+        "integration_id": integration.id.to_string(),
+        "name": integration.name,
+        "kind": integration.kind,
+        "git_host_type": integration.git_host_type,
+    });
     if integration.git_host_type == GitHostType::GitHub {
         let txn = db.web_db.inner().begin().await?;
         match integration.github_installation {
@@ -851,8 +902,15 @@ pub async fn delete_integration(
             }
         }
         txn.commit().await?;
-        return Ok(ok_json(true));
+    } else {
+        gradient_db::rows::delete::<EIntegration, _>(&db.web_db, integration).await?;
     }
-    gradient_db::rows::delete::<EIntegration, _>(&db.web_db, integration).await?;
+    audit
+        .write(
+            Action::ProjectGitHostIntegrationDelete,
+            EventOwner::project(project.id),
+            metadata,
+        )
+        .await;
     Ok(ok_json(true))
 }

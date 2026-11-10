@@ -6,7 +6,7 @@
 
 use crate::access::has_permission;
 use crate::api_spec::ProjectPath;
-use crate::audit::Audit;
+use crate::audit::{Audit, changed_fields};
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::State;
@@ -258,6 +258,7 @@ pub(crate) async fn reauth_project_workers(db: &WebDb, scheduler: &Scheduler, pr
 pub async fn post_project_worker(
     ProjectScope { project, user, .. }: ProjectScope<Requires<can::ManageWorkers>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
@@ -286,6 +287,7 @@ pub async fn post_project_worker(
         body.url.as_deref(),
         &token,
     )?;
+    let display_name = body.display_name.trim().to_string();
 
     gradient_db::rows::insert::<EWorkerRegistration, _>(
         &state.web_db,
@@ -296,7 +298,7 @@ pub async fn post_project_worker(
             token_hash,
             token_encrypted,
             url: body.url,
-            display_name: body.display_name.trim().to_string(),
+            display_name: display_name.clone(),
             active: true,
             enable_network: body.enable_network,
             enable_secrets: body.enable_secrets,
@@ -321,6 +323,13 @@ pub async fn post_project_worker(
         );
     }
 
+    audit
+        .write(
+            Action::ProjectWorkerRegister,
+            EventOwner::project(project.id),
+            serde_json::json!({ "worker_id": worker_id_str, "display_name": display_name }),
+        )
+        .await;
     Ok(ok_json(RegisterWorkerResponse {
         peer_id: project.id,
         token: if return_token { Some(token) } else { None },
@@ -613,6 +622,7 @@ pub async fn patch_project_worker(
         params,
         ..
     }: ProjectScope<Requires<can::ManageWorkers>>,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -632,6 +642,15 @@ pub async fn patch_project_worker(
         return Err(SharedRefusal::WorkerManagedByState.into());
     }
 
+    let fields = changed_fields([
+        ("active", body.active.is_some()),
+        ("display_name", body.display_name.is_some()),
+        ("enable_network", body.enable_network.is_some()),
+        ("enable_secrets", body.enable_secrets.is_some()),
+        ("enable_exec", body.enable_exec.is_some()),
+        ("enable_eval", body.enable_eval.is_some()),
+        ("enable_build", body.enable_build.is_some()),
+    ]);
     let mut active_model: AWorkerRegistration = reg.into();
 
     if let Some(active) = body.active {
@@ -679,6 +698,13 @@ pub async fn patch_project_worker(
         );
     }
 
+    audit
+        .write(
+            Action::ProjectWorkerUpdate,
+            EventOwner::project(project.id),
+            serde_json::json!({ "worker_id": worker_id, "fields": fields["fields"] }),
+        )
+        .await;
     Ok(ok_json(format!("worker '{}' updated", worker_id)))
 }
 

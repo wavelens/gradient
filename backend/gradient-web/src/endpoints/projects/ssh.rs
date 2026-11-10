@@ -5,6 +5,7 @@
  */
 
 use crate::api_spec::ProjectPath;
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::scope::{Member, ProjectScope, RequiresUnmanaged, can};
@@ -12,6 +13,8 @@ use axum::Json;
 use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_sources::{format_public_key, generate_ssh_key};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use std::sync::Arc;
 
@@ -48,6 +51,7 @@ pub async fn get_project_ssh(
 pub async fn post_project_ssh(
     ProjectScope { project, .. }: ProjectScope<RequiresUnmanaged<can::ManageSshKey>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (private_key, public_key) =
         generate_ssh_key(&state.config.secrets.crypt_file).map_err(|e| {
@@ -58,6 +62,13 @@ pub async fn post_project_ssh(
     let project =
         gradient_db::projects::replace_ssh_key(&state.web_db, project, private_key, public_key)
             .await?;
+    audit
+        .write(
+            Action::ProjectSshKeyRegenerated,
+            EventOwner::project(project.id),
+            None,
+        )
+        .await;
 
     let res = BaseResponse {
         error: false,

@@ -37,6 +37,7 @@ actions! {
     Logout => "logout",
     Register => "register",
     UserDelete => "user.delete",
+    UserUpdateAccountSettings => "user.settings.update",
     ApiKeyCreate => "api_key.create",
     ApiKeyUpdate => "api_key.update",
     ApiKeyRevoke => "api_key.revoke",
@@ -68,7 +69,15 @@ actions! {
     ProjectWebhookCreate => "project.webhook.create",
     ProjectWebhookUpdate => "project.webhook.update",
     ProjectWebhookDelete => "project.webhook.delete",
+    ProjectWorkerRegister => "project.worker.create",
+    ProjectWorkerUpdate => "project.worker.update",
     ProjectWorkerRegistrationDelete => "project.worker.delete",
+    ProjectGitHostIntegrationCreatedOrReplaced => "project.integration.create",
+    ProjectGitHostIntegrationChanged => "project.integration.update",
+    ProjectGitHostIntegrationDelete => "project.integration.delete",
+    ProjectSecretCreatedOrReplaced => "project.secret.put",
+    ProjectSecretDeleted => "project.secret.delete",
+    ProjectSshKeyRegenerated => "project.ssh_key.regenerate",
     TaskCreate => "task.create",
     TaskUpdate => "task.update",
     TaskDelete => "task.delete",
@@ -79,6 +88,16 @@ actions! {
     TaskActionUpdate => "task.action.update",
     TaskActionDelete => "task.action.delete",
     PullRequestCreateOrUpdateFromPatch => "task.pull_request.open",
+    TaskEvaluationTriggerCreate => "task.trigger.create",
+    TaskEvaluationTriggerChanged => "task.trigger.update",
+    TaskEvaluationTriggerDelete => "task.trigger.delete",
+    TriggerBecameDefaultForTask => "task.trigger.set_default",
+    TaskFlakeInputOverrideAdded => "task.flake_input.create",
+    TaskFlakeInputOverrideChanged => "task.flake_input.update",
+    TaskFlakeInputOverrideDeleted => "task.flake_input.delete",
+    TaskRepositorySettingsReplaced => "task.repository.update",
+    TaskActionTokenRegenerated => "task.action.regenerate_token",
+    TaskActiveFlagChanged => "task.active.change",
     CacheCreate => "cache.create",
     CacheUpdate => "cache.update",
     CacheDelete => "cache.delete",
@@ -141,6 +160,7 @@ impl Action {
                 | Logout
                 | Register
                 | UserDelete
+                | UserUpdateAccountSettings
                 | ApiKeyCreate
                 | ApiKeyUpdate
                 | ApiKeyRevoke

@@ -6,6 +6,7 @@
 
 use super::refusal::ProjectRefusal;
 use crate::api_spec::{ProjectPath, ProjectSecretPath};
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -16,6 +17,8 @@ use axum::Json;
 use axum::extract::State;
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_core::ServerState;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use gradient_wire::types::validate_secret_name;
 use serde::{Deserialize, Serialize};
@@ -170,6 +173,7 @@ pub async fn put_project_secret(
         ..
     }: ProjectScope<Requires<can::ManageProjectSettings>>,
     state: State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<PutProjectSecretRequest>,
 ) -> WebResult<Json<BaseResponse<ProjectSecretSummary>>> {
     let name = secret_name(&params)?;
@@ -191,6 +195,13 @@ pub async fn put_project_secret(
     )
     .await?;
 
+    audit
+        .write(
+            Action::ProjectSecretCreatedOrReplaced,
+            EventOwner::project(project.id),
+            serde_json::json!({ "name": name }),
+        )
+        .await;
     Ok(ok_json(summary(
         secret,
         &BTreeMap::from([(user.id, user.username)]),
@@ -214,6 +225,7 @@ pub async fn delete_project_secret(
         params,
         ..
     }: ProjectScope<Requires<can::ManageProjectSettings>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = secret_name(&params)?;
     let secret = gradient_db::project_secrets::one(&db.web_db, project.id, &name)
@@ -221,6 +233,13 @@ pub async fn delete_project_secret(
         .ok_or_else(|| WebError::not_found(Resource::ProjectSecret))?;
     refuse_managed(&secret)?;
     gradient_db::project_secrets::delete(&db.web_db, project.id, &name).await?;
+    audit
+        .write(
+            Action::ProjectSecretDeleted,
+            EventOwner::project(project.id),
+            serde_json::json!({ "name": name }),
+        )
+        .await;
 
     Ok(ok_json(true))
 }

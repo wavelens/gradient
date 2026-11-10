@@ -7,6 +7,7 @@
 use super::DeletedResponse;
 use super::refusal::TaskRefusal;
 use crate::api_spec::TaskPath;
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
@@ -15,6 +16,8 @@ use crate::scope::{Member, RequiresUnmanaged, TaskScope, can};
 use axum::Json;
 use chrono::Utc;
 use gradient_core::ServerState;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::input::validate_flake_input_override_flake_ref;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -103,6 +106,16 @@ fn validate_url(input_name: &str, url: Option<&str>) -> WebResult<()> {
     Ok(())
 }
 
+fn build_flake_input_override_audit_log_entry_metadata_json(
+    input_override: &MTaskFlakeInputOverride,
+) -> serde_json::Value {
+    serde_json::json!({
+        "flake_input_override_id": input_override.id.to_string(),
+        "input_name": input_override.input_name,
+        "url": input_override.url,
+    })
+}
+
 #[utoipa::path(
     get,
     path = "/",
@@ -132,6 +145,7 @@ pub async fn list(
 )]
 pub async fn create(
     TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    audit: Audit,
     Json(body): Json<CreateFlakeInputOverrideRequest>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     validate_input_name(&body.input_name)?;
@@ -163,6 +177,13 @@ pub async fn create(
             WebError::from_unique_violation(e, TaskRefusal::OverrideExists { input_name })
         })?;
 
+    audit
+        .write(
+            Action::TaskFlakeInputOverrideAdded,
+            EventOwner::task(proj.project, proj.id),
+            build_flake_input_override_audit_log_entry_metadata_json(&row),
+        )
+        .await;
     Ok(ok_json(row.into()))
 }
 
@@ -209,6 +230,7 @@ pub async fn update(
         params,
         ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    audit: Audit,
     Json(body): Json<UpdateFlakeInputOverrideRequest>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     let id: FlakeInputOverrideId = params.param("id")?;
@@ -259,6 +281,13 @@ pub async fn update(
                 },
             )
         })?;
+    audit
+        .write(
+            Action::TaskFlakeInputOverrideChanged,
+            EventOwner::task(proj.project, proj.id),
+            build_flake_input_override_audit_log_entry_metadata_json(&updated),
+        )
+        .await;
     Ok(ok_json(updated.into()))
 }
 
@@ -278,6 +307,7 @@ pub async fn delete_one(
         params,
         ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let id: FlakeInputOverrideId = params.param("id")?;
 
@@ -285,7 +315,15 @@ pub async fn delete_one(
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
 
+    let metadata = build_flake_input_override_audit_log_entry_metadata_json(&row);
     gradient_db::flake_input_overrides::delete(&db.web_db, row).await?;
+    audit
+        .write(
+            Action::TaskFlakeInputOverrideDeleted,
+            EventOwner::task(proj.project, proj.id),
+            metadata,
+        )
+        .await;
 
     Ok(ok_json(DeletedResponse::deleted()))
 }
