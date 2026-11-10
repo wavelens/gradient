@@ -12,7 +12,7 @@ use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
 use gradient_storage::admission::UploadAdmission;
-use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
+use gradient_util::supervision::{ChildSpec, Pass, PassError};
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
 use tracing::info;
@@ -38,7 +38,6 @@ struct OtlpSnapshot {
 
 impl Pass for OtlpSnapshot {
     const NAME: &'static str = "otlp-snapshot";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = Duration::from_secs(60);
 
     fn period(&self) -> Duration {

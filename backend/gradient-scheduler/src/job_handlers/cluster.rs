@@ -12,7 +12,7 @@ use gradient_db::scheduling::assignment_record::{ClaimGate, exec_job_of_key};
 use gradient_db::scheduling::cluster::ClusterClaim;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::{ClusterAttemptId, ClusterJobId};
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use gradient_wire::types::{ClusterAddress, ClusterMembership, ClusterPeer};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
@@ -25,7 +25,6 @@ pub(crate) struct ClusterDispatch {
 
 impl Pass for ClusterDispatch {
     const NAME: &'static str = "cluster-dispatch";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = crate::loops::ASSIGN_BUDGET;
 
     fn period(&self) -> Duration {

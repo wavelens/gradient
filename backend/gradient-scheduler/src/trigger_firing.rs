@@ -72,7 +72,7 @@ use gradient_entity::task_trigger as ept;
 use gradient_sources::{BranchHead, check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{debug, error, info, warn};
@@ -85,7 +85,6 @@ pub(crate) struct TriggerDispatch {
 
 impl Pass for TriggerDispatch {
     const NAME: &'static str = "trigger-dispatch";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = crate::loops::ASSIGN_BUDGET;
 
     fn period(&self) -> Duration {

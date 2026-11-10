@@ -15,7 +15,7 @@ use gradient_graph::Transition;
 use gradient_pool::{WorkerCaps, WorkerInfo};
 use gradient_types::exec::{ExecDefaults, ExecSpec};
 use gradient_types::{ExecJobId, ProjectId};
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use gradient_wire::types::RequiredPath;
 use tracing::{debug, error, warn};
 
@@ -31,7 +31,6 @@ pub(crate) struct ExecDispatch {
 
 impl Pass for ExecDispatch {
     const NAME: &'static str = "exec-dispatch";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::ASSIGN_BUDGET;
 
     fn period(&self) -> Duration {

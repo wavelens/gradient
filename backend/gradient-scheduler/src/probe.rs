@@ -17,7 +17,7 @@ use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::StorePath;
 use gradient_graph::Graph;
 use gradient_types::*;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use sea_orm::sea_query::Query;
 use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -116,7 +116,6 @@ impl UpstreamProbe {
 
 impl Pass for UpstreamProbe {
     const NAME: &'static str = "upstream-probe";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = Duration::from_secs(120);
 
     fn period(&self) -> Duration {

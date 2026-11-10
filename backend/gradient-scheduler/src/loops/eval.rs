@@ -17,7 +17,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use sea_orm::sea_query::{Expr, ExprTrait, Query, SelectStatement};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
@@ -38,7 +38,6 @@ pub(crate) struct EvalDispatch {
 
 impl Pass for EvalDispatch {
     const NAME: &'static str = "eval-dispatch";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::ASSIGN_BUDGET;
 
     fn period(&self) -> Duration {

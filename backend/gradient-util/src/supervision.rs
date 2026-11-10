@@ -41,22 +41,10 @@ pub struct PeriodicSpec {
     pub(crate) budget: Duration,
     pub(crate) run: PassFn,
     pub(crate) wake: Option<Arc<Notify>>,
-    #[expect(
-        dead_code,
-        reason = "declared now, read once the supervisor places passes"
-    )]
-    pub(crate) runs_on: RunsOn,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunsOn {
-    EveryInstance,
-    SingleInstance,
 }
 
 pub trait Pass: Send + Sync + 'static {
     const NAME: &'static str;
-    const RUNS_ON: RunsOn;
     const BUDGET: Duration;
 
     fn period(&self) -> Duration;
@@ -91,7 +79,6 @@ impl ChildSpec {
             period: pass.period(),
             budget: P::BUDGET,
             wake: pass.wake(),
-            runs_on: P::RUNS_ON,
             run: Arc::new(move || {
                 let pass = Arc::clone(&pass);
                 Box::pin(async move { pass.run().await })
@@ -522,7 +509,6 @@ mod tests {
 
     impl Pass for Counting {
         const NAME: &'static str = "t";
-        const RUNS_ON: RunsOn = RunsOn::EveryInstance;
         const BUDGET: Duration = Duration::from_millis(50);
 
         fn period(&self) -> Duration {
@@ -559,7 +545,6 @@ mod tests {
             budget,
             run: Arc::new(move || Box::pin(run())),
             wake,
-            runs_on: RunsOn::EveryInstance,
         })
     }
 

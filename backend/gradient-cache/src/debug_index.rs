@@ -6,7 +6,7 @@
 
 use gradient_db::WorkerDb;
 use gradient_storage::NarStore;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -20,7 +20,6 @@ pub(crate) struct DebugIndex {
 
 impl Pass for DebugIndex {
     const NAME: &'static str = "debug-index";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = Duration::from_secs(600);
 
     fn period(&self) -> Duration {

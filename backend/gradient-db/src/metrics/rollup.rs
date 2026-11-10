@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::metric_rollup::RollupGranularity;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use gradient_util::telemetry::metric;
 use gradient_wire::types::JobPhase;
 use sea_orm::ConnectionTrait;
@@ -232,7 +232,6 @@ impl Rollup {
 
 impl Pass for Rollup {
     const NAME: &'static str = "rollup";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = Duration::from_secs(300);
 
     fn period(&self) -> Duration {

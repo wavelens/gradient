@@ -8,7 +8,7 @@ use chrono::{Duration, NaiveDateTime};
 use gradient_db::WorkerDb;
 use gradient_storage::NarStore;
 use gradient_types::*;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -58,7 +58,6 @@ pub(crate) struct EvalCacheSweep {
 
 impl Pass for EvalCacheSweep {
     const NAME: &'static str = "eval-cache-sweep";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: std::time::Duration = std::time::Duration::from_secs(600);
 
     fn period(&self) -> std::time::Duration {

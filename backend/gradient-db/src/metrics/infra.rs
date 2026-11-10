@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use chrono::DateTime;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use gradient_util::telemetry::{Agg, GAUGES, Gauges, Key, MinuteStats, STATS, metric};
 use sea_orm::{ConnectionTrait, Statement};
 use tracing::warn;
@@ -41,7 +41,6 @@ impl InfraMetricFlush {
 
 impl Pass for InfraMetricFlush {
     const NAME: &'static str = "infra_metric_flush";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = Duration::from_secs(60);
 
     fn period(&self) -> Duration {

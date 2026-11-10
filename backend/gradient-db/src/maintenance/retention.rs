@@ -12,7 +12,7 @@ use std::time::Duration;
 use chrono::NaiveDateTime;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::metric_rollup::RollupGranularity;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use sea_orm::{ConnectionTrait, DbErr};
 use tracing::{debug, warn};
 
@@ -173,7 +173,6 @@ impl Retention {
 
 impl Pass for Retention {
     const NAME: &'static str = "retention";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = Duration::from_secs(600);
 
     fn period(&self) -> Duration {

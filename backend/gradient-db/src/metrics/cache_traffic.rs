@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use chrono::{NaiveDateTime, Timelike};
 use gradient_entity::ids::CacheId;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use gradient_util::sync::Mutex;
 use sea_orm::{ConnectionTrait, Statement};
 use tracing::warn;
@@ -95,7 +95,6 @@ impl CacheMetricFlush {
 
 impl Pass for CacheMetricFlush {
     const NAME: &'static str = "cache_metric_flush";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = Duration::from_secs(60);
 
     fn period(&self) -> Duration {

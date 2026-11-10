@@ -9,7 +9,7 @@ use gradient_db::lookup::by_ids;
 use gradient_sources::CacheSigner;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
     QuerySelect, Set,
@@ -61,7 +61,6 @@ pub(crate) struct SignSweep {
 
 impl Pass for SignSweep {
     const NAME: &'static str = "sign-sweep";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = Duration::from_secs(300);
 
     fn period(&self) -> Duration {

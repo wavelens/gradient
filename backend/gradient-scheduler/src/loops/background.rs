@@ -15,7 +15,7 @@ use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::{Graph, RequeueScope, Transition};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::{DerivationBuildId, EvaluationId, RuntimeConfig};
-use gradient_util::supervision::{Pass, PassError, RunsOn};
+use gradient_util::supervision::{Pass, PassError};
 use gradient_wire::types::BuildFailureKind;
 use tracing::{debug, info, warn};
 
@@ -49,7 +49,6 @@ pub(crate) struct GraphConsistency {
 
 impl Pass for GraphConsistency {
     const NAME: &'static str = "graph-consistency";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = super::CONSISTENCY_BUDGET;
 
     fn period(&self) -> Duration {
@@ -99,7 +98,6 @@ pub(crate) struct TransientRetryRequeue {
 
 impl Pass for TransientRetryRequeue {
     const NAME: &'static str = "transient-retry-requeue";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = super::ASSIGN_BUDGET;
 
     fn period(&self) -> Duration {
@@ -122,7 +120,6 @@ pub(crate) struct NeededOutputRequeue {
 
 impl Pass for NeededOutputRequeue {
     const NAME: &'static str = "needed-output-requeue";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = super::ASSIGN_BUDGET;
 
     fn period(&self) -> Duration {
@@ -146,7 +143,6 @@ pub(crate) struct GraphStuckReheal {
 
 impl Pass for GraphStuckReheal {
     const NAME: &'static str = "graph-stuck-reheal";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = super::CONSISTENCY_BUDGET;
 
     fn period(&self) -> Duration {
@@ -167,7 +163,6 @@ pub(crate) struct WorkerLiveness {
 
 impl Pass for WorkerLiveness {
     const NAME: &'static str = "worker-liveness";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::METRICS_BUDGET;
 
     fn period(&self) -> Duration {
@@ -203,7 +198,6 @@ pub(crate) struct UnreclaimedJobSweep {
 
 impl Pass for UnreclaimedJobSweep {
     const NAME: &'static str = "unreclaimed-job-sweep";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::METRICS_BUDGET;
 
     fn period(&self) -> Duration {
@@ -223,7 +217,6 @@ pub(crate) struct InstanceMetrics {
 
 impl Pass for InstanceMetrics {
     const NAME: &'static str = "instance-metrics";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::METRICS_BUDGET;
 
     fn period(&self) -> Duration {
@@ -243,7 +236,6 @@ pub(crate) struct BuildHistoryRefit {
 
 impl Pass for BuildHistoryRefit {
     const NAME: &'static str = "build-history-refit";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::CONSISTENCY_BUDGET;
 
     fn period(&self) -> Duration {
@@ -302,7 +294,6 @@ pub(crate) struct WorkerSample {
 
 impl Pass for WorkerSample {
     const NAME: &'static str = "worker-sample";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::METRICS_BUDGET;
 
     fn period(&self) -> Duration {
@@ -350,7 +341,6 @@ pub(crate) struct AbandonedDispatchSweep {
 
 impl Pass for AbandonedDispatchSweep {
     const NAME: &'static str = "abandoned-dispatch-sweep";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = super::CONSISTENCY_BUDGET;
 
     fn period(&self) -> Duration {
@@ -444,7 +434,6 @@ pub(crate) struct EvalCompletionWatchdog {
 
 impl Pass for EvalCompletionWatchdog {
     const NAME: &'static str = "eval-completion-watchdog";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = super::CONSISTENCY_BUDGET;
 
     fn period(&self) -> Duration {
@@ -524,7 +513,6 @@ pub(crate) struct RamShortageSweep {
 
 impl Pass for RamShortageSweep {
     const NAME: &'static str = "ram-shortage-sweep";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = super::CONSISTENCY_BUDGET;
 
     fn period(&self) -> Duration {
@@ -576,7 +564,6 @@ pub(crate) struct StrandedBuildSweep {
 
 impl Pass for StrandedBuildSweep {
     const NAME: &'static str = "stranded-build-sweep";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = super::CONSISTENCY_BUDGET;
 
     fn period(&self) -> Duration {

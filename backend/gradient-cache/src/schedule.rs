@@ -12,7 +12,7 @@ use crate::{blobs, deep_gc, evaluations, nar, storage_migrations};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_graph::Graph;
-use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
+use gradient_util::supervision::{ChildSpec, Pass, PassError};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,7 +60,6 @@ struct StorageMaintenance {
 
 impl Pass for StorageMaintenance {
     const NAME: &'static str = "storage-maintenance";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = Duration::from_secs(3600);
 
     fn period(&self) -> Duration {
@@ -94,7 +93,6 @@ struct CacheMaintenance {
 
 impl Pass for CacheMaintenance {
     const NAME: &'static str = "cache-maintenance";
-    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
     const BUDGET: Duration = Duration::from_secs(1800);
 
     fn period(&self) -> Duration {

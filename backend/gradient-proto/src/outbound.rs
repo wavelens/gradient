@@ -15,7 +15,7 @@ use gradient_types::ids::ProjectId;
 use gradient_types::{ETeamWorker, EWorkerRegistration, SecretString};
 use gradient_util::error_cause_chain_formatting::error_chain;
 use gradient_util::http_validation::check_worker_url_and_resolve_allowed_socket_addresses;
-use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
+use gradient_util::supervision::{ChildSpec, Pass, PassError};
 use gradient_wire::Rejection;
 use gradient_wire::session::handshake::DialerCredentials;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -136,7 +136,6 @@ struct OutboundConnect {
 
 impl Pass for OutboundConnect {
     const NAME: &'static str = "outbound-connect";
-    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
     const BUDGET: Duration = Duration::from_secs(60);
 
     fn period(&self) -> Duration {
