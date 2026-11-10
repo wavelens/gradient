@@ -8,6 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import type { LogSearchHit } from '@core/models';
 import { LogViewerComponent, ServerLog } from './log-viewer.component';
+import { NotifyService } from '@core/services/notify.service';
 
 type Internals = {
   renderLine: (text: string, n: number) => unknown;
@@ -394,6 +395,31 @@ describe('LogViewerComponent', () => {
     gutter.click();
     expect(viewer.highlightLine()).toBe(2);
     expect(navigate.mock.calls[0][1]).toMatchObject({ fragment: 'L2' });
+  });
+
+  it('says whether copying the line link worked', async () => {
+    const { fixture } = setup();
+    await show(fixture, ['a', 'b']);
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const notify = TestBed.inject(NotifyService);
+    const success = vi.spyOn(notify, 'success').mockImplementation(() => undefined);
+    const failure = vi.spyOn(notify, 'failure').mockImplementation(() => undefined);
+    const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const gutter = fixture.nativeElement.querySelectorAll('.log-gutter')[1] as HTMLElement;
+    gutter.click();
+    await settle(fixture);
+    expect(success).toHaveBeenCalledWith('Link copied');
+    gutter.click();
+    await settle(fixture);
+    expect(failure).toHaveBeenCalledWith("Couldn't copy link", expect.any(Error));
+  });
+
+  it('tints every line that starts with the Nix error prefix, also behind color codes', async () => {
+    const { fixture } = setup();
+    await show(fixture, ['building', '\u001b[31;1merror:\u001b[0m builder failed', '  error: nested', 'no error: here']);
+    const tinted = Array.from(fixture.nativeElement.querySelectorAll('.log-line--error')).map((line) => (line as HTMLElement).dataset['line']);
+    expect(tinted).toEqual(['2', '3']);
   });
 
   it('keeps the gutter buttons out of the tab order', async () => {

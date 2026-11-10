@@ -110,6 +110,11 @@
   line-height: 1.6;
   min-height: 1.6em;
 
+  &--error {
+    background: color-mix(in srgb, var(--gr-status-danger) 12%, transparent);
+    box-shadow: inset 3px 0 0 var(--gr-status-danger);
+  }
+
   &--hl {
     background: color-mix(in srgb, var(--gr-status-warning) 18%, transparent);
   }

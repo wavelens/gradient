@@ -55,6 +55,7 @@
         <div
           class="log-line"
           [class.log-line--hl]="ln.n === highlightLine()"
+          [class.log-line--error]="ln.startsWithErrorPrefix"
           [attr.data-line]="ln.n"
         >
           <button type="button" class="log-gutter" tabindex="-1" (click)="selectLine(ln.n)" title="Link to line"

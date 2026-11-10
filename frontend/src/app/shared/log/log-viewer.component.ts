@@ -26,7 +26,8 @@ import type { LogSearchHit } from '@core/models';
 import { DecimalPipe } from '@angular/common';
 import { ButtonComponent, IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective } from '@gradient/ui/ui';
 import { ansiToHtml } from './ansi';
-import { parseLineFragment, searchLines, windowAround } from './log-window';
+import { parseLineFragment, removeAnsiEscapeSequences, searchLines, windowAround } from './log-window';
+import { NotifyService } from '@core/services/notify.service';
 
 export interface ServerLog {
   total: number;
@@ -41,9 +42,12 @@ interface RenderedLine {
   text: string;
   html: SafeHtml | null;
   marker: string | null;
+  startsWithErrorPrefix: boolean;
 }
 
 type WindowMode = 'replace' | 'append' | 'prepend';
+
+const nixErrorLinePattern = /^\s*error:/;
 
 export function isFindShortcut(event: KeyboardEvent): boolean {
   return (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
@@ -71,6 +75,7 @@ export class LogViewerComponent implements OnDestroy {
   private router = inject(Router);
   private sanitizer = inject(DomSanitizer);
   private cdr = inject(ChangeDetectorRef);
+  private notify = inject(NotifyService);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   lines = input<readonly string[]>([]);
@@ -196,7 +201,7 @@ export class LogViewerComponent implements OnDestroy {
   private renderLine(text: string, n: number): RenderedLine {
     const marker = this.marker()(text);
     const html = marker === null ? this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(text, this.highlightedQuery)) : null;
-    return { n, text, marker, html };
+    return { n, text, marker, html, startsWithErrorPrefix: nixErrorLinePattern.test(removeAnsiEscapeSequences(text)) };
   }
 
   private setHighlightedQuery(query: string): void {
@@ -302,7 +307,10 @@ export class LogViewerComponent implements OnDestroy {
       replaceUrl: true,
     });
     const url = `${window.location.origin}${window.location.pathname}${window.location.search}#L${line}`;
-    navigator.clipboard?.writeText(url).catch(() => undefined);
+    navigator.clipboard?.writeText(url).then(
+      () => this.notify.success('Link copied'),
+      (error: unknown) => this.notify.failure("Couldn't copy link", error),
+    );
   }
 
   @HostListener('document:keydown', ['$event'])
