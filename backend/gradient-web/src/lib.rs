@@ -638,7 +638,7 @@ mod tests {
     #[tokio::test]
     async fn one_address_cannot_hold_more_proto_connections_than_allowed() {
         use super::{ClientIpKey, PerIpLimiter, acquire_worker_websocket_connection_slot};
-        use axum::{Router, middleware, routing::get};
+        use axum::{Router, middleware};
         use std::net::{IpAddr, Ipv4Addr};
         use std::sync::Arc;
 
@@ -647,8 +647,8 @@ mod tests {
             trusted_proxies: Arc::from([]),
         };
         let app = Router::new()
-            .route("/proto", get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(
+            .fallback(|| async { "ok" })
+            .layer(middleware::from_fn_with_state(
                 (key, Arc::clone(&limiter)),
                 acquire_worker_websocket_connection_slot,
             ));

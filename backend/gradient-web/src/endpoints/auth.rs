@@ -452,12 +452,19 @@ pub async fn get_oauth_authorize(
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
     let use_tls = state.config.server.use_tls;
-    let token = complete_oidc_login_from_callback(
-        &state,
+    if state.config.oidc.is_none() {
+        return Err(WebError::oauth_disabled());
+    }
+    let (code, state_query, csrf) =
+        read_oidc_login_callback_code_state_and_csrf_cookie(&headers, &query)?;
+    let user: MUser = oidc_login_verify(&state, code, state_query, csrf)
+        .await
+        .map_err(oidc_failure("oauth_authorize_callback"))?;
+    let token = create_oidc_login_session_and_token_with_login_success_audit_log(
+        &state.web_db,
+        &state.jwt_secret,
         &audit,
-        &headers,
-        &query,
-        "oauth_authorize_callback",
+        user.id,
     )
     .await?;
 
@@ -475,31 +482,26 @@ pub async fn get_oauth_authorize(
     Ok(response)
 }
 
-async fn complete_oidc_login_from_callback(
-    state: &ServerState,
-    audit: &Audit,
+fn read_oidc_login_callback_code_state_and_csrf_cookie(
     headers: &HeaderMap,
     query: &HashMap<String, String>,
-    stage: &'static str,
-) -> WebResult<String> {
-    if state.config.oidc.is_none() {
-        return Err(WebError::oauth_disabled());
-    }
-
+) -> WebResult<(String, String, String)> {
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
     let state_query = query.get("state").ok_or(AuthRefusal::MissingOidcState)?;
-    let csrf = cookie_value(headers, OIDC_CSRF_COOKIE)
-        .ok_or(AuthRefusal::MissingOidcCsrfCookie)?
-        .to_owned();
+    let csrf = cookie_value(headers, OIDC_CSRF_COOKIE).ok_or(AuthRefusal::MissingOidcCsrfCookie)?;
+    Ok((code.to_owned(), state_query.to_owned(), csrf.to_owned()))
+}
 
-    let user: MUser = oidc_login_verify(state, code.to_string(), state_query.to_string(), csrf)
-        .await
-        .map_err(oidc_failure(stage))?;
-
+async fn create_oidc_login_session_and_token_with_login_success_audit_log(
+    web_db: &WebDb,
+    jwt_secret: &SecretString,
+    audit: &Audit,
+    user: UserId,
+) -> WebResult<String> {
     let (_session_id, token) = create_session_and_token(
-        &state.web_db,
-        &state.jwt_secret,
-        user.id,
+        web_db,
+        jwt_secret,
+        user,
         false,
         audit.info().user_agent.clone(),
         audit.info().ip.clone(),
@@ -509,7 +511,7 @@ async fn complete_oidc_login_from_callback(
 
     audit
         .write_as(
-            Some(user.id),
+            Some(user),
             Action::LoginSuccess,
             EventOwner::default(),
             serde_json::json!({ "method": "oidc" }),
@@ -602,9 +604,21 @@ pub async fn get_oidc_callback(
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
     let use_tls = state.config.server.use_tls;
-    let token =
-        complete_oidc_login_from_callback(&state, &audit, &headers, &query, "oidc_callback")
-            .await?;
+    if state.config.oidc.is_none() {
+        return Err(WebError::oauth_disabled());
+    }
+    let (code, state_query, csrf) =
+        read_oidc_login_callback_code_state_and_csrf_cookie(&headers, &query)?;
+    let user: MUser = oidc_login_verify(&state, code, state_query, csrf)
+        .await
+        .map_err(oidc_failure("oidc_callback"))?;
+    let token = create_oidc_login_session_and_token_with_login_success_audit_log(
+        &state.web_db,
+        &state.jwt_secret,
+        &audit,
+        user.id,
+    )
+    .await?;
 
     let session_cookie = jwt_cookie(&token, false, use_tls);
     let clear_csrf = csrf_clear_cookie(OIDC_CSRF_COOKIE, use_tls);
