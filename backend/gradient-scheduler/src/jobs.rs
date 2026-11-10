@@ -871,7 +871,10 @@ impl JobTracker {
 
     pub fn record_scores(&mut self, worker_id: &str, scores: Vec<CandidateScore>) {
         let worker_scores = self.scores.entry(worker_id.to_owned()).or_default();
-        for score in scores {
+        let offered = scores.into_iter().filter(|score| {
+            self.pending.contains_key(&score.job_id) || self.clusters.contains(&score.job_id)
+        });
+        for score in offered {
             worker_scores.insert(
                 score.job_id.clone(),
                 WorkerJobScore {
@@ -3450,6 +3453,23 @@ mod tests {
             tracker.recent_decisions()[0].winner.as_deref(),
             Some("valid")
         );
+    }
+
+    #[test]
+    fn test_worker_scores_for_non_pending_or_non_member_jobs_are_not_stored() {
+        let mut tracker = JobTracker::new();
+        tracker.add_pending("build:j1".into(), build_job(ProjectId::now_v7(), vec![]));
+        let score = |job_id: &str| CandidateScore {
+            job_id: job_id.into(),
+            missing_count: 0,
+            missing_nar_size: 0,
+            outputs_present: false,
+        };
+
+        tracker.record_scores("w1", vec![score("build:j1"), score("build:unknown")]);
+
+        let stored: Vec<&String> = tracker.scores["w1"].keys().collect();
+        assert_eq!(stored, vec!["build:j1"]);
     }
 
     #[test]
