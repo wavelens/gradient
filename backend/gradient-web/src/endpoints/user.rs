@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
+use crate::access::{CacheAccess, Caller, caller_cache_mask, load_cache};
 use crate::audit::Audit;
 use crate::authorization::{
     MaybeUser, can_disconnect, generate_api_key, hash_api_key, session_claims,
@@ -535,7 +535,7 @@ impl PinNames {
 
 async fn held_cache_permissions(
     db: &WebDb,
-    user_id: UserId,
+    user: &MUser,
     cache_id: CacheId,
     wire: &[String],
 ) -> WebResult<i64> {
@@ -543,9 +543,7 @@ async fn held_cache_permissions(
     if mask == 0 {
         return Err(UserRefusal::NoPermissionsSelected.into());
     }
-    let granted = effective_cache_mask(db, user_id, cache_id, None)
-        .await?
-        .ok_or_else(|| WebError::not_found(Resource::Cache))?;
+    let granted = caller_cache_mask(db, Caller::User(user), cache_id, None).await?;
     if mask & !granted != 0 {
         return Err(UserRefusal::GrantUnheldCachePermissions.into());
     }
@@ -654,7 +652,7 @@ pub async fn post_keys(
             CacheAccess::Readable,
         )
         .await?;
-        let m = held_cache_permissions(&state.web_db, user.id, cache.id, &body.permissions).await?;
+        let m = held_cache_permissions(&state.web_db, &user, cache.id, &body.permissions).await?;
         (m, None, Some(cache.id))
     } else {
         let m = parse_permission_list(&body.permissions, "GET /user/keys/permissions")?;
@@ -746,7 +744,7 @@ pub async fn patch_key(
     let mut new_mask = previous_mask;
     if let Some(perms) = body.permissions {
         new_mask = match pinned_cache {
-            Some(cache) => held_cache_permissions(&state.web_db, user.id, cache, &perms).await?,
+            Some(cache) => held_cache_permissions(&state.web_db, &user, cache, &perms).await?,
             None => parse_permission_list(&perms, "GET /user/keys/permissions")?,
         };
         if new_mask == 0 {

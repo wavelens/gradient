@@ -10,12 +10,14 @@
 )]
 
 use gradient_entity::{api, cache, ids::*};
-use gradient_fixtures::ids::user_id;
+use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{cache_member_in, cache_view_role, user};
+use gradient_fixtures::rows::{
+    cache_member_in, cache_view_role, project_cache_link, project_member, user,
+};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::make_test_server;
-use gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID;
+use gradient_types::consts::{BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_VIEW_ID};
 use gradient_types::permissions::cache_admin_mask;
 use sea_orm::{MockDatabase, MockExecResult};
 use sha2::{Digest, Sha256};
@@ -193,6 +195,42 @@ async fn create_cache_pinned_key_cannot_exceed_member_mask() {
         .json(&serde_json::json!({
             "name": "my-cache-key",
             "permissions": ["writeStore"],
+            "cache": "test-cache",
+        }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn subscribed_project_member_cannot_create_a_key_pinned_to_the_cache() {
+    let session_id = gradient_types::SessionId::now_v7();
+    let token = gradient_test_support::web::make_token(session_id);
+    let session = gradient_fixtures::rows::live_session(session_id);
+
+    let db = mock_db()
+        .append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]])
+        .append_query_results([Vec::<api::Model>::new()])
+        .append_query_results([vec![private_cache_row()]])
+        .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
+        .append_query_results([vec![project_cache_link(
+            ProjectCacheId::now_v7(),
+            project_id(),
+            cache_id(),
+            gradient_entity::project_cache::CacheSubscriptionMode::ReadOnly,
+        )]])
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
+        .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/user/keys")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "subscriber-key",
+            "permissions": ["readStore"],
             "cache": "test-cache",
         }))
         .await;
