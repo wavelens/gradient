@@ -603,7 +603,6 @@ in {
             RemainAfterExit = true;
             User = "gradient-worker";
             Group = "gradient-worker";
-            StateDirectory = "gradient-worker";
             UMask = "0277";
           };
 

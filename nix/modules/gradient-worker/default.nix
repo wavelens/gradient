@@ -436,7 +436,13 @@ in {
     ];
 
     systemd = {
-      tmpfiles.settings."10-gradient" = lib.optionalAttrs (cfg.gcrootsDir != "") {
+      tmpfiles.settings."10-gradient" = {
+        ${cfg.baseDir}.d = {
+          user = "gradient-worker";
+          group = "gradient-worker";
+          mode = "0755";
+        };
+      } // lib.optionalAttrs (cfg.gcrootsDir != "") {
         ${cfg.gcrootsDir}.d = {
           user = "gradient-worker";
           group = "gradient-worker";
@@ -475,7 +481,6 @@ in {
             Type = "notify";
             ExecStart = lib.getExe' cfg.packages.gradient "gradient-worker";
             ExecReload = lib.mkIf cfg.capabilities.exec "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
-            StateDirectory = "gradient-worker";
             User = "gradient-worker";
             Group = "gradient-worker";
             PrivateTmp = true;
@@ -486,7 +491,8 @@ in {
             ProtectKernelTunables = true;
             ProtectProc = "invisible";
             ProtectSystem = "strict";
-            ReadWritePaths = lib.optionals (cfg.gcrootsDir != "") [ cfg.gcrootsDir ]
+            ReadWritePaths = [ cfg.baseDir ]
+              ++ lib.optional (cfg.gcrootsDir != "") cfg.gcrootsDir
               ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir
               ++ map (mount: mount.path) (lib.filter (mount: mount.perJob) exec.mounts);
             Restart = "on-failure";
