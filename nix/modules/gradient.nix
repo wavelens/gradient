@@ -335,7 +335,7 @@ in {
         url = lib.mkOption {
           type = lib.types.str;
           default = "postgresql://gradient@localhost/gradient?host=/run/postgresql";
-          description = "PostgreSQL connection URL.";
+          description = "Use a connection URL for PostgreSQL without a password. Files in the Nix store are world-readable and contain the connection URL. Use {option}`services.gradient.database.urlFile` for a URL with a password.";
         };
 
         urlFile = lib.mkOption {
@@ -568,6 +568,9 @@ in {
     assertions = [{
       assertion = cfg.localWorker -> cfg.worker.enable;
       message = "services.gradient.localWorker provisions credentials for a worker on this host and requires services.gradient.worker.enable.";
+    } {
+      assertion = builtins.match "([^:/?#]+://[^/?#@]*:[^/?#@]*@.*|.*[?&]password=.*)" cfg.database.url == null;
+      message = "Copies of `services.gradient.database.url` in the Nix store expose the password to any user. Move the URL to a file outside the store. Set `services.gradient.database.urlFile` instead.";
     } {
       assertion = cfg.proto.federate -> cfg.proto.discoverable;
       message = "proto.federate requires proto.discoverable to be enabled";
