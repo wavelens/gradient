@@ -99,13 +99,6 @@ impl ActiveJobs {
         self.project(job_id).or_else(|| self.fetch_project(job_id))
     }
 
-    async fn job_project(&self, scheduler: &Scheduler, job_id: &str) -> Option<ProjectId> {
-        match self.session_project(job_id) {
-            Some(project) => Some(project),
-            None => scheduler.project_for_job(job_id).await,
-        }
-    }
-
     pub(crate) fn build(&self, job_id: &str) -> Option<DerivationBuildId> {
         match &self.0.lock().get(job_id)?.pending {
             PendingJob::Build(j) => Some(j.derivation_build),
@@ -334,7 +327,7 @@ impl<'a> InboundContext<'a> {
                         paths_done,
                         paths_total,
                     };
-                    self.on_build_progress(&build_id, progress);
+                    self.on_build_progress(&job_id, &build_id, progress);
                 }
                 true
             }
@@ -642,7 +635,7 @@ impl<'a> InboundContext<'a> {
                         self.peer_id,
                         vm,
                         state,
-                        job_id.as_deref(),
+                        job_id.as_deref().filter(|job| self.active.contains(job)),
                     ));
                 true
             }
@@ -679,7 +672,7 @@ impl<'a> InboundContext<'a> {
             | ClientMessage::ImportRequest { job_id, .. }
             | ClientMessage::InputRequest { job_id, .. }
             | ClientMessage::UploadRequest { job_id, .. } => {
-                let project = self.active.job_project(self.scheduler, job_id).await;
+                let project = self.active.session_project(job_id);
                 if project.is_none() {
                     refuse(self.writer, &msg, "the job does not resolve to a project").await;
                     return None;
@@ -775,7 +768,7 @@ impl<'a> InboundContext<'a> {
         applied: Vec<String>,
     ) {
         let db = &self.handles.db.worker_db;
-        let readable = match self.active.job_project(self.scheduler, &job_id).await {
+        let readable = match self.active.session_project(&job_id) {
             Some(project) => project_read_caches(db, project).await.unwrap_or_else(|e| {
                 warn!(peer_id = %self.peer_id, %job_id, error = %e, "readable caches lookup failed");
                 Vec::new()
@@ -801,6 +794,10 @@ impl<'a> InboundContext<'a> {
         message: String,
     ) {
         trace!(peer_id = %self.peer_id, %job_id, ?level, %source, "EvalMessage");
+        if self.active.eval(&job_id).is_none() {
+            warn!(peer_id = %self.peer_id, %job_id, "Evaluation Message for an Evaluation the Session Never Ran");
+            return;
+        }
         if let Err(e) = self
             .scheduler
             .record_eval_message(&job_id, level, source, message)
@@ -1013,6 +1010,10 @@ impl<'a> InboundContext<'a> {
         reason: Option<String>,
         endpoint: Option<String>,
     ) {
+        if !self.active.contains(&job_id) {
+            warn!(peer_id = %self.peer_id, %job_id, "Assignment Response for a Job Not Given to This Session");
+            return;
+        }
         if accepted {
             info!(peer_id = %self.peer_id, %job_id, ?endpoint, "job accepted");
             self.scheduler
@@ -1092,9 +1093,13 @@ impl<'a> InboundContext<'a> {
         self.logs.append(target, data.to_vec()).await;
     }
 
-    fn on_build_progress(&self, build_id: &str, progress: BuildProgress) {
-        let Ok(shared_build) = build_id.parse::<DerivationBuildId>() else {
-            warn!(peer_id = %self.peer_id, %build_id, "invalid derivation_build in BuildProgress");
+    fn on_build_progress(&self, job_id: &str, build_id: &str, progress: BuildProgress) {
+        let Some(shared_build) = self
+            .active
+            .build(job_id)
+            .filter(|held| build_id.parse() == Ok(*held))
+        else {
+            warn!(peer_id = %self.peer_id, %job_id, %build_id, "Progress for a Build Not Run in This Session");
             return;
         };
         self.handles
@@ -1242,12 +1247,11 @@ impl RpcContext {
         None
     }
 
-    pub(super) async fn job_project(&self, job_id: &str) -> Option<ProjectId> {
-        self.active.job_project(&self.scheduler, job_id).await
-    }
-
     async fn answer(&self, msg: ClientMessage) {
-        let Some(project_id) = self.job_project(msg.job_id().unwrap_or_default()).await else {
+        let Some(project_id) = self
+            .active
+            .session_project(msg.job_id().unwrap_or_default())
+        else {
             refuse(&self.writer, &msg, "the job does not resolve to a project").await;
             return;
         };
@@ -1792,6 +1796,57 @@ mod assignment_response_tests {
     }
 
     #[tokio::test]
+    async fn an_answer_for_a_job_this_session_was_not_handed_changes_nothing() {
+        let db = empty_db();
+        let log_db = db.clone();
+        let state = test_state(db);
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        scheduler.spawn_core(None).await.expect("core actor");
+        let writer = detached_writer();
+        let semaphore = Arc::new(Semaphore::new(1));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: "w1".into(),
+            },
+        );
+        let active = ActiveJobs::from(HashMap::new());
+
+        let mut ctx = InboundContext {
+            writer: &writer,
+            handles: &SessionHandles::from_state(&state),
+            scheduler: &scheduler,
+            peer_id: "w1",
+            nar_serve_semaphore: &semaphore,
+            active: &active,
+            job_events: &job_events,
+            logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
+            dialed: None,
+        };
+        ctx.on_assign_job_response("build:foreign".into(), false, None, None)
+            .await;
+        ctx.on_assign_job_response(
+            "build:foreign".into(),
+            true,
+            None,
+            Some("10.0.0.5:22".into()),
+        )
+        .await;
+        ctx.on_eval_message(
+            "eval:foreign".into(),
+            gradient_wire::types::EvalMessageLevel::Error,
+            "source".into(),
+            "injected".into(),
+        )
+        .await;
+
+        assert!(log_db.into_transaction_log().is_empty());
+    }
+
+    #[tokio::test]
     async fn a_progress_report_is_held_in_memory_and_broadcast() {
         let db = empty_db();
         let log_db = db.clone();
@@ -1808,9 +1863,16 @@ mod assignment_response_tests {
                 peer_id: "w1".into(),
             },
         );
-        let active = ActiveJobs::from(HashMap::new());
-        let mut events = state.events.subscribe();
         let shared_build = DerivationBuildId::now_v7();
+        let active = ActiveJobs::from(HashMap::from([(
+            "j1".to_owned(),
+            ActiveJob {
+                assignment_id: DispatchedJobId::now_v7(),
+                pending: super::fixture::pending_build(shared_build),
+                cluster: None,
+            },
+        )]));
+        let mut events = state.events.subscribe();
         let progress = BuildProgress {
             phase: BuildProgressPhase::Upload,
             bytes_done: 512,
@@ -1830,8 +1892,10 @@ mod assignment_response_tests {
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
         };
-        ctx.on_build_progress(&shared_build.to_string(), progress);
-        ctx.on_build_progress("not-a-uuid", progress);
+        ctx.on_build_progress("j1", &shared_build.to_string(), progress);
+        ctx.on_build_progress("j1", "not-a-uuid", progress);
+        ctx.on_build_progress("j1", &DerivationBuildId::now_v7().to_string(), progress);
+        ctx.on_build_progress("foreign", &shared_build.to_string(), progress);
 
         assert_eq!(
             state
