@@ -12,6 +12,7 @@ use git2::ErrorClass;
 use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_wire::types::JobContext;
+use tokio_util::sync::CancellationToken;
 
 use super::job::StoreAccess;
 use crate::executor::failure::BuildError;
@@ -85,20 +86,28 @@ async fn clone_commit(
 
 async fn copy_store_path(work: &Path, store_path: &str) -> Result<()> {
     let (from, to) = (PathBuf::from(store_path), work.to_path_buf());
-    tokio::task::spawn_blocking(move || copy_writable_tree(&from, &to))
+    let stopped = CancellationToken::new();
+    let _stop_when_dropped = stopped.clone().drop_guard();
+    tokio::task::spawn_blocking(move || copy_writable_tree(&from, &to, &stopped))
         .await
         .context("copy task panicked")?
         .with_context(|| format!("copy {store_path} into the work directory"))
 }
 
-fn copy_writable_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+fn copy_writable_tree(from: &Path, to: &Path, stopped: &CancellationToken) -> std::io::Result<()> {
     for entry in std::fs::read_dir(from)? {
+        if stopped.is_cancelled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "Job stopped during copy to work directory",
+            ));
+        }
         let entry = entry?;
         let (source, target) = (entry.path(), to.join(entry.file_name()));
         let kind = entry.file_type()?;
         if kind.is_dir() {
             std::fs::create_dir(&target)?;
-            copy_writable_tree(&source, &target)?;
+            copy_writable_tree(&source, &target, stopped)?;
         } else if kind.is_symlink() {
             std::os::unix::fs::symlink(std::fs::read_link(&source)?, &target)?;
         } else {
@@ -231,12 +240,26 @@ mod tests {
         std::os::unix::fs::symlink("src/main.rs", store.path().join("link")).unwrap();
         let work = tempfile::tempdir().unwrap();
 
-        copy_writable_tree(store.path(), work.path()).unwrap();
+        copy_writable_tree(store.path(), work.path(), &CancellationToken::new()).unwrap();
 
         std::fs::write(work.path().join("src/main.rs"), "changed").unwrap();
         assert_eq!(
             std::fs::read_link(work.path().join("link")).unwrap(),
             PathBuf::from("src/main.rs")
         );
+    }
+
+    #[test]
+    fn a_stopped_job_copies_nothing_more() {
+        let store = tempfile::tempdir().unwrap();
+        std::fs::write(store.path().join("big.bin"), "x").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let stopped = CancellationToken::new();
+        stopped.cancel();
+
+        let error = copy_writable_tree(store.path(), work.path(), &stopped).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert!(!work.path().join("big.bin").exists());
     }
 }

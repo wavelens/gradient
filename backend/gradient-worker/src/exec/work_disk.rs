@@ -35,6 +35,7 @@ pub async fn build_work_disk(
         .arg(staging)
         .arg(image)
         .arg(format!("{disk_mb}M"))
+        .kill_on_drop(true)
         .output()
         .await
         .map_err(WorkDiskError::Start)?;
