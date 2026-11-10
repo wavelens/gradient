@@ -28,6 +28,7 @@ async fn config_returns_struct() {
                 "public_listing": false,
                 "quic": false,
                 "registration_enabled": true,
+                "serve_url": "http://localhost",
                 "smtp_enabled": false,
                 "ssh_enabled": true,
                 "ssh_port": 22,
