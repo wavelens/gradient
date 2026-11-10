@@ -76,6 +76,23 @@ RETURNING derivation
 "#,
         params = [DerivationIds(64), DerivationIds(64), Texts("out", 64)];
 
+    SYSTEM_REQUIREMENT_FEATURE_NAME_INSERT_IF_ABSENT = r#"
+INSERT INTO system_requirement (id, name, kind)
+SELECT f.id, f.name, 'feature'
+FROM unnest($1::uuid[], $2::text[]) AS f(id, name)
+ON CONFLICT (name, kind) DO NOTHING
+"#,
+        params = [NewUuids(64), Texts("kvm", 64)];
+
+    DERIVATION_FEATURE_INSERT_SQL = r#"
+INSERT INTO derivation_feature (id, derivation, feature)
+SELECT l.id, l.derivation, f.id
+FROM unnest($1::uuid[], $2::uuid[], $3::text[]) AS l(id, derivation, name)
+JOIN system_requirement f ON f.name = l.name AND f.kind = 'feature'
+ON CONFLICT (derivation, feature) DO NOTHING
+"#,
+        params = [NewUuids(64), DerivationIds(64), Texts("kvm", 64)];
+
     SHARED_BUILD_LIMITS_UPDATE = r#"
 UPDATE derivation_build AS db
 SET timeout_secs = NULLIF(l.timeout_secs, 0), max_silent_secs = NULLIF(l.max_silent_secs, 0)
@@ -909,25 +926,58 @@ impl BatchWriter<'_> {
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
     ) {
+        let mut derivation_feature_ids: Vec<uuid::Uuid> = Vec::new();
+        let mut derivation_ids_for_feature_links: Vec<uuid::Uuid> = Vec::new();
+        let mut feature_names_per_derivation_feature_link_row: Vec<String> = Vec::new();
         for d in derivations {
-            if d.required_features.is_empty() {
-                continue;
-            }
-
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
                 continue;
             };
-
-            if let Err(e) = gradient_db::graph::features::add_features(
-                self.ctx,
-                d.required_features.clone(),
-                gradient_entity::feature::FeatureKind::Feature,
-                Some(drv_id),
-            )
-            .await
-            {
-                error!(error = %e, %drv_id, "failed to add system features");
+            for name in &d.required_features {
+                derivation_feature_ids.push(DerivationFeatureId::now_v7().into_inner());
+                derivation_ids_for_feature_links.push(drv_id.into_inner());
+                feature_names_per_derivation_feature_link_row.push(name.clone());
             }
+        }
+
+        if derivation_feature_ids.is_empty() {
+            return;
+        }
+
+        let required_system_feature_names: Vec<String> = BTreeSet::from_iter(
+            feature_names_per_derivation_feature_link_row
+                .iter()
+                .cloned(),
+        )
+        .into_iter()
+        .collect();
+        let new_uuid_v7_ids_for_feature_names: Vec<uuid::Uuid> = required_system_feature_names
+            .iter()
+            .map(|_| FeatureId::now_v7().into_inner())
+            .collect();
+
+        if let Err(e) = self
+            .db()
+            .execute_raw(SYSTEM_REQUIREMENT_FEATURE_NAME_INSERT_IF_ABSENT.bind([
+                new_uuid_v7_ids_for_feature_names.into(),
+                required_system_feature_names.into(),
+            ]))
+            .await
+        {
+            error!(error = %e, "failed to insert system features");
+            return;
+        }
+
+        if let Err(e) = self
+            .db()
+            .execute_raw(DERIVATION_FEATURE_INSERT_SQL.bind([
+                derivation_feature_ids.into(),
+                derivation_ids_for_feature_links.into(),
+                feature_names_per_derivation_feature_link_row.into(),
+            ]))
+            .await
+        {
+            error!(error = %e, "failed to link derivations to their corresponding system features");
         }
     }
 

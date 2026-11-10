@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::{BTreeSet, HashMap};
+
 use gradient_entity::build::BuildStatus::{self, Completed, Created, Queued, Skipped, Substituted};
 use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
+use gradient_entity::{derivation_feature, feature};
 use gradient_fixtures::shape::shape;
 use gradient_wire::types::DiscoveredDerivation;
 
@@ -899,5 +902,89 @@ async fn b21_each_edge_records_the_outputs_its_derivation_builds_with() {
         "after 1: edge(A,C).dependency_outputs, a dependency named without outputs"
     );
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+async fn read_required_system_features_by_derivation_path(
+    case: &Case,
+    paths: &[&str],
+) -> BTreeSet<(String, String)> {
+    let mut path_of = HashMap::new();
+    for path in paths {
+        path_of.insert(case.db.id_of(path).await, (*path).to_owned());
+    }
+    let names: HashMap<_, _> = case
+        .db
+        .rows::<feature::Entity>()
+        .await
+        .into_iter()
+        .map(|row| (row.id, row.name))
+        .collect();
+
+    case.db
+        .rows::<derivation_feature::Entity>()
+        .await
+        .into_iter()
+        .filter_map(|link| {
+            let path = path_of.get(&link.derivation)?.clone();
+            Some((path, names[&link.feature].clone()))
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn b22_a_batch_with_shared_and_two_feature_requirements_writes_expected_rows_reuses_existing_feature_and_rewrite_adds_nothing()
+ {
+    let e1 = EvaluationId::now_v7();
+    let seed = shape()
+        .evaluation(e1)
+        .derivation(X)
+        .walked()
+        .feature("kvm")
+        .build_status(Skipped);
+    let case = Case::start(seed).await;
+    let seeded = case.db.rows::<feature::Entity>().await;
+    let mut a = walked(A, A_OUT, &[]);
+    a.required_features = vec!["kvm".to_owned(), "big-parallel".to_owned()];
+    let mut b = walked(B, B_OUT, &[]);
+    b.required_features = vec!["kvm".to_owned()];
+
+    walk(&case, e1, vec![a.clone(), b.clone()]).await;
+
+    let links = read_required_system_features_by_derivation_path(&case, &[X, A, B]).await;
+    let expected = BTreeSet::from([
+        (X.to_owned(), "kvm".to_owned()),
+        (A.to_owned(), "kvm".to_owned()),
+        (A.to_owned(), "big-parallel".to_owned()),
+        (B.to_owned(), "kvm".to_owned()),
+    ]);
+    assert_eq!(links, expected, "(derivation, feature) link after step 1");
+    let features: BTreeSet<_> = case
+        .db
+        .rows::<feature::Entity>()
+        .await
+        .into_iter()
+        .map(|row| (row.name, row.id == seeded[0].id))
+        .collect();
+    let reused = BTreeSet::from([("big-parallel".to_owned(), false), ("kvm".to_owned(), true)]);
+    assert_eq!(features, reused, "Feature name after 1: seeded kvm reused");
+    let (feature_rows, link_rows) = (
+        case.db.rows::<feature::Entity>().await,
+        case.db.rows::<derivation_feature::Entity>().await,
+    );
+
+    walk(&case, e1, vec![a, b]).await;
+
+    assert_eq!(
+        case.db.rows::<feature::Entity>().await,
+        feature_rows,
+        "after 2: feature rows stay unchanged on a second run of the same batch"
+    );
+    assert_eq!(
+        case.db.rows::<derivation_feature::Entity>().await,
+        link_rows,
+        "After 2: second write of same batch -> no new links"
+    );
+    case.zero_drift("step 2").await;
     case.finish().await;
 }
