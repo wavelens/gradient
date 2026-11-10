@@ -32,7 +32,8 @@ import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { RelativeTimePipe } from '@shared/text';
 
-const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const SECRET_NAME_MAX_LENGTH = 64;
+const SECRET_NAME = new RegExp(`^[a-z0-9][a-z0-9-]{0,${SECRET_NAME_MAX_LENGTH - 1}}$`);
 
 @Component({
   selector: 'app-project-secrets',
@@ -87,7 +88,13 @@ export class SecretsComponent implements OnInit {
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Secrets' }));
-  nameInvalid = computed(() => this.name() !== '' && !SECRET_NAME.test(this.name()));
+  nameError = computed(() => {
+    const name = this.name();
+    if (name === '' || SECRET_NAME.test(name)) return null;
+    return name.length > SECRET_NAME_MAX_LENGTH
+      ? 'Keep the name to 64 characters or fewer.'
+      : 'Start with a letter or digit, then use lowercase letters, digits and dashes';
+  });
   canSave = computed(() => SECRET_NAME.test(this.name()) && this.value() !== '' && !this.saving());
 
   ngOnInit(): void {

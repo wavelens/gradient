@@ -144,6 +144,22 @@ describe('SecretsComponent', () => {
     expect(service.put).toHaveBeenCalledWith('acme', 'new-token', 'v');
   });
 
+  it('names the length as the problem with a long name of valid characters', async () => {
+    const { fixture } = setup();
+    await settled(fixture);
+    buttonIn(fixture.nativeElement, 'Set secret')!.click();
+    await settled(fixture);
+    typeInto('secret-name', 'a'.repeat(65));
+    await settled(fixture);
+    expect(document.body.textContent).toContain('Keep the name to 64 characters or fewer.');
+    expect(document.body.textContent).not.toContain('Start with a letter or digit');
+
+    typeInto('secret-name', '-token');
+    await settled(fixture);
+    expect(document.body.textContent).toContain('Start with a letter or digit');
+    expect(fixture.componentInstance.canSave()).toBe(false);
+  });
+
   it('asks before Set secret overwrites an existing secret of the same name', async () => {
     const { fixture, service, confirm } = setup();
     await settled(fixture);
