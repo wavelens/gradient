@@ -10,8 +10,7 @@ use std::time::Duration;
 use chrono::{NaiveDateTime, Utc};
 
 use gradient_types::TaskTriggerId;
-
-const POLLING_JITTER_PCT: u32 = 10;
+use gradient_types::triggers::next_poll_time_with_jitter;
 
 const HEAD_RESOLVE_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -21,31 +20,7 @@ pub(crate) fn polling_due(
     interval_secs: u32,
     now: NaiveDateTime,
 ) -> bool {
-    match last_fired_at {
-        None => true,
-        Some(t) => {
-            let jitter = polling_jitter_secs(trigger_id, t, interval_secs);
-            (now - t).num_seconds() >= interval_secs as i64 + jitter as i64
-        }
-    }
-}
-
-fn polling_jitter_secs(
-    trigger_id: TaskTriggerId,
-    last_fired_at: NaiveDateTime,
-    interval_secs: u32,
-) -> u32 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let max = interval_secs / (100 / POLLING_JITTER_PCT);
-    if max == 0 {
-        return 0;
-    }
-    let mut hasher = DefaultHasher::new();
-    trigger_id.hash(&mut hasher);
-    last_fired_at.hash(&mut hasher);
-    u32::try_from(hasher.finish() % (u64::from(max) + 1)).unwrap_or(max)
+    last_fired_at.is_none_or(|t| now >= next_poll_time_with_jitter(trigger_id, t, interval_secs))
 }
 
 pub(crate) fn cron_due(cron_expr: &str, after: NaiveDateTime, now: NaiveDateTime) -> bool {
@@ -126,7 +101,7 @@ pub async fn fire(scheduler: &Scheduler, fire: &TriggerFire) -> anyhow::Result<(
     let now = gradient_types::now();
 
     let sources = &scheduler.db;
-    let branch = polling_branch(&cfg);
+    let branch = cfg.trigger_branch().map(str::to_owned);
     let resolve = check_task_updates(sources, &task, branch.as_deref());
     let resolved = resolve_head(resolve, &task.name).await;
     if let Err(e) = gradient_db::tasks::record_fetch(
@@ -188,7 +163,7 @@ fn due_fire(trig: &ept::Model, now: NaiveDateTime) -> Option<TriggerFire> {
         TriggerConfig::Polling { interval_secs, .. } => {
             polling_due(trig.id, trig.last_fired_at, interval_secs, now)
         }
-        TriggerConfig::Time { cron } => {
+        TriggerConfig::Time { cron, .. } => {
             cron_due(&cron, trig.last_fired_at.unwrap_or(trig.created_at), now)
         }
         _ => false,
@@ -218,13 +193,6 @@ async fn load_pending_firing(
     }
 
     Ok(parse_config(&trig).map(|cfg| (trig, task, cfg)))
-}
-
-fn polling_branch(cfg: &TriggerConfig) -> Option<String> {
-    match cfg {
-        TriggerConfig::Polling { branch, .. } => branch.clone(),
-        _ => None,
-    }
 }
 
 async fn apply_resolved_head(
@@ -423,52 +391,11 @@ mod tests {
     }
 
     #[test]
-    fn polling_jitter_within_ten_percent_bound() {
-        let last = dt("2026-05-06 10:00:00");
-        let interval = 600;
-        let max = interval / 10;
-        for _ in 0..1000 {
-            let j = polling_jitter_secs(tid(), last, interval);
-            assert!(j <= max, "jitter {j} exceeded 10% bound {max}");
-        }
-    }
-
-    #[test]
-    fn polling_jitter_is_deterministic_per_cycle() {
-        let id = tid();
-        let last = dt("2026-05-06 10:00:00");
-        let a = polling_jitter_secs(id, last, 600);
-        let b = polling_jitter_secs(id, last, 600);
-        assert_eq!(
-            a, b,
-            "same (trigger_id, last_fired_at) must yield same jitter"
-        );
-    }
-
-    #[test]
-    fn polling_jitter_changes_between_cycles() {
-        let id = tid();
-        let a = polling_jitter_secs(id, dt("2026-05-06 10:00:00"), 600);
-        let b = polling_jitter_secs(id, dt("2026-05-06 10:11:00"), 600);
-        let c = polling_jitter_secs(id, dt("2026-05-06 10:22:00"), 600);
-        assert!(a != b || a != c, "jitter must vary across cycles");
-    }
-
-    #[test]
-    fn polling_jitter_zero_when_interval_below_threshold() {
-        assert_eq!(polling_jitter_secs(tid(), dt("2026-05-06 10:00:00"), 9), 0);
-    }
-
-    #[test]
     fn polling_does_not_fire_before_interval_plus_jitter() {
         let id = TaskTriggerId::now_v7();
         let last = dt("2026-05-06 10:00:00");
-        let jitter = polling_jitter_secs(id, last, 100);
-        if jitter == 0 {
-            return;
-        }
-        let just_before = last + chrono::Duration::seconds(100 + jitter as i64 - 1);
-        let exactly_at = last + chrono::Duration::seconds(100 + jitter as i64);
+        let exactly_at = next_poll_time_with_jitter(id, last, 100);
+        let just_before = exactly_at - chrono::Duration::seconds(1);
         assert!(!polling_due(id, Some(last), 100, just_before));
         assert!(polling_due(id, Some(last), 100, exactly_at));
     }

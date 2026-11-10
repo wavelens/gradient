@@ -485,7 +485,7 @@ pub(super) async fn fire(
 ) -> WebResult<FireOutcome> {
     let branch = TriggerConfig::parse_row(trigger.trigger_type, &trigger.config)
         .ok()
-        .and_then(|cfg| cfg.manual_branch().map(str::to_owned));
+        .and_then(|cfg| cfg.trigger_branch().map(str::to_owned));
 
     let (branch, head) = head_commit(db, task, branch.as_deref())
         .await

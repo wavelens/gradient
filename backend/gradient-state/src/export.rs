@@ -533,9 +533,12 @@ fn export_trigger(
                 c,
             )
         }
-        TriggerConfig::Time { cron } => {
+        TriggerConfig::Time { cron, branch } => {
             let mut c = serde_json::Map::new();
             c.insert("cron".into(), cron.into());
+            if let Some(b) = branch {
+                c.insert("branch".into(), b.into());
+            }
             (TriggerType::Time, None, c)
         }
     };

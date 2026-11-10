@@ -501,11 +501,18 @@ pub(crate) fn build_trigger_config(
                 .and_then(|v| v.as_str())
                 .context("time trigger requires `cron`")?
                 .to_string();
-            TriggerConfig::Time { cron }
+            TriggerConfig::Time {
+                cron,
+                branch: t
+                    .config
+                    .get("branch")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_owned()),
+            }
         }
     };
-    cfg.validate().context("validate the trigger config")?;
-    Ok(cfg)
+    cfg.validate_and_convert_cron_to_six_fields()
+        .context("validate the trigger config")
 }
 
 pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {
@@ -834,7 +841,27 @@ mod trigger_helper_tests {
         assert_eq!(
             cfg,
             TriggerConfig::Time {
-                cron: "0 0 2 * * *".into()
+                cron: "0 0 2 * * *".into(),
+                branch: None,
+            }
+        );
+    }
+
+    #[test]
+    fn build_time_trigger_with_branch_and_five_field_cron() {
+        let t = StateTrigger {
+            trigger_type: TriggerType::Time,
+            integration: None,
+            config: serde_json::json!({ "cron": "0 2 * * *", "branch": "release" }),
+            active: true,
+            is_default: false,
+        };
+        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
+        assert_eq!(
+            cfg,
+            TriggerConfig::Time {
+                cron: "0 0 2 * * *".into(),
+                branch: Some("release".into()),
             }
         );
     }
@@ -924,6 +951,7 @@ mod trigger_helper_tests {
         };
         let time = TriggerConfig::Time {
             cron: "0 0 * * * *".into(),
+            branch: None,
         };
         assert_ne!(trigger_key(&polling), trigger_key(&time));
     }

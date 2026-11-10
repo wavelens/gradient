@@ -131,7 +131,7 @@ async fn start_input_update(
 }
 
 async fn task_head(ci: &CiContext, trig: &ept::Model, task: &MTask) -> Option<Vec<u8>> {
-    let branch = parse_trigger_config(trig).and_then(|cfg| cfg.manual_branch().map(str::to_owned));
+    let branch = parse_trigger_config(trig).and_then(|cfg| cfg.trigger_branch().map(str::to_owned));
     match gradient_sources::remote_branch_head(&ci.db, task, branch.as_deref()).await {
         Ok(head) => Some(head.commit),
         Err(e) => {
