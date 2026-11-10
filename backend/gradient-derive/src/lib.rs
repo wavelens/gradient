@@ -229,17 +229,25 @@ fn describe_fields(fields: &[Field], removed: &[Removed], present_since: u16) ->
     }
 
     let codec = codec();
-    let describe = |ty: &Type| {
+    let describe = |member: Option<&Ident>, ty: &Type| {
+        let label = member.map(|name| {
+            let label = format!("{name}:");
+            quote!(out.push_str(#label);)
+        });
         quote! {
             #codec::push_separator(out, &mut first);
+            #label
             <#ty as #codec::Proto>::describe(version, out);
         }
     };
-    let steps = fields
-        .iter()
-        .map(|f| when_present(f.since.max(present_since), describe(&f.ty)));
+    let steps = fields.iter().map(|f| {
+        when_present(
+            f.since.max(present_since),
+            describe(f.member.as_ref(), &f.ty),
+        )
+    });
     let removed_steps = removed.iter().map(|Removed { until, ty }| {
-        let step = describe(ty);
+        let step = describe(None, ty);
         quote!(if version < #until { #step })
     });
     quote!({
@@ -312,7 +320,7 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
         let tag = index as u64;
         let ident = &variant.ident;
         let variant_label = ident.to_string();
-        let shape_label = format!("{index}:");
+        let shape_label = format!("{index}:{variant_label}");
         let fs = fields(&variant.fields)?;
         let (oldest, newest) = field_versions(&fs, since);
         body.oldest.extend(oldest);

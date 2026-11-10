@@ -35,7 +35,7 @@ fn every_supported_version_still_has_its_released_shape() {
         assert_eq!(
             shape(version),
             stored,
-            "the wire shape of protocol {version} changed: raise `#[proto(oldest = N)]` or undo the change"
+            "The wire shape for protocol {version} changed. Bump `#[proto(oldest = N)]` or revert the change. Update the names in the schema file for a pure rename."
         );
     }
 }

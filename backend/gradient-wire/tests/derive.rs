@@ -103,6 +103,18 @@ enum Replaced {
     },
 }
 
+#[derive(Proto, Debug, Clone, PartialEq)]
+struct JobIdAssignmentIdWireShapeTest {
+    job_id: String,
+    assignment_id: String,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+struct SwappedFieldOrderFixture {
+    assignment_id: String,
+    job_id: String,
+}
+
 fn at<T: Proto>(value: &T, version: u16) -> Bytes {
     to_bytes(value, version).expect("encodes")
 }
@@ -124,7 +136,8 @@ fn a_removed_field_keeps_its_place_for_older_peers_only() {
         peak: None,
     };
     assert_eq!(at(&trimmed, 27), at(&unset, 27));
-    assert_eq!(shape::<Trimmed>(27), shape::<BeforeTrim>(27));
+    assert_eq!(shape::<Trimmed>(27), "{id:str,opt<f32>}");
+    assert_eq!(shape::<BeforeTrim>(27), "{id:str,peak:opt<f32>}");
 
     let sent_by_old_peer = BeforeTrim {
         peak: Some(3.0),
@@ -143,7 +156,7 @@ fn a_removed_field_keeps_its_place_for_older_peers_only() {
 
 #[test]
 fn a_variant_drops_a_removed_field_from_the_version_that_removed_it() {
-    assert_eq!(shape::<Heartbeat>(27), shape::<HeartbeatBeforeTrim>(27));
+    assert_eq!(shape::<Heartbeat>(27), "[0:Load{cpu:u32,opt<f32>}]");
     assert_eq!(shape::<Heartbeat>(28), shape::<HeartbeatAfterTrim>(28));
 
     let load = Heartbeat::Load {
@@ -238,22 +251,40 @@ fn a_variant_newer_than_the_agreed_version_is_rejected_on_receive() {
 }
 
 #[test]
-fn the_shape_leaves_out_names_and_versions_the_peer_lacks() {
-    let mut old = String::new();
-    Message::describe(27, &mut old);
-    assert_eq!(old, "[0:{str},1:{},2:{{str}}]");
+fn message_wire_shape_lists_names_and_omits_items_newer_than_peer_version() {
+    assert_eq!(
+        shape::<Message>(27),
+        "[0:Hello{id:str},1:Ping{},2:Wrapped{{id:str}}]"
+    );
+    assert_eq!(
+        shape::<Message>(28),
+        "[0:Hello{id:str},1:Ping{},2:Wrapped{{id:str,features:seq<str>}},3:Bye{reason:str}]"
+    );
+}
 
-    let mut new = String::new();
-    Message::describe(28, &mut new);
-    assert_eq!(new, "[0:{str},1:{},2:{{str,seq<str>}},3:{str}]");
+#[test]
+fn swapped_same_typed_fields_produce_different_wire_shape_descriptions() {
+    let ids = |job: &str, assignment: &str| JobIdAssignmentIdWireShapeTest {
+        job_id: job.into(),
+        assignment_id: assignment.into(),
+    };
+    let swapped = SwappedFieldOrderFixture {
+        assignment_id: "a".into(),
+        job_id: "j".into(),
+    };
+    assert_eq!(at(&ids("a", "j"), 41), at(&swapped, 41));
+    assert_ne!(
+        shape::<JobIdAssignmentIdWireShapeTest>(41),
+        shape::<SwappedFieldOrderFixture>(41)
+    );
 }
 
 #[test]
 fn a_removed_variant_stays_for_older_peers_only() {
     let old = Replaced::Old { url: "u".into() };
     assert_eq!(from_bytes::<Replaced>(at(&old, 27), 27), Ok(old.clone()));
-    assert_eq!(shape::<Replaced>(27), "[0:{},1:{str}]");
-    assert_eq!(shape::<Replaced>(28), "[0:{},2:{seq<str>}]");
+    assert_eq!(shape::<Replaced>(27), "[0:Kept{},1:Old{url:str}]");
+    assert_eq!(shape::<Replaced>(28), "[0:Kept{},2:New{urls:seq<str>}]");
     assert_eq!((Replaced::OLDEST, Replaced::NEWEST), (27, 28));
     assert_eq!(
         to_bytes(&old, 28),

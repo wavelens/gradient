@@ -200,7 +200,7 @@ Running builds and evaluations survive a lost connection and a server restart. Q
 
 - A field without `default` count as mandatory. A missing `default` break compatibility, not correctness.
 - New variant can only be appended. Placing a variant before an older one fail to compile.
-- The files `gradient-wire/schema/v{N}.txt` describe the wire shape of each supported version. The `schema` test can check them against the code.
+- Supported versions N get one file each. `gradient-wire/schema/v{N}.txt` can record the wire shape of that version along with variant names and field names. The `schema` test can fail when two variants or two fields of the same type swap. Renames don't change bytes on the wire, so update the names by hand in all schema files.
 - `cargo run --example wire_schema` can write the file for a new version and remove files below the oldest version. Existing files remain untouched.
 
 ## Cache Sessions
