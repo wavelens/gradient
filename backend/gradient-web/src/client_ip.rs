@@ -44,12 +44,11 @@ pub fn resolve_client_ip(headers: &HeaderMap, peer: IpAddr, trusted_proxies: &[I
         return peer;
     }
 
-    let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) else {
-        return peer;
-    };
-
-    let parsed: Vec<IpAddr> = xff
-        .split(',')
+    let parsed: Vec<IpAddr> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|line| line.to_str().ok())
+        .flat_map(|line| line.split(','))
         .filter_map(|s| s.trim().parse().ok())
         .map(normalize)
         .collect();
@@ -194,6 +193,17 @@ mod tests {
         let h = headers_with_xff("10.0.0.5");
         let peer = ip("::ffff:127.0.0.1");
         assert_eq!(resolve_client_ip(&h, peer, &trusted), ip("10.0.0.5"));
+    }
+
+    #[test]
+    fn a_client_supplied_line_before_the_proxy_line_is_not_trusted() {
+        let trusted = nets(&["127.0.0.1/32"]);
+        let mut h = headers_with_xff("192.0.2.10");
+        h.append("x-forwarded-for", HeaderValue::from_static("203.0.113.7"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("203.0.113.7")
+        );
     }
 
     #[test]
