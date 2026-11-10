@@ -67,6 +67,12 @@ async fn adding_a_public_upstream_in_push_mode_needs_write_store() {
         .await;
 
     res.assert_status(StatusCode::FORBIDDEN);
+    let message = res.json::<serde_json::Value>()["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(message.contains("\"write cache\""), "{message}");
+    assert!(!message.contains("writeStore"), "{message}");
 }
 
 #[tokio::test]

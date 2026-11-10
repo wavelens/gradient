@@ -30,8 +30,10 @@ pub(crate) enum AccessRefusal {
     CachePinnedKeyOnEndpoint,
     #[error("API key is pinned to a different cache.")]
     KeyPinnedToDifferentCache,
-    #[error("Missing cache permission `{permission}`.")]
-    MissingCachePermission { permission: String },
+    #[error("Requests to this cache need the \"{}\" permission.", .0.permission_label())]
+    MissingCachePermission(CachePermission),
+    #[error("A cache admin can push build outputs to the upstream cache only with the \"{}\" permission on that cache.", .0.permission_label())]
+    MissingUpstreamCachePermission(CachePermission),
 }
 
 impl Refusal for AccessRefusal {
@@ -558,10 +560,7 @@ async fn require_cache_permission(
         .ok_or_else(|| WebError::not_found(label))?;
 
     if !cache_mask_grants(mask, permission) {
-        return Err(AccessRefusal::MissingCachePermission {
-            permission: permission.as_wire_name().to_string(),
-        }
-        .into());
+        return Err(AccessRefusal::MissingCachePermission(permission).into());
     }
 
     Ok(())

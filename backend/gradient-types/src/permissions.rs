@@ -217,6 +217,22 @@ impl CachePermission {
         }
     }
 
+    pub const fn permission_label(self) -> &'static str {
+        match self {
+            CachePermission::ViewCache => "view cache",
+            CachePermission::ReadStore => "read cache",
+            CachePermission::WriteStore => "write cache",
+            CachePermission::ManageCacheSettings => "manage cache settings",
+            CachePermission::ManageCacheKeys => "manage cache keys",
+            CachePermission::ManageUpstreamCaches => "manage upstream caches",
+            CachePermission::ManageCacheMembers => "manage cache members",
+            CachePermission::ManageCacheRoles => "manage cache roles",
+            CachePermission::ManageCacheSubscriptions => "manage cache subscriptions",
+            CachePermission::DeleteCache => "delete cache",
+            CachePermission::ManageCacheWebhooks => "manage event notifications",
+        }
+    }
+
     pub fn from_wire_name(s: &str) -> Option<Self> {
         CachePermission::ALL
             .iter()

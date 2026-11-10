@@ -176,10 +176,7 @@ async fn require_write_store_permission_for_push_upstream(
     {
         return Ok(());
     }
-    Err(AccessRefusal::MissingCachePermission {
-        permission: permission.as_wire_name().to_string(),
-    }
-    .into())
+    Err(AccessRefusal::MissingUpstreamCachePermission(permission).into())
 }
 
 #[utoipa::path(

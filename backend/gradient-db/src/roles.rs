@@ -5,6 +5,7 @@
  */
 
 use gradient_types::*;
+use sea_orm::sea_query::{Expr, ExprTrait, Func};
 use sea_orm::{ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, Value};
 
 fn owned_or_builtin<C: ColumnTrait>(owner_column: C, owner: impl Into<Value>) -> Condition {
@@ -66,7 +67,8 @@ where
     E: EntityTrait,
     C: ConnectionTrait,
 {
-    let mut query = E::find().filter(name_column.eq(name));
+    let mut query =
+        E::find().filter(Expr::expr(Func::lower(Expr::col(name_column))).eq(name.to_lowercase()));
     if let Some(role_id) = except {
         query = query.filter(id_column.ne(role_id));
     }
@@ -75,4 +77,52 @@ where
         .one(db)
         .await?;
     Ok(clash.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn built_in_role_names_are_taken_in_any_case() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let project = ProjectId::now_v7();
+        for role in [
+            gradient_fixtures::rows::admin_role(),
+            gradient_fixtures::rows::view_role(),
+        ] {
+            crate::rows::insert::<ERole, _>(&db.connection(), role)
+                .await
+                .expect("the built-in role is written");
+        }
+
+        for name in ["view", "VIEW", "Admin"] {
+            let taken = name_taken::<ERole, _>(
+                &db.connection(),
+                CRole::Name,
+                name,
+                CRole::Id,
+                None,
+                CRole::Project,
+                project,
+            )
+            .await
+            .expect("the lookup runs");
+            assert!(taken, "{name} must clash with a built-in role");
+        }
+
+        let free = name_taken::<ERole, _>(
+            &db.connection(),
+            CRole::Name,
+            "releaser",
+            CRole::Id,
+            None,
+            CRole::Project,
+            project,
+        )
+        .await
+        .expect("the lookup runs");
+        assert!(!free);
+        db.finish().await;
+    }
 }
