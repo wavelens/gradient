@@ -78,6 +78,18 @@ impl SavedLogin {
     pub fn server(&self) -> Option<String> {
         self.get(ConfigKey::Server)
     }
+
+    fn set_selected_project_and_clear_task_from_other_project(&mut self, project: String) {
+        let task_in_other_project = self
+            .selected_task
+            .as_deref()
+            .and_then(|task| task.split_once('/'))
+            .is_some_and(|(task_project, _)| task_project != project);
+        if task_in_other_project {
+            self.selected_task = None;
+        }
+        self.selected_project = Some(project);
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -200,15 +212,7 @@ fn apply_invocation_settings_to_saved_login(mut login: SavedLogin) -> SavedLogin
         login.auth_token = Some(token.clone());
     }
     if let Some(project) = &overrides.project {
-        let task_in_other_project = login
-            .selected_task
-            .as_deref()
-            .and_then(|task| task.split_once('/'))
-            .is_some_and(|(task_project, _)| task_project != project);
-        if task_in_other_project {
-            login.selected_task = None;
-        }
-        login.selected_project = Some(project.clone());
+        login.set_selected_project_and_clear_task_from_other_project(project.clone());
     }
     if let Some(task) = &overrides.task {
         login.selected_task = match (task.contains('/'), &login.selected_project) {
@@ -343,7 +347,12 @@ pub fn set_or_get_by_name(
 }
 
 pub fn set_value(key: ConfigKey, value: String, quiet: bool) {
-    update_or_create_saved_login_in_config_file(|login| *login.slot(key) = Some(value.clone()));
+    update_or_create_saved_login_in_config_file(|login| match key {
+        ConfigKey::SelectedProject => {
+            login.set_selected_project_and_clear_task_from_other_project(value.clone())
+        }
+        _ => *login.slot(key) = Some(value.clone()),
+    });
 
     if !quiet {
         println!("{} set to \"{}\"", key, value);
@@ -457,5 +466,28 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(login.token(), None);
+    }
+
+    #[test]
+    fn selecting_another_project_drops_the_task_of_the_previous_one() {
+        let mut login = SavedLogin {
+            selected_project: Some("a".into()),
+            selected_task: Some("a/web".into()),
+            ..Default::default()
+        };
+        login.set_selected_project_and_clear_task_from_other_project("b".into());
+        assert_eq!(login.selected_project.as_deref(), Some("b"));
+        assert_eq!(login.selected_task, None);
+    }
+
+    #[test]
+    fn reselecting_the_same_project_keeps_its_task() {
+        let mut login = SavedLogin {
+            selected_project: Some("a".into()),
+            selected_task: Some("a/web".into()),
+            ..Default::default()
+        };
+        login.set_selected_project_and_clear_task_from_other_project("a".into());
+        assert_eq!(login.selected_task.as_deref(), Some("a/web"));
     }
 }
