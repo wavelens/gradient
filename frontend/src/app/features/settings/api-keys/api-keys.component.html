@@ -23,7 +23,8 @@
     <button slot="empty-action" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
       <gr-row-list>
         @for (key of keys(); track key.id) {
-          <gr-row icon="key" [muted]="!!key.revoked_at">
+          @let expired = !key.revoked_at && isApiKeyExpired(key);
+          <gr-row icon="key" [muted]="!!key.revoked_at || expired">
             {{ key.name }}
             <gr-badge>{{ scopeBadge(key) }}</gr-badge>
             @if (key.managed) {
@@ -31,6 +32,8 @@
             }
             @if (key.revoked_at) {
               <gr-badge severity="danger">Revoked</gr-badge>
+            } @else if (expired) {
+              <gr-badge severity="danger">Expired</gr-badge>
             }
             <div slot="meta">
               @let effectivePermissionCount = getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key).length;
@@ -40,12 +43,12 @@
               <span>
                 · Last used: {{ key.last_used_at ? (key.last_used_at | serverDate) : 'never' }}
               </span>
-              @if (key.expires_at && !key.revoked_at) {
+              @if (key.expires_at && !key.revoked_at && !expired) {
                 <span>· Expires: {{ key.expires_at | serverDate }}</span>
               }
             </div>
             <div slot="actions">
-              @if (!key.revoked_at) {
+              @if (!key.revoked_at && !expired) {
                 <button
                   grButton
                   label="Edit"

@@ -115,6 +115,24 @@ describe('ApiKeysComponent - managed-key gating', () => {
     expect(deleteButtons[0].disabled).toBe(false);
   });
 
+  it('marks an expired key and offers only Delete', () => {
+    const fixture = setup([{ ...unmanagedKey, expires_at: '2026-01-02 00:00:00' }]);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Expired');
+    expect(root.textContent).not.toContain('Expires:');
+    expect(buttonsByText(root, 'edit').length).toBe(0);
+    expect(buttonsByText(root, 'revoke').length).toBe(0);
+    expect(buttonsByText(root, 'delete').length).toBe(1);
+  });
+
+  it('shows the expiry date of a key that is still valid', () => {
+    const fixture = setup([{ ...unmanagedKey, expires_at: '2999-01-01 00:00:00' }]);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Expires:');
+    expect(root.textContent).not.toContain('Expired');
+    expect(buttonsByText(root, 'revoke').length).toBe(1);
+  });
+
   it('renders Revoke / Delete present-but-disabled for a managed key', () => {
     const fixture = setup([managedKey]);
     const revokeButtons = buttonsByText(fixture.nativeElement, 'revoke');

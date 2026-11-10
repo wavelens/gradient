@@ -57,6 +57,8 @@ enum UserRefusal {
     PinToProjectAndCache,
     #[error("At least one permission is required for an API key.")]
     NoPermissionsSelected,
+    #[error("Set API key expiry to at least 1 day.")]
+    ApiKeyExpiryShorterThanOneDay,
     #[error("API key cannot grant cache permissions you do not hold.")]
     GrantUnheldCachePermissions,
     #[error(
@@ -79,6 +81,7 @@ impl Refusal for UserRefusal {
             Self::UnknownProjectOrNotMember { .. }
             | Self::PinToProjectAndCache
             | Self::NoPermissionsSelected
+            | Self::ApiKeyExpiryShorterThanOneDay
             | Self::InvalidVersion { .. } => RefusalStatus::BadRequest,
         }
     }
@@ -130,6 +133,7 @@ pub struct ApiKeyRequest {
 pub struct CreateApiKeyRequest {
     pub name: String,
     #[serde(default)]
+    #[schema(minimum = 1)]
     pub expires_in_days: Option<u32>,
     pub permissions: Vec<String>,
     #[serde(default)]
@@ -626,6 +630,9 @@ pub async fn post_keys(
     let db = state.db();
     if body.cache.is_some() && body.project.is_some() {
         return Err(UserRefusal::PinToProjectAndCache.into());
+    }
+    if body.expires_in_days == Some(0) {
+        return Err(UserRefusal::ApiKeyExpiryShorterThanOneDay.into());
     }
 
     let existing_api_key =

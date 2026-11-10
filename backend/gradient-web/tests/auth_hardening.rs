@@ -199,6 +199,27 @@ async fn delete_user_without_password_is_forbidden() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn api_key_with_zero_day_expiry_is_rejected() {
+    let session = live_session(SessionId::now_v7());
+    let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
+
+    let s = server_with(|db| auth_queue(db, session));
+
+    let res = s
+        .post("/api/v1/user/keys")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "short-lived",
+            "permissions": ["view"],
+            "expires_in_days": 0,
+        }))
+        .await;
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["message"], "Set API key expiry to at least 1 day.");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn delete_user_with_wrong_password_is_forbidden() {
     let session = live_session(SessionId::now_v7());
     let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));

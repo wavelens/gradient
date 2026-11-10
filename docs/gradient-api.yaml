@@ -15991,7 +15991,7 @@ components:
           - integer
           - 'null'
           format: int32
-          minimum: 0
+          minimum: 1
         permissions:
           type: array
           items:

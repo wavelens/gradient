@@ -32,7 +32,7 @@ import {
 import { ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@core/models';
-import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { permissionLabel, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
 import { CreateCacheDialogComponent, dialogFormChangesSinceOpen, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
@@ -437,6 +437,10 @@ export class ApiKeysComponent implements OnInit {
     if (key.cache) return `Cache ${label(this.cacheOptions(), key.cache)}`;
     if (key.project) return label(this.projectOptions(), key.project);
     return 'Any project';
+  }
+
+  isApiKeyExpired(key: ApiKeyInfo): boolean {
+    return !!key.expires_at && serverTime(key.expires_at).getTime() <= Date.now();
   }
 
   rowAccess(key: ApiKeyInfo): AccessState {
