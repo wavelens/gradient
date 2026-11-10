@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, input, linkedSignal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input, linkedSignal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { HistoryBar } from '@core/models';
 import { PHASE_COLOR, evaluationPhase } from '@shared/evaluation';
@@ -22,15 +22,19 @@ const MIN_HEIGHT_PCT = 15;
   template: `
     <div class="history" (keydown)="onHistoryBarKeydown($event)">
       @for (b of view(); track b.id; let i = $index) {
-        <a
-          class="bar"
-          [style.background]="b.color"
-          [style.height]="b.height"
-          [tabindex]="i === evaluationHistoryBarIndexInTabOrder() ? 0 : -1"
-          [routerLink]="links.task(project(), task(), b.id)"
-          [grTooltip]="b.title"
-          [attr.aria-label]="b.title"
-        ></a>
+        @if (barsAreLinks()) {
+          <a
+            class="bar"
+            [style.background]="b.color"
+            [style.height]="b.height"
+            [tabindex]="i === evaluationHistoryBarIndexInTabOrder() ? 0 : -1"
+            [routerLink]="links.task(project(), task(), b.id)"
+            [grTooltip]="b.title"
+            [attr.aria-label]="b.title"
+          ></a>
+        } @else {
+          <span class="bar" [style.background]="b.color" [style.height]="b.height" [title]="b.title"></span>
+        }
       }
     </div>
   `,
@@ -41,6 +45,7 @@ export class EvaluationHistoryComponent {
   bars = input.required<HistoryBar[]>();
   project = input.required<string>();
   task = input.required<string>();
+  barsAreLinks = input(true, { transform: booleanAttribute });
 
   protected evaluationHistoryBarIndexInTabOrder = linkedSignal<HistoryBar[], number>({
     source: this.bars,

@@ -93,7 +93,7 @@ describe('ProjectDetailComponent subscribed caches', () => {
 
 describe('ProjectDetailComponent task cards', () => {
   it('marks inactive tasks with a neutral badge', () => {
-    const task = (name: string, active: boolean) => ({ id: name, name, display_name: name, description: '', active });
+    const task = (name: string, active: boolean) => ({ id: name, name, display_name: name, description: '', active, recent_evaluations: [] });
     const { root } = render(true, () => of({ items: [task('on', true), task('off', false)], total: 2, page: 1 }));
     const metas = Array.from(root.querySelectorAll('gr-nav-card')).map((card) => card.querySelector('[slot="meta"]')?.textContent?.trim());
     expect(metas).toEqual(['', 'Inactive']);
@@ -101,11 +101,36 @@ describe('ProjectDetailComponent task cards', () => {
   });
 
   it('titles each card with the display name and the slug', () => {
-    const task = { id: 't1', name: 'build', display_name: 'Nightly Build', description: '', active: true };
+    const task = { id: 't1', name: 'build', display_name: 'Nightly Build', description: '', active: true, recent_evaluations: [] };
     const card = render(true, () => of({ items: [task], total: 1, page: 1 })).root.querySelector('gr-nav-card')!;
     expect(card.querySelector('.nav-card__title')?.getAttribute('title')).toBe('Nightly Build (build)');
     expect(card.querySelector('.entity-name__display')?.textContent).toBe('Nightly Build');
     expect(card.querySelector('.entity-name__slug')?.textContent).toBe('build');
+  });
+
+  describe('latest evaluations', () => {
+    const run = (id: string, status: 'Completed' | 'Failed' | 'Building', finished_at: string | null) =>
+      ({ id, status, duration_ms: 60_000, created_at: '2026-11-10 12:00:00', started_at: '2026-11-10 12:05:00', finished_at });
+    const cardFor = (recent_evaluations: ReturnType<typeof run>[]) => {
+      const task = { id: 't1', name: 'build', display_name: 'Build', description: '', active: true, recent_evaluations };
+      return render(false, () => of({ items: [task], total: 1, page: 1 }), { role: null, permissions: [] }).root.querySelector('gr-nav-card')!;
+    };
+
+    beforeEach(() => vi.useFakeTimers({ now: new Date('2026-11-10T12:30:00Z'), toFake: ['Date'] }));
+    afterEach(() => vi.useRealTimers());
+
+    it('tells a guest when the latest evaluation finished and draws the recent ones without nested links', () => {
+      const card = cardFor([run('e1', 'Failed', '2026-11-10 12:10:00'), run('e2', 'Completed', '2026-11-10 12:18:00')]);
+      expect(card.querySelector('.task-card-latest-evaluation')?.textContent?.trim()).toBe('Finished 12m ago');
+      expect(card.querySelectorAll('app-evaluation-history .bar')).toHaveLength(2);
+      expect(card.querySelector('app-evaluation-history a')).toBeNull();
+    });
+
+    it('tells how long the latest evaluation runs and draws no history for a single run', () => {
+      const card = cardFor([run('e1', 'Building', null)]);
+      expect(card.querySelector('.task-card-latest-evaluation')?.textContent?.trim()).toBe('Running for 25m 00s');
+      expect(card.querySelector('app-evaluation-history')).toBeNull();
+    });
   });
 });
 

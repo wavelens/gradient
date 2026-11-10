@@ -30,6 +30,8 @@ import { canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ProjectsService } from '@core/services/projects.service';
 import { EMPTY, catchError, merge, tap } from 'rxjs';
+import { CurrentTimeSignal, formatDuration, relativeTime, serverTime } from '@shared/text';
+import { EvaluationHistoryComponent } from '@features/dashboard/evaluation-history/evaluation-history.component';
 
 @Component({
   selector: 'app-project-detail',
@@ -49,8 +51,10 @@ import { EMPTY, catchError, merge, tap } from 'rxjs';
     StarButtonComponent,
     BadgeComponent,
     ProjectNoActiveWritableCacheSubscriptionWarningComponent,
+    EvaluationHistoryComponent,
   ],
   templateUrl: './project-detail.component.html',
+  styleUrl: './project-detail.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class ProjectDetailComponent implements OnInit {
@@ -63,6 +67,7 @@ export class ProjectDetailComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private stars = inject(StarsService);
   private crumbs = inject(BreadcrumbsService);
+  private now = inject(CurrentTimeSignal).currentTimeMilliseconds;
 
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   canCreateTask = computed(() => !this.project().managed && this.project().permissions.includes('createTask'));
@@ -86,6 +91,15 @@ export class ProjectDetailComponent implements OnInit {
         ),
       ),
     );
+  }
+
+  protected getLatestEvaluationStatusText(task: TaskResponse): string | null {
+    const latest = task.recent_evaluations.at(-1);
+    if (!latest) return null;
+    const now = this.now();
+    if (latest.finished_at) return `Finished ${relativeTime(latest.finished_at, now)}`;
+    if (latest.started_at) return `Running for ${formatDuration(now - serverTime(latest.started_at).getTime())}`;
+    return `Queued ${relativeTime(latest.created_at, now)}`;
   }
 
   ngOnInit(): void {

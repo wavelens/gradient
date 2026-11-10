@@ -54,6 +54,12 @@
               @if (task.last_evaluation_status) {
                 <gr-eval-status-badge [status]="task.last_evaluation_status" />
               }
+              @if (getLatestEvaluationStatusText(task); as latestEvaluationText) {
+                <span class="task-card-latest-evaluation">{{ latestEvaluationText }}</span>
+              }
+              @if (task.recent_evaluations.length > 1) {
+                <app-evaluation-history [bars]="task.recent_evaluations" [project]="projectName" [task]="task.name" [barsAreLinks]="false" />
+              }
             </div>
           </gr-nav-card>
         }

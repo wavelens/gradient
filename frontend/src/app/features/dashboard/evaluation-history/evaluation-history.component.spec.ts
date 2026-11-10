@@ -58,4 +58,17 @@ describe('EvaluationHistoryComponent', () => {
     expect(tabIndexes()).toEqual(['0', '-1', '-1']);
     f.nativeElement.remove();
   });
+
+  it('draws plain bars without links or tab stops inside another link', () => {
+    TestBed.configureTestingModule({ imports: [EvaluationHistoryComponent], providers: [provideRouter([])] });
+    const f = TestBed.createComponent(EvaluationHistoryComponent);
+    f.componentRef.setInput('bars', [bar('Completed', 1000), bar('Failed', 4000)]);
+    f.componentRef.setInput('project', 'p');
+    f.componentRef.setInput('task', 't');
+    f.componentRef.setInput('barsAreLinks', false);
+    f.detectChanges();
+    const root = f.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('a')).toHaveLength(0);
+    expect(Array.from(root.querySelectorAll('span.bar')).map((b) => b.getAttribute('title'))).toEqual(['Completed · 1.0 s', 'Failed · 4.0 s']);
+  });
 });
