@@ -114,10 +114,7 @@ async fn handle_github_app_webhook(
         return Err(GitHostHookRefusal::InvalidSignature.into());
     }
 
-    let peer_ip = peer
-        .map(|p| p.ip())
-        .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let client_ip = resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
+    let client_ip = webhook_sender_ip(ci, headers, peer);
 
     let event = headers
         .get("X-GitHub-Event")
@@ -434,22 +431,17 @@ async fn handle_git_host_webhook(
     }
     log.set_integration_and_event(integration.id, raw_event);
 
+    let client_ip = webhook_sender_ip(ci, headers, peer);
     let allowlist = integration.allowed_ips.clone().unwrap_or_default();
-    if !allowlist.is_empty() {
-        let peer_ip = peer
-            .map(|p| p.ip())
-            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        let client_ip = resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
-        if !ip_allowed(client_ip, &allowlist) {
-            warn!(
-                project = %project_name,
-                git_host = %git_host,
-                integration = %integration_name,
-                %client_ip,
-                "Git host webhook: source IP not allowed",
-            );
-            return Err(GitHostHookRefusal::SourceIpNotAllowed.into());
-        }
+    if !allowlist.is_empty() && !ip_allowed(client_ip, &allowlist) {
+        warn!(
+            project = %project_name,
+            git_host = %git_host,
+            integration = %integration_name,
+            %client_ip,
+            "Git host webhook: source IP not allowed",
+        );
+        return Err(GitHostHookRefusal::SourceIpNotAllowed.into());
     }
 
     let integration_id = integration.id;
@@ -510,11 +502,6 @@ async fn handle_git_host_webhook(
             IncomingWebhookResponse::new("release", urls, outcome)
         }
         WebhookEventKind::Comment => {
-            let peer_ip = peer
-                .map(|p| p.ip())
-                .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-            let client_ip =
-                resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
             commands::handle_issue_comment(
                 ci,
                 scheduler,
@@ -527,11 +514,6 @@ async fn handle_git_host_webhook(
             IncomingWebhookResponse::empty("comment")
         }
         WebhookEventKind::Review => {
-            let peer_ip = peer
-                .map(|p| p.ip())
-                .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-            let client_ip =
-                resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
             approval::handle_pull_request_review(
                 ci,
                 git_host_type,
@@ -554,4 +536,13 @@ fn first_header<'a>(headers: &'a HeaderMap, names: &[&str]) -> &'a str {
         .find_map(|name| headers.get(*name))
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
+}
+
+fn webhook_sender_ip(
+    ci: &CiContext,
+    headers: &HeaderMap,
+    peer: Option<std::net::SocketAddr>,
+) -> IpAddr {
+    let peer_ip = peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |p| p.ip());
+    resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies)
 }

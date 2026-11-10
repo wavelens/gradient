@@ -533,13 +533,14 @@ impl From<dispatched_job_phase::Model> for JobPhaseView {
 pub(crate) async fn job_phases<C: ConnectionTrait>(
     db: &C,
     job: DispatchedJobId,
-) -> Vec<JobPhaseView> {
-    gradient_db::worker_registrations::phases_of_dispatched_job(db, job)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(JobPhaseView::from)
-        .collect()
+) -> Result<Vec<JobPhaseView>, sea_orm::DbErr> {
+    Ok(
+        gradient_db::worker_registrations::phases_of_dispatched_job(db, job)
+            .await?
+            .into_iter()
+            .map(JobPhaseView::from)
+            .collect(),
+    )
 }
 
 #[derive(Serialize, Debug, Default, PartialEq, Eq, utoipa::ToSchema)]
@@ -624,33 +625,32 @@ async fn resolve_build_jobs<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
     shared_builds: &[DerivationBuildId],
-) -> HashMap<DerivationBuildId, BuildJobId> {
+) -> Result<HashMap<DerivationBuildId, BuildJobId>, sea_orm::DbErr> {
     if shared_builds.is_empty() {
-        return HashMap::new();
+        return Ok(HashMap::new());
     }
 
-    gradient_db::build_jobs::of_derivation_builds_in_evaluation(
+    Ok(gradient_db::build_jobs::of_derivation_builds_in_evaluation(
         db,
         evaluation,
         shared_builds.to_vec(),
     )
-    .await
-    .unwrap_or_default()
+    .await?
     .into_iter()
     .map(|j| (j.derivation_build, j.id))
-    .collect()
+    .collect())
 }
 
 async fn job_derivations<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
     job_context: &serde_json::Value,
-) -> Vec<JobDerivationView> {
+) -> Result<Vec<JobDerivationView>, sea_orm::DbErr> {
     let entries = snapshot_derivations(job_context);
     let shared_builds: Vec<DerivationBuildId> = entries.iter().map(|(a, _, _)| *a).collect();
-    let builds = resolve_build_jobs(db, evaluation, &shared_builds).await;
+    let builds = resolve_build_jobs(db, evaluation, &shared_builds).await?;
 
-    entries
+    Ok(entries
         .into_iter()
         .map(|(shared_build, drv_path, pname)| JobDerivationView {
             build: builds.get(&shared_build).copied().map(Into::into),
@@ -658,7 +658,7 @@ async fn job_derivations<C: ConnectionTrait>(
             drv_path,
             pname,
         })
-        .collect()
+        .collect())
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -736,11 +736,11 @@ pub async fn get_dispatched_job(
         let (project, worker_name) =
             job_names(&state.web_db, &scope, c.project, &c.worker_id).await?;
 
-        let derivations = job_derivations(&state.web_db, c.evaluation_id, &c.job_context).await;
+        let derivations = job_derivations(&state.web_db, c.evaluation_id, &c.job_context).await?;
         let build_id = match c.derivation_build {
             Some(shared_build) => {
                 resolve_build_jobs(&state.web_db, c.evaluation_id, &[shared_build])
-                    .await
+                    .await?
                     .get(&shared_build)
                     .copied()
                     .map(Into::into)
@@ -831,14 +831,14 @@ pub async fn get_dispatched_job(
     let shared_build_id = shared_build_of(&j);
     let build_id: Option<Uuid> = match shared_build_id {
         Some(shared_build) => resolve_build_jobs(&state.web_db, j.evaluation_id, &[shared_build])
-            .await
+            .await?
             .get(&shared_build)
             .copied()
             .map(Into::into),
         None => None,
     };
-    let derivations = job_derivations(&state.web_db, j.evaluation_id, &j.job_context).await;
-    let worker_spans = job_phases(&state.web_db, j.id).await;
+    let derivations = job_derivations(&state.web_db, j.evaluation_id, &j.job_context).await?;
+    let worker_spans = job_phases(&state.web_db, j.id).await?;
     let gap = report_gap(
         j.worker_elapsed_ms,
         &worker_spans,
@@ -854,9 +854,8 @@ pub async fn get_dispatched_job(
     };
     let phases = match &attempt {
         Some(attempt) => {
-            let reported = gradient_db::exec_jobs::phases::of_attempt(&state.web_db, attempt.id)
-                .await
-                .unwrap_or_default();
+            let reported =
+                gradient_db::exec_jobs::phases::of_attempt(&state.web_db, attempt.id).await?;
             with_reported_phases(worker_spans, attempt, &reported)
         }
         None => worker_spans,
@@ -865,18 +864,13 @@ pub async fn get_dispatched_job(
 
     let pname = match shared_build_id {
         Some(aid) => {
-            let shared_build = by_id::<EDerivationBuild, _>(&state.web_db, aid)
-                .await
-                .ok()
-                .flatten();
+            let shared_build = by_id::<EDerivationBuild, _>(&state.web_db, aid).await?;
             match shared_build {
                 Some(shared_build) => by_id::<gradient_entity::derivation::Entity, _>(
                     &state.web_db,
                     shared_build.derivation,
                 )
-                .await
-                .ok()
-                .flatten()
+                .await?
                 .and_then(|d| d.pname),
                 None => None,
             }
@@ -887,8 +881,7 @@ pub async fn get_dispatched_job(
     let previous_attempts = match shared_build_id {
         Some(aid) => {
             gradient_db::scheduling::build_attempt::attempts_oldest_first(&state.web_db, aid)
-                .await
-                .unwrap_or_default()
+                .await?
                 .into_iter()
                 .map(AttemptSummary::from)
                 .collect()

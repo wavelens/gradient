@@ -20,6 +20,7 @@ use gradient_core::ServerState;
 use gradient_entity::StorePathError;
 use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader};
 use gradient_storage::PartialStore;
+use gradient_storage::admission::HeldPermit;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::events::cache::NarSigned;
@@ -86,6 +87,40 @@ pub async fn nars_upload(
     let upload_store = upload_partial_store(&state.config)?;
     let stage_key = format!("{}/oneshot-{}", cache.id, uuid::Uuid::now_v7());
 
+    let result = read_multipart_form_stage_nar_to_temp_file_and_import(
+        &state,
+        cache.id,
+        &upload_store,
+        &stage_key,
+        &mut multipart,
+        max,
+        permit,
+    )
+    .await;
+    let _ = upload_store.discard(&stage_key).await;
+    let (upload, created) = result?;
+
+    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": upload.client_path, "created": created, }))
+    .await;
+
+    Ok((
+        StatusCode::CREATED,
+        ok_json(StoredNar {
+            store_path: upload.client_path,
+            created,
+        }),
+    ))
+}
+
+async fn read_multipart_form_stage_nar_to_temp_file_and_import(
+    state: &ServerState,
+    cache: CacheId,
+    upload_store: &PartialStore,
+    stage_key: &str,
+    multipart: &mut Multipart,
+    max: u64,
+    permit: HeldPermit,
+) -> WebResult<(MappedUpload, bool)> {
     let mut narinfo: Option<NarinfoPart> = None;
     let mut staged_size: Option<u64> = None;
 
@@ -108,57 +143,54 @@ pub async fn nars_upload(
                 narinfo = Some(parsed);
             }
             Some("nar") => {
-                staged_size = Some(stage_nar_field(&upload_store, &stage_key, field, max).await?);
+                staged_size = Some(stage_nar_field(upload_store, stage_key, field, max).await?);
             }
             _ => {}
         }
     }
 
-    let narinfo = match narinfo {
-        Some(n) => n,
-        None => {
-            let _ = upload_store.discard(&stage_key).await;
-            return Err(CacheRefusal::MissingPart("narinfo").into());
-        }
-    };
-    let upload = match MappedUpload::new(narinfo, &state.cache_mapper(cache.id)) {
-        Ok(upload) => upload,
-        Err(e) => {
-            let _ = upload_store.discard(&stage_key).await;
-            return Err(e);
-        }
-    };
-    let narinfo = &upload.narinfo;
+    let narinfo = narinfo.ok_or(CacheRefusal::MissingPart("narinfo"))?;
+    let upload = MappedUpload::new(narinfo, &state.cache_mapper(cache))?;
     let staged_size = staged_size.ok_or(CacheRefusal::MissingPart("nar"))?;
-
-    if staged_size as i64 != narinfo.file_size {
-        let _ = upload_store.discard(&stage_key).await;
+    if staged_size as i64 != upload.narinfo.file_size {
         return Err(CacheRefusal::UploadedNarSizeMismatch {
-            declared: narinfo.file_size,
+            declared: upload.narinfo.file_size,
             got: staged_size,
         }
         .into());
     }
+    permit.committed();
 
-    let verify_reader = upload_store
-        .open_read(&stage_key)
-        .await
-        .context("read staged NAR")?;
-    if let Err(e) = gradient_storage::verify_nar_reader(
+    let created = verify_admit_import_sign_and_publish_staged_nar(
+        state,
+        cache,
+        upload_store,
+        stage_key,
+        &upload,
+    )
+    .await?;
+    Ok((upload, created))
+}
+
+async fn verify_admit_import_sign_and_publish_staged_nar(
+    state: &ServerState,
+    cache: CacheId,
+    store: &PartialStore,
+    key: &str,
+    upload: &MappedUpload,
+) -> WebResult<bool> {
+    let narinfo = &upload.narinfo;
+    let verify_reader = store.open_read(key).await.context("read staged NAR")?;
+    gradient_storage::verify_nar_reader(
         verify_reader,
         &narinfo.file_hash,
         narinfo.file_size as u64,
     )
     .await
-    {
-        let _ = upload_store.discard(&stage_key).await;
-        return Err(CacheRefusal::NarVerificationFailed {
-            reason: e.to_string(),
-        }
-        .into());
-    }
+    .map_err(|e| CacheRefusal::NarVerificationFailed {
+        reason: e.to_string(),
+    })?;
 
-    permit.committed();
     let claim = admit_nar(
         &state.config,
         &state.memory.upload_admission,
@@ -166,17 +198,14 @@ pub async fn nars_upload(
         narinfo.file_size as u64,
     )
     .await?;
-    let nar_reader = upload_store
-        .open_read(&stage_key)
-        .await
-        .context("read staged NAR")?;
+    let nar_reader = store.open_read(key).await.context("read staged NAR")?;
     let outcome = import_nar_reader(
         &state.web_db,
         &state.nar_storage,
         &state.graph,
         nar_reader,
         upload.import_input(),
-        SignTargets::Cache(cache.id),
+        SignTargets::Cache(cache),
     )
     .await
     .map_err(WebError::from)?;
@@ -184,25 +213,13 @@ pub async fn nars_upload(
         claim.committed();
     }
 
-    let _ = upload_store.discard(&stage_key).await;
-
     for cache in outcome.signed {
         state.events.publish(NarSigned {
             cache,
             hash: upload.original_hash.clone(),
         });
     }
-
-    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": upload.client_path, "created": outcome.created, }))
-    .await;
-
-    Ok((
-        StatusCode::CREATED,
-        ok_json(StoredNar {
-            store_path: upload.client_path,
-            created: outcome.created,
-        }),
-    ))
+    Ok(outcome.created)
 }
 
 fn stored_narinfo(
@@ -285,7 +302,6 @@ async fn stage_nar_field(
         .map_err(|e| CacheRefusal::MultipartFieldUnreadable(e.to_string()))?
     {
         if offset + chunk.len() as u64 > max {
-            let _ = store.discard(key).await;
             return Err(CacheRefusal::NarTooLarge { max }.into());
         }
         store
@@ -398,58 +414,19 @@ pub async fn nar_finalize(
         .into());
     }
 
-    let claim = admit_nar(
-        &state.config,
-        &state.memory.upload_admission,
-        &upload.stored_hash,
-        narinfo.file_size as u64,
-    )
-    .await?;
-    let verify_reader = store.open_read(&key).await.context("read staged NAR")?;
-    if let Err(e) = gradient_storage::verify_nar_reader(
-        verify_reader,
-        &narinfo.file_hash,
-        narinfo.file_size as u64,
-    )
-    .await
-    {
-        return Err(CacheRefusal::NarVerificationFailed {
-            reason: e.to_string(),
-        }
-        .into());
-    }
-    let nar_reader = store.open_read(&key).await.context("read staged NAR")?;
-    let outcome = import_nar_reader(
-        &state.web_db,
-        &state.nar_storage,
-        &state.graph,
-        nar_reader,
-        upload.import_input(),
-        SignTargets::Cache(cache.id),
-    )
-    .await
-    .map_err(WebError::from)?;
-    if let Some(claim) = claim {
-        claim.committed();
-    }
-
+    let created =
+        verify_admit_import_sign_and_publish_staged_nar(&state, cache.id, &store, &key, &upload)
+            .await?;
     let _ = store.discard(&key).await;
 
-    for cache in outcome.signed {
-        state.events.publish(NarSigned {
-            cache,
-            hash: upload.original_hash.clone(),
-        });
-    }
-
-    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": upload.client_path, "created": outcome.created, "chunked": true, }))
+    audit.write(Action::CacheNarUpload, EventOwner::cache(cache.id), json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "store_path": upload.client_path, "created": created, "chunked": true, }))
     .await;
 
     Ok((
         StatusCode::CREATED,
         ok_json(StoredNar {
             store_path: upload.client_path,
-            created: outcome.created,
+            created,
         }),
     ))
 }

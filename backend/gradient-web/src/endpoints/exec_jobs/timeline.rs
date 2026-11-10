@@ -46,8 +46,12 @@ pub(crate) async fn worker_timeline<C: ConnectionTrait>(
     db: &C,
     attempt: &MExecJobAttempt,
     phases: &[ExecJobPhaseRow],
-) -> Vec<JobPhaseView> {
-    with_reported_phases(job_phases(db, attempt.assignment_id).await, attempt, phases)
+) -> Result<Vec<JobPhaseView>, sea_orm::DbErr> {
+    Ok(with_reported_phases(
+        job_phases(db, attempt.assignment_id).await?,
+        attempt,
+        phases,
+    ))
 }
 
 pub(crate) fn with_reported_phases(

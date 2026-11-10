@@ -368,7 +368,7 @@ pub async fn get_exec_job(
     let names = WorkerNames::load(&state.web_db, &scope, attempt_workers(&ctx.detail)).await?;
     let latest = ctx.detail.attempts.last();
     let timeline = match latest {
-        Some(attempt) => worker_timeline(&state.web_db, attempt, &ctx.detail.phases).await,
+        Some(attempt) => worker_timeline(&state.web_db, attempt, &ctx.detail.phases).await?,
         None => Vec::new(),
     };
     let cluster_job = match latest {
