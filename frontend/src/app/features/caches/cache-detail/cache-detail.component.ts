@@ -46,8 +46,9 @@ import {
   TrafficKind,
 } from '@core/models';
 import { docsUrl } from '@core/docs';
-import { clockTime, formatBytes, formatCount, monthDay, subscriptionModeLabel } from '@shared/text';
+import { clockTime, formatBytes, formatCount, monthDay, plural, subscriptionModeLabel } from '@shared/text';
 import { UseCacheDialogComponent } from './use-cache-dialog.component';
+import { injectPendingSubscriptionRequestCount } from '../pending-subscription-request-count';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { FormsModule } from '@angular/forms';
 import { links } from '@shared/routing';
@@ -125,6 +126,8 @@ export class CacheDetailComponent implements OnInit {
   subscribersError = signal<unknown>(null);
   useDialogOpen = signal(false);
   protected readonly modeLabel = subscriptionModeLabel;
+  protected readonly plural = plural;
+  pendingSubscriptionRequestCount = injectPendingSubscriptionRequestCount();
 
   setWindow(value: unknown): void {
     this.activeWindow.set(value as Window);

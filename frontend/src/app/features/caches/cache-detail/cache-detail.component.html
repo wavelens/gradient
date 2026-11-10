@@ -123,6 +123,12 @@
     @if (authService.isAuthenticated()) {
       <button slot="actions" grButton label="Use with project" icon="add_link" severity="secondary" (click)="useDialogOpen.set(true)"></button>
     }
+    @if (pendingSubscriptionRequestCount(); as pending) {
+      @let reviewLabel = plural(pending, 'subscription request pending review', 'subscription requests pending review');
+      <gr-row-list>
+        <gr-row icon="hub" [link]="links.cachePage(cacheName, 'subscriptions')" [linkLabel]="reviewLabel">{{ reviewLabel }}</gr-row>
+      </gr-row-list>
+    }
     <gr-load-state [loading]="!subscribers() && !subscribersError()" [error]="subscribersError()" flat
                    errorTitle="Failed to load the projects using this cache" (retry)="loadSubscribers()">
       @if (subscribers(); as used) {

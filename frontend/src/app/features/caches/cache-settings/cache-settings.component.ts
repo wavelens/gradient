@@ -14,6 +14,7 @@ import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
+  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   FormFieldComponent,
@@ -42,6 +43,7 @@ import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
 import { plural } from '@shared/text';
+import { injectPendingSubscriptionRequestCount } from '../pending-subscription-request-count';
 
 const CACHE_DELETE_CONSEQUENCE = 'All store paths in this cache are deleted with the cache.';
 
@@ -84,6 +86,7 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
     CommonModule,
     RouterModule,
     FormsModule,
+    BadgeComponent,
     ButtonComponent,
     InputDirective,
     LoadStateComponent,
@@ -124,6 +127,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   deleteAccess = injectCacheAccessTo('deleteCache');
   manageCacheSubscriptionsAccess = injectCacheAccessTo('manageCacheSubscriptions');
   webhooksAccess = injectCacheAccessTo('manageCacheWebhooks');
+  pendingSubscriptionRequestCount = injectPendingSubscriptionRequestCount();
   viewerIsCacheMember = computed(() => isViewerCacheMember(this.resolved()?.cache));
 
   loading = signal(true);

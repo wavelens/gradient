@@ -158,6 +158,9 @@
             [link]="links.cachePage(cacheName, 'subscriptions')"
           >
             Subscriptions
+            @if (pendingSubscriptionRequestCount(); as pending) {
+              <gr-badge severity="warning">{{ pending }} Pending</gr-badge>
+            }
             <span slot="meta">Projects asking to use this cache</span>
           </gr-row>
         }

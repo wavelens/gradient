@@ -66,7 +66,7 @@ function setup(access: AccessState, permissions?: CachePermission[]): ComponentF
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access, permissions) },
-      { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))), getSubscribers: () => of({ projects: [], hidden: 0 }) } },
+      { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))), getSubscribers: () => of({ projects: [], hidden: 0 }), getSubscriptionRequests: () => of([{ project: 'p1' }, { project: 'p2' }]) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -127,6 +127,15 @@ describe('CacheSettingsComponent - access gating', () => {
     expect(hrefs).toContain('/caches/demo/members-roles');
     expect(hrefs).toContain('/caches/demo/subscriptions');
     expect(hrefs).toContain('/caches/demo/webhooks');
+  });
+
+  it('counts pending subscription requests on the Subscriptions row for subscription managers only', () => {
+    const managerRow = (setup({ managed: false, canEdit: true, canTrigger: true }).nativeElement as HTMLElement)
+      .querySelector('a[href="/caches/demo/subscriptions"]')!.closest('gr-row')!;
+    expect(managerRow.querySelector('gr-badge')?.textContent?.trim()).toBe('2 Pending');
+    TestBed.resetTestingModule();
+    const readerPage = setup({ managed: false, canEdit: false, canTrigger: false }).nativeElement as HTMLElement;
+    expect(readerPage.querySelector('gr-badge')).toBeNull();
   });
 
   it('links a read-only member to members but not to subscriptions or event notifications', () => {

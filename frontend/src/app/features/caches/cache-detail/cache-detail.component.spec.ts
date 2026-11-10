@@ -187,7 +187,7 @@ describe('CacheDetailComponent empty and inactive caches', () => {
 });
 
 describe('CacheDetailComponent header', () => {
-  function render(authenticated: boolean) {
+  function render(authenticated: boolean, permissions: string[] = []) {
     const starred = vi.fn(() => of(true));
     TestBed.configureTestingModule({
       imports: [CacheDetailComponent],
@@ -201,9 +201,10 @@ describe('CacheDetailComponent header', () => {
             getCache: () => NEVER,
             getCacheStats: () => NEVER,
             getSubscribers: () => of({ projects: [{ project: 'acme', project_display_name: 'Acme', mode: 'ReadWrite' }], hidden: 2 }),
+            getSubscriptionRequests: () => of([{ project: 'p1' }, { project: 'p2' }]),
           },
         },
-        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) }, parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', public_key: OWN_KEY, public: true, active: true } } }) } } },
+        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) }, parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', public_key: OWN_KEY, public: true, active: true, permissions } } }) } } },
         { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => null } },
         { provide: StarsService, useValue: { starred, set: () => of(true) } },
       ],
@@ -230,5 +231,12 @@ describe('CacheDetailComponent header', () => {
     expect(section.textContent).toContain('Read & Write');
     expect(section.textContent).not.toContain('private');
     expect(section.textContent).not.toContain('Use with project');
+    expect(section.querySelector('a[href="/caches/main/subscriptions"]')).toBeNull();
+  });
+
+  it('links a subscription manager to the pending requests with their count', () => {
+    const { root } = render(true, ['viewCache', 'manageCacheSubscriptions']);
+    const link = root.querySelector('.used-by a[href="/caches/main/subscriptions"]')!;
+    expect(link.closest('gr-row')?.textContent).toContain('2 subscription requests pending review');
   });
 });
