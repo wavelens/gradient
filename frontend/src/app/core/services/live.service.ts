@@ -24,6 +24,7 @@ export type LiveEvent = EventEnvelope<{
 }>;
 
 const MAX_BACKOFF_MS = 15000;
+const SESSION_REVOKED_CLOSE_CODE = 1008;
 
 /// Build the `onLiveSocketConnectedChange` callback for `LiveService.connect` (or `BoardLiveService.connect`). It calls `resync` each time the socket opens again after a drop, never on the first open, so the page refetches what it missed while offline. It passes every change on to `onConnectedChange`, which can drive `gr-live-status`.
 export function createResyncOnLiveSocketReconnectCallback(
@@ -40,7 +41,7 @@ export function createResyncOnLiveSocketReconnectCallback(
 
 @Injectable({ providedIn: 'root' })
 export class LiveService {
-  /// Subscribe to a live channel. The path is relative to the API root, e.g. `/evals/{id}/live`. Frames arrive as parsed JSON. The socket can reconnect with capped exponential backoff, so an open page can survive short disconnects. Only the caller can complete the observable through unsubscribe. Connection events pass true to `onLiveSocketConnectedChange` on every open and false on every disconnect. A page can set a stale flag and refetch missed content after reconnect.
+  /// Subscribe to a live channel. The path is relative to the API route (for example, ``/evals/{id}/live``). Frames arrive as parsed JSON. The socket can reconnect with capped exponential backoff, so an open page can survive short disconnects. The Observable can complete on a socket close by the server with close code 1008 because a session or API key became invalid. Otherwise, only the caller can end the subscription through unsubscribe. Connection events pass true to ``onLiveSocketConnectedChange`` on each connection open and false on each disconnect. A page can set a stale flag and refetch content that the page missed after a reconnect.
   connect<T = LiveEvent>(path: string, onLiveSocketConnectedChange?: (connected: boolean) => void): Observable<T> {
     return new Observable<T>((subscriber) => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -64,9 +65,13 @@ export class LiveService {
           }
         };
         ws.onerror = () => ws?.close();
-        ws.onclose = () => {
+        ws.onclose = (event) => {
           if (stopped) return;
           onLiveSocketConnectedChange?.(false);
+          if (event.code === SESSION_REVOKED_CLOSE_CODE) {
+            subscriber.complete();
+            return;
+          }
           timer = setTimeout(open, Math.min(1000 * 2 ** attempt++, MAX_BACKOFF_MS));
         };
       };

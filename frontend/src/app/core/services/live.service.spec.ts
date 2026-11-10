@@ -20,7 +20,7 @@ class FakeWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((e: { code: number }) => void) | null = null;
   closed = false;
 
   constructor(public url: string) {
@@ -69,6 +69,20 @@ describe('LiveService', () => {
     expect(frames).toEqual([frame]);
   });
 
+  it('Stop reconnection on server socket close for an expired session.', () => {
+    vi.useFakeTimers();
+    try {
+      let completed = false;
+      sub = service.connect('/board/cache/live').subscribe({ complete: () => (completed = true) });
+      FakeWebSocket.instances[0].onclose?.({ code: 1008 });
+      vi.advanceTimersByTime(60_000);
+      expect(completed).toBe(true);
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores malformed frames', () => {
     const frames: unknown[] = [];
     sub = service.connect('/board/cache/live').subscribe((f) => frames.push(f));
@@ -84,7 +98,7 @@ describe('LiveService', () => {
     const states: boolean[] = [];
     sub = service.connect('/board/live', (connected) => states.push(connected)).subscribe();
     FakeWebSocket.instances[0].onopen?.();
-    FakeWebSocket.instances[0].onclose?.();
+    FakeWebSocket.instances[0].onclose?.({ code: 1006 });
     vi.advanceTimersByTime(1000);
     FakeWebSocket.instances[1].onopen?.();
     expect(states).toEqual([true, false, true]);
