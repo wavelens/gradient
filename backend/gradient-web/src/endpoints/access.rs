@@ -13,6 +13,7 @@ use crate::endpoints::membership::{
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::permissions::PermissionMask;
+use crate::scope::{CacheScope, ProjectScope, Readable, Requires, can};
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -298,8 +299,8 @@ async fn reachable_by_user<O: Owner>(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let labels = O::load_project_name_display_name_owner_team_and_managed_flag_by_ids(db, &owners)
-        .await?;
+    let labels =
+        O::load_project_name_display_name_owner_team_and_managed_flag_by_ids(db, &owners).await?;
     let roles = role_access::<O>(
         db,
         direct
@@ -378,7 +379,7 @@ async fn user_access_summary(db: &WebDb, user: &MUser) -> WebResult<UserAccessSu
     responses((status = OK, description = "One row per person", body = Vec<PersonWithAccessToProjectOrCache>), WebError)
 )]
 pub async fn get_project_access(
-    scope: <ProjectOwner as Owner>::ListMembersScope,
+    scope: ProjectScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<PersonWithAccessToProjectOrCache>>>> {
     Ok(ok_json(
         people_with_access::<ProjectOwner>(&scope.db().web_db, scope.id(), scope.managed()).await?,
@@ -396,7 +397,7 @@ pub async fn get_project_access(
     responses((status = OK, description = "One row per person", body = Vec<PersonWithAccessToProjectOrCache>), WebError)
 )]
 pub async fn get_cache_access(
-    scope: <CacheOwner as Owner>::ListMembersScope,
+    scope: CacheScope<Requires<can::ViewCache>>,
 ) -> WebResult<Json<BaseResponse<Vec<PersonWithAccessToProjectOrCache>>>> {
     Ok(ok_json(
         people_with_access::<CacheOwner>(&scope.db().web_db, scope.id(), scope.managed()).await?,

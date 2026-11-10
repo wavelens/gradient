@@ -280,7 +280,10 @@ pub async fn direct_memberships_of_user<C: ConnectionTrait>(
 }
 
 pub async fn superusers<C: ConnectionTrait>(db: &C) -> Result<Vec<MUser>, DbErr> {
-    EUser::find().filter(CUser::Superuser.eq(true)).all(db).await
+    EUser::find()
+        .filter(CUser::Superuser.eq(true))
+        .all(db)
+        .await
 }
 
 async fn team_members<C: ConnectionTrait>(

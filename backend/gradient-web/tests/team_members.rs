@@ -148,6 +148,26 @@ async fn a_member_declared_by_the_state_cannot_be_removed() {
 }
 
 #[tokio::test]
+async fn a_non_superuser_team_admin_cannot_add_a_member_immediately() {
+    let (db, auth) = signed_in();
+    let db = db
+        .append_query_results([vec![managed_team_row()]])
+        .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
+        .append_query_results([vec![other_user()]])
+        .append_query_results([Vec::<team_user::Model>::new()])
+        .append_query_results([Vec::<team_invitation::Model>::new()]);
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .post("/api/v1/teams/platform/members")
+        .add_header("authorization", auth)
+        .json(&json!({ "user": "otheruser", "role": "member", "add_as_member_immediately": true }))
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn a_member_cannot_invite() {
     let (db, auth) = signed_in();
     let db = db

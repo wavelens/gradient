@@ -46,6 +46,14 @@ impl TeamMemberItem {
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
+pub struct AddTeamMemberRequest {
+    pub user: String,
+    pub role: TeamRole,
+    #[serde(default)]
+    pub add_as_member_immediately: bool,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct TeamMemberRequest {
     pub user: String,
     pub role: TeamRole,
@@ -115,16 +123,16 @@ pub async fn get_team_members(
     operation_id = "addTeamMember",
     tag = "teams",
     summary = "Invite team member",
-    description = "Needs Admin in the team. The user joins after accepting the invitation (`Invitation sent`); a superuser adds the member directly (`User added`).",
+    description = "Teams require an Admin. Users join after they accept an invitation (`Invitation sent`). An instance admin can add the member directly in the `add_as_member_immediately` case (`User added`).",
     params(TeamPath),
-    request_body = TeamMemberRequest,
-    responses((status = OK, description = "Invitation sent, or member added when the caller is a superuser", body = String, content_type = "application/json"), WebError)
+    request_body = AddTeamMemberRequest,
+    responses((status = OK, description = "The server sent an invitation, or `add_as_member_immediately` added the member.", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn post_team_members(
     TeamScope { team, user, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
     audit: Audit,
-    Json(body): Json<TeamMemberRequest>,
+    Json(body): Json<AddTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&state.web_db, &body.user).await?;
 
@@ -147,7 +155,10 @@ pub async fn post_team_members(
         "role": role_label(body.role),
     });
 
-    if user.superuser {
+    if body.add_as_member_immediately {
+        if !user.superuser {
+            return Err(SharedRefusal::AddingMemberWithoutInvitationNotAllowed.into());
+        }
         gradient_db::teams::members::add_member(
             &state.web_db,
             MTeamUser {

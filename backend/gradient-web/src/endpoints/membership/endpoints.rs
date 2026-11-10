@@ -14,7 +14,7 @@ macro_rules! owner_endpoints {
     ) => {
         use crate::audit::Audit;
         use crate::endpoints::membership::invitations::{self, PendingInvitationItem, RevokeInvitationRequest};
-        use crate::endpoints::membership::members::{self, AddMemberRequest, MemberItem, RemoveMemberRequest};
+        use crate::endpoints::membership::members::{self, AddMemberRequest, ChangeMemberRoleRequest, MemberItem, RemoveMemberRequest};
         use crate::endpoints::membership::roles::{
             self, CreateRoleRequest, PatchRoleRequest, RoleListResponse, RoleResponse,
         };
@@ -91,13 +91,13 @@ macro_rules! owner_endpoint {
             summary = $summary,
             $(description = $description,)?
             params($params),
-            request_body = AddMemberRequest,
+            request_body = ChangeMemberRoleRequest,
             responses((status = OK, description = $response, body = String, content_type = "application/json"), WebError)
         )]
         pub async fn change_role(
             scope: <$owner as Owner>::ManageMembersScope,
             audit: Audit,
-            Json(body): Json<AddMemberRequest>,
+            Json(body): Json<ChangeMemberRoleRequest>,
         ) -> WebResult<Json<BaseResponse<String>>> {
             members::change_role::<$owner>(scope, audit, Json(body)).await
         }
@@ -304,8 +304,8 @@ pub mod project {
             path: "/projects/{project}/users",
             id: "addProjectUser",
             summary: "Invite member",
-            description: "Invites a user to the project by username. Requires the caller to\nhold the **admin** role in the project.\n\nThe user is **not** a member until they accept. The response message is\n`Invitation sent`, and the pending row appears under\n`GET /projects/{project}/invitations` until it is accepted, declined or\nrevoked. An invitation expires after 7 days.\n\nA **superuser** who already holds the permission adds the member\ndirectly instead, answering `User added`. State-managed projects reject\nthis endpoint entirely; their members come from the state file.",
-            response: "Invitation sent, or member added when the caller is a superuser",
+            description: "Invite a user to a project by username. Only a caller with the admin role for the project can send the invitation.\n\nUsers are not members until acceptance. The response message is `Invitation sent`. Pending rows appear under `GET /projects/{project}/invitations` until users accept, decline, or cancel the invite. Invites expire after 7 days.\n\nUse `add_as_member_immediately` to add members directly. The response message is `User added`. Instance admins, users of the owner team and users who already have project access through team grants get this result. State-managed projects reject this endpoint. Their members come from the state file.",
+            response: "The server sent an invitation, or `add_as_member_immediately` added the member.",
         },
         change_role: {
             path: "/projects/{project}/users",
@@ -392,8 +392,8 @@ pub mod cache {
             path: "/caches/{cache}/members",
             id: "addCacheMember",
             summary: "Invite cache member",
-            description: "Invites a user to the cache with the given role. Requires\n`manageCacheMembers`.\n\nThe user is **not** a member until they accept; the response message is\n`Invitation sent` and the pending row appears under\n`GET /caches/{cache}/invitations`. An invitation expires after 7 days. A\n**superuser** who already holds the permission adds the member directly\ninstead, answering `User added`.",
-            response: "Invitation sent, or member added when the caller is a superuser",
+            description: "Invite a user to the cache with the specified role. Requests need `manageCacheMembers`.\n\nA user doesn't become a member until acceptance. The response message is `Invitation sent`. Pending rows appear under `GET /caches/{cache}/invitations`. Invitations expire after 7 days.\n\nUse `add_as_member_immediately` to add a member directly. The response message is `User added`. Administrators of the instance can always do this. Other callers can do this for users in the owner team. These callers can also do this for users who already have cache access through team grants.",
+            response: "The server sent an invitation, or `add_as_member_immediately` added the member.",
         },
         change_role: {
             path: "/caches/{cache}/members",

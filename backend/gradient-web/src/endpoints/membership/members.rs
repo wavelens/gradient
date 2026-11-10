@@ -53,6 +53,14 @@ impl MemberItem {
 pub struct AddMemberRequest {
     pub user: String,
     pub role: String,
+    #[serde(default)]
+    pub add_as_member_immediately: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+pub struct ChangeMemberRoleRequest {
+    pub user: String,
+    pub role: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -127,6 +135,29 @@ pub async fn list<O: Owner>(
     Ok(ok_json(items))
 }
 
+async fn can_add_user_as_member_without_invitation<O: Owner>(
+    db: &WebDb,
+    scope: &O::ManageMembersScope,
+    target: &MUser,
+) -> WebResult<bool> {
+    if scope.user().superuser {
+        return Ok(true);
+    }
+
+    if let Some(team) = scope.owner_team()
+        && gradient_db::teams::team_role_of(db, team, target.id)
+            .await?
+            .is_some()
+    {
+        return Ok(true);
+    }
+
+    Ok(O::list_team_grants_with_members(db, scope.id())
+        .await?
+        .iter()
+        .any(|grant| grant.user == target.id))
+}
+
 pub async fn add<O: Owner>(
     scope: O::ManageMembersScope,
     state: State<Arc<ServerState>>,
@@ -153,7 +184,13 @@ pub async fn add<O: Owner>(
 
     let role = find_role::<O::Roles>(&state.web_db, owner, &body.role).await?;
 
-    if user.superuser {
+    if body.add_as_member_immediately {
+        if !can_add_user_as_member_without_invitation::<O>(&state.web_db, &scope, &target_user)
+            .await?
+        {
+            return Err(SharedRefusal::AddingMemberWithoutInvitationNotAllowed.into());
+        }
+
         insert_unique_row::<O::Members>(
             &state.web_db,
             <O::Members as MemberTable>::new(owner, target_user.id, role.id),
@@ -216,7 +253,7 @@ pub async fn add<O: Owner>(
 pub async fn change_role<O: Owner>(
     scope: O::ManageMembersScope,
     audit: Audit,
-    Json(body): Json<AddMemberRequest>,
+    Json(body): Json<ChangeMemberRoleRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let owner = scope.id();
     let db = &scope.db().web_db;

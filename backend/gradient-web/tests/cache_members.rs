@@ -9,11 +9,13 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_entity::{cache, cache_invitation, cache_user, ids::*, user};
-use gradient_fixtures::ids::user_id;
+use gradient_entity::team_project::TeamGrantSource;
+use gradient_entity::team_user::TeamRole;
+use gradient_entity::{cache, cache_invitation, cache_user, ids::*, team_cache, team_user, user};
+use gradient_fixtures::ids::{team_id, user_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{
-    cache_admin_role, cache_member_in, cache_view_role, live_session, superuser, user,
+    cache_admin_role, cache_member_in, cache_view_role, live_session, superuser, team_member, user,
 };
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, signed_in};
@@ -215,7 +217,112 @@ async fn add_member_superuser_skips_the_invitation() {
     let res = server
         .post("/api/v1/caches/test-cache/members")
         .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "otheruser", "role": "View", "add_as_member_immediately": true}))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"], "User added");
+}
+
+#[tokio::test]
+async fn add_member_superuser_without_add_as_member_immediately_creates_a_pending_invitation() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_superuser_auth(mock_db(), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![other_user_row()]])
+        .append_query_results([Vec::<cache_user::Model>::new()])
+        .append_query_results([Vec::<cache_invitation::Model>::new()])
+        .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![pending_invitation()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
         .json(&json!({"user": "otheruser", "role": "View"}))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"], "Invitation sent");
+}
+
+fn admin_adding_other_user_immediately(
+    team_grants: Vec<team_cache::Model>,
+    team_members: Vec<team_user::Model>,
+) -> (MockDatabase, String) {
+    let (db, auth) = signed_in();
+    let db = db
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![other_user_row()]])
+        .append_query_results([Vec::<cache_user::Model>::new()])
+        .append_query_results([Vec::<cache_invitation::Model>::new()])
+        .append_query_results([vec![cache_view_role()]])
+        .append_query_results([team_grants])
+        .append_query_results([team_members]);
+    (db, auth)
+}
+
+#[tokio::test]
+async fn cache_admin_add_member_immediately_is_forbidden_when_user_is_not_in_owner_team_or_granted_team()
+ {
+    let (db, auth) = admin_adding_other_user_immediately(Vec::new(), Vec::new());
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/members")
+        .add_header("authorization", auth)
+        .json(&json!({"user": "otheruser", "role": "View", "add_as_member_immediately": true}))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn add_member_cache_admin_adds_immediately_when_user_already_reaches_cache_through_team_grant()
+ {
+    let grant = team_cache::Model {
+        id: TeamCacheId::now_v7(),
+        team: team_id(),
+        cache: cache_id(),
+        role: BASE_CACHE_ROLE_VIEW_ID,
+        grant_source: TeamGrantSource::Manual,
+        created_at: test_date(),
+    };
+    let membership = team_user::Model {
+        user: other_user_id(),
+        ..team_member(TeamRole::Member)
+    };
+    let new_member = cache_user::Model {
+        id: CacheUserId::now_v7(),
+        cache: cache_id(),
+        user: other_user_id(),
+        role: BASE_CACHE_ROLE_VIEW_ID,
+    };
+    let (db, auth) = admin_adding_other_user_immediately(vec![grant], vec![membership]);
+    let db = db
+        .append_query_results([vec![new_member]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/members")
+        .add_header("authorization", auth)
+        .json(&json!({"user": "otheruser", "role": "View", "add_as_member_immediately": true}))
         .await;
 
     res.assert_status_ok();
