@@ -54,7 +54,9 @@ pub async fn handle_build(
         out.human("Streaming evaluation logs...");
     }
 
-    crate::commands::logstream::stream_eval_logs(&client, &evaluation, out).await;
+    if let Err(e) = crate::commands::logstream::stream_eval_logs(&client, &evaluation, out).await {
+        out.fail(e);
+    }
 
     let eval = wait_for_terminal(&client, &evaluation, out).await;
     if let Some(failure) = failure_message(eval.status, eval.error.as_deref()) {

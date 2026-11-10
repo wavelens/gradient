@@ -10,5 +10,7 @@ use crate::output::Output;
 
 pub async fn handle_logs(evaluation: &str, out: Output) {
     let client = client_from_config(out);
-    stream_eval_logs(&client, evaluation, out).await;
+    if let Err(e) = stream_eval_logs(&client, evaluation, out).await {
+        out.fail(e);
+    }
 }

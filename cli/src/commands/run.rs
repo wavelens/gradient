@@ -144,7 +144,10 @@ async fn follow_builds_until_started(
     let mut lines = WaitingLines::default();
     let started = tokio::select! {
         started = wait_until_started(client, evaluation, &mut lines, out) => started,
-        () = &mut builds => {
+        followed = &mut builds => {
+            if let Err(e) = followed {
+                out.progress(format!("Failed to stream build log: {e}"));
+            }
             builds_followed = true;
             wait_until_started(client, evaluation, &mut lines, out).await
         }

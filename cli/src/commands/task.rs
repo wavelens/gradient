@@ -380,8 +380,12 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             if eval.status != EvaluationStatus::Aborted {
                 out.human("===== Log =====");
-                crate::commands::logstream::stream_eval_logs(&client, &eval.id.to_string(), out)
-                    .await;
+                if let Err(e) =
+                    crate::commands::logstream::stream_eval_logs(&client, &eval.id.to_string(), out)
+                        .await
+                {
+                    out.fail(e);
+                }
             }
         }
 
@@ -396,8 +400,12 @@ pub async fn handle(cmd: Commands, out: Output) {
             let Some(latest) = details.last_evaluations.first() else {
                 out.err(ExitKind::Api, "Task has no evaluations yet.");
             };
-            crate::commands::logstream::stream_eval_logs(&client, &latest.id.to_string(), out)
-                .await;
+            if let Err(e) =
+                crate::commands::logstream::stream_eval_logs(&client, &latest.id.to_string(), out)
+                    .await
+            {
+                out.fail(e);
+            }
         }
 
         Commands::Create {

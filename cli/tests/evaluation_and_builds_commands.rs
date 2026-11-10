@@ -184,3 +184,27 @@ async fn abort_build_reports_server_message_and_conflict_exits_nonzero() {
             .contains("Evaluation has finished")
     );
 }
+
+#[tokio::test]
+async fn logs_exits_non_zero_when_the_log_stream_cannot_be_opened() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/evals/missing/builds"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "error": true, "message": "Evaluation not found"
+        })))
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+
+    let failed = run_gradient_json_with_temp_home_for_wiremock_in_dir(
+        &server,
+        dir.path(),
+        &["logs", "missing"],
+    )
+    .failure();
+    assert_eq!(
+        parse_gradient_json_stdout_as_json_value(&failed)["error"],
+        true
+    );
+}

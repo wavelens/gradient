@@ -6,6 +6,7 @@
 
 use crate::logfmt;
 use crate::output::Output;
+use connector::ConnectorError;
 use connector::api::EvaluationMessageResponse;
 use futures::StreamExt;
 use futures::pin_mut;
@@ -13,34 +14,30 @@ use std::collections::HashSet;
 use std::io::Write as _;
 use std::time::Duration;
 
-pub async fn stream_eval_logs(client: &connector::Client, evaluation: &str, out: Output) {
+pub async fn stream_eval_logs(
+    client: &connector::Client,
+    evaluation: &str,
+    out: Output,
+) -> Result<(), ConnectorError> {
     let evals = client.evals();
-    let stream = match evals.stream_builds(evaluation).await {
-        Ok(s) => s,
-        Err(e) => {
-            out.progress(format!("Failed to stream logs: {e}"));
-            return;
-        }
-    };
+    let stream = evals.stream_builds(evaluation).await?;
     pin_mut!(stream);
 
     let mut seen: HashSet<String> = HashSet::new();
     let mut messages = tokio::time::interval(Duration::from_millis(1500));
 
-    loop {
+    let outcome = loop {
         tokio::select! {
             item = stream.next() => match item {
                 Some(Ok(line)) => print_log(&line, out),
-                Some(Err(e)) => {
-                    out.progress(format!("log stream error: {e}"));
-                    break;
-                }
-                None => break,
+                Some(Err(e)) => break Err(e),
+                None => break Ok(()),
             },
             _ = messages.tick() => flush_messages(client, evaluation, &mut seen, out).await,
         }
-    }
+    };
     flush_messages(client, evaluation, &mut seen, out).await;
+    outcome
 }
 
 fn print_log(line: &str, out: Output) {
