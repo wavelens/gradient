@@ -41,6 +41,7 @@ use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use gradient_wire::ProtoLimiter;
 use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
+use tokio::sync::OwnedSemaphorePermit;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -73,6 +74,7 @@ async fn ws_upgrade(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Extension(limiter): Extension<Arc<ProtoLimiter>>,
     Extension(sessions): Extension<Arc<SessionsHandle>>,
+    ip_slot: Option<Extension<Arc<OwnedSemaphorePermit>>>,
 ) -> Response {
     let Some(permit) = limiter.try_acquire() else {
         tracing::warn!(
@@ -97,6 +99,7 @@ async fn ws_upgrade(
             let _ = shutdown
                 .spawn(async move {
                     let _permit = permit;
+                    let _ip_slot = ip_slot;
                     session::handle_socket(
                         socket::ProtoSocket::axum(sock),
                         handles,

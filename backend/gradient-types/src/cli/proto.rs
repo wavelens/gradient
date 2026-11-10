@@ -34,6 +34,11 @@ pub struct ProtoArgs {
     #[arg(id = "proto-max-connections", default_value = "256")]
     pub max_connections: NonZeroUsize,
 
+    /// Maximum number of simultaneous `/proto` WebSocket connections from one IP address of a
+    /// client. Raise this value when many workers connect through one NAT address.
+    #[arg(id = "proto-max-connections-per-ip", default_value = "64")]
+    pub max_connections_per_ip: NonZeroUsize,
+
     /// Seconds a connected worker can stay silent before counting as dead, with its jobs
     /// re-queued. Workers heartbeat every 10 seconds, giving the default a tolerance of twelve
     /// missed beats. The timeout is the only detection for a worker lost without a clean TCP

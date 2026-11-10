@@ -85,6 +85,29 @@ impl KeyExtractor for ClientIpKey {
     }
 }
 
+async fn acquire_worker_websocket_connection_slot(
+    axum::extract::State((key, limiter)): axum::extract::State<(ClientIpKey, Arc<PerIpLimiter>)>,
+    mut req: Request<Body>,
+    next: middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+
+    let slot = key
+        .extract(&req)
+        .ok()
+        .and_then(|ip| limiter.try_acquire(ip));
+    let Some(slot) = slot else {
+        return (
+            http::StatusCode::SERVICE_UNAVAILABLE,
+            [(http::header::RETRY_AFTER, "10")],
+            "too many proto connections from this address",
+        )
+            .into_response();
+    };
+    req.extensions_mut().insert(Arc::new(slot));
+    next.run(req).await
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct MakeRequestUuid;
 
@@ -366,7 +389,16 @@ pub fn create_router_with_scheduler(
                 .route_layer(GovernorLayer::new(rate_limit(
                     Duration::from_millis(200),
                     150,
-                )?)),
+                )?))
+                .route_layer(middleware::from_fn_with_state(
+                    (
+                        key.clone(),
+                        Arc::new(PerIpLimiter::new(
+                            state.config.proto.max_connections_per_ip.get(),
+                        )),
+                    ),
+                    acquire_worker_websocket_connection_slot,
+                )),
         )
         .layer(axum::Extension(Arc::clone(&scheduler)))
         .layer(axum::Extension(Arc::clone(&proto_limiter)))
@@ -578,5 +610,35 @@ mod tests {
         let _client = client.expect("connect");
 
         assert!(io.nodelay().expect("read nodelay"));
+    }
+
+    #[tokio::test]
+    async fn one_address_cannot_hold_more_proto_connections_than_allowed() {
+        use super::{ClientIpKey, PerIpLimiter, acquire_worker_websocket_connection_slot};
+        use axum::{Router, middleware, routing::get};
+        use std::net::{IpAddr, Ipv4Addr};
+        use std::sync::Arc;
+
+        let limiter = Arc::new(PerIpLimiter::new(1));
+        let key = ClientIpKey {
+            trusted_proxies: Arc::from([]),
+        };
+        let app = Router::new()
+            .route("/proto", get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(
+                (key, Arc::clone(&limiter)),
+                acquire_worker_websocket_connection_slot,
+            ));
+        let server = axum_test::TestServer::new(app);
+
+        let held = limiter
+            .try_acquire(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+            .expect("first slot");
+        server
+            .get("/proto")
+            .await
+            .assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
+        drop(held);
+        server.get("/proto").await.assert_status_ok();
     }
 }

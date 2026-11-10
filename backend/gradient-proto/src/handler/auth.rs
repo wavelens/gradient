@@ -4,11 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::Context as _;
 use gradient_db::WorkerDb;
 use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
 use sea_orm::DbErr;
 use std::collections::HashSet;
+use std::sync::{Arc, LazyLock};
+use tokio::sync::Semaphore;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -158,13 +161,33 @@ pub(super) struct Resolved {
     pub emptied_by_missing_cache: bool,
 }
 
+static WORKER_TOKEN_CHECK_SEMAPHORE: LazyLock<Arc<Semaphore>> = LazyLock::new(|| {
+    Arc::new(Semaphore::new(
+        std::thread::available_parallelism().map_or(2, |n| n.get().div_ceil(2)),
+    ))
+});
+
+async fn validate_tokens_on_limited_blocking_pool(
+    registered: &[(String, String)],
+    tokens: &[(String, String)],
+) -> anyhow::Result<(Vec<String>, Vec<FailedPeer>)> {
+    let _permit = Arc::clone(&WORKER_TOKEN_CHECK_SEMAPHORE)
+        .acquire_owned()
+        .await?;
+    let (registered, tokens) = (registered.to_vec(), tokens.to_vec());
+    tokio::task::spawn_blocking(move || validate_tokens(&registered, &tokens))
+        .await
+        .context("token verification task failed")
+}
+
 pub(super) async fn resolve_authorized(
     db: &WorkerDb,
     team: &Option<TeamWorkerChallenge>,
     registered: &[(String, String)],
     tokens: &[(String, String)],
-) -> Result<Resolved, DbErr> {
-    let (token_authorized, mut failed) = validate_tokens(registered, tokens);
+) -> anyhow::Result<Resolved> {
+    let (token_authorized, mut failed) =
+        validate_tokens_on_limited_blocking_pool(registered, tokens).await?;
     let proven = !token_authorized.is_empty();
     let expanded = expand_team_authorized(team, token_authorized);
     let had_any = !expanded.is_empty();
