@@ -189,7 +189,7 @@ impl PeerAuthority for ServerAuthority {
             team,
             registered_peers,
         } = challenge;
-        let resolved = resolve_authorized(&self.db, &team, &registered_peers, tokens).await;
+        let resolved = resolve_authorized(&self.db, &team, &registered_peers, tokens).await?;
         self.proven.store(resolved.proven, Ordering::Relaxed);
 
         let has_any = registered_peers.is_empty() && has_any_registrations(&self.db, claimed).await;
@@ -213,7 +213,7 @@ impl PeerAuthority for ServerAuthority {
         claimed: &str,
         client: GradientCapabilities,
     ) -> Result<GradientCapabilities> {
-        let enabled = aggregate_enabled_caps(&self.db, claimed).await;
+        let enabled = aggregate_enabled_caps(&self.db, claimed).await?;
         Ok(negotiate_capabilities(&self.config, client, enabled))
     }
 }

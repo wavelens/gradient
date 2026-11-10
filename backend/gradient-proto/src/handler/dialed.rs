@@ -58,7 +58,7 @@ impl DialerAuthority for DialedWorkerAuthority {
         worker_id: &str,
         client: GradientCapabilities,
     ) -> Result<GradientCapabilities> {
-        let enabled = aggregate_enabled_caps(&self.db, worker_id).await;
+        let enabled = aggregate_enabled_caps(&self.db, worker_id).await?;
         Ok(negotiate_capabilities(&self.config, client, enabled))
     }
 }
@@ -77,7 +77,7 @@ async fn admit_dialed(
                 .filter(|p| session.token_projects.contains(p))
                 .collect();
 
-            outcome_for(db, accepted).await
+            outcome_for(db, accepted).await?
         }
         Dialable::Refused(rejection) => AuthOutcome::Reject(rejection),
     })
@@ -102,7 +102,13 @@ pub(super) async fn refresh_dialed_peers(
                 return false;
             }
 
-            outcome_for(db, current).await
+            match outcome_for(db, current).await {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    warn!(error = %e, %worker_id, "failed to refresh a dialed session's projects");
+                    return true;
+                }
+            }
         }
         Ok(Dialable::Refused(rejection)) => AuthOutcome::Reject(rejection),
         Err(e) => {
@@ -139,9 +145,9 @@ pub(super) async fn refresh_dialed_peers(
     }
 }
 
-async fn outcome_for(db: &WorkerDb, projects: Vec<String>) -> AuthOutcome {
-    let (authorized, demoted) = filter_project_peers_without_cache(db, projects).await;
-    dialed_decision(authorized, demoted)
+async fn outcome_for(db: &WorkerDb, projects: Vec<String>) -> Result<AuthOutcome, sea_orm::DbErr> {
+    let (authorized, demoted) = filter_project_peers_without_cache(db, projects).await?;
+    Ok(dialed_decision(authorized, demoted))
 }
 
 fn dialed_decision(authorized: Vec<String>, demoted: Vec<FailedPeer>) -> AuthOutcome {

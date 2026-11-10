@@ -834,7 +834,13 @@ impl<'a> InboundContext<'a> {
     async fn on_auth_response(&mut self, tokens: Vec<(String, String)>) -> bool {
         let db = &self.handles.db.worker_db;
         let (team, registered_peers) = challenge_for(db, self.peer_id).await;
-        let resolved = resolve_authorized(db, &team, &registered_peers, &tokens).await;
+        let resolved = match resolve_authorized(db, &team, &registered_peers, &tokens).await {
+            Ok(resolved) => resolved,
+            Err(e) => {
+                warn!(peer_id = %self.peer_id, error = %e, "Failed to look up data for re-authentication. Closing connection.");
+                return false;
+            }
+        };
 
         if resolved.authorized.is_empty() {
             info!(peer_id = %self.peer_id, "no project authorizes this worker any more - disconnecting");

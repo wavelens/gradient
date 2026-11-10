@@ -7,6 +7,7 @@
 use gradient_db::WorkerDb;
 use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
+use sea_orm::DbErr;
 use std::collections::HashSet;
 use tracing::warn;
 use uuid::Uuid;
@@ -17,7 +18,7 @@ use gradient_wire::messages::{FailedPeer, GradientCapabilities};
 pub(super) async fn filter_project_peers_without_cache(
     db: &WorkerDb,
     authorized: Vec<String>,
-) -> (Vec<String>, Vec<FailedPeer>) {
+) -> Result<(Vec<String>, Vec<FailedPeer>), DbErr> {
     use gradient_entity::project::{Column as OCol, Entity as EProject};
     use gradient_entity::project_cache::{Column as OCCol, Entity as EProjectCache};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -32,44 +33,30 @@ pub(super) async fn filter_project_peers_without_cache(
     }
 
     if uuid_peers.is_empty() {
-        return (authorized_out, Vec::new());
+        return Ok((authorized_out, Vec::new()));
     }
 
     let uuid_set: Vec<ProjectId> = uuid_peers.iter().map(|(_, u)| *u).collect();
 
     let project_ids: HashSet<ProjectId> =
-        match gradient_db::fetch_in_chunks(&uuid_set, |chunk| async move {
+        gradient_db::fetch_in_chunks(&uuid_set, |chunk| async move {
             EProject::find().filter(OCol::Id.is_in(chunk)).all(db).await
         })
-        .await
-        {
-            Ok(rows) => rows.into_iter().map(|r| r.id).collect(),
-            Err(e) => {
-                warn!(error = %e, "failed to look up projects for peer filter");
-                for (s, _) in uuid_peers {
-                    authorized_out.push(s);
-                }
-                return (authorized_out, Vec::new());
-            }
-        };
+        .await?
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
 
     let projects_with_cache: HashSet<ProjectId> = if project_ids.is_empty() {
         HashSet::new()
     } else {
-        match EProjectCache::find()
+        EProjectCache::find()
             .filter(OCCol::Project.is_in(project_ids.iter().copied().collect::<Vec<_>>()))
             .all(db)
-            .await
-        {
-            Ok(rows) => rows.into_iter().map(|r| r.project).collect(),
-            Err(e) => {
-                warn!(error = %e, "failed to look up project_cache rows");
-                for (s, _) in uuid_peers {
-                    authorized_out.push(s);
-                }
-                return (authorized_out, Vec::new());
-            }
-        }
+            .await?
+            .into_iter()
+            .map(|r| r.project)
+            .collect()
     };
 
     let mut demoted: Vec<FailedPeer> = Vec::new();
@@ -84,7 +71,7 @@ pub(super) async fn filter_project_peers_without_cache(
         }
     }
 
-    (authorized_out, demoted)
+    Ok((authorized_out, demoted))
 }
 
 pub(super) async fn lookup_registered_peers(
@@ -176,26 +163,26 @@ pub(super) async fn resolve_authorized(
     team: &Option<TeamWorkerChallenge>,
     registered: &[(String, String)],
     tokens: &[(String, String)],
-) -> Resolved {
+) -> Result<Resolved, DbErr> {
     let (token_authorized, mut failed) = validate_tokens(registered, tokens);
     let proven = !token_authorized.is_empty();
     let expanded = expand_team_authorized(team, token_authorized);
     let had_any = !expanded.is_empty();
-    let (authorized, demoted) = filter_project_peers_without_cache(db, expanded).await;
+    let (authorized, demoted) = filter_project_peers_without_cache(db, expanded).await?;
     let emptied_by_missing_cache = authorized.is_empty() && had_any && !demoted.is_empty();
     failed.extend(demoted);
 
-    Resolved {
+    Ok(Resolved {
         authorized,
         failed,
         proven,
         emptied_by_missing_cache,
-    }
+    })
 }
 
 /// A capability is enabled only when every active registration is enabling it. The handshake is
 /// clamping the advertised set with it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct EnabledCapsAggregate {
     pub enable_network: bool,
     pub enable_secrets: bool,
@@ -204,6 +191,7 @@ pub(super) struct EnabledCapsAggregate {
     pub enable_build: bool,
 }
 
+#[cfg(test)]
 impl EnabledCapsAggregate {
     pub fn all() -> Self {
         Self {
@@ -216,46 +204,40 @@ impl EnabledCapsAggregate {
     }
 }
 
-pub(super) async fn aggregate_enabled_caps(db: &WorkerDb, worker_id: &str) -> EnabledCapsAggregate {
+pub(super) async fn aggregate_enabled_caps(
+    db: &WorkerDb,
+    worker_id: &str,
+) -> Result<EnabledCapsAggregate, DbErr> {
     use gradient_entity::worker_registration::{Column, Entity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-    let rows = match Entity::find()
+    let rows = Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
         .filter(Column::Active.eq(true))
         .all(db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, %worker_id, "failed to aggregate enabled caps");
-            return EnabledCapsAggregate::all();
-        }
-    };
+        .await?;
 
     if rows.is_empty() {
-        if let Ok(Some(worker)) =
-            gradient_db::teams::workers::active_team_worker(db, worker_id).await
-        {
-            return EnabledCapsAggregate {
-                enable_network: worker.enable_network,
-                enable_secrets: worker.enable_secrets,
-                enable_exec: worker.enable_exec,
-                enable_eval: worker.enable_eval,
-                enable_build: worker.enable_build,
-            };
-        }
-
-        return EnabledCapsAggregate::all();
+        let Some(worker) = gradient_db::teams::workers::active_team_worker(db, worker_id).await?
+        else {
+            return Ok(EnabledCapsAggregate::default());
+        };
+        return Ok(EnabledCapsAggregate {
+            enable_network: worker.enable_network,
+            enable_secrets: worker.enable_secrets,
+            enable_exec: worker.enable_exec,
+            enable_eval: worker.enable_eval,
+            enable_build: worker.enable_build,
+        });
     }
 
-    EnabledCapsAggregate {
+    Ok(EnabledCapsAggregate {
         enable_network: rows.iter().all(|r| r.enable_network),
         enable_secrets: rows.iter().all(|r| r.enable_secrets),
         enable_exec: rows.iter().all(|r| r.enable_exec),
         enable_eval: rows.iter().all(|r| r.enable_eval),
         enable_build: rows.iter().all(|r| r.enable_build),
-    }
+    })
 }
 
 pub(super) async fn has_any_registrations(db: &WorkerDb, worker_id: &str) -> bool {
@@ -459,7 +441,9 @@ mod tests {
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_project_peers_without_cache(&state.worker_db, vec![project.to_string()]).await;
+            filter_project_peers_without_cache(&state.worker_db, vec![project.to_string()])
+                .await
+                .expect("peer filter");
         assert_eq!(authorized, vec![project.to_string()]);
         assert!(demoted.is_empty());
     }
@@ -473,7 +457,9 @@ mod tests {
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_project_peers_without_cache(&state.worker_db, vec![project.to_string()]).await;
+            filter_project_peers_without_cache(&state.worker_db, vec![project.to_string()])
+                .await
+                .expect("peer filter");
         assert!(authorized.is_empty());
         assert_eq!(demoted.len(), 1);
         assert_eq!(demoted[0].peer_id, project.to_string());
@@ -493,9 +479,43 @@ mod tests {
         let state = state_with_db(db);
         let (authorized, demoted) =
             filter_project_peers_without_cache(&state.worker_db, vec![cache_peer.to_string()])
-                .await;
+                .await
+                .expect("peer filter");
         assert_eq!(authorized, vec![cache_peer.to_string()]);
         assert!(demoted.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_database_error_rejects_instead_of_granting() {
+        let failing = || {
+            mock_db()
+                .append_query_errors([DbErr::Custom("connection lost".into())])
+                .into_connection()
+        };
+
+        let filtered = filter_project_peers_without_cache(
+            &state_with_db(failing()).worker_db,
+            vec![ProjectId::now_v7().to_string()],
+        )
+        .await;
+        let caps = aggregate_enabled_caps(&state_with_db(failing()).worker_db, "w1").await;
+
+        assert!(filtered.is_err());
+        assert!(caps.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_worker_without_registrations_gets_no_capabilities() {
+        let db = mock_db()
+            .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::team_worker::Model>::new()])
+            .into_connection();
+
+        let caps = aggregate_enabled_caps(&state_with_db(db).worker_db, "w1")
+            .await
+            .expect("caps");
+
+        assert_eq!(caps, EnabledCapsAggregate::default());
     }
 
     #[tokio::test]
@@ -520,7 +540,8 @@ mod tests {
                 cache_peer.to_string(),
             ],
         )
-        .await;
+        .await
+        .expect("peer filter");
         assert!(authorized.contains(&project_with.to_string()));
         assert!(authorized.contains(&cache_peer.to_string()));
         assert_eq!(demoted.len(), 1);
@@ -572,7 +593,8 @@ mod tests {
             &registered,
             &[(TEAM.into(), "t1".into())],
         )
-        .await;
+        .await
+        .expect("resolved");
 
         assert!(resolved.proven);
         assert!(resolved.authorized.is_empty());
@@ -597,7 +619,8 @@ mod tests {
             &registered,
             &[(TEAM.into(), "t1".into())],
         )
-        .await;
+        .await
+        .expect("resolved");
 
         assert!(resolved.authorized.is_empty());
         assert!(resolved.emptied_by_missing_cache);
