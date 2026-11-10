@@ -534,3 +534,46 @@ async fn s12_a_missing_output_needed_while_the_fetch_result_is_pending_turns_its
     case.zero_drift("step 3").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn s13_a_producer_whose_unneeded_missing_output_becomes_needed_is_asked_about_again_and_turns_fetchable_from_upstream_instead_of_a_build()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        a_builds_with(e1, &["out"])
+            .derivation(D)
+            .walked()
+            .entry_point("pkg.d")
+            .job()
+            .drv_cached()
+            .output(D_OUT)
+            .depends_on_outputs(B, &["dev"]),
+    )
+    .await;
+    upstream_holds(&case, &[(B_OUT, "b")]).await;
+    case.upstream_hits(&[(B_OUT2, narinfo(&[(B_OUT2, "b-dev")]))])
+        .await;
+    case.upstream_probed(&[D]).await;
+
+    let turned = case.requeue_needed_outputs().await;
+
+    assert_eq!(turned, 1, "after 1: shared builds asked about again");
+    case.zero_drift("step 1").await;
+
+    case.upstream_probed(&[B]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.cache_available, b.unneeded_outputs, b.probed),
+        (true, Vec::<String>::new(), true),
+        "after 2: sb(B) cache_available, unneeded_outputs, probed"
+    );
+    let c = case.sb(C).await;
+    assert_eq!(
+        (c.status, c.wanted),
+        (BuildStatus::Skipped, false),
+        "after 2: sb(C) status, wanted"
+    );
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}
