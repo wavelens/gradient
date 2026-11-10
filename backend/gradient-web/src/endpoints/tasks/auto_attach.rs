@@ -29,16 +29,18 @@ pub(crate) fn url_host(url: &str) -> Option<String> {
     let s = url.trim();
     let s = s.strip_prefix("git+").unwrap_or(s);
 
-    for scheme in ["https://", "http://", "ssh://", "git://"] {
-        if let Some(rest) = s.strip_prefix(scheme) {
-            let rest = rest.rsplit('@').next().unwrap_or(rest);
-            let host = rest.split(['/', ':']).next().unwrap_or("");
-            return (!host.is_empty()).then(|| host.to_ascii_lowercase());
-        }
+    let authority = match ["https://", "http://", "ssh://", "git://"]
+        .iter()
+        .find_map(|scheme| s.strip_prefix(scheme))
+    {
+        Some(rest) => rest.split(['/', '?', '#']).next().unwrap_or(""),
+        None => s.split_once(':')?.0,
+    };
+    if authority.contains('/') {
+        return None;
     }
-
-    let (prefix, _) = s.split_once(':')?;
-    let host = prefix.rsplit('@').next().unwrap_or(prefix);
+    let host_and_port = authority.rsplit('@').next().unwrap_or(authority);
+    let host = host_and_port.split(':').next().unwrap_or("");
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
@@ -305,6 +307,19 @@ mod tests {
             Some("gitea.example.com")
         );
         assert_eq!(url_host("not-a-url"), None);
+    }
+
+    #[test]
+    fn an_at_sign_in_the_path_does_not_change_the_host() {
+        assert_eq!(
+            url_host("https://evil.example/x@gitlab.com/y").as_deref(),
+            Some("evil.example")
+        );
+        assert_eq!(
+            url_host("https://user:pw@gitea.example.com:3000/a/b").as_deref(),
+            Some("gitea.example.com")
+        );
+        assert_eq!(url_host("evil.example/x@gitlab.com:y/z"), None);
     }
 
     #[test]
