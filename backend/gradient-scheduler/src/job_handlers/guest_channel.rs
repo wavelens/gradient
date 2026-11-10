@@ -8,12 +8,11 @@ use std::fmt;
 
 use gradient_db::exec_jobs::{attempts, nodes};
 use gradient_entity::exec_job::ExecJobStatus;
-use gradient_pool::guest_channels::{GuestChannelEvent, GuestChannelHandle};
+use gradient_pool::guest_channels::{GuestChannelEventReceiver, GuestChannelHandle};
 use gradient_types::MExecJob;
 use gradient_types::exec::ExecSpec;
 use gradient_types::ids::ExecJobId;
 use gradient_wire::types::GuestChannelKind;
-use tokio::sync::mpsc;
 
 use crate::Scheduler;
 use crate::jobs::exec_job_key;
@@ -48,7 +47,7 @@ impl std::error::Error for GuestChannelRefusal {}
 #[derive(Debug)]
 pub struct GuestChannelOpened {
     pub handle: GuestChannelHandle,
-    pub events: mpsc::Receiver<GuestChannelEvent>,
+    pub events: GuestChannelEventReceiver,
 }
 
 pub(crate) fn check_guest_channel(

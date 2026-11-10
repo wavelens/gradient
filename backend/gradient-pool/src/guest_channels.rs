@@ -7,15 +7,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::Poll;
 
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::GUEST_CHANNEL_CHUNK;
 use gradient_wire::types::GuestChannelKind;
-use tokio::sync::mpsc;
+use tokio::sync::Notify;
 
 use crate::session_port::{SessionPort, SessionSignal};
 
-pub const GUEST_CHANNEL_BUFFER: usize = 256;
+pub const GUEST_CHANNEL_OUTPUT_BUFFER_BYTE_LIMIT: usize = 8 * 1024 * 1024;
 
 const OVERFLOW_MESSAGE: &str = "the terminal could not keep up";
 const DISCONNECT_MESSAGE: &str = "the worker disconnected";
@@ -50,25 +51,121 @@ pub enum GuestChannelEvent {
     },
 }
 
+enum GuestChannelReaderState {
+    Open,
+    Closed {
+        exit_code: Option<i32>,
+        message: Option<String>,
+    },
+    Finished,
+}
+
+struct GuestChannelUnreadOutputAndEndStatus {
+    output: Vec<u8>,
+    state: GuestChannelReaderState,
+}
+
+struct GuestChannelPendingOutput {
+    status: Mutex<GuestChannelUnreadOutputAndEndStatus>,
+    wake: Notify,
+}
+
+fn guest_channel_output() -> (GuestChannelOutputWriter, GuestChannelEventReceiver) {
+    let pending = Arc::new(GuestChannelPendingOutput {
+        status: Mutex::new(GuestChannelUnreadOutputAndEndStatus {
+            output: Vec::new(),
+            state: GuestChannelReaderState::Open,
+        }),
+        wake: Notify::new(),
+    });
+    (
+        GuestChannelOutputWriter(Arc::clone(&pending)),
+        GuestChannelEventReceiver(pending),
+    )
+}
+
+struct GuestChannelOutputWriter(Arc<GuestChannelPendingOutput>);
+
+impl GuestChannelOutputWriter {
+    fn try_append_output_chunk(&self, data: &[u8]) -> bool {
+        let mut status = self.0.status.lock();
+        if status.output.len() + data.len() > GUEST_CHANNEL_OUTPUT_BUFFER_BYTE_LIMIT {
+            return false;
+        }
+        status.output.extend_from_slice(data);
+        drop(status);
+        self.0.wake.notify_one();
+        true
+    }
+
+    fn end(&self, state: GuestChannelReaderState) {
+        let mut status = self.0.status.lock();
+        if matches!(status.state, GuestChannelReaderState::Open) {
+            status.state = state;
+        }
+        drop(status);
+        self.0.wake.notify_one();
+    }
+}
+
+impl Drop for GuestChannelOutputWriter {
+    fn drop(&mut self) {
+        self.end(GuestChannelReaderState::Finished);
+    }
+}
+
+pub struct GuestChannelEventReceiver(Arc<GuestChannelPendingOutput>);
+
+impl std::fmt::Debug for GuestChannelEventReceiver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GuestChannelEventReceiver")
+            .finish_non_exhaustive()
+    }
+}
+
+impl GuestChannelEventReceiver {
+    pub async fn recv(&mut self) -> Option<GuestChannelEvent> {
+        loop {
+            if let Poll::Ready(event) = self.poll_buffered_guest_channel_event() {
+                return event;
+            }
+            self.0.wake.notified().await;
+        }
+    }
+
+    fn poll_buffered_guest_channel_event(&mut self) -> Poll<Option<GuestChannelEvent>> {
+        let mut status = self.0.status.lock();
+        if !status.output.is_empty() {
+            let output = std::mem::take(&mut status.output);
+            return Poll::Ready(Some(GuestChannelEvent::Data(output)));
+        }
+        match std::mem::replace(&mut status.state, GuestChannelReaderState::Finished) {
+            GuestChannelReaderState::Open => {
+                status.state = GuestChannelReaderState::Open;
+                Poll::Pending
+            }
+            GuestChannelReaderState::Closed { exit_code, message } => {
+                Poll::Ready(Some(GuestChannelEvent::Closed { exit_code, message }))
+            }
+            GuestChannelReaderState::Finished => Poll::Ready(None),
+        }
+    }
+}
+
 struct Route {
     worker: String,
     port: Arc<dyn SessionPort>,
-    events: mpsc::Sender<GuestChannelEvent>,
+    output: GuestChannelOutputWriter,
 }
 
 impl Route {
-    fn has_room_for_data(&self) -> bool {
-        self.events.capacity() > 1
-    }
-
     fn signal(&self, signal: GuestChannelSignal) {
         self.port.signal(SessionSignal::GuestChannel(signal));
     }
 
     fn close(&self, exit_code: Option<i32>, message: Option<String>) {
-        let _ = self
-            .events
-            .try_send(GuestChannelEvent::Closed { exit_code, message });
+        self.output
+            .end(GuestChannelReaderState::Closed { exit_code, message });
     }
 }
 
@@ -99,13 +196,13 @@ impl GuestChannels {
         port: Arc<dyn SessionPort>,
         job_id: String,
         kind: GuestChannelKind,
-    ) -> (GuestChannelHandle, mpsc::Receiver<GuestChannelEvent>) {
+    ) -> (GuestChannelHandle, GuestChannelEventReceiver) {
         let channel_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (events, receiver) = mpsc::channel(GUEST_CHANNEL_BUFFER + 1);
+        let (output, receiver) = guest_channel_output();
         let route = Route {
             worker: worker.to_owned(),
             port,
-            events,
+            output,
         };
         let mut open = self.open.lock();
         route.signal(GuestChannelSignal::Open {
@@ -127,8 +224,7 @@ impl GuestChannels {
         let Some(route) = open.get(&channel_id).filter(|r| r.worker == worker) else {
             return;
         };
-        if route.has_room_for_data() {
-            let _ = route.events.try_send(GuestChannelEvent::Data(data));
+        if route.output.try_append_output_chunk(&data) {
             return;
         }
         if let Some(route) = open.remove(&channel_id) {
@@ -265,7 +361,7 @@ mod tests {
         channels: &Arc<GuestChannels>,
         worker: &str,
         port: &Arc<RecordingPort>,
-    ) -> (GuestChannelHandle, mpsc::Receiver<GuestChannelEvent>) {
+    ) -> (GuestChannelHandle, GuestChannelEventReceiver) {
         let port: Arc<dyn SessionPort> = Arc::clone(port) as Arc<dyn SessionPort>;
         channels.open(worker, port, "exec:j".into(), GuestChannelKind::Console)
     }
@@ -298,13 +394,16 @@ mod tests {
         let id = handle.id();
         channels.deliver("w1", id, b"hi".to_vec());
         assert_eq!(
-            events.try_recv().unwrap(),
-            GuestChannelEvent::Data(b"hi".to_vec())
+            events.poll_buffered_guest_channel_event(),
+            Poll::Ready(Some(GuestChannelEvent::Data(b"hi".to_vec())))
         );
         drop(handle);
         assert_eq!(port.closes(id), 1);
         channels.deliver("w1", id, b"late".to_vec());
-        assert!(events.try_recv().is_err());
+        assert_eq!(
+            events.poll_buffered_guest_channel_event(),
+            Poll::Ready(None)
+        );
     }
 
     #[test]
@@ -315,11 +414,11 @@ mod tests {
         let id = handle.id();
         channels.closed_by_worker("w1", id, Some(0), None);
         assert_eq!(
-            events.try_recv().unwrap(),
-            GuestChannelEvent::Closed {
+            events.poll_buffered_guest_channel_event(),
+            Poll::Ready(Some(GuestChannelEvent::Closed {
                 exit_code: Some(0),
                 message: None
-            }
+            }))
         );
         drop(handle);
         assert_eq!(port.closes(id), 0);
@@ -332,7 +431,7 @@ mod tests {
         let (handle, mut events) = open_on(&channels, "w1", &port);
         channels.deliver("w2", handle.id(), b"spoof".to_vec());
         channels.closed_by_worker("w2", handle.id(), Some(1), None);
-        assert!(events.try_recv().is_err());
+        assert!(events.poll_buffered_guest_channel_event().is_pending());
     }
 
     #[test]
@@ -343,34 +442,67 @@ mod tests {
         let (_two, mut on_w2) = open_on(&channels, "w2", &port);
         channels.close_worker("w1");
         assert_eq!(
-            on_w1.try_recv().unwrap(),
-            GuestChannelEvent::Closed {
+            on_w1.poll_buffered_guest_channel_event(),
+            Poll::Ready(Some(GuestChannelEvent::Closed {
                 exit_code: None,
                 message: Some("the worker disconnected".into())
-            }
+            }))
         );
-        assert!(on_w2.try_recv().is_err());
+        assert!(on_w2.poll_buffered_guest_channel_event().is_pending());
     }
 
     #[test]
-    fn a_full_buffer_closes_the_channel_instead_of_blocking() {
+    fn output_over_the_8_mib_byte_limit_is_read_before_the_channel_closes_with_the_terminal_could_not_keep_up()
+     {
         let channels = GuestChannels::new();
         let port = Arc::new(RecordingPort::default());
         let (handle, mut events) = open_on(&channels, "w1", &port);
-        for _ in 0..=GUEST_CHANNEL_BUFFER {
-            channels.deliver("w1", handle.id(), b"x".to_vec());
-        }
+        let full = vec![b'x'; GUEST_CHANNEL_OUTPUT_BUFFER_BYTE_LIMIT];
+        channels.deliver("w1", handle.id(), full.clone());
+        channels.deliver("w1", handle.id(), b"y".to_vec());
         assert_eq!(port.closes(handle.id()), 1);
-        let mut last = None;
-        while let Ok(event) = events.try_recv() {
-            last = Some(event);
-        }
         assert_eq!(
-            last,
-            Some(GuestChannelEvent::Closed {
+            events.poll_buffered_guest_channel_event(),
+            Poll::Ready(Some(GuestChannelEvent::Data(full)))
+        );
+        assert_eq!(
+            events.poll_buffered_guest_channel_event(),
+            Poll::Ready(Some(GuestChannelEvent::Closed {
                 exit_code: None,
                 message: Some("the terminal could not keep up".into())
-            })
+            }))
+        );
+        assert_eq!(
+            events.poll_buffered_guest_channel_event(),
+            Poll::Ready(None)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_waiting_reader_gets_data_when_worker_output_is_delivered() {
+        let channels = GuestChannels::new();
+        let port = Arc::new(RecordingPort::default());
+        let (handle, mut events) = open_on(&channels, "w1", &port);
+        let (received, ()) = tokio::join!(events.recv(), async {
+            tokio::task::yield_now().await;
+            channels.deliver("w1", handle.id(), b"hi".to_vec());
+        });
+        assert_eq!(received, Some(GuestChannelEvent::Data(b"hi".to_vec())));
+    }
+
+    #[test]
+    fn delivering_1000_one_byte_output_chunks_keeps_the_channel_open_and_merges_them_into_one_1000_byte_data_event()
+     {
+        let channels = GuestChannels::new();
+        let port = Arc::new(RecordingPort::default());
+        let (handle, mut events) = open_on(&channels, "w1", &port);
+        for _ in 0..1000 {
+            channels.deliver("w1", handle.id(), b"x".to_vec());
+        }
+        assert_eq!(port.closes(handle.id()), 0);
+        assert_eq!(
+            events.poll_buffered_guest_channel_event(),
+            Poll::Ready(Some(GuestChannelEvent::Data(vec![b'x'; 1000])))
         );
     }
 
