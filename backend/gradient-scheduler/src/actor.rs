@@ -37,6 +37,7 @@ pub struct Registration {
     pub active: Vec<crate::jobs::Reattached>,
     pub reclaims_jobs: bool,
     pub held_jobs_wait_deadline: Instant,
+    pub is_new_worker_connection: bool,
 }
 
 pub struct Registered {
@@ -98,7 +99,7 @@ pub struct Counts {
     reason = "one message per mailbox send; boxing only relocates the allocation"
 )]
 pub enum SchedulerMsg {
-    Register(Registration, RpcReplyPort<Registered>),
+    Register(Registration, RpcReplyPort<Option<Registered>>),
     Unregister {
         worker: String,
         grace: Duration,
@@ -916,6 +917,11 @@ impl Actor for CoreActor {
     ) -> Result<(), ActorProcessingErr> {
         match msg {
             SchedulerMsg::Register(reg, reply) => {
+                if reg.is_new_worker_connection && core.pool.is_connected(&reg.worker) {
+                    warn!(worker = %reg.worker, "Rejected second connection for an already registered worker");
+                    let _ = reply.send(None);
+                    return Ok(());
+                }
                 let last_seen = core.pool.register(
                     reg.worker.clone(),
                     reg.capabilities,
@@ -935,10 +941,10 @@ impl Actor for CoreActor {
                 };
                 core.return_unreclaimed(&unreclaimed);
                 info!(worker = %reg.worker, "worker registered");
-                let _ = reply.send(Registered {
+                let _ = reply.send(Some(Registered {
                     last_seen,
                     unreclaimed,
-                });
+                }));
             }
             SchedulerMsg::Unregister {
                 worker,

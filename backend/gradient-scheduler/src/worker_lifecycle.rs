@@ -25,6 +25,7 @@ use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, W
 use crate::build;
 use crate::jobs::{AwaitingReclaim, reclaim_grace};
 use crate::waiting_state::WaitingRefresh;
+use crate::worker_memory::WorkerReports;
 use gradient_db::scheduling::assignment_record::{
     abandon_open_assignments, keys_with_open_assignment,
 };
@@ -108,18 +109,24 @@ impl Scheduler {
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let projects = authorized_peers.iter().copied().collect();
-        self.workers.forget(worker_id);
-        self.pre_warm.forget(worker_id);
+        let registration = Registration {
+            worker: worker_id.to_owned(),
+            capabilities,
+            authorized_peers,
+            session,
+            active: Vec::new(),
+            reclaims_jobs,
+            held_jobs_wait_deadline: self.held_jobs_wait_deadline(),
+            is_new_worker_connection: true,
+        };
         let mut registered = self
-            .reattach_worker(
-                worker_id,
-                capabilities,
-                authorized_peers,
-                session,
-                Vec::new(),
-                reclaims_jobs,
+            .send_worker_registration_and_apply_last_reported_state(
+                registration,
+                WorkerReports::default(),
             )
             .await?;
+        self.workers.forget(worker_id);
+        self.pre_warm.forget(worker_id);
         if !reclaims_jobs {
             self.close_unclaimed_assignments(worker_id).await;
         }
@@ -167,16 +174,34 @@ impl Scheduler {
         let registration = Registration {
             worker: worker_id.to_owned(),
             capabilities,
-            authorized_peers: reports.authorized_peers.unwrap_or(authorized_peers),
+            authorized_peers: reports.authorized_peers.clone().unwrap_or(authorized_peers),
             session,
             active,
             reclaims_jobs,
-            held_jobs_wait_deadline: Instant::now()
-                + Duration::from_secs(self.db.config.proto.assignment_reclaim_grace_secs),
+            held_jobs_wait_deadline: self.held_jobs_wait_deadline(),
+            is_new_worker_connection: false,
         };
+        self.send_worker_registration_and_apply_last_reported_state(registration, reports)
+            .await
+    }
+
+    fn held_jobs_wait_deadline(&self) -> Instant {
+        Instant::now() + Duration::from_secs(self.db.config.proto.assignment_reclaim_grace_secs)
+    }
+
+    async fn send_worker_registration_and_apply_last_reported_state(
+        &self,
+        registration: Registration,
+        reports: WorkerReports,
+    ) -> Result<Registered> {
+        let worker_id = registration.worker.clone();
         let registered = self
             .call(|reply| SchedulerMsg::Register(registration, reply))
-            .await?;
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!("Worker {worker_id} already connected to this scheduler")
+            })?;
+        let worker_id = worker_id.as_str();
         if let Some(caps) = reports.capabilities {
             self.update_worker_capabilities(worker_id, caps).await;
         }

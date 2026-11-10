@@ -1907,6 +1907,42 @@ async fn w39_a_reconnected_worker_that_never_lists_running_jobs_has_its_build_re
     case.finish().await;
 }
 
+#[tokio::test]
+async fn w40_second_connection_for_live_worker_id_is_refused_and_first_session_keeps_running_build()
+{
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, _) = building_on_w1(&case).await;
+
+    let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
+    let second = case
+        .scheduler
+        .register_worker(
+            W1,
+            w_all().caps,
+            Default::default(),
+            std::sync::Arc::new(port),
+            true,
+        )
+        .await;
+    assert!(
+        second.is_err(),
+        "after 2: the second registration is refused"
+    );
+    assert_eq!(
+        case.active(&a).await.as_deref(),
+        Some(W1),
+        "after 2: active(build:A)"
+    );
+    assert!(
+        case.scheduler.is_worker_connected(W1).await,
+        "after 2: W1 connected"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
 fn reattached_keys(reclaimed: &Reclaimed) -> Vec<(String, DispatchedJobId)> {
     reclaimed
         .reattached
