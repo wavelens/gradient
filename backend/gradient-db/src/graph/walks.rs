@@ -166,19 +166,18 @@ pub fn live_cached_paths_cte() -> String {
         "WITH RECURSIVE {reachable}, {runtime}, {kept}",
         reachable = reachable_derivations_cte_body(),
         runtime = runtime_closure_cte_body("runtime", "SELECT derivation FROM reachable"),
-        kept = kept_hashes_cte_body("reachable", "runtime"),
+        kept = kept_hashes_cte_body("runtime"),
     )
 }
 
-pub fn kept_hashes_cte_body(reachable: &str, runtime: &str) -> String {
+pub fn kept_hashes_cte_body(runtime: &str) -> String {
     format!(
         "live(hash) AS (\
          SELECT o.hash FROM derivation_output o JOIN {runtime} t ON t.derivation = o.derivation \
          UNION \
-         SELECT d.hash FROM derivation d JOIN {reachable} r ON r.derivation = d.id \
+         SELECT d.hash FROM derivation d \
          UNION \
-         SELECT s.hash FROM derivation_input_source s \
-         JOIN {reachable} r ON r.derivation = s.derivation)"
+         SELECT s.hash FROM derivation_input_source s)"
     )
 }
 
@@ -269,7 +268,8 @@ mod tests {
     }
 
     #[test]
-    fn live_cached_paths_close_reachable_outputs_and_drvs_over_references() {
+    fn test_live_cached_path_sql_keeps_reachable_derivation_outputs_and_recorded_derivation_and_input_source_hashes()
+     {
         let cte = norm(&live_cached_paths_cte());
 
         assert!(
@@ -286,9 +286,8 @@ mod tests {
             cte.contains(concat!(
                 "live(hash) AS (SELECT o.hash FROM derivation_output o ",
                 "JOIN runtime t ON t.derivation = o.derivation UNION ",
-                "SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id UNION ",
-                "SELECT s.hash FROM derivation_input_source s ",
-                "JOIN reachable r ON r.derivation = s.derivation)",
+                "SELECT d.hash FROM derivation d UNION ",
+                "SELECT s.hash FROM derivation_input_source s)",
             )),
             "{cte}"
         );
@@ -483,11 +482,12 @@ mod tests {
     }
 
     #[test]
-    fn the_live_set_walks_runtime_dependencies_from_live_derivations_and_keeps_their_sources() {
+    fn live_cached_path_query_follows_only_runtime_dependency_edges_from_reachable_derivations_keeps_every_recorded_input_source_without_join_and_does_not_read_cached_path_reference()
+     {
         let cte = norm(&live_cached_paths_cte());
         assert!(cte.contains("e.kind IN (1, 2)"), "{cte}");
         assert!(
-            cte.contains("SELECT s.hash FROM derivation_input_source s JOIN"),
+            cte.contains("SELECT s.hash FROM derivation_input_source s)"),
             "{cte}"
         );
         assert!(!cte.contains("cached_path_reference"), "{cte}");

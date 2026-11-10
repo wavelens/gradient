@@ -268,13 +268,16 @@ async fn c05_path_gc_retires_only_what_the_scan_lists_as_not_live() {
     let listed = paths_the_scan_lists(&case).await;
     gc_paths(&case, listed.clone()).await;
 
-    let not_live = BTreeSet::from([O_OUT.to_owned(), drv_hash(O).to_owned()]);
-    assert_eq!(listed, not_live, "the scan lists O_OUT and O.drv only");
+    let not_live = BTreeSet::from([O_OUT.to_owned()]);
+    assert_eq!(
+        listed, not_live,
+        "The scan can list only O_OUT because the .drv file of recorded derivation O is live."
+    );
     for (hash, present) in [
         (B_OUT, true),
         (drv_hash(B), true),
         (O_OUT, false),
-        (drv_hash(O), false),
+        (drv_hash(O), true),
     ] {
         let path = stored(&case, hash).await;
         assert_eq!(path, present, "after 1: cached_path({hash}) present");

@@ -61,7 +61,7 @@ fn stale_after_scan_sql() -> String {
             "runtime",
             "SELECT derivation FROM roots",
         ),
-        live = gradient_db::graph::walks::kept_hashes_cte_body("roots", "runtime"),
+        live = gradient_db::graph::walks::kept_hashes_cte_body("runtime"),
     )
 }
 
