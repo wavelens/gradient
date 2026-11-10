@@ -81,7 +81,7 @@ export class TerminalComponent {
     const theme = inject(ThemeService);
     afterNextRender(() => {
       const screen = this.screen().nativeElement;
-      const terminal = new Terminal({ cursorBlink: true, fontSize: FONT_SIZE, theme: readTerminalThemeFromCssVariables(screen) });
+      const terminal = new Terminal({ cursorBlink: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, fontSize: FONT_SIZE, theme: readTerminalThemeFromCssVariables(screen) });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(screen);

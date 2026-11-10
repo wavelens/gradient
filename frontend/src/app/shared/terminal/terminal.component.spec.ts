@@ -14,18 +14,19 @@ import { TerminalComponent } from './terminal.component';
 const terminals = vi.hoisted(() => [] as {
   write: ReturnType<typeof vi.fn>;
   typed: (data: string) => void;
-  options: { disableStdin?: boolean; fontFamily?: string; theme?: { background?: string } };
+  options: { disableStdin?: boolean; fontFamily?: string; cursorBlink?: boolean; theme?: { background?: string } };
 }[]);
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;
     rows = 24;
-    options: { disableStdin?: boolean; fontFamily?: string; theme?: { background?: string } } = {};
+    options: { disableStdin?: boolean; fontFamily?: string; cursorBlink?: boolean; theme?: { background?: string } } = {};
     write = vi.fn((_bytes: unknown, parsed?: () => void) => parsed?.());
     typed: (data: string) => void = () => undefined;
-    constructor(options: { theme?: { background?: string } } = {}) {
+    constructor(options: { cursorBlink?: boolean; theme?: { background?: string } } = {}) {
       this.options.theme = options.theme;
+      this.options.cursorBlink = options.cursorBlink;
       terminals.push(this);
     }
     loadAddon(): void {}
@@ -80,6 +81,16 @@ describe('TerminalComponent', () => {
     const bytes = new Uint8Array([104, 105]);
     output.next(bytes);
     expect(terminals[0].write.mock.calls[0][0]).toBe(bytes);
+  });
+
+  it('Cursor can stay still on a reduced-motion request from the system.', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    try {
+      render(fakeSource().source);
+      expect(terminals[0].options.cursorBlink).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('switches to the monospace font of the app once that font has loaded', async () => {

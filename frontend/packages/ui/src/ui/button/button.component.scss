@@ -128,3 +128,9 @@
 @keyframes gr-button-spin {
   to { transform: rotate(360deg); }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .gr-button__spinner {
+    animation-duration: 3s;
+  }
+}
