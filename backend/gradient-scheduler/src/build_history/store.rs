@@ -98,7 +98,6 @@ impl SampleStore {
         };
         rows.iter()
             .rev()
-            .take(OWN_SAMPLE_WINDOW)
             .map(|&i| &self.rows[i].sample)
             .map(|sample| {
                 (
@@ -107,6 +106,7 @@ impl SampleStore {
                 )
             })
             .filter(|(overlap, _)| *overlap >= MIN_INPUT_OVERLAP)
+            .take(OWN_SAMPLE_WINDOW)
             .collect()
     }
 
@@ -215,5 +215,18 @@ mod tests {
         let own = store.own(&key(&["a", "b", "c", "e"]));
         assert_eq!(own.len(), 1);
         assert!((own[0].0 - 0.6).abs() < 1e-9, "{}", own[0].0);
+    }
+
+    #[test]
+    fn newer_builds_of_another_variant_do_not_push_out_the_matching_history() {
+        let mut store = SampleStore::default();
+        store.add(vec![with_inputs(&["cmake", "cudatoolkit"])]);
+        store.add(
+            (0..OWN_SAMPLE_WINDOW)
+                .map(|_| with_inputs(&["autoPatchelfHook", "python3-wheel"]))
+                .collect(),
+        );
+
+        assert_eq!(store.own(&key(&["cmake", "cudatoolkit"])).len(), 1);
     }
 }
