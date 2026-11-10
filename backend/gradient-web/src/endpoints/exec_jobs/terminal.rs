@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{LiveStreamAuthToken, MaybeApiKey};
+use crate::endpoints::live::revoked_session_or_api_key_close_message;
 use crate::error::{WebError, WebResult};
 use axum::Extension;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
-use futures::{SinkExt, StreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use gradient_core::ServerState;
 use gradient_pool::guest_channels::{GuestChannelEvent, GuestChannelHandle};
 use gradient_scheduler::{GuestChannelOpened, Scheduler};
@@ -80,6 +81,10 @@ struct TerminalRequest {
         WebError
     )
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Axum extractors: each argument is one part of the request."
+)]
 pub async fn get_exec_job_console(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -87,6 +92,7 @@ pub async fn get_exec_job_console(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(job): Path<ExecJobId>,
     Query(query): Query<ConsoleQuery>,
+    credentials: LiveStreamAuthToken,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
     ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
@@ -95,7 +101,13 @@ pub async fn get_exec_job_console(
         node: query.node.unwrap_or(0),
         kind: GuestChannelKind::Console,
     };
-    Ok(upgrade(&state.shutdown, scheduler, ws, request))
+    Ok(upgrade(
+        &state.shutdown,
+        scheduler,
+        ws,
+        request,
+        credentials,
+    ))
 }
 
 #[utoipa::path(
@@ -111,6 +123,10 @@ pub async fn get_exec_job_console(
         WebError
     )
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Axum extractors: each argument is one part of the request."
+)]
 pub async fn get_exec_job_shell(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -118,6 +134,7 @@ pub async fn get_exec_job_shell(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(job): Path<ExecJobId>,
     Query(query): Query<TerminalQuery>,
+    credentials: LiveStreamAuthToken,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
     ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
@@ -129,7 +146,13 @@ pub async fn get_exec_job_shell(
             attach: query.attach,
         },
     };
-    Ok(upgrade(&state.shutdown, scheduler, ws, request))
+    Ok(upgrade(
+        &state.shutdown,
+        scheduler,
+        ws,
+        request,
+        credentials,
+    ))
 }
 
 #[utoipa::path(
@@ -145,6 +168,10 @@ pub async fn get_exec_job_shell(
         WebError
     )
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Axum extractors: each argument is one part of the request."
+)]
 pub async fn get_exec_job_forward(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -152,6 +179,7 @@ pub async fn get_exec_job_forward(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(job): Path<ExecJobId>,
     Query(query): Query<ForwardQuery>,
+    credentials: LiveStreamAuthToken,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
     ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
@@ -160,7 +188,13 @@ pub async fn get_exec_job_forward(
         node: query.node.unwrap_or(0),
         kind: GuestChannelKind::Forward { port: query.port },
     };
-    Ok(upgrade(&state.shutdown, scheduler, ws, request))
+    Ok(upgrade(
+        &state.shutdown,
+        scheduler,
+        ws,
+        request,
+        credentials,
+    ))
 }
 
 fn upgrade(
@@ -168,6 +202,7 @@ fn upgrade(
     scheduler: Arc<Scheduler>,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     request: TerminalRequest,
+    credentials: LiveStreamAuthToken,
 ) -> Response {
     let ws = match ws {
         Ok(ws) => ws,
@@ -177,7 +212,13 @@ fn upgrade(
     let shutdown = shutdown.clone();
     ws.on_upgrade(move |socket| async move {
         let _ = shutdown
-            .spawn(serve_terminal(socket, scheduler, request, cancel))
+            .spawn(serve_terminal(
+                socket,
+                scheduler,
+                request,
+                credentials,
+                cancel,
+            ))
             .await;
     })
 }
@@ -186,13 +227,18 @@ async fn serve_terminal(
     socket: WebSocket,
     scheduler: Arc<Scheduler>,
     request: TerminalRequest,
+    credentials: LiveStreamAuthToken,
     cancel: CancellationToken,
 ) {
     let opened = scheduler
         .open_guest_channel(request.job, request.node, request.kind)
         .await;
     match opened {
-        Ok(Ok(opened)) => pipe_terminal(socket, opened, cancel).await,
+        Ok(Ok(opened)) => {
+            let (sink, stream) = socket.split();
+            let revoked = credentials.wait_until_session_or_api_key_is_revoked();
+            pipe_terminal(sink, stream, opened, revoked, cancel).await;
+        }
         Ok(Err(refusal)) => refuse(socket, refusal.to_string()).await,
         Err(e) => {
             tracing::warn!(exec_job = %request.job, error = %e, "opening a terminal failed");
@@ -211,16 +257,25 @@ async fn refuse(socket: WebSocket, message: String) {
     let _ = sink.send(Message::Close(None)).await;
 }
 
-pub async fn pipe_terminal(
-    socket: WebSocket,
+async fn pipe_terminal<Si, St, E>(
+    mut sink: Si,
+    mut stream: St,
     opened: GuestChannelOpened,
+    revoked: impl Future<Output = ()>,
     cancel: CancellationToken,
-) {
+) where
+    Si: Sink<Message> + Unpin,
+    St: Stream<Item = Result<Message, E>> + Unpin,
+{
     let GuestChannelOpened { handle, mut events } = opened;
-    let (mut sink, mut stream) = socket.split();
+    tokio::pin!(revoked);
     let closed = loop {
         tokio::select! {
             _ = cancel.cancelled() => return,
+            _ = &mut revoked => {
+                let _ = sink.send(revoked_session_or_api_key_close_message()).await;
+                return;
+            }
             incoming = stream.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
                 Some(Ok(message)) => forward_client_message(&handle, message),
@@ -334,6 +389,37 @@ mod tests {
                     "ssh -p 2222 -N -L 6006:127.0.0.1:6006 infra/{id}@ci.example.com"
                 )]
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_revoked_session_closes_an_open_terminal() {
+        let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
+        let (handle, events) = gradient_pool::guest_channels::GuestChannels::new().open(
+            "worker",
+            Arc::new(port),
+            "job".into(),
+            GuestChannelKind::Console,
+        );
+        let (sink, mut sent) = futures::channel::mpsc::unbounded::<Message>();
+        let client = futures::stream::pending::<Result<Message, axum::Error>>();
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            pipe_terminal(
+                sink,
+                client,
+                GuestChannelOpened { handle, events },
+                std::future::ready(()),
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .expect("the terminal closes once the credentials are revoked");
+
+        assert_eq!(
+            sent.next().await,
+            Some(revoked_session_or_api_key_close_message())
         );
     }
 }
