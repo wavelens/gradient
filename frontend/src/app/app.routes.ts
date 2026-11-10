@@ -163,7 +163,7 @@ export const routes: Routes = [
           },
           {
             path: 'exec/:job',
-            title: 'Exec Job',
+            title: 'Exec job',
             canActivate: [execJobInTaskGuard],
             data: { hideFooter: true },
             loadComponent: () =>

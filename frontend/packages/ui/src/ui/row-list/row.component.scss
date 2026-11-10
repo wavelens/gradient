@@ -95,19 +95,28 @@
   gap: $spacing-xs $spacing-sm;
   color: var(--gr-text-primary);
   font-size: $font-size-md;
-  overflow-wrap: anywhere;
 }
 
 .row-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: $spacing-sm;
+  gap: $spacing-xs $spacing-sm;
   margin-top: $spacing-xs;
   color: var(--gr-text-secondary);
   font-size: $font-size-sm;
-  overflow-wrap: anywhere;
 
   &:empty { display: none; }
+}
+
+// A word can only break mid-word, when the word doesn't fit on a line by itself. `anywhere` can shrink flex items to the width of one character before they wrap to the next line.
+.row-name,
+.row-meta {
+  overflow-wrap: break-word;
+
+  > ::ng-deep * {
+    max-width: 100%;
+  }
 }
 
 .row-actions {
