@@ -220,7 +220,7 @@ impl<'a> StateApplicator<'a> {
             active.role = Set(role);
             active.includes_users = Set(grant.users);
             active.includes_workers = Set(grant.workers);
-            active.managed = Set(true);
+            active.grant_source = Set(TeamGrantSource::State);
             active.update(self.db).await?;
             return Ok(());
         }
@@ -232,7 +232,7 @@ impl<'a> StateApplicator<'a> {
             role,
             includes_users: grant.users,
             includes_workers: grant.workers,
-            managed: true,
+            grant_source: TeamGrantSource::State,
             created_at: now(),
         }
         .into_active_model()
@@ -282,11 +282,11 @@ impl<'a> StateApplicator<'a> {
                     .one(self.db)
                     .await?;
                 match existing {
-                    Some(row) if row.role == role && row.managed => {}
+                    Some(row) if row.role == role && row.grant_source == TeamGrantSource::State => {}
                     Some(row) => {
                         let mut active: team_cache::ActiveModel = row.into();
                         active.role = Set(role);
-                        active.managed = Set(true);
+                        active.grant_source = Set(TeamGrantSource::State);
                         active.update(self.db).await?;
                     }
                     None => {
@@ -295,7 +295,7 @@ impl<'a> StateApplicator<'a> {
                             team,
                             cache: cache_id,
                             role,
-                            managed: true,
+                            grant_source: TeamGrantSource::State,
                             created_at: now(),
                         }
                         .into_active_model()
@@ -333,7 +333,7 @@ async fn remove_undeclared_project_grants<C: ConnectionTrait>(
 ) -> Result<(), sea_orm::DbErr> {
     team_project::Entity::delete_many()
         .filter(team_project::Column::Project.eq(project))
-        .filter(team_project::Column::Managed.eq(true))
+        .filter(team_project::Column::GrantSource.eq(TeamGrantSource::State))
         .filter(team_project::Column::Team.is_not_in(declared))
         .exec(db)
         .await?;
@@ -347,7 +347,7 @@ async fn remove_undeclared_cache_grants<C: ConnectionTrait>(
 ) -> Result<(), sea_orm::DbErr> {
     team_cache::Entity::delete_many()
         .filter(team_cache::Column::Cache.eq(cache))
-        .filter(team_cache::Column::Managed.eq(true))
+        .filter(team_cache::Column::GrantSource.eq(TeamGrantSource::State))
         .filter(team_cache::Column::Team.is_not_in(declared))
         .exec(db)
         .await?;
@@ -385,7 +385,7 @@ mod grant_tests {
         remove_undeclared_project_grants(&db, ProjectId::now_v7(), Vec::new())
             .await
             .unwrap();
-        deletes_only_state_rows(db, "team_project", "managed");
+        deletes_only_state_rows(db, "team_project", "grant_source");
     }
 
     #[tokio::test]
@@ -394,7 +394,7 @@ mod grant_tests {
         remove_undeclared_cache_grants(&db, CacheId::now_v7(), Vec::new())
             .await
             .unwrap();
-        deletes_only_state_rows(db, "team_cache", "managed");
+        deletes_only_state_rows(db, "team_cache", "grant_source");
     }
 
     #[tokio::test]

@@ -7,7 +7,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CacheId, RoleId, UserId};
+use crate::ids::{CacheId, RoleId, TeamId, UserId};
 
 // A view over `cache_user` and team grants; never written.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -19,6 +19,7 @@ pub struct Model {
     pub user: UserId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub role: RoleId,
+    pub team: Option<TeamId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -9,6 +9,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{CacheId, RoleId, TeamCacheId, TeamId};
+use crate::team_project::TeamGrantSource;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "team_cache")]
@@ -18,7 +19,7 @@ pub struct Model {
     pub team: TeamId,
     pub cache: CacheId,
     pub role: RoleId,
-    pub managed: bool,
+    pub grant_source: TeamGrantSource,
     pub created_at: NaiveDateTime,
 }
 

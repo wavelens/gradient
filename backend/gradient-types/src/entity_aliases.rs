@@ -11,6 +11,7 @@ use gradient_entity::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use gradient_entity::team_project::TeamGrantSource;
 pub use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 pub use gradient_entity::{
     IdentityMapping, MappingContext, MappingError, OriginalStorePath, STORE_DIR, StoreHash,

@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CacheId, UserId};
+use crate::ids::{CacheId, TeamId, UserId};
 
 #[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize, utoipa::ToSchema)]
 #[schema(as = Cache)]
@@ -34,6 +34,7 @@ pub struct Model {
     #[sea_orm(default_value = "0")]
     pub max_storage_gb: i32,
     pub pull_through: bool,
+    pub owner_team: Option<TeamId>,
 }
 
 impl Default for Model {
@@ -54,6 +55,7 @@ impl Default for Model {
             managed: false,
             max_storage_gb: 0,
             pull_through: true,
+            owner_team: None,
         }
     }
 }

@@ -191,7 +191,7 @@ async fn delete_role_rejects_a_role_granted_to_a_team() {
             team: TeamId::now_v7(),
             cache: cache_id(),
             role: custom_id,
-            managed: false,
+            grant_source: Default::default(),
             created_at: chrono::Utc::now().naive_utc(),
         }]]);
 

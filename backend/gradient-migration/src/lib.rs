@@ -70,6 +70,7 @@ mod m20261201_000002_add_job_id_dispatched_at_desc_index_to_dispatched_job_concu
 mod m20261201_000003_evaluation_previous_next_set_null_on_delete;
 mod m20261201_000004_add_retention_delete_indexes;
 mod m20261202_000000_add_view_project_permission_bit_to_existing_api_keys_not_pinned_to_cache;
+mod m20261203_000000_project_owner_team_and_direct_role_precedence;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -167,6 +168,7 @@ impl MigratorTrait for Migrator {
             Box::new(
                 m20261202_000000_add_view_project_permission_bit_to_existing_api_keys_not_pinned_to_cache::Migration,
             ),
+            Box::new(m20261203_000000_project_owner_team_and_direct_role_precedence::Migration),
         ]
     }
 }

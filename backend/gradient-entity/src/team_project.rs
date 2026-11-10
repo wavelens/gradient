@@ -10,6 +10,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{ProjectId, RoleId, TeamId, TeamProjectId};
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    Deserialize,
+    Serialize,
+    utoipa::ToSchema,
+)]
+#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
+#[serde(rename_all = "lowercase")]
+pub enum TeamGrantSource {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    Manual,
+    #[sea_orm(num_value = 1)]
+    Owner,
+    #[sea_orm(num_value = 2)]
+    State,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "team_project")]
 pub struct Model {
@@ -20,7 +45,7 @@ pub struct Model {
     pub role: Option<RoleId>,
     pub includes_users: bool,
     pub includes_workers: bool,
-    pub managed: bool,
+    pub grant_source: TeamGrantSource,
     pub created_at: NaiveDateTime,
 }
 

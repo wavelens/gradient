@@ -44,55 +44,68 @@ pub async fn cache_role_granted_to_a_team<C: ConnectionTrait>(
             .is_some())
 }
 
-pub async fn apply_new_project_grants<C: ConnectionTrait>(
+#[derive(Debug, Default, PartialEq)]
+pub struct OwnerTeamGrantChange {
+    pub added: Option<MTeamProject>,
+    pub removed: Vec<MTeamProject>,
+}
+
+pub async fn upsert_project_owner_team_grant<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
-    creator: UserId,
-) -> Result<Vec<TeamId>, DbErr> {
-    let teams = ETeam::find()
-        .filter(
-            Condition::any()
-                .add(CTeam::NewProjectUsers.eq(true))
-                .add(CTeam::NewProjectWorkers.eq(true)),
-        )
-        .all(db)
-        .await?;
-    let creator_teams: HashSet<TeamId> = if teams.iter().any(|team| team.new_project_users) {
-        ETeamUser::find()
-            .filter(CTeamUser::User.eq(creator))
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|membership| membership.team)
-            .collect()
-    } else {
-        HashSet::new()
-    };
-
-    let mut granted = Vec::new();
-    for team in teams {
-        let users = team.new_project_users
-            && team.new_project_role.is_some()
-            && creator_teams.contains(&team.id);
-        if !users && !team.new_project_workers {
-            continue;
-        }
-        ATeamProject {
-            id: Set(TeamProjectId::now_v7()),
-            team: Set(team.id),
-            project: Set(project),
-            role: Set(team.new_project_role.filter(|_| users)),
-            includes_users: Set(users),
-            includes_workers: Set(team.new_project_workers),
-            managed: Set(false),
-            created_at: Set(gradient_types::now()),
-        }
-        .insert(db)
-        .await?;
-        granted.push(team.id);
+    owner: Option<TeamId>,
+) -> Result<OwnerTeamGrantChange, DbErr> {
+    let mut stale = ETeamProject::find()
+        .filter(CTeamProject::Project.eq(project))
+        .filter(CTeamProject::GrantSource.eq(TeamGrantSource::Owner));
+    if let Some(owner) = owner {
+        stale = stale.filter(CTeamProject::Team.ne(owner));
+    }
+    let removed = stale.all(db).await?;
+    if !removed.is_empty() {
+        ETeamProject::delete_many()
+            .filter(CTeamProject::Id.is_in(removed.iter().map(|grant| grant.id)))
+            .exec(db)
+            .await?;
     }
 
-    Ok(granted)
+    let Some(owner) = owner else {
+        return Ok(OwnerTeamGrantChange {
+            added: None,
+            removed,
+        });
+    };
+    let Some(team) = ETeam::find_by_id(owner).one(db).await? else {
+        return Ok(OwnerTeamGrantChange {
+            added: None,
+            removed,
+        });
+    };
+    let users = team.new_project_users && team.new_project_role.is_some();
+    if (!users && !team.new_project_workers) || project_grant(db, owner, project).await?.is_some()
+    {
+        return Ok(OwnerTeamGrantChange {
+            added: None,
+            removed,
+        });
+    }
+
+    let added = ATeamProject {
+        id: Set(TeamProjectId::now_v7()),
+        team: Set(owner),
+        project: Set(project),
+        role: Set(team.new_project_role.filter(|_| users)),
+        includes_users: Set(users),
+        includes_workers: Set(team.new_project_workers),
+        grant_source: Set(TeamGrantSource::Owner),
+        created_at: Set(gradient_types::now()),
+    }
+    .insert(db)
+    .await?;
+    Ok(OwnerTeamGrantChange {
+        added: Some(added),
+        removed,
+    })
 }
 
 pub async fn project_grant<C: ConnectionTrait>(
@@ -234,48 +247,6 @@ mod tests {
     use sea_orm::MockExecResult;
 
     #[tokio::test]
-    async fn new_projects_get_the_grants_their_teams_ask_for() {
-        let granting = MTeam {
-            id: TeamId::now_v7(),
-            new_project_users: true,
-            new_project_workers: true,
-            new_project_role: Some(BASE_ROLE_WRITE_ID),
-            ..Default::default()
-        };
-        let users_without_role = MTeam {
-            id: TeamId::now_v7(),
-            new_project_users: true,
-            ..Default::default()
-        };
-        let creator = UserId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![granting.clone(), users_without_role]])
-            .append_query_results([vec![MTeamUser {
-                team: granting.id,
-                user: creator,
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MTeamProject {
-                team: granting.id,
-                includes_users: true,
-                includes_workers: true,
-                role: Some(BASE_ROLE_WRITE_ID),
-                ..Default::default()
-            }]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-
-        let granted = apply_new_project_grants(&db, ProjectId::now_v7(), creator)
-            .await
-            .expect("grants");
-
-        assert_eq!(granted, vec![granting.id]);
-    }
-
-    #[tokio::test]
     async fn a_grant_replaces_the_pending_request_of_its_team() {
         let grant = MTeamProject {
             team: TeamId::now_v7(),
@@ -302,39 +273,103 @@ mod tests {
         assert!(log[1].sql.starts_with("INSERT INTO \"team_project\""));
     }
 
-    #[tokio::test]
-    async fn a_creator_outside_the_team_gets_its_workers_but_not_its_role() {
-        let granting = MTeam {
-            id: TeamId::now_v7(),
-            new_project_users: true,
-            new_project_workers: true,
-            new_project_role: Some(BASE_ROLE_WRITE_ID),
-            ..Default::default()
-        };
-        let db = mock_db()
-            .append_query_results([vec![granting.clone()]])
-            .append_query_results([Vec::<MTeamUser>::new()])
-            .append_query_results([vec![MTeamProject {
-                team: granting.id,
-                includes_workers: true,
-                ..Default::default()
-            }]])
-            .into_connection();
-
-        let granted = apply_new_project_grants(&db, ProjectId::now_v7(), UserId::now_v7())
+    async fn two_teams_and_a_project(
+        db: &gradient_fixtures::database::TestDatabase,
+    ) -> (MTeam, MTeam, ProjectId) {
+        use gradient_fixtures::rows;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
             .await
-            .expect("grants");
+            .expect("the user is written");
+        crate::rows::insert::<ERole, _>(&conn, rows::write_role())
+            .await
+            .expect("the role is written");
+        let owner = crate::rows::insert::<ETeam, _>(
+            &conn,
+            MTeam {
+                new_project_users: true,
+                new_project_workers: true,
+                new_project_role: Some(BASE_ROLE_WRITE_ID),
+                ..rows::team()
+            },
+        )
+        .await
+        .expect("the owner team is written");
+        let other = crate::rows::insert::<ETeam, _>(
+            &conn,
+            MTeam {
+                id: TeamId::now_v7(),
+                name: "other".into(),
+                new_project_workers: true,
+                ..rows::team()
+            },
+        )
+        .await
+        .expect("the other team is written");
+        let project = crate::rows::insert::<EProject, _>(&conn, rows::project())
+            .await
+            .expect("the project is written");
+        (owner, other, project.id)
+    }
 
-        assert_eq!(granted, vec![granting.id]);
-        let log = gradient_fixtures::mock::raw_statements(db.into_transaction_log());
-        let insert = log
-            .iter()
-            .find(|s| s.sql.starts_with("INSERT INTO \"team_project\""))
-            .expect("the grant is written");
-        let values = format!("{:?}", insert.values);
-        assert!(
-            values.contains("Bool(Some(false)), Bool(Some(true))"),
-            "users off, workers on: {values}"
+    #[tokio::test]
+    async fn only_the_owner_team_gets_a_grant_on_a_new_project() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let (owner, _other, project) = two_teams_and_a_project(&db).await;
+
+        let change = upsert_project_owner_team_grant(&db.connection(), project, Some(owner.id))
+            .await
+            .expect("the owner grant is written");
+
+        let grants = db.rows::<ETeamProject>().await;
+        assert_eq!(change.added.as_ref(), grants.first());
+        assert_eq!(
+            grants
+                .iter()
+                .map(|g| (g.team, g.role, g.includes_users, g.grant_source))
+                .collect::<Vec<_>>(),
+            [(
+                owner.id,
+                Some(BASE_ROLE_WRITE_ID),
+                true,
+                TeamGrantSource::Owner
+            )]
         );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_new_owner_team_replaces_the_old_owner_grant_but_not_manual_grants() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        let (owner, other, project) = two_teams_and_a_project(&db).await;
+        upsert_project_owner_team_grant(&conn, project, Some(owner.id))
+            .await
+            .expect("the owner grant is written");
+        let manual = crate::rows::insert::<ETeamProject, _>(
+            &conn,
+            MTeamProject {
+                id: TeamProjectId::now_v7(),
+                team: other.id,
+                project,
+                includes_workers: true,
+                created_at: gradient_types::now(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the manual grant is written");
+
+        let change = upsert_project_owner_team_grant(&conn, project, Some(other.id))
+            .await
+            .expect("the owner moves");
+
+        assert_eq!(change.added, None);
+        assert_eq!(
+            change.removed.iter().map(|g| g.team).collect::<Vec<_>>(),
+            [owner.id]
+        );
+        assert_eq!(db.rows::<ETeamProject>().await, [manual]);
+        db.finish().await;
     }
 }

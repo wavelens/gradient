@@ -10,7 +10,9 @@ use gradient_types::consts::{
 };
 use gradient_types::permissions::PermissionMask;
 use gradient_types::*;
+use sea_orm::sea_query::Query;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub async fn project_permission_mask<C: ConnectionTrait>(
@@ -77,7 +79,7 @@ pub async fn load_cache_member_role_and_permission_mask<C: ConnectionTrait>(
     Ok(Some(CacheRoleAndPermissionMask { role, permissions }))
 }
 
-fn cache_role_rank(role: RoleId) -> u8 {
+pub fn cache_role_rank(role: RoleId) -> u8 {
     match role {
         BASE_CACHE_ROLE_ADMIN_ID => 3,
         BASE_CACHE_ROLE_WRITE_ID => 2,
@@ -160,7 +162,7 @@ pub async fn project_role_names<C: ConnectionTrait>(
         .collect())
 }
 
-fn role_rank(role: RoleId) -> u8 {
+pub fn role_rank(role: RoleId) -> u8 {
     match role {
         BASE_ROLE_ADMIN_ID => 3,
         BASE_ROLE_WRITE_ID => 2,
@@ -184,19 +186,89 @@ async fn project_roles<C: ConnectionTrait>(
         .collect())
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+pub struct RevokedUserAccessCounts {
+    pub projects: u64,
+    pub caches: u64,
+    pub teams: u64,
+    pub invitations: u64,
+}
+
+pub async fn delete_user_memberships_and_pending_invitations_skipping_configured_rows<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    user: UserId,
+) -> Result<RevokedUserAccessCounts, DbErr> {
+    let projects = EProjectUser::delete_many()
+        .filter(CProjectUser::User.eq(user))
+        .filter(
+            CProjectUser::Project.not_in_subquery(
+                Query::select()
+                    .column(CProject::Id)
+                    .from(EProject)
+                    .and_where(CProject::Managed.eq(true))
+                    .to_owned(),
+            ),
+        )
+        .exec(db)
+        .await?
+        .rows_affected;
+    let caches = ECacheUser::delete_many()
+        .filter(CCacheUser::User.eq(user))
+        .filter(
+            CCacheUser::Cache.not_in_subquery(
+                Query::select()
+                    .column(CCache::Id)
+                    .from(ECache)
+                    .and_where(CCache::Managed.eq(true))
+                    .to_owned(),
+            ),
+        )
+        .exec(db)
+        .await?
+        .rows_affected;
+    let teams = ETeamUser::delete_many()
+        .filter(CTeamUser::User.eq(user))
+        .filter(CTeamUser::Source.eq(TeamMemberSource::Api))
+        .exec(db)
+        .await?
+        .rows_affected;
+    let invitations = EProjectInvitation::delete_many()
+        .filter(CProjectInvitation::User.eq(user))
+        .exec(db)
+        .await?
+        .rows_affected
+        + ECacheInvitation::delete_many()
+            .filter(CCacheInvitation::User.eq(user))
+            .exec(db)
+            .await?
+            .rows_affected
+        + ETeamInvitation::delete_many()
+            .filter(CTeamInvitation::User.eq(user))
+            .exec(db)
+            .await?
+            .rows_affected;
+    Ok(RevokedUserAccessCounts {
+        projects,
+        caches,
+        teams,
+        invitations,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_fixtures::mock::mock_db;
-    use gradient_types::permissions::{
-        CachePermission, Permission, cache_mask_from, cache_mask_grants, mask_from, mask_grants,
-    };
+    use gradient_types::permissions::{admin_mask, cache_write_mask, view_mask};
 
     fn access(role: RoleId) -> MProjectAccess {
         MProjectAccess {
             project: ProjectId::now_v7(),
             user: UserId::now_v7(),
             role,
+            team: None,
         }
     }
 
@@ -213,34 +285,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_direct_role_and_a_team_role_add_up() {
-        let (direct, team) = (RoleId::now_v7(), RoleId::now_v7());
-        let db = mock_db()
-            .append_query_results([vec![access(direct), access(team)]])
-            .append_query_results([vec![
-                MRole {
-                    id: direct,
-                    permission: mask_from(&[Permission::ViewProject]),
-                    ..Default::default()
-                },
-                MRole {
-                    id: team,
-                    permission: mask_from(&[Permission::TriggerEvaluation]),
-                    ..Default::default()
-                },
-            ]])
-            .into_connection();
-
-        let mask = project_permission_mask(&db, ProjectId::now_v7(), UserId::now_v7())
-            .await
-            .expect("query")
-            .expect("access");
-        assert!(mask_grants(mask, Permission::ViewProject));
-        assert!(mask_grants(mask, Permission::TriggerEvaluation));
-        assert!(!mask_grants(mask, Permission::ManageMembers));
-    }
-
-    #[tokio::test]
     async fn the_strongest_role_names_the_access_to_a_project() {
         use gradient_types::consts::{BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
         let (project, user) = (ProjectId::now_v7(), UserId::now_v7());
@@ -248,6 +292,7 @@ mod tests {
             project,
             user,
             role,
+            team: None,
         };
         let named = |id, name: &str| MRole {
             id,
@@ -295,43 +340,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_roles_from_a_team_and_a_membership_add_up() {
-        let (direct, team) = (RoleId::now_v7(), RoleId::now_v7());
-        let row = |role| MCacheAccess {
-            cache: CacheId::now_v7(),
-            user: UserId::now_v7(),
-            role,
-        };
-        let db = mock_db()
-            .append_query_results([vec![row(direct), row(team)]])
-            .append_query_results([vec![
-                MCacheRole {
-                    id: direct,
-                    permission: cache_mask_from(&[CachePermission::ReadStore]),
-                    ..Default::default()
-                },
-                MCacheRole {
-                    id: team,
-                    permission: cache_mask_from(&[CachePermission::WriteStore]),
-                    ..Default::default()
-                },
-            ]])
-            .into_connection();
-
-        let mask = cache_permission_mask(&db, CacheId::now_v7(), UserId::now_v7())
-            .await
-            .expect("query")
-            .expect("access");
-        assert!(cache_mask_grants(mask, CachePermission::ReadStore));
-        assert!(cache_mask_grants(mask, CachePermission::WriteStore));
-    }
-
-    #[tokio::test]
     async fn the_strongest_cache_role_names_the_membership() {
         let row = |role| MCacheAccess {
             cache: CacheId::now_v7(),
             user: UserId::now_v7(),
             role,
+            team: None,
         };
         let role = |id, name: &str| MCacheRole {
             id,
@@ -353,5 +367,258 @@ mod tests {
                 .expect("query")
                 .expect("access");
         assert_eq!(grant.role.as_deref(), Some("Uploader"));
+    }
+
+    async fn team_member_with_project(conn: &sea_orm::DatabaseConnection) {
+        use gradient_fixtures::rows;
+        crate::rows::insert::<EUser, _>(conn, rows::user())
+            .await
+            .expect("the user is written");
+        crate::rows::insert::<ETeam, _>(conn, rows::team())
+            .await
+            .expect("the team is written");
+        crate::rows::insert::<ETeamUser, _>(conn, rows::team_member(TeamRole::Member))
+            .await
+            .expect("the membership is written");
+        for role in [rows::admin_role(), rows::write_role(), rows::view_role()] {
+            crate::rows::insert::<ERole, _>(conn, role)
+                .await
+                .expect("the role is written");
+        }
+        crate::rows::insert::<EProject, _>(conn, rows::project())
+            .await
+            .expect("the project is written");
+        crate::rows::insert::<ECache, _>(conn, rows::cache())
+            .await
+            .expect("the cache is written");
+    }
+
+    fn team_grant(role: RoleId) -> MTeamProject {
+        MTeamProject {
+            id: TeamProjectId::now_v7(),
+            team: gradient_fixtures::ids::team_id(),
+            project: gradient_fixtures::ids::project_id(),
+            role: Some(role),
+            includes_users: true,
+            created_at: gradient_types::now(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_direct_role_overrides_a_stronger_team_grant() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        team_member_with_project(&conn).await;
+        crate::rows::insert::<ETeamProject, _>(&conn, team_grant(BASE_ROLE_ADMIN_ID))
+            .await
+            .expect("the grant is written");
+        let direct = crate::rows::insert::<EProjectUser, _>(
+            &conn,
+            gradient_fixtures::rows::project_member(BASE_ROLE_VIEW_ID),
+        )
+        .await
+        .expect("the member is written");
+        let (project, user) = (direct.project, direct.user);
+
+        let with_direct_row = project_permission_mask(&conn, project, user)
+            .await
+            .expect("the mask reads");
+        crate::rows::delete::<EProjectUser, _>(&conn, direct)
+            .await
+            .expect("the member is removed");
+        let with_team_grant_only = project_permission_mask(&conn, project, user)
+            .await
+            .expect("the mask reads");
+
+        assert_eq!(with_direct_row, Some(view_mask()));
+        assert_eq!(with_team_grant_only, Some(admin_mask()));
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_direct_cache_role_overrides_a_stronger_team_grant() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        team_member_with_project(&conn).await;
+        crate::rows::insert::<ETeamCache, _>(
+            &conn,
+            MTeamCache {
+                id: TeamCacheId::now_v7(),
+                team: gradient_fixtures::ids::team_id(),
+                cache: gradient_fixtures::ids::cache_id(),
+                role: BASE_CACHE_ROLE_WRITE_ID,
+                created_at: gradient_types::now(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the grant is written");
+        crate::rows::insert::<ECacheUser, _>(
+            &conn,
+            gradient_fixtures::rows::cache_member(BASE_CACHE_ROLE_VIEW_ID),
+        )
+        .await
+        .expect("the member is written");
+
+        let grant = load_cache_member_role_and_permission_mask(
+            &conn,
+            gradient_fixtures::ids::cache_id(),
+            gradient_fixtures::ids::user_id(),
+        )
+        .await
+        .expect("the mask reads")
+        .expect("access");
+
+        assert_eq!(grant.role.as_deref(), Some("View"));
+        assert!(grant.permissions & cache_write_mask() != cache_write_mask());
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn revoking_all_access_keeps_rows_of_the_server_configuration() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        team_member_with_project(&conn).await;
+        crate::rows::insert::<EProjectUser, _>(
+            &conn,
+            gradient_fixtures::rows::project_member(BASE_ROLE_WRITE_ID),
+        )
+        .await
+        .expect("the member is written");
+        let configured = crate::rows::insert::<EProject, _>(
+            &conn,
+            MProject {
+                managed: true,
+                ..gradient_fixtures::rows::project_named("configured")
+            },
+        )
+        .await
+        .expect("the configured project is written");
+        crate::rows::insert::<EProjectUser, _>(
+            &conn,
+            MProjectUser {
+                project: configured.id,
+                ..gradient_fixtures::rows::project_member(BASE_ROLE_VIEW_ID)
+            },
+        )
+        .await
+        .expect("the configured member is written");
+
+        let revoked = delete_user_memberships_and_pending_invitations_skipping_configured_rows(
+            &conn,
+            gradient_fixtures::ids::user_id(),
+        )
+        .await
+        .expect("the rows are deleted");
+
+        assert_eq!(
+            revoked,
+            RevokedUserAccessCounts {
+                projects: 1,
+                teams: 1,
+                ..Default::default()
+            }
+        );
+        let kept: Vec<ProjectId> = db
+            .rows::<EProjectUser>()
+            .await
+            .into_iter()
+            .map(|row| row.project)
+            .collect();
+        assert_eq!(kept, [configured.id]);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn the_precedence_migration_deletes_only_direct_rows_weaker_than_team_grants() {
+        use gradient_migration::{Migrator, MigratorTrait};
+        use sea_orm_migration::SchemaManager;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        let migration = Migrator::migrations()
+            .into_iter()
+            .find(|m| m.name() == "m20261203_000000_project_owner_team_and_direct_role_precedence")
+            .expect("the migration is registered");
+        migration
+            .down(&SchemaManager::new(&conn))
+            .await
+            .expect("the migration reverts");
+        team_member_with_project_before_precedence(&db).await;
+        let (project, team) = (
+            gradient_fixtures::ids::project_id(),
+            gradient_fixtures::ids::team_id(),
+        );
+        let (weaker, stronger) = (UserId::now_v7(), UserId::now_v7());
+        for (user, role) in [(weaker, BASE_ROLE_VIEW_ID), (stronger, BASE_ROLE_ADMIN_ID)] {
+            db.execute(&format!(
+                "INSERT INTO \"user\" (id, username, name, email, last_login_at, created_at) \
+                 VALUES ('{user}', 'u{}', 'U', 'u{}@example.com', now(), now()); \
+                 INSERT INTO team_user (id, team, \"user\", role) VALUES ('{}', '{team}', '{user}', 1); \
+                 INSERT INTO project_user (id, project, \"user\", role) VALUES ('{}', '{project}', '{user}', '{role}');",
+                user.simple(),
+                user.simple(),
+                uuid::Uuid::now_v7(),
+                uuid::Uuid::now_v7(),
+            ))
+            .await;
+        }
+        db.execute(&format!(
+            "INSERT INTO team_project (id, team, project, role, includes_users, includes_workers, managed, created_at) \
+             VALUES ('{}', '{team}', '{project}', '{BASE_ROLE_WRITE_ID}', true, false, true, now());",
+            uuid::Uuid::now_v7(),
+        ))
+        .await;
+
+        migration
+            .up(&SchemaManager::new(&conn))
+            .await
+            .expect("the migration applies");
+
+        let direct: Vec<UserId> = db
+            .rows::<EProjectUser>()
+            .await
+            .into_iter()
+            .map(|row| row.user)
+            .collect();
+        assert_eq!(direct, [stronger]);
+        assert_eq!(
+            project_permission_mask(&conn, project, weaker)
+                .await
+                .expect("the mask reads"),
+            Some(gradient_types::permissions::write_mask())
+        );
+        assert_eq!(
+            db.rows::<ETeamProject>().await[0].grant_source,
+            TeamGrantSource::State
+        );
+        db.finish().await;
+    }
+
+    async fn team_member_with_project_before_precedence(
+        db: &gradient_fixtures::database::TestDatabase,
+    ) {
+        use gradient_fixtures::rows;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the user is written");
+        crate::rows::insert::<ETeam, _>(&conn, rows::team())
+            .await
+            .expect("the team is written");
+        for role in [rows::admin_role(), rows::write_role(), rows::view_role()] {
+            crate::rows::insert::<ERole, _>(&conn, role)
+                .await
+                .expect("the role is written");
+        }
+        db.execute(&format!(
+            "INSERT INTO project (id, name, display_name, description, public_key, private_key, \
+             public, hide_build_requests, allow_exec_in_build_requests, created_by, created_at) \
+             VALUES ('{}', 'p', 'P', '', '', '', false, false, false, '{}', now());",
+            gradient_fixtures::ids::project_id(),
+            gradient_fixtures::ids::user_id(),
+        ))
+        .await;
     }
 }

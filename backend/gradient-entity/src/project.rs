@@ -7,7 +7,7 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 
-use crate::ids::{ProjectId, UserId};
+use crate::ids::{ProjectId, TeamId, UserId};
 
 #[derive(Clone, Default, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "project")]
@@ -29,6 +29,7 @@ pub struct Model {
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
+    pub owner_team: Option<TeamId>,
 }
 
 impl std::fmt::Debug for Model {
@@ -56,6 +57,7 @@ impl std::fmt::Debug for Model {
             )
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
+            .field("owner_team", &self.owner_team)
             .finish()
     }
 }

@@ -323,7 +323,7 @@ async fn delete_role_granted_to_a_team_is_rejected() {
             role: Some(custom_id),
             includes_users: true,
             includes_workers: true,
-            managed: false,
+            grant_source: Default::default(),
             created_at: chrono::Utc::now().naive_utc(),
         }]]);
 

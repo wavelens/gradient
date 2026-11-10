@@ -315,7 +315,7 @@ pub async fn post_approve_team_request(
                 role: request.role,
                 includes_users: request.includes_users,
                 includes_workers: workers,
-                managed: false,
+                grant_source: TeamGrantSource::Manual,
                 created_at: gradient_types::now(),
             },
         )
@@ -347,7 +347,7 @@ pub async fn post_approve_team_request(
             team: team.id,
             cache,
             role: request.role,
-            managed: false,
+            grant_source: TeamGrantSource::Manual,
             created_at: gradient_types::now(),
         },
     )

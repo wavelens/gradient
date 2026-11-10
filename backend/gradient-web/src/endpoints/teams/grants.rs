@@ -335,7 +335,7 @@ pub async fn post_project_team(
             role,
             includes_users: body.users,
             includes_workers: body.workers,
-            managed: false,
+            grant_source: TeamGrantSource::Manual,
             created_at: gradient_types::now(),
         },
     )
@@ -665,7 +665,7 @@ pub async fn post_cache_team(
             team: team.id,
             cache: cache.id,
             role,
-            managed: false,
+            grant_source: TeamGrantSource::Manual,
             created_at: gradient_types::now(),
         },
     )
