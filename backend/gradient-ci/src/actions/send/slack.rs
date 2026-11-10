@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::chat_response;
+use super::action_result_from_http_response;
 use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::actions::crypto::decrypt_with_server_key;
@@ -42,5 +42,5 @@ pub(crate) async fn post_slack_message(
         .await
         .map_err(reqwest::Error::without_url)
         .context("send to Slack")?;
-    chat_response("Slack", resp).await
+    action_result_from_http_response("Slack", resp).await
 }

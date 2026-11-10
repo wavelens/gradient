@@ -26,13 +26,29 @@ pub(crate) use start_evaluation::queue_evaluation;
 pub(crate) use web_request::execute_send_web_request;
 
 use crate::actions::{ExecutorOk, MAX_BODY_BYTES, read_capped, truncate};
-use anyhow::{Result, bail};
+use anyhow::Result;
+use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
 
-pub(super) async fn chat_response(service: &str, resp: reqwest::Response) -> Result<ExecutorOk> {
+pub(super) async fn action_result_from_http_response(
+    service: &str,
+    resp: reqwest::Response,
+) -> Result<ExecutorOk> {
     let status = resp.status();
+    let headers = resp.headers().clone();
     let body = read_capped(resp, MAX_BODY_BYTES).await;
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-        bail!("{service} returned {status}: {}", truncate(body, 512));
+    if status.is_client_error() || status.is_server_error() {
+        let rejection =
+            OutboundHttpNonSuccessStatusError::create_error_from_response_status_and_headers(
+                status,
+                &headers,
+                format!(
+                    "{service} returned {status}: {}",
+                    truncate(body.clone(), 512)
+                ),
+            );
+        if !rejection.is_not_retryable() {
+            return Err(rejection.into());
+        }
     }
 
     Ok(ExecutorOk {

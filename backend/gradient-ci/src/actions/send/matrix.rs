@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::chat_response;
+use super::action_result_from_http_response;
 use crate::actions::ExecutorOk;
 use crate::actions::crypto::decrypt_with_server_key;
 use crate::actions::summary::EventSummary;
@@ -88,7 +88,7 @@ pub(crate) async fn post_matrix_message(
         .send()
         .await
         .context("send to Matrix")?;
-    chat_response("Matrix", resp).await
+    action_result_from_http_response("Matrix", resp).await
 }
 
 pub(crate) fn matrix_txn_id(action: TaskActionId, event: &str, at: &str) -> String {

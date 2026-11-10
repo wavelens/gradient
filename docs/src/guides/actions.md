@@ -107,6 +107,8 @@ Every delivery arrives as a `POST` request with a JSON body. The `content` field
 
 A receiver can verify the signature to reject requests not sent by Gradient.
 
+- Gradient can retry rate limits (`429`) and server errors (`5xx`). The wait can last for the delay from `Retry-After`.
+
 ## Matrix and Slack
 
 Each event becomes a single message line with a link to the evaluation log.
