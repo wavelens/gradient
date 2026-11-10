@@ -229,6 +229,8 @@ async fn unpinned_api_key_with_create_project_permission_creates_project() {
         .append_query_results([Vec::<gradient_entity::project::Model>::new()])
         .append_query_results([vec![inserted.clone()]])
         .append_query_results([vec![membership]])
+        .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team::Model>::new()])
         .append_exec_results([exec_ok(), exec_ok()]);
     let crypt_file = std::env::temp_dir().join(format!("gradient-test-crypt-{}", ApiId::now_v7()));
