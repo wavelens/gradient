@@ -869,7 +869,7 @@ impl BatchWriter<'_> {
         &self,
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
-    ) {
+    ) -> Result<()> {
         let now = gradient_types::now();
         let mut rows: Vec<ADerivationInputSource> = Vec::new();
         let mut seen: HashSet<(DerivationId, String)> = HashSet::new();
@@ -912,12 +912,16 @@ impl BatchWriter<'_> {
                 )
                 .exec(&self.ctx.worker_db)
                 .await;
-            if let Err(e) = res
-                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
-            {
-                error!(error = %e, "failed to insert derivation input sources");
+            match res {
+                Ok(_) | Err(sea_orm::DbErr::RecordNotInserted) => {}
+                Err(e) => {
+                    return Err(e)
+                        .context("Insert the input sources of the derivations in a batch.");
+                }
             }
         }
+
+        Ok(())
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -1259,7 +1263,9 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
         writer
             .record_walk_completeness(&resolved, &newly_walked, &grew)
             .await?;
-        writer.persist_input_sources(&batch.derivations, ids).await;
+        writer
+            .persist_input_sources(&batch.derivations, ids)
+            .await?;
         let stored = writer.stored_derivations(&batch.derivations, ids).await?;
         writer
             .resolve_shared_builds(ids, &batch.derivations, &stored)
