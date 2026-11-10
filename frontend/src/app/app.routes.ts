@@ -538,12 +538,14 @@ export const routes: Routes = [
       ),
   },
 
-  // Style guide (developer reference, intentionally unlinked)
-  {
-    path: 'styleguide',
-    loadChildren: () =>
-      import('./features/styleguide/styleguide.routes').then((m) => m.STYLEGUIDE_ROUTES),
-  },
+  // Style guide: reference for developers. No links point to this route. Production builds omit the route.
+  ...(typeof ngDevMode === 'undefined' || ngDevMode
+    ? [{
+        path: 'styleguide',
+        loadChildren: () =>
+          import('./features/styleguide/styleguide.routes').then((m) => m.STYLEGUIDE_ROUTES),
+      }]
+    : []),
 
   // Error pages
   {
