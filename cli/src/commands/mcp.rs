@@ -26,6 +26,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -68,6 +69,13 @@ const DENIED_GRADIENT_SUBCOMMANDS: &[&[&str]] = &[
     &["team", "webhook", "rotate-secret"],
     &["cache", "webhook", "create"],
     &["cache", "webhook", "rotate-secret"],
+    &["cache", "install-netrc"],
+    &["cache", "upload"],
+    &["worker", "register"],
+    &["team", "worker", "register"],
+    &["exec-job", "download"],
+    &["evaluation", "report"],
+    &["builds", "sbom"],
 ];
 const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
 const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
@@ -172,7 +180,7 @@ struct EntryPointStatus {
 
 #[derive(Clone)]
 pub struct GradientMcp {
-    client: Client,
+    cached_api_client_with_token_mutex: Arc<Mutex<(Option<String>, Client)>>,
     selected_project: Option<String>,
     account_name: Option<String>,
     control: bool,
@@ -250,13 +258,27 @@ impl GradientMcp {
             tool_router += Self::control_router();
         }
 
+        let token = saved_login_for_invocation().token();
         Self {
-            client,
+            cached_api_client_with_token_mutex: Arc::new(Mutex::new((token, client))),
             selected_project,
             account_name,
             control,
             tool_router,
         }
+    }
+
+    async fn renew_session_token_and_get_api_client(&self) -> Client {
+        crate::session_token_renewal::renew_saved_session_token_if_half_lifetime_passed().await;
+        let token = saved_login_for_invocation().token();
+        let mut cached = self
+            .cached_api_client_with_token_mutex
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if cached.0 != token {
+            *cached = (token, client_from_config(Output::new(false)));
+        }
+        cached.1.clone()
     }
 
     fn project(&self, given: Option<String>) -> Result<String, ErrorData> {
@@ -272,7 +294,13 @@ impl GradientMcp {
 
     #[tool(description = "List the Gradient projects the authenticated user belongs to.")]
     async fn list_projects(&self) -> Result<CallToolResult, ErrorData> {
-        to_result(self.client.projects().list().await)
+        to_result(
+            self.renew_session_token_and_get_api_client()
+                .await
+                .projects()
+                .list()
+                .await,
+        )
     }
 
     #[tool(description = "List the tasks of a project.")]
@@ -281,7 +309,13 @@ impl GradientMcp {
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let project = self.project(args.project)?;
-        to_result(self.client.tasks().list(&project).await)
+        to_result(
+            self.renew_session_token_and_get_api_client()
+                .await
+                .tasks()
+                .list(&project)
+                .await,
+        )
     }
 
     #[tool(
@@ -292,7 +326,13 @@ impl GradientMcp {
         Parameters(args): Parameters<TaskArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let project = self.project(args.project)?;
-        to_result(self.client.tasks().evaluations(&project, &args.task).await)
+        to_result(
+            self.renew_session_token_and_get_api_client()
+                .await
+                .tasks()
+                .evaluations(&project, &args.task)
+                .await,
+        )
     }
 
     #[tool(description = "Get one evaluation: its commit, status and error, if it failed.")]
@@ -300,7 +340,13 @@ impl GradientMcp {
         &self,
         Parameters(args): Parameters<EvaluationArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        to_result(self.client.evals().get(&args.evaluation).await)
+        to_result(
+            self.renew_session_token_and_get_api_client()
+                .await
+                .evals()
+                .get(&args.evaluation)
+                .await,
+        )
     }
 
     #[tool(description = "List the builds of an evaluation with their per-build status.")]
@@ -308,7 +354,13 @@ impl GradientMcp {
         &self,
         Parameters(args): Parameters<EvaluationArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        to_result(self.client.evals().builds(&args.evaluation).await)
+        to_result(
+            self.renew_session_token_and_get_api_client()
+                .await
+                .evals()
+                .builds(&args.evaluation)
+                .await,
+        )
     }
 
     #[tool(description = "Get one build: its status, derivation path, architecture and outputs.")]
@@ -316,7 +368,13 @@ impl GradientMcp {
         &self,
         Parameters(args): Parameters<BuildArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        to_result(self.client.builds().get(&args.build).await)
+        to_result(
+            self.renew_session_token_and_get_api_client()
+                .await
+                .builds()
+                .get(&args.build)
+                .await,
+        )
     }
 
     #[tool(
@@ -329,7 +387,8 @@ impl GradientMcp {
     ) -> Result<CallToolResult, ErrorData> {
         let start = args.start.unwrap_or(1);
         let log = self
-            .client
+            .renew_session_token_and_get_api_client()
+            .await
             .builds()
             .log_lines(&args.build, start, args.end)
             .await;
@@ -344,7 +403,8 @@ impl GradientMcp {
         Parameters(args): Parameters<LogSearchArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let hits = match self
-            .client
+            .renew_session_token_and_get_api_client()
+            .await
             .builds()
             .log_search(
                 &args.build,
@@ -376,7 +436,8 @@ impl GradientMcp {
     ) -> Result<CallToolResult, ErrorData> {
         let project = self.project(args.project)?;
         to_result(
-            self.client
+            self.renew_session_token_and_get_api_client()
+                .await
                 .tasks()
                 .evaluate(&project, &args.task, args.commit.as_deref())
                 .await,
@@ -388,7 +449,13 @@ impl GradientMcp {
         &self,
         Parameters(args): Parameters<EvaluationArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        to_result(self.client.evals().abort(&args.evaluation).await)
+        to_result(
+            self.renew_session_token_and_get_api_client()
+                .await
+                .evals()
+                .abort(&args.evaluation)
+                .await,
+        )
     }
 
     #[tool(
@@ -430,7 +497,7 @@ impl GradientMcp {
         {
             let command = chain.join(" ");
             return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "`gradient {command}` can work with secret values, so it isn't available here."
+                "`gradient {command}` can't run here because the command can access secret values or local files."
             ))]));
         }
         if args
@@ -520,7 +587,8 @@ impl GradientMcp {
                 .min(WATCH_MAX_TIMEOUT_SECONDS),
         );
 
-        self.client
+        self.renew_session_token_and_get_api_client()
+            .await
             .tasks()
             .entry_points(&project, &args.task, Some(&evaluation), Some(1), Some(0))
             .await
@@ -545,7 +613,8 @@ impl GradientMcp {
 
     async fn latest_evaluation(&self, project: &str, task: &str) -> Result<String, CallToolResult> {
         let evaluations = self
-            .client
+            .renew_session_token_and_get_api_client()
+            .await
             .tasks()
             .evaluations(project, task)
             .await
@@ -566,7 +635,12 @@ impl GradientMcp {
     ) -> Result<EvaluationResponse, ConnectorError> {
         let mut last_read = None;
         loop {
-            let polled = self.client.evals().get(evaluation).await;
+            let polled = self
+                .renew_session_token_and_get_api_client()
+                .await
+                .evals()
+                .get(evaluation)
+                .await;
             match &polled {
                 Ok(eval) if eval_is_terminal(eval.status) => return polled,
                 Err(e) if !is_transient(e) => return polled,
@@ -593,7 +667,8 @@ impl GradientMcp {
         let mut statuses = Vec::new();
         loop {
             let page = self
-                .client
+                .renew_session_token_and_get_api_client()
+                .await
                 .tasks()
                 .entry_points(
                     project,

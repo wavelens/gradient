@@ -275,10 +275,30 @@ async fn mcp_refuses_secret_writes_even_with_flags_before_the_subcommand() {
             "--url",
             "https://example.com"
         ]),
+        json!([
+            "cache",
+            "install-netrc",
+            "--server",
+            "https://example.com",
+            "--cache",
+            "prod",
+            "--token",
+            "GRADx",
+            "--netrc-file",
+            "netrc"
+        ]),
+        json!(["cache", "upload", "prod", "--nar-file", "secret.nar"]),
+        json!([
+            "worker",
+            "register",
+            "00000000-0000-0000-0000-000000000002",
+            "--display-name",
+            "w"
+        ]),
     ] {
         run_gradient_with_temp_home_stdin_and_args(&home, &build_mcp_stdin_json_rpc_frames_for_initialize_initialized_and_run_gradient_command_call(args), &["mcp", "--control"])
             .success()
-            .stdout(predicate::str::contains("isn't available here"));
+            .stdout(predicate::str::contains("can't run here"));
     }
 }
 
@@ -313,7 +333,7 @@ async fn mcp_run_gradient_command_refuses_task_action_create_that_prints_a_one_t
         &["mcp", "--control"],
     )
     .success()
-    .stdout(predicate::str::contains("isn't available here"));
+    .stdout(predicate::str::contains("can't run here"));
 }
 
 #[tokio::test]
@@ -335,5 +355,5 @@ async fn mcp_allows_listing_secret_names() {
         &["mcp", "--control"],
     )
     .success()
-    .stdout(predicate::str::contains("isn't available here").not());
+    .stdout(predicate::str::contains("can't run here").not());
 }

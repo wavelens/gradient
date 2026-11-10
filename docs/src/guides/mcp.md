@@ -70,7 +70,7 @@ With `gradient mcp --control`, the assistant can act on CI. Project permissions 
 | `start_evaluation` | Start an evaluation for a task, optionally pinned to a commit |
 | `abort_evaluation` | Abort all running and queued builds of an evaluation |
 | `watch_evaluation` | Block until an evaluation finishes, up to `timeout_seconds` (default 600, max 3600) |
-| `run_gradient_command` | Run arbitrary `gradient` commands from groups `project`, `task`, `cache`, `worker`, `team`, `builds`, `evaluation`, `logs`, `search`, `status`, `info`, `exec-job`. One example is the creation of a task. The output is JSON. The assistant can detect commands through `--help`, so these rare actions don't add tool definitions to context. Commands that print secrets, such as `project secret set` and `task action create`, fail with a denial. |
+| `run_gradient_command` | Run arbitrary `gradient` commands from groups `project`, `task`, `cache`, `worker`, `team`, `builds`, `evaluation`, `logs`, `search`, `status`, `info`, `exec-job`. One example is the creation of a task. The output is JSON. The assistant can detect commands through `--help`, so these rare actions don't add tool definitions to context. Commands that print secrets or touch local files fail with a denial. Examples are `project secret set`, `task action create`, `worker register`, `cache install-netrc`, `cache upload` and `evaluation report`. |
 
 Without `--control`, the server runs in read-only mode.
 
