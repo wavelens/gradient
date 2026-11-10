@@ -139,20 +139,14 @@ impl<'a> StateApplicator<'a> {
         }
 
         for (task_id, created_by_id, project_id, state_task) in applied {
-            self.apply_task_actions(
-                task_id,
-                created_by_id,
-                project_id,
-                &state_task.name,
-                &state_task.actions,
-            )
-            .await
-            .map_err(|e| {
-                format!(
-                    "Failed to apply actions for task '{}': {}",
-                    state_task.name, e
-                )
-            })?;
+            self.apply_task_actions(task_id, created_by_id, project_id, state_task)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed to apply actions for task '{}': {}",
+                        state_task.name, e
+                    )
+                })?;
         }
 
         Ok(())
@@ -163,9 +157,10 @@ impl<'a> StateApplicator<'a> {
         task_id: TaskId,
         created_by: UserId,
         project_id: ProjectId,
-        task_name: &str,
-        desired: &[StateAction],
+        state_task: &StateTask,
     ) -> Result<(), DynError> {
+        let task_name = state_task.name.as_str();
+        let desired = &state_task.actions;
         let outbound = outbound_integrations_by_name(self.db, project_id).await?;
         let tasks = task_ids_by_name(self.db, project_id).await?;
         let crypt_key = load_secret_bytes(self.crypt_secret_file)
@@ -192,7 +187,10 @@ impl<'a> StateApplicator<'a> {
 
             let cfg = build_action_config(
                 action,
-                task_name,
+                &ProjectAndTaskNames {
+                    project: &state_task.project,
+                    task: task_name,
+                },
                 &outbound,
                 &tasks,
                 self.email_enabled,
@@ -516,11 +514,15 @@ pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {
     format!("{}|{}", i16::from(cfg.trigger_type()), canonical)
 }
 
-/// Action secrets are loaded from the credential `gradient_action_${name}_${field}`. They are
-/// encrypted with the server crypt key before storage, matching the REST `create_action` path.
+pub(crate) struct ProjectAndTaskNames<'a> {
+    pub(crate) project: &'a str,
+    pub(crate) task: &'a str,
+}
+
+/// Action secrets come from credentials `gradient_action_${project}_${task}_${name}_${field}`, so actions with the same name in different tasks never share secrets. They go through encryption with the crypt key of the server before storage, in line with the REST `create_action` path.
 pub(crate) fn build_action_config(
     a: &StateAction,
-    task_name: &str,
+    owner: &ProjectAndTaskNames,
     outbound: &HashMap<String, IntegrationId>,
     tasks: &HashMap<String, TaskId>,
     email_enabled: bool,
@@ -542,7 +544,7 @@ pub(crate) fn build_action_config(
             if !email_enabled {
                 return Err(format!(
                     "action '{}' in task '{}' is type 'send_mail' but SMTP is not enabled on this server",
-                    a.name, task_name
+                    a.name, owner.task
                 )
                 .into());
             }
@@ -570,7 +572,7 @@ pub(crate) fn build_action_config(
         "send_web_request" => {
             let url = string_field(a, "url")?;
             checked_url(&a.name, &url)?;
-            let token = action_credential(credentials_dir, a, "token")?
+            let token = action_credential(credentials_dir, owner, a, "token")?
                 .map(|plain| encrypt(&plain))
                 .transpose()?;
             Ok(ActionConfig::SendWebRequest { url, token })
@@ -587,7 +589,7 @@ pub(crate) fn build_action_config(
                 .into());
             }
 
-            let plain = action_credential(credentials_dir, a, "access_token")?
+            let plain = action_credential(credentials_dir, owner, a, "access_token")?
                 .ok_or_else(|| format!("action '{}': access_token_file is required", a.name))?;
             Ok(ActionConfig::SendMatrixMessage {
                 homeserver,
@@ -596,7 +598,7 @@ pub(crate) fn build_action_config(
             })
         }
         "send_slack_message" => {
-            let plain = action_credential(credentials_dir, a, "webhook_url")?
+            let plain = action_credential(credentials_dir, owner, a, "webhook_url")?
                 .ok_or_else(|| format!("action '{}': webhook_url_file is required", a.name))?;
             checked_url(&a.name, &plain)?;
             Ok(ActionConfig::SendSlackMessage {
@@ -724,6 +726,7 @@ fn checked_url(action: &str, url: &str) -> Result<(), DynError> {
 
 fn action_credential(
     credentials_dir: &Path,
+    owner: &ProjectAndTaskNames,
     a: &StateAction,
     field: &str,
 ) -> Result<Option<String>, DynError> {
@@ -734,7 +737,7 @@ fn action_credential(
     let (plain, _) = read_credential(
         credentials_dir,
         "action",
-        &a.name,
+        &format!("{}_{}_{}", owner.project, owner.task, a.name),
         field,
         &format!("action {field} file"),
     )?;
@@ -974,7 +977,10 @@ mod action_helper_tests {
         };
         let cfg = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1005,7 +1011,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             false,
@@ -1027,7 +1036,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1036,6 +1048,55 @@ mod action_helper_tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("recipients"), "got: {err}");
+    }
+
+    #[test]
+    fn tasks_in_different_projects_with_same_action_name_read_own_secret_files() {
+        let dir =
+            std::env::temp_dir().join(format!("gradient-action-credentials-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("gradient_action_acme_ci_notify_token"),
+            "acme-token\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("gradient_action_globex_ci_notify_token"),
+            "globex-token",
+        )
+        .unwrap();
+        let a = StateAction {
+            name: "notify".into(),
+            action_type: "send_web_request".into(),
+            active: true,
+            events: vec![],
+            config: serde_json::json!({ "url": "https://hooks.example.com/x", "token_file": "/run/x" }),
+        };
+
+        let acme = action_credential(
+            &dir,
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "ci",
+            },
+            &a,
+            "token",
+        )
+        .unwrap();
+        let globex = action_credential(
+            &dir,
+            &ProjectAndTaskNames {
+                project: "globex",
+                task: "ci",
+            },
+            &a,
+            "token",
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(acme.as_deref(), Some("acme-token"));
+        assert_eq!(globex.as_deref(), Some("globex-token"));
     }
 
     #[test]
@@ -1049,7 +1110,10 @@ mod action_helper_tests {
         };
         let cfg = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1080,7 +1144,10 @@ mod action_helper_tests {
         };
         let cfg = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &outbound,
             &HashMap::new(),
             true,
@@ -1107,7 +1174,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1132,7 +1202,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &outbound,
             &HashMap::new(),
             true,
@@ -1154,7 +1227,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1179,7 +1255,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1205,7 +1284,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1227,7 +1309,10 @@ mod action_helper_tests {
         };
         let err = build_action_config(
             &a,
-            "web",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "web",
+            },
             &HashMap::new(),
             &HashMap::new(),
             true,
@@ -1260,7 +1345,10 @@ mod action_helper_tests {
     ) -> Result<ActionConfig, DynError> {
         build_action_config(
             a,
-            "update",
+            &ProjectAndTaskNames {
+                project: "acme",
+                task: "update",
+            },
             &HashMap::new(),
             tasks,
             true,

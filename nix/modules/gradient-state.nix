@@ -489,9 +489,7 @@
           reports, pull request automation and evaluations of other tasks. Actions missing on the next state apply are removed,
           matched by `name`.
 
-          Secret files of actions (`token_file`, `access_token_file`, `webhook_url_file`) must live
-          at the systemd credential path
-          `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_''${name}_<field>`.
+          Keep the secret files of an action (`token_file`, `access_token_file`, `webhook_url_file`) at the path for systemd credentials, `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_<project>_<task>_<action>_<field>`.
         '';
       };
 
@@ -745,9 +743,7 @@
             event. An exec job event links the new evaluation to the job.
 
           A `send_web_request` action without `token_file` sends unauthenticated requests.
-          Secret files (`token_file`, `access_token_file`, `webhook_url_file`) are read from the
-          systemd credential `gradient_action_''${name}_<field>` and stored encrypted with the
-          server's crypt key.
+          The secret files (`token_file`, `access_token_file`, `webhook_url_file`) come from systemd credentials `gradient_action_<project>_<task>_<action>_<field>`. The server crypt key can encrypt them for storage.
         '';
       };
     };

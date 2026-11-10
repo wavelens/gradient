@@ -79,12 +79,12 @@ impl<'a> StateApplicator<'a> {
 
             let encrypted_secret = self.read_and_encrypt_integration_field(
                 state_int.secret_file.as_deref(),
-                &state_int.name,
+                state_int,
                 "secret",
             )?;
             let encrypted_token = self.read_and_encrypt_integration_field(
                 state_int.access_token_file.as_deref(),
-                &state_int.name,
+                state_int,
                 "token",
             )?;
 
@@ -150,17 +150,18 @@ impl<'a> StateApplicator<'a> {
     pub(crate) fn read_and_encrypt_integration_field(
         &self,
         field_set: Option<&str>,
-        int_name: &str,
+        state_int: &StateIntegration,
         suffix: &str,
     ) -> Result<Option<String>, DynError> {
         if field_set.is_none() {
             return Ok(None);
         }
+        let int_name = &state_int.name;
         let label = format!("integration {} file", suffix);
         let (plain, _) = read_credential(
             self.credentials_dir,
             "integration",
-            int_name,
+            &format!("{}_{}_{}", state_int.project, state_int.kind, int_name),
             suffix,
             &label,
         )?;

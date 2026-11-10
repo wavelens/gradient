@@ -102,11 +102,11 @@
   workerTokenFiles = lib.mapAttrsToList (_: worker: "gradient_worker_${worker.worker_id}_token:${worker.token_file}") cfg.state.workers;
   integrationSecretFiles = lib.concatLists (lib.mapAttrsToList (_: int:
     lib.optional (int.secret_file != null)
-      "gradient_integration_${int.name}_secret:${int.secret_file}"
+      "gradient_integration_${int.project}_${int.kind}_${int.name}_secret:${int.secret_file}"
   ) cfg.state.integrations);
   integrationTokenFiles = lib.concatLists (lib.mapAttrsToList (_: int:
     lib.optional (int.access_token_file != null)
-      "gradient_integration_${int.name}_token:${int.access_token_file}"
+      "gradient_integration_${int.project}_${int.kind}_${int.name}_token:${int.access_token_file}"
   ) cfg.state.integrations);
   localWorker = cfg.worker.enable && cfg.localWorker;
 
@@ -134,7 +134,7 @@
         field = actionSecretFields.${action.type} or null;
         file = if field == null then null else action.config."${field}_file" or null;
       in
-      lib.optional (file != null) "gradient_action_${action.name}_${field}:${file}"
+      lib.optional (file != null) "gradient_action_${task.project}_${task.name}_${action.name}_${field}:${file}"
     ) task.actions
   ) cfg.state.tasks);
 in {
