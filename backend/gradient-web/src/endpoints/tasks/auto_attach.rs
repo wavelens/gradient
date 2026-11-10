@@ -4,14 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::has_permission;
+use crate::authorization::ApiKeyContext;
 use crate::endpoints::git_host_hooks::installation::github_full_name;
+use crate::error::WebResult;
+use crate::permissions::Permission;
 use gradient_ci::IntegrationKind;
 use gradient_db::WebDb;
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::{
-    GitHostType, GitHubAppConfig, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId,
-    TaskTriggerId,
+    GitHostType, GitHubAppConfig, MIntegration, MTask, MTaskAction, MTaskTrigger, ProjectId,
+    TaskActionId, TaskTriggerId, UserId,
 };
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
@@ -240,6 +244,27 @@ async fn bind_github_app(
     .await?;
     txn.commit().await?;
     Ok(())
+}
+
+pub(crate) async fn configured_github_app_if_caller_can_manage_integrations<'a>(
+    web_db: &WebDb,
+    github_app: Option<&'a GitHubAppConfig>,
+    user: UserId,
+    project: ProjectId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<Option<&'a GitHubAppConfig>> {
+    let Some(app) = github_app else {
+        return Ok(None);
+    };
+    let allowed = has_permission(
+        web_db,
+        user,
+        project,
+        Permission::ManageIntegrations,
+        api_key,
+    )
+    .await?;
+    Ok(allowed.then_some(app))
 }
 
 pub(crate) async fn connect_repository(

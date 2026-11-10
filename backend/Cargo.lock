@@ -3650,6 +3650,7 @@ dependencies = [
  "tower-http 0.7.1",
  "tower_governor",
  "tracing",
+ "tracing-subscriber",
  "url",
  "utoipa",
  "utoipa-axum",

@@ -270,13 +270,15 @@ pub async fn put(
     };
     gradient_db::triggers::insert(&state.web_db, default_trigger).await?;
 
-    auto_attach::connect_repository(
+    let github_app = auto_attach::configured_github_app_if_caller_can_manage_integrations(
         &state.web_db,
-        &state.http,
         state.config.github_app.as_ref(),
-        &task,
+        user.id,
+        project.id,
+        api_key.as_ref(),
     )
-    .await;
+    .await?;
+    auto_attach::connect_repository(&state.web_db, &state.http, github_app, &task).await;
 
     audit
         .write(
@@ -348,7 +350,14 @@ pub async fn get_task(
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn patch_task(
-    TaskScope { project, task, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    TaskScope {
+        project,
+        task,
+        user,
+        api_key,
+        db,
+        ..
+    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
     JsonBody(body): JsonBody<PatchTaskRequest>,
@@ -430,13 +439,15 @@ pub async fn patch_task(
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
 
     if repository_changed {
-        auto_attach::connect_repository(
-            &state.web_db,
-            &state.http,
+        let github_app = auto_attach::configured_github_app_if_caller_can_manage_integrations(
+            &db.web_db,
             state.config.github_app.as_ref(),
-            &updated,
+            user.id,
+            project.id,
+            api_key.as_ref(),
         )
-        .await;
+        .await?;
+        auto_attach::connect_repository(&state.web_db, &state.http, github_app, &updated).await;
     }
 
     audit.write(Action::TaskUpdate, owner, fields).await;

@@ -97,4 +97,5 @@ gradient-test-support = { workspace = true }
 tokio-test   = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tower        = { workspace = true }
+tracing-subscriber = { workspace = true }
 zstd         = { workspace = true }
