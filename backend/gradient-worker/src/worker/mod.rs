@@ -35,6 +35,13 @@ use jobs::WorkerJobs;
 
 pub(crate) use jobs::clear_job_logs;
 
+/// Running jobs finish during a drain. The worker can take no new jobs during that time and then the worker process is complete. Running jobs halt at once on a stop. The server can put them back in the queue.
+#[derive(Clone, Default)]
+pub struct DrainAndStopTokens {
+    pub graceful_drain_cancellation_token: CancellationToken,
+    pub stop: CancellationToken,
+}
+
 const WRITER_FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 const NO_JOB_SESSION: u64 = 0;
@@ -126,7 +133,10 @@ impl Worker<Disconnected> {
 }
 
 impl Worker<Connected> {
-    pub async fn run(self, stop: CancellationToken) -> (Worker<Disconnected>, Result<RunOutcome>) {
+    pub async fn run(
+        self,
+        tokens: DrainAndStopTokens,
+    ) -> (Worker<Disconnected>, Result<RunOutcome>) {
         let Worker {
             config,
             executor,
@@ -153,13 +163,13 @@ impl Worker<Connected> {
             scorer,
         );
         let outcome =
-            message_loop::run_message_loop(state, reader, job_session, stop.clone()).await;
+            message_loop::run_message_loop(state, reader, job_session, tokens.clone()).await;
         jobs.end_session(version);
 
         // Only background tasks can still hold a writer clone at this point.
         // A stopping worker must see its last reports leave the queue.
         // A session ending for a reconnect is closing at once.
-        if stop.is_cancelled() {
+        if tokens.stop.is_cancelled() {
             flush.flush(WRITER_FLUSH_BUDGET).await;
         } else {
             flush.close();
@@ -371,7 +381,7 @@ fn test_executor(gcroots: &std::path::Path) -> JobExecutor {
 mod tests {
     use super::*;
     use gradient_test_support::prelude::MockProtoServer;
-    use gradient_wire::messages::GradientCapabilities;
+    use gradient_wire::messages::{GradientCapabilities, ServerMessage};
 
     fn disconnected_worker(base: &std::path::Path) -> Worker<Disconnected> {
         let config = WorkerConfig {
@@ -418,7 +428,7 @@ mod tests {
             jobs.writer.detach();
         };
         let ((_, ended), ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            tokio::join!(worker.run(CancellationToken::new()), lose_the_job_lane)
+            tokio::join!(worker.run(DrainAndStopTokens::default()), lose_the_job_lane)
         })
         .await
         .expect("a session that cannot carry job reports ends while the socket stays open");
@@ -468,7 +478,87 @@ mod tests {
             assert_eq!(completed, "build:1");
             sc.close().await;
         };
-        let ((_, ended), ()) = tokio::join!(worker.run(CancellationToken::new()), script);
+        let ((_, ended), ()) = tokio::join!(worker.run(DrainAndStopTokens::default()), script);
         ended.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_server_drain_requests_jobs_again() {
+        let base = tempfile::tempdir().unwrap();
+        let worker = disconnected_worker(base.path());
+        let (mut sc, worker) = reconnected(worker).await;
+        let tokens = DrainAndStopTokens::default();
+
+        let script = async {
+            sc.recv_until(|msg| {
+                matches!(
+                    msg,
+                    ClientMessage::RequestJob {
+                        kind: JobKind::Build
+                    }
+                )
+                .then_some(())
+            })
+            .await
+            .unwrap();
+            sc.send(ServerMessage::Draining).await.unwrap();
+            sc.send(ServerMessage::DrainCancelled).await.unwrap();
+            let kind = sc
+                .recv_until(|msg| match msg {
+                    ClientMessage::RequestJob { kind } => Some(kind),
+                    _ => None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(kind, JobKind::Flake);
+            sc.close().await;
+        };
+        let ((_, ended), ()) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            tokio::join!(worker.run(tokens.clone()), script)
+        })
+        .await
+        .expect("the worker asks for jobs after the drain ends");
+        ended.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_drain_finishes_the_running_job_and_then_stops_the_worker() {
+        let base = tempfile::tempdir().unwrap();
+        let worker = disconnected_worker(base.path());
+        let running = worker.jobs.register(
+            "build:1".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+        );
+        let (mut sc, worker) = reconnected(worker).await;
+        let tokens = DrainAndStopTokens::default();
+        tokens.graceful_drain_cancellation_token.cancel();
+
+        let script = async {
+            sc.recv_until(|msg| matches!(msg, ClientMessage::Draining).then_some(()))
+                .await
+                .unwrap();
+            running
+                .done_tx
+                .send(("build:1".to_owned(), Ok(())))
+                .unwrap();
+            let completed = sc
+                .recv_until(|msg| match msg {
+                    ClientMessage::JobCompleted { job_id, .. } => Some(job_id),
+                    ClientMessage::JobFailed { .. } => panic!("the drain aborted the running job"),
+                    _ => None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(completed, "build:1");
+        };
+        let ((_, ended), ()) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            tokio::join!(worker.run(tokens.clone()), script)
+        })
+        .await
+        .expect("a drained worker without jobs ends its session");
+        ended.unwrap();
+        assert!(tokens.stop.is_cancelled());
     }
 }

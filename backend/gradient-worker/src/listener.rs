@@ -9,17 +9,16 @@ use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use crate::config::WorkerConfig;
 use crate::executor::JobExecutor;
-use crate::worker::Worker;
+use crate::worker::{DrainAndStopTokens, Worker};
 
 pub async fn start_listener(
     config: WorkerConfig,
-    stop: CancellationToken,
+    tokens: DrainAndStopTokens,
     sessions: TaskTracker,
     executor: JobExecutor,
 ) -> Result<()> {
@@ -31,7 +30,7 @@ pub async fn start_listener(
 
     loop {
         tokio::select! {
-            _ = stop.cancelled() => {
+            _ = tokens.stop.cancelled() => {
                 info!("shutdown requested; closing inbound listener");
                 return Ok(());
             }
@@ -39,10 +38,10 @@ pub async fn start_listener(
                 Ok((stream, addr)) => {
                     info!(%addr, "incoming connection accepted");
                     let config = config.clone();
-                    let conn_stop = stop.clone();
+                    let conn_tokens = tokens.clone();
                     let executor = executor.clone();
                     sessions.spawn(async move {
-                        if let Err(e) = handle_incoming(stream, config, conn_stop, executor).await {
+                        if let Err(e) = handle_incoming(stream, config, conn_tokens, executor).await {
                             error!(%addr, error = %e, "incoming connection failed");
                         }
                     });
@@ -69,7 +68,7 @@ async fn accept_tuned(
 async fn handle_incoming(
     stream: tokio::net::TcpStream,
     config: WorkerConfig,
-    stop: CancellationToken,
+    tokens: DrainAndStopTokens,
     executor: JobExecutor,
 ) -> Result<()> {
     let ws_config = WebSocketConfig::default()
@@ -84,7 +83,7 @@ async fn handle_incoming(
     .context("upgrade the WebSocket")?;
 
     let worker = Worker::from_accepted(ws, config, executor).await?;
-    let (_disconnected, outcome) = worker.run(stop).await;
+    let (_disconnected, outcome) = worker.run(tokens).await;
     outcome.map(|_| ())
 }
 

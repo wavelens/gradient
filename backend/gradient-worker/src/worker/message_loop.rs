@@ -17,7 +17,6 @@ use gradient_wire::messages::{
     GuestChannelKind, Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage, VM_STATE_SINCE,
 };
 use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
@@ -34,6 +33,7 @@ use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::AssignmentHandle;
 
+use super::DrainAndStopTokens;
 use super::cluster::{ClusterChannels, ClusterHolds, ClusterStart, HeldJob};
 use super::jobs::{Readoption, WorkerJobs, report_when_drained};
 use super::scoring::spawn_scoring_task;
@@ -50,8 +50,9 @@ pub(super) async fn run_message_loop(
     mut state: MessageLoopState,
     mut reader: ProtoReader,
     job_session: u64,
-    stop: CancellationToken,
+    tokens: DrainAndStopTokens,
 ) -> Result<LoopEnd> {
+    let stop = tokens.stop.clone();
     let jobs = Arc::clone(&state.jobs);
     let mut done_rx = jobs.done_rx.lock().await;
 
@@ -98,20 +99,25 @@ pub(super) async fn run_message_loop(
                 }
             }
 
-            _ = exit_check.tick(), if limits.is_set() => {
+            _ = tokens.graceful_drain_cancellation_token.cancelled(), if !state.exiting => {
+                info!("Drain request. Running jobs finish before exit.");
+                state.exiting = true;
+                state.begin_drain().await?;
                 state.report_busy();
-                if exit_clock::clock().exit_due(&limits, Instant::now()) {
-                    if !state.exiting {
-                        info!(?limits, "exit limit reached; draining before exit");
-                        state.exiting = true;
-                        state.begin_drain().await?;
-                        state.report_busy();
-                    }
-                    if exit_clock::clock().is_idle() {
-                        info!("exit limit reached and every job has finished; exiting");
-                        stop.cancel();
-                        break;
-                    }
+            }
+
+            _ = exit_check.tick(), if limits.is_set() || state.exiting => {
+                state.report_busy();
+                if !state.exiting && exit_clock::clock().exit_due(&limits, Instant::now()) {
+                    info!(?limits, "exit limit reached; draining before exit");
+                    state.exiting = true;
+                    state.begin_drain().await?;
+                    state.report_busy();
+                }
+                if state.exiting && exit_clock::clock().is_idle() {
+                    info!("All jobs finished during drain. Exiting.");
+                    tokens.stop.cancel();
+                    break;
                 }
             }
 
@@ -256,6 +262,27 @@ impl MessageLoopState {
         self.writer.send(ClientMessage::Draining).await
     }
 
+    async fn on_drain_cancelled(&mut self) -> Result<()> {
+        if self.exiting || self.stopping {
+            info!(
+                "The server canceled the drain. This worker entered shutdown, so keep the drain."
+            );
+            return self.writer.send(ClientMessage::Draining).await;
+        }
+        info!("The server canceled the drain. Job requests resume.");
+        self.draining = false;
+        self.server_draining = false;
+        let mut kinds = vec![JobKind::Flake, JobKind::Build];
+        if let Some(exec) = &self.executor.exec {
+            exec.pool.reopen();
+            kinds.push(JobKind::Exec);
+        }
+        for kind in kinds {
+            self.writer.send(ClientMessage::RequestJob { kind }).await?;
+        }
+        Ok(())
+    }
+
     async fn begin_stop(&mut self) -> Result<()> {
         self.stopping = true;
         self.begin_drain().await?;
@@ -362,6 +389,9 @@ impl MessageLoopState {
                     exec.pool.set_draining();
                 }
                 self.stop_warm_guests_once_idle();
+            }
+            ServerMessage::DrainCancelled => {
+                self.on_drain_cancelled().await?;
             }
             ServerMessage::PreWarmVms { count, sizes } => {
                 self.executor.pre_warm(count, sizes);
