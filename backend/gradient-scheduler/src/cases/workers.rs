@@ -876,7 +876,7 @@ async fn w14_a_worker_silent_below_the_timeout_stays_connected() {
 }
 
 #[tokio::test]
-async fn w14_a_zero_heartbeat_timeout_disables_the_liveness_pass() {
+async fn w39_a_zero_heartbeat_timeout_disables_the_liveness_pass() {
     let case =
         SchedulerCase::start_with(shape(), |c| c.proto.worker_heartbeat_timeout_secs = 0).await;
     case.connect(W1, w_all(), &[]).await;

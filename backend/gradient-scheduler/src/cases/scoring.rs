@@ -81,7 +81,7 @@ async fn m06_instance_windows_take_rows_at_the_boundary_and_wait_from_ready_at()
 }
 
 #[tokio::test]
-async fn m06_an_instance_without_rows_has_empty_windows_and_zero_completed() {
+async fn m12_an_instance_without_rows_has_empty_windows_and_zero_completed() {
     let now = whole_second_now();
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
 
