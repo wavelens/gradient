@@ -76,40 +76,138 @@ async fn test_cli_gradient_search_passes_query_and_limit_and_prints_json_envelop
     assert_eq!(envelope["message"][0]["kind"], "task");
 }
 
-#[tokio::test]
-async fn test_task_repository_edit_push_branches_keeps_other_current_settings_in_full_put_body() {
-    let server = MockServer::start().await;
-    let repository = serde_json::json!({
-        "repository": "https://git.example.com/org/repo.git", "uses_ssh": false,
-        "build_on_push": {
-            "trigger_id": TRIGGER, "integration_id": INBOUND, "active": true,
-            "branches": ["dev"], "tags": ["v*"]
-        },
-        "report_status": {"action_id": ACTION, "integration_id": OUTBOUND, "active": true},
-        "integrations": [{
-            "id": INBOUND, "name": "forgejo-hooks", "display_name": "Forgejo hooks",
-            "kind": "inbound", "git_host_type": "forgejo", "serves_repository": true
-        }],
-        "can_edit": true, "can_manage_integrations": true
-    });
+const REPOSITORY: &str = "https://git.example.com/org/repo.git";
+
+async fn mount_push_and_pull_request_suggestions(
+    server: &MockServer,
+    suggestions: serde_json::Value,
+) {
     Mock::given(method("GET"))
-        .and(path("/api/v1/tasks/proj/nightly/repository"))
-        .respond_with(ok(repository.clone()))
-        .mount(&server)
+        .and(path("/api/v1/projects/proj/trigger-suggestions"))
+        .and(query_param("repository", REPOSITORY))
+        .respond_with(ok(suggestions))
+        .mount(server)
         .await;
+}
+
+async fn mount_task_create(server: &MockServer, expected_calls: u64) {
     Mock::given(method("PUT"))
-        .and(path("/api/v1/tasks/proj/nightly/repository"))
+        .and(path("/api/v1/tasks/proj"))
+        .respond_with(ok(serde_json::json!(TASK_ID)))
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+async fn sent_task_create_body(server: &MockServer) -> serde_json::Value {
+    let requests = server.received_requests().await.unwrap();
+    let create = requests
+        .iter()
+        .find(|request| request.method.as_str() == "PUT")
+        .unwrap();
+    serde_json::from_slice(&create.body).unwrap()
+}
+
+fn create_task_args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec![
+        "--project",
+        "proj",
+        "task",
+        "create",
+        "-n",
+        "web",
+        "-d",
+        "Web",
+        "-c",
+        "",
+        "-r",
+        REPOSITORY,
+        "-w",
+        "packages.*",
+    ];
+    args.extend_from_slice(extra);
+    args
+}
+
+#[tokio::test]
+async fn test_task_create_sends_branch_cron_and_suggested_push_trigger_in_one_request() {
+    let server = MockServer::start().await;
+    mount_push_and_pull_request_suggestions(
+        &server,
+        serde_json::json!([
+            {"type": "reporter_push", "integration_id": INBOUND},
+            {"type": "reporter_pull_request", "integration_id": INBOUND}
+        ]),
+    )
+    .await;
+    mount_task_create(&server, 1).await;
+
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(
+        &home,
+        &create_task_args(&[
+            "--branch",
+            "release",
+            "--trigger",
+            "cron=0 3 * * *",
+            "--trigger",
+            "push",
+        ]),
+    )
+    .success();
+
+    let triggers = sent_task_create_body(&server).await["triggers"].clone();
+    assert_eq!(triggers.as_array().unwrap().len(), 2, "{triggers}");
+    assert_eq!(triggers[0]["type"], "time");
+    assert_eq!(triggers[0]["cron"], "0 3 * * *");
+    assert_eq!(triggers[0]["branch"], "release");
+    assert_eq!(triggers[1]["type"], "reporter_push");
+    assert_eq!(triggers[1]["integration_id"], INBOUND);
+    assert_eq!(triggers[1]["branches"], serde_json::json!(["release"]));
+}
+
+#[tokio::test]
+async fn test_task_create_leaves_triggers_to_the_server_unless_asked_and_can_skip_the_default() {
+    let server = MockServer::start().await;
+    mount_task_create(&server, 1).await;
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(&home, &create_task_args(&[])).success();
+    assert!(
+        sent_task_create_body(&server)
+            .await
+            .get("triggers")
+            .is_none_or(serde_json::Value::is_null)
+    );
+
+    let server = MockServer::start().await;
+    mount_task_create(&server, 1).await;
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(&home, &create_task_args(&["--no-default-trigger"])).success();
+    assert_eq!(
+        sent_task_create_body(&server).await["triggers"],
+        serde_json::json!([])
+    );
+}
+
+#[tokio::test]
+async fn test_task_create_with_push_trigger_and_no_webhook_receiver_creates_nothing() {
+    let server = MockServer::start().await;
+    mount_push_and_pull_request_suggestions(&server, serde_json::json!([])).await;
+    mount_task_create(&server, 0).await;
+
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(&home, &create_task_args(&["--trigger", "pr"])).failure();
+}
+
+#[tokio::test]
+async fn test_task_duplicate_posts_the_new_names_and_branch() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/tasks/proj/nightly/duplicate"))
         .and(body_json(serde_json::json!({
-            "inbound_integration": INBOUND,
-            "build_on_push": true,
-            "push_branches": ["main"],
-            "push_tags": ["v*"],
-            "build_on_pull_request": false,
-            "require_approval": true,
-            "outbound_integration": OUTBOUND,
-            "report_status": true
+            "name": "nightly-release", "display_name": "Nightly release", "branch": "release"
         })))
-        .respond_with(ok(repository))
+        .respond_with(ok(serde_json::json!(TASK_ID)))
         .expect(1)
         .mount(&server)
         .await;
@@ -119,15 +217,48 @@ async fn test_task_repository_edit_push_branches_keeps_other_current_settings_in
         &home,
         &[
             "task",
-            "repository",
-            "edit",
-            "--inbound-integration",
-            "forgejo-hooks",
-            "--push-branches",
-            "main",
+            "duplicate",
+            "--name",
+            "nightly-release",
+            "--display-name",
+            "Nightly release",
+            "--branch",
+            "release",
         ],
     )
     .success();
+}
+
+#[tokio::test]
+async fn test_task_repository_install_webhook_defaults_to_the_receiver_serving_the_repository() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tasks/proj/nightly/repository"))
+        .respond_with(ok(serde_json::json!({
+            "repository": REPOSITORY, "uses_ssh": false,
+            "report_status": {"action_id": ACTION, "integration_id": OUTBOUND, "active": true},
+            "integrations": [{
+                "id": INBOUND, "name": "forgejo-hooks", "display_name": "Forgejo hooks",
+                "kind": "inbound", "git_host_type": "forgejo", "serves_repository": true
+            }],
+            "can_edit": true, "can_manage_integrations": true
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v1/tasks/proj/nightly/repository/install-webhook",
+        ))
+        .and(body_json(serde_json::json!({
+            "inbound_integration": INBOUND, "outbound_integration": OUTBOUND
+        })))
+        .respond_with(ok(serde_json::json!("org/repo")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(&home, &["task", "repository", "install-webhook"]).success();
 }
 
 #[tokio::test]

@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::api::{
-    InstallDeployKeyRequest, InstallWebhookRequest, TaskRepositoryResponse,
-    UpdateTaskRepositoryRequest,
-};
+use crate::api::{InstallDeployKeyRequest, InstallWebhookRequest, TaskRepositoryResponse};
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::{Method, RequestBuilder};
@@ -39,16 +36,6 @@ impl TaskRepositoryConnectionApi<'_> {
         task: &str,
     ) -> Result<TaskRepositoryResponse, ConnectorError> {
         let req = self.request(Method::GET, project, task, "")?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn update(
-        &self,
-        project: &str,
-        task: &str,
-        body: &UpdateTaskRepositoryRequest,
-    ) -> Result<TaskRepositoryResponse, ConnectorError> {
-        let req = self.request(Method::PUT, project, task, "")?.json(body);
         http::decode(req.send().await?).await
     }
 

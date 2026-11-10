@@ -13,8 +13,7 @@ use connector::Client;
 use connector::api::{
     ActionConfig, CreateActionRequest, CreateFlakeInputOverrideRequest, CreateTriggerRequest,
     FlakeInputOverrideId, InstallDeployKeyRequest, InstallWebhookRequest, IntegrationId,
-    TaskActionId, TaskRepositoryResponse, TriggerConfig, UpdateActionRequest,
-    UpdateTaskRepositoryRequest, UpdateTriggerRequest,
+    TaskActionId, TaskRepositoryResponse, TriggerConfig, UpdateActionRequest, UpdateTriggerRequest,
 };
 use serde::de::DeserializeOwned;
 
@@ -104,29 +103,6 @@ async fn find_override_uuid_by_input_name_or_uuid(
         })
 }
 
-fn build_full_repository_update_request_from_connection(
-    repository: &TaskRepositoryResponse,
-) -> UpdateTaskRepositoryRequest {
-    let push = repository.build_on_push.as_ref();
-    let pull_request = repository.build_on_pull_request.as_ref();
-    let status = repository.report_status.as_ref();
-    UpdateTaskRepositoryRequest {
-        inbound_integration: push
-            .map(|build| build.integration_id.clone())
-            .or_else(|| pull_request.map(|build| build.integration_id.clone())),
-        build_on_push: Some(push.is_some_and(|build| build.active)),
-        push_branches: push.map(|build| build.branches.clone()).unwrap_or_default(),
-        push_tags: push.map(|build| build.tags.clone()).unwrap_or_default(),
-        build_on_pull_request: Some(pull_request.is_some_and(|build| build.active)),
-        pull_request_branches: pull_request
-            .map(|build| build.branches.clone())
-            .unwrap_or_default(),
-        require_approval: Some(pull_request.is_none_or(|build| build.require_approval)),
-        outbound_integration: status.map(|report| report.integration_id.clone()),
-        report_status: Some(status.is_some_and(|report| report.active)),
-    }
-}
-
 fn print_repository(repository: &TaskRepositoryResponse, out: Output) {
     let integration_name = |id: &IntegrationId| {
         repository
@@ -138,28 +114,6 @@ fn print_repository(repository: &TaskRepositoryResponse, out: Output) {
     let state = |active: bool| if active { "on" } else { "off" };
 
     out.human(format!("Repository: {}", repository.repository));
-    if let Some(push) = &repository.build_on_push {
-        out.human(format!(
-            "Push Build: {} ({}) [{}] [{}]",
-            state(push.active),
-            integration_name(&push.integration_id),
-            push.branches.join(", "),
-            push.tags.join(", "),
-        ));
-    }
-    if let Some(pull_request) = &repository.build_on_pull_request {
-        let approval = if pull_request.require_approval {
-            ", Approval required"
-        } else {
-            ""
-        };
-        out.human(format!(
-            "Pull Request Build: {} ({}) [{}]{approval}",
-            state(pull_request.active),
-            integration_name(&pull_request.integration_id),
-            pull_request.branches.join(", "),
-        ));
-    }
     if let Some(report) = &repository.report_status {
         out.human(format!(
             "Status Report: {} ({})",
@@ -194,67 +148,6 @@ pub async fn handle_task_repository_subcommand(cmd: TaskRepositoryCommands, out:
         TaskRepositoryCommands::Show => {
             out.ok(&repository);
             print_repository(&repository, out);
-        }
-
-        TaskRepositoryCommands::Edit {
-            inbound_integration,
-            build_on_push,
-            push_branches,
-            push_tags,
-            build_on_pull_request,
-            pull_request_branches,
-            require_approval,
-            outbound_integration,
-            report_status,
-        } => {
-            let unchanged = inbound_integration.is_none()
-                && build_on_push.is_none()
-                && push_branches.is_none()
-                && push_tags.is_none()
-                && build_on_pull_request.is_none()
-                && pull_request_branches.is_none()
-                && require_approval.is_none()
-                && outbound_integration.is_none()
-                && report_status.is_none();
-            if unchanged {
-                out.err(
-                    ExitKind::Usage,
-                    "Nothing to change. Specify at least one flag.",
-                );
-            }
-
-            let resolve = |reference: String| {
-                integration_uuid_from_uuid_or_name_using_task_repository_integrations(
-                    &reference,
-                    &repository,
-                    out,
-                )
-            };
-            let current = build_full_repository_update_request_from_connection(&repository);
-            let body = UpdateTaskRepositoryRequest {
-                inbound_integration: inbound_integration
-                    .map(resolve)
-                    .or(current.inbound_integration),
-                build_on_push: build_on_push.or(current.build_on_push),
-                push_branches: push_branches.unwrap_or(current.push_branches),
-                push_tags: push_tags.unwrap_or(current.push_tags),
-                build_on_pull_request: build_on_pull_request.or(current.build_on_pull_request),
-                pull_request_branches: pull_request_branches
-                    .unwrap_or(current.pull_request_branches),
-                require_approval: require_approval.or(current.require_approval),
-                outbound_integration: outbound_integration
-                    .map(resolve)
-                    .or(current.outbound_integration),
-                report_status: report_status.or(current.report_status),
-            };
-
-            let updated = client
-                .task_repository()
-                .update(&project, &task, &body)
-                .await
-                .unwrap_or_else(|e| out.fail(e));
-            out.ok(&updated);
-            out.human("Updated the repository connection.");
         }
 
         TaskRepositoryCommands::InstallDeployKey {
@@ -307,19 +200,31 @@ pub async fn handle_task_repository_subcommand(cmd: TaskRepositoryCommands, out:
                     out,
                 )
             };
-            let current = build_full_repository_update_request_from_connection(&repository);
             let inbound_integration = inbound_integration
                 .map(resolve)
-                .or(current.inbound_integration)
+                .or_else(|| {
+                    repository
+                        .integrations
+                        .iter()
+                        .find(|integration| {
+                            integration.kind == "inbound" && integration.serves_repository
+                        })
+                        .map(|integration| integration.id.clone())
+                })
                 .unwrap_or_else(|| {
                     out.err(
                         ExitKind::Usage,
-                        "Push and pull request builds don't use a webhook receiver. Specify `--inbound-integration`.",
+                        "No webhook receivers exist for this repository. Specify `--inbound-integration`.",
                     )
                 });
             let outbound_integration = outbound_integration
                 .map(resolve)
-                .or(current.outbound_integration)
+                .or_else(|| {
+                    repository
+                        .report_status
+                        .as_ref()
+                        .map(|report| report.integration_id.clone())
+                })
                 .unwrap_or_else(|| {
                     out.err(
                         ExitKind::Usage,

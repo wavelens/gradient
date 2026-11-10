@@ -7,7 +7,7 @@
 )]
 
 use connector::Client;
-use connector::api::{InstallDeployKeyRequest, InstallWebhookRequest, UpdateTaskRepositoryRequest};
+use connector::api::{InstallDeployKeyRequest, InstallWebhookRequest};
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -35,7 +35,7 @@ fn client(server: &MockServer) -> Client {
 }
 
 #[tokio::test]
-async fn test_task_repository_connection_read_and_replace_uses_get_and_put() {
+async fn test_task_repository_connection_read_uses_get() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(BASE))
@@ -43,31 +43,16 @@ async fn test_task_repository_connection_read_and_replace_uses_get_and_put() {
         .expect(1)
         .mount(&server)
         .await;
-    Mock::given(method("PUT"))
-        .and(path(BASE))
-        .and(body_json(serde_json::json!({
-            "inbound_integration": INBOUND, "build_on_push": true, "push_branches": ["main"]
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(repository())))
-        .expect(1)
-        .mount(&server)
-        .await;
 
     let client = client(&server);
-    let api = client.task_repository();
-    assert!(!api.get("proj", "nightly").await.unwrap().uses_ssh);
-    api.update(
-        "proj",
-        "nightly",
-        &UpdateTaskRepositoryRequest {
-            inbound_integration: Some(INBOUND.parse().unwrap()),
-            build_on_push: Some(true),
-            push_branches: vec!["main".into()],
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    assert!(
+        !client
+            .task_repository()
+            .get("proj", "nightly")
+            .await
+            .unwrap()
+            .uses_ssh
+    );
 }
 
 #[tokio::test]

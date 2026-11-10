@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    CreateTriggerRequest, CreatedEntityResponse, EntryPointMetricsResponse, EvaluationSummary,
-    MakeTaskRequest, PaginatedEntryPoints, PaginatedTaskResponse, PatchTaskRequest,
-    TaskDetailsResponse, TaskMetricsResponse, TaskResponse, TransferOwnershipRequest, TriggerOut,
-    UpdateTriggerRequest,
+    CreateTriggerRequest, CreatedEntityResponse, DuplicateTaskRequest, EntryPointMetricsResponse,
+    EvaluationSummary, MakeTaskRequest, PaginatedEntryPoints, PaginatedTaskResponse,
+    PatchTaskRequest, TaskDetailsResponse, TaskMetricsResponse, TaskResponse,
+    TransferOwnershipRequest, TriggerConfig, TriggerOut, UpdateTriggerRequest,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -70,6 +70,41 @@ impl TasksApi<'_> {
             true,
         )?
         .json(&body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn duplicate_task(
+        &self,
+        project: &str,
+        task: &str,
+        body: &DuplicateTaskRequest,
+    ) -> Result<CreatedEntityResponse, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("tasks/{project}/{task}/duplicate"),
+            true,
+        )?
+        .json(body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn get_webhook_trigger_suggestions_for_repository(
+        &self,
+        project: &str,
+        repository: &str,
+    ) -> Result<Vec<TriggerConfig>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/trigger-suggestions"),
+            true,
+        )?
+        .query(&[("repository", repository)]);
         http::decode(req.send().await?).await
     }
 

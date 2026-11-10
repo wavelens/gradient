@@ -14,7 +14,10 @@ use crate::input::{
 use crate::output::{Color, ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use connector::api::{EvaluationStatus, MakeTaskRequest, PatchTaskRequest};
+use connector::Client;
+use connector::api::{
+    DuplicateTaskRequest, EvaluationStatus, MakeTaskRequest, PatchTaskRequest, TriggerConfig,
+};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -45,6 +48,27 @@ pub enum Commands {
         /// Flake attribute wildcard to evaluate
         #[arg(short = 'w', long)]
         wildcard: Option<String>,
+        /// Branch that the triggers evaluate. Default: the default branch of the repository
+        #[arg(short, long)]
+        branch: Option<String>,
+        /// Trigger to add: `polling`, `cron=<expression>`, `push` or `pr`. Repeat this flag to specify multiple triggers. Leave out this flag to set one polling trigger for the task.
+        #[arg(long = "trigger", value_parser = parse_trigger_value)]
+        triggers: Vec<CommandLineTrigger>,
+        /// Create a task without a default trigger for polling.
+        #[arg(long)]
+        no_default_trigger: bool,
+    },
+    /// Copy the selected task and its settings, triggers, and actions to a new task for another branch.
+    Duplicate {
+        /// New task name
+        #[arg(short, long)]
+        name: String,
+        /// Display name for the new task
+        #[arg(short, long)]
+        display_name: String,
+        /// Branch for each trigger of the new task
+        #[arg(short, long)]
+        branch: String,
     },
     /// List the tasks of the selected project
     List,
@@ -104,38 +128,8 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskRepositoryCommands {
-    /// Show push and pull request builds, status reports and the integrations of the project
+    /// Show repositories, status reports, and integrations for a project.
     Show,
-    /// Change the repository connection. Omitted flags keep their current values.
-    Edit {
-        /// Webhook receiver integration to start a build on pushes and pull requests (by name or UUID)
-        #[arg(long)]
-        inbound_integration: Option<String>,
-        /// Build on push: true or false
-        #[arg(long)]
-        build_on_push: Option<bool>,
-        /// Comma-separated branch patterns that start a build on push. Empty patterns match all branches.
-        #[arg(long, value_delimiter = ',')]
-        push_branches: Option<Vec<String>>,
-        /// Comma-separated tag patterns that start a build on push.
-        #[arg(long, value_delimiter = ',')]
-        push_tags: Option<Vec<String>>,
-        /// Build pull request: true or false
-        #[arg(long)]
-        build_on_pull_request: Option<bool>,
-        /// Comma-separated target branch patterns for pull requests to build. Empty value: all branches.
-        #[arg(long, value_delimiter = ',')]
-        pull_request_branches: Option<Vec<String>>,
-        /// Require approval before building a pull request. The value can be true or false.
-        #[arg(long)]
-        require_approval: Option<bool>,
-        /// An integration of a status reporter that can post commit statuses to a Git host. Specify it by name or UUID.
-        #[arg(long)]
-        outbound_integration: Option<String>,
-        /// Report commit status to Git host: true or false.
-        #[arg(long)]
-        report_status: Option<bool>,
-    },
     /// Add the SSH key of the project as a read-only deploy key to the repository on the Git host
     InstallDeployKey {
         /// Specify the integration for status reports by name or UUID. Gradient can call the Git host with an access token. Default: this task's status reporter.
@@ -144,7 +138,7 @@ pub enum TaskRepositoryCommands {
     },
     /// Create a webhook on the Git host to send repository events to Gradient.
     InstallWebhook {
-        /// Webhook integration that can receive events (name or UUID). Default: the integration that can start the build for this task.
+        /// Webhook integration (name or UUID) that can receive events. The default is the webhook receiver for this task's repository.
         #[arg(long)]
         inbound_integration: Option<String>,
         /// Specify the integration for status reports by name or UUID. Gradient can call the Git host with an access token. Default: this task's status reporter.
@@ -308,6 +302,100 @@ pub enum TaskTriggerCommands {
     },
 }
 
+const DEFAULT_POLLING_INTERVAL_SECS: i32 = 300;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandLineTrigger {
+    Polling,
+    Cron(String),
+    Push,
+    PullRequest,
+}
+
+fn parse_trigger_value(value: &str) -> Result<CommandLineTrigger, String> {
+    match value.split_once('=') {
+        None if value == "polling" => Ok(CommandLineTrigger::Polling),
+        None if value == "push" => Ok(CommandLineTrigger::Push),
+        None if value == "pr" => Ok(CommandLineTrigger::PullRequest),
+        Some(("cron", expression)) if !expression.trim().is_empty() => {
+            Ok(CommandLineTrigger::Cron(expression.trim().to_owned()))
+        }
+        _ => Err(format!(
+            "Unknown trigger '{value}'. Use polling, cron=<expression>, push or pr."
+        )),
+    }
+}
+
+async fn build_optional_task_create_trigger_configs(
+    client: &Client,
+    project: &str,
+    repository: &str,
+    branch: Option<String>,
+    mut triggers: Vec<CommandLineTrigger>,
+    no_default_trigger: bool,
+    out: Output,
+) -> Option<Vec<TriggerConfig>> {
+    if triggers.is_empty() {
+        if no_default_trigger {
+            return Some(Vec::new());
+        }
+        branch.as_ref()?;
+        triggers.push(CommandLineTrigger::Polling);
+    }
+
+    let mut suggestions: Option<Vec<TriggerConfig>> = None;
+    let mut configs = Vec::with_capacity(triggers.len());
+    for trigger in triggers {
+        let config = match trigger {
+            CommandLineTrigger::Polling => TriggerConfig::Polling {
+                interval_secs: DEFAULT_POLLING_INTERVAL_SECS,
+                branch: branch.clone(),
+            },
+            CommandLineTrigger::Cron(cron) => TriggerConfig::Time {
+                cron,
+                branch: branch.clone(),
+            },
+            CommandLineTrigger::Push | CommandLineTrigger::PullRequest => {
+                if suggestions.is_none() {
+                    suggestions = Some(
+                        client
+                            .tasks()
+                            .get_webhook_trigger_suggestions_for_repository(project, repository)
+                            .await
+                            .unwrap_or_else(|e| out.fail(e)),
+                    );
+                }
+                let wants_push = trigger == CommandLineTrigger::Push;
+                let mut config = suggestions
+                    .iter()
+                    .flatten()
+                    .find(|config| match config {
+                        TriggerConfig::ReporterPush { .. } => wants_push,
+                        TriggerConfig::ReporterPullRequest { .. } => !wants_push,
+                        _ => false,
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        out.err(
+                            ExitKind::Usage,
+                            format!(
+                                "This project doesn't have a webhook receiver for {repository}. Add one on the Integrations page of the project. Then try again."
+                            ),
+                        )
+                    });
+                if let TriggerConfig::ReporterPush { branches, .. }
+                | TriggerConfig::ReporterPullRequest { branches, .. } = &mut config
+                {
+                    *branches = branch.iter().cloned().collect();
+                }
+                config
+            }
+        };
+        configs.push(config);
+    }
+    Some(configs)
+}
+
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { task } => {
@@ -422,6 +510,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             description,
             repository,
             wildcard,
+            branch,
+            triggers,
+            no_default_trigger,
         } => {
             let project = selected_project(out);
 
@@ -436,7 +527,19 @@ pub async fn handle(cmd: Commands, out: Output) {
             let input = handle_input(input_fields, false, out);
             let name = input.get("Name");
 
+            let repository = input.get("Repository");
+
             let client = client_from_config(out);
+            let triggers = build_optional_task_create_trigger_configs(
+                &client,
+                &project,
+                &repository,
+                branch,
+                triggers,
+                no_default_trigger,
+                out,
+            )
+            .await;
             match client
                 .tasks()
                 .create(
@@ -445,13 +548,15 @@ pub async fn handle(cmd: Commands, out: Output) {
                         name: name.clone().into(),
                         display_name: input.get("Display Name").into(),
                         description: input.get("Description"),
-                        repository: input.get("Repository"),
+                        repository,
                         wildcard: input.get("Wildcard"),
                         concurrency: None,
                         retry_failed_builds: None,
                         multi_node_evaluation: None,
                         sign_cache: None,
                         wait_for_workers: None,
+                        exec_enabled: None,
+                        triggers,
                     },
                 )
                 .await
@@ -544,6 +649,35 @@ pub async fn handle(cmd: Commands, out: Output) {
                     }
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Task updated.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::Duplicate {
+            name,
+            display_name,
+            branch,
+        } => {
+            let (project, task) = selected_task(out);
+
+            let client = client_from_config(out);
+            match client
+                .tasks()
+                .duplicate_task(
+                    &project,
+                    &task,
+                    &DuplicateTaskRequest {
+                        name: name.clone().into(),
+                        display_name: display_name.into(),
+                        branch,
+                    },
+                )
+                .await
+            {
+                Ok(id) => {
+                    out.ok(&serde_json::json!({"created": true, "id": id, "task": name}));
+                    out.human(format!("Task duplicated as {name}."));
                 }
                 Err(e) => out.fail(e),
             }
