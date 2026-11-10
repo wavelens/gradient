@@ -55,7 +55,6 @@ pub struct EvalPoolConfig {
 #[derive(Debug)]
 pub struct EvalPool {
     workers: Arc<EvalWorkerPool>,
-    patterns: Mutex<Vec<String>>,
     cache_dir: String,
 }
 
@@ -85,7 +84,6 @@ impl EvalPool {
         }
         Arc::new(Self {
             workers,
-            patterns: Mutex::new(Vec::new()),
             cache_dir: config.cache_dir,
         })
     }
@@ -136,7 +134,7 @@ impl EvalPool {
             .run_calls(
                 eval_target,
                 calls,
-                &[],
+                &requested,
                 None,
                 dependencies,
                 &recording,
@@ -182,7 +180,7 @@ impl EvalPool {
             .run_calls(
                 eval_target,
                 calls,
-                &excludes,
+                &wildcards,
                 run_overrides,
                 dependencies,
                 found,
@@ -201,7 +199,6 @@ impl EvalPool {
         wildcards: Vec<String>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
-        self.remember_patterns(&wildcards);
         let mut worker = self.workers.acquire().await?;
         match worker
             .plan(eval_target.clone(), wildcards, dependencies)
@@ -215,14 +212,6 @@ impl EvalPool {
         }
     }
 
-    fn remember_patterns(&self, wildcards: &[String]) {
-        *lock(&self.patterns) = wildcards
-            .iter()
-            .filter(|w| !w.starts_with('!'))
-            .cloned()
-            .collect();
-    }
-
     pub async fn list_given(
         &self,
         eval_target: &FlakeEvalTarget,
@@ -232,13 +221,11 @@ impl EvalPool {
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
-        self.remember_patterns(wildcards);
-        let excludes = excludes_of(wildcards);
-        let calls = discovery_calls(shards, &excludes, self.workers.max());
+        let calls = discovery_calls(shards, &excludes_of(wildcards), self.workers.max());
         self.run_calls(
             eval_target,
             calls,
-            &excludes,
+            wildcards,
             run_overrides,
             dependencies,
             found,
@@ -255,12 +242,14 @@ impl EvalPool {
         &self,
         eval_target: &FlakeEvalTarget,
         calls: Vec<DiscoveryCall>,
-        excludes: &[String],
+        wildcards: &[String],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
         return_deferred: bool,
     ) -> Result<Discovery> {
+        let excludes = &excludes_of(wildcards);
+        let patterns = &included_attribute_patterns(wildcards);
         let listed_attrs = Mutex::new(HashSet::<String>::new());
         let warnings = Mutex::new(Vec::<String>::new());
         let errors = Mutex::new(Vec::<AttrError>::new());
@@ -271,7 +260,7 @@ impl EvalPool {
                 (&listed_attrs, &warnings, &errors, &calls_seen, &deferred);
             pooled_fan_out(self.workers.max(), calls, |call| async move {
                 let (listing, call_stats) = self
-                    .list_shard(eval_target, call, run_overrides, dependencies)
+                    .list_shard(eval_target, call, patterns, run_overrides, dependencies)
                     .await?;
                 let fresh: Vec<ResolvedItem> = {
                     let mut listed = lock(listed_attrs);
@@ -320,13 +309,20 @@ impl EvalPool {
         &self,
         eval_target: &FlakeEvalTarget,
         call: DiscoveryCall,
+        patterns: &[String],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, Option<CallStats>)> {
         let mut attempt = 0;
         loop {
             match self
-                .list_once(eval_target, call.clone(), run_overrides, dependencies)
+                .list_once(
+                    eval_target,
+                    call.clone(),
+                    patterns,
+                    run_overrides,
+                    dependencies,
+                )
                 .await
             {
                 Ok((listing, stats)) => return Ok((listing, Some(stats))),
@@ -347,11 +343,12 @@ impl EvalPool {
         &self,
         eval_target: &FlakeEvalTarget,
         call: DiscoveryCall,
+        patterns: &[String],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, CallStats)> {
         let pattern = call.wildcards.first().cloned().unwrap_or_default();
-        let bucket = entry_point_of(&pattern, &lock(&self.patterns));
+        let bucket = entry_point_of(&pattern, patterns);
         let mut worker = self.workers.acquire().await?;
         let first_call = worker.is_fresh();
         let started = Instant::now();
@@ -418,6 +415,14 @@ fn excludes_of(wildcards: &[String]) -> Vec<String> {
     wildcards
         .iter()
         .filter(|w| w.starts_with('!'))
+        .cloned()
+        .collect()
+}
+
+fn included_attribute_patterns(wildcards: &[String]) -> Vec<String> {
+    wildcards
+        .iter()
+        .filter(|w| !w.starts_with('!'))
         .cloned()
         .collect()
 }

@@ -425,10 +425,11 @@ where
     use std::io::Read;
     use std::os::unix::io::FromRawFd;
 
-    // SAFETY (all libc calls below): this code is executing on the eval-worker's single thread.
-    // Every fd (`2`, `saved`, `pipefd[*]`) is valid by construction.
-    // Failures are best-effort and are only skipping the warning capture.
-    // `pipefd[0]` is handed to `File::from_raw_fd` exactly once, taking ownership.
+    // SAFETY (all libc calls below): every fd (`2`, `saved`, `pipefd[*]`) is valid by construction,
+    // and `pipefd[0]` is handed to `File::from_raw_fd` exactly once, which takes ownership.
+    // Failures only skip the warning capture. Redirecting fd 2 affects the whole process, so stderr
+    // writes from other threads land in the capture as well: the stats ticker thread and the drain
+    // thread do not write to stderr.
 
     let saved = unsafe { libc::dup(2) };
     if saved < 0 {
