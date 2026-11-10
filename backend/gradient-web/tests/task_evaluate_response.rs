@@ -6,7 +6,7 @@
 
 use axum::http::StatusCode;
 use gradient_entity::{project, task, task_trigger};
-use gradient_fixtures::ids::{project_id, user_id};
+use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{
     admin_role, live_session, project_member, task_without_cache_signing, user,
@@ -94,6 +94,39 @@ async fn answers_400_without_raw_git_error_when_commit_cannot_be_fetched() {
     assert_eq!(
         body["message"],
         "The repository has no such commit. Check the commit hash and confirm that Gradient can read the repository."
+    );
+    assert!(!res.text().contains(missing_repository));
+}
+
+#[tokio::test]
+async fn answers_400_without_raw_git_error_when_head_commit_cannot_be_fetched() {
+    let session_id = SessionId::now_v7();
+    let missing_repository = "/nonexistent/gradient-missing-repository";
+    let task = task::Model {
+        repository: missing_repository.into(),
+        ..task_without_cache_signing()
+    };
+    let default_trigger = task_trigger::Model {
+        task: task_id(),
+        is_default: true,
+        active: true,
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    };
+    let res = evaluate(
+        authorized_db_with_task(session_id, task).append_query_results([vec![default_trigger]]),
+        session_id,
+        json!({}),
+    )
+    .await;
+
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["code"], "repository_unreachable");
+    assert_eq!(
+        body["message"],
+        "Gradient can't read the latest commit of the repository. Check the repository URL, branch and the project's access key (deploy key), then try again."
     );
     assert!(!res.text().contains(missing_repository));
 }

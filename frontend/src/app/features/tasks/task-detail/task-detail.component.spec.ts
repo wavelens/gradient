@@ -773,7 +773,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
 
 describe('TaskDetailComponent - error surfacing (issue #280)', () => {
   it('reports a failed start with the server reason and enables the button again', () => {
-    const error = new ApiError('Failed to fetch repository state: connection refused', 502);
+    const error = new ApiError("Gradient can't read the latest commit of the repository. Check the repository URL, branch and the project's access key (deploy key), then try again.", 400, 'repository_unreachable');
     const { fixture, notify } = setup({ managed: false, canEdit: true, canTrigger: true }, {
       startEvaluation: () => throwError(() => error),
     });

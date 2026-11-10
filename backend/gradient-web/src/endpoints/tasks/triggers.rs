@@ -409,8 +409,9 @@ pub(super) async fn fire(
 
     let (branch, head) = head_commit(db, task, branch.as_deref())
         .await
-        .map_err(|e| SharedRefusal::RepositoryStateFetchFailed {
-            reason: e.to_string(),
+        .map_err(|e| {
+            tracing::warn!(task_id = %task.id, trigger_id = %trigger.id, error = %e, "rejecting evaluation: failed to fetch the head commit of the repository");
+            SharedRefusal::RepositoryStateFetchFailed
         })?;
 
     let trigger_id = request.counts_as_trigger_run.then_some(trigger.id);

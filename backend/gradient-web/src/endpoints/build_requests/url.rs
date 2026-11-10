@@ -102,8 +102,9 @@ pub async fn post_url(
             let git_ref = body.git_ref.as_deref();
             let hash = resolve_remote_ref(&state.db(), &project, url, git_ref)
                 .await
-                .map_err(|e| SharedRefusal::RepositoryStateFetchFailed {
-                    reason: e.to_string(),
+                .map_err(|e| {
+                    tracing::warn!(project_id = %project.id, error = %e, "reject build request because of failure to resolve git ref of repository");
+                    SharedRefusal::RepositoryStateFetchFailed
                 })?;
             (hash, git_ref.unwrap_or("HEAD").to_string())
         }

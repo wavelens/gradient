@@ -102,8 +102,10 @@ pub enum SharedRefusal {
     AccountDeactivated,
     #[error("You do not have permission to perform this action.")]
     MissingPermission,
-    #[error("Failed to fetch repository state: {reason}")]
-    RepositoryStateFetchFailed { reason: String },
+    #[error(
+        "Gradient can't read the latest commit of the repository. Check the repository URL, branch and the project's access key (deploy key), then try again."
+    )]
+    RepositoryStateFetchFailed,
 }
 
 impl Refusal for SharedRefusal {
@@ -121,7 +123,7 @@ impl Refusal for SharedRefusal {
             | Self::InvalidWorkerId
             | Self::EmptyField(_)
             | Self::InvalidAllowedIp { .. }
-            | Self::RepositoryStateFetchFailed { .. } => RefusalStatus::BadRequest,
+            | Self::RepositoryStateFetchFailed => RefusalStatus::BadRequest,
             Self::LastAdmin(_) | Self::WorkerManagedByState => RefusalStatus::Conflict,
             Self::InvalidToken | Self::AuthorizationRequired => RefusalStatus::Unauthorized,
         }
@@ -131,7 +133,7 @@ impl Refusal for SharedRefusal {
         match self {
             Self::SourceIpNotAllowed => ErrorCode::FORBIDDEN_SOURCE_IP,
             Self::InvalidAllowedIp { .. } => ErrorCode::INVALID_ALLOWED_IP,
-            Self::RepositoryStateFetchFailed { .. } => ErrorCode::REPOSITORY_UNREACHABLE,
+            Self::RepositoryStateFetchFailed => ErrorCode::REPOSITORY_UNREACHABLE,
             _ => self.status().default_code(),
         }
     }

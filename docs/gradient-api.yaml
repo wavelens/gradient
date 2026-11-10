@@ -10168,9 +10168,7 @@ paths:
         `POST /evals/{evaluation}/retry` re-runs the failed builds of a finished
         evaluation.
 
-        Returns `400` with `code: "repository_unreachable"` when the repository
-        cannot be fetched (DNS failure, authentication failure, unreachable host,
-        bad URL, …) - the message includes the underlying git error.
+        The endpoint can return `400` with `code: "repository_unreachable"` if it cannot fetch the repository. The causes can be DNS failure, authentication failure, an unreachable host or an invalid URL. The message can give a fixed hint. The server logs record the underlying git error.
       operationId: triggerEvaluation
       parameters:
       - name: project
