@@ -51,6 +51,12 @@ describe('DashboardComponent', () => {
     expect(root.querySelector('app-dashboard-rail')?.classList).toContain('hidden');
   });
 
+  it('sends the cache step to the cache list, where a user can create a cache or find a public one', () => {
+    const root = render({ projects: [], caches: [] });
+    const hrefs = Array.from(root.querySelectorAll('app-dashboard-start a')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('/caches');
+  });
+
   it('shows the router blocks once the user has something', () => {
     const root = render({ projects: [{ name: 'p', display_name: 'P', starred: false, tier: 'member', status: null, task_count: 1 }], caches: [] });
     for (const sel of ['app-dashboard-stats', 'app-dashboard-task-table', 'app-dashboard-activity', 'app-dashboard-rail']) {

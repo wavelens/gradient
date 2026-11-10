@@ -33,6 +33,6 @@ export class DashboardStartComponent {
   readonly steps = [
     { icon: entityKindToIconName.project, title: 'Create a project', detail: 'A project groups tasks and members', link: withCreateDialogQueryParam(links.projects()) },
     { icon: 'group', title: 'Create a team', detail: 'A team shares its members and workers with projects and caches', link: withCreateDialogQueryParam(links.teams()) },
-    { icon: entityKindToIconName.cache, title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: withCreateDialogQueryParam(links.caches()) },
+    { icon: entityKindToIconName.cache, title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: links.caches() },
   ];
 }
