@@ -235,7 +235,25 @@ async fn optional_caller(
     let Some(token) = extract_bearer_or_cookie(headers) else {
         return Ok(None);
     };
-    let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token.to_owned())
+    verify_credential_and_return_user_and_decoded_credential(
+        db,
+        jwt_secret,
+        last_used_stamps,
+        token.to_owned(),
+        client_ip,
+    )
+    .await
+    .map(Some)
+}
+
+pub async fn verify_credential_and_return_user_and_decoded_credential(
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    last_used_stamps: &Debounce<Uuid>,
+    token: String,
+    client_ip: IpAddr,
+) -> WebResult<(MUser, DecodedRequest)> {
+    let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token)
         .await
         .map_err(token_decode_status_to_web_error)?;
     let allowed_from_here = decoded
@@ -254,7 +272,7 @@ async fn optional_caller(
     }
 
     let user = decoded.user_with_superuser_allowed_for_credential(user);
-    Ok(Some((user, decoded)))
+    Ok((user, decoded))
 }
 
 fn optional_auth_error_to_response_and_delete_session_cookie(

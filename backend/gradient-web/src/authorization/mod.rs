@@ -31,6 +31,7 @@ pub(crate) use self::jwt::{sign_claims, verify_claims};
 pub use self::middleware::{
     MaybeUser, authorize, authorize_optional, reject_api_key_authentication,
     require_session_authentication, update_last_login,
+    verify_credential_and_return_user_and_decoded_credential,
 };
 pub(crate) use self::oidc::random_url_safe;
 pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};

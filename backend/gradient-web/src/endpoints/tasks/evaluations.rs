@@ -29,7 +29,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::{InstanceMemory, ServerState};
 use gradient_db::evaluations::TaskEvaluationFilter;
-use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
+use gradient_db::lookup::{by_ids, get_any_project_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
@@ -848,21 +848,16 @@ pub async fn get_entry_point_download(
         .or_not_found(Resource::Task)?;
 
     let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
-        let decoded = crate::authorization::decode_jwt(
-            &state.web_db,
-            &state.jwt_secret,
-            &state.memory.last_used_stamps,
-            token_str,
-        )
-        .await
-        .map_err(|_| SharedRefusal::InvalidToken)?;
-        if let Some(ctx) = decoded.api_key_context()
-            && !crate::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
-        {
-            return Err(SharedRefusal::SourceIpNotAllowed.into());
-        }
-        let user = by_id::<EUser, _>(&state.web_db, decoded.user_id()).await?;
-        (user, decoded.api_key_context().cloned())
+        let (user, decoded) =
+            crate::authorization::verify_credential_and_return_user_and_decoded_credential(
+                &state.web_db,
+                &state.jwt_secret,
+                &state.memory.last_used_stamps,
+                token_str,
+                client_ip,
+            )
+            .await?;
+        (Some(user), decoded.api_key_context().cloned())
     } else {
         (maybe_user, api_key.as_ref().cloned())
     };

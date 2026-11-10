@@ -352,7 +352,7 @@ pub async fn load_membership_with_permissions(
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<PermissionMask>> {
-    if api_key_is_pinned_to_other_project(api_key, project_id) {
+    if api_key_cannot_use_project_permissions(api_key, project_id) {
         return Ok(None);
     }
     Ok(
@@ -369,13 +369,21 @@ pub fn api_key_is_pinned_to_other_project(
     api_key.is_some_and(|ctx| ctx.project.is_some_and(|pinned| pinned != project_id))
 }
 
+fn api_key_cannot_use_project_permissions(
+    api_key: Option<&ApiKeyContext>,
+    project_id: ProjectId,
+) -> bool {
+    api_key.is_some_and(|ctx| ctx.cache_pin.is_some())
+        || api_key_is_pinned_to_other_project(api_key, project_id)
+}
+
 pub fn key_limited_project_mask(
     mask: PermissionMask,
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
 ) -> PermissionMask {
     match api_key {
-        _ if api_key_is_pinned_to_other_project(api_key, project_id) => 0,
+        _ if api_key_cannot_use_project_permissions(api_key, project_id) => 0,
         Some(ctx) => mask & ctx.mask,
         None => mask,
     }
@@ -1157,6 +1165,28 @@ mod tests {
             cache_pin: None,
             allowed_ips: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_cache_pinned_key_holds_no_project_permission() {
+        run(async {
+            let key = ApiKeyContext {
+                cache_pin: Some(CacheId::now_v7()),
+                ..api_key_ctx(mask_from(Permission::ALL), None)
+            };
+            let project = ProjectId::now_v7();
+            let state = make_state(mock_db().into_connection());
+
+            assert_eq!(
+                key_limited_project_mask(mask_from(Permission::ALL), project, Some(&key)),
+                0
+            );
+            assert!(
+                !can_view_project(&state.web_db, UserId::now_v7(), project, Some(&key))
+                    .await
+                    .expect("no query runs for a cache-pinned key")
+            );
+        });
     }
 
     #[test]

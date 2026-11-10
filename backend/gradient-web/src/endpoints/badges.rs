@@ -135,16 +135,16 @@ async fn resolve_badge_user(
 ) -> Result<(Option<MUser>, Option<ApiKeyContext>), WebError> {
     match token {
         Some(tok) => {
-            let decoded = crate::authorization::decode_jwt(db, jwt_secret, last_used_stamps, tok)
-                .await
-                .map_err(|_| SharedRefusal::InvalidToken)?;
-            if let Some(ctx) = decoded.api_key_context()
-                && !crate::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
-            {
-                return Err(SharedRefusal::SourceIpNotAllowed.into());
-            }
-            let user = by_id::<EUser, _>(db, decoded.user_id()).await?;
-            Ok((user, decoded.api_key_context().cloned()))
+            let (user, decoded) =
+                crate::authorization::verify_credential_and_return_user_and_decoded_credential(
+                    db,
+                    jwt_secret,
+                    last_used_stamps,
+                    tok,
+                    client_ip,
+                )
+                .await?;
+            Ok((Some(user), decoded.api_key_context().cloned()))
         }
         None => Ok((maybe_user, api_key.as_ref().cloned())),
     }
