@@ -301,7 +301,7 @@ describe('TaskTriggersComponent - write failures', () => {
     list.mockReturnValue(of([{ ...trigger, last_fired_at: new Date(Date.now() - 1000).toISOString().replace('Z', '') }]));
     fixture.componentInstance.fireNow('t1');
     fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).textContent).toMatch(/Last fired: \d+s ago/);
+    expect((fixture.nativeElement as HTMLElement).textContent).toMatch(/Last fired: just now/);
   });
 
   it('reports a failed make default', () => {
