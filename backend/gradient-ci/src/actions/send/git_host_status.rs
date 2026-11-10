@@ -6,7 +6,7 @@
 
 use crate::ActionError;
 use crate::actions::ExecutorOk;
-use crate::actions::crypto::decrypt_secret_with_file;
+use crate::outbound_integration_access_token::refresh_and_get_usable_decrypted_access_token;
 use crate::actions::matchers::git_host_status_for_event;
 use crate::actions::report::{build_ci_reports_from_payload, persist_evaluation_check_id};
 use crate::context::CiContext;
@@ -130,13 +130,13 @@ pub(crate) async fn build_reporter_for_integration(
         .get(git_host)
         .ok_or_else(|| anyhow!("no Git host provider registered for {:?}", git_host))?;
 
-    let token = match integration.access_token.as_deref() {
-        Some(enc) => Some(
-            decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, enc)
-                .map_err(|e| anyhow!("decrypt integration token: {}", e))?,
-        ),
-        None => None,
-    };
+    let token = refresh_and_get_usable_decrypted_access_token(
+        &ctx.db.worker_db,
+        &ctx.db.config,
+        &ctx.http,
+        &integration,
+    )
+    .await?;
 
     if provider.supports_app_auth()
         && let Some(reporter) = build_github_app_reporter(ctx, &integration).await?

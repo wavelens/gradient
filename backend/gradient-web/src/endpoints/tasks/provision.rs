@@ -17,6 +17,7 @@ use axum::Json;
 use axum::extract::State;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::decrypt_secret_with_file;
+use gradient_ci::outbound_integration_access_token::refresh_and_get_usable_decrypted_access_token;
 use gradient_core::ServerState;
 use gradient_git_host::provision::{self, ForgeAccess, ProvisionError};
 use gradient_sources::format_public_key;
@@ -145,13 +146,15 @@ pub async fn post_install_webhook(
             .as_deref()
             .ok_or(TaskRefusal::ProvisionSecretMissing)?,
     )?;
-    let token = decrypt(
-        &state.config.secrets.crypt_file,
-        outbound
-            .access_token
-            .as_deref()
-            .ok_or(TaskRefusal::ProvisionTokenMissing)?,
-    )?;
+    let token = refresh_and_get_usable_decrypted_access_token(
+        &state.web_db,
+        &state.config,
+        &state.http,
+        outbound,
+    )
+    .await
+    .context("decrypt integration credential")?
+    .ok_or(TaskRefusal::ProvisionTokenMissing)?;
 
     provision::install_webhook(
         public_client().clone(),
@@ -191,13 +194,15 @@ pub async fn post_install_deploy_key(
         IntegrationKind::Outbound,
     )?;
     let endpoint_url = forge_endpoint(outbound, &target.host)?;
-    let token = decrypt(
-        &state.config.secrets.crypt_file,
-        outbound
-            .access_token
-            .as_deref()
-            .ok_or(TaskRefusal::ProvisionTokenMissing)?,
-    )?;
+    let token = refresh_and_get_usable_decrypted_access_token(
+        &state.web_db,
+        &state.config,
+        &state.http,
+        outbound,
+    )
+    .await
+    .context("decrypt integration credential")?
+    .ok_or(TaskRefusal::ProvisionTokenMissing)?;
     let public_key = format_public_key(scope.project.clone(), &state.config.server.serve_url);
     let title = public_key
         .rsplit(' ')

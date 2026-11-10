@@ -1334,6 +1334,11 @@ export interface GetUserSettingsResponse {
   managed: boolean;
 }
 
+export interface GiteaOAuthAppConfig {
+  git_host_type: string;
+  instance_base_url: string;
+}
+
 export interface GithubAppManifestRequest {
   host?: string | null;
 }
@@ -1480,6 +1485,7 @@ export interface IntegrationResponse {
   endpoint_url?: string | null;
   has_secret: boolean;
   has_access_token: boolean;
+  access_token_refreshes_automatically: boolean;
   allowed_ips: string[];
   installation_id?: number | null;
   account_login?: string | null;
@@ -2422,6 +2428,7 @@ export interface ServerConfig {
   create_team: CreatePermission;
   create_cache: CreatePermission;
   github_app_enabled: boolean;
+  gitea_oauth_app?: GiteaOAuthAppConfig | null;
   ssh_enabled: boolean;
   ssh_port?: number | null;
   gradient_ci_enabled: boolean;

@@ -60,6 +60,10 @@ pub(crate) enum ProjectRefusal {
     GitHubNeedsApp,
     #[error("endpoint_url must be an http or https URL")]
     InvalidEndpointUrl,
+    #[error("No Gitea or Forgejo OAuth2 application configured on this server")]
+    GiteaOAuth2ApplicationNotConfigured,
+    #[error("Connections to the Git host need a signed-in browser session.")]
+    GitHostOAuthConnectNeedsSignedInBrowserSession,
 }
 
 impl Refusal for ProjectRefusal {
@@ -78,7 +82,9 @@ impl Refusal for ProjectRefusal {
             | Self::SecretValueTooLarge
             | Self::WebhookSecretRequired
             | Self::GitHubNeedsApp
-            | Self::InvalidEndpointUrl => RefusalStatus::BadRequest,
+            | Self::InvalidEndpointUrl
+            | Self::GiteaOAuth2ApplicationNotConfigured => RefusalStatus::BadRequest,
+            Self::GitHostOAuthConnectNeedsSignedInBrowserSession => RefusalStatus::Unauthorized,
             Self::IntegrationNameTaken { .. }
             | Self::WorkerIdBelongsToTeamWorker
             | Self::WorkerIdRegistered

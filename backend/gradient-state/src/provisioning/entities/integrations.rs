@@ -113,6 +113,8 @@ impl<'a> StateApplicator<'a> {
                 active.endpoint_url = Set(endpoint);
                 active.secret = Set(encrypted_secret);
                 active.access_token = Set(encrypted_token);
+                active.encrypted_refresh_token = Set(None);
+                active.access_token_expires_at = Set(None);
                 active.github_installation = Set(github_installation);
                 active.created_by = Set(created_by_id);
                 active.managed = Set(true);

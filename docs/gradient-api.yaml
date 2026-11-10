@@ -6795,6 +6795,30 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security: []
+  /api/v1/integrations/oauth/callback:
+    get:
+      tags:
+      - integrations
+      summary: Gitea or Forgejo OAuth2 Callback
+      description: Handle the redirect from the Git host. Start with validation of `state` against the `git_host_oauth_connect` cookie. Exchange the code for a token. Create the integration while the session that started the connection is still active. Redirect to the project integration page with `oauth_connected` and `webhooks_installed`, or with the `oauth_error` code.
+      operationId: gitHostOAuthCallback
+      parameters:
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect to the frontend
+        default:
+          $ref: '#/components/responses/Error'
+      security: []
   /api/v1/metrics/catalog:
     get:
       tags:
@@ -7359,6 +7383,38 @@ paths:
                     type: boolean
                   message:
                     $ref: '#/components/schemas/ConnectGitHostResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/integrations/oauth/connect:
+    get:
+      tags:
+      - integrations
+      summary: Connect Gitea or Forgejo with OAuth2
+      description: Redirect the signed-in browser to a Gitea or Forgejo instance with a setup to authorize Gradient (HTTP 302). Use PKCE (S256). Set a short-lived signed `git_host_oauth_connect` cookie with the state, project and integration name. The callback can create a webhook receiver named `name` and a status reporter after approval. Gradient can refresh the access token for the status reporter automatically. The callback can also install a webhook on the repositories of tasks that connect to the new integration. API keys cannot call this endpoint.
+      operationId: connectGitHostWithOAuth
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: query
+        description: Combined name of the webhook receiver and status reporter.
+        required: true
+        schema:
+          type: string
+      - name: display_name
+        in: query
+        description: Name to display in the UI. Default is `name`.
+        required: false
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect to Git host
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -18217,6 +18273,16 @@ components:
             $ref: '#/components/schemas/ConnectedLoginProvider'
         managed:
           type: boolean
+    GiteaOAuthAppConfig:
+      type: object
+      required:
+      - git_host_type
+      - instance_base_url
+      properties:
+        git_host_type:
+          type: string
+        instance_base_url:
+          type: string
     GithubAppManifestRequest:
       type: object
       properties:
@@ -18582,6 +18648,7 @@ components:
       - git_host_type
       - has_secret
       - has_access_token
+      - access_token_refreshes_automatically
       - allowed_ips
       - created_by
       - created_at
@@ -18607,6 +18674,8 @@ components:
         has_secret:
           type: boolean
         has_access_token:
+          type: boolean
+        access_token_refreshes_automatically:
           type: boolean
         allowed_ips:
           type: array
@@ -21303,6 +21372,10 @@ components:
           $ref: '#/components/schemas/CreatePermission'
         github_app_enabled:
           type: boolean
+        gitea_oauth_app:
+          oneOf:
+          - $ref: '#/components/schemas/GiteaOAuthAppConfig'
+          - type: 'null'
         ssh_enabled:
           type: boolean
         ssh_port:

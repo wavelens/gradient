@@ -32,6 +32,8 @@ pub use self::middleware::{
     require_session_authentication, update_last_login,
 };
 pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};
+pub(crate) use self::jwt::{sign_claims, verify_claims};
+pub(crate) use self::oidc::random_url_safe;
 pub use self::provider_flow::{
     ProviderCallback, ProviderPurpose, provider_authorize, provider_callback,
 };

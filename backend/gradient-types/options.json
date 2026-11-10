@@ -1428,6 +1428,49 @@
     "values": []
   },
   {
+    "group": "gitea_app",
+    "field": "instance_base_url",
+    "flag": "gitea-app-instance-base-url",
+    "env": "GRADIENT_GITEA_APP_INSTANCE_BASE_URL",
+    "type": "Option<String>",
+    "description": "Base URL of the Gitea or Forgejo instance that has the OAuth2 application registered (example: `https://codeberg.org`).",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "gitea_app",
+    "field": "git_host_type",
+    "flag": "gitea-app-git-host-type",
+    "env": "GRADIENT_GITEA_APP_GIT_HOST_TYPE",
+    "type": "GitHostSoftwareChoice",
+    "description": "Software to host Git on the instance.",
+    "default": "forgejo",
+    "values": [
+      "gitea",
+      "forgejo"
+    ]
+  },
+  {
+    "group": "gitea_app",
+    "field": "client_id",
+    "flag": "gitea-app-client-id",
+    "env": "GRADIENT_GITEA_APP_CLIENT_ID",
+    "type": "Option<String>",
+    "description": "The client ID for the OAuth2 application.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "gitea_app",
+    "field": "client_secret_file",
+    "flag": "gitea-app-client-secret-file",
+    "env": "GRADIENT_GITEA_APP_CLIENT_SECRET_FILE",
+    "type": "Option<String>",
+    "description": "Path to the file with the client secret for the OAuth2 application. Register an application on the Git host with redirect URI `<serve URL>/api/v1/integrations/oauth/callback`.",
+    "default": null,
+    "values": []
+  },
+  {
     "group": "ssh",
     "field": "enable",
     "flag": "ssh-enable",

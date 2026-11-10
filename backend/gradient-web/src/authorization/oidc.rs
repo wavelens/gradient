@@ -50,7 +50,7 @@ struct IdTokenClaims {
     groups: Vec<String>,
 }
 
-pub(super) fn random_url_safe(bytes: usize) -> String {
+pub(crate) fn random_url_safe(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     rand::rng().fill(buf.as_mut_slice());
     URL_SAFE_NO_PAD.encode(buf)

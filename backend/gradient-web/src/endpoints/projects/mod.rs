@@ -6,6 +6,7 @@
 
 pub mod integrations;
 pub mod management;
+pub mod project_gitea_oauth2_connection;
 mod refusal;
 pub mod secrets;
 pub mod settings;

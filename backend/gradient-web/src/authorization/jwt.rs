@@ -76,7 +76,7 @@ pub fn clear_jwt_token_cookie(use_tls: bool) -> String {
     format!("jwt_token=; HttpOnly{secure}; SameSite=Strict; Path=/; Max-Age=0")
 }
 
-pub(super) fn sign_claims<T: Serialize>(
+pub(crate) fn sign_claims<T: Serialize>(
     jwt_secret: &SecretString,
     claims: &T,
 ) -> jsonwebtoken::errors::Result<String> {
@@ -87,7 +87,7 @@ pub(super) fn sign_claims<T: Serialize>(
     )
 }
 
-pub(super) fn verify_claims<T: DeserializeOwned>(
+pub(crate) fn verify_claims<T: DeserializeOwned>(
     jwt_secret: &SecretString,
     token: &str,
 ) -> jsonwebtoken::errors::Result<T> {

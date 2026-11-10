@@ -104,6 +104,9 @@ pub struct Model {
     pub endpoint_url: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub access_token: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub encrypted_refresh_token: Option<String>,
+    pub access_token_expires_at: Option<NaiveDateTime>,
     /// Source CIDRs allowed for inbound webhooks. `None` or an empty list is allowing any source.
     #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
     pub allowed_ips: Option<Vec<String>>,
@@ -150,6 +153,11 @@ impl std::fmt::Debug for Model {
                 "access_token",
                 &self.access_token.as_ref().map(|_| "[redacted]"),
             )
+            .field(
+                "encrypted_refresh_token",
+                &self.encrypted_refresh_token.as_ref().map(|_| "[redacted]"),
+            )
+            .field("access_token_expires_at", &self.access_token_expires_at)
             .field("allowed_ips", &self.allowed_ips)
             .field("github_installation", &self.github_installation)
             .field("created_by", &self.created_by)

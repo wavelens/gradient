@@ -13,6 +13,7 @@ pub mod error;
 pub mod github_app_manifest;
 pub mod integration_lookup;
 pub mod manifest_state;
+pub mod outbound_integration_access_token;
 pub mod pull_request_summary;
 pub mod pull_requests;
 pub mod reactions;

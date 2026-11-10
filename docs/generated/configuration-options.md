@@ -103,6 +103,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `gc.narUploadGraceHours` | unsigned int | `24` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | Hours before the deletion of an unreferenced NAR object, covering the window between its upload and the commit of its database rows. |
 | `gc.orphanDerivationHours` | unsigned int | `24` | `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` | Hours before the deletion of a derivation outside the build closure of every retained evaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to `0` to delete such derivations on the next run. |
 
+## `giteaApp`
+
+| Option | Type | Default | Env | Description |
+|---|---|---|---|---|
+| `giteaApp.clientId` | string | - | `GRADIENT_GITEA_APP_CLIENT_ID` | The client ID of the OAuth2 application. |
+| `giteaApp.clientSecretFile` | path | - | `GRADIENT_GITEA_APP_CLIENT_SECRET_FILE` | File for the client secret of the OAuth2 application. Register the application on the Git host with redirect URI `<serveUrl>/api/v1/integrations/oauth/callback`. |
+| `giteaApp.enable` | bool | `false` | - | Whether to enable an OAuth2 application for Gitea or Forgejo that project members can use for one-click connection to a Git host. |
+| `giteaApp.gitHostType` | one of `gitea` `forgejo` | `"forgejo"` | `GRADIENT_GITEA_APP_GIT_HOST_TYPE` | Software to host Git on the instance. |
+| `giteaApp.instanceBaseUrl` | string | - | `GRADIENT_GITEA_APP_INSTANCE_BASE_URL` | Base URL of the Gitea or Forgejo instance that has the OAuth2 application registered. |
+
 ## `githubApp`
 
 | Option | Type | Default | Env | Description |

@@ -147,6 +147,12 @@ pub struct LoginProviderInfo {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
+pub struct GiteaOAuthAppConfig {
+    pub git_host_type: String,
+    pub instance_base_url: String,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ServerConfig {
     pub version: String,
     pub commit: Option<String>,
@@ -161,6 +167,7 @@ pub struct ServerConfig {
     pub create_team: CreatePermission,
     pub create_cache: CreatePermission,
     pub github_app_enabled: bool,
+    pub gitea_oauth_app: Option<GiteaOAuthAppConfig>,
     pub ssh_enabled: bool,
     pub ssh_port: Option<u16>,
     pub gradient_ci_enabled: bool,
@@ -214,6 +221,10 @@ pub async fn get_config(
             create_team: state.config.permissions.create_team,
             create_cache: state.config.permissions.create_cache,
             github_app_enabled: state.config.github_app.is_some(),
+            gitea_oauth_app: state.config.gitea_app.as_ref().map(|app| GiteaOAuthAppConfig {
+                git_host_type: app.git_host_type.as_path_segment().to_owned(),
+                instance_base_url: app.instance_base_url.clone(),
+            }),
             ssh_enabled: state.config.ssh.enable,
             ssh_port: state.config.ssh.enable.then_some(state.config.ssh.port),
             gradient_ci_enabled: state.config.gradient_ci.enable,

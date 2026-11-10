@@ -36,7 +36,7 @@ sha2        = { workspace = true }
 subtle      = { workspace = true }
 tempfile    = { workspace = true }
 thiserror   = { workspace = true }
-tokio       = { workspace = true, features = ["rt"] }
+tokio       = { workspace = true, features = ["rt", "fs"] }
 tracing     = { workspace = true }
 url         = { workspace = true }
 

@@ -6,6 +6,7 @@
 
 mod client;
 pub mod git_push;
+pub mod gitea_oauth;
 pub mod github_app;
 pub mod pr;
 pub mod provider;

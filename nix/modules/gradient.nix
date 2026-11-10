@@ -9,7 +9,7 @@
   serverOptions = import ./options.nix {
     inherit lib;
     specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-types/options.json);
-    enabledGroups = [ "oidc" "scim" "email" "s3" "github_app" "ssh" ];
+    enabledGroups = [ "oidc" "scim" "email" "s3" "github_app" "gitea_app" "ssh" ];
     withoutEnvironment = [ [ "credentialsDir" ] [ "database" "url" ] [ "state" "file" ] [ "state" "validate" ] [ "state" "delete" ] ];
 
     examples = {
@@ -41,6 +41,8 @@
       [ "oidc" "discoveryUrl" ]
       [ "s3" "bucket" ]
       [ "githubApp" "id" ]
+      [ "giteaApp" "instanceBaseUrl" ]
+      [ "giteaApp" "clientId" ]
       [ "log" "level" "default" ]
       [ "log" "level" "web" ]
       [ "log" "level" "cache" ]
@@ -503,6 +505,26 @@ in {
         };
       };
 
+      giteaApp = {
+        enable = lib.mkEnableOption "an OAuth2 application for Gitea or Forgejo that project members can use for one-click connection to a Git host";
+
+        instanceBaseUrl = lib.mkOption {
+          type = lib.types.str;
+          example = "https://codeberg.org";
+          description = "Base URL of the Gitea or Forgejo instance that has the OAuth2 application registered.";
+        };
+
+        clientId = lib.mkOption {
+          type = lib.types.str;
+          description = "The client ID of the OAuth2 application.";
+        };
+
+        clientSecretFile = lib.mkOption {
+          type = lib.types.path;
+          description = "File for the client secret of the OAuth2 application. Register the application on the Git host with redirect URI `<serveUrl>/api/v1/integrations/oauth/callback`.";
+        };
+      };
+
       ssh = {
         enable = lib.mkEnableOption "the Nix daemon over SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`";
 
@@ -646,6 +668,8 @@ in {
             ] ++ lib.optionals cfg.githubApp.enable [
               "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
               "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
+            ] ++ lib.optionals cfg.giteaApp.enable [
+              "gradient_gitea_app_client_secret:${cfg.giteaApp.clientSecretFile}"
             ] ++ lib.optional (cfg.ssh.enable && cfg.ssh.hostKeyFile != null)
               "gradient_ssh_host_key:${cfg.ssh.hostKeyFile}"
             ++ lib.optional (cfg.metrics.tokenFile != null)
@@ -680,6 +704,8 @@ in {
           } // lib.optionalAttrs cfg.githubApp.enable {
             GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
             GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
+          } // lib.optionalAttrs cfg.giteaApp.enable {
+            GRADIENT_GITEA_APP_CLIENT_SECRET_FILE = "%d/gradient_gitea_app_client_secret";
           } // lib.optionalAttrs (cfg.ssh.enable && cfg.ssh.hostKeyFile != null) {
             GRADIENT_SSH_HOST_KEY_FILE = "%d/gradient_ssh_host_key";
           } // lib.optionalAttrs (cfg.metrics.tokenFile != null) {

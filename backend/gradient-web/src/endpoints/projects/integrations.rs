@@ -44,6 +44,7 @@ pub struct IntegrationResponse {
     pub endpoint_url: Option<String>,
     pub has_secret: bool,
     pub has_access_token: bool,
+    pub access_token_refreshes_automatically: bool,
     pub allowed_ips: Vec<String>,
     pub installation_id: Option<i64>,
     pub account_login: Option<String>,
@@ -71,6 +72,7 @@ impl IntegrationResponse {
             endpoint_url: integration.endpoint_url,
             has_secret: integration.secret.is_some(),
             has_access_token: integration.access_token.is_some(),
+            access_token_refreshes_automatically: integration.encrypted_refresh_token.is_some(),
             allowed_ips: integration.allowed_ips.unwrap_or_default(),
             installation_id: installation.as_ref().map(|i| i.installation_id),
             account_login: installation.and_then(|i| i.account_login),
@@ -426,6 +428,8 @@ pub async fn put_integration(
             kind,
             secret,
             access_token,
+            refresh_token: None,
+            access_token_expires_at: None,
             allowed_ips,
         }],
     )
@@ -437,23 +441,25 @@ pub async fn put_integration(
     Ok(ok_json(response))
 }
 
-struct SharedIntegrationCreationFields {
-    project: ProjectId,
-    name: String,
-    display_name: String,
-    git_host: GitHostType,
-    endpoint_url: Option<String>,
-    created_by: UserId,
+pub(super) struct SharedIntegrationCreationFields {
+    pub(super) project: ProjectId,
+    pub(super) name: String,
+    pub(super) display_name: String,
+    pub(super) git_host: GitHostType,
+    pub(super) endpoint_url: Option<String>,
+    pub(super) created_by: UserId,
 }
 
-struct IntegrationToCreate<'a> {
-    kind: IntegrationKind,
-    secret: Option<&'a str>,
-    access_token: Option<&'a str>,
-    allowed_ips: Option<Vec<String>>,
+pub(super) struct IntegrationToCreate<'a> {
+    pub(super) kind: IntegrationKind,
+    pub(super) secret: Option<&'a str>,
+    pub(super) access_token: Option<&'a str>,
+    pub(super) refresh_token: Option<&'a str>,
+    pub(super) access_token_expires_at: Option<chrono::NaiveDateTime>,
+    pub(super) allowed_ips: Option<Vec<String>>,
 }
 
-async fn create_integrations_and_attach_matching_tasks(
+pub(super) async fn create_integrations_and_attach_matching_tasks(
     db: &gradient_db::WebDb,
     crypt_file: &str,
     base: &WebhookBase<'_>,
@@ -481,6 +487,10 @@ async fn create_integrations_and_attach_matching_tasks(
             Some(t) => Some(encrypt_secret_with_file(crypt_file, t).context("encrypt token")?),
             None => None,
         };
+        let encrypted_refresh_token = match row.refresh_token {
+            Some(t) => Some(encrypt_secret_with_file(crypt_file, t).context("encrypt token")?),
+            None => None,
+        };
         let integration = MIntegration {
             id: IntegrationId::now_v7(),
             project: shared.project,
@@ -491,6 +501,8 @@ async fn create_integrations_and_attach_matching_tasks(
             secret,
             endpoint_url: shared.endpoint_url.clone(),
             access_token,
+            encrypted_refresh_token,
+            access_token_expires_at: row.access_token_expires_at,
             allowed_ips: row.allowed_ips,
             github_installation: None,
             created_by: shared.created_by,
@@ -545,7 +557,7 @@ fn http_endpoint_url(url: &str) -> WebResult<String> {
         .ok_or_else(|| ProjectRefusal::InvalidEndpointUrl.into())
 }
 
-fn new_webhook_secret() -> String {
+pub(super) fn new_webhook_secret() -> String {
     use rand::RngExt as _;
 
     let mut raw = [0u8; 32];
@@ -592,6 +604,8 @@ pub async fn post_connect_git_host(
         kind: IntegrationKind::Inbound,
         secret: None,
         access_token: None,
+        refresh_token: None,
+        access_token_expires_at: None,
         allowed_ips: None,
     }];
     if let Some(token) = token {
@@ -599,6 +613,8 @@ pub async fn post_connect_git_host(
             kind: IntegrationKind::Outbound,
             secret: None,
             access_token: Some(token),
+            refresh_token: None,
+            access_token_expires_at: None,
             allowed_ips: None,
         });
     }
@@ -773,6 +789,8 @@ pub async fn patch_integration(
     }
 
     if let Some(token) = body.access_token {
+        active.encrypted_refresh_token = Set(None);
+        active.access_token_expires_at = Set(None);
         active.access_token = Set(if token.is_empty() {
             None
         } else {

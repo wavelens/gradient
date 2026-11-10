@@ -43,6 +43,28 @@ async fn config_reports_a_configured_github_app() {
 }
 
 #[tokio::test]
+async fn config_reports_a_configured_gitea_oauth_app() {
+    let db = mock_db();
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.gitea_app.instance_base_url = Some("https://codeberg.org/".into());
+            cli.gitea_app.client_id = Some("client".into());
+            cli.gitea_app.client_secret_file = Some("/run/secret".into());
+        })
+        .server();
+
+    let body: Value = server.get("/api/v1/config").await.json();
+    assert_eq!(
+        body["message"]["gitea_oauth_app"],
+        serde_json::json!({
+            "git_host_type": "forgejo",
+            "instance_base_url": "https://codeberg.org",
+        })
+    );
+}
+
+#[tokio::test]
 async fn config_reflects_configured_permissions() {
     let db = mock_db();
     let server = TestState::new()

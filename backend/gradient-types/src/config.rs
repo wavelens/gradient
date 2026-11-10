@@ -47,6 +47,14 @@ pub struct GitHubAppConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct GiteaOAuthConfig {
+    pub instance_base_url: String,
+    pub git_host_type: crate::GitHostType,
+    pub client_id: String,
+    pub client_secret_file: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct MetricsConfig {
     pub token: String,
 }
@@ -121,6 +129,20 @@ impl Cli {
         })
     }
 
+    pub fn gitea_app_config(&self) -> Option<GiteaOAuthConfig> {
+        Some(GiteaOAuthConfig {
+            instance_base_url: self
+                .gitea_app
+                .instance_base_url
+                .as_deref()?
+                .trim_end_matches('/')
+                .to_owned(),
+            git_host_type: self.gitea_app.git_host_type.into(),
+            client_id: self.gitea_app.client_id.clone()?,
+            client_secret_file: self.gitea_app.client_secret_file.clone()?,
+        })
+    }
+
     pub fn s3_config(&self) -> Option<S3Config> {
         self.s3.bucket.as_ref().map(|bucket| S3Config {
             bucket: bucket.clone(),
@@ -192,6 +214,7 @@ pub struct RuntimeConfig {
     pub email: Option<EmailConfig>,
     pub s3: Option<S3Config>,
     pub github_app: Option<GitHubAppConfig>,
+    pub gitea_app: Option<GiteaOAuthConfig>,
     pub metrics: Option<MetricsConfig>,
     /// These pipeline settings are always present. The `metrics` field is gating only the
     /// scrape token.
@@ -228,6 +251,7 @@ impl RuntimeConfig {
             email: cli.email_config(),
             s3: cli.s3_config(),
             github_app: cli.github_app_config(),
+            gitea_app: cli.gitea_app_config(),
             metrics: cli.metrics_config(),
             metrics_args: cli.metrics.clone(),
             network: cli.network_config()?,
