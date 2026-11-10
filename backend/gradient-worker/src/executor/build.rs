@@ -470,7 +470,6 @@ where
     let started = std::time::Instant::now();
     let mut watchdog = Watchdog::new(tokio::time::Instant::now(), None, silent);
     loop {
-        watchdog.saw_output();
         let msg = match watchdog.next(&mut logs, abort).await {
             Watched::Item(msg) => msg,
             Watched::End => break,
@@ -485,6 +484,7 @@ where
         };
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
+            watchdog.saw_output();
             let len = line.len();
             match limiter.admit(len as u64, started.elapsed().as_secs_f64()) {
                 Admission::Forward => {}
