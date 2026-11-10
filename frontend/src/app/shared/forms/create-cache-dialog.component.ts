@@ -111,11 +111,11 @@ export class CreateCacheDialogComponent {
     this.creating.set(true);
     this.error.set(null);
     this.caches.createCache(this.cache).subscribe({
-      next: () => {
+      next: (cache) => {
         this.creating.set(false);
         this.visible.set(false);
         this.notify.success('Cache created');
-        this.created.emit(this.cache.name);
+        this.created.emit(cache.name);
       },
       error: (error: unknown) => {
         this.error.set(apiErrorMessage(error, 'Failed to create cache.'));

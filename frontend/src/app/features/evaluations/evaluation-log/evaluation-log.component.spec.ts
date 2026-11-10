@@ -19,6 +19,7 @@ import { EMPTY, NEVER, type Observable, Subject, map, of, throwError } from 'rxj
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
+import { CopyMenuService } from '@shared/routing';
 import { UserInfoResponse, BuildAttemptLogRow, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
@@ -362,11 +363,22 @@ describe('EvaluationLogComponent', () => {
       expect(String(items.get('Artefacts')!.routerLink)).toBe('/project/proj/artefacts/b1?task=ci&eval=eval-1');
     });
 
+    it('copies the CLI command, plain log API URL and page link of the build', () => {
+      const { cmp } = setup();
+      const copy = vi.spyOn(TestBed.inject(CopyMenuService), 'createCopyMenuItemWithCliCommandApiUrlAndLink');
+      const items = open(cmp, target());
+      expect(items.get('Copy')!.submenuItems!.map((i) => i.label)).toEqual(['CLI command', 'API URL', 'Link']);
+      const references = copy.mock.calls[0][0];
+      expect(references.gradientCliCommand).toBe('gradient builds log b1');
+      expect(references.relativeApiEndpointPath).toBe('builds/b1/log?format=plain');
+      expect(String(references.absoluteLinkUrlTree)).toBe('/project/proj/log/eval-1?build=b1');
+    });
+
     it('offers graph, job, artefacts and log download for an assigned build', () => {
       const { cmp } = setup();
       vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockReturnValue(true);
       const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
-      expect([...items.keys()]).toEqual(['Dependency graph', 'Closure', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
+      expect([...items.keys()]).toEqual(['Dependency graph', 'Closure', 'Show job', 'Artefacts', 'Download Log', 'SBOM', 'Copy']);
       expect(String(items.get('Dependency graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
       expect(String(items.get('Closure')!.routerLink)).toBe('/project/proj/closure/build/b1?eval=eval-1');
       expect(String(items.get('Show job')!.routerLink)).toBe('/board/jobs/job-1');
@@ -447,8 +459,8 @@ describe('EvaluationLogComponent', () => {
       fixture.detectChanges();
 
       expect(cmp.contextBuild()!.id).toBe('b2');
-      const labels = Array.from(document.querySelectorAll('.gr-menu__item span:last-child')).map((e) => e.textContent);
-      expect(labels).toEqual(['Dependency graph', 'Closure', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
+      const labels = Array.from(document.querySelectorAll('.gr-menu__item span:not(.gr-menu__icon)')).map((e) => e.textContent);
+      expect(labels).toEqual(['Dependency graph', 'Closure', 'Show job', 'Artefacts', 'Download Log', 'SBOM', 'Copy']);
     });
 
     it('opens the same menu from the row\'s three dots, without selecting the row', () => {
@@ -1424,7 +1436,7 @@ describe('EvaluationLogComponent', () => {
     it('saves the whole log as plain text under the store file name', async () => {
       const { cmp } = setup();
       const getLog = vi.spyOn(TestBed.inject(EvaluationsService), 'getBuildLog')
-        .mockReturnValue(of('\u001b[31mline 1\u001b[0m\nline 2\n'));
+        .mockReturnValue(of('line 1\nline 2\n'));
       const created: Blob[] = [];
       objectUrls['createObjectURL'] = (b: Blob) => (created.push(b), 'blob:log');
       const revoke = vi.fn();

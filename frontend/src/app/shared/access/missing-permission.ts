@@ -26,6 +26,7 @@ const minimumBuiltInRoleByPermissionWireName: Record<Permission | CachePermissio
   triggerEvaluation: 'Write',
   manageTriggers: 'Write',
   manageWebhooks: 'Write',
+  createProject: 'Admin',
   viewCache: 'View',
   readStore: 'View',
   writeStore: 'Write',

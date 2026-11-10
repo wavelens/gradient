@@ -6,3 +6,4 @@
 
 export * from './query-param-signal';
 export * from './links';
+export * from './copy-menu';

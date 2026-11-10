@@ -42,6 +42,10 @@
       <gr-form-field label="Install netrc" for="cache-netrc">
         <gr-label-help slot="label" doc="guides/share-a-cache/#1-use-the-cache-on-a-machine" title="Cache authentication docs" />
         <gr-copy-field inputId="cache-netrc" multiline [value]="installNetrcCommand" />
+        @if (authService.isAuthenticated()) {
+          <a grButton label="Create key for this cache" icon="key" severity="secondary" size="small"
+             data-testid="create-cache-key" [routerLink]="links.createApiKeyPageForCache(cacheName)"></a>
+        }
         <span slot="hint">
           This cache is private. Run the command as root and replace <code>&lt;YOUR_TOKEN&gt;</code> with an
           <a [routerLink]="links.settings('keys')">API key</a> with Cache scope for this cache. "Any project" keys can't read the cache.

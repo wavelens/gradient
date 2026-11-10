@@ -45,7 +45,7 @@ import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-a
 import { groupEntryPoints } from './entry-point-groups';
 import { firstLine } from '@features/evaluations/evaluation-summary/summary-text';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
-import { links } from '@shared/routing';
+import { CopyMenuService, links } from '@shared/routing';
 import { removeAnsiEscapeSequences } from '@shared/log';
 import { CurrentTimeSignal, formatDuration, monthDayClockTime, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import {
@@ -93,6 +93,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private tasksService = inject(TasksService);
   private evaluationsService = inject(EvaluationsService);
   private notify = inject(NotifyService);
+  private copyMenuService = inject(CopyMenuService);
   private confirm = inject(ConfirmService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
@@ -446,7 +447,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.starting.set(true);
     this.tasksService.startEvaluation(this.projectName, this.taskName, walk).pipe(
       switchMap((evaluation) => {
-        this.selectEvaluation(evaluation);
+        this.selectEvaluation(evaluation.id);
         return this.requestTaskDetailsIfNoNewerRequestApplied().pipe(catchError(() => of(null)));
       }),
       finalize(() => this.starting.set(false)),
@@ -711,8 +712,23 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       ?? (selected && isEvaluationNotStartedStatus(selected.status) ? links.boardPendingJob({ evaluation_id: selected.id }) : undefined);
     return [
       { label: 'Show job', icon: 'work', disabledReason: showJobMenuItemDisabledReason(job, this.authService.isAuthenticated(), 'evaluation'), routerLink: job },
+      ...(selected
+        ? [this.copyMenuService.createCopyMenuItemWithCliCommandApiUrlAndLink({
+            gradientCliCommand: `gradient evaluation wait ${selected.id}`,
+            relativeApiEndpointPath: `evals/${selected.id}`,
+            absoluteLinkUrlTree: links.evaluationLog(this.projectName, selected.id),
+          })]
+        : []),
     ];
   });
+
+  copyMenuModel = computed<MenuItem[]>(() => this.task()
+    ? this.copyMenuService.getFlatCopyEntries({
+        gradientCliCommand: `gradient evaluation wait ${this.projectName}/${this.taskName}`,
+        relativeApiEndpointPath: `tasks/${this.projectName}/${this.taskName}`,
+        absoluteLinkUrlTree: links.task(this.projectName, this.taskName),
+      })
+    : []);
 
   panelMenuModel = computed<MenuItem[]>(() => [...this.evaluationLinkItems(), ...this.evaluationActionItems()]);
 

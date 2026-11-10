@@ -113,6 +113,7 @@ export const links = {
     url(['project', exec.project, 'task', exec.task, 'exec', exec.id], { node: exec.node_index || null }),
 
   settings: (page: SettingsPage = 'profile') => url(['settings', page]),
+  createApiKeyPageForCache: (cache: string) => url(['settings', 'keys'], { cache }),
   admin: (page: AdminPage) => url(['admin', page]),
 } as const;
 

@@ -51,6 +51,14 @@
 
 .gr-menu__icon { color: var(--gr-text-secondary); font-size: 1.125rem; }
 
+.gr-menu__chevron { margin-left: auto; }
+
+.gr-menu__submenu {
+  margin: 0;
+  padding: 0 0 0 $spacing-md;
+  list-style: none;
+}
+
 .gr-menu__item--danger {
   color: var(--gr-status-danger-text);
 }

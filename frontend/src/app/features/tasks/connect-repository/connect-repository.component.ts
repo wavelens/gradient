@@ -161,9 +161,9 @@ export class ConnectRepositoryComponent implements OnInit {
         wildcard: this.form.wildcard.trim() || DEFAULT_WILDCARD,
       })
       .subscribe({
-        next: () => {
+        next: (task) => {
           this.creating.set(false);
-          this.taskName.set(this.form.name);
+          this.taskName.set(task.name);
           this.go('access');
         },
         error: (error: unknown) => {

@@ -25,6 +25,7 @@ import {
   viewChild,
   ChangeDetectionStrategy
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { MenuItem } from '../types';
 
@@ -49,54 +50,83 @@ let disabledReasonMenuSeq = 0;
 @Component({
   selector: 'gr-menu',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, NgTemplateOutlet],
   template: `
     <ng-template #panel>
       <ul class="gr-menu" role="menu">
         @for (item of model(); track $index) {
           @if (item.separator) {
             <li class="gr-menu__separator" role="separator"></li>
-          } @else {
+          } @else if (item.submenuItems) {
+            @let expanded = expandedTopLevelItemIndex() === $index;
             <li role="none">
-              @if (item.routerLink && !item.disabled && !item.disabledReason) {
-                <a
-                  role="menuitem"
-                  class="gr-menu__item"
-                  [class.gr-menu__item--danger]="item.danger"
-                  [routerLink]="item.routerLink"
-                  [queryParams]="item.queryParams ?? null"
-                  (click)="run(item)"
-                  (auxclick)="hide()"
-                >
-                  @if (item.icon) {
-                    <span class="material-symbols-outlined gr-menu__icon" aria-hidden="true">{{ item.icon }}</span>
-                  }
-                  <span>{{ item.label }}</span>
-                </a>
-              } @else {
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="gr-menu__item"
-                  [class.gr-menu__item--danger]="item.danger"
-                  [disabled]="item.disabled"
-                  [attr.aria-disabled]="item.disabledReason ? 'true' : null"
-                  [attr.aria-describedby]="item.disabledReason ? disabledReasonId + '-' + $index : null"
-                  (click)="run(item)"
-                >
-                  @if (item.icon) {
-                    <span class="material-symbols-outlined gr-menu__icon" aria-hidden="true">{{ item.icon }}</span>
-                  }
-                  <span>{{ item.label }}</span>
-                </button>
-                @if (item.disabledReason) {
-                  <span class="gr-menu__reason" [id]="disabledReasonId + '-' + $index">{{ item.disabledReason }}</span>
+              <button
+                type="button"
+                role="menuitem"
+                class="gr-menu__item"
+                aria-haspopup="menu"
+                [attr.aria-expanded]="expanded"
+                (click)="toggleSubmenuOfMenuItem($index)"
+              >
+                @if (item.icon) {
+                  <span class="material-symbols-outlined gr-menu__icon" aria-hidden="true">{{ item.icon }}</span>
                 }
+                <span>{{ item.label }}</span>
+                <span class="material-symbols-outlined gr-menu__icon gr-menu__chevron" aria-hidden="true">{{ expanded ? 'expand_less' : 'expand_more' }}</span>
+              </button>
+              @if (expanded) {
+                <ul class="gr-menu__submenu" role="menu" [attr.aria-label]="item.label">
+                  @for (child of item.submenuItems; track $index) {
+                    <ng-container *ngTemplateOutlet="entry; context: { $implicit: child, reasonId: disabledReasonId + '-submenu-' + $index }" />
+                  }
+                </ul>
               }
             </li>
+          } @else {
+            <ng-container *ngTemplateOutlet="entry; context: { $implicit: item, reasonId: disabledReasonId + '-' + $index }" />
           }
         }
       </ul>
+    </ng-template>
+
+    <ng-template #entry let-item let-reasonId="reasonId">
+      <li role="none">
+        @if (item.routerLink && !item.disabled && !item.disabledReason) {
+          <a
+            role="menuitem"
+            class="gr-menu__item"
+            [class.gr-menu__item--danger]="item.danger"
+            [routerLink]="item.routerLink"
+            [queryParams]="item.queryParams ?? null"
+            (click)="run(item)"
+            (auxclick)="hide()"
+          >
+            @if (item.icon) {
+              <span class="material-symbols-outlined gr-menu__icon" aria-hidden="true">{{ item.icon }}</span>
+            }
+            <span>{{ item.label }}</span>
+          </a>
+        } @else {
+          <button
+            type="button"
+            role="menuitem"
+            class="gr-menu__item"
+            [class.gr-menu__item--danger]="item.danger"
+            [disabled]="item.disabled"
+            [attr.aria-disabled]="item.disabledReason ? 'true' : null"
+            [attr.aria-describedby]="item.disabledReason ? reasonId : null"
+            (click)="run(item)"
+          >
+            @if (item.icon) {
+              <span class="material-symbols-outlined gr-menu__icon" aria-hidden="true">{{ item.icon }}</span>
+            }
+            <span>{{ item.label }}</span>
+          </button>
+          @if (item.disabledReason) {
+            <span class="gr-menu__reason" [id]="reasonId">{{ item.disabledReason }}</span>
+          }
+        }
+      </li>
     </ng-template>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -113,6 +143,7 @@ export class MenuComponent implements OnDestroy {
   private ref?: OverlayRef;
   private returnFocus?: HTMLElement;
   private readonly openState = signal(false);
+  protected readonly expandedTopLevelItemIndex = signal<number | null>(null);
   readonly isOpen = this.openState.asReadonly();
 
   ngOnDestroy(): void {
@@ -145,6 +176,7 @@ export class MenuComponent implements OnDestroy {
     positions: ConnectedPosition[],
   ): void {
     this.hide();
+    this.expandedTopLevelItemIndex.set(null);
     this.returnFocus = origin instanceof HTMLElement ? origin : undefined;
     this.ref = this.overlay.create({
       hasBackdrop: true,
@@ -197,6 +229,10 @@ export class MenuComponent implements OnDestroy {
     if (!(event.key in next) || !items.length) return;
     event.preventDefault();
     items[next[event.key]].focus();
+  }
+
+  protected toggleSubmenuOfMenuItem(index: number): void {
+    this.expandedTopLevelItemIndex.update((expanded) => (expanded === index ? null : index));
   }
 
   protected run(item: MenuItem): void {

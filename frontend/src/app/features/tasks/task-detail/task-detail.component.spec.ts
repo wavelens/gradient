@@ -25,6 +25,7 @@ import { AccessState } from '@core/models/access.model';
 import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { monthDayClockTime } from '@shared/text';
+import { CopyMenuService } from '@shared/routing';
 
 function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0 };
@@ -147,7 +148,7 @@ function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): 
     getTask: overrides.getTask ?? (() => of(resolvedTask(access, overrides))),
     getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0, failed_attributes: [] })),
     getEvaluations: overrides.getEvaluations ?? (() => of([])),
-    startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
+    startEvaluation: overrides.startEvaluation ?? (() => of({ id: 'ok', name: 'acme/demo', url: '' })),
     abortEvaluation: overrides.abortEvaluation ?? (() => of('ok')),
     downloadReport: overrides.downloadReport ?? (() => NEVER),
   } as unknown as TasksService;
@@ -531,14 +532,14 @@ describe('TaskDetailComponent evaluation menu', () => {
     }
 
     it('selects the evaluation the start answers with and keeps it in the URL', () => {
-      const { comp, navigate } = startThenArrive(() => of('e2'));
+      const { comp, navigate } = startThenArrive(() => of({ id: 'e2', name: 'acme/demo', url: '' }));
       expect(comp.selected()?.id).toBe('e2');
       expect(comp.starting()).toBe(false);
       expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { eval: 'e2' } }));
     });
 
     it('fetches the packages of the new evaluation once', () => {
-      const { entryPoints } = startThenArrive(() => of('e2'));
+      const { entryPoints } = startThenArrive(() => of({ id: 'e2', name: 'acme/demo', url: '' }));
       expect(entryPoints.mock.calls.filter((call) => call[2] === 'e2')).toHaveLength(1);
     });
 
@@ -549,7 +550,7 @@ describe('TaskDetailComponent evaluation menu', () => {
 
     it('starts one evaluation on a double click and stays busy until the new evaluation is loaded', () => {
       const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
-      const start = vi.spyOn(tasksService, 'startEvaluation').mockReturnValue(of('e2'));
+      const start = vi.spyOn(tasksService, 'startEvaluation').mockReturnValue(of({ id: 'e2', name: 'acme/demo', url: '' }));
       const task = new Subject<ReturnType<typeof taskFor>>();
       vi.spyOn(tasksService, 'getTask').mockReturnValue(task as never);
       vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
@@ -590,6 +591,29 @@ describe('TaskDetailComponent evaluation menu', () => {
     const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
     expect(String(item?.routerLink)).toBe('/board/jobs/job-1');
     expect(item?.disabledReason).toBeNull();
+  });
+
+  it('copies the wait command, API URL and log page of the selected evaluation from both menus', () => {
+    const copy = vi.spyOn(CopyMenuService.prototype, 'createCopyMenuItemWithCliCommandApiUrlAndLink');
+    const { fixture } = setup(trigger);
+    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Copy')?.submenuItems?.map(i => i.label)).toEqual(['CLI command', 'API URL', 'Link']);
+    expect(menuLabels(fixture)).toContain('Copy');
+    const references = copy.mock.calls.at(-1)![0];
+    copy.mockRestore();
+    expect(references.gradientCliCommand).toBe('gradient evaluation wait e1');
+    expect(references.relativeApiEndpointPath).toBe('evals/e1');
+    expect(String(references.absoluteLinkUrlTree)).toBe('/project/acme/log/e1');
+  });
+
+  it('copies the wait command, API URL and page of the task from the header', () => {
+    const entries = vi.spyOn(CopyMenuService.prototype, 'getFlatCopyEntries');
+    const { fixture } = setup(trigger);
+    expect(fixture.componentInstance.copyMenuModel().map(i => i.label)).toEqual(['CLI command', 'API URL', 'Link']);
+    const references = entries.mock.calls.map(([called]) => called).find((called) => called.relativeApiEndpointPath.startsWith('tasks/'))!;
+    entries.mockRestore();
+    expect(references.gradientCliCommand).toBe('gradient evaluation wait acme/demo');
+    expect(references.relativeApiEndpointPath).toBe('tasks/acme/demo');
+    expect(String(references.absoluteLinkUrlTree)).toBe('/project/acme/task/demo');
   });
 
   it('links Show job of a split evaluation to its cluster job', () => {
@@ -1224,7 +1248,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
     const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Prioritize', 'Reevaluate all inputs', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Copy', 'Prioritize', 'Reevaluate all inputs', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -1248,7 +1272,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
     const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Copy']);
   });
 
   it('opens the dialog from the menu command', () => {
@@ -1981,7 +2005,7 @@ describe('TaskDetailComponent - live package reloads', () => {
   it('keeps a started evaluation selected while a refresh still lists only the older ones', () => {
     const access = { managed: false, canEdit: true, canTrigger: true };
     const getTask = vi.fn(() => of(resolvedTask(access, {})));
-    const { fixture } = setup(access, { getTask, startEvaluation: () => of('e-new') });
+    const { fixture } = setup(access, { getTask, startEvaluation: () => of({ id: 'e-new', name: 'acme/demo', url: '' }) });
     const cmp = fixture.componentInstance;
     cmp.startEvaluation();
     expect(cmp.selected()?.id).toBe('e1');
@@ -1998,7 +2022,7 @@ describe('TaskDetailComponent - live package reloads', () => {
       responses.push(response);
       return response;
     });
-    const { fixture, frames } = setup(access, { getTask, primaryStatus: 'Completed', startEvaluation: () => of('e2') });
+    const { fixture, frames } = setup(access, { getTask, primaryStatus: 'Completed', startEvaluation: () => of({ id: 'e2', name: 'acme/demo', url: '' }) });
     vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     const cmp = fixture.componentInstance;
     const withLatest = (status: EvaluationSummary['status'], builds: Partial<BuildStatusCounts>) =>

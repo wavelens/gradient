@@ -17,7 +17,7 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, removeAnsiEscapeSequences, splitLogLines } from '@shared/log';
+import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
 import { BuildLogStreamDecoder, buildAttemptLogQueryParam, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
 import { buildAttemptOutcomeText, formatBuildAttemptDurationText } from './build-attempts';
@@ -37,7 +37,7 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
-import { BuildOrigin, links } from '@shared/routing';
+import { BuildOrigin, CopyMenuService, links } from '@shared/routing';
 import { CurrentTimeSignal, formatDuration, packageNameFromDerivationPath, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
@@ -107,6 +107,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private accessService = inject(AccessService);
   private messageService = inject(MessageService);
   private notify = inject(NotifyService);
+  private copyMenuService = inject(CopyMenuService);
   private confirm = inject(ConfirmService);
   private execJobs = inject(ExecJobsService);
   protected authService = inject(AuthService);
@@ -247,6 +248,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         disabledReason: getSbomDownloadMenuItemDisabledReason(build.status),
         command: () => this.downloadSbom(build),
       },
+      this.copyMenuService.createCopyMenuItemWithCliCommandApiUrlAndLink({
+        gradientCliCommand: `gradient builds log ${build.id}`,
+        relativeApiEndpointPath: `builds/${build.id}/log?format=plain`,
+        absoluteLinkUrlTree: links.evaluationLog(this.projectName, this.evaluationId, { build: build.id }),
+      }),
       ...(this.canPrioritize(build)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up', command: () => this.prioritizeBuild(build) }]
         : []),
@@ -1127,7 +1133,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   async downloadLog(build: BuildItem): Promise<void> {
     let log: string;
     try {
-      log = removeAnsiEscapeSequences(await firstValueFrom(this.evalService.getBuildLog(build.id)));
+      log = await firstValueFrom(this.evalService.getBuildLog(build.id));
     } catch (error) {
       this.notify.failure("Couldn't download log", error);
       return;

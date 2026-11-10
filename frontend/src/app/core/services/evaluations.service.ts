@@ -83,7 +83,7 @@ export class EvaluationsService {
   }
 
   getBuildLog(buildId: string): Observable<string> {
-    return this.api.get<string>(`builds/${buildId}/log`);
+    return this.api.get<string>(`builds/${buildId}/log?format=plain`);
   }
 
   getBuildAttempts(buildId: string): Observable<BuildAttemptLogRow[]> {

@@ -48,7 +48,7 @@ import {
   TrafficKind,
 } from '@core/models';
 import { docsUrl } from '@core/docs';
-import { clockTime, formatBytes, formatCount, monthDay, plural, subscriptionModeLabel } from '@shared/text';
+import { buildGradientCliInstallNetrcCommand, buildNixConfCacheSubstituterAndKeyLines, clockTime, formatBytes, formatCount, monthDay, plural, subscriptionModeLabel } from '@shared/text';
 import { UseCacheDialogComponent } from './use-cache-dialog.component';
 import { injectPendingSubscriptionRequestCount } from '../pending-subscription-request-count';
 import { oneOf, queryParamSignal } from '@shared/routing';
@@ -156,13 +156,10 @@ export class CacheDetailComponent implements OnInit {
   cacheUrl = '';
   serverUrl = '';
 
-  nixConfSnippet = computed(() => {
-    const keys = this.trustedPublicKeys();
-    return `extra-substituters = ${this.cacheUrl}\nextra-trusted-public-keys = ${keys.length ? keys.join(' ') : '<unavailable>'}`;
-  });
+  nixConfSnippet = computed(() => buildNixConfCacheSubstituterAndKeyLines(this.cacheUrl, this.trustedPublicKeys()));
 
   get installNetrcCommand(): string {
-    return `nix run nixpkgs#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
+    return buildGradientCliInstallNetrcCommand(this.serverUrl, this.cacheName, '<YOUR_TOKEN>');
   }
 
   activePoints = computed<CacheMetricPoint[]>(() => {

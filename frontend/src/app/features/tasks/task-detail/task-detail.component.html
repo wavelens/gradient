@@ -36,6 +36,8 @@
       }
       <a grButton label="Metrics" icon="show_chart" severity="secondary"
               [routerLink]="links.taskPage(projectName, taskName, 'metrics')"></a>
+      <button grButton label="Copy" icon="content_copy" severity="secondary" (click)="copyMenu.toggle($event)"></button>
+      <gr-menu #copyMenu [model]="copyMenuModel()" />
       @if (authService.isAuthenticated()) {
         <gr-star-button labeled [target]="starTarget" [starredItemDisplayName]="proj.display_name" [(starred)]="starred" />
       }

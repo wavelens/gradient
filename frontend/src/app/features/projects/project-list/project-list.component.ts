@@ -139,11 +139,10 @@ export class ProjectListComponent implements OnInit {
 
     this.creating.set(true);
     this.createError.set(null);
-    const created = this.newProject.name;
     this.projectsService.createProject(this.newProject).subscribe({
-      next: () => {
+      next: (project) => {
         this.notify.success('Project created');
-        this.router.navigateByUrl(links.project(created));
+        this.router.navigateByUrl(links.project(project.name));
       },
       error: (error: unknown) => {
         this.createError.set(apiErrorMessage(error, 'Failed to create project.'));

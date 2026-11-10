@@ -11,7 +11,7 @@ import { PermissionPickerComponent } from './permission-picker.component';
 @Component({
   standalone: true,
   imports: [PermissionPickerComponent],
-  template: `<app-permission-picker [permissions]="permissions" [viewPermissionIsRequired]="viewRequired()" [(selection)]="selection" />`,
+  template: `<app-permission-picker [permissions]="permissions" [serverWidePermissions]="serverWide()" [selectablePermissionIds]="selectable()" [viewPermissionIsRequired]="viewRequired()" [(selection)]="selection" />`,
 })
 class Host {
   permissions = [
@@ -21,6 +21,8 @@ class Host {
   ];
   selection = signal<Record<string, boolean>>({ viewProject: true });
   viewRequired = signal(false);
+  serverWide = signal<{ id: string; mutating: boolean }[]>([]);
+  selectable = signal<string[] | null>(null);
 }
 
 describe('PermissionPickerComponent', () => {
@@ -34,6 +36,28 @@ describe('PermissionPickerComponent', () => {
     const { root } = render();
     const groups = Array.from(root.querySelectorAll('fieldset')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
     expect(groups).toEqual(['Read View project', 'Write Edit task', 'Admin Delete project']);
+  });
+
+  it('keeps permissions outside the selectable list visible but disabled and unselected', () => {
+    const { fixture, root } = render();
+    fixture.componentInstance.selection.set({ viewProject: true, deleteProject: true });
+    fixture.componentInstance.selectable.set(['viewProject', 'editTask']);
+    fixture.detectChanges();
+    const boxes = root.querySelectorAll<HTMLInputElement>('input[type=checkbox]');
+    expect(Array.from(boxes).map((box) => box.disabled)).toEqual([false, false, true]);
+    expect(boxes[2].checked).toBe(false);
+  });
+
+  it('shows server-wide permissions in their own group and includes them in the selection', async () => {
+    const { fixture, root } = render();
+    fixture.componentInstance.serverWide.set([{ id: 'createProject', mutating: true }]);
+    fixture.detectChanges();
+    const groups = Array.from(root.querySelectorAll('fieldset')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
+    expect(groups.at(-1)).toBe('Whole Server Create project');
+    root.querySelectorAll<HTMLInputElement>('input[type=checkbox]')[3].click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.selection()).toEqual({ viewProject: true, editTask: false, deleteProject: false, createProject: true });
   });
 
   it('hands back a new selection when a permission is ticked', async () => {

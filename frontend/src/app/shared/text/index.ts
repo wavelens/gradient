@@ -9,6 +9,7 @@ export * from './clock-time';
 export * from './device-name';
 export * from './error-cause';
 export * from './package-name';
+export * from './nix-cache-client-setup';
 export * from './permission-label';
 export * from './plural';
 export * from './relative-time';

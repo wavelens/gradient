@@ -10,6 +10,7 @@ import { HttpResponse } from '@angular/common/http';
 import { ApiService } from './api.service';
 import {
   CheckRepositoryRequest,
+  CreatedEntityResponse,
   InstallDeployKeyRequest,
   InstallWebhookRequest,
   Paginated,
@@ -49,8 +50,8 @@ export class TasksService {
   createTask(
     project: string,
     data: MakeTaskRequest
-  ): Observable<string> {
-    return this.api.put<string>(`tasks/${project}`, data);
+  ): Observable<CreatedEntityResponse> {
+    return this.api.put<CreatedEntityResponse>(`tasks/${project}`, data);
   }
 
   updateTask(
@@ -83,9 +84,9 @@ export class TasksService {
     return this.api.get<EvaluationSummary[]>(`tasks/${project}/${task}/evaluations${q}`);
   }
 
-  startEvaluation(project: string, task: string, walk: WalkMode = 'pruned'): Observable<string> {
+  startEvaluation(project: string, task: string, walk: WalkMode = 'pruned'): Observable<CreatedEntityResponse> {
     const body = walk === 'pruned' ? undefined : { walk };
-    return this.api.post<string>(`tasks/${project}/${task}/evaluate`, body);
+    return this.api.post<CreatedEntityResponse>(`tasks/${project}/${task}/evaluate`, body);
   }
 
   abortEvaluation(project: string, task: string, evaluationId: string): Observable<string> {

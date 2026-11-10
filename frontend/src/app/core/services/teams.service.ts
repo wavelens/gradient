@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
   TeamSummary,
+  CreatedEntityResponse,
   TeamResponse,
   PatchTeamRequest,
   TeamMemberItem,
@@ -37,8 +38,8 @@ export class TeamsService {
     return this.api.get<boolean>(`teams/available?name=${encodeURIComponent(name)}`);
   }
 
-  create(name: string, displayName: string): Observable<string> {
-    return this.api.put<string>('teams', { name, display_name: displayName });
+  create(name: string, displayName: string): Observable<CreatedEntityResponse> {
+    return this.api.put<CreatedEntityResponse>('teams', { name, display_name: displayName });
   }
 
   get(team: string): Observable<TeamResponse> {

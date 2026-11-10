@@ -36,10 +36,7 @@
               <gr-badge severity="danger">Expired</gr-badge>
             }
             <div slot="meta">
-              @let effectivePermissionCount = getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key).length;
-              <span [grTooltip]="permissionTooltip(key)" tooltipPosition="top">
-                {{ effectivePermissionCount }} permission{{ effectivePermissionCount === 1 ? '' : 's' }}
-              </span>
+              <span>{{ getReadableApiKeyPermissionNamesForOwnerOnPinnedProject(key) }}</span>
               <span>
                 · Last used: {{ key.last_used_at ? (key.last_used_at | serverDate) : 'never' }}
               </span>
@@ -49,6 +46,13 @@
             </div>
             <div slot="actions">
               @if (!key.revoked_at && !expired) {
+                <button
+                  grButton
+                  label="Access"
+                  icon="shield"
+                  severity="secondary"
+                  (click)="openApiKeyAccessDialog(key)"
+                ></button>
                 <button
                   grButton
                   label="Edit"
@@ -137,6 +141,7 @@
           optionLabel="label"
           optionValue="value"
           [(ngModel)]="formProject"
+          (ngModelChange)="loadSignedInUserProjectPermissionsForProject($event)"
           placeholder="Select a project"
         />
       </gr-form-field>
@@ -177,7 +182,12 @@
     <gr-divider />
 
     <gr-form-field label="Permissions" hint="A key can never have more permissions than its owner's account." [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
-      <app-permission-picker [permissions]="activePermissions()" [selectablePermissionIds]="getPermissionIdsUserCanGrantForKeyBeingEdited()" [(selection)]="formPermissions" />
+      <app-permission-picker
+        [permissions]="activePermissions()"
+        [serverWidePermissions]="formScope === 'none' ? serverWidePermissions() : []"
+        [selectablePermissionIds]="getPermissionIdsUserCanGrantForKeyBeingEdited()"
+        [(selection)]="formPermissions"
+      />
     </gr-form-field>
   </div>
 
@@ -208,9 +218,63 @@
 >
   <p>Your new API key has been created. Copy it now - it will not be shown again.</p>
   <gr-copy-field label="New API key" [value]="createdKeyValue()" />
+  @if (cacheClientSetupTexts(); as setup) {
+    <gr-divider />
+    <p>Add the netrc entry to `/etc/nix/netrc`. Add the nix.conf line to `/etc/nix/nix.conf`. The install command does the netrc steps. Run it as root.</p>
+    <gr-copy-field label="Netrc Entry" [value]="setup.netrcCredentialsLine" data-testid="created-key-netrc" />
+    <gr-copy-field label="nix.conf snippet" multiline [value]="setup.nixConfExtraSubstitutersAndTrustedPublicKeysLines" />
+    <gr-copy-field label="Install netrc" multiline [value]="setup.installNetrcCommand" />
+  }
   <div grDialogFooter>
     <button grButton label="Done" (click)="showKeyDialog.set(false)"></button>
   </div>
+</gr-dialog>
+
+<gr-dialog header="Access by Key" [(visible)]="isApiKeyAccessDialogVisible" width="560px">
+  @let reach = apiKeyVisibleProjectsAndCachesWithPermissionsResponse();
+  <gr-load-state
+    [loading]="!reach && !apiKeyReachLoadError()"
+    [error]="apiKeyReachLoadError()"
+    loadingMessage="Loading key access..."
+    errorTitle="Failed to load key access"
+    (retry)="openApiKeyAccessDialog(apiKeyWithOpenReachDialog()!)"
+  >
+    @if (reach) {
+      @if (!reach.projects.length && !reach.caches.length && !reach.create_project) {
+        <p>This key cannot access private projects or caches. Any key can read public projects and caches.</p>
+      }
+      @if (reach.create_project) {
+        <p>This key can create projects.</p>
+      }
+      @if (reach.projects.length) {
+        <h3>Projects</h3>
+        <gr-row-list data-testid="key-reach-projects">
+          @for (project of reach.projects; track project.name) {
+            <gr-row icon="account_tree">
+              {{ project.display_name || project.name }}
+              <div slot="meta">{{ permissionIdsToCommaSeparatedLabels(project.permissions) }}</div>
+            </gr-row>
+          }
+        </gr-row-list>
+      }
+      @if (reach.caches.length) {
+        <h3>Cache</h3>
+        <gr-row-list data-testid="key-reach-caches">
+          @for (cache of reach.caches; track cache.name) {
+            <gr-row icon="database">
+              {{ cache.display_name || cache.name }}
+              <div slot="meta">{{ permissionIdsToCommaSeparatedLabels(cache.permissions) }}</div>
+            </gr-row>
+          }
+        </gr-row-list>
+      }
+      <gr-divider />
+      <gr-copy-field label="Base URL for the API" [value]="config.apiBaseUrl" />
+      <gr-form-field label="Example request" for="key-reach-curl" hint="Set GRADIENT_TOKEN to the value of the key before command execution.">
+        <gr-copy-field inputId="key-reach-curl" [value]="buildCurlCommandExampleForKeyScope(apiKeyWithOpenReachDialog()!)" />
+      </gr-form-field>
+    }
+  </gr-load-state>
 </gr-dialog>
 
 <app-create-cache-dialog [(visible)]="showCreateCache" (visibleChange)="createCacheClosed($event)" (created)="cacheCreated($event)" />

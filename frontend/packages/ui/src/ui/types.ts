@@ -20,6 +20,7 @@ export interface MenuItem {
   command?: () => void;
   routerLink?: string | unknown[] | UrlTree;
   queryParams?: Record<string, unknown>;
+  submenuItems?: readonly MenuItem[];
 }
 
 export type MessageSeverity = 'success' | 'info' | 'warn' | 'error';

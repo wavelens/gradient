@@ -14,6 +14,7 @@ import {
   RoleListResponse_CacheRoleOwner,
   RoleResponse_CacheRoleOwner,
   Cache,
+  CreatedEntityResponse,
   CacheStatsResponse,
   TrafficKind,
   UpstreamCacheItem,
@@ -63,8 +64,8 @@ export class CachesService {
     return this.api.get<Cache[]>('caches/public');
   }
 
-  createCache(data: MakeCacheRequest): Observable<string> {
-    return this.api.put<string>('caches', data).pipe(tap(() => this.auth.reloadUser()));
+  createCache(data: MakeCacheRequest): Observable<CreatedEntityResponse> {
+    return this.api.put<CreatedEntityResponse>('caches', data).pipe(tap(() => this.auth.reloadUser()));
   }
 
   setCachePublic(cache: string): Observable<string> {

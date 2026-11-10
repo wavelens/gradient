@@ -176,14 +176,14 @@ describe('ProjectListComponent', () => {
 
   it('opens the created project', () => {
     const { fixture } = render(() => of(EMPTY_PAGE));
-    (TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown }).createProject = () => of('Project created');
+    (TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown }).createProject = () => of({ id: 'p1', name: 'acme-ci', url: '' });
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     const cmp = fixture.componentInstance;
     cmp.openCreateDialog();
     cmp.newProject.name = 'acme';
     cmp.newProject.display_name = 'Acme';
     cmp.createProject();
-    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme');
+    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme-ci');
     expect(cmp.showCreateDialog()).toBe(true);
   });
 

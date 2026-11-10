@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
@@ -17,7 +17,9 @@ import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { NotifyService } from '@core/services/notify.service';
-import { ApiKeyInfo } from '@core/models';
+import { CachesService } from '@core/services/caches.service';
+import { ConfigService } from '@core/services/config.service';
+import { ApiKeyInfo, CacheResponse, ProjectResponse } from '@core/models';
 
 const unmanagedKey: ApiKeyInfo = {
   id: 'k1',
@@ -48,7 +50,12 @@ const managedKey: ApiKeyInfo = {
 let notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
 
-function setup(keys: ApiKeyInfo[], user: object = {}, projects: object[] = []): ComponentFixture<ApiKeysComponent> {
+function setup(
+  keys: ApiKeyInfo[],
+  user: object = {},
+  projects: ({ name: string } & Record<string, unknown>)[] = [],
+  queryParams: Record<string, string> = {},
+): ComponentFixture<ApiKeysComponent> {
   notify = { success: vi.fn(), failure: vi.fn() };
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
@@ -61,18 +68,23 @@ function setup(keys: ApiKeyInfo[], user: object = {}, projects: object[] = []): 
         provide: UserService,
         useValue: {
           getApiKeys: () => of(keys),
-          getApiKeyPermissions: () => of({ available_permissions: [], availableCache: [] }),
+          getApiKeyPermissions: () => of({ available_permissions: [], availableCache: [], server_wide_permissions: [] }),
           ...user,
         },
       },
       {
         provide: ProjectsService,
-        useValue: { getProjects: () => of({ items: projects, total: projects.length, page: 1, per_page: 100 }) },
+        useValue: {
+          getProjects: () => of({ items: projects, total: projects.length, page: 1, per_page: 100 }),
+          getProject: (name: string) => of(projects.find((project) => project.name === name) ?? { name, permissions: [] }),
+        },
       },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
   });
+  Object.defineProperty(TestBed.inject(ActivatedRoute).snapshot, 'queryParamMap', { value: convertToParamMap(queryParams) });
+  TestBed.inject(ConfigService).serveUrl = 'https://ci.example.com';
   const fixture = TestBed.createComponent(ApiKeysComponent);
   fixture.detectChanges();
   return fixture;
@@ -240,13 +252,57 @@ describe('ApiKeysComponent - field checks', () => {
     }, [{ name: 'web', display_name: 'Web Shop', permissions: ['viewProject'] }]);
     const component = fixture.componentInstance;
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('gr-row [slot="meta"]')?.textContent).toContain('1 permission ');
-    expect(component.permissionTooltip(pinned)).toBe('view project');
+    expect(root.querySelector('gr-row [slot="meta"]')?.textContent).toContain('view project');
+    expect(root.querySelector('gr-row [slot="meta"]')?.textContent).not.toContain('delete project');
+    expect(component.getReadableApiKeyPermissionNamesForOwnerOnPinnedProject(pinned)).toBe('view project');
 
     component.openEditDialog(pinned);
     fixture.detectChanges();
     const deleteBox = Array.from(document.querySelectorAll<HTMLLabelElement>('app-permission-picker label')).find((label) => label.textContent?.includes('Delete project'))!;
     expect(deleteBox.querySelector('input')!.disabled).toBe(true);
+    expect(component.selectedPermissions()).toEqual(['viewProject']);
+  });
+
+  it('offers on a picked project only the permissions that GET /projects/{project} lists for the owner', () => {
+    const fixture = setup([], {
+      getApiKeyPermissions: () => of({ available_permissions: [{ id: 'viewProject', mutating: false }, { id: 'editTask', mutating: true }], availableCache: [], server_wide_permissions: [] }),
+    }, [{ name: 'web', permissions: ['viewProject', 'editTask'] }]);
+    const component = fixture.componentInstance;
+    const getProject = vi.spyOn(TestBed.inject(ProjectsService), 'getProject').mockReturnValue(of({ name: 'web', permissions: ['viewProject'] } as unknown as ProjectResponse));
+    component.openCreateDialog();
+    component.formScope = 'project';
+    component.onScopeChange();
+    component.formProject = 'web';
+    component.loadSignedInUserProjectPermissionsForProject('web');
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    expect(getProject).toHaveBeenCalledWith('web');
+    const editBox = Array.from(document.querySelectorAll<HTMLLabelElement>('app-permission-picker label')).find((label) => label.textContent?.includes('Edit task'))!;
+    expect(editBox.querySelector('input')!.disabled).toBe(true);
+    expect(component.getPermissionIdsUserCanGrantForKeyBeingEdited()).toEqual(['viewProject']);
+  });
+
+  it('offers Create project only for Any project and drops it when the scope changes', () => {
+    const fixture = setup([], {
+      getApiKeyPermissions: () => of({
+        available_permissions: [{ id: 'viewProject', mutating: false }],
+        availableCache: [],
+        server_wide_permissions: [{ id: 'createProject', mutating: true }],
+      }),
+    });
+    const component = fixture.componentInstance;
+    const pickerText = () => document.querySelector('app-permission-picker')?.textContent ?? '';
+    component.openCreateDialog();
+    fixture.detectChanges();
+    expect(pickerText()).toContain('Create project');
+    component.formPermissions = { ...component.formPermissions, createProject: true };
+    expect(component.selectedPermissions()).toEqual(['viewProject', 'createProject']);
+
+    component.formScope = 'project';
+    component.onScopeChange();
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    expect(pickerText()).not.toContain('Create project');
     expect(component.selectedPermissions()).toEqual(['viewProject']);
   });
 
@@ -479,5 +535,92 @@ describe('ApiKeysComponent - cache scope', () => {
     expect(component.showDialog()).toBe(true);
     expect(component.formCache).toBe('fresh');
     expect(component.formName).toBe('deploy');
+  });
+
+  it('opens the create dialog for the cache named in ?cache=', () => {
+    const fixture = setup([], {}, [], { cache: 'main' });
+    const component = fixture.componentInstance;
+    expect(component.showDialog()).toBe(true);
+    expect(component.formScope).toBe('cache');
+    expect(component.formCache).toBe('main');
+    expect(component.cacheOptions().map((option) => option.value)).toContain('main');
+    expect(component.formPermissions).toEqual({ viewCache: true, readStore: true });
+    expect(component.formChanges.changed()).toBe(false);
+  });
+
+  it('shows the netrc entry, nix.conf lines and install command with the new key of a cache-scoped key', () => {
+    const createApiKey = vi.fn(() => of('secret-key'));
+    const fixture = setup([], { createApiKey }, [], { cache: 'main' });
+    const getCache = vi.spyOn(TestBed.inject(CachesService), 'getCache').mockReturnValue(of({ name: 'main', public_key: 'main:abc=' } as CacheResponse));
+    const component = fixture.componentInstance;
+    component.formName = 'laptop';
+    component.saveKey();
+    fixture.detectChanges();
+    expect(createApiKey).toHaveBeenCalledWith('laptop', null, ['viewCache', 'readStore'], null, 'main', []);
+    expect(getCache).toHaveBeenCalledWith('main');
+    expect(component.cacheClientSetupTexts()).toEqual({
+      netrcCredentialsLine: 'machine ci.example.com login gradient password secret-key',
+      nixConfExtraSubstitutersAndTrustedPublicKeysLines: 'extra-substituters = https://ci.example.com/cache/main\nextra-trusted-public-keys = main:abc=',
+      installNetrcCommand: expect.stringContaining('--server https://ci.example.com --token secret-key --cache main'),
+    });
+    expect(document.querySelector<HTMLInputElement>('[data-testid="created-key-netrc"] input')?.value).toBe('machine ci.example.com login gradient password secret-key');
+  });
+
+  it('shows no cache setup for a key that is not pinned to a cache', () => {
+    const fixture = setup([], { createApiKey: () => of('secret-key') });
+    const component = fixture.componentInstance;
+    component.openCreateDialog();
+    component.formName = 'deploy';
+    component.saveKey();
+    expect(component.cacheClientSetupTexts()).toBeNull();
+  });
+});
+
+describe('ApiKeysComponent - key access', () => {
+  const reach = {
+    projects: [{ name: 'web', display_name: 'Web Shop', permissions: ['viewProject', 'editTask'] }],
+    caches: [{ name: 'main', display_name: '', permissions: ['viewCache'] }],
+    create_project: true,
+  };
+
+  it('lists the projects and caches a key reaches with their permissions, the API base URL and a curl example', () => {
+    const getApiKeyAccessibleProjectsAndCaches = vi.fn(() => of(reach));
+    const fixture = setup([unmanagedKey], { getApiKeyAccessibleProjectsAndCaches });
+    buttonsByText(fixture.nativeElement, 'access')[0].click();
+    fixture.detectChanges();
+    expect(getApiKeyAccessibleProjectsAndCaches).toHaveBeenCalledWith('k1');
+    const dialog = document.querySelector('.gr-dialog')!;
+    const text = dialog.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(dialog.querySelector('[data-testid="key-reach-projects"]')?.textContent).toContain('Web Shop');
+    expect(text).toContain('view project, edit task');
+    expect(dialog.querySelector('[data-testid="key-reach-caches"]')?.textContent).toContain('main');
+    expect(text).toContain('This key can create projects.');
+    const values = Array.from(dialog.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea')).map((field) => field.value);
+    expect(values).toContain('https://ci.example.com/api/v1');
+    expect(values).toContain('curl -H "Authorization: Bearer $GRADIENT_TOKEN" https://ci.example.com/api/v1/projects');
+  });
+
+  it('points the curl example at the pinned project or cache', () => {
+    const component = setup([]).componentInstance;
+    expect(component.buildCurlCommandExampleForKeyScope({ ...unmanagedKey, project: 'web' })).toBe(
+      'curl -H "Authorization: Bearer $GRADIENT_TOKEN" https://ci.example.com/api/v1/projects/web',
+    );
+    expect(component.buildCurlCommandExampleForKeyScope({ ...unmanagedKey, cache: 'main' })).toBe(
+      'curl -H "Authorization: Bearer $GRADIENT_TOKEN" https://ci.example.com/api/v1/caches/main',
+    );
+  });
+
+  it('shows a failed access load with Try Again that asks again', () => {
+    const getApiKeyAccessibleProjectsAndCaches = vi.fn()
+      .mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)))
+      .mockReturnValue(of({ projects: [], caches: [], create_project: false }));
+    const fixture = setup([unmanagedKey], { getApiKeyAccessibleProjectsAndCaches });
+    fixture.componentInstance.openApiKeyAccessDialog(unmanagedKey);
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Failed to load key access');
+    document.querySelector<HTMLButtonElement>('.gr-dialog .gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(getApiKeyAccessibleProjectsAndCaches).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('This key cannot access private projects or caches.');
   });
 });

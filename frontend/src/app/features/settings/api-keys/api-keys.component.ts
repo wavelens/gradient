@@ -6,13 +6,15 @@
 
 import { Component, ElementRef, Injector, OnInit, afterNextRender, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { catchError, of } from 'rxjs';
 import { UserService } from '@core/services/user.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ApiError, apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ConfigService } from '@core/services/config.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -27,12 +29,19 @@ import {
   RowListComponent,
   SelectButtonComponent,
   SelectComponent,
-  TooltipDirective,
 } from '@gradient/ui/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@core/models';
-import { permissionLabel, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { AccessState, ApiKeyInfo, ApiKeyVisibleProjectsAndCachesWithPermissionsResponse, PatchApiKeyRequest, PermissionEntry } from '@core/models';
+import {
+  buildGradientCliInstallNetrcCommand,
+  buildNetrcEntryForServerUrl,
+  buildNixConfCacheSubstituterAndKeyLines,
+  type CacheClientSetupTexts,
+  permissionLabel,
+  serverTime,
+  ServerTimestampToLocalDateTimePipe,
+} from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
 import { CreateCacheDialogComponent, dialogFormChangesSinceOpen, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
@@ -80,7 +89,6 @@ interface SelectOption {
     DividerComponent,
     SelectComponent,
     SelectButtonComponent,
-    TooltipDirective,
     LoadStateComponent,
     ManagedDisableDirective,
     PageLayoutComponent,
@@ -104,6 +112,8 @@ export class ApiKeysComponent implements OnInit {
   private confirm = inject(ConfirmService);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private injector = inject(Injector);
+  private apiKeysPageRoute = inject(ActivatedRoute);
+  protected config = inject(ConfigService);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -113,6 +123,7 @@ export class ApiKeysComponent implements OnInit {
   keys = signal<ApiKeyInfo[]>([]);
   availablePermissions = signal<PermissionEntry[]>([]);
   availableCachePermissions = signal<PermissionEntry[]>([]);
+  serverWidePermissions = signal<PermissionEntry[]>([]);
   projectOptions = signal<SelectOption[]>([]);
   signedInUserProjectPermissionsByProjectName = signal<ReadonlyMap<string, readonly string[]>>(new Map());
   cacheOptions = signal<SelectOption[]>([]);
@@ -127,6 +138,11 @@ export class ApiKeysComponent implements OnInit {
   editingKey = signal<ApiKeyInfo | null>(null);
   showKeyDialog = signal(false);
   createdKeyValue = signal('');
+  cacheClientSetupTexts = signal<CacheClientSetupTexts | null>(null);
+  isApiKeyAccessDialogVisible = signal(false);
+  apiKeyWithOpenReachDialog = signal<ApiKeyInfo | null>(null);
+  apiKeyVisibleProjectsAndCachesWithPermissionsResponse = signal<ApiKeyVisibleProjectsAndCachesWithPermissionsResponse | null>(null);
+  apiKeyReachLoadError = signal<unknown>(null);
   errorMessage = signal<string | null>(null);
   attempted = signal(false);
   keyNameConflictError = signal<{ name: string; message: string } | null>(null);
@@ -157,6 +173,7 @@ export class ApiKeysComponent implements OnInit {
       next: (response) => {
         this.availablePermissions.set(response.available_permissions);
         this.availableCachePermissions.set(response.availableCache);
+        this.serverWidePermissions.set(response.server_wide_permissions ?? []);
       },
       error: () => {},
     });
@@ -168,6 +185,30 @@ export class ApiKeysComponent implements OnInit {
       error: () => {},
     });
     this.loadCacheOptions();
+    this.openCreateApiKeyDialogForCacheQueryParameter();
+  }
+
+  private openCreateApiKeyDialogForCacheQueryParameter(): void {
+    const cache = this.apiKeysPageRoute.snapshot.queryParamMap.get('cache');
+    if (!cache) return;
+    this.openCreateDialog();
+    this.formScope = 'cache';
+    this.formCache = cache;
+    if (!this.cacheOptions().some((option) => option.value === cache)) {
+      this.cacheOptions.update((options) => [{ label: cache, value: cache }, ...options]);
+    }
+    this.formPermissions = { viewCache: true, readStore: true };
+    this.formChanges.mark();
+  }
+
+  loadSignedInUserProjectPermissionsForProject(project: string | null): void {
+    if (!project) return;
+    this.projectsService.getProject(project).subscribe({
+      next: (response) => {
+        this.signedInUserProjectPermissionsByProjectName.update((byName) => new Map(byName).set(project, response.permissions));
+      },
+      error: () => {},
+    });
   }
 
   private loadCacheOptions(): void {
@@ -244,6 +285,7 @@ export class ApiKeysComponent implements OnInit {
     if (key.project && !this.projectOptions().some((option) => option.value === key.project)) {
       this.projectOptions.update((options) => [{ label: key.project!, value: key.project! }, ...options]);
     }
+    this.loadSignedInUserProjectPermissionsForProject(key.project ?? null);
     this.formPermissions = this.permissionTemplate(false);
     for (const p of key.permissions) this.formPermissions[p] = true;
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
@@ -268,6 +310,10 @@ export class ApiKeysComponent implements OnInit {
     this.attempted.set(false);
     this.formProject = null;
     this.formCache = null;
+    if (this.formScope !== 'none') {
+      const serverWideIds = new Set(this.serverWidePermissions().map((permission) => permission.id));
+      this.formPermissions = Object.fromEntries(Object.entries(this.formPermissions).filter(([id]) => !serverWideIds.has(id)));
+    }
     const ids = this.activePermissions().map((permission) => permission.id);
     if (ids.every((id) => id in this.formPermissions)) return;
     const preselected = this.formScope === 'cache' ? ['viewCache', 'readStore'] : ['viewProject'];
@@ -302,6 +348,26 @@ export class ApiKeysComponent implements OnInit {
     return Object.entries(this.formPermissions)
       .filter(([id, on]) => on && (grantable?.includes(id) ?? true))
       .map(([id]) => id);
+  }
+
+  openApiKeyAccessDialog(key: ApiKeyInfo): void {
+    this.apiKeyWithOpenReachDialog.set(key);
+    this.apiKeyVisibleProjectsAndCachesWithPermissionsResponse.set(null);
+    this.apiKeyReachLoadError.set(null);
+    this.isApiKeyAccessDialogVisible.set(true);
+    this.userService.getApiKeyAccessibleProjectsAndCaches(key.id).subscribe({
+      next: (reach) => this.apiKeyVisibleProjectsAndCachesWithPermissionsResponse.set(reach),
+      error: (error: unknown) => this.apiKeyReachLoadError.set(error),
+    });
+  }
+
+  buildCurlCommandExampleForKeyScope(key: ApiKeyInfo): string {
+    const path = key.cache ? `caches/${key.cache}` : key.project ? `projects/${key.project}` : 'projects';
+    return `curl -H "Authorization: Bearer $GRADIENT_TOKEN" ${this.config.apiBaseUrl}/${path}`;
+  }
+
+  permissionIdsToCommaSeparatedLabels(permissions: readonly string[]): string {
+    return permissions.map(permissionLabel).join(', ');
   }
 
   getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key: ApiKeyInfo): string[] {
@@ -375,6 +441,8 @@ export class ApiKeysComponent implements OnInit {
             this.creating.set(false);
             this.showDialog.set(false);
             this.createdKeyValue.set(keyValue);
+            this.cacheClientSetupTexts.set(null);
+            if (cache) this.fetchCacheSigningKeyAndSetApiKeyUsageInstructions(cache, keyValue);
             this.showKeyDialog.set(true);
             this.loadKeys();
           },
@@ -384,6 +452,23 @@ export class ApiKeysComponent implements OnInit {
           },
         });
     }
+  }
+
+  private fetchCacheSigningKeyAndSetApiKeyUsageInstructions(cache: string, keyValue: string): void {
+    const serverUrl = this.config.serveUrl;
+    this.cachesService
+      .getCache(cache)
+      .pipe(catchError(() => of(null)))
+      .subscribe((response) => {
+        this.cacheClientSetupTexts.set({
+          netrcCredentialsLine: buildNetrcEntryForServerUrl(serverUrl, keyValue),
+          nixConfExtraSubstitutersAndTrustedPublicKeysLines: buildNixConfCacheSubstituterAndKeyLines(
+            `${serverUrl}/cache/${cache}`,
+            response?.public_key ? [response.public_key] : [],
+          ),
+          installNetrcCommand: buildGradientCliInstallNetrcCommand(serverUrl, cache, keyValue),
+        });
+      });
   }
 
   private showApiKeyNameConflictOrErrorMessage(err: unknown, name: string, fallback: string): void {
@@ -437,10 +522,9 @@ export class ApiKeysComponent implements OnInit {
     target?.focus();
   }
 
-  permissionTooltip(key: ApiKeyInfo): string {
+  getReadableApiKeyPermissionNamesForOwnerOnPinnedProject(key: ApiKeyInfo): string {
     const permissions = this.getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key);
-    if (permissions.length === 0) return 'No permissions';
-    return permissions.map(permissionLabel).join(', ');
+    return permissions.length === 0 ? 'No permissions' : this.permissionIdsToCommaSeparatedLabels(permissions);
   }
 
   scopeBadge(key: ApiKeyInfo): string {

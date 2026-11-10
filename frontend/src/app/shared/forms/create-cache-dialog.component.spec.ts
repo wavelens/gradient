@@ -62,7 +62,7 @@ async function setup(createCache: () => unknown, available = true) {
 
 describe('CreateCacheDialogComponent', () => {
   it('asks before Cancel drops typed input', async () => {
-    const { host, type, cancel } = await setup(() => of('id'));
+    const { host, type, cancel } = await setup(() => of({ id: 'c1', name: 'team-cache', url: '' }));
     await type('#cache-display-name', 'Team Cache');
     await cancel();
     expect(host.visible).toBe(true);
@@ -70,13 +70,13 @@ describe('CreateCacheDialogComponent', () => {
   });
 
   it('closes on Cancel without asking while nothing was typed', async () => {
-    const { host, cancel } = await setup(() => of('id'));
+    const { host, cancel } = await setup(() => of({ id: 'c1', name: 'team-cache', url: '' }));
     await cancel();
     expect(host.visible).toBe(false);
   });
 
   it('creates the cache, closes and reports its name', async () => {
-    const createCache = vi.fn(() => of('id'));
+    const createCache = vi.fn(() => of({ id: 'c1', name: 'team-cache', url: '' }));
     const { host, type, submit } = await setup(createCache);
     await type('#cache-display-name', 'Team Cache');
     await submit();
@@ -86,7 +86,7 @@ describe('CreateCacheDialogComponent', () => {
   });
 
   it('keeps Create enabled on an empty form and names the missing fields on submit, like Create Project', async () => {
-    const createCache = vi.fn(() => of('id'));
+    const createCache = vi.fn(() => of({ id: 'c1', name: 'team-cache', url: '' }));
     const { host, submit } = await setup(createCache);
     const create = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes('Create'))!;
     expect(create.disabled).toBe(false);
@@ -98,7 +98,7 @@ describe('CreateCacheDialogComponent', () => {
   });
 
   it('confirms a created cache with a toast', async () => {
-    const { type, submit } = await setup(() => of('id'));
+    const { type, submit } = await setup(() => of({ id: 'c1', name: 'team-cache', url: '' }));
     const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
     await type('#cache-display-name', 'Team Cache');
     await submit();
@@ -115,7 +115,7 @@ describe('CreateCacheDialogComponent', () => {
   });
 
   it('ignores Enter while the name is taken', async () => {
-    const createCache = vi.fn(() => of('id'));
+    const createCache = vi.fn(() => of({ id: 'c1', name: 'team-cache', url: '' }));
     const { host, type, pressEnter } = await setup(createCache, false);
     await type('#cache-display-name', 'Team Cache');
     await pressEnter('#cache-display-name');
@@ -124,7 +124,7 @@ describe('CreateCacheDialogComponent', () => {
   });
 
   it('ignores Enter while the name check is running', async () => {
-    const createCache = vi.fn(() => of('id'));
+    const createCache = vi.fn(() => of({ id: 'c1', name: 'team-cache', url: '' }));
     const { type, pressEnter } = await setup(createCache);
     const input = document.querySelector<HTMLInputElement>('#cache-display-name')!;
     input.value = 'Team Cache';

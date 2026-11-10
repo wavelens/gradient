@@ -21,6 +21,7 @@ import {
   CreateRoleRequest,
   PatchRoleRequest,
   PublicProjectSummary,
+  CreatedEntityResponse,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -47,8 +48,8 @@ export class ProjectsService {
     return this.api.get<ProjectResponse>(`projects/${name}`);
   }
 
-  createProject(data: MakeProjectRequest): Observable<string> {
-    return this.api.put<string>('projects', data);
+  createProject(data: MakeProjectRequest): Observable<CreatedEntityResponse> {
+    return this.api.put<CreatedEntityResponse>('projects', data);
   }
 
   updateProject(

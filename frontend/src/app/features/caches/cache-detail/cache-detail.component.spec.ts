@@ -140,7 +140,7 @@ describe('CacheDetailComponent loading', () => {
 });
 
 describe('CacheDetailComponent empty and inactive caches', () => {
-  function render(active: boolean, canEdit = false) {
+  function render(active: boolean, canEdit = false, isPublic = true, authenticated = false) {
     TestBed.configureTestingModule({
       imports: [CacheDetailComponent],
       providers: [
@@ -152,10 +152,11 @@ describe('CacheDetailComponent empty and inactive caches', () => {
           provide: ActivatedRoute,
           useValue: {
             snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
-            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active, public: true }, access: { managed: false, canEdit, canTrigger: canEdit } } }) },
+            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active, public: isPublic }, access: { managed: false, canEdit, canTrigger: canEdit } } }) },
           },
         },
         { provide: StarsService, useValue: { starred: () => of(false), set: () => of(true) } },
+        { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => null } },
       ],
     });
     const fixture = TestBed.createComponent(CacheDetailComponent);
@@ -183,6 +184,13 @@ describe('CacheDetailComponent empty and inactive caches', () => {
     const link = root.querySelector<HTMLAnchorElement>('[data-testid="inactive-cache"] a');
     expect(link?.textContent).toContain('Open settings');
     expect(link?.getAttribute('href')).toBe('/caches/main/settings');
+  });
+
+  it('offers a signed-in user a key for this private cache', () => {
+    const root = render(true, false, false, true);
+    const link = root.querySelector<HTMLAnchorElement>('[data-testid="create-cache-key"]');
+    expect(link?.textContent).toContain('Create key for this cache');
+    expect(link?.getAttribute('href')).toBe('/settings/keys?cache=main');
   });
 });
 

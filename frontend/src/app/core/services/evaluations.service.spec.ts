@@ -44,6 +44,13 @@ describe('EvaluationsService actions', () => {
     expect(result).toBe('[uuid11]');
   });
 
+  it('requests the build log without colour codes', () => {
+    let result: string | undefined;
+    service.getBuildLog('b1').subscribe((r) => (result = r));
+    httpMock.expectOne(`${environment.apiUrl}/builds/b1/log?format=plain`).flush({ error: false, message: 'line 1\n' });
+    expect(result).toBe('line 1\n');
+  });
+
   it('prioritizes a build with a bodyless POST', () => {
     let result: string | undefined;
     service.prioritizeBuild('01a05a38-3276-7252-bc05-c139d9c8a015').subscribe((r) => (result = r));

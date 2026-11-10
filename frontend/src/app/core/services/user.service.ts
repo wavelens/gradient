@@ -20,6 +20,7 @@ import {
   CreateApiKeyRequest,
   PatchApiKeyRequest,
   ApiKeyPermissionsResponse,
+  ApiKeyVisibleProjectsAndCachesWithPermissionsResponse,
   UserSearchResult,
 } from '@core/models';
 
@@ -83,6 +84,10 @@ export class UserService {
 
   getApiKeyPermissions(): Observable<ApiKeyPermissionsResponse> {
     return this.api.get<ApiKeyPermissionsResponse>('user/keys/permissions');
+  }
+
+  getApiKeyAccessibleProjectsAndCaches(apiId: string): Observable<ApiKeyVisibleProjectsAndCachesWithPermissionsResponse> {
+    return this.api.get<ApiKeyVisibleProjectsAndCachesWithPermissionsResponse>(`user/keys/${apiId}/reach`);
   }
 
   deleteApiKey(name: string): Observable<string> {

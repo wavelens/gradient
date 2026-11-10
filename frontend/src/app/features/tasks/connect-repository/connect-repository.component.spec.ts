@@ -50,7 +50,7 @@ function render(query: Record<string, string>, tasks: object, projects: object =
 
 describe('ConnectRepositoryComponent', () => {
   it('derives the task name from the repository URL and creates the task', () => {
-    const createTask = vi.fn(() => of('id'));
+    const createTask = vi.fn(() => of({ id: 't1', name: 'my-app-1', url: '' }));
     const fixture = render({}, { createTask });
     const comp = fixture.componentInstance;
     comp.repositoryChanged('ssh://git@forgejo.example.com/acme/my-app.git');
@@ -62,6 +62,7 @@ describe('ConnectRepositoryComponent', () => {
       repository: 'ssh://git@forgejo.example.com/acme/my-app.git',
     }));
     expect(comp.step()).toBe('access');
+    expect(comp.taskName()).toBe('my-app-1');
   });
 
   it('follows later URL edits until the user names the task', () => {
@@ -77,7 +78,7 @@ describe('ConnectRepositoryComponent', () => {
   });
 
   it('refuses an invalid wildcard before asking the server', () => {
-    const createTask = vi.fn(() => of('id'));
+    const createTask = vi.fn(() => of({ id: 't1', name: 'demo', url: '' }));
     const comp = render({}, { createTask }).componentInstance;
     comp.repositoryChanged('ssh://git@forgejo.example.com/acme/my-app.git');
     comp.form.wildcard = 'packages.#';

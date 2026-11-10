@@ -26,7 +26,7 @@ function setup(create: () => unknown) {
 
 describe('CreateTeamDialogComponent', () => {
   it('reports the created team by name and closes', () => {
-    const { fixture, dialog } = setup(() => of('id'));
+    const { fixture, dialog } = setup(() => of({ id: 't1', name: 'ops', url: '' }));
     const created = vi.fn();
     fixture.componentInstance.created.subscribe(created);
     dialog.form = { name: 'ops', displayName: 'Ops' };
@@ -46,7 +46,7 @@ describe('CreateTeamDialogComponent', () => {
   });
 
   it('asks before Cancel drops typed input', async () => {
-    const { fixture } = setup(() => of('id'));
+    const { fixture } = setup(() => of({ id: 't1', name: 'ops', url: '' }));
     const input = document.querySelector<HTMLInputElement>('#team-display-name')!;
     input.value = 'Ops';
     input.dispatchEvent(new Event('input'));

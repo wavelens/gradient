@@ -44,6 +44,10 @@ export class ConfigService {
   publicListing = true;
   maxKeepEvaluationsPerTask: number | null = null;
 
+  get apiBaseUrl(): string {
+    return `${this.serveUrl}${environment.apiUrl}`;
+  }
+
   canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
     switch (permission) {
       case 'everyone':

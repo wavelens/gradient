@@ -71,6 +71,27 @@ describe('MenuComponent', () => {
     expect(items()).toHaveLength(0);
   });
 
+  it('expands a submenu in place and runs a child command', () => {
+    const { fixture, anchor } = render();
+    const copied = vi.fn();
+    fixture.componentInstance.model.set([
+      { label: 'Copy', icon: 'content_copy', submenuItems: [{ label: 'Link', command: copied }] },
+    ]);
+    anchor().click();
+    fixture.detectChanges();
+    const parent = items()[0];
+    expect(parent.getAttribute('aria-expanded')).toBe('false');
+    expect(items()).toHaveLength(1);
+    parent.click();
+    fixture.detectChanges();
+    expect(parent.getAttribute('aria-expanded')).toBe('true');
+    expect(items()).toHaveLength(2);
+    items()[1].click();
+    fixture.detectChanges();
+    expect(copied).toHaveBeenCalledTimes(1);
+    expect(items()).toHaveLength(0);
+  });
+
   it('marks destructive items as danger', () => {
     const { fixture, row } = render();
     fixture.componentInstance.menu().show(row());
