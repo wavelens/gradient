@@ -109,11 +109,13 @@ impl Permission {
             Permission::DeleteProject => "Delete the project and all tasks and builds.",
             Permission::ManageMembers => "Invite and remove members and change roles.",
             Permission::ManageRoles => "Create, edit and delete custom roles.",
-            Permission::ManageIntegrations => "Connect Git hosts and external services.",
+            Permission::ManageIntegrations => {
+                "Add or edit a project's connection to a Git host and install webhooks and deploy keys."
+            }
             Permission::ManageActions => "Set actions to run on task events.",
             Permission::ManageWorkers => "Register, enable and disable project workers.",
             Permission::ManageSubscriptions => {
-                "Subscribe the project to a cache or remove the subscription."
+                "Subscribe a project to the cache, change the mode and output signing, or remove the subscription."
             }
             Permission::ManageSshKey => "Update the project SSH key for repository clones.",
             Permission::CreateTask => "Add a new task to the project.",
@@ -132,7 +134,7 @@ impl Permission {
             Permission::DeleteProject => "delete project",
             Permission::ManageMembers => "members",
             Permission::ManageRoles => "roles",
-            Permission::ManageIntegrations => "integrations",
+            Permission::ManageIntegrations => "Connection to Git Host",
             Permission::ManageActions => "actions",
             Permission::ManageWorkers => "workers",
             Permission::ManageSubscriptions => "subscriptions",
