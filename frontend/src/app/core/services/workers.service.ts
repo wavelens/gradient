@@ -8,10 +8,10 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
-  AllowedCapabilities,
   ProjectWorkerEntry,
   WorkerMetricsResponse,
-  RegisterWorkerResponse,
+  RegisterWorkerRequest,
+  WorkerRegistrationResponse,
   PatchWorkerRequest,
   WorkerTestResponse,
   ConnectionRequest,
@@ -30,25 +30,8 @@ export class WorkersService {
     return this.api.get<WorkerMetricsResponse>(`projects/${project}/workers/${workerId}/metrics`);
   }
 
-  registerWorker(
-    project: string,
-    workerId: string,
-    displayName: string,
-    url?: string,
-    token?: string,
-    caps?: AllowedCapabilities,
-  ): Observable<RegisterWorkerResponse> {
-    return this.api.post<RegisterWorkerResponse>(`projects/${project}/workers`, {
-      worker_id: workerId,
-      display_name: displayName,
-      url: url || undefined,
-      token: token || undefined,
-      enable_network: caps?.enable_network ?? true,
-      enable_secrets: caps?.enable_secrets ?? true,
-      enable_exec: caps?.enable_exec ?? false,
-      enable_eval: caps?.enable_eval ?? true,
-      enable_build: caps?.enable_build ?? true,
-    });
+  registerWorker(project: string, worker: RegisterWorkerRequest): Observable<WorkerRegistrationResponse> {
+    return this.api.post<WorkerRegistrationResponse>(`projects/${project}/workers`, worker);
   }
 
   setWorkerActive(project: string, workerId: string, active: boolean): Observable<string> {

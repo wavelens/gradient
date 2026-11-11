@@ -18,21 +18,18 @@ import {
   gradientCiHost,
   TeamResponse,
   TeamWorkerEntry,
-  RegisterWorkerRequest,
   WorkerConnection,
   PatchWorkerRequest,
 } from '@core/models';
 import { AllowedCapabilitiesComponent, confirmAndDrainWorker, GradientCiConnectComponent, WorkerDrainingBadgeComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { MANAGED_ITEM_DISABLED_REASON, canManageTeam } from '@shared/access';
-import { fieldChecks } from '@shared/forms';
-import { checkWorkerUrlWithWebSocketOrHttpScheme } from '@shared/forms/build-worker-url-field-check';
+import { RegisterWorkerDialogComponent } from '@shared/worker-registration-dialog/register-worker-dialog.component';
 import { EMPTY, Observable, map, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import {
   BadgeComponent,
   ButtonComponent,
-  CopyFieldComponent,
   DialogComponent,
   FormFieldComponent,
   InputDirective,
@@ -42,8 +39,6 @@ import {
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
 
-const DISPLAY_NAME_REQUIRED = 'Enter a display name.';
-
 @Component({
   selector: 'app-team-workers',
   standalone: true,
@@ -51,9 +46,9 @@ const DISPLAY_NAME_REQUIRED = 'Enter a display name.';
     AllowedCapabilitiesComponent,
     FormsModule,
     GradientCiConnectComponent,
+    RegisterWorkerDialogComponent,
     BadgeComponent,
     ButtonComponent,
-    CopyFieldComponent,
     DialogComponent,
     FormFieldComponent,
     InputDirective,
@@ -80,16 +75,12 @@ export class TeamWorkersComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   busy = signal<string | null>(null);
-  registerError = signal<string | null>(null);
   editError = signal<string | null>(null);
   showRegister = signal(false);
-  registerAttempted = signal(false);
   showGradientCiConnect = signal(false);
-  issuedToken = signal<string | null>(null);
   editing = signal<TeamWorkerEntry | null>(null);
   editName = '';
   editAllowed: AllowedCapabilities = ALL_ALLOWED;
-  form: RegisterWorkerRequest = { worker_id: '', display_name: '' };
 
   isAdmin = computed(() => canManageTeam(this.team(), this.authService.user()));
   offlineCount = computed(() => this.workers().filter((worker) => !worker.connected).length);
@@ -137,53 +128,8 @@ export class TeamWorkersComponent implements OnInit {
     });
   }
 
-  openRegister(): void {
-    this.registerError.set(null);
-    this.registerAttempted.set(false);
-    this.showRegister.set(true);
-  }
-
-  workerIdError(): string | null {
-    if (!this.form.worker_id.trim()) return this.registerAttempted() ? 'Enter a worker ID.' : null;
-    return fieldChecks.uuid(this.form.worker_id);
-  }
-
-  urlError(): string | null {
-    return checkWorkerUrlWithWebSocketOrHttpScheme(this.form.url);
-  }
-
-  displayNameError(): string | null {
-    return this.registerAttempted() && !this.form.display_name.trim() ? DISPLAY_NAME_REQUIRED : null;
-  }
-
   editNameError(): string | null {
-    return this.editing()?.gradient_ci || this.editName.trim() ? null : DISPLAY_NAME_REQUIRED;
-  }
-
-  register(): void {
-    if (this.busy() === 'register') return;
-    this.registerAttempted.set(true);
-    if (this.workerIdError() || this.displayNameError() || this.urlError()) return;
-    this.busy.set('register');
-    this.registerError.set(null);
-    const worker: RegisterWorkerRequest = {
-      worker_id: this.form.worker_id.trim(),
-      display_name: this.form.display_name.trim(),
-      url: this.form.url?.trim() || undefined,
-    };
-    this.teams.registerWorker(this.teamName, worker).subscribe({
-      next: (res) => {
-        this.busy.set(null);
-        this.showRegister.set(false);
-        this.issuedToken.set(res.token ?? null);
-        this.form = { worker_id: '', display_name: '' };
-        this.load();
-      },
-      error: (err: unknown) => {
-        this.busy.set(null);
-        this.registerError.set(apiErrorMessage(err, 'Failed to register the worker.'));
-      },
-    });
+    return this.editing()?.gradient_ci || this.editName.trim() ? null : 'Enter a display name.';
   }
 
   reactivateWorker(worker: TeamWorkerEntry): void {

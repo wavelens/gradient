@@ -187,16 +187,110 @@ describe('TeamGrantsComponent', () => {
       expect(service.removeProjectGrant).toHaveBeenCalledWith('acme', 'docs');
       expect(service.updateProjectGrant).not.toHaveBeenCalled();
     });
+
+    const workersCheckbox = (fixture: ReturnType<typeof setup>['fixture'], team: string) =>
+      (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>(`#team-grant-workers-${team}`);
+
+    it('turns the workers of a team grant off and on through its switch', async () => {
+      const { fixture, service, notify } = setup('project', 'users', true);
+      fixture.componentRef.setInput('canEditWorkers', true);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(workersCheckbox(fixture, 'platform')!.checked).toBe(true);
+      expect(workersCheckbox(fixture, 'docs')!.checked).toBe(false);
+
+      workersCheckbox(fixture, 'platform')!.click();
+      fixture.detectChanges();
+      expect(service.updateProjectGrant).toHaveBeenCalledWith('acme', 'platform', { workers: false });
+      expect(notify.success).toHaveBeenCalledWith('Team workers saved');
+
+      workersCheckbox(fixture, 'docs')!.click();
+      expect(service.updateProjectGrant).toHaveBeenCalledWith('acme', 'docs', { workers: true });
+    });
+
+    it('sets the switch back and reports a refused change', async () => {
+      const { fixture, service, notify } = setup('project', 'users', true);
+      service.updateProjectGrant.mockReturnValue(throwError(() => new ApiError('Grant is managed', 409)));
+      fixture.componentRef.setInput('canEditWorkers', true);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      workersCheckbox(fixture, 'platform')!.click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(notify.failure).toHaveBeenCalledWith("Couldn't save team worker", expect.any(ApiError));
+      expect(workersCheckbox(fixture, 'platform')!.checked).toBe(true);
+    });
+
+    it('shows viewers the workers state as a badge without a switch', () => {
+      const { fixture } = setup('project', 'users');
+      const badges = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-badge')).map((b) => b.textContent?.trim());
+      expect(workersCheckbox(fixture, 'platform')).toBeNull();
+      expect(badges).toContain('Workers');
+      expect(badges).toContain('No workers');
+    });
+
+    it('shows no workers switch on cache grants', () => {
+      const { fixture } = setup('cache');
+      fixture.componentRef.setInput('canEditWorkers', true);
+      fixture.detectChanges();
+      expect(workersCheckbox(fixture, 'platform')).toBeNull();
+      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('No workers');
+    });
   });
 
   describe('for workers', () => {
     it('lists only the grants that include workers and marks pending ones', () => {
-      const { text } = setup('project', 'workers');
-      expect(text()).toContain('Platform');
-      expect(text()).toContain('Ops');
+      const { fixture, text } = setup('project', 'workers');
+      const rowsWithWorkers = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row:not([data-testid])'));
+      expect(rowsWithWorkers.map((row) => row.querySelector('.entity-name__display')?.textContent?.trim())).toEqual(['Platform', 'Ops', 'QA']);
       expect(text()).toContain('Pending');
-      expect(text()).not.toContain('Docs');
       expect(text()).not.toContain('Role');
+    });
+
+    const withoutWorkersRow = (fixture: ReturnType<typeof setup>['fixture']) =>
+      (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('[data-testid="team-grant-without-workers"]');
+    const enableButton = (fixture: ReturnType<typeof setup>['fixture']) =>
+      Array.from(withoutWorkersRow(fixture)?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
+        (b) => b.querySelector('.gr-button__label')?.textContent?.trim() === 'Enable',
+      );
+
+    it('lists an approved team grant without workers instead of saying No teams', () => {
+      const { fixture, service, component, text } = setup('project', 'workers');
+      service.projectGrants = () => of(grants.filter((grant) => grant.team === 'docs'));
+      component.load();
+      fixture.detectChanges();
+      expect(withoutWorkersRow(fixture)?.textContent?.replace(/\s+/g, ' ')).toContain('No workers: Docs');
+      expect(text()).not.toContain('No teams');
+    });
+
+    it('enables the workers of a team granted without workers for a team admin', () => {
+      const { fixture, service, notify, changed } = setup('project', 'workers', true);
+      fixture.componentRef.setInput('canEditWorkers', true);
+      fixture.detectChanges();
+      enableButton(fixture)!.click();
+      fixture.detectChanges();
+      expect(service.updateProjectGrant).toHaveBeenCalledWith('acme', 'docs', { workers: true });
+      expect(notify.success).toHaveBeenCalledWith('Team workers saved');
+      expect(changed).toHaveBeenCalled();
+      expect(withoutWorkersRow(fixture)).toBeNull();
+    });
+
+    it('blocks Enable with a reason for a viewer who is not Admin in the team', () => {
+      const { fixture, service } = setup('project', 'workers');
+      fixture.componentRef.setInput('canEditWorkers', true);
+      fixture.detectChanges();
+      const button = enableButton(fixture)!;
+      button.click();
+      expect(service.updateProjectGrant).not.toHaveBeenCalled();
+      expect(fixture.componentInstance.getWorkerEnableBlockedReason(grantOf('docs'))).toBe("Only admins of Docs can add that team's workers.");
+    });
+
+    it('offers no Enable without the permission to manage workers', () => {
+      const { fixture } = setup('project', 'workers', true);
+      expect(withoutWorkersRow(fixture)).not.toBeNull();
+      expect(enableButton(fixture)).toBeUndefined();
     });
 
     it('creates a workers-only grant for a team without one', () => {

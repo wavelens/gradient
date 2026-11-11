@@ -15,7 +15,7 @@
         <button grButton label="Connect Gradient.CI Servers" icon="link" severity="secondary" (click)="showGradientCiConnect.set(true)"></button>
       }
       @if (isAdmin()) {
-        <button grButton severity="secondary" label="Register Worker" icon="add" (click)="openRegister()"></button>
+        <button grButton severity="secondary" label="Register Worker" icon="add" (click)="showRegister.set(true)"></button>
       }
     </div>
 
@@ -84,34 +84,7 @@
   </gr-settings-section>
 }
 
-<gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px" [error]="registerError()" [busy]="busy() === 'register'">
-  <gr-form-field label="Worker ID" for="team-worker-id" hint="The worker's UUID from services.gradient.worker.id."
-    [invalid]="!!workerIdError()" [error]="workerIdError() ?? ''">
-    <input grInput id="team-worker-id" [(ngModel)]="form.worker_id" (keyup.enter)="register()" />
-  </gr-form-field>
-  <gr-form-field label="Display Name" for="team-worker-name" [invalid]="!!displayNameError()" [error]="displayNameError() ?? ''">
-    <input grInput id="team-worker-name" [(ngModel)]="form.display_name" (keyup.enter)="register()" />
-  </gr-form-field>
-  <gr-form-field label="URL" for="team-worker-url" hint="Optional. Set it when the server dials the worker." [invalid]="!!urlError()" [error]="urlError() ?? ''">
-    <input grInput id="team-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto" (keyup.enter)="register()" />
-  </gr-form-field>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" [disabled]="busy() === 'register'" (click)="showRegister.set(false)"></button>
-    <button grButton label="Register" [loading]="busy() === 'register'" (click)="register()"></button>
-  </div>
-</gr-dialog>
-
-<gr-dialog header="Worker Registered" [visible]="issuedToken() !== null" width="520px" [closable]="false">
-  @if (issuedToken(); as token) {
-    <gr-form-field label="Token">
-      <span slot="hint">Shown once. Put <code>{{ team().id }}:{{ token }}</code> or <code>*:{{ token }}</code> into the worker's peers file.</span>
-      <gr-copy-field [value]="token" />
-    </gr-form-field>
-  }
-  <div grDialogFooter>
-    <button grButton label="I've saved the token" icon="check" (click)="issuedToken.set(null)"></button>
-  </div>
-</gr-dialog>
+<app-register-worker-dialog [(visible)]="showRegister" [team]="teamName" (workerRegistered)="load()" />
 
 <gr-dialog header="Edit Worker" [visible]="editing() !== null" (hide)="editing.set(null)" width="480px" [error]="editError()" [busy]="busy() === 'edit'">
   @if (editing(); as worker) {

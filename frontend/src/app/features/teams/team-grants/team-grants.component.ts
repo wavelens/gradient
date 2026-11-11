@@ -32,6 +32,7 @@ import {
   AutoCompleteComponent,
   BadgeComponent,
   ButtonComponent,
+  CheckboxComponent,
   DialogComponent,
   LoadStateComponent,
   FormFieldComponent,
@@ -62,6 +63,7 @@ interface GrantForm {
     AutoCompleteComponent,
     BadgeComponent,
     ButtonComponent,
+    CheckboxComponent,
     DialogComponent,
     LoadStateComponent,
     FormFieldComponent,
@@ -89,6 +91,7 @@ export class TeamGrantsComponent implements OnInit {
   grants = input<GrantedPart>('users');
   roles = input<string[]>([]);
   canEdit = input(false);
+  canEditWorkers = input(false);
   whichGrantsToShow = input<TeamGrantStatusFilter>('all');
   teamGrantUsernamesByTeamName = input<Record<string, readonly string[]>>({});
   changed = output<void>();
@@ -105,6 +108,12 @@ export class TeamGrantsComponent implements OnInit {
       .filter((grant) => grant[this.part()])
       .filter((grant) => status === 'all' || grant.pending === (status === 'pending'));
   });
+  projectTeamGrantsWithMemberRolesOnly = computed(() =>
+    this.part() === 'workers' && this.whichGrantsToShow() !== 'pending'
+      ? this.allGrants().filter((grant) => grant.users && !grant.workers && !grant.pending)
+      : [],
+  );
+  teamNameOfWorkersSwitchInProgress = signal<string | null>(null);
   emptyMessage = computed(() => {
     if (this.whichGrantsToShow() === 'pending') return 'No team requests await approval.';
     const workers = this.part() === 'workers';
@@ -281,6 +290,33 @@ export class TeamGrantsComponent implements OnInit {
     return users
       ? `Members of ${team} lose their role on this project.`
       : `This project can no longer run builds on ${team} workers.`;
+  }
+
+  shouldShowWorkersSwitchForTeamGrant(grant: TeamGrantEntry): boolean {
+    return this.kind() === 'project' && this.part() === 'users' && !grant.pending;
+  }
+
+  getWorkerEnableBlockedReason(grant: TeamGrantEntry): string | null {
+    if (grant.workers || this.authService.user()?.superuser) return null;
+    const isTeamAdmin = this.myTeams().some((team) => team.name === grant.team && team.role === 'admin');
+    return isTeamAdmin ? null : `Only admins of ${grant.display_name} can add that team's workers.`;
+  }
+
+  setTeamGrantWorkersEnabled(grant: TeamGrantEntry, workers: boolean): void {
+    if (this.teamNameOfWorkersSwitchInProgress() !== null) return;
+    this.teamNameOfWorkersSwitchInProgress.set(grant.team);
+    this.teams.updateProjectGrant(this.name(), grant.team, { workers }).subscribe({
+      next: () => {
+        this.teamNameOfWorkersSwitchInProgress.set(null);
+        this.allGrants.update((grants) => grants.map((entry) => (entry.team === grant.team ? { ...entry, workers } : entry)));
+        this.notify.success('Team workers saved');
+        this.changed.emit();
+      },
+      error: (err: unknown) => {
+        this.teamNameOfWorkersSwitchInProgress.set(null);
+        this.notify.failure("Couldn't save team worker", err);
+      },
+    });
   }
 
   private teamNamed(typed: string): string {

@@ -8,26 +8,51 @@
   @if (canEdit() && whichGrantsToShow() !== 'pending') {
     <button slot="actions" grButton severity="secondary" label="Grant Team" icon="add" (click)="openGrant()"></button>
   }
-  <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="shownGrants().length === 0"
+  <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="shownGrants().length === 0 && projectTeamGrantsWithMemberRolesOnly().length === 0"
     loadingMessage="Loading teams..." errorTitle="Failed to load teams" (retry)="load()"
-    emptyIcon="groups" emptyTitle="No teams"
+    emptyIcon="groups" [emptyTitle]="part() === 'workers' ? undefined : 'No teams'"
     [emptyMessage]="emptyMessage()">
+    <p slot="empty" class="text-secondary">{{ emptyMessage() }}</p>
     <gr-row-list>
       @for (grant of shownGrants(); track grant.team) {
-        <gr-row [icon]="entityKindToIconName.team" [link]="teamLink(grant.team)" [linkLabel]="'Open team ' + formatEntityLabel({ display_name: grant.display_name, name: grant.team })">
+        @let teamLabel = formatEntityLabel({ display_name: grant.display_name, name: grant.team });
+        <gr-row [icon]="entityKindToIconName.team" [link]="teamLink(grant.team)" [linkLabel]="'Open team ' + teamLabel">
           <gr-entity-name [displayName]="grant.display_name" [name]="grant.team" />
           @if (part() === 'users') {
             @let usernames = teamGrantUsernamesByTeamName()[grant.team] ?? [];
-            <span slot="meta">Role {{ grant.role }}@if (usernames.length) { · Members: {{ usernames.join(', ') }} }</span>
+            <span slot="meta">Role {{ grant.role }}@if (usernames.length) { · Members: {{ usernames.join(', ') }} }@if (shouldShowWorkersSwitchForTeamGrant(grant) && canEditWorkers() && getWorkerEnableBlockedReason(grant); as reason) { · {{ reason }} }</span>
           }
           <div slot="actions">
             @if (grant.pending) {
               <gr-badge severity="warning">Pending</gr-badge>
             }
+            @if (shouldShowWorkersSwitchForTeamGrant(grant)) {
+              @if (canEditWorkers()) {
+                <gr-checkbox label="Workers" [inputId]="'team-grant-workers-' + grant.team"
+                  [ngModel]="teamNameOfWorkersSwitchInProgress() === grant.team ? !grant.workers : grant.workers"
+                  [disabled]="teamNameOfWorkersSwitchInProgress() !== null || !!getWorkerEnableBlockedReason(grant)"
+                  (ngModelChange)="setTeamGrantWorkersEnabled(grant, $event)" />
+              } @else {
+                <gr-badge>{{ grant.workers ? 'Workers' : 'No workers' }}</gr-badge>
+              }
+            }
             @if (canEdit()) {
-              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="(part() === 'workers' ? 'Remove workers of ' : 'Remove role of ') + formatEntityLabel({ display_name: grant.display_name, name: grant.team })" (click)="remove(grant)"></button>
+              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="(part() === 'workers' ? 'Remove workers of ' : 'Remove role of ') + teamLabel" (click)="remove(grant)"></button>
             }
           </div>
+        </gr-row>
+      }
+      @for (grant of projectTeamGrantsWithMemberRolesOnly(); track grant.team) {
+        @let teamLabel = formatEntityLabel({ display_name: grant.display_name, name: grant.team });
+        <gr-row [icon]="entityKindToIconName.team" muted data-testid="team-grant-without-workers">
+          No workers: <gr-entity-name [displayName]="grant.display_name" [name]="grant.team" /> has a grant with no workers
+          @if (canEditWorkers()) {
+            <div slot="actions">
+              <button grButton label="Enable" icon="play_arrow" severity="secondary" [attr.aria-label]="'Enable workers for ' + teamLabel"
+                [loading]="teamNameOfWorkersSwitchInProgress() === grant.team" [disabled]="teamNameOfWorkersSwitchInProgress() !== null"
+                [disabledReason]="getWorkerEnableBlockedReason(grant)" (click)="setTeamGrantWorkersEnabled(grant, true)"></button>
+            </div>
+          }
         </gr-row>
       }
     </gr-row-list>

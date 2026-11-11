@@ -10,7 +10,7 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Observable, of } from 'rxjs';
-import type { AccessState, PersonWithAccessToProjectOrCache, TeamMemberItem, TeamResponse } from '@core/models';
+import type { AccessState, PersonWithAccessToProjectOrCache, TeamGrantEntry, TeamMemberItem, TeamResponse } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -61,13 +61,14 @@ function memberService() {
   };
 }
 
-function setup(route: Partial<ActivatedRoute>, options: { superuser?: boolean; teamMembers?: TeamMemberItem[] } = {}) {
+function setup(route: Partial<ActivatedRoute>, options: { superuser?: boolean; teamMembers?: TeamMemberItem[]; projectGrants?: TeamGrantEntry[] } = {}) {
   const projects = memberService();
   const caches = memberService();
   const teams = {
     members: vi.fn(() => of(options.teamMembers ?? [])),
     invitations: vi.fn(() => of([])),
-    projectGrants: () => of([]),
+    projectGrants: () => of(options.projectGrants ?? []),
+    list: () => of([]),
     cacheGrants: () => of([]),
     get: () => of({}),
   };
@@ -197,6 +198,20 @@ describe('MembersPageComponent people', () => {
     expect(confirm.mock.calls[0][0].consequenceLink).toBeUndefined();
     expect(confirm.mock.calls[0][0].consequence).toBe('You lose all access to this project.');
     expect(fixture.componentInstance.rows().map((row) => row.user)).not.toContain('alice');
+  });
+});
+
+describe('MembersPageComponent teams', () => {
+  it('Display Workers switch and read-only badge in Teams tab. People who manage workers get the switch. Viewers get the badge.', () => {
+    const projectGrants: TeamGrantEntry[] = [{ team: 'platform', display_name: 'Platform', role: 'View', users: true, workers: false, pending: false }];
+    const route = projectRouteStub('acme', viewer, { permissions: ['viewProject', 'manageWorkers'] });
+    (route.snapshot as unknown as { data: Record<string, unknown> }).data['membersPageTab'] = 'teams';
+    const workersManager = setup(route, { projectGrants }).root;
+    expect(workersManager.querySelector('#team-grant-workers-platform')).not.toBeNull();
+    TestBed.resetTestingModule();
+    const readOnly = setup(projectRoute(viewer, 'teams'), { projectGrants }).root;
+    expect(readOnly.querySelector('gr-checkbox')).toBeNull();
+    expect(readOnly.querySelector('gr-row gr-badge')?.textContent?.trim()).toBe('No workers');
   });
 });
 

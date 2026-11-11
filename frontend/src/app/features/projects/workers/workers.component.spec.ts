@@ -17,7 +17,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import type { CacheSubscriptionItem, Permission } from '@core/models';
+import type { CacheSubscriptionItem, Permission, TeamGrantEntry } from '@core/models';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
@@ -75,6 +75,7 @@ function setup(opts: {
   memberOf?: string[];
   permissions?: Permission[];
   role?: string | null;
+  grants?: TeamGrantEntry[];
 }) {
   const workersService = {
     getWorkers: vi.fn(() => of(opts.workers)),
@@ -101,8 +102,9 @@ function setup(opts: {
       {
         provide: TeamsService,
         useValue: {
-          list: () => of((opts.memberOf ?? ['platform']).map((name) => ({ name, display_name: name }))),
-          projectGrants: () => of([]),
+          list: () => of((opts.memberOf ?? ['platform']).map((name) => ({ name, display_name: name, role: 'admin' }))),
+          projectGrants: () => of(opts.grants ?? []),
+          updateProjectGrant: vi.fn(() => of('Team grant updated')),
         },
       },
       { provide: AuthService, useValue: { isAuthenticated: () => true, user: signal({ superuser: false }) } },
@@ -159,36 +161,6 @@ describe('WorkersComponent - live state', () => {
     fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('Renamed');
-  });
-});
-
-describe('WorkersComponent - no-cache banner (existing)', () => {
-  it('shows the banner when the project has no subscribed caches', async () => {
-    const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [], caches: [] });
-    await settled(fixture);
-    const banner = fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]');
-    expect(banner, 'banner element').toBeTruthy();
-  });
-
-  it('hides the banner when the project has at least one subscribed cache', async () => {
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [],
-      caches: [{ id: 'c', name: 'cache-1' }],
-    });
-    await settled(fixture);
-    const banner = fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]');
-    expect(banner, 'banner element').toBeNull();
-  });
-
-  it('shows the banner when every subscription is read-only or pending', async () => {
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [],
-      caches: [{ id: 'r', name: 'read-only', mode: 'ReadOnly' }, { id: 'p', name: 'pending', status: 'pending' }],
-    });
-    await settled(fixture);
-    expect(fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]')?.textContent).toContain('Subscription request pending');
   });
 });
 
@@ -265,14 +237,74 @@ describe('WorkersComponent - team workers', () => {
     });
     await settled(fixture);
 
-    const badge = (Array.from(fixture.nativeElement.querySelectorAll('gr-badge')) as HTMLElement[])
-      .find((el) => (el.textContent ?? '').trim() === 'Team Platform Team');
-    expect(badge, 'Team badge').toBeTruthy();
     const menu = menuOf(fixture, workerOfTeam);
     expect(String(itemOf(menu, 'Manage on team')?.routerLink)).toBe('/team/platform');
     expect(itemOf(menu, 'Edit')).toBeUndefined();
     expect(itemOf(menu, 'Deactivate')).toBeUndefined();
     expect(itemOf(menu, 'Delete')).toBeUndefined();
+  });
+
+  it('names the source of every worker: the project itself or the granted team', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: false, canTrigger: false },
+      workers: [workerUnmanaged, workerOfTeam],
+      caches: [{ id: 'c', name: 'c' }],
+    });
+    await settled(fixture);
+    const sources = Array.from(fixture.nativeElement.querySelectorAll('[data-testid="worker-source"]')).map((el) =>
+      ((el as HTMLElement).textContent ?? '').replace(/\s+/g, ' ').trim(),
+    );
+    expect(sources[0]).toBe('Project worker');
+    expect(sources[1]).toContain('Via');
+    expect(sources[1]).toContain('Platform Team');
+    expect(sources[1]).toContain('(Workers)');
+    expect(fixture.nativeElement.querySelectorAll('[data-testid="worker-source"] gr-entity-name').length).toBe(1);
+  });
+
+  it('lists a team granted without workers and enables its workers', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [workerUnmanaged],
+      caches: [{ id: 'c', name: 'c' }],
+      grants: [{ team: 'platform', display_name: 'Platform Team', role: 'Write', users: true, workers: false, pending: false }],
+    });
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    const row = root.querySelector<HTMLElement>('[data-testid="team-grant-without-workers"]')!;
+    expect(row.textContent?.replace(/\s+/g, ' ')).toContain('No workers: Platform Team');
+    expect(root.textContent).not.toContain('No teams');
+
+    const teams = TestBed.inject(TeamsService) as unknown as { updateProjectGrant: ReturnType<typeof vi.fn> };
+    const getWorkers = TestBed.inject(WorkersService).getWorkers as ReturnType<typeof vi.fn>;
+    buttonsLabelled(row, 'Enable')[0].click();
+    await settled(fixture);
+
+    expect(teams.updateProjectGrant).toHaveBeenCalledWith('demo', 'platform', { workers: true });
+    expect(notify.success).toHaveBeenCalledWith('Team workers saved');
+    expect(getWorkers).toHaveBeenCalledTimes(2);
+    expect(root.querySelector('[data-testid="team-grant-without-workers"]')).toBeNull();
+  });
+
+  it('says no "No teams" on a project without team grants', async () => {
+    const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).not.toContain('No teams');
+    expect(text).toContain("Grant a team to run this project's builds on the team's workers.");
+  });
+
+  it('shows a team granted without workers to viewers without Enable and never says No teams', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: false, canTrigger: false },
+      workers: [],
+      caches: [{ id: 'c', name: 'c' }],
+      grants: [{ team: 'platform', display_name: 'Platform Team', role: 'Write', users: true, workers: false, pending: false }],
+    });
+    await settled(fixture);
+    const row = fixture.nativeElement.querySelector('[data-testid="team-grant-without-workers"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(buttonsLabelled(row, 'Enable')).toHaveLength(0);
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('No teams');
   });
 
   it('offers no team link to a viewer outside the team, whose team page would not load', async () => {
@@ -453,7 +485,8 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
   it('shows a connection of a granted team as coming from that team', async () => {
     const fixture = setup({ access: writable, workers: [gciTeam], caches });
     await settled(fixture);
-    expect(entry(fixture)!.textContent).toContain('Via team Platform Team');
+    expect(entry(fixture)!.textContent).toContain('Via Platform Team');
+    expect(entry(fixture)!.querySelector('gr-entity-name')?.getAttribute('title')).toBe('Platform Team (platform)');
     expect(entry(fixture)!.textContent).toContain('Allowed:');
     expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(0);
     expect(buttonsLabelled(entry(fixture)!, 'Edit').length).toBe(0);
@@ -557,7 +590,6 @@ describe('WorkersComponent - load errors', () => {
   it('shows a visitor outside the project no access and asks the server nothing', async () => {
     const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [], caches: [], gradientCi: false, permissions: [], role: null });
     const service = TestBed.inject(WorkersService) as unknown as { getWorkers: ReturnType<typeof vi.fn> };
-    const projects = TestBed.inject(ProjectsService) as unknown as MockedProjects;
     await settled(fixture);
     const root = fixture.nativeElement as HTMLElement;
     expect(root.textContent).toContain('No access');
@@ -565,7 +597,6 @@ describe('WorkersComponent - load errors', () => {
     expect(root.textContent).not.toContain('Try Again');
     expect(root.querySelector('app-team-grants')).toBeNull();
     expect(service.getWorkers).not.toHaveBeenCalled();
-    expect(projects.getSubscribedCaches).not.toHaveBeenCalled();
   });
 });
 
@@ -687,50 +718,30 @@ describe('WorkersComponent - write failures', () => {
 describe('WorkersComponent - register and edit validation', () => {
   const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
-  async function openRegister() {
-    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
-    await settled(fixture);
-    const registerWorker = vi.fn(() => of({ peer_id: 'project-uuid', token: 'generated' }));
-    Object.assign(TestBed.inject(WorkersService), { registerWorker });
-    fixture.componentInstance.openRegisterDialog();
-    await settled(fixture);
-    return { fixture, registerWorker, dialog: document.querySelector('.gr-dialog')! };
-  }
-
   const errors = (dialog: Element) =>
     Array.from(dialog.querySelectorAll('.field-error')).map((e) => e.textContent?.trim() ?? '');
 
-  it('names the missing fields on submit and sends nothing', async () => {
-    const { fixture, registerWorker, dialog } = await openRegister();
-    buttonsLabelled(dialog, 'Register')[0].click();
-    fixture.detectChanges();
-    expect(errors(dialog)).toEqual(['Enter a worker name.', 'Enter a worker ID.']);
-    expect(registerWorker).not.toHaveBeenCalled();
-  });
-
-  it('refuses a worker ID that is not a UUID and a token that is not base64', async () => {
-    const { fixture, registerWorker, dialog } = await openRegister();
-    const cmp = fixture.componentInstance;
-    cmp.newWorkerName = 'Builder';
-    cmp.newWorkerId = 'builder-1';
-    cmp.newWorkerToken = 'not base64!';
-    cmp.registerWorker();
+  it('registers through the shared dialog for this project and reloads the list', async () => {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
-    expect(errors(dialog)).toEqual([
-      expect.stringContaining('UUID'),
-      expect.stringContaining('base64'),
-    ]);
-    expect(registerWorker).not.toHaveBeenCalled();
-  });
+    const workers = TestBed.inject(WorkersService) as unknown as { getWorkers: ReturnType<typeof vi.fn> };
+    const registerWorker = vi.fn(() =>
+      of({ id: 'w9', name: 'Builder', url: '', peer_id: 'project-uuid', token: 'generated', nixos_configuration: 'services.gradient.worker = {};' }),
+    );
+    Object.assign(TestBed.inject(WorkersService), { registerWorker });
+    findByText(fixture.nativeElement, 'Register Worker')!.click();
+    await settled(fixture);
+    const name = document.querySelector<HTMLInputElement>('#register-worker-display-name')!;
+    name.value = 'Builder';
+    name.dispatchEvent(new Event('input'));
+    await settled(fixture);
+    buttonsLabelled(document.querySelector('.gr-dialog')!, 'Register')[0].click();
+    await settled(fixture);
 
-  it('generates a UUID worker ID that registers', async () => {
-    const { fixture, registerWorker, dialog } = await openRegister();
-    const cmp = fixture.componentInstance;
-    cmp.newWorkerName = 'Builder';
-    buttonsLabelled(dialog, 'Generate')[0].click();
-    expect(cmp.workerIdError).toBeNull();
-    cmp.registerWorker();
-    expect(registerWorker).toHaveBeenCalledWith('demo', cmp.newWorkerId, 'Builder', undefined, undefined, expect.anything());
+    expect(fixture.nativeElement.querySelector('app-register-worker-dialog')).not.toBeNull();
+    expect(registerWorker).toHaveBeenCalledWith('demo', expect.objectContaining({ display_name: 'Builder' }));
+    expect(workers.getWorkers).toHaveBeenCalledTimes(2);
+    expect(document.querySelector<HTMLInputElement>('.gr-dialog gr-copy-field input')?.value).toBe('project-uuid:generated');
   });
 
   it('closes the Edit Worker dialog without a request when nothing changed', async () => {

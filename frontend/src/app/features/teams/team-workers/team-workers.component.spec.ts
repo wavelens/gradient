@@ -9,7 +9,7 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
-import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ApiError } from '@core/services/api.service';
 import { TeamWorkersComponent } from './team-workers.component';
@@ -39,8 +39,6 @@ const connection: TeamWorkerEntry = {
 
 const live = { capabilities: {}, architectures: [], system_features: [], max_concurrent_builds: 2, assigned_job_count: 1, draining: false } as unknown as NonNullable<TeamWorkerEntry['live']>;
 
-const WORKER_ID = '3f2b8c1e-9a4d-4e6f-b7c2-1d5e8f9a0b3c';
-
 const offline = { ...connection, worker_id: 'w2', display_name: 'Sleeper', gradient_ci: false, connected: false };
 
 function setup(
@@ -49,7 +47,9 @@ function setup(
   list: () => Observable<TeamWorkerEntry[]> = () => of(workers),
 ) {
   const updateWorker = vi.fn().mockReturnValue(of('updated'));
-  const registerWorker = vi.fn().mockReturnValue(of({ token: 'secret' }));
+  const registerWorker = vi.fn().mockReturnValue(
+    of({ id: 'w9', name: 'Builder', url: '', peer_id: 'team-uuid', token: 'secret', nixos_configuration: 'services.gradient.worker = {};' }),
+  );
   const removeWorker = vi.fn().mockReturnValue(of('removed'));
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
@@ -105,38 +105,24 @@ describe('TeamWorkersComponent', () => {
     expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { enable_secrets: true });
   });
 
-  it('keeps a refused registration inside the Register dialog', () => {
-    const { fixture, root, registerWorker } = setup();
-    registerWorker.mockReturnValue(throwError(() => new ApiError('Worker is already registered', 409)));
-    button(root, 'Register Worker')!.click();
-    fixture.componentInstance.form = { worker_id: WORKER_ID, display_name: 'Builder' };
-    fixture.componentInstance.register();
-    fixture.detectChanges();
-    expect(fixture.componentInstance.showRegister()).toBe(true);
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Worker is already registered');
-    expect(root.textContent).not.toContain('Worker is already registered');
-  });
-
-  it('names the missing fields under them and sends no registration', () => {
-    const { fixture, root, registerWorker } = setup();
+  it('registers a team worker through the shared dialog and reloads the list', async () => {
+    const list = vi.fn(() => of([connection]));
+    const { fixture, root, registerWorker } = setup('admin', [connection], list);
     button(root, 'Register Worker')!.click();
     fixture.detectChanges();
+    await fixture.whenStable();
     const dialog = document.querySelector('.gr-dialog')!;
+    const name = dialog.querySelector<HTMLInputElement>('#register-worker-display-name')!;
+    name.value = 'Builder';
+    name.dispatchEvent(new Event('input'));
     button(dialog, 'Register')!.click();
     fixture.detectChanges();
-    expect(dialog.textContent).toContain('Enter a worker ID.');
-    expect(dialog.textContent).toContain('Enter a display name.');
-    expect(registerWorker).not.toHaveBeenCalled();
-  });
 
-  it('refuses a worker ID that is no UUID before asking the server', () => {
-    const { fixture, root, registerWorker } = setup();
-    button(root, 'Register Worker')!.click();
-    fixture.componentInstance.form = { worker_id: 'builder-1', display_name: 'Builder' };
-    fixture.componentInstance.register();
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Enter a UUID');
-    expect(registerWorker).not.toHaveBeenCalled();
+    expect(root.querySelector('app-register-worker-dialog')).not.toBeNull();
+    expect(registerWorker).toHaveBeenCalledWith('platform', expect.objectContaining({ display_name: 'Builder' }));
+    expect(registerWorker.mock.calls[0][1]).not.toHaveProperty('worker_id');
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(document.querySelector<HTMLInputElement>('.gr-dialog gr-copy-field input')?.value).toBe('team-uuid:secret');
   });
 
   it('closes the Edit dialog without a request when nothing changed', () => {
@@ -146,24 +132,6 @@ describe('TeamWorkersComponent', () => {
     button(document.querySelector('.gr-dialog')!, 'Save')!.click();
     expect(updateWorker).not.toHaveBeenCalled();
     expect(fixture.componentInstance.editing()).toBeNull();
-  });
-
-  it('keeps the Register dialog open and sends one request while registration runs', () => {
-    const { fixture, root, registerWorker } = setup();
-    registerWorker.mockReturnValue(new Subject());
-    button(root, 'Register Worker')!.click();
-    fixture.componentInstance.form = { worker_id: WORKER_ID, display_name: 'Builder' };
-    fixture.detectChanges();
-    const dialog = document.querySelector('.gr-dialog')!;
-    button(dialog, 'Register')!.click();
-    fixture.detectChanges();
-    button(dialog, 'Register')!.click();
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(registerWorker).toHaveBeenCalledTimes(1);
-    expect(fixture.componentInstance.showRegister()).toBe(true);
-    expect(button(dialog, 'Cancel')!.disabled).toBe(true);
   });
 
   it('keeps a failed edit inside the Edit dialog', () => {

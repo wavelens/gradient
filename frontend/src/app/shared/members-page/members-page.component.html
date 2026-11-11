@@ -59,6 +59,7 @@
             [roles]="roleNames()"
             [cacheWithViewerPermissions]="cache()"
             [canEdit]="access().canEdit && !access().managed"
+            [canEditWorkers]="manageWorkersAccess().canEdit && !manageWorkersAccess().managed"
             [teamGrantUsernamesByTeamName]="teamGrantUsernamesByTeamName()"
             whichGrantsToShow="approved"
           />

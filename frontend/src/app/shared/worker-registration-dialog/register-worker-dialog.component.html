@@ -1,0 +1,49 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-dialog #registerDialog header="Register Worker" [(visible)]="visible" width="520px" [error]="error()" [busy]="registering()"
+  [confirmDiscard]="formChanges.changed()">
+  <div #registerFields>
+    <gr-form-field label="Display Name" for="register-worker-display-name" required
+      [invalid]="!!displayNameError()" [error]="displayNameError() ?? ''">
+      <input grInput id="register-worker-display-name" [(ngModel)]="form.display_name" placeholder="e.g. Primary Build Server"
+        (keyup.enter)="register()" />
+    </gr-form-field>
+    <gr-form-field label="URL" for="register-worker-url" hint="Optional. Set it when the server dials the worker."
+      [invalid]="!!urlError()" [error]="urlError() ?? ''">
+      <input grInput id="register-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto"
+        (keyup.enter)="register()" />
+    </gr-form-field>
+    <gr-form-field label="Allowed"
+      hint="exec can start exec jobs on this worker. These jobs are flake apps that boot in a new virtual machine after each evaluation. Leave this off unless the worker settings enable exec jobs.">
+      <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
+      <gr-allowed-capabilities editable [(value)]="form.allowed" />
+    </gr-form-field>
+  </div>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" [disabled]="registering()" (click)="registerDialog.close()"></button>
+    <button grButton label="Register" icon="add" [loading]="registering()" [disabled]="registering()" (grSubmit)="register()"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog header="Worker Registered" [visible]="workerRegistrationResponse() !== null" width="640px" [closable]="false">
+  @if (workerRegistrationResponse(); as registration) {
+    <gr-message-banner type="warning">The peer line shows one time only. Copy it before you close this dialog.</gr-message-banner>
+    <gr-form-field label="NixOS Config" hint="Add this to the NixOS configuration on the worker machine.">
+      <gr-copy-field multiline [value]="registration.nixos_configuration" />
+    </gr-form-field>
+    <gr-form-field label="Peer line">
+      <span slot="hint">Store this line as a secret on the worker machine in the file that <code>peersFile</code> specifies (for example, <code>/run/secrets/gradient-worker-peers</code>).</span>
+      <gr-copy-field [value]="registration.peer_id + ':' + registration.token" />
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    @if (workerLink(); as link) {
+      <a grButton label="Open worker" icon="open_in_new" severity="secondary" [routerLink]="link" (click)="closeResult()"></a>
+    }
+    <button grButton label="I've saved the token" icon="check" (click)="closeResult()"></button>
+  </div>
+</gr-dialog>

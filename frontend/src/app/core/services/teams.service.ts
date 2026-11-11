@@ -22,7 +22,7 @@ import {
   TeamRequestItem,
   TeamGrantEntry,
   GrantProjectRequest,
-  RegisteredTeamWorker,
+  WorkerRegistrationResponse,
   PatchProjectGrantRequest,
   TeamGrantPickerRow,
   AddTeamMemberRequest,
@@ -89,8 +89,8 @@ export class TeamsService {
     return this.api.get<TeamWorkerEntry[]>(`teams/${team}/workers`);
   }
 
-  registerWorker(team: string, worker: RegisterWorkerRequest): Observable<RegisteredTeamWorker> {
-    return this.api.post<RegisteredTeamWorker>(`teams/${team}/workers`, worker);
+  registerWorker(team: string, worker: RegisterWorkerRequest): Observable<WorkerRegistrationResponse> {
+    return this.api.post<WorkerRegistrationResponse>(`teams/${team}/workers`, worker);
   }
 
   updateWorker(team: string, workerId: string, patch: PatchWorkerRequest): Observable<string> {

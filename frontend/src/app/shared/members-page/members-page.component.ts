@@ -121,6 +121,7 @@ export class MembersPageComponent implements OnInit {
     const canEdit = canManageTeam(this.team(), this.auth.user());
     return { managed: false, canEdit, canTrigger: canEdit };
   });
+  manageWorkersAccess = computed<AccessState>(() => accessTo(this.kind === 'project' ? this.project() : null, 'manageWorkers'));
   roleAccess = computed<AccessState>(() =>
     this.kind === 'project' ? accessTo(this.project(), 'manageRoles') : accessTo(this.cache(), 'manageCacheRoles'),
   );

@@ -11,10 +11,9 @@
       grButton
       label="Register Worker"
       icon="add"
-      (click)="openRegisterDialog()"
+      (click)="showRegisterDialog.set(true)"
       [appManagedDisable]="access()"
     ></button>
-  <app-project-no-active-writable-cache-subscription-warning [projectName]="projectName" [caches]="cacheSubscriptions()" />
 
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="loadWorkers()" />
@@ -44,7 +43,7 @@
                   <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small" class="worker-action-btn"
                     [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
                   @if (w.team) {
-                    <span class="text-secondary">Via team {{ w.team_display_name ?? w.team }}</span>
+                    <span class="text-secondary">Via <gr-entity-name [displayName]="w.team_display_name ?? w.team" [name]="w.team" /> (Workers)</span>
                   } @else {
                     <ng-container *ngTemplateOutlet="editAndToggle; context: { $implicit: w }" />
                     <button *appWritable="access()" grButton label="Disconnect" icon="link_off" severity="danger" size="small"
@@ -69,6 +68,13 @@
           <gr-row icon="construction">
             {{ worker.display_name }}
             <div slot="meta">
+                <div class="worker-source text-secondary" data-testid="worker-source">
+                  @if (worker.team) {
+                    Via <gr-entity-name [displayName]="worker.team_display_name ?? worker.team" [name]="worker.team" /> (Workers)
+                  } @else {
+                    Project worker
+                  }
+                </div>
                 <div class="worker-stats text-secondary">{{ workerStatusText(worker) }}</div>
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
@@ -97,9 +103,6 @@
                 }
             </div>
             <div slot="actions" class="phone-icon-buttons">
-              @if (worker.team) {
-                <gr-badge>Team {{ worker.team_display_name ?? worker.team }}</gr-badge>
-              }
               @if (worker.live?.draining) {
                 <gr-badge severity="warning">Draining</gr-badge>
               }
@@ -156,90 +159,11 @@
 
   @if (!loadError()) {
     <app-team-grants kind="project" grants="workers" [name]="projectName" [canEdit]="access().canEdit && !access().managed"
-      (changed)="loadWorkers()" />
+      [canEditWorkers]="access().canEdit && !access().managed" (changed)="loadWorkers()" />
   }
 </gr-page-layout>
 
-<!-- Register Worker Dialog -->
-<gr-dialog
-  header="Register Worker"
-  [(visible)]="showRegisterDialog"
-  [error]="errorMessage()"
-  [busy]="registering()"
-  width="480px"
->
-  <gr-form-field label="Name" for="worker-name" required
-    [invalid]="(registerAttempted() || workerNameModel.touched) && !!workerNameError" [error]="workerNameError ?? ''">
-    <input
-      grInput
-      id="worker-name"
-      [(ngModel)]="newWorkerName"
-      #workerNameModel="ngModel"
-      placeholder="e.g. Primary Build Server"
-      (keyup.enter)="registerWorker()"
-    />
-  </gr-form-field>
-  <gr-form-field label="Worker ID" for="worker-id" required hint="A UUID for worker identification. Use &quot;Generate&quot; to create one."
-    [invalid]="(registerAttempted() || workerIdModel.touched) && !!workerIdError" [error]="workerIdError ?? ''">
-    <gr-label-help slot="label" doc="guides/remote-worker/#1-pick-a-worker-id" title="Pick a worker ID" />
-    <div class="field-actions">
-      <input
-        grInput
-        id="worker-id"
-        [(ngModel)]="newWorkerId"
-        #workerIdModel="ngModel"
-        placeholder="e.g. a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
-        (keyup.enter)="registerWorker()"
-      />
-      <button grButton type="button" label="Generate" severity="secondary" (click)="generateWorkerId()"></button>
-    </div>
-  </gr-form-field>
-  <gr-form-field label="Worker URL" for="worker-url"
-    [invalid]="(registerAttempted() || workerUrlModel.touched) && !!workerUrlError" [error]="workerUrlError ?? ''">
-    <span slot="label" class="text-secondary">(optional)</span>
-    <input
-      grInput
-      id="worker-url"
-      [(ngModel)]="newWorkerUrl"
-      #workerUrlModel="ngModel"
-      placeholder="e.g. wss://worker.example.com/proto"
-    />
-  </gr-form-field>
-  <gr-form-field label="Token" for="worker-token" hint="Base64 text, such as the output of openssl rand -base64 48. Blank fields let the server generate a token."
-    [invalid]="(registerAttempted() || workerTokenModel.touched) && !!workerTokenError" [error]="workerTokenError ?? ''">
-    <gr-label-help slot="label" doc="guides/remote-worker/#2-register-the-worker" title="Register a worker" />
-    <span slot="label" class="text-secondary">(optional)</span>
-    <input
-      grInput
-      id="worker-token"
-      [(ngModel)]="newWorkerToken"
-      #workerTokenModel="ngModel"
-      placeholder="Output of: openssl rand -base64 48"
-      (keyup.enter)="registerWorker()"
-    />
-  </gr-form-field>
-  @if (projectId()) {
-    <gr-form-field label="Project Peer ID">
-      <span slot="hint">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</span>
-      <gr-copy-field [value]="projectId()" />
-    </gr-form-field>
-  }
-  <gr-form-field label="Allowed">
-    <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
-    <gr-allowed-capabilities editable [(value)]="newAllowed" />
-  </gr-form-field>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
-    <button
-      grButton
-      label="Register"
-      icon="add"
-      (click)="registerWorker()"
-      [loading]="registering()"
-      [disabled]="registering()"
-    ></button>
-  </div>
-</gr-dialog>
+<app-register-worker-dialog [(visible)]="showRegisterDialog" [project]="projectName" (workerRegistered)="loadWorkers()" />
 
 <!-- Deactivate Warning Dialog -->
 <gr-dialog
@@ -259,45 +183,6 @@
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()" [disabled]="togglingId() !== null"></button>
     <button grButton label="Deactivate" icon="pause" severity="danger" (click)="confirmToggleWorker()" [loading]="togglingId() !== null"></button>
-  </div>
-</gr-dialog>
-
-<!-- Token Dialog (shown once after registration) -->
-<gr-dialog
-  header="Worker Registered"
-  [(visible)]="showTokenDialog"
-  width="520px"
-  [closable]="false"
->
-  @if (lastRegistration(); as reg) {
-    @if (reg.token) {
-      <div class="token-warning">
-        <gr-icon name="warning" />
-        <strong>Save this token now.</strong> It will not be shown again.
-      </div>
-    }
-
-    <gr-form-field label="Peer ID">
-      <gr-copy-field [value]="reg.peer_id" />
-    </gr-form-field>
-
-    @if (reg.token) {
-      <gr-form-field label="Token" hint="Shown once. Copy it before closing this dialog.">
-        <gr-label-help slot="label" doc="guides/remote-worker/#2-register-the-worker" title="Register a worker" />
-        <gr-copy-field [value]="reg.token" />
-      </gr-form-field>
-
-      <gr-form-field label="Peers file entry">
-        <gr-label-help slot="label" doc="guides/remote-worker/#peers-file" title="Peers file format" />
-        <span slot="hint">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</span>
-        <gr-copy-field multiline [value]="reg.peer_id + ':' + reg.token" />
-      </gr-form-field>
-    } @else {
-      <p class="text-secondary">Worker registered successfully. The token was pre-supplied and will not be echoed back.</p>
-    }
-  }
-  <div grDialogFooter>
-    <button grButton label="I've saved the token" icon="check" (click)="closeTokenDialog()"></button>
   </div>
 </gr-dialog>
 
