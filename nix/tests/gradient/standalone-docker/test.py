@@ -22,7 +22,7 @@ def dump_container():
 def start_container():
     machine.succeed(RUN)
     try:
-        machine.wait_until_succeeds(f"{LOGIN_JOURNAL} | grep -q 'log in with admin / '", timeout=timedelta(seconds=600))
+        machine.wait_until_succeeds(f"{LOGIN_JOURNAL} | grep -q 'Gradient is running at '", timeout=timedelta(seconds=600))
         assert_serving(machine, BASE)
     except Exception:
         dump_container()
