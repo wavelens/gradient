@@ -870,8 +870,10 @@ pub async fn post_task_transfer(
     if new_project.id == project.id {
         return Err(TaskRefusal::AlreadyInProject.into());
     }
-    if task_references_git_host_integration(&db.web_db, task.id).await? {
-        return Err(TaskRefusal::CurrentProjectGitHostIntegrationInUse.into());
+    if task_uses_git_host_connection_unusable_by_target_project(&db.web_db, &task, &new_project)
+        .await?
+    {
+        return Err(TaskRefusal::TaskUsesGitHostConnectionTargetProjectCannotUse.into());
     }
 
     let moved = gradient_db::tasks::move_to_project(&db.web_db, task, new_project.id)
@@ -899,19 +901,31 @@ pub async fn post_task_transfer(
     Ok(Json(res))
 }
 
-async fn task_references_git_host_integration(db: &WebDb, task: TaskId) -> WebResult<bool> {
-    let triggers = gradient_db::triggers::of_task(db, task).await?;
-    if triggers
-        .iter()
-        .any(|t| super::triggers::trigger_integration_id(t.trigger_type, &t.config).is_some())
-    {
-        return Ok(true);
+async fn task_uses_git_host_connection_unusable_by_target_project(
+    db: &WebDb,
+    task: &MTask,
+    target: &MProject,
+) -> WebResult<bool> {
+    let actions = gradient_db::actions::of_task(db, task.id).await?;
+    let used: Vec<GitHostConnectionId> = task
+        .git_host_connection
+        .into_iter()
+        .chain(actions.into_iter().filter_map(|action| {
+            match serde_json::from_value::<ActionConfig>(action.config) {
+                Ok(ActionConfig::OpenPr {
+                    git_host_connection_id,
+                    ..
+                }) => Some(git_host_connection_id),
+                _ => None,
+            }
+        }))
+        .collect();
+    if used.is_empty() {
+        return Ok(false);
     }
-    let actions = gradient_db::actions::of_task(db, task).await?;
-    Ok(actions.into_iter().any(|action| {
-        matches!(
-            serde_json::from_value::<ActionConfig>(action.config),
-            Ok(ActionConfig::GitHostStatusReport { .. } | ActionConfig::OpenPr { .. })
-        )
-    }))
+    let usable = gradient_db::git_host_connections::list_git_host_connections_available_to_project(
+        db, target,
+    )
+    .await?;
+    Ok(used.iter().any(|id| !usable.iter().any(|c| c.id == *id)))
 }

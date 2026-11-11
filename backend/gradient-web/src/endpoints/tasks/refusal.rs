@@ -37,9 +37,9 @@ pub(crate) enum TaskRefusal {
     #[error("Task is already in this project.")]
     AlreadyInProject,
     #[error(
-        "The triggers or actions of the task use the integration with the Git host for this project. Delete them first, then move the task."
+        "The task uses a connection to a Git host that the destination project can't use. Select another connection in the settings of the task repository or in the actions that open pull requests, then move the task."
     )]
-    CurrentProjectGitHostIntegrationInUse,
+    TaskUsesGitHostConnectionTargetProjectCannotUse,
     #[error("team '{team}' has no access to this project")]
     TeamWithoutProjectAccess { team: String },
     #[error("{0}")]
@@ -124,7 +124,7 @@ impl Refusal for TaskRefusal {
             Self::TransferNotPermitted => RefusalStatus::Forbidden,
             Self::ActionNameTaken
             | Self::DefaultTriggerDeletion
-            | Self::CurrentProjectGitHostIntegrationInUse => RefusalStatus::Conflict,
+            | Self::TaskUsesGitHostConnectionTargetProjectCannotUse => RefusalStatus::Conflict,
             Self::TeamWithoutProjectAccess { .. }
             | Self::InvalidWebhookUrl(_)
             | Self::EmptyAccessToken
