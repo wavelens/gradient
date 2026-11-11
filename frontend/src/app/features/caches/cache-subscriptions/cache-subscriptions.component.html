@@ -52,3 +52,34 @@
     </gr-row-list>
   </gr-load-state>
 </gr-page-layout>
+
+<gr-dialog
+  header="Approve subscription request"
+  [visible]="subscriptionRequestInApproveDialog() !== null"
+  (visibleChange)="closeApproveDialogWhenVisibilityIsHidden($event)"
+  [error]="approveSubscriptionRequestErrorMessage()"
+  [busy]="deciding() !== null"
+  width="440px"
+>
+  @if (subscriptionRequestInApproveDialog(); as request) {
+    <gr-entity-name [displayName]="request.project_display_name" [name]="request.project" />
+    <p>Requested mode: {{ modeLabel(request.mode) }}</p>
+    <gr-form-field label="Grant Mode" for="approved-subscription-mode" hint="Less access than the project requested is fine. More access is not.">
+      <gr-select
+        inputId="approved-subscription-mode"
+        [options]="subscriptionModesWithNoMoreAccessThanRequested()"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="approvedSubscriptionMode()"
+        (ngModelChange)="approvedSubscriptionMode.set($event)"
+      />
+    </gr-form-field>
+    @if (approvedSubscriptionMode() !== 'ReadOnly') {
+      <p class="gr-form-aside">The project can push store paths to this cache. All users of this cache get the pushed paths.</p>
+    }
+  }
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" [disabled]="deciding() !== null" (click)="subscriptionRequestInApproveDialog.set(null)"></button>
+    <button grButton label="Approve" icon="check" [loading]="deciding() !== null" (grSubmit)="approveOpenRequestWithSelectedMode()"></button>
+  </div>
+</gr-dialog>

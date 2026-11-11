@@ -24,6 +24,7 @@ import {
   NarStats,
   PendingInvitationItem,
   SubscriptionRequestItem,
+  CacheSubscriptionMode,
   CacheSubscribersResponse,
   MakeCacheRequest,
   PatchCacheRequest,
@@ -172,8 +173,8 @@ export class CachesService {
     return this.api.get<SubscriptionRequestItem[]>(`caches/${cache}/subscription-requests`);
   }
 
-  approveSubscriptionRequest(cache: string, project: string): Observable<string> {
-    return this.api.post<string>(`caches/${cache}/subscription-requests/${project}`, {});
+  approveSubscriptionRequest(cache: string, project: string, mode?: CacheSubscriptionMode): Observable<string> {
+    return this.api.post<string>(`caches/${cache}/subscription-requests/${project}`, mode ? { mode } : {});
   }
 
   denySubscriptionRequest(cache: string, project: string): Observable<string> {

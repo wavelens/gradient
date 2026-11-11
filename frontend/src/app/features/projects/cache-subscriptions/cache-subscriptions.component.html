@@ -6,8 +6,6 @@
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
   <app-server-configuration-managed-banner [access]="access()" kind="project" />
-  <app-project-no-active-writable-cache-subscription-warning [projectName]="projectName" [caches]="loading() || loadError() ? null : caches()"
-                                                             [showCacheSubscriptionsPageLink]="false" />
   @if (!loading() && !loadError()) {
     <button slot="actions"
         *appWritable="access()"
@@ -28,9 +26,30 @@
         @for (cache of caches(); track cache.id) {
           <gr-row [icon]="entityKindToIconName.cache">
             <gr-entity-name [displayName]="cache.display_name" [name]="cache.name" />
+            <gr-badge severity="neutral">{{ modeLabel(cache.mode) }}</gr-badge>
+            @if (cache.managed) {
+              <gr-badge severity="info"><gr-icon name="lock" size="sm" />Managed</gr-badge>
+            }
             @if (cache.status === 'pending') {
               <gr-badge severity="warning">Pending approval</gr-badge>
             }
+            <div slot="meta">
+              @if (cache.status === 'pending') {
+                {{ buildPendingSubscriptionApproversText(cache) }}
+              } @else {
+                @if (cache.managed) {
+                  <span>{{ managedItemDisabledReason }}</span>
+                }
+                <gr-checkbox
+                  [inputId]="'sign-pushed-paths-' + cache.name"
+                  label="Sign pushed paths with the cache key"
+                  [ngModel]="getSubscriptionSignPushedPathsCheckboxValue(cache)"
+                  (ngModelChange)="toggleSubscriptionSignPushedPaths(cache, $event)"
+                  [appManagedDisable]="access()"
+                  [disabled]="cache.managed || signPushedPathsPendingValue() !== null || access().managed || !access().canEdit"
+                />
+              }
+            </div>
             <div slot="actions">
               <a
                 grButton
@@ -49,6 +68,7 @@
                 severity="danger"
                 size="small"
                 [appManagedDisable]="access()"
+                [disabledReason]="cache.managed ? managedItemDisabledReason : null"
                 (click)="unsubscribeCache(cache)"
               ></button>
             </div>
@@ -72,7 +92,7 @@
   [busy]="subscribing()"
   width="440px"
 >
-  <gr-form-field label="Cache Name" for="cache-name" hint="Select one cache from the personal caches or the public caches.">
+  <gr-form-field label="Cache Name" for="cache-name" hint="Select the caches that this project can use.">
     <gr-label-help slot="label" doc="guides/share-a-cache/#2-share-with-another-project" title="Share a cache" />
     <gr-autocomplete
       inputId="cache-name"
@@ -82,6 +102,16 @@
       placeholder="e.g. my-cache"
       [forceSelection]="false"
       (enter)="subscribeCache()"
+    />
+  </gr-form-field>
+  <gr-form-field label="Mode" for="subscription-mode" hint="Read & Write can pull from the cache and push to the cache. Read Only can pull only. Write Only can push only.">
+    <gr-select
+      inputId="subscription-mode"
+      [options]="modes"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="selectedSubscriptionMode()"
+      (ngModelChange)="selectedSubscriptionMode.set($event)"
     />
   </gr-form-field>
   @if (canCreateAndSubscribe()) {

@@ -15,3 +15,7 @@ export const SUBSCRIPTION_MODES: { value: CacheSubscriptionMode; label: string }
 export function subscriptionModeLabel(mode: CacheSubscriptionMode): string {
   return SUBSCRIPTION_MODES.find((m) => m.value === mode)?.label ?? mode;
 }
+
+export function getSubscriptionModesWithNoMoreAccessThan(mode: CacheSubscriptionMode): { value: CacheSubscriptionMode; label: string }[] {
+  return mode === 'ReadWrite' ? SUBSCRIPTION_MODES : SUBSCRIPTION_MODES.filter((m) => m.value === mode);
+}

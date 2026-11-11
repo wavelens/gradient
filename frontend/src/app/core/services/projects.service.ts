@@ -14,6 +14,8 @@ import {
   ProjectSummary,
   PendingInvitationItem,
   CacheSubscriptionItem,
+  CacheSubscriptionMode,
+  SubscribableCache,
   ProjectResponse,
   MakeProjectRequest,
   PatchProjectRequest,
@@ -23,7 +25,9 @@ import {
   CreatedEntityResponse,
   PersonWithAccessToProjectOrCache,
   AddMemberRequest,
+  ProjectReadinessResponse,
 } from '@core/models';
+import { asSectionRequest } from '@core/interceptors/request-context';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectsService {
@@ -124,12 +128,24 @@ export class ProjectsService {
     return this.api.get<boolean>(`projects/available?name=${encodeURIComponent(name)}`);
   }
 
+  getProjectReadiness(project: string): Observable<ProjectReadinessResponse> {
+    return this.api.get<ProjectReadinessResponse>(`projects/${project}/readiness`, asSectionRequest());
+  }
+
   getSubscribedCaches(project: string): Observable<CacheSubscriptionItem[]> {
     return this.api.get<CacheSubscriptionItem[]>(`projects/${project}/subscribe`);
   }
 
-  subscribeCache(project: string, cache: string): Observable<string> {
-    return this.api.post<string>(`projects/${project}/subscribe/${cache}`, {});
+  getSubscribableCaches(project: string): Observable<SubscribableCache[]> {
+    return this.api.get<SubscribableCache[]>(`projects/${project}/subscribable-caches`);
+  }
+
+  subscribeCache(project: string, cache: string, mode?: CacheSubscriptionMode): Observable<string> {
+    return this.api.post<string>(`projects/${project}/subscribe/${cache}`, mode ? { mode } : {});
+  }
+
+  setCacheSubscriptionSignOutputs(project: string, cache: string, signOutputs: boolean): Observable<string> {
+    return this.api.patch<string>(`projects/${project}/subscribe/${cache}`, { sign_outputs: signOutputs });
   }
 
   unsubscribeCache(project: string, cache: string): Observable<string> {

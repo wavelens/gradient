@@ -14,10 +14,13 @@ import { ApiError } from '@core/services/api.service';
 import { CacheSubscriptionRequestsComponent } from './cache-subscriptions.component';
 import { CachesService } from '@core/services/caches.service';
 import { SubscriptionRequestItem } from '@core/models';
-import { MessageService } from '@gradient/ui/ui';
+import { MessageService, SelectComponent } from '@gradient/ui/ui';
+import { By } from '@angular/platform-browser';
 import { cacheAccessData } from '@core/resolvers/access-route.testing';
 
 const request: SubscriptionRequestItem = {
+  cache: 'prod',
+  cache_display_name: 'Prod',
   project: 'wavelens',
   project_display_name: 'Wavelens',
   mode: 'ReadWrite',
@@ -30,6 +33,15 @@ function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | unde
   return Array.from(root.querySelectorAll('button')).find((b) =>
     (b.textContent || '').trim().toLowerCase().includes(text.toLowerCase()),
   ) as HTMLButtonElement | undefined;
+}
+
+function approveDialog(): HTMLElement {
+  return document.querySelector('.gr-dialog') as HTMLElement;
+}
+
+function offeredModes(fixture: ComponentFixture<CacheSubscriptionRequestsComponent>): unknown[] {
+  const select = fixture.debugElement.query(By.directive(SelectComponent)).componentInstance as SelectComponent;
+  return select.options().map((option) => (option as { value: unknown }).value);
 }
 
 function setup(requests: SubscriptionRequestItem[], load?: () => Observable<SubscriptionRequestItem[]>, canManage = true) {
@@ -126,18 +138,59 @@ describe('CacheSubscriptionRequestsComponent', () => {
     expect(approve).toHaveBeenCalledWith('prod', 'wavelens');
   });
 
-  it('asks before approving a request that may push, naming the project', () => {
+  it('opens an approve dialog for a request that may push, showing the requested mode', () => {
     const { fixture, approve, confirm } = setup([request]);
     buttonByText(fixture.nativeElement, 'Approve')?.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Approve subscription request', target: 'Wavelens (wavelens)' }));
-    expect(approve).toHaveBeenCalledWith('prod', 'wavelens');
+    fixture.detectChanges();
+    const dialog = approveDialog();
+    expect(dialog.textContent).toContain('Wavelens');
+    expect(dialog.textContent).toContain('Requested mode: Read & Write');
+    expect(dialog.textContent).toContain('The project can push store paths to this cache.');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(approve).not.toHaveBeenCalled();
   });
 
-  it('sends no push approval when the confirmation is cancelled', () => {
-    const { fixture, approve, confirm } = setup([request]);
-    confirm.mockImplementation(() => EMPTY);
+  it('lets the approver lower a read and write request to any mode and sends the chosen one', () => {
+    const { fixture, approve } = setup([request]);
     buttonByText(fixture.nativeElement, 'Approve')?.click();
+    fixture.detectChanges();
+    expect(offeredModes(fixture)).toEqual(['ReadWrite', 'ReadOnly', 'WriteOnly']);
+    fixture.componentInstance.approvedSubscriptionMode.set('ReadOnly');
+    fixture.detectChanges();
+    expect(approveDialog().textContent).not.toContain('can push store paths');
+    buttonByText(approveDialog(), 'Approve')!.click();
+    expect(approve).toHaveBeenCalledWith('prod', 'wavelens', 'ReadOnly');
+    expect(fixture.componentInstance.subscriptionRequestInApproveDialog()).toBeNull();
+  });
+
+  it('offers a write only request no other mode', () => {
+    const { fixture, approve } = setup([{ ...request, mode: 'WriteOnly' }]);
+    buttonByText(fixture.nativeElement, 'Approve')?.click();
+    fixture.detectChanges();
+    expect(offeredModes(fixture)).toEqual(['WriteOnly']);
+    buttonByText(approveDialog(), 'Approve')!.click();
+    expect(approve).toHaveBeenCalledWith('prod', 'wavelens', 'WriteOnly');
+  });
+
+  it('keeps a failed approval inside the open dialog', () => {
+    const { fixture, approve } = setup([request]);
+    approve.mockReturnValue(throwError(() => new ApiError('Project wavelens was deleted', 404)));
+    buttonByText(fixture.nativeElement, 'Approve')?.click();
+    fixture.detectChanges();
+    buttonByText(approveDialog(), 'Approve')!.click();
+    fixture.detectChanges();
+    expect(approveDialog().querySelector('gr-message-banner')?.textContent).toContain('Project wavelens was deleted');
+    expect(fixture.componentInstance.subscriptionRequestInApproveDialog()).not.toBeNull();
+  });
+
+  it('sends no approval when the approve dialog is cancelled', () => {
+    const { fixture, approve } = setup([request]);
+    buttonByText(fixture.nativeElement, 'Approve')?.click();
+    fixture.detectChanges();
+    buttonByText(approveDialog(), 'Cancel')!.click();
+    fixture.detectChanges();
     expect(approve).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.subscriptionRequestInApproveDialog()).toBeNull();
   });
 
   it('asks before denying a request, naming the project, then denies it by project name', () => {

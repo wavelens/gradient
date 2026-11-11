@@ -6,13 +6,15 @@
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
-import { ServerTimestampToLocalDateTimePipe, subscriptionModeLabel } from '@shared/text';
+import { ServerTimestampToLocalDateTimePipe, getSubscriptionModesWithNoMoreAccessThan, subscriptionModeLabel } from '@shared/text';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
-import { SubscriptionRequestItem } from '@core/models';
+import { apiErrorMessage } from '@core/services/api.service';
+import { CacheSubscriptionMode, SubscriptionRequestItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { tap } from 'rxjs';
@@ -21,10 +23,14 @@ import { injectCacheAccessData } from '@core/resolvers/inject-access';
 import {
   BadgeComponent,
   ButtonComponent,
+  DialogComponent,
+  FormFieldComponent,
   LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
+  SelectComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 
 @Component({
@@ -33,9 +39,14 @@ import {
   imports: [
     EntityNameComponent,
     CommonModule,
+    FormsModule,
     ServerTimestampToLocalDateTimePipe,
     BadgeComponent,
     ButtonComponent,
+    DialogComponent,
+    FormFieldComponent,
+    SelectComponent,
+    SubmitDirective,
     LoadStateComponent,
     PageLayoutComponent,
     RowComponent,
@@ -60,6 +71,13 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   deciding = signal<string | null>(null);
   requests = signal<SubscriptionRequestItem[]>([]);
   loadError = signal<unknown>(null);
+  subscriptionRequestInApproveDialog = signal<SubscriptionRequestItem | null>(null);
+  approvedSubscriptionMode = signal<CacheSubscriptionMode>('ReadWrite');
+  approveSubscriptionRequestErrorMessage = signal<string | null>(null);
+  subscriptionModesWithNoMoreAccessThanRequested = computed(() => {
+    const request = this.subscriptionRequestInApproveDialog();
+    return request ? getSubscriptionModesWithNoMoreAccessThan(request.mode) : [];
+  });
   protected readonly modeLabel = subscriptionModeLabel;
 
   constructor() {
@@ -92,7 +110,9 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
 
   approve(request: SubscriptionRequestItem): void {
     if (request.mode !== 'ReadOnly') {
-      this.confirmPushApproval(request);
+      this.approvedSubscriptionMode.set(request.mode);
+      this.approveSubscriptionRequestErrorMessage.set(null);
+      this.subscriptionRequestInApproveDialog.set(request);
       return;
     }
     this.deciding.set(request.project);
@@ -108,18 +128,26 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
     });
   }
 
-  private confirmPushApproval(request: SubscriptionRequestItem): void {
-    this.confirm
-      .confirm({
-        title: 'Approve subscription request',
-        target: formatEntityLabel({ display_name: request.project_display_name, name: request.project }),
-        consequence: 'The project can push store paths to this cache. All users of this cache get the pushed paths.',
-        confirmLabel: 'Approve',
-        failure: "Couldn't approve the subscription request",
-        severity: 'primary',
-        action: () => this.cachesService.approveSubscriptionRequest(this.cacheName, request.project),
-      })
-      .subscribe(() => this.onApproved());
+  approveOpenRequestWithSelectedMode(): void {
+    const request = this.subscriptionRequestInApproveDialog();
+    if (!request || this.deciding()) return;
+    this.deciding.set(request.project);
+    this.approveSubscriptionRequestErrorMessage.set(null);
+    this.cachesService.approveSubscriptionRequest(this.cacheName, request.project, this.approvedSubscriptionMode()).subscribe({
+      next: () => {
+        this.deciding.set(null);
+        this.subscriptionRequestInApproveDialog.set(null);
+        this.onApproved();
+      },
+      error: (error: unknown) => {
+        this.deciding.set(null);
+        this.approveSubscriptionRequestErrorMessage.set(apiErrorMessage(error, "Couldn't approve the subscription request"));
+      },
+    });
+  }
+
+  closeApproveDialogWhenVisibilityIsHidden(visible: boolean): void {
+    if (!visible) this.subscriptionRequestInApproveDialog.set(null);
   }
 
   private onApproved(): void {

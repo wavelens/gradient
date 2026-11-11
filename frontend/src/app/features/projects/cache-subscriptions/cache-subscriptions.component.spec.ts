@@ -22,6 +22,8 @@ import { AuthService } from '@core/services/auth.service';
 import { AccessState } from '@core/models/access.model';
 import { By } from '@angular/platform-browser';
 import { CreateCacheDialogComponent } from '@shared/forms';
+import { CacheSubscriptionItem, SubscribableCache } from '@core/models';
+import { MANAGED_ITEM_DISABLED_REASON } from '@shared/access';
 
 function routeStub(access: AccessState, query: Record<string, string>): Partial<ActivatedRoute> {
   const route = projectRouteStub('acme', access);
@@ -37,13 +39,23 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 
 const subscribeCache = vi.fn((): Observable<unknown> => of(undefined));
 const unsubscribeCache = vi.fn((): Observable<unknown> => of(undefined));
+const setCacheSubscriptionSignOutputs = vi.fn((): Observable<unknown> => of(undefined));
 const notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
+
+function subscription(overrides: Partial<CacheSubscriptionItem>): CacheSubscriptionItem {
+  return { id: 'c', name: 'shared', display_name: 'Shared Cache', mode: 'ReadWrite', status: 'active', managed: false, sign_outputs: true, approvers: [], ...overrides };
+}
+
+function subscribable(overrides: Partial<SubscribableCache>): SubscribableCache {
+  return { name: 'mycache', display_name: 'MyCache', public: false, needs_approval: false, approvers: [], ...overrides };
+}
 
 function setup(access: AccessState, query: Record<string, string> = {}): ComponentFixture<CacheSubscriptionsComponent> {
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   subscribeCache.mockReset().mockReturnValue(of(undefined));
   unsubscribeCache.mockReset().mockReturnValue(of(undefined));
+  setCacheSubscriptionSignOutputs.mockReset().mockReturnValue(of(undefined));
   notify.success.mockClear();
   notify.failure.mockClear();
   TestBed.configureTestingModule({
@@ -59,11 +71,13 @@ function setup(access: AccessState, query: Record<string, string> = {}): Compone
           getProject: () => of({ id: 'o', display_name: 'Acme' }),
           getSubscribedCaches: () =>
             of([
-              { id: 'c', name: 'shared', display_name: 'Shared Cache', mode: 'ReadWrite', status: 'active' },
-              { id: 'c2', name: 'staging', display_name: 'Staging Cache', mode: 'ReadWrite', status: 'pending' },
+              subscription({}),
+              subscription({ id: 'c2', name: 'staging', display_name: 'Staging Cache', status: 'pending' }),
             ]),
+          getSubscribableCaches: () => of([]),
           subscribeCache,
           unsubscribeCache,
+          setCacheSubscriptionSignOutputs,
         },
       },
       { provide: NotifyService, useValue: notify },
@@ -137,26 +151,62 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     expect(cmp.newCacheName).toBe('shared-two');
   });
 
-  it('reports a private cache subscription as requested, in the words of the server', async () => {
+  it('names the cache admins when the server records a request instead of a subscription', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    TestBed.inject(ProjectsService).getSubscribableCaches = (() =>
+      of([subscribable({ name: 'private', needs_approval: true, approvers: ['admin', 'dave'] })])) as never;
     await settled(fixture);
     subscribeCache.mockReturnValue(of('Subscription requested'));
+    fixture.componentInstance.openSubscribeDialog();
     fixture.componentInstance.newCacheName = 'private';
     fixture.componentInstance.subscribeCache();
-    expect(notify.success).toHaveBeenCalledWith('Subscription requested');
+    expect(notify.success).toHaveBeenCalledWith('Subscription requested. Approval from a cache admin is pending: admin, dave');
+    expect(fixture.componentInstance.showSubscribeDialog()).toBe(false);
   });
 
-  it('suggests caches by display name as well as by name, without the subscribed ones', async () => {
+  it('passes on the words of the server for a direct subscription', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    TestBed.inject(CachesService).getCaches = (() =>
-      of({ items: [{ name: 'mycache', display_name: 'MyCache' }, { name: 'shared', display_name: 'Shared' }] })) as never;
+    await settled(fixture);
+    subscribeCache.mockReturnValue(of('Subscribed to cache'));
+    fixture.componentInstance.newCacheName = 'mycache';
+    fixture.componentInstance.subscribeCache();
+    expect(notify.success).toHaveBeenCalledWith('Subscribed to cache');
+  });
+
+  it('sends Read & Write by default and the mode picked in the dialog', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+    cmp.openSubscribeDialog();
+    cmp.newCacheName = 'mycache';
+    cmp.subscribeCache();
+    expect(subscribeCache).toHaveBeenLastCalledWith('acme', 'mycache', 'ReadWrite');
+    cmp.openSubscribeDialog();
+    cmp.newCacheName = 'mycache';
+    cmp.selectedSubscriptionMode.set('ReadOnly');
+    cmp.subscribeCache();
+    expect(subscribeCache).toHaveBeenLastCalledWith('acme', 'mycache', 'ReadOnly');
+  });
+
+  it('suggests subscribable caches by display name or name, with owner team, visibility and who approves', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    TestBed.inject(ProjectsService).getSubscribableCaches = (() =>
+      of([
+        subscribable({ owner_team: 'myteam', owner_team_display_name: 'My Team' }),
+        subscribable({ name: 'nixpkgs', display_name: 'Nix Packages', public: true, needs_approval: true, approvers: ['admin', 'dave'] }),
+        subscribable({ name: 'hidden', display_name: 'Hidden', needs_approval: true }),
+      ])) as never;
     await settled(fixture);
     const component = fixture.componentInstance;
     component.openSubscribeDialog();
     component.onCacheSearch({ query: 'My' });
-    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache (mycache)', value: 'mycache' }]);
-    component.onCacheSearch({ query: '' });
-    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache (mycache)', value: 'mycache' }]);
+    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache (mycache)', value: 'mycache', textBelowLabel: 'My Team · Private · Write access' }]);
+    component.onCacheSearch({ query: 'nixpkgs' });
+    expect(component.cacheSuggestions()).toEqual([
+      { label: 'Nix Packages (nixpkgs)', value: 'nixpkgs', textBelowLabel: 'Public · Pending approval from admin, dave' },
+    ]);
+    component.onCacheSearch({ query: 'hidden' });
+    expect(component.cacheSuggestions()[0].textBelowLabel).toBe('Private · Ask a cache administrator for approval.');
   });
 
   it('opens Subscribe with the cache picked on the cache page', async () => {
@@ -166,17 +216,26 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     expect(fixture.componentInstance.newCacheName).toBe('nixpkgs');
   });
 
-  it('drops the picked cache from the address and offers no subscribed cache', async () => {
+  it('drops the picked cache from the address and lists the caches this project can subscribe to', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, { subscribe: 'nixpkgs' });
-    TestBed.inject(CachesService).getPublicCaches = (() =>
-      of([{ name: 'nixpkgs', display_name: 'Nix Packages' }, { name: 'shared', display_name: 'Shared Cache' }])) as never;
+    const getSubscribableCaches = vi.fn(() => of([subscribable({ name: 'nixpkgs', display_name: 'Nix Packages', public: true })]));
+    TestBed.inject(ProjectsService).getSubscribableCaches = getSubscribableCaches as never;
     await settled(fixture);
     expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
       [],
       expect.objectContaining({ queryParams: { subscribe: null }, queryParamsHandling: 'merge', replaceUrl: true }),
     );
+    expect(getSubscribableCaches).toHaveBeenCalledWith('acme');
     fixture.componentInstance.onCacheSearch({ query: '' });
-    expect(fixture.componentInstance.cacheSuggestions()).toEqual([{ label: 'Nix Packages (nixpkgs)', value: 'nixpkgs' }]);
+    expect(fixture.componentInstance.cacheSuggestions().map((s) => s.value)).toEqual(['nixpkgs']);
+  });
+
+  it('shows a failed load of the subscribable caches inside the dialog', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    TestBed.inject(ProjectsService).getSubscribableCaches = (() => throwError(() => new ApiError('Project acme is gone', 404))) as never;
+    await settled(fixture);
+    fixture.componentInstance.openSubscribeDialog();
+    expect(fixture.componentInstance.errorMessage()).toBe('Project acme is gone');
   });
 
   it('opens Subscribe for the picked cache only after the subscriptions load', async () => {
@@ -194,9 +253,9 @@ describe('CacheSubscriptionsComponent - create cache', () => {
   it('shows the display name of the cache picked on the cache page', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, { subscribe: 'nixpkgs' });
     const publicCaches = new Subject<unknown[]>();
-    TestBed.inject(CachesService).getPublicCaches = (() => publicCaches) as never;
+    TestBed.inject(ProjectsService).getSubscribableCaches = (() => publicCaches) as never;
     await settled(fixture);
-    publicCaches.next([{ name: 'nixpkgs', display_name: 'Nix Packages' }]);
+    publicCaches.next([subscribable({ name: 'nixpkgs', display_name: 'Nix Packages' })]);
     publicCaches.complete();
     await settled(fixture);
     expect(document.body.querySelector<HTMLInputElement>('#cache-name')?.value).toBe('Nix Packages (nixpkgs)');
@@ -209,7 +268,7 @@ describe('CacheSubscriptionsComponent - create cache', () => {
       const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
       const service = TestBed.inject(ProjectsService) as unknown as { getSubscribedCaches: () => unknown };
       fixture.detectChanges();
-      service.getSubscribedCaches = () => of([{ id: 'n', name: 'new', display_name: 'New Cache', mode: 'ReadWrite', status: 'active' }]);
+      service.getSubscribedCaches = () => of([subscription({ id: 'n', name: 'new', display_name: 'New Cache' })]);
       vi.advanceTimersByTime(15_000);
       fixture.detectChanges();
       expect((fixture.nativeElement as HTMLElement).textContent).toContain('New Cache');
@@ -265,30 +324,11 @@ describe('CacheSubscriptionsComponent - load errors', () => {
     expect(root.textContent).toContain('Failed to load caches');
     expect(root.textContent).toContain('database is down');
     expect(root.textContent).not.toContain('No cache subscriptions');
-    expect(root.querySelector('[data-testid=no-cache-banner]')).toBeNull();
 
     service.getSubscribedCaches = () => of([]);
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     await settled(fixture);
     expect(root.textContent).not.toContain('Failed to load caches');
-  });
-});
-
-describe('CacheSubscriptionsComponent - no writable cache', () => {
-  it('warns on the page that fixes it, without linking back to itself', async () => {
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    const service = TestBed.inject(ProjectsService) as unknown as { getSubscribedCaches: () => unknown };
-    service.getSubscribedCaches = () => of([{ id: 'c', name: 'mirror', display_name: 'Mirror', mode: 'ReadOnly', status: 'active' }]);
-    await settled(fixture);
-    const banner = (fixture.nativeElement as HTMLElement).querySelector('[data-testid=no-cache-banner]');
-    expect(banner?.textContent).toContain('No writable cache');
-    expect(banner?.querySelector('a')).toBeNull();
-  });
-
-  it('stays quiet once an active writable cache is subscribed', async () => {
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    await settled(fixture);
-    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid=no-cache-banner]')).toBeNull();
   });
 });
 
@@ -348,5 +388,83 @@ describe('CacheSubscriptionsComponent - write failures', () => {
     expect(subscribeCache).toHaveBeenCalledTimes(1);
     expect(cmp.showSubscribeDialog()).toBe(true);
     expect(dialog.getAttribute('aria-busy')).toBe('true');
+  });
+});
+
+describe('CacheSubscriptionsComponent - subscriptions from the server configuration', () => {
+  it('locks Unsubscribe and the sign setting on a managed row and names the reason', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    TestBed.inject(ProjectsService).getSubscribedCaches = (() => of([subscription({ managed: true })])) as never;
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Managed');
+    expect(root.querySelector('.row-meta')?.textContent).toContain(MANAGED_ITEM_DISABLED_REASON);
+    const unsubscribe = findByText(root, 'unsubscribe')!;
+    expect(unsubscribe.getAttribute('aria-disabled')).toBe('true');
+    unsubscribe.click();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(root.querySelector<HTMLInputElement>('#sign-pushed-paths-shared')!.disabled).toBe(true);
+  });
+
+  it('leaves an unmanaged row editable', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(findByText(root, 'unsubscribe')!.getAttribute('aria-disabled')).toBeNull();
+    expect(root.querySelector<HTMLInputElement>('#sign-pushed-paths-shared')!.disabled).toBe(false);
+  });
+});
+
+describe('CacheSubscriptionsComponent - sign pushed paths', () => {
+  it('saves the sign setting on change and shows the saved value', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const checkbox = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#sign-pushed-paths-shared')!;
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.labels?.[0]?.textContent).toBe('Sign pushed paths with the cache key');
+    checkbox.click();
+    await settled(fixture);
+    expect(setCacheSubscriptionSignOutputs).toHaveBeenCalledWith('acme', 'shared', false);
+    expect(notify.success).toHaveBeenCalledWith('Cache subscription saved');
+    expect(fixture.componentInstance.caches()[0].sign_outputs).toBe(false);
+    expect(checkbox.checked).toBe(false);
+  });
+
+  it('locks the setting during the request and shows the saved value again after a failure', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const response = new Subject<unknown>();
+    setCacheSubscriptionSignOutputs.mockReturnValue(response);
+    await settled(fixture);
+    const checkbox = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#sign-pushed-paths-shared')!;
+    checkbox.click();
+    await settled(fixture);
+    expect(checkbox.checked).toBe(false);
+    expect(checkbox.disabled).toBe(true);
+    const error = new ApiError('Subscription is managed', 409);
+    response.error(error);
+    await settled(fixture);
+    expect(notify.failure).toHaveBeenCalledWith("Couldn't save cache subscription", error);
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(false);
+  });
+
+  it('shows the sign setting to read-only members without letting them change it', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    await settled(fixture);
+    const checkbox = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#sign-pushed-paths-shared')!;
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(true);
+  });
+});
+
+describe('CacheSubscriptionsComponent - pending request approvers', () => {
+  it('names the cache admins who can approve a pending request', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    TestBed.inject(ProjectsService).getSubscribedCaches = (() =>
+      of([subscription({ name: 'staging', display_name: 'Staging Cache', status: 'pending', approvers: ['admin', 'dave'] })])) as never;
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.row-meta')?.textContent).toContain('Cache admins: admin, dave');
+    expect(root.querySelector('#sign-pushed-paths-staging')).toBeNull();
   });
 });
