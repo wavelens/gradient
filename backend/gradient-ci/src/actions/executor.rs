@@ -5,9 +5,9 @@
  */
 
 use super::send::{
-    execute_exec_tree_pr, execute_git_host_status_report, execute_open_pr, execute_send_mail,
-    execute_send_matrix_message, execute_send_slack_message, execute_send_web_request,
-    execute_start_evaluation, verify_git_host_action,
+    execute_exec_tree_pr, execute_open_pr, execute_send_mail, execute_send_matrix_message,
+    execute_send_slack_message, execute_send_web_request, execute_start_evaluation,
+    verify_git_host_action,
 };
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
@@ -62,11 +62,8 @@ pub async fn execute_action(
         ActionConfig::SendWebRequest { url, token } => {
             execute_send_web_request(ctx, event, &envelope, &url, token.as_deref()).await
         }
-        ActionConfig::GitHostStatusReport { integration_id } => {
-            execute_git_host_status_report(ctx, event, &content, integration_id).await
-        }
         ActionConfig::OpenPr {
-            integration_id,
+            git_host_connection_id,
             generator: PatchGeneratorKind::ExecTree,
             branch_pattern,
             title_template,
@@ -79,7 +76,7 @@ pub async fn execute_action(
                 &content,
                 action_id,
                 task_id,
-                integration_id,
+                git_host_connection_id,
                 &branch_pattern,
                 title_template.as_deref(),
                 body_template.as_deref(),
@@ -88,7 +85,7 @@ pub async fn execute_action(
             .await
         }
         ActionConfig::OpenPr {
-            integration_id,
+            git_host_connection_id,
             branch_pattern,
             title_template,
             body_template,
@@ -101,7 +98,7 @@ pub async fn execute_action(
                 &content,
                 action_id,
                 task_id,
-                integration_id,
+                git_host_connection_id,
                 &branch_pattern,
                 title_template.as_deref(),
                 body_template.as_deref(),

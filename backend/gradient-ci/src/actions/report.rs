@@ -38,7 +38,7 @@ gradient_db::sql! {
 /// `jsonb_set` is keeping concurrent persists for different context keys from wiping each other. A
 /// load-modify-write over the JSON column would let the slower writer clobber the faster writer's
 /// entry.
-pub(super) async fn persist_evaluation_check_id(
+pub(crate) async fn persist_evaluation_check_id(
     ctx: &CiContext,
     evaluation_id: EvaluationId,
     context: &str,
@@ -68,7 +68,7 @@ fn check_run_id_for_context(eval: &gradient_types::MEvaluation, context: &str) -
         .and_then(|v| v.as_i64())
 }
 
-pub(super) async fn build_ci_reports_from_payload(
+pub(crate) async fn build_ci_reports_from_payload(
     ctx: &CiContext,
     event: &str,
     payload: &JsonValue,

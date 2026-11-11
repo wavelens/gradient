@@ -8,8 +8,8 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use tracing::warn;
 
-use crate::actions::reporter_for_task;
 use crate::context::CiContext;
+use crate::task_commit_status_posting::reporter_for_task;
 use crate::{ReactionKind, ReactionTarget};
 
 pub async fn react_to_source_comment_on_terminal(

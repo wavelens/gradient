@@ -5,8 +5,8 @@
  */
 
 use super::TaskResponse;
-use super::integration_by_repository_host;
 use super::refusal::TaskRefusal;
+use super::repository::check_git_host_connection_fits_task;
 use super::triggers::{
     build_task_trigger_row_from_config_and_flags,
     validate_trigger_config_and_return_config_to_store,
@@ -223,7 +223,7 @@ pub async fn get(
     operation_id = "createTask",
     tag = "tasks",
     summary = "Create task",
-    description = "Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. Project integrations add no triggers and no actions.",
+    description = "Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers.",
     params(("project" = String, Path)),
     request_body = MakeTaskRequest,
     responses((status = OK, description = "Created a task.", body = CreatedEntityResponse), WebError)
@@ -269,20 +269,10 @@ pub async fn put(
             interval_secs: 300,
             branch: None,
         }],
-        Some(configs) => {
-            let mut validated = Vec::with_capacity(configs.len());
-            for config in configs {
-                validated.push(
-                    validate_trigger_config_and_return_config_to_store(
-                        &state.web_db,
-                        project.id,
-                        config,
-                    )
-                    .await?,
-                );
-            }
-            validated
-        }
+        Some(configs) => configs
+            .into_iter()
+            .map(validate_trigger_config_and_return_config_to_store)
+            .collect::<WebResult<Vec<_>>>()?,
     };
 
     let now = gradient_types::now();
@@ -317,23 +307,6 @@ pub async fn put(
         gradient_db::triggers::insert(&txn, row).await?;
     }
     txn.commit().await?;
-
-    let github_app =
-        integration_by_repository_host::configured_github_app_if_caller_can_manage_integrations(
-            &state.web_db,
-            state.config.github_app.as_ref(),
-            user.id,
-            project.id,
-            api_key.as_ref(),
-        )
-        .await?;
-    integration_by_repository_host::link_project_to_github_app_installation_by_repository_host(
-        &state.web_db,
-        &state.http,
-        github_app,
-        &task,
-    )
-    .await;
 
     audit
         .write(
@@ -416,12 +389,7 @@ pub async fn get_task(
 )]
 pub async fn patch_task(
     TaskScope {
-        project,
-        task,
-        user,
-        api_key,
-        db,
-        ..
+        project, task, db, ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -449,6 +417,14 @@ pub async fn patch_task(
         .repository
         .as_deref()
         .is_some_and(|url| url.trim() != task.repository);
+    if let (true, Some(repository), Some(connection)) = (
+        repository_changed,
+        body.repository.as_deref(),
+        task.git_host_connection,
+    ) {
+        check_git_host_connection_fits_task(&db.web_db, &project, repository.trim(), connection)
+            .await?;
+    }
     let evaluation_inputs_changed = repository_changed
         || body.wildcard.is_some()
         || body.only_evaluate.is_some()
@@ -502,27 +478,9 @@ pub async fn patch_task(
         atask.last_fetch_ok_at = Set(None);
         atask.last_fetch_error = Set(None);
     }
-    let updated = gradient_db::tasks::update(&state.web_db, atask)
+    gradient_db::tasks::update(&state.web_db, atask)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
-
-    if repository_changed {
-        let github_app = integration_by_repository_host::configured_github_app_if_caller_can_manage_integrations(
-            &db.web_db,
-            state.config.github_app.as_ref(),
-            user.id,
-            project.id,
-            api_key.as_ref(),
-        )
-        .await?;
-        integration_by_repository_host::link_project_to_github_app_installation_by_repository_host(
-            &state.web_db,
-            &state.http,
-            github_app,
-            &updated,
-        )
-        .await;
-    }
 
     audit.write(Action::TaskUpdate, owner, fields).await;
 

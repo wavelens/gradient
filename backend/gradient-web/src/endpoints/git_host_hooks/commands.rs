@@ -5,7 +5,7 @@
  */
 
 use super::approval::{PullRequestApprovalContext, on_approval_granted, sender_is_trusted};
-use super::fanout::trigger_pr_for_integration;
+use super::fanout::trigger_pr_for_connection;
 use super::installation::{resolve_github_app_targets, task_serves_repository};
 use super::payloads::CommentPayload;
 use gradient_ci::CiContext;
@@ -88,7 +88,7 @@ pub(super) async fn handle_issue_comment(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     git_host: GitHostType,
-    integration_id: Option<IntegrationId>,
+    connection_id: Option<GitHostConnectionId>,
     body: &[u8],
     client_ip: std::net::IpAddr,
 ) {
@@ -116,15 +116,15 @@ pub(super) async fn handle_issue_comment(
         return;
     };
 
-    let Some(integration_ids) =
-        resolve_comment_integrations(&ci.db.web_db, integration_id, body, &owner_repo, client_ip)
+    let Some(connection_ids) =
+        resolve_comment_connections(&ci.db.web_db, connection_id, body, &owner_repo, client_ip)
             .await
     else {
         return;
     };
 
     let wildcard_override =
-        match resolve_wildcard_override(ci, &cmd, &integration_ids, owner, repo, pr_number).await {
+        match resolve_wildcard_override(ci, &cmd, &connection_ids, owner, repo, pr_number).await {
             Ok(w) => w,
             Err(()) => return,
         };
@@ -137,11 +137,11 @@ pub(super) async fn handle_issue_comment(
     });
 
     let mut action_taken = false;
-    for integration_id in &integration_ids {
+    for connection_id in &connection_ids {
         let route = CommentRoute {
             ci,
             scheduler,
-            integration_id: *integration_id,
+            connection_id: *connection_id,
             cmd: &cmd,
             owner,
             repo,
@@ -151,7 +151,7 @@ pub(super) async fn handle_issue_comment(
             wildcard_override: &wildcard_override,
             reaction_target: &reaction_target,
         };
-        if handle_comment_for_integration(&route).await {
+        if handle_comment_for_connection(&route).await {
             action_taken = true;
         }
     }
@@ -163,28 +163,23 @@ pub(super) async fn handle_issue_comment(
     }
 }
 
-async fn resolve_comment_integrations(
+async fn resolve_comment_connections(
     db: &WebDb,
-    integration_id: Option<IntegrationId>,
+    connection_id: Option<GitHostConnectionId>,
     body: &[u8],
     owner_repo: &str,
     client_ip: std::net::IpAddr,
-) -> Option<Vec<IntegrationId>> {
-    if let Some(id) = integration_id {
+) -> Option<Vec<GitHostConnectionId>> {
+    if let Some(id) = connection_id {
         return Some(vec![id]);
     }
     let Some(installation_id) = github_installation_id_from_comment_body(body) else {
         warn!("comment webhook (github): no installation_id");
         return None;
     };
-    let repo_urls = vec![
-        format!("https://github.com/{owner_repo}"),
-        format!("https://github.com/{owner_repo}.git"),
-        format!("git@github.com:{owner_repo}.git"),
-    ];
-    let targets = resolve_github_app_targets(db, installation_id, &repo_urls, client_ip).await;
+    let targets = resolve_github_app_targets(db, installation_id, client_ip).await;
     if targets.is_empty() {
-        warn!(installation_id, %owner_repo, "comment webhook (github): no integration matched");
+        warn!(installation_id, %owner_repo, "comment webhook (github): the installation has no connection to a Git host");
         return None;
     }
     Some(targets)
@@ -193,7 +188,7 @@ async fn resolve_comment_integrations(
 async fn resolve_wildcard_override(
     ci: &CiContext,
     cmd: &GradientCommand,
-    integration_ids: &[IntegrationId],
+    connection_ids: &[GitHostConnectionId],
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -208,7 +203,7 @@ async fn resolve_wildcard_override(
         Ok(_) => Ok(Some(raw.clone())),
         Err(e) => {
             warn!(wildcard = %raw, error = %e, "/gradient run wildcard rejected");
-            post_wildcard_error_comment(ci, integration_ids, owner, repo, pr_number, raw, &e).await;
+            post_wildcard_error_comment(ci, connection_ids, owner, repo, pr_number, raw, &e).await;
             Err(())
         }
     }
@@ -217,7 +212,7 @@ async fn resolve_wildcard_override(
 struct CommentRoute<'a> {
     ci: &'a CiContext,
     scheduler: &'a Arc<Scheduler>,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     cmd: &'a GradientCommand,
     owner: &'a str,
     repo: &'a str,
@@ -228,10 +223,10 @@ struct CommentRoute<'a> {
     reaction_target: &'a Option<gradient_ci::ReactionTarget>,
 }
 
-async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
+async fn handle_comment_for_connection(ctx: &CommentRoute<'_>) -> bool {
     let task_ids = match load_active_pull_request_tasks_for_event_repository(
         &ctx.ci.db.web_db,
-        ctx.integration_id,
+        ctx.connection_id,
         ctx.owner,
         ctx.repo,
     )
@@ -245,10 +240,10 @@ async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
     };
     let Some(probe_task) = first_task_with_reporter(ctx.ci, &task_ids).await else {
         warn!(
-            integration_id = %ctx.integration_id,
+            connection_id = %ctx.connection_id,
             pr_number = ctx.pr_number,
             tasks = task_ids.len(),
-            "/gradient comment ignored: integration has no task with a usable Git host reporter (needs an API token)"
+            "/gradient comment ignored: no task of this connection reports commit status"
         );
         return false;
     };
@@ -264,7 +259,7 @@ async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
     }
     if !is_maintainer {
         warn!(
-            integration_id = %ctx.integration_id,
+            connection_id = %ctx.connection_id,
             pr_number = ctx.pr_number,
             sender = %ctx.sender,
             "Rejecting /gradient command - sender is not a repo writer"
@@ -353,7 +348,7 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
         fetch_pr_snapshot(ctx.ci, task_ids, ctx.owner, ctx.repo, ctx.pr_number).await
     else {
         warn!(
-            integration_id = %ctx.integration_id,
+            connection_id = %ctx.connection_id,
             pr_number = ctx.pr_number,
             "/gradient run: could not fetch PR head via any task reporter"
         );
@@ -382,16 +377,16 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
     });
     if ctx.repository_urls.is_empty() {
         warn!(
-            integration_id = %ctx.integration_id,
+            connection_id = %ctx.connection_id,
             pr_number = ctx.pr_number,
             "/gradient run: no repository URL in the comment payload"
         );
         return false;
     }
-    let outcome = trigger_pr_for_integration(
+    let outcome = trigger_pr_for_connection(
         ctx.ci,
         ctx.scheduler,
-        ctx.integration_id,
+        ctx.connection_id,
         ctx.repository_urls,
         Some(snapshot.head_branch.as_str()),
         "synchronize",
@@ -407,7 +402,7 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
     .await;
     if !outcome.queued.is_empty() {
         info!(
-            integration_id = %ctx.integration_id,
+            connection_id = %ctx.connection_id,
             pr_number = ctx.pr_number,
             sender = %ctx.sender,
             wildcard_override = ctx.wildcard_override.as_deref(),
@@ -417,7 +412,7 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
         true
     } else {
         debug!(
-            integration_id = %ctx.integration_id,
+            connection_id = %ctx.connection_id,
             pr_number = ctx.pr_number,
             "/gradient run: trigger fan-out queued nothing"
         );
@@ -431,14 +426,15 @@ async fn fire_reaction_via_task(
     target: &gradient_ci::ReactionTarget,
     kind: gradient_ci::ReactionKind,
 ) {
-    let reporter = match gradient_ci::actions::reporter_for_task(ci, task_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => return,
-        Err(e) => {
-            warn!(error = %e, %task_id, "/gradient reaction: resolving reporter");
-            return;
-        }
-    };
+    let reporter =
+        match gradient_ci::task_commit_status_posting::reporter_for_task(ci, task_id).await {
+            Ok(Some(r)) => r,
+            Ok(None) => return,
+            Err(e) => {
+                warn!(error = %e, %task_id, "/gradient reaction: resolving reporter");
+                return;
+            }
+        };
     if let Err(e) = reporter.add_reaction(target, kind).await {
         warn!(error = %e, %task_id, ?kind, "/gradient reaction: post failed");
     }
@@ -449,7 +445,9 @@ pub(super) async fn first_task_with_reporter(
     task_ids: &[TaskId],
 ) -> Option<TaskId> {
     for task_id in task_ids {
-        if let Ok(Some(_)) = gradient_ci::actions::reporter_for_task(ci, *task_id).await {
+        if let Ok(Some(_)) =
+            gradient_ci::task_commit_status_posting::reporter_for_task(ci, *task_id).await
+        {
             return Some(*task_id);
         }
     }
@@ -458,12 +456,12 @@ pub(super) async fn first_task_with_reporter(
 
 pub(super) async fn load_active_pull_request_tasks_for_event_repository(
     db: &WebDb,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     owner: &str,
     repo: &str,
 ) -> Result<Vec<TaskId>, sea_orm::DbErr> {
     let task_ids =
-        gradient_db::triggers::active_pull_request_tasks_of_integration(db, integration_id).await?;
+        gradient_db::triggers::active_pull_request_task_ids_using_git_host_connection(db, connection_id).await?;
     let tasks = gradient_db::lookup::by_ids::<ETask, _>(db, &task_ids).await?;
     Ok(filter_task_ids_by_repository_url_owner_and_name(
         task_ids, &tasks, owner, repo,
@@ -494,10 +492,11 @@ async fn fetch_pr_snapshot(
     pr_number: u64,
 ) -> Option<gradient_ci::PullRequestSnapshot> {
     for task_id in task_ids {
-        let reporter = match gradient_ci::actions::reporter_for_task(ci, *task_id).await {
-            Ok(Some(r)) => r,
-            _ => continue,
-        };
+        let reporter =
+            match gradient_ci::task_commit_status_posting::reporter_for_task(ci, *task_id).await {
+                Ok(Some(r)) => r,
+                _ => continue,
+            };
         match reporter.get_pull_request(owner, repo, pr_number).await {
             Ok(Some(snap)) => return Some(snap),
             Ok(None) => return None,
@@ -511,7 +510,7 @@ async fn fetch_pr_snapshot(
 
 async fn post_wildcard_error_comment(
     ci: &CiContext,
-    integration_ids: &[IntegrationId],
+    connection_ids: &[GitHostConnectionId],
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -523,21 +522,26 @@ async fn post_wildcard_error_comment(
         raw_wildcard, parse_error
     );
 
-    for integration_id in integration_ids {
-        let task_ids = match gradient_db::triggers::active_pull_request_tasks_of_integration(
-            &ci.db.web_db,
-            *integration_id,
-        )
-        .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(error = %e, %integration_id, "/gradient run wildcard: failed to load tasks for reply comment");
-                continue;
-            }
-        };
+    for connection_id in connection_ids {
+        let task_ids =
+            match gradient_db::triggers::active_pull_request_task_ids_using_git_host_connection(
+                &ci.db.web_db,
+                *connection_id,
+            )
+            .await
+            {
+                Ok(rows) => rows,
+                Err(e) => {
+                    warn!(error = %e, %connection_id, "/gradient run wildcard: failed to load tasks for reply comment");
+                    continue;
+                }
+            };
         for task_id in task_ids {
-            let reporter = match gradient_ci::actions::reporter_for_task(ci, task_id).await {
+            let reporter = match gradient_ci::task_commit_status_posting::reporter_for_task(
+                ci, task_id,
+            )
+            .await
+            {
                 Ok(Some(r)) => r,
                 Ok(None) => continue,
                 Err(e) => {

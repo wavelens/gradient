@@ -38,7 +38,7 @@ name_kind!(ProjectKind, ProjectName);
 name_kind!(CacheKind, CacheName);
 name_kind!(TeamKind, TeamName);
 name_kind!(RoleKind, RoleName);
-name_kind!(IntegrationKind, IntegrationName);
+name_kind!(GitHostConnectionKind, GitHostConnectionName);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskKind;
@@ -198,7 +198,7 @@ pub type CacheName = IndexName<CacheKind>;
 pub type TaskName = IndexName<TaskKind>;
 pub type TeamName = IndexName<TeamKind>;
 pub type RoleName = IndexName<RoleKind>;
-pub type IntegrationName = IndexName<IntegrationKind>;
+pub type GitHostConnectionName = IndexName<GitHostConnectionKind>;
 
 pub type ProjectDisplayName = DisplayName<ProjectKind>;
 pub type CacheDisplayName = DisplayName<CacheKind>;

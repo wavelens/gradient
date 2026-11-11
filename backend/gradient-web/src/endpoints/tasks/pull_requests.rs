@@ -17,7 +17,7 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_ci::pull_requests::{
     PatchPullRequest, PullRequestError, default_branch_name, evaluation_commit_of_job,
-    open_from_patch, patch_paths, pull_request_integration,
+    open_from_patch, patch_paths, pull_request_git_host_connection,
 };
 use gradient_core::ServerState;
 use gradient_types::events::EventOwner;
@@ -66,7 +66,7 @@ impl Refusal for PullRequestRefusal {
 impl Refusal for PullRequestError {
     fn status(&self) -> RefusalStatus {
         match self {
-            Self::NoIntegration | Self::NoCommit => RefusalStatus::Conflict,
+            Self::NoGitHostConnection | Self::NoCommit => RefusalStatus::Conflict,
             Self::DeletesFile(_) | Self::DoesNotApply(_) | Self::Empty => {
                 RefusalStatus::UnprocessableEntity
             }
@@ -81,7 +81,7 @@ impl Refusal for PullRequestError {
     operation_id = "openTaskPullRequest",
     tag = "tasks",
     summary = "Open a pull request from a patch",
-    description = "Applies a unified diff to the start commit and opens or updates a pull request through the Git host integration of the task's `open_pr` action. Inside an exec job the start commit is the job's evaluation commit and the pull request is listed on the job; any other caller passes `commit`. Start the specified `branch` with `gradient/`. Without `branch` the branch name follows the touched paths, so the same paths update one pull request. The patch may add and change files but not delete them.\n\n**Access:** Members with the `triggerEvaluation` permission, or the job token of an exec job of the task.",
+    description = "Apply a unified diff to the start commit and create or update a pull request through the Git host connection of the task's `open_pr` action. Exec jobs use the job's evaluation commit as the start commit and can show the pull request on the job. Other callers pass `commit`. Start the specified `branch` with `gradient/`. Callers that omit `branch` get a branch name from the changed paths, so the same path can update one pull request. A patch can add and change files but cannot delete files.\n\n**Access:** Members with the `triggerEvaluation` permission, or the job token of an exec job of the task.",
     params(TaskPath),
     request_body = CreatePullRequestRequest,
     responses((status = OK, description = "Opened pull request", body = PullRequestResponse), WebError)
@@ -98,9 +98,9 @@ pub async fn post_task_pull_request(
         check_branch_name_has_reserved_prefix_and_safe_ref_characters(branch)?;
     }
     let start_commit = start_commit(&db.web_db, job, body.commit.as_deref()).await?;
-    let integration = pull_request_integration(&db.web_db, task.id)
+    let git_host_connection = pull_request_git_host_connection(&db.web_db, task.id)
         .await?
-        .ok_or(PullRequestError::NoIntegration)?;
+        .ok_or(PullRequestError::NoGitHostConnection)?;
     let patch = body.patch.into_bytes();
     let branch = match body.branch {
         Some(branch) => branch,
@@ -110,7 +110,7 @@ pub async fn post_task_pull_request(
     let owner = EventOwner::task(task.project, task.id);
     let request = PatchPullRequest {
         task,
-        integration,
+        git_host_connection,
         start_commit,
         patch,
         title: body.title,

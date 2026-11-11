@@ -34,8 +34,6 @@ pub enum ActionType {
     SendMail = 0,
     #[sea_orm(num_value = 1)]
     SendWebRequest = 1,
-    #[sea_orm(num_value = 2)]
-    GitHostStatusReport = 2,
     #[sea_orm(num_value = 3)]
     OpenPr = 3,
     #[sea_orm(num_value = 4)]
@@ -51,7 +49,6 @@ impl ActionType {
         match self {
             ActionType::SendMail => "send_mail",
             ActionType::SendWebRequest => "send_web_request",
-            ActionType::GitHostStatusReport => "git_host_status_report",
             ActionType::OpenPr => "open_pr",
             ActionType::SendMatrixMessage => "send_matrix_message",
             ActionType::SendSlackMessage => "send_slack_message",

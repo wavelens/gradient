@@ -98,6 +98,10 @@ pub struct StateTask {
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
     #[serde(default)]
     pub actions: Vec<StateAction>,
+    #[serde(default)]
+    pub git_host_connection: Option<String>,
+    #[serde(default)]
+    pub report_status: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -126,8 +130,6 @@ pub struct StateTrigger {
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
     #[serde(default)]
-    pub integration: Option<String>,
-    #[serde(default)]
     pub config: serde_json::Value,
     #[serde(default = "default_active")]
     pub active: bool,
@@ -139,7 +141,6 @@ impl StateTrigger {
     pub fn default_polling() -> Self {
         Self {
             trigger_type: TriggerType::Polling,
-            integration: None,
             config: serde_json::json!({ "interval_secs": 300 }),
             active: true,
             is_default: true,
@@ -152,19 +153,22 @@ fn default_active() -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateIntegration {
+pub struct StateGitHostConnection {
     pub name: String,
     #[serde(default)]
     pub display_name: Option<String>,
-    pub project: String,
-    pub kind: String,
+    pub owner: String,
     pub git_host_type: String,
     #[serde(default)]
     pub secret_file: Option<String>,
     #[serde(default)]
-    pub endpoint_url: Option<String>,
+    pub base_url: Option<String>,
     #[serde(default)]
     pub access_token_file: Option<String>,
+    #[serde(default = "default_true")]
+    pub receives_events: bool,
+    #[serde(default)]
+    pub reports_status: bool,
     #[serde(default)]
     pub installation_id: Option<i64>,
     #[serde(default)]
@@ -360,7 +364,7 @@ pub struct StateConfiguration {
     #[serde(default)]
     pub workers: HashMap<String, StateWorker>,
     #[serde(default)]
-    pub integrations: HashMap<String, StateIntegration>,
+    pub git_host_connections: HashMap<String, StateGitHostConnection>,
     #[serde(default)]
     pub teams: HashMap<String, StateTeam>,
 }

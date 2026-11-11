@@ -65,7 +65,7 @@ async fn a_task_without_an_open_pr_action_answers_409() {
     assert_eq!(res.status_code(), StatusCode::CONFLICT);
     assert_eq!(
         res.json::<Value>()["message"],
-        "the task has no open_pr action naming a Git host integration"
+        "There is no open_pr action on the task to specify a connection to the Git host."
     );
 }
 

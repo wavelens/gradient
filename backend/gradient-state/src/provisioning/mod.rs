@@ -22,9 +22,7 @@ use std::path::Path;
 pub(crate) use credentials::{
     derive_public_key, parse_api_key_hash, parse_password_phc, read_credential,
 };
-pub(crate) use lookups::{
-    inbound_integrations_by_name, lookup_id, outbound_integrations_by_name, parse_integration_kind,
-};
+pub(crate) use lookups::{load_git_host_connections_usable_by_project_by_name, lookup_id};
 
 pub use pending::{PendingProjectMembership, PendingProjectMemberships};
 
@@ -62,9 +60,9 @@ pub(super) async fn apply_state_to_database(
     app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &pending)
         .await?;
-    // Integrations must land before tasks. Task triggers and `git_host_status_report` actions are
-    // resolving integrations by name at apply time (#332).
-    app.apply_integrations(&config.integrations).await?;
+    // Create connections to Git hosts before tasks. Tasks and `open_pr` actions look up a connection by name when they apply state (#332).
+    app.apply_git_host_connections(&config.git_host_connections, &team_ids)
+        .await?;
     app.apply_tasks(&config.tasks).await?;
     app.apply_caches(&config.caches, &team_ids).await?;
     app.apply_project_teams(&config.projects, &team_ids).await?;

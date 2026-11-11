@@ -9,15 +9,17 @@ use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GitHostHookRefusal {
-    #[error("github app integration not configured")]
+    #[error("No GitHub App configured")]
     GithubAppNotConfigured,
     #[error("invalid webhook signature")]
     InvalidSignature,
     #[error("malformed webhook payload")]
     MalformedPayload,
-    #[error("integration not found")]
-    IntegrationNotFound,
-    #[error("integration has no webhook secret. set a secret for the integration in Gradient")]
+    #[error("No Git host connection at this address. No events reach that connection.")]
+    GitHostConnectionNotFoundOrNotReceivingEvents,
+    #[error(
+        "No Webhook secret set for the connection to the Git host. Set a secret for the connection in Gradient."
+    )]
     SecretNotConfigured,
     #[error("unsupported Git host")]
     UnsupportedGitHost,
@@ -31,7 +33,7 @@ impl Refusal for GitHostHookRefusal {
             Self::GithubAppNotConfigured => RefusalStatus::ServiceUnavailable,
             Self::InvalidSignature | Self::SecretNotConfigured => RefusalStatus::Unauthorized,
             Self::MalformedPayload | Self::UnsupportedGitHost => RefusalStatus::BadRequest,
-            Self::IntegrationNotFound => RefusalStatus::NotFound,
+            Self::GitHostConnectionNotFoundOrNotReceivingEvents => RefusalStatus::NotFound,
             Self::SourceIpNotAllowed => RefusalStatus::Forbidden,
         }
     }

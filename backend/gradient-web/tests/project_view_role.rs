@@ -18,7 +18,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 const PROJECT: &str = "/api/v1/projects/test-project";
-const INTEGRATION: &str = "00000000-0000-0000-0000-000000000033";
+const CONNECTION: &str = "00000000-0000-0000-0000-000000000033";
 
 fn member_with(role: &role::Model) -> (MockDatabase, String) {
     let (db, auth) = signed_in_as(user());
@@ -33,7 +33,6 @@ async fn assert_forbidden(server: &TestServer, auth: String, method: &str, url: 
     let request = match method {
         "PUT" => server.put(url).json(&json!({
             "name": "rogue",
-            "kind": "inbound",
             "git_host_type": "forgejo",
             "secret": "chosen-by-the-viewer",
         })),
@@ -48,13 +47,13 @@ async fn assert_forbidden(server: &TestServer, auth: String, method: &str, url: 
 
 #[tokio::test]
 async fn a_view_member_cannot_change_integrations_ssh_key_or_subscriptions() {
-    let integrations = format!("{PROJECT}/integrations");
-    let integration = format!("{integrations}/{INTEGRATION}");
+    let connections = format!("{PROJECT}/git-host-connections");
+    let connection = format!("{connections}/{CONNECTION}");
     let subscription = format!("{PROJECT}/subscribe/test-cache");
     for (method, url) in [
-        ("PUT", integrations.clone()),
-        ("PATCH", integration.clone()),
-        ("DELETE", integration.clone()),
+        ("PUT", connections.clone()),
+        ("PATCH", connection.clone()),
+        ("DELETE", connection.clone()),
         ("POST", format!("{PROJECT}/ssh")),
         ("POST", subscription.clone()),
         ("DELETE", subscription.clone()),

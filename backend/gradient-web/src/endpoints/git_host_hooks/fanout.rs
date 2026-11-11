@@ -47,28 +47,28 @@ impl<'a> PushRefKind<'a> {
     }
 }
 
-pub(super) async fn trigger_push_for_integration(
+pub(super) async fn trigger_push_for_connection(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     push: &ParsedPushEvent,
 ) -> WebhookTriggerOutcome {
-    let mut outcome = trigger_task_repository_push(ci, scheduler, integration_id, push).await;
-    outcome.merge(trigger_input_updates_for_push(ci, integration_id, push).await);
+    let mut outcome = trigger_task_repository_push(ci, scheduler, connection_id, push).await;
+    outcome.merge(trigger_input_updates_for_push(ci, connection_id, push).await);
     outcome
 }
 
 async fn trigger_task_repository_push(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     push: &ParsedPushEvent,
 ) -> WebhookTriggerOutcome {
     let ref_kind = PushRefKind::of(push);
     fan_out_triggers(
         ci,
         scheduler,
-        integration_id,
+        connection_id,
         &push.repository_urls,
         TriggerType::ReporterPush,
         ref_kind.branch_key(),
@@ -109,16 +109,16 @@ async fn trigger_task_repository_push(
 
 /// The queue branch is the branch key, and the push event for that branch dedups against this
 /// evaluation. The base branch picks the trigger.
-pub(super) async fn trigger_merge_group_for_integration(
+pub(super) async fn trigger_merge_group_for_connection(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     group: &ParsedMergeGroupEvent,
 ) -> WebhookTriggerOutcome {
     fan_out_triggers(
         ci,
         scheduler,
-        integration_id,
+        connection_id,
         &group.repository_urls,
         TriggerType::ReporterPush,
         branch_key::branch(&group.queue_branch),
@@ -151,10 +151,10 @@ pub(super) async fn trigger_merge_group_for_integration(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
 )]
-pub(super) async fn trigger_pr_for_integration(
+pub(super) async fn trigger_pr_for_connection(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     event_repo_urls: &[String],
     branch: Option<&str>,
     action: &str,
@@ -176,7 +176,7 @@ pub(super) async fn trigger_pr_for_integration(
     fan_out_triggers(
         ci,
         scheduler,
-        integration_id,
+        connection_id,
         event_repo_urls,
         TriggerType::ReporterPullRequest,
         pull_request_key,
@@ -220,10 +220,10 @@ pub(super) async fn trigger_pr_for_integration(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
 )]
-pub(super) async fn trigger_release_for_integration(
+pub(super) async fn trigger_release_for_connection(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     event_repo_urls: &[String],
     tag: Option<&str>,
     target: &ReleaseTarget,
@@ -237,7 +237,7 @@ pub(super) async fn trigger_release_for_integration(
     fan_out_triggers(
         ci,
         scheduler,
-        integration_id,
+        connection_id,
         event_repo_urls,
         TriggerType::ReporterPush,
         tag.map_or_else(|| branch_key::NO_BRANCH.to_owned(), branch_key::tag),
@@ -307,7 +307,7 @@ enum FilterResult {
 async fn fan_out_triggers<F>(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     event_repo_urls: &[String],
     trigger_type: TriggerType,
     branch: String,
@@ -325,16 +325,16 @@ async fn fan_out_triggers<F>(
 where
     F: Fn(&TriggerConfig) -> FilterResult,
 {
-    let triggers = match gradient_db::triggers::active_of_integration(
+    let triggers = match gradient_db::triggers::list_active_triggers_of_type_on_tasks_using_git_host_connection(
         &ci.db.web_db,
-        integration_id,
+        connection_id,
         trigger_type,
     )
     .await
     {
         Ok(rows) => rows,
         Err(e) => {
-            warn!(error = %e, "load triggers for integration");
+            warn!(error = %e, "Load triggers for connections to Git hosts.");
             return WebhookTriggerOutcome::default();
         }
     };

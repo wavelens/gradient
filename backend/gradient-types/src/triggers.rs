@@ -7,7 +7,7 @@
 //! Six fields, `sec min hour dom mon dow`, are the expected input for the `cron` crate (v0.16).
 //! 5-field crontab expressions receive a leading `0` seconds field before saving.
 
-use crate::ids::{IntegrationId, TaskTriggerId};
+use crate::ids::TaskTriggerId;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -24,7 +24,6 @@ pub enum TriggerConfig {
         branch: Option<String>,
     },
     ReporterPush {
-        integration_id: IntegrationId,
         #[serde(default)]
         branches: Vec<String>,
         #[serde(default)]
@@ -35,7 +34,6 @@ pub enum TriggerConfig {
         include_flake_inputs: bool,
     },
     ReporterPullRequest {
-        integration_id: IntegrationId,
         #[serde(default)]
         branches: Vec<String>,
         #[serde(default = "default_pr_actions")]
@@ -140,25 +138,21 @@ impl TriggerConfig {
                 branch: Some(branch),
             },
             Self::ReporterPush {
-                integration_id,
                 tags,
                 releases_only,
                 include_flake_inputs,
                 ..
             } => Self::ReporterPush {
-                integration_id,
                 branches: vec![branch],
                 tags,
                 releases_only,
                 include_flake_inputs,
             },
             Self::ReporterPullRequest {
-                integration_id,
                 actions,
                 require_approval,
                 ..
             } => Self::ReporterPullRequest {
-                integration_id,
                 branches: vec![branch],
                 actions,
                 require_approval,
@@ -297,7 +291,6 @@ mod tests {
     #[test]
     fn trigger_branch_skips_glob_patterns() {
         let cfg = TriggerConfig::ReporterPush {
-            integration_id: IntegrationId::nil(),
             branches: vec!["release/*".into(), "feat-[ab]".into(), "develop".into()],
             tags: vec![],
             releases_only: false,
@@ -309,7 +302,6 @@ mod tests {
     #[test]
     fn trigger_branch_without_a_literal_branch_is_the_default_branch() {
         let cfg = TriggerConfig::ReporterPullRequest {
-            integration_id: IntegrationId::nil(),
             branches: vec!["*".into()],
             actions: vec![],
             require_approval: true,
@@ -407,7 +399,7 @@ mod tests {
         // Pre-#247 rows are lacking `require_approval` in the stored JSON. The serde default must
         // read as `true` to keep them secure by default without a backfill migration.
         let legacy_db = serde_json::json!({
-            "integration_id": IntegrationId::nil(),
+            "integration_id": "00000000-0000-0000-0000-000000000000",
             "branches": [],
             "actions": ["opened"],
         });
@@ -424,7 +416,6 @@ mod tests {
 
     #[test]
     fn with_branch_replaces_the_branch_of_every_kind() {
-        let integration_id = IntegrationId::nil();
         let release = || "release".to_owned();
         let polling = TriggerConfig::Polling {
             interval_secs: 60,
@@ -435,7 +426,6 @@ mod tests {
             branch: Some("main".into()),
         };
         let push = TriggerConfig::ReporterPush {
-            integration_id,
             branches: vec!["main".into(), "dev".into()],
             tags: vec!["v*".into()],
             releases_only: false,
@@ -454,7 +444,6 @@ mod tests {
     #[test]
     fn an_empty_branch_filter_reads_as_any_branch_in_the_header() {
         let push = TriggerConfig::ReporterPullRequest {
-            integration_id: IntegrationId::nil(),
             branches: vec![],
             actions: vec![],
             require_approval: true,

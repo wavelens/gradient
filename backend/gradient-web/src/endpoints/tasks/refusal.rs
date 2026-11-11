@@ -59,15 +59,11 @@ pub(crate) enum TaskRefusal {
     },
     #[error("send_mail requires at least one recipient")]
     NoMailRecipients,
-    #[error("integration is not an outbound integration")]
-    IntegrationNotOutbound,
-    #[error("outbound integration not found")]
-    OutboundIntegrationNotFound,
     #[error("action with this name already exists")]
     ActionNameTaken,
     #[error("action_type cannot be changed")]
     ActionTypeChange,
-    #[error("git_host_status_report and open_pr actions cannot carry custom events")]
+    #[error("open_pr actions cannot carry custom events")]
     CustomEventsNotAllowed,
     #[error("regenerate-token is only valid for send_web_request actions")]
     TokenRegenerationNotSupported,
@@ -87,16 +83,14 @@ pub(crate) enum TaskRefusal {
     UnknownEvaluationStatus { name: String },
     #[error("the task to start belongs to another project")]
     StartTaskInOtherProject,
-    #[error("this integration not part of this project, or wrong direction")]
-    RepositoryIntegrationMismatch,
-    #[error("Push and pull request triggers need a webhook receiving integration for this project")]
-    TriggerIntegrationNotInbound,
+    #[error("Select a Git host connection first on the repository page for the task.")]
+    GitHostConnectionMissing,
     #[error(
-        "no access token on the status reporter, add one first with admin rights on the repository"
+        "The connection to the Git host for this task has no access token. Add a token with admin rights on the repository to the connection."
     )]
     ProvisionTokenMissing,
     #[error(
-        "the integration for the webhook receiver has no secret - set the secret before webhook installation"
+        "The task's connection to the Git host doesn't have a webhook secret or receive events. Turn on receives_events for the connection first."
     )]
     ProvisionSecretMissing,
     #[error("{0}")]
@@ -126,8 +120,7 @@ impl Refusal for TaskRefusal {
             | Self::EvaluationInProgress
             | Self::AttrNotConcrete
             | Self::UnknownEvaluationStatus { .. }
-            | Self::RepositoryIntegrationMismatch
-            | Self::TriggerIntegrationNotInbound => RefusalStatus::BadRequest,
+            | Self::GitHostConnectionMissing => RefusalStatus::BadRequest,
             Self::TransferNotPermitted => RefusalStatus::Forbidden,
             Self::ActionNameTaken
             | Self::DefaultTriggerDeletion
@@ -140,8 +133,6 @@ impl Refusal for TaskRefusal {
             | Self::ActionHasNoEvents
             | Self::MissingSecret { .. }
             | Self::NoMailRecipients
-            | Self::IntegrationNotOutbound
-            | Self::OutboundIntegrationNotFound
             | Self::ActionTypeChange
             | Self::CustomEventsNotAllowed
             | Self::TokenRegenerationNotSupported

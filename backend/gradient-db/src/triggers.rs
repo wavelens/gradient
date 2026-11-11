@@ -106,52 +106,48 @@ fn active_triggers_sql(trigger_type: TriggerType) -> String {
     format!(
         "SELECT pt.* FROM task_trigger pt \
          JOIN task p ON pt.task = p.id \
-         JOIN integration i ON i.project = p.project \
          WHERE pt.active = true \
            AND p.active = true \
            AND pt.trigger_type = {} \
-           AND i.id = $1",
+           AND p.git_host_connection = $1",
         i16::from(trigger_type),
     )
 }
 
 crate::sql_fn! {
-    ACTIVE_TRIGGERS_FOR_INTEGRATION = || active_triggers_sql(TriggerType::ReporterPullRequest),
-        params = [IntegrationId];
+    ACTIVE_TRIGGERS_FOR_TASKS_USING_GIT_HOST_CONNECTION = || active_triggers_sql(TriggerType::ReporterPullRequest),
+        params = [GitHostConnectionId];
 }
 
-pub async fn active_of_integration<C: ConnectionTrait>(
+pub async fn list_active_triggers_of_type_on_tasks_using_git_host_connection<C: ConnectionTrait>(
     db: &C,
-    integration: IntegrationId,
+    connection: GitHostConnectionId,
     trigger_type: TriggerType,
 ) -> Result<Vec<MTaskTrigger>, DbErr> {
-    // Triggers are matched by project, not by config `integration_id`. The GitHub App seed
-    // migration rewrote integration rows, and a pre-migration trigger's stale UUID would stop
-    // matching.
-    let stmt = ACTIVE_TRIGGERS_FOR_INTEGRATION.bind_built(
+    let stmt = ACTIVE_TRIGGERS_FOR_TASKS_USING_GIT_HOST_CONNECTION.bind_built(
         active_triggers_sql(trigger_type),
-        [Value::Uuid(Some(integration.into_inner()))],
+        [Value::Uuid(Some(connection.into_inner()))],
     );
     ETaskTrigger::find().from_raw_sql(stmt).all(db).await
 }
 
 crate::sql! {
-    ACTIVE_TASK_IDS_FOR_INTEGRATION = "SELECT DISTINCT tt.task FROM task_trigger tt \
+    ACTIVE_PULL_REQUEST_TASK_IDS_FOR_GIT_HOST_CONNECTION = "SELECT DISTINCT tt.task FROM task_trigger tt \
          JOIN task t ON t.id = tt.task \
          WHERE tt.active = true \
            AND t.active = true \
            AND tt.trigger_type = $1 \
-           AND (tt.config->>'integration_id')::uuid = $2",
-        params = [Int(2), IntegrationId];
+           AND t.git_host_connection = $2",
+        params = [Int(2), GitHostConnectionId];
 }
 
-pub async fn active_pull_request_tasks_of_integration<C: ConnectionTrait>(
+pub async fn active_pull_request_task_ids_using_git_host_connection<C: ConnectionTrait>(
     db: &C,
-    integration: IntegrationId,
+    connection: GitHostConnectionId,
 ) -> Result<Vec<TaskId>, DbErr> {
-    let stmt = ACTIVE_TASK_IDS_FOR_INTEGRATION.bind([
+    let stmt = ACTIVE_PULL_REQUEST_TASK_IDS_FOR_GIT_HOST_CONNECTION.bind([
         Value::SmallInt(Some(i16::from(TriggerType::ReporterPullRequest))),
-        Value::Uuid(Some(integration.into_inner())),
+        Value::Uuid(Some(connection.into_inner())),
     ]);
 
     #[derive(FromQueryResult)]

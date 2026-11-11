@@ -7,7 +7,6 @@
 pub mod actions;
 pub mod evaluations;
 pub mod flake_inputs;
-pub(crate) mod integration_by_repository_host;
 pub mod management;
 pub mod metrics;
 pub mod provision;

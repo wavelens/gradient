@@ -165,25 +165,38 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(projects::workers::post_project_worker_test))
                 .routes(routes!(gradient_ci_connections::post_connection))
                 .routes(routes!(
-                    projects::integrations::get_integrations,
-                    projects::integrations::put_integration
-                ))
-                .routes(routes!(projects::integrations::get_integration_summaries))
-                .routes(routes!(projects::integrations::get_integration_deliveries))
-                .routes(routes!(projects::integrations::post_connect_git_host))
-                .routes(routes!(
-                    projects::project_gitea_oauth2_connection::redirect_signed_in_browser_to_git_host_for_project_oauth_approval
+                    git_host_connections::project::list_project_git_host_connections,
+                    git_host_connections::project::create_project_git_host_connection
                 ))
                 .routes(routes!(
-                    tasks::repository::get_task_repository
+                    git_host_connections::project::get_project_git_host_connection,
+                    git_host_connections::project::patch_project_git_host_connection,
+                    git_host_connections::project::delete_project_git_host_connection
+                ))
+                .routes(routes!(
+                    git_host_connections::project::list_project_git_host_connection_deliveries
+                ))
+                .routes(routes!(
+                    git_host_connections::team::list_team_git_host_connections,
+                    git_host_connections::team::create_team_git_host_connection
+                ))
+                .routes(routes!(
+                    git_host_connections::team::get_team_git_host_connection,
+                    git_host_connections::team::patch_team_git_host_connection,
+                    git_host_connections::team::delete_team_git_host_connection
+                ))
+                .routes(routes!(
+                    git_host_connections::team::list_team_git_host_connection_deliveries
+                ))
+                .routes(routes!(
+                    tasks::repository::get_task_repository,
+                    tasks::repository::save_task_repository_connection_and_commit_status
+                ))
+                .routes(routes!(
+                    tasks::repository::post_pending_commit_status_to_head_commit_for_status_test
                 ))
                 .routes(routes!(tasks::provision::post_install_webhook))
                 .routes(routes!(tasks::provision::post_install_deploy_key))
-                .routes(routes!(
-                    projects::integrations::get_integration,
-                    projects::integrations::patch_integration,
-                    projects::integrations::delete_integration
-                ))
                 .routes(routes!(tasks::management::put))
                 .routes(routes!(tasks::management::get_task_name_available))
                 .routes(routes!(
@@ -496,7 +509,8 @@ pub(crate) fn webhook_routes() -> OpenApiRouter<Arc<ServerState>> {
     unsecured(enveloped(
         OpenApiRouter::new()
             .routes(routes!(git_host_hooks::github_app_webhook))
-            .routes(routes!(git_host_hooks::git_host_webhook)),
+            .routes(routes!(git_host_hooks::git_host_webhook))
+            .routes(routes!(git_host_hooks::git_host_connection_webhook)),
     ))
 }
 

@@ -156,11 +156,13 @@ pub(super) async fn sender_is_trusted(
     repo: &str,
     sender: &str,
 ) -> bool {
-    let reporter = match gradient_ci::actions::reporter_for_task(ci, task_id).await {
+    let reporter = match gradient_ci::task_commit_status_posting::reporter_for_task(ci, task_id)
+        .await
+    {
         Ok(Some(r)) => r,
         Ok(None) => return false,
         Err(e) => {
-            warn!(error = %e, %task_id, "resolving GitHostStatusReport action for trust probe");
+            warn!(error = %e, %task_id, "Resolve the task's reporter for commit statuses for the trust probe.");
             return false;
         }
     };
@@ -198,7 +200,7 @@ async fn unpark_pr_approval_eval(
 pub(super) async fn handle_pull_request_review(
     ci: &CiContext,
     git_host: GitHostType,
-    integration_id: Option<IntegrationId>,
+    connection_id: Option<GitHostConnectionId>,
     body: &[u8],
     client_ip: std::net::IpAddr,
 ) {
@@ -237,33 +239,27 @@ pub(super) async fn handle_pull_request_review(
         return;
     };
 
-    let integration_ids: Vec<IntegrationId> = match integration_id {
+    let connection_ids: Vec<GitHostConnectionId> = match connection_id {
         Some(id) => vec![id],
         None => {
             let Some(installation_id) = github_installation_id_from_comment_body(body) else {
                 warn!("pull_request_review (github): no installation_id");
                 return;
             };
-            let repo_urls = vec![
-                format!("https://github.com/{owner_repo}"),
-                format!("https://github.com/{owner_repo}.git"),
-                format!("git@github.com:{owner_repo}.git"),
-            ];
             let targets =
-                resolve_github_app_targets(&ci.db.web_db, installation_id, &repo_urls, client_ip)
-                    .await;
+                resolve_github_app_targets(&ci.db.web_db, installation_id, client_ip).await;
             if targets.is_empty() {
-                warn!(installation_id, %owner_repo, "pull_request_review (github): no integration matched");
+                warn!(installation_id, %owner_repo, "pull_request_review (github): No connection to the Git host for the installation");
                 return;
             }
             targets
         }
     };
 
-    for integration_id in &integration_ids {
+    for connection_id in &connection_ids {
         let task_ids = match load_active_pull_request_tasks_for_event_repository(
             &ci.db.web_db,
-            *integration_id,
+            *connection_id,
             owner,
             repo,
         )
@@ -280,7 +276,7 @@ pub(super) async fn handle_pull_request_review(
         };
         if !sender_is_trusted(ci, probe_task, owner, repo, &reviewer).await {
             warn!(
-                %integration_id,
+                %connection_id,
                 pr_number,
                 %reviewer,
                 "Ignoring PR review approval - reviewer is not a repo writer"

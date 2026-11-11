@@ -68,11 +68,11 @@ fn matches_event_send_mail_filters_by_stored_events() {
 }
 
 fn open_pr(gate: gradient_types::VerifyGate) -> gradient_types::MTaskAction {
-    use gradient_types::{ActionConfig, IntegrationId};
+    use gradient_types::{ActionConfig, GitHostConnectionId};
 
     let mut a = action_with(ActionType::OpenPr, vec![]);
     a.config = serde_json::to_value(ActionConfig::OpenPr {
-        integration_id: IntegrationId::now_v7(),
+        git_host_connection_id: GitHostConnectionId::now_v7(),
         generator: Default::default(),
         granularity: Default::default(),
         verify_gate: gate,
@@ -103,26 +103,6 @@ fn matches_event_open_pr_fires_only_on_gate_event() {
     assert!(matches_event(&eval_gate, "evaluation.building"));
     assert!(!matches_event(&eval_gate, "evaluation.completed"));
     assert!(!matches_event(&eval_gate, "build.completed"));
-}
-
-#[test]
-fn matches_event_git_host_status_ignores_stored_events() {
-    // The stored `events` list is irrelevant for `GitHostStatusReport` because
-    // `GIT_HOST_STATUS_EVENTS` is driving matching. The row is seeded with an event outside that
-    // set on purpose.
-    let a = action_with(ActionType::GitHostStatusReport, vec!["evaluation.waiting"]);
-    assert!(matches_event(&a, "build.created"));
-    assert!(matches_event(&a, "build.queued"));
-    assert!(matches_event(&a, "build.started"));
-    assert!(matches_event(&a, "build.completed"));
-    assert!(matches_event(&a, "build.failed"));
-    assert!(matches_event(&a, "build.substituted"));
-    assert!(matches_event(&a, "evaluation.queued"));
-    assert!(matches_event(&a, "evaluation.building"));
-    assert!(matches_event(&a, "evaluation.completed"));
-    assert!(matches_event(&a, "evaluation.action_required"));
-    assert!(matches_event(&a, "evaluation.approval_granted"));
-    assert!(!matches_event(&a, "evaluation.waiting"));
 }
 
 #[test]
@@ -270,10 +250,9 @@ fn a_failed_attribute_reddens_the_evaluation_check_and_gets_its_own_build_check(
 }
 
 #[test]
-fn an_input_update_reaches_open_pr_and_never_the_git_host_report() {
+fn an_input_update_reaches_open_pr() {
     let actions = vec![
         open_pr(gradient_types::VerifyGate::Build),
-        action_with(ActionType::GitHostStatusReport, vec![]),
         action_with(ActionType::SendMail, vec!["evaluation.completed"]),
     ];
     let payload = json!({"evaluation_kind": "input_update"});
@@ -287,10 +266,10 @@ fn an_input_update_reaches_open_pr_and_never_the_git_host_report() {
 }
 
 #[test]
-fn a_normal_run_reaches_the_git_host_report_and_never_open_pr() {
+fn a_normal_run_never_reaches_open_pr() {
     let actions = vec![
         open_pr(gradient_types::VerifyGate::Build),
-        action_with(ActionType::GitHostStatusReport, vec![]),
+        action_with(ActionType::SendMail, vec!["evaluation.completed"]),
     ];
     let payload = json!({"evaluation_kind": "normal"});
 
@@ -298,7 +277,7 @@ fn a_normal_run_reaches_the_git_host_report_and_never_open_pr() {
 
     assert_eq!(
         matched.iter().map(|a| a.action_type).collect::<Vec<_>>(),
-        vec![ActionType::GitHostStatusReport],
+        vec![ActionType::SendMail],
     );
 }
 
@@ -310,11 +289,11 @@ fn an_action_that_does_not_subscribe_is_not_matched() {
 }
 
 fn exec_tree() -> gradient_types::MTaskAction {
-    use gradient_types::{ActionConfig, IntegrationId, PatchGeneratorKind};
+    use gradient_types::{ActionConfig, GitHostConnectionId, PatchGeneratorKind};
 
     let mut a = action_with(ActionType::OpenPr, vec![]);
     a.config = serde_json::to_value(ActionConfig::OpenPr {
-        integration_id: IntegrationId::now_v7(),
+        git_host_connection_id: GitHostConnectionId::now_v7(),
         generator: PatchGeneratorKind::ExecTree,
         granularity: Default::default(),
         verify_gate: Default::default(),
@@ -358,7 +337,7 @@ fn exec_tree_fires_on_exec_job_completed_only() {
 #[test]
 fn an_exec_tree_action_without_a_tree_patch_opens_nothing() {
     use gradient_entity::exec_job_output;
-    use gradient_types::{ExecJobId, IntegrationId, TaskActionId, TaskId};
+    use gradient_types::{ExecJobId, GitHostConnectionId, TaskActionId, TaskId};
 
     for outputs in [
         vec![],
@@ -377,7 +356,7 @@ fn an_exec_tree_action_without_a_tree_patch_opens_nothing() {
                 &payload,
                 TaskActionId::now_v7(),
                 TaskId::now_v7(),
-                IntegrationId::now_v7(),
+                GitHostConnectionId::now_v7(),
                 "gradient/{entry_point}",
                 None,
                 None,

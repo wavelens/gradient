@@ -16,10 +16,9 @@ use gradient_db::access::CacheRoleAndPermissionMask;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
-use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
+use gradient_types::ids::{CacheId, ProjectId, UserId};
 use gradient_types::{
-    CProjectUser, EProjectUser, MCache, MIntegration, MProject, MProjectUser, MTask, MTeam, MUser,
-    TeamRole,
+    CProjectUser, EProjectUser, MCache, MProject, MProjectUser, MTask, MTeam, MUser, TeamRole,
 };
 use sea_orm::Condition;
 use sea_orm::sea_query::Expr;
@@ -315,16 +314,6 @@ fn listed_or(public_listing: bool, visible: Option<Condition>) -> Condition {
         (false, Some(visible)) => visible,
         (false, None) => Condition::all().add(Expr::val(false)),
     }
-}
-
-pub async fn load_integration_in_project(
-    db: &WebDb,
-    project_id: ProjectId,
-    integration_id: IntegrationId,
-) -> WebResult<MIntegration> {
-    gradient_db::integrations::by_id_in_project(db, project_id, integration_id)
-        .await?
-        .or_not_found(Resource::Integration)
 }
 
 pub async fn can_view_project(
@@ -639,13 +628,6 @@ async fn admin_emails(db: &WebDb, ids: Vec<UserId>) -> WebResult<Vec<String>> {
         .filter(|u| u.active && !u.email.is_empty())
         .map(|u| u.email)
         .collect())
-}
-
-pub(crate) fn reject_managed_integration(integration: &MIntegration) -> WebResult<()> {
-    if integration.managed {
-        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Integration).into());
-    }
-    Ok(())
 }
 
 pub(crate) fn reject_managed_cache(cache: &MCache) -> WebResult<()> {

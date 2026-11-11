@@ -6,8 +6,8 @@
 
 mod api_keys;
 mod caches;
+mod git_host_connections;
 mod helpers;
-mod integrations;
 mod projects;
 mod roles;
 mod tasks;
@@ -39,7 +39,7 @@ impl StateConfiguration {
         users::validate(&lookup, &mut errors);
         projects::validate(&lookup, &mut errors);
         tasks::validate(&lookup, &mut errors);
-        integrations::validate(&lookup, &mut errors);
+        git_host_connections::validate(&lookup, &mut errors);
         caches::validate(&lookup, &mut errors);
         roles::validate(&lookup, &mut errors);
         teams::validate(&lookup, &mut errors);

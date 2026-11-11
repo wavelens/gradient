@@ -9,9 +9,15 @@
 //! branch. A log finalize is replacing the chunk index.
 
 use anyhow::{Context, Result, anyhow};
-use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
+use gradient_ci::actions::{
+    GIT_HOST_STATUS_EVENTS, active_actions_for_task, execute_action, matching_actions,
+};
 use gradient_ci::pull_request_summary::update_pull_request_summary_on_terminal;
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
+use gradient_ci::task_commit_status_posting::{
+    load_task_git_host_connection, post_commit_statuses_for_task_event_and_record_attempt,
+    task_should_post_commit_statuses,
+};
 use gradient_db::deliveries::pending::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
 use gradient_db::deliveries::trigger_fire::TriggerFire;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -33,6 +39,7 @@ pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
         PendingDeliveryKind::WebhookDelivery => deliver_webhook(ctx, row).await,
         PendingDeliveryKind::TriggerFire => fire_trigger(ctx, row).await,
         PendingDeliveryKind::EvalCacheCompact => compact_eval_cache(ctx, row).await,
+        PendingDeliveryKind::TaskEventCommitStatusPost => post_commit_status(ctx, row).await,
     };
 
     match result {
@@ -105,9 +112,21 @@ fn plan_deliveries(
     envelope: &Envelope,
     actions: &[MTaskAction],
     hooks: &[MWebhook],
+    commit_status_task: Option<TaskId>,
     parent: &str,
 ) -> Vec<(PendingDeliveryKind, String, JsonValue)> {
     let name = envelope.event.name();
+    let to_commit_status = commit_status_task.map(|task| {
+        (
+            PendingDeliveryKind::TaskEventCommitStatusPost,
+            format!("{task}:{name}:{parent}"),
+            serde_json::json!({
+                "task": task,
+                "event": name,
+                "envelope": envelope.to_json(),
+            }),
+        )
+    });
     let to_actions = actions.iter().map(|action| {
         (
             PendingDeliveryKind::ActionDelivery,
@@ -126,7 +145,7 @@ fn plan_deliveries(
             }),
         )
     });
-    to_actions.chain(to_hooks).collect()
+    to_actions.chain(to_hooks).chain(to_commit_status).collect()
 }
 
 /// The whole expansion is one transaction. Either every owed delivery is queued or none is. A
@@ -152,7 +171,18 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
         .filter(|h| gradient_ci::webhooks::routes_to(h, &owner, &name, envelope.event.personal()))
         .collect();
 
-    let plan = plan_deliveries(envelope, &actions, &hooks, parent);
+    let commit_status_task = match owner.task {
+        Some(task) if posts_commit_status_for(&name, &envelope.event.content()) => {
+            load_task_git_host_connection(&ci, task)
+                .await
+                .context("load the task's git host connection")?
+                .filter(|(task, connection)| task_should_post_commit_statuses(task, connection))
+                .map(|(task, _)| task.id)
+        }
+        _ => None,
+    };
+
+    let plan = plan_deliveries(envelope, &actions, &hooks, commit_status_task, parent);
     if plan.is_empty() {
         return Ok(());
     }
@@ -172,6 +202,21 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
         .context("commit the delivery expansion")?;
 
     Ok(())
+}
+
+fn posts_commit_status_for(event: &str, content: &JsonValue) -> bool {
+    GIT_HOST_STATUS_EVENTS.contains(&event)
+        && content.get("evaluation_kind").and_then(|v| v.as_str()) != Some("input_update")
+}
+
+async fn post_commit_status(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
+    let task = TaskId::new(uuid_field(row, "task")?);
+    let event = field(row, "event")?
+        .as_str()
+        .ok_or_else(|| anyhow!("pending delivery payload event is not a string"))?;
+    let envelope = field(row, "envelope")?;
+    let content = envelope.get("content").cloned().unwrap_or_default();
+    post_commit_statuses_for_task_event_and_record_attempt(&ctx.ci(), task, event, &content).await
 }
 
 async fn live_webhook<C: ConnectionTrait>(
@@ -381,13 +426,14 @@ mod tests {
             id: WebhookId::now_v7(),
             ..Default::default()
         }];
-        let plan = plan_deliveries(&env, &actions, &hooks, "parent");
+        let plan = plan_deliveries(&env, &actions, &hooks, Some(TaskId::now_v7()), "parent");
         let kinds: Vec<_> = plan.iter().map(|(kind, _, _)| *kind).collect();
         assert_eq!(
             kinds,
             vec![
                 PendingDeliveryKind::ActionDelivery,
-                PendingDeliveryKind::WebhookDelivery
+                PendingDeliveryKind::WebhookDelivery,
+                PendingDeliveryKind::TaskEventCommitStatusPost
             ]
         );
         assert!(
@@ -409,5 +455,50 @@ mod tests {
         assert_eq!(payload["event"], "evaluation.completed");
         assert_eq!(payload["envelope"]["event"], "evaluation.completed");
         assert!(payload["envelope"]["content"].is_object());
+    }
+
+    #[test]
+    fn plan_task_commit_status_post_for_report_status_task() {
+        let env = Envelope::now(
+            evaluation::Reported {
+                phase: evaluation::Phase::Completed,
+                ..Default::default()
+            }
+            .into(),
+        );
+        let build_task_with_report_status = |report_status| MTask {
+            report_status,
+            ..Default::default()
+        };
+        let make_git_host_connection_with_reports_status = |reports_status| MGitHostConnection {
+            reports_status,
+            ..Default::default()
+        };
+
+        assert!(posts_commit_status_for(
+            "evaluation.completed",
+            &env.event.content()
+        ));
+        assert!(!posts_commit_status_for(
+            "evaluation.completed",
+            &serde_json::json!({ "evaluation_kind": "input_update" })
+        ));
+        assert!(task_should_post_commit_statuses(
+            &build_task_with_report_status(true),
+            &make_git_host_connection_with_reports_status(true)
+        ));
+        assert!(!task_should_post_commit_statuses(
+            &build_task_with_report_status(true),
+            &make_git_host_connection_with_reports_status(false)
+        ));
+        assert!(!task_should_post_commit_statuses(
+            &build_task_with_report_status(false),
+            &make_git_host_connection_with_reports_status(true)
+        ));
+        assert!(
+            plan_deliveries(&env, &[], &[], None, "parent")
+                .iter()
+                .all(|(kind, _, _)| *kind != PendingDeliveryKind::TaskEventCommitStatusPost)
+        );
     }
 }

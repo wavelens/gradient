@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{IncomingWebhookDeliveryId, IntegrationId};
+use crate::ids::{GitHostConnectionId, IncomingWebhookDeliveryId};
 
 #[repr(i16)]
 #[derive(
@@ -48,7 +48,7 @@ pub enum DeliveryResult {
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: IncomingWebhookDeliveryId,
-    pub integration: IntegrationId,
+    pub git_host_connection: GitHostConnectionId,
     pub event: String,
     pub status_code: i16,
     pub result: DeliveryResult,
@@ -63,12 +63,12 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::integration::Entity",
-        from = "Column::Integration",
-        to = "super::integration::Column::Id",
+        belongs_to = "super::git_host_connection::Entity",
+        from = "Column::GitHostConnection",
+        to = "super::git_host_connection::Column::Id",
         on_delete = "Cascade"
     )]
-    Integration,
+    GitHostConnection,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

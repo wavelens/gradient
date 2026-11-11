@@ -23,7 +23,7 @@ pub struct ExecJobPullRequestView {
     pub url: String,
     pub branch: String,
     pub number: i64,
-    pub integration: String,
+    pub git_host_connection: GitHostConnectionId,
     pub created_at: NaiveDateTime,
 }
 
@@ -33,7 +33,7 @@ pub struct ExecJobPullRequestView {
     operation_id = "listExecJobPullRequests",
     tag = "exec-jobs",
     summary = "List pull requests of an exec job",
-    description = "Returns the pull requests the job opened or updated, newest first. `integration` is the id of the Git host integration that opened it.\n\n**Access:** Public projects, or members of the project.",
+    description = "List the pull requests that the job opened or updated, newest first. `git_host_connection` is the ID of the Git host connection that opened each one.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Pull requests", body = Vec<ExecJobPullRequestView>), WebError)
 )]
@@ -51,7 +51,7 @@ pub async fn list_exec_job_pull_requests(
                 url: row.url,
                 branch: row.branch,
                 number: row.number,
-                integration: row.integration.to_string(),
+                git_host_connection: row.git_host_connection,
                 created_at: row.created_at,
             })
             .collect(),

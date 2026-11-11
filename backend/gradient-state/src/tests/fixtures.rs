@@ -6,23 +6,39 @@
 
 use super::super::StateConfiguration;
 
-pub fn reporter_cfg(integration_name: &str, integrations_json: &str) -> StateConfiguration {
+pub fn reporter_cfg(connection_name: &str, connections_json: &str) -> StateConfiguration {
+    make_state_with_git_host_connections_and_web_task_extra_fields(
+        connections_json,
+        &format!(
+            r#""git_host_connection": "{connection_name}",
+            "triggers": [
+                {{ "type": "reporter_push", "config": {{ "branches": ["main"] }} }}
+            ]"#
+        ),
+    )
+}
+
+pub fn make_state_with_git_host_connections_and_web_task_extra_fields(
+    connections_json: &str,
+    task_fields_json: &str,
+) -> StateConfiguration {
     let json = format!(
         r#"{{
             "users": {{
                 "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }}
             }},
-            "projects": {{
-                "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
+            "teams": {{
+                "platform": {{ "name": "platform", "display_name": "Platform" }}
             }},
-            "integrations": {integrations_json},
+            "projects": {{
+                "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice", "owner_team": "platform" }}
+            }},
+            "git_host_connections": {connections_json},
             "tasks": {{
                 "web": {{
                     "name": "web", "project": "acme", "display_name": "Web",
                     "repository": "https://example.com/acme/web.git", "created_by": "alice",
-                    "triggers": [
-                        {{ "type": "reporter_push", "integration": "{integration_name}", "config": {{ "branches": ["main"] }} }}
-                    ]
+                    {task_fields_json}
                 }}
             }}
         }}"#
@@ -30,7 +46,9 @@ pub fn reporter_cfg(integration_name: &str, integrations_json: &str) -> StateCon
     serde_json::from_str(&json).unwrap()
 }
 
-pub fn integration_cfg(integrations_json: &str) -> StateConfiguration {
+pub fn state_with_one_user_one_project_and_git_host_connections(
+    connections_json: &str,
+) -> StateConfiguration {
     let json = format!(
         r#"{{
             "users": {{
@@ -39,7 +57,7 @@ pub fn integration_cfg(integrations_json: &str) -> StateConfiguration {
             "projects": {{
                 "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
             }},
-            "integrations": {integrations_json}
+            "git_host_connections": {connections_json}
         }}"#
     );
     serde_json::from_str(&json).unwrap()

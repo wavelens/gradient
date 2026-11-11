@@ -15,7 +15,7 @@ use crate::pull_requests::{
 use anyhow::{Context, Result, anyhow};
 use gradient_db::exec_jobs::outputs;
 use gradient_db::lookup::by_id;
-use gradient_types::{ETask, ExecJobId, IntegrationId, TaskActionId, TaskId};
+use gradient_types::{ETask, ExecJobId, GitHostConnectionId, TaskActionId, TaskId};
 use gradient_wire::types::TREE_PATCH_OUTPUT;
 use serde_json::Value as JsonValue;
 
@@ -31,7 +31,7 @@ pub(crate) async fn execute_exec_tree_pr(
     payload: &JsonValue,
     action_id: TaskActionId,
     task_id: TaskId,
-    integration_id: IntegrationId,
+    git_host_connection_id: GitHostConnectionId,
     branch_pattern: &str,
     title_template: Option<&str>,
     body_template: Option<&str>,
@@ -62,7 +62,7 @@ pub(crate) async fn execute_exec_tree_pr(
             .await
             .context("load task")?
             .ok_or(ActionError::TaskNotFound { id: task_id })?,
-        integration: integration_id,
+        git_host_connection: git_host_connection_id,
         start_commit: evaluation_commit_of_job(&ctx.db.worker_db, job).await?,
         patch,
         title: render(title_template, DEFAULT_TITLE),

@@ -9,33 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{GithubInstallationId, IntegrationId, ProjectId, UserId};
-
-#[repr(i16)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    IntoPrimitive,
-    TryFromPrimitive,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "snake_case")]
-pub enum IntegrationKind {
-    #[default]
-    #[sea_orm(num_value = 0)]
-    Inbound = 0,
-    #[sea_orm(num_value = 1)]
-    Outbound = 1,
-}
+use crate::ids::{GitHostConnectionId, ProjectId, TeamId, UserId};
 
 #[repr(i16)]
 #[derive(
@@ -89,19 +63,19 @@ impl GitHostType {
 }
 
 #[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "integration")]
+#[sea_orm(table_name = "git_host_connection")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: IntegrationId,
-    pub project: ProjectId,
+    pub id: GitHostConnectionId,
+    pub project: Option<ProjectId>,
+    pub owner_team: Option<TeamId>,
     pub name: String,
     pub display_name: String,
-    pub kind: IntegrationKind,
     pub git_host_type: GitHostType,
     #[sea_orm(column_type = "Text", nullable)]
     pub secret: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
-    pub endpoint_url: Option<String>,
+    pub base_url: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub access_token: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
@@ -110,7 +84,11 @@ pub struct Model {
     /// Source CIDRs allowed for inbound webhooks. `None` or an empty list is allowing any source.
     #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
     pub allowed_ips: Option<Vec<String>>,
-    pub github_installation: Option<GithubInstallationId>,
+    pub receives_events: bool,
+    pub reports_status: bool,
+    pub github_installation_id: Option<i64>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub account_login: Option<String>,
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
@@ -131,24 +109,24 @@ pub enum Relation {
     )]
     CreatedBy,
     #[sea_orm(
-        belongs_to = "super::github_installation::Entity",
-        from = "Column::GithubInstallation",
-        to = "super::github_installation::Column::Id"
+        belongs_to = "super::team::Entity",
+        from = "Column::OwnerTeam",
+        to = "super::team::Column::Id"
     )]
-    GithubInstallation,
+    OwnerTeam,
 }
 
 impl std::fmt::Debug for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Integration")
+        f.debug_struct("GitHostConnection")
             .field("id", &self.id)
             .field("project", &self.project)
+            .field("owner_team", &self.owner_team)
             .field("name", &self.name)
             .field("display_name", &self.display_name)
-            .field("kind", &self.kind)
             .field("git_host_type", &self.git_host_type)
             .field("secret", &self.secret.as_ref().map(|_| "[redacted]"))
-            .field("endpoint_url", &self.endpoint_url)
+            .field("base_url", &self.base_url)
             .field(
                 "access_token",
                 &self.access_token.as_ref().map(|_| "[redacted]"),
@@ -159,7 +137,10 @@ impl std::fmt::Debug for Model {
             )
             .field("access_token_expires_at", &self.access_token_expires_at)
             .field("allowed_ips", &self.allowed_ips)
-            .field("github_installation", &self.github_installation)
+            .field("receives_events", &self.receives_events)
+            .field("reports_status", &self.reports_status)
+            .field("github_installation_id", &self.github_installation_id)
+            .field("account_login", &self.account_login)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .field("managed", &self.managed)

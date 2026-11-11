@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{EvaluationId, ProjectId, TaskId, UserId};
+use crate::ids::{EvaluationId, GitHostConnectionId, ProjectId, TaskId, UserId};
 
 #[repr(i16)]
 #[derive(
@@ -74,6 +74,8 @@ pub struct Model {
     pub last_fetch_ok_at: Option<NaiveDateTime>,
     #[sea_orm(column_type = "Text", nullable)]
     pub last_fetch_error: Option<String>,
+    pub git_host_connection: Option<GitHostConnectionId>,
+    pub report_status: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

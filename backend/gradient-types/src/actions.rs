@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ids::{IntegrationId, TaskId};
+use crate::ids::{GitHostConnectionId, TaskId};
 use serde::{Deserialize, Serialize};
 
 pub use gradient_entity::task_action::ActionType;
@@ -47,11 +47,8 @@ pub enum ActionConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<String>,
     },
-    GitHostStatusReport {
-        integration_id: IntegrationId,
-    },
     OpenPr {
-        integration_id: IntegrationId,
+        git_host_connection_id: GitHostConnectionId,
         #[serde(default)]
         generator: PatchGeneratorKind,
         #[serde(default)]
@@ -100,7 +97,6 @@ impl ActionConfig {
         match self {
             ActionConfig::SendMail { .. } => ActionType::SendMail,
             ActionConfig::SendWebRequest { .. } => ActionType::SendWebRequest,
-            ActionConfig::GitHostStatusReport { .. } => ActionType::GitHostStatusReport,
             ActionConfig::OpenPr { .. } => ActionType::OpenPr,
             ActionConfig::SendMatrixMessage { .. } => ActionType::SendMatrixMessage,
             ActionConfig::SendSlackMessage { .. } => ActionType::SendSlackMessage,
@@ -181,16 +177,6 @@ mod tests {
             let field = cfg.action_type().secret_field().unwrap();
             assert_eq!(json[field], "S");
         }
-    }
-
-    #[test]
-    fn the_stored_config_reads_back_as_the_same_action() {
-        let cfg = ActionConfig::GitHostStatusReport {
-            integration_id: crate::IntegrationId::now_v7(),
-        };
-        let stored = cfg.to_db_json();
-        assert_eq!(stored["type"], "git_host_status_report");
-        assert_eq!(serde_json::from_value::<ActionConfig>(stored).unwrap(), cfg);
     }
 
     #[test]

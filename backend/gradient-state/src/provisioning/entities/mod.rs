@@ -6,7 +6,7 @@
 
 mod api_keys;
 mod caches;
-mod integrations;
+mod git_host_connections;
 mod project_secrets;
 mod projects;
 mod roles;

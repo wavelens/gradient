@@ -15,8 +15,8 @@ use gradient_entity::ids::{
     BuildAttemptId, CacheUpstreamId, ClusterAttemptId, ClusterJobId, ClusterMemberId, CommitId,
     DerivationFeatureId, DerivationMetricId, DispatchedJobId, DispatchedJobPhaseId,
     EvalCacheStoreId, EvaluationFlakeInputOverrideId, EvaluationId, EvaluationInputUpdateId,
-    EvaluationMetricId, FeatureId, FlakeInputOverrideId, IntegrationId, ProjectId, TaskActionId,
-    TaskId, TaskTriggerId,
+    EvaluationMetricId, FeatureId, FlakeInputOverrideId, GitHostConnectionId, ProjectId,
+    TaskActionId, TaskId, TaskTriggerId,
 };
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::task_trigger::TriggerType;
@@ -118,7 +118,7 @@ impl Shape {
         let task = self.tasks[self.current_task()].id;
         let created_by = self.owner();
         let config = ActionConfig::OpenPr {
-            integration_id: IntegrationId::now_v7(),
+            git_host_connection_id: GitHostConnectionId::now_v7(),
             generator: PatchGeneratorKind::FlakeLock,
             granularity: PrGranularity::PerRun,
             verify_gate: VerifyGate::Build,

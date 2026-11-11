@@ -53,7 +53,7 @@ const JSON: &str = "application/json";
         (name = "commits", description = "Commit records"),
         (name = "actions", description = "Per-task Actions (Send Mail, Send Web Request, Git Host Status Report)"),
         (name = "git-host-webhooks", description = "Incoming Git host webhooks (external Git hosts -> Gradient push triggers)"),
-        (name = "integrations", description = "Per-project named Git host integrations (inbound HMAC secrets + outbound API credentials)"),
+        (name = "git-host-connections", description = "Connections to Git hosts belong to a project, a team, or an instance. Tasks select one of those connections to receive webhook events and report commit status."),
         (name = "admin", description = "Server-wide administrative endpoints. All routes require the caller to have the `superuser` flag."),
         (name = "scim", description = "SCIM 2.0 instance-level provisioning (Users + Groups), bearer-token authenticated, mounted at `/scim/v2` only when SCIM is enabled.")
     ),

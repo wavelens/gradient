@@ -10,8 +10,7 @@
 )]
 
 use axum_test::TestServer;
-use gradient_ci::IntegrationKind;
-use gradient_entity::{integration, task, task_action, task_trigger};
+use gradient_entity::{git_host_connection, task, task_action, task_trigger};
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::rows;
@@ -87,15 +86,16 @@ fn new_task(triggers: Option<Value>) -> Value {
     body
 }
 
-fn gitea_integration(kind: IntegrationKind) -> integration::Model {
-    integration::Model {
-        id: IntegrationId::now_v7(),
-        project: project_id(),
+fn test_project_gitea_git_host_connection_for_webhook_events() -> git_host_connection::Model {
+    git_host_connection::Model {
+        id: GitHostConnectionId::now_v7(),
+        project: Some(project_id()),
         name: "gitea".into(),
         display_name: "Gitea".into(),
-        kind,
         git_host_type: GitHostType::Gitea,
-        endpoint_url: Some("https://gitea.example.com".into()),
+        base_url: Some("https://gitea.example.com".into()),
+        secret: Some("encrypted".into()),
+        receives_events: true,
         created_by: user_id(),
         created_at: test_date(),
         ..Default::default()
@@ -192,29 +192,6 @@ async fn creating_a_task_without_triggers_adds_one_default_polling_trigger() {
 }
 
 #[tokio::test]
-async fn a_push_trigger_on_a_status_reporter_rejects_the_whole_task() {
-    let s = seeded(BASE_ROLE_ADMIN_ID).await;
-    let outbound = gitea_integration(IntegrationKind::Outbound);
-    gradient_db::rows::insert::<integration::Entity, _>(&s.db.connection(), outbound.clone())
-        .await
-        .unwrap();
-
-    let res = s
-        .server
-        .put("/api/v1/tasks/test-project")
-        .add_header("authorization", &s.auth)
-        .json(&new_task(Some(json!([
-            { "type": "reporter_push", "integration_id": outbound.id },
-        ]))))
-        .await;
-
-    res.assert_status_bad_request();
-    assert!(s.db.rows::<task::Entity>().await.is_empty());
-    assert!(s.db.rows::<task_trigger::Entity>().await.is_empty());
-    s.db.finish().await;
-}
-
-#[tokio::test]
 async fn connecting_a_git_host_adds_no_triggers_to_existing_tasks() {
     let s = seeded(BASE_ROLE_ADMIN_ID).await;
     s.server
@@ -226,18 +203,19 @@ async fn connecting_a_git_host_adds_no_triggers_to_existing_tasks() {
 
     let res = s
         .server
-        .post("/api/v1/projects/test-project/integrations/connect")
+        .put("/api/v1/projects/test-project/git-host-connections")
         .add_header("authorization", &s.auth)
         .json(&json!({
             "name": "gitea",
             "git_host_type": "gitea",
-            "endpoint_url": "https://gitea.example.com",
+            "base_url": "https://gitea.example.com",
             "access_token": "token",
+            "reports_status": true,
         }))
         .await;
 
     res.assert_status_ok();
-    assert_eq!(s.db.rows::<integration::Entity>().await.len(), 2);
+    assert_eq!(s.db.rows::<git_host_connection::Entity>().await.len(), 1);
     assert!(s.db.rows::<task_trigger::Entity>().await.is_empty());
     assert!(s.db.rows::<task_action::Entity>().await.is_empty());
     s.db.finish().await;
@@ -246,10 +224,12 @@ async fn connecting_a_git_host_adds_no_triggers_to_existing_tasks() {
 #[tokio::test]
 async fn suggestions_offer_push_and_pull_request_triggers_of_the_matching_webhook_receiver() {
     let s = seeded(BASE_ROLE_VIEW_ID).await;
-    let inbound = gitea_integration(IntegrationKind::Inbound);
-    gradient_db::rows::insert::<integration::Entity, _>(&s.db.connection(), inbound.clone())
-        .await
-        .unwrap();
+    gradient_db::rows::insert::<git_host_connection::Entity, _>(
+        &s.db.connection(),
+        test_project_gitea_git_host_connection_for_webhook_events(),
+    )
+    .await
+    .unwrap();
 
     let suggest = |repository: &'static str| {
         s.server
@@ -269,9 +249,6 @@ async fn suggestions_offer_push_and_pull_request_triggers_of_the_matching_webhoo
             .collect::<Vec<_>>(),
         vec![TriggerType::ReporterPush, TriggerType::ReporterPullRequest]
     );
-    assert!(suggested.iter().all(|c| matches!(c,
-        TriggerConfig::ReporterPush { integration_id, .. }
-        | TriggerConfig::ReporterPullRequest { integration_id, .. } if *integration_id == inbound.id)));
 
     let other = suggest("https://codeberg.org/acme/app.git").await;
     other.assert_status_ok();
@@ -284,10 +261,6 @@ async fn suggestions_offer_push_and_pull_request_triggers_of_the_matching_webhoo
 async fn duplicating_a_task_copies_settings_triggers_and_actions_onto_the_new_branch() {
     let s = seeded(BASE_ROLE_ADMIN_ID).await;
     let conn = s.db.connection();
-    let inbound = gitea_integration(IntegrationKind::Inbound);
-    gradient_db::rows::insert::<integration::Entity, _>(&conn, inbound.clone())
-        .await
-        .unwrap();
     let source = task::Model {
         exec_enabled: true,
         wait_for_workers: true,
@@ -306,7 +279,6 @@ async fn duplicating_a_task_copies_settings_triggers_and_actions_onto_the_new_br
         ),
         (
             TriggerConfig::ReporterPush {
-                integration_id: inbound.id,
                 branches: vec!["main".into()],
                 tags: vec![],
                 releases_only: false,

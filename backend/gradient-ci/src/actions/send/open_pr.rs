@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::git_host_status::build_reporter_for_integration;
 use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
+use crate::task_commit_status_posting::build_commit_status_posting_client_from_git_host_connection_id;
 use anyhow::{Context, Result, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::parse_owner_repo;
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
 use gradient_types::{
     AOpenPrState, CEvaluationInputUpdate, COpenPrState, ECommit, EEvaluation,
-    EEvaluationInputUpdate, EOpenPrState, ETask, EvaluationId, IntegrationId, OpenPrStateId,
+    EEvaluationInputUpdate, EOpenPrState, ETask, EvaluationId, GitHostConnectionId, OpenPrStateId,
     RepositoryLocation, TaskActionId, TaskId,
 };
 use sea_orm::ActiveValue::Set;
@@ -39,7 +39,7 @@ pub(crate) async fn execute_open_pr(
     payload: &JsonValue,
     action_id: TaskActionId,
     task_id: TaskId,
-    integration_id: IntegrationId,
+    git_host_connection_id: GitHostConnectionId,
     branch_pattern: &str,
     title_template: Option<&str>,
     body_template: Option<&str>,
@@ -84,7 +84,9 @@ pub(crate) async fn execute_open_pr(
             repository: task.repository.clone(),
         })?;
 
-    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
+    let reporter =
+        build_commit_status_posting_client_from_git_host_connection_id(ctx, git_host_connection_id)
+            .await?;
     let base_branch = reporter
         .default_branch(&owner, &repo)
         .await

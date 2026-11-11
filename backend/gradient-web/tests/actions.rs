@@ -417,41 +417,6 @@ async fn create_chat_action_invalid_config_returns_422() {
 }
 
 #[tokio::test]
-async fn create_git_host_status_report_rejects_nonempty_events() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-
-    let db = with_task_edit(with_auth(mock_db(), session_id));
-
-    let server = make_test_server(db.into_connection());
-    let integration_id = IntegrationId::now_v7();
-    let res = server
-        .post(BASE_URL)
-        .add_header("authorization", format!("Bearer {}", token))
-        .json(&json!({
-            "name": "status",
-            "config": {
-                "type": "git_host_status_report",
-                "integration_id": integration_id.to_string(),
-            },
-            "events": ["build.started"],
-        }))
-        .await;
-
-    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-    let body: Value = res.json();
-    assert_eq!(body["error"], true);
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap()
-            .contains("git_host_status_report"),
-        "expected git_host_status_report mention, got: {}",
-        body["message"]
-    );
-}
-
-#[tokio::test]
 async fn read_action_secret_config_field_is_stripped() {
     let slack_row = task_action::Model {
         action_type: ActionType::SendSlackMessage,

@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ExecJobId, ExecJobPullRequestId, IntegrationId};
+use crate::ids::{ExecJobId, ExecJobPullRequestId, GitHostConnectionId};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "exec_job_pull_request")]
@@ -16,7 +16,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: ExecJobPullRequestId,
     pub exec_job: ExecJobId,
-    pub integration: IntegrationId,
+    pub git_host_connection: GitHostConnectionId,
     pub url: String,
     pub branch: String,
     pub number: i64,
@@ -33,12 +33,12 @@ pub enum Relation {
     )]
     ExecJob,
     #[sea_orm(
-        belongs_to = "super::integration::Entity",
-        from = "Column::Integration",
-        to = "super::integration::Column::Id",
+        belongs_to = "super::git_host_connection::Entity",
+        from = "Column::GitHostConnection",
+        to = "super::git_host_connection::Column::Id",
         on_delete = "Cascade"
     )]
-    Integration,
+    GitHostConnection,
 }
 
 impl Related<super::exec_job::Entity> for Entity {

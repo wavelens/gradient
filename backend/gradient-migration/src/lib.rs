@@ -75,6 +75,7 @@ mod m20261203_000000_project_owner_team_and_direct_role_precedence;
 mod m20261204_000000_create_retired_cache_key_table_and_add_previous_signature_column;
 mod m20261206_000000_add_sign_outputs_to_project_cache;
 mod m20261207_000000_add_abort_record_to_evaluation_and_one_commit_row_per_project_hash;
+mod m20261208_000000_move_project_integrations_and_github_app_installations_to_git_host_connections_owned_by_instance_team_or_project_and_add_task_git_host_connection_and_task_report_status_and_replace_status_report_actions;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -177,6 +178,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261204_000000_create_retired_cache_key_table_and_add_previous_signature_column::Migration),
             Box::new(m20261206_000000_add_sign_outputs_to_project_cache::Migration),
             Box::new(m20261207_000000_add_abort_record_to_evaluation_and_one_commit_row_per_project_hash::Migration),
+            Box::new(m20261208_000000_move_project_integrations_and_github_app_installations_to_git_host_connections_owned_by_instance_team_or_project_and_add_task_git_host_connection_and_task_report_status_and_replace_status_report_actions::Migration),
         ]
     }
 }

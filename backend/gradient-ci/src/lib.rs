@@ -10,14 +10,15 @@ pub mod actions;
 pub mod apply;
 pub mod context;
 pub mod error;
+pub mod github_app_connection;
 pub mod github_app_manifest;
-pub mod integration_lookup;
 pub mod manifest_state;
 pub mod outbound_integration_access_token;
 pub mod pull_request_summary;
 pub mod pull_requests;
 pub mod reactions;
 pub mod reporting;
+pub mod task_commit_status_posting;
 pub mod trigger;
 pub mod unpark;
 pub mod webhooks;
@@ -29,7 +30,7 @@ pub use self::apply::{
 };
 pub use self::context::CiContext;
 pub use self::error::ActionError;
-pub use self::integration_lookup::*;
+pub use self::github_app_connection::*;
 pub use self::reporting::*;
 pub use self::trigger::*;
 pub use self::unpark::{

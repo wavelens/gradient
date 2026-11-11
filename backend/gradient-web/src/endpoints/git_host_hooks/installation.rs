@@ -5,12 +5,10 @@
  */
 
 use super::payloads::GitHubInstallationPayload;
-use crate::endpoints::tasks::integration_by_repository_host::url_host;
 use gradient_ci::parse_owner_repo;
 use gradient_db::WebDb;
 use gradient_types::*;
-use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
     let payload: GitHubInstallationPayload = match serde_json::from_slice(body) {
@@ -20,124 +18,53 @@ pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
             return;
         }
     };
+    let installation_id = payload.installation.id;
 
     if payload.action == "deleted" {
-        clear_installation_id(db, payload.installation.id).await;
-        return;
-    }
-
-    store_installation_id(db, &payload).await;
-}
-
-async fn clear_installation_id(db: &WebDb, installation_id: i64) {
-    if let Err(e) =
-        gradient_db::integrations::delete_installations_by_github_id(db, installation_id).await
-    {
-        warn!(error = %e, installation_id, "Failed to delete github_installation rows");
-    }
-}
-
-async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) {
-    use std::collections::HashSet;
-
-    let github_login = payload.installation.account.login.as_str();
-    let installation_id = payload.installation.id;
-    let installed = payload.installed_full_names();
-
-    if installed.is_empty() {
-        debug!(
-            installation_id,
-            github_login, "GitHub App install carried no repository list; nothing to bind"
-        );
-        return;
-    }
-
-    // Every project owning a task whose parsed `owner/repo` is matching an installed repo is bound.
-    // Flake shorthand and every clone-URL form are matching alike.
-    let owner_project_ids: HashSet<ProjectId> =
-        gradient_db::tasks::with_repository_containing(db, "github")
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|p| github_full_name(&p.repository).is_some_and(|n| installed.contains(&n)))
-            .map(|p| p.project)
-            .collect();
-
-    if owner_project_ids.is_empty() {
-        let sender_login = payload
-            .sender
-            .as_ref()
-            .map(|s| s.login.as_str())
-            .unwrap_or("unknown");
-        warn!(
-            github_login,
-            sender = %sender_login,
-            installation_id,
-            "GitHub App installed but no Gradient task tracks an installed repository"
-        );
-
-        return;
-    }
-
-    let projects =
-        gradient_db::projects::with_ids(db, &owner_project_ids.into_iter().collect::<Vec<_>>())
-            .await
-            .unwrap_or_default();
-
-    for project in projects {
-        let project_id = project.id;
-        let creator = project.created_by;
-        match gradient_ci::link_project_github_installation(
-            db.inner(),
-            project_id,
-            installation_id,
-            Some(github_login),
-            creator,
-        )
-        .await
+        if let Err(e) =
+            gradient_db::git_host_connections::delete_by_github_installation_id(db, installation_id)
+                .await
         {
-            Ok(_) => {
-                info!(installation_id, %project_id, github_login = %github_login, "GitHub App installed on project")
-            }
-            Err(e) => {
-                warn!(error = %e, installation_id, %project_id, "Failed to link the installation of the GitHub App to the project")
-            }
+            warn!(error = %e, installation_id, "Failed to delete the Git host connection for the installation of the GitHub App");
+        }
+        return;
+    }
+
+    let Some(creator) = gradient_db::access::superusers(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .next()
+    else {
+        warn!(
+            installation_id,
+            "No instance administrator for the connection to the Git host for the installation of the GitHub App. Skipping."
+        );
+        return;
+    };
+    let account_login = payload.installation.account.login.as_str();
+    match gradient_ci::github_app_connection::upsert_github_app_installation_git_host_connection(
+        db.inner(),
+        installation_id,
+        Some(account_login),
+        creator.id,
+    )
+    .await
+    {
+        Ok(connection) => {
+            info!(installation_id, connection = %connection.id, account_login, "Saved a connection to the Git host for an installation of the GitHub App")
+        }
+        Err(e) => {
+            warn!(error = %e, installation_id, "Failed to save the connection to the Git host for the installation of the GitHub App.")
         }
     }
 }
 
-pub(crate) fn github_full_name(repo_url: &str) -> Option<String> {
-    let lower = repo_url.trim().to_ascii_lowercase();
-    let is_github = lower.starts_with("github:")
-        || lower.starts_with("git+github:")
-        || url_host(&lower).as_deref() == Some("github.com");
-    if !is_github {
-        return None;
-    }
-
-    let (owner, repo) = parse_owner_repo(repo_url.trim())?;
-    (!repo.contains('/')).then(|| format!("{owner}/{repo}").to_ascii_lowercase())
-}
-
-pub(super) fn normalize_repo_url(url: &str) -> String {
-    let s = RepositoryLocation::of(url.trim())
-        .clone_url
-        .trim_end_matches('/');
-    let s = s.strip_suffix(".git").unwrap_or(s);
-    if let Some(rest) = s.strip_prefix("git@")
-        && let Some((host, path)) = rest.split_once(':')
-    {
-        return format!("https://{}/{}", host, path);
-    }
-    s.to_string()
-}
-
-pub(super) fn repo_identity(url: &str) -> Option<String> {
+pub(crate) fn repo_identity(url: &str) -> Option<String> {
     parse_owner_repo(url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
-/// A project-wide inbound integration would otherwise fan out to sibling tasks. Empty urls are
-/// matching all.
+/// A connection to a Git host that many tasks share can otherwise fan out to sibling tasks. An empty URL list can match every task.
 pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repository: &str) -> bool {
     let mut keys = event_repo_urls
         .iter()
@@ -161,87 +88,42 @@ pub(super) fn task_serves_repository(task_repository: &str, owner: &str, repo: &
 pub(super) async fn resolve_github_app_targets(
     db: &WebDb,
     installation_id: i64,
-    repository_urls: &[String],
     client_ip: std::net::IpAddr,
-) -> Vec<IntegrationId> {
+) -> Vec<GitHostConnectionId> {
     use crate::ip_allowlist::is_allowed as ip_allowed;
-    use std::collections::HashSet;
 
-    let installs = gradient_db::integrations::installations_by_github_id(db, installation_id)
-        .await
-        .unwrap_or_default();
-
-    if installs.is_empty() {
-        return Vec::new();
-    }
-
-    let webhook_urls: HashSet<String> = repository_urls
-        .iter()
-        .map(|u| normalize_repo_url(u))
-        .collect();
-
-    let project_ids: Vec<ProjectId> = installs.iter().map(|i| i.project).collect();
-    let install_ids: Vec<GithubInstallationId> = installs.iter().map(|i| i.id).collect();
-
-    let mut tasks_by_project: HashMap<ProjectId, Vec<MTask>> = HashMap::new();
-    match gradient_db::tasks::of_projects(db, project_ids.clone()).await {
-        Ok(rows) => {
-            for row in rows {
-                tasks_by_project.entry(row.project).or_default().push(row);
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "resolve_github_app_targets: task lookup failed");
+    let connection = match gradient_db::git_host_connections::by_github_installation_id(
+        db,
+        installation_id,
+    )
+    .await
+    {
+        Ok(Some(connection)) => connection,
+        Ok(None) => {
+            warn!(
+                installation_id,
+                "The webhook of the GitHub App received no handling: no connection to the Git host for that installation."
+            );
             return Vec::new();
         }
-    }
-
-    let integrations_by_install: HashMap<GithubInstallationId, MIntegration> =
-        gradient_db::integrations::inbound_github_of_installations(db, project_ids, install_ids)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|i| i.github_installation.map(|inst| (inst, i)))
-            .collect();
-
-    let mut integrations = Vec::new();
-    for inst in installs {
-        let project_id = inst.project;
-        let has_match = tasks_by_project
-            .get(&project_id)
-            .into_iter()
-            .flatten()
-            .any(|p| webhook_urls.contains(&normalize_repo_url(&p.repository)));
-        if !has_match {
-            continue;
+        Err(e) => {
+            warn!(error = %e, installation_id, "resolve_github_app_targets: connection lookup failed");
+            return Vec::new();
         }
-        let integration = integrations_by_install.get(&inst.id).cloned();
-        match integration {
-            Some(i) => {
-                let allowlist = i.allowed_ips.clone().unwrap_or_default();
-                if !ip_allowed(client_ip, &allowlist) {
-                    warn!(
-                        %project_id,
-                        integration_id = %i.id,
-                        %client_ip,
-                        "resolve_github_app_targets: source IP not allowed, skipping integration"
-                    );
-                    continue;
-                }
-                integrations.push(i.id);
-            }
-            None => warn!(
-                %project_id,
-                "resolve_github_app_targets: project has matching task but no inbound github integration row"
-            ),
-        }
+    };
+    if !ip_allowed(
+        client_ip,
+        connection.allowed_ips.as_deref().unwrap_or_default(),
+    ) {
+        warn!(installation_id, connection = %connection.id, %client_ip, "GitHub App webhook from a source IP that is not on the allowed_ips list for this connection. Ignore this webhook.");
+        return Vec::new();
     }
-    integrations
+    vec![connection.id]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{event_repo_matches_task, github_full_name, normalize_repo_url};
+    use super::event_repo_matches_task;
 
     #[test]
     fn a_task_url_with_a_flake_directory_matches_its_push() {
@@ -249,10 +131,6 @@ mod tests {
             &["https://github.com/acme/infra.git".into()],
             "https://github.com/acme/infra?dir=nix"
         ));
-        assert_eq!(
-            normalize_repo_url("https://github.com/acme/infra.git?dir=nix"),
-            "https://github.com/acme/infra"
-        );
     }
 
     #[test]
@@ -291,62 +169,5 @@ mod tests {
     fn event_repo_unparsable_task_never_matches() {
         let event = ["https://github.com/NuschtOS/search".to_string()];
         assert!(!event_repo_matches_task(&event, "not-a-url"));
-    }
-
-    #[test]
-    fn github_full_name_parses_every_url_form() {
-        for url in [
-            "https://github.com/NuschtOS/search.git",
-            "https://github.com/NuschtOS/search",
-            "git+https://github.com/NuschtOS/search",
-            "git@github.com:NuschtOS/search.git",
-            "github:NuschtOS/search",
-            "git+github:NuschtOS/search",
-        ] {
-            assert_eq!(
-                github_full_name(url).as_deref(),
-                Some("nuschtos/search"),
-                "{url}"
-            );
-        }
-    }
-
-    #[test]
-    fn github_full_name_rejects_non_github_hosts() {
-        assert_eq!(github_full_name("https://gitlab.com/NuschtOS/search"), None);
-        assert_eq!(
-            github_full_name("https://notgithub.com.evil.example/acme/widgets"),
-            None
-        );
-        assert_eq!(
-            github_full_name("https://evil.example/github.com/acme/widgets"),
-            None
-        );
-        assert_eq!(
-            github_full_name("https://github.com/a/b/../../../orgs/x/y"),
-            None
-        );
-        assert_eq!(
-            github_full_name("https://github.com/acme/widgets/extra"),
-            None
-        );
-        assert_eq!(
-            github_full_name("https://gitea.example.com/acme/widgets"),
-            None
-        );
-    }
-
-    #[test]
-    fn normalize_repo_url_collapses_every_variant_to_the_canonical_form() {
-        let canonical = normalize_repo_url("https://github.com/owner/repo");
-        assert_eq!(canonical, "https://github.com/owner/repo");
-        for url in [
-            "https://github.com/owner/repo.git",
-            "https://github.com/owner/repo/",
-            "git@github.com:owner/repo.git",
-            "  https://github.com/owner/repo  ",
-        ] {
-            assert_eq!(normalize_repo_url(url), canonical, "input was {url}");
-        }
     }
 }

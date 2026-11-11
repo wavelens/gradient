@@ -64,7 +64,7 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
         }
         Param::TaskId => "SELECT id AS v FROM task ORDER BY id LIMIT 1",
         Param::TaskActionId => "SELECT id AS v FROM task_action ORDER BY id LIMIT 1",
-        Param::IntegrationId => "SELECT id AS v FROM integration ORDER BY id LIMIT 1",
+        Param::GitHostConnectionId => "SELECT id AS v FROM git_host_connection ORDER BY id LIMIT 1",
         Param::CommitPrefixLow => {
             "SELECT rpad(left(encode(c.hash, 'hex'), 7), 40, '0') AS v FROM commit c \
              WHERE EXISTS (SELECT 1 FROM evaluation e WHERE e.commit = c.id) ORDER BY c.id LIMIT 1"
@@ -104,7 +104,7 @@ fn shape(param: &Param) -> Option<Shape> {
         | Param::CacheId
         | Param::TaskId
         | Param::TaskActionId
-        | Param::IntegrationId => Shape::Uuid,
+        | Param::GitHostConnectionId => Shape::Uuid,
         Param::DerivationIds(n)
         | Param::OrphanDerivationIds(n)
         | Param::SharedBuildIds(n)
@@ -234,7 +234,7 @@ mod tests {
             Param::CacheId,
             Param::TaskId,
             Param::TaskActionId,
-            Param::IntegrationId,
+            Param::GitHostConnectionId,
             Param::CommitPrefixLow,
             Param::CommitPrefixHigh,
         ] {

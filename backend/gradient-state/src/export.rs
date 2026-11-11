@@ -6,16 +6,17 @@
 
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheProject, StateCacheRoleEntry,
-    StateCacheTeam, StateConfiguration, StateFlakeInputOverride, StateIntegration,
+    StateCacheTeam, StateConfiguration, StateFlakeInputOverride, StateGitHostConnection,
     StateNewProjectGrant, StateProject, StateProjectMemberEntry, StateProjectTeam, StateRole,
     StateTask, StateTeam, StateTeamMember, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
-use gradient_ci::IntegrationKind;
+use gradient_db::git_host_connections::GitHostConnectionOwnerByDatabaseId;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
 use gradient_entity::team_project::TeamGrantSource;
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_types::actions::{ActionConfig, ActionType};
+use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::permissions::{
     cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec,
 };
@@ -34,9 +35,7 @@ const SECRET_KEYS: &[&str] = &[
     "webhook_url_file",
 ];
 
-/// The snapshot is covering the live system, not only state-managed rows. Rows an operator cannot
-/// hand-author are excluded. These are the `build-request` task, server-managed GitHub integration
-/// rows, Gradient.CI connections, members added through an SSO group and the built-in `Admin`/`Write`/`View` roles.
+/// The scope of the snapshot is the whole running system, not only state-managed rows. Rows that an admin can't write by hand stay out. These rows are `build-request` tasks, Gradient.CI connections, members added through SSO groups, and built-in `Admin`/`Write`/`View` roles.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
     let users = gradient_entity::user::Entity::find().all(db).await?;
     let projects = gradient_entity::project::Entity::find().all(db).await?;
@@ -66,7 +65,9 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .filter(gradient_entity::team_worker::Column::GradientCi.eq(false))
         .all(db)
         .await?;
-    let integrations = gradient_entity::integration::Entity::find().all(db).await?;
+    let connections = gradient_entity::git_host_connection::Entity::find()
+        .all(db)
+        .await?;
     let project_users = gradient_entity::project_user::Entity::find()
         .all(db)
         .await?;
@@ -84,9 +85,6 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let overrides = gradient_entity::task_flake_input_override::Entity::find()
         .all(db)
         .await?;
-    let github_installs = gradient_entity::github_installation::Entity::find()
-        .all(db)
-        .await?;
     let managed_secrets = gradient_entity::project_secret::Entity::find()
         .filter(gradient_entity::project_secret::Column::Managed.eq(true))
         .all(db)
@@ -97,8 +95,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let cache_name = id_name_map(caches.iter().map(|c| (c.id, c.name.clone())));
     let role_name = id_name_map(roles.iter().map(|r| (r.id, r.name.clone())));
     let cache_role_name = id_name_map(cache_roles.iter().map(|r| (r.id, r.name.clone())));
-    let integration_name = id_name_map(integrations.iter().map(|i| (i.id, i.name.clone())));
-    let github_install_by_id: HashMap<_, _> = github_installs.iter().map(|g| (g.id, g)).collect();
+    let connection_name = id_name_map(connections.iter().map(|c| (c.id, c.name.clone())));
     let team_name = id_name_map(teams.iter().map(|t| (t.id, t.name.clone())));
 
     let mut config = StateConfiguration {
@@ -109,7 +106,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         roles: HashMap::new(),
         api_keys: HashMap::new(),
         workers: HashMap::new(),
-        integrations: HashMap::new(),
+        git_host_connections: HashMap::new(),
         teams: HashMap::new(),
     };
 
@@ -168,12 +165,12 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         let task_triggers: Vec<StateTrigger> = triggers
             .iter()
             .filter(|t| t.task == p.id)
-            .filter_map(|t| export_trigger(t, &integration_name))
+            .filter_map(export_trigger)
             .collect();
         let task_actions = actions
             .iter()
             .filter(|a| a.task == p.id)
-            .filter_map(|a| export_action(a, &integration_name, &task_name))
+            .filter_map(|a| export_action(a, &connection_name, &task_name))
             .collect();
         let flake_input_overrides = overrides
             .iter()
@@ -189,6 +186,9 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             })
             .collect();
         let mut task = export_task(p, &project_name, &username);
+        task.git_host_connection = p
+            .git_host_connection
+            .and_then(|id| connection_name.get(&id).cloned());
         task.triggers = (!task_triggers.is_empty()).then_some(task_triggers);
         task.flake_input_overrides = flake_input_overrides;
         task.actions = task_actions;
@@ -354,34 +354,46 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         );
     }
 
-    for i in &integrations {
-        let install = i
-            .github_installation
-            .and_then(|fk| github_install_by_id.get(&fk));
-
-        config.integrations.insert(
-            i.name.clone(),
-            StateIntegration {
-                name: i.name.clone(),
-                display_name: Some(i.display_name.clone()),
-                project: name_or_blank(&project_name, i.project),
-                kind: match i.kind {
-                    IntegrationKind::Inbound => "inbound",
-                    IntegrationKind::Outbound => "outbound",
-                }
-                .to_string(),
-                git_host_type: i.git_host_type.as_path_segment().to_string(),
+    for c in &connections {
+        let owner = match GitHostConnectionOwnerByDatabaseId::of(c) {
+            GitHostConnectionOwnerByDatabaseId::Instance => GitHostConnectionOwner::Instance,
+            GitHostConnectionOwnerByDatabaseId::Team(id) => GitHostConnectionOwner::Team {
+                name: name_or_blank(&team_name, id),
+            },
+            GitHostConnectionOwnerByDatabaseId::Project(id) => GitHostConnectionOwner::Project {
+                name: name_or_blank(&project_name, id),
+            },
+        };
+        config.git_host_connections.insert(
+            build_exported_git_host_connection_label(&owner, &c.name),
+            StateGitHostConnection {
+                name: c.name.clone(),
+                display_name: Some(c.display_name.clone()),
+                owner: owner.to_string(),
+                git_host_type: c.git_host_type.as_path_segment().to_string(),
                 secret_file: None,
-                endpoint_url: i.endpoint_url.clone(),
+                base_url: c.base_url.clone(),
                 access_token_file: None,
-                installation_id: install.map(|g| g.installation_id),
-                account_login: install.and_then(|g| g.account_login.clone()),
-                created_by: name_or_blank(&username, i.created_by),
+                receives_events: c.receives_events,
+                reports_status: c.reports_status,
+                installation_id: c.github_installation_id,
+                account_login: c.account_login.clone(),
+                created_by: name_or_blank(&username, c.created_by),
             },
         );
     }
 
     Ok(config)
+}
+
+fn build_exported_git_host_connection_label(owner: &GitHostConnectionOwner, name: &str) -> String {
+    match owner {
+        GitHostConnectionOwner::Instance => name.to_owned(),
+        GitHostConnectionOwner::Team { name: owner }
+        | GitHostConnectionOwner::Project { name: owner } => {
+            format!("{owner}-{name}")
+        }
+    }
 }
 
 fn export_project(
@@ -433,6 +445,8 @@ fn export_task(
         only_evaluate: task.only_evaluate,
         flake_input_overrides: HashMap::new(),
         actions: Vec::new(),
+        git_host_connection: None,
+        report_status: task.report_status,
     }
 }
 
@@ -493,12 +507,9 @@ fn export_team_worker(
     }
 }
 
-fn export_trigger(
-    t: &gradient_entity::task_trigger::Model,
-    integration_name: &HashMap<IntegrationId, String>,
-) -> Option<StateTrigger> {
+fn export_trigger(t: &gradient_entity::task_trigger::Model) -> Option<StateTrigger> {
     let cfg = TriggerConfig::parse_row(t.trigger_type, &t.config).ok()?;
-    let (trigger_type, integration, config) = match cfg {
+    let (trigger_type, config) = match cfg {
         TriggerConfig::Polling {
             interval_secs,
             branch,
@@ -508,10 +519,9 @@ fn export_trigger(
             if let Some(b) = branch {
                 c.insert("branch".into(), b.into());
             }
-            (TriggerType::Polling, None, c)
+            (TriggerType::Polling, c)
         }
         TriggerConfig::ReporterPush {
-            integration_id,
             branches,
             tags,
             releases_only,
@@ -524,14 +534,9 @@ fn export_trigger(
             if include_flake_inputs {
                 c.insert("include_flake_inputs".into(), include_flake_inputs.into());
             }
-            (
-                TriggerType::ReporterPush,
-                integration_name.get(&integration_id).cloned(),
-                c,
-            )
+            (TriggerType::ReporterPush, c)
         }
         TriggerConfig::ReporterPullRequest {
-            integration_id,
             branches,
             actions,
             require_approval,
@@ -540,11 +545,7 @@ fn export_trigger(
             c.insert("branches".into(), branches.into());
             c.insert("actions".into(), actions.into());
             c.insert("require_approval".into(), require_approval.into());
-            (
-                TriggerType::ReporterPullRequest,
-                integration_name.get(&integration_id).cloned(),
-                c,
-            )
+            (TriggerType::ReporterPullRequest, c)
         }
         TriggerConfig::Time { cron, branch } => {
             let mut c = serde_json::Map::new();
@@ -552,12 +553,11 @@ fn export_trigger(
             if let Some(b) = branch {
                 c.insert("branch".into(), b.into());
             }
-            (TriggerType::Time, None, c)
+            (TriggerType::Time, c)
         }
     };
     Some(StateTrigger {
         trigger_type,
-        integration,
         config: serde_json::Value::Object(config),
         active: t.active,
         is_default: t.is_default,
@@ -573,7 +573,7 @@ fn enum_str<T: serde::Serialize>(value: &T) -> String {
 
 pub(crate) fn export_action(
     a: &gradient_entity::task_action::Model,
-    integration_name: &HashMap<IntegrationId, String>,
+    connection_name: &HashMap<GitHostConnectionId, String>,
     task_name: &HashMap<TaskId, String>,
 ) -> Option<super::StateAction> {
     let cfg: ActionConfig = serde_json::from_value(a.config.clone()).ok()?;
@@ -595,16 +595,8 @@ pub(crate) fn export_action(
             c.insert("url".into(), url.into());
             (ActionType::SendWebRequest, c)
         }
-        ActionConfig::GitHostStatusReport { integration_id } => {
-            let mut c = serde_json::Map::new();
-            c.insert(
-                "integration".into(),
-                integration_name.get(&integration_id).cloned()?.into(),
-            );
-            (ActionType::GitHostStatusReport, c)
-        }
         ActionConfig::OpenPr {
-            integration_id,
+            git_host_connection_id,
             generator,
             granularity,
             verify_gate,
@@ -615,8 +607,11 @@ pub(crate) fn export_action(
         } => {
             let mut c = serde_json::Map::new();
             c.insert(
-                "integration".into(),
-                integration_name.get(&integration_id).cloned()?.into(),
+                "git_host_connection".into(),
+                connection_name
+                    .get(&git_host_connection_id)
+                    .cloned()?
+                    .into(),
             );
             c.insert("generator".into(), enum_str(&generator).into());
             c.insert("granularity".into(), enum_str(&granularity).into());

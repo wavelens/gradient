@@ -14,8 +14,7 @@ mod start_evaluation;
 mod web_request;
 
 pub(crate) use exec_tree_pr::execute_exec_tree_pr;
-pub(crate) use git_host_status::execute_git_host_status_report;
-pub use git_host_status::{reporter_for_task, verify_git_host_action};
+pub use git_host_status::verify_git_host_action;
 pub(crate) use mail::execute_send_mail;
 pub(crate) use matrix::execute_send_matrix_message;
 pub(crate) use open_pr::execute_open_pr;

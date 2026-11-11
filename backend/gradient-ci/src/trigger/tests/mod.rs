@@ -310,7 +310,7 @@ fn open_pr_action(task_id: TaskId) -> MTaskAction {
         name: "updater".into(),
         action_type: ActionType::OpenPr,
         config: serde_json::to_value(ActionConfig::OpenPr {
-            integration_id: IntegrationId::now_v7(),
+            git_host_connection_id: GitHostConnectionId::now_v7(),
             generator: PatchGeneratorKind::FlakeLock,
             granularity: PrGranularity::PerRun,
             verify_gate: VerifyGate::Build,

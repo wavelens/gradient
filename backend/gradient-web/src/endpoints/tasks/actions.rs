@@ -8,6 +8,7 @@ use super::DeletedResponse;
 use super::refusal::TaskRefusal;
 use crate::api_spec::TaskPath;
 use crate::audit::Audit;
+use crate::endpoints::git_host_connections::GitHostConnectionRefusal;
 use crate::endpoints::webhooks::{ActionDeliveryItem, DeliveryDetail, DeliveryListItem};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -18,10 +19,10 @@ use axum::Json;
 use axum::extract::Query;
 use axum::extract::State;
 use chrono::Utc;
-use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::git_host_connections::list_git_host_connections_available_to_project;
 use gradient_types::actions::{ActionConfig, ActionType, is_matrix_room_id};
 use gradient_types::events::audit::Action;
 use gradient_types::events::{EventOwner, names};
@@ -152,14 +153,39 @@ async fn validate_start_target(
     Ok(())
 }
 
+async fn validate_open_pr_git_host_connection(
+    db: &WebDb,
+    project: &MProject,
+    cfg: &ActionConfig,
+) -> WebResult<()> {
+    let ActionConfig::OpenPr {
+        git_host_connection_id,
+        ..
+    } = cfg
+    else {
+        return Ok(());
+    };
+    let connection = list_git_host_connections_available_to_project(db, project)
+        .await?
+        .into_iter()
+        .find(|c| c.id == *git_host_connection_id)
+        .ok_or(GitHostConnectionRefusal::NotAvailableToProject {
+            id: *git_host_connection_id,
+        })?;
+    if !connection.reports_status {
+        return Err(GitHostConnectionRefusal::ConnectionCannotReportStatus {
+            name: connection.name,
+        }
+        .into());
+    }
+    Ok(())
+}
+
 fn validate_task_action_events_for_type(
     action_type: ActionType,
     events: &[String],
 ) -> Result<(), TaskRefusal> {
-    let fixed_events = matches!(
-        action_type,
-        ActionType::GitHostStatusReport | ActionType::OpenPr
-    );
+    let fixed_events = action_type == ActionType::OpenPr;
     match (fixed_events, events.is_empty()) {
         (true, false) => Err(TaskRefusal::CustomEventsNotAllowed),
         (false, true) => Err(TaskRefusal::ActionHasNoEvents),
@@ -293,12 +319,7 @@ pub async fn create_action(
         return Err(TaskRefusal::NoMailRecipients.into());
     }
 
-    ensure_task_action_integration_is_outbound_and_belongs_to_project(
-        &state.web_db,
-        project.id,
-        &body.config,
-    )
-    .await?;
+    validate_open_pr_git_host_connection(&state.web_db, &project, &body.config).await?;
 
     let existing = gradient_db::actions::by_name(&state.web_db, proj.id, &body.name).await?;
     if existing.is_some() {
@@ -414,17 +435,13 @@ pub async fn update_action(
         validate_destination(new_cfg)?;
         validate_mail_teams(&state.web_db, project.id, new_cfg).await?;
         validate_start_target(&state.web_db, project.id, new_cfg).await?;
-        if let ActionConfig::SendMail { recipients, .. } = new_cfg
-            && recipients.is_empty()
-        {
-            return Err(TaskRefusal::NoMailRecipients.into());
+        validate_open_pr_git_host_connection(&state.web_db, &project, new_cfg).await?;
+        match new_cfg {
+            ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
+                return Err(TaskRefusal::NoMailRecipients.into());
+            }
+            _ => {}
         }
-        ensure_task_action_integration_is_outbound_and_belongs_to_project(
-            &state.web_db,
-            project.id,
-            new_cfg,
-        )
-        .await?;
     }
 
     if let Some(ref evs) = body.events {
@@ -519,7 +536,7 @@ pub async fn delete_action(
     operation_id = "testTaskAction",
     tag = "actions",
     summary = "Fire action now (synthetic test)",
-    description = "Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host. All tests enter the action's delivery history. Connectivity checks enter that history as event `test.connectivity`. Return 400 for an invalid action config on test failure. Return 502 for an unreachable receiver or a rejected request. The message can include the reason.",
+    description = "Run an action right now with a synthetic test event and no event matching. Skip the action run for `open_pr` actions. Run a connectivity check against the task repository instead. No changes occur. Git hosts reject pull requests against placeholder commits. All tests go into the delivery history of the action. Store the connectivity check there as event `test.connectivity`. Return 400 for an invalid action configuration. Return 502 for an unreachable receiver or a rejected request. The message can include the reason.",
     params(TaskPath, ("id" = TaskActionId, Path)),
     responses((status = OK, description = "Action fired", body = serde_json::Value), WebError)
 )]
@@ -540,12 +557,8 @@ pub async fn test_action(
 
     let action_type = action.action_type;
 
-    // Git-host-integration actions cannot be test-fired against a synthetic commit. The Git host is
-    // rejecting the placeholder owner, repo and sha.
-    if matches!(
-        action_type,
-        ActionType::GitHostStatusReport | ActionType::OpenPr
-    ) {
+    // Git hosts reject pull requests for the placeholder owner, repository, and commit that synthetic tests use. The open_pr action can only check connectivity.
+    if action_type == ActionType::OpenPr {
         gradient_ci::actions::test_git_host_action(&ci, &action, &proj.repository)
             .await
             .map_err(test_failure)?;
@@ -778,23 +791,6 @@ pub async fn get_delivery(
         .or_not_found(Resource::Delivery)?;
 
     Ok(ok_json(r.into()))
-}
-
-async fn ensure_task_action_integration_is_outbound_and_belongs_to_project(
-    db: &impl sea_orm::ConnectionTrait,
-    project: ProjectId,
-    config: &ActionConfig,
-) -> WebResult<()> {
-    let (ActionConfig::GitHostStatusReport { integration_id }
-    | ActionConfig::OpenPr { integration_id, .. }) = config
-    else {
-        return Ok(());
-    };
-    match gradient_db::integrations::by_id_in_project(db, project, *integration_id).await? {
-        Some(row) if row.kind == IntegrationKind::Outbound => Ok(()),
-        Some(_) => Err(TaskRefusal::IntegrationNotOutbound.into()),
-        None => Err(TaskRefusal::OutboundIntegrationNotFound.into()),
-    }
 }
 
 #[cfg(test)]

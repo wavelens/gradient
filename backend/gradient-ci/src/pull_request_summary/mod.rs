@@ -8,8 +8,8 @@ mod load;
 mod render;
 
 use crate::actions::evaluation_rows::load_evaluation_rows;
-use crate::actions::reporter_for_task;
 use crate::context::CiContext;
+use crate::task_commit_status_posting::reporter_for_task;
 use crate::{ActionError, parse_owner_repo};
 use anyhow::{Context, Result};
 use gradient_db::evaluations::branch::newest_on_branch;

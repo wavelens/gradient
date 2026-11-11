@@ -6,19 +6,12 @@
 
 use super::DynError;
 use super::StateApplicator;
-use gradient_ci::IntegrationKind;
+use gradient_db::git_host_connections::{self, GitHostConnectionOwnerByDatabaseId};
+use gradient_db::lookup::by_id;
 use gradient_entity::*;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ConnectionTrait, EntityTrait};
 use std::collections::HashMap;
-
-pub(crate) fn parse_integration_kind(kind: &str) -> Option<IntegrationKind> {
-    match kind {
-        "inbound" => Some(IntegrationKind::Inbound),
-        "outbound" => Some(IntegrationKind::Outbound),
-        _ => None,
-    }
-}
 
 pub(crate) fn lookup_id<T: Copy>(
     map: &HashMap<String, T>,
@@ -30,35 +23,38 @@ pub(crate) fn lookup_id<T: Copy>(
         .ok_or_else(|| format!("{} '{}' not found", kind, name).into())
 }
 
-/// The GitHub App is seeding two integrations per project sharing `name = "github"`, one inbound
-/// and one outbound. A collect ignoring `kind` is collapsing them into one arbitrary entry. The
-/// webhook resolver then misses the outbound id and the trigger never fires.
-pub(crate) async fn inbound_integrations_by_name<C: ConnectionTrait>(
+pub(crate) async fn load_git_host_connections_usable_by_project_by_name<C: ConnectionTrait>(
     db: &C,
     project_id: ProjectId,
-) -> Result<HashMap<String, IntegrationId>, sea_orm::DbErr> {
-    Ok(integration::Entity::find()
-        .filter(integration::Column::Project.eq(project_id))
-        .filter(integration::Column::Kind.eq(i16::from(IntegrationKind::Inbound)))
-        .all(db)
+) -> Result<HashMap<String, MGitHostConnection>, DynError> {
+    let project = by_id::<EProject, _>(db, project_id)
         .await?
-        .into_iter()
-        .map(|r| (r.name, r.id))
-        .collect())
+        .ok_or_else(|| format!("Project '{}' not found", project_id))?;
+    let usable =
+        git_host_connections::list_git_host_connections_available_to_project(db, &project).await?;
+    Ok(keep_closest_owner_git_host_connection_for_each_name(usable))
 }
 
-pub(crate) async fn outbound_integrations_by_name<C: ConnectionTrait>(
-    db: &C,
-    project_id: ProjectId,
-) -> Result<HashMap<String, IntegrationId>, sea_orm::DbErr> {
-    Ok(integration::Entity::find()
-        .filter(integration::Column::Project.eq(project_id))
-        .filter(integration::Column::Kind.eq(i16::from(IntegrationKind::Outbound)))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|r| (r.name, r.id))
-        .collect())
+pub(crate) fn keep_closest_owner_git_host_connection_for_each_name(
+    connections: Vec<MGitHostConnection>,
+) -> HashMap<String, MGitHostConnection> {
+    let rank = |connection: &MGitHostConnection| match GitHostConnectionOwnerByDatabaseId::of(
+        connection,
+    ) {
+        GitHostConnectionOwnerByDatabaseId::Project(_) => 0,
+        GitHostConnectionOwnerByDatabaseId::Team(_) => 1,
+        GitHostConnectionOwnerByDatabaseId::Instance => 2,
+    };
+    let mut closest: HashMap<String, MGitHostConnection> = HashMap::new();
+    for connection in connections {
+        match closest.get(&connection.name) {
+            Some(kept) if rank(kept) <= rank(&connection) => {}
+            _ => {
+                closest.insert(connection.name.clone(), connection);
+            }
+        }
+    }
+    closest
 }
 
 impl<'a> StateApplicator<'a> {
@@ -74,45 +70,45 @@ impl<'a> StateApplicator<'a> {
 }
 
 #[cfg(test)]
-mod inbound_integration_lookup_tests {
+mod closest_owner_tests {
     use super::*;
-    use gradient_fixtures::ids::project_id;
-    use gradient_fixtures::mock::mock_db;
 
-    #[tokio::test]
-    async fn inbound_integrations_lookup_sql_filters_kind_inbound() {
-        let db = mock_db()
-            .append_query_results([Vec::<integration::Model>::new()])
-            .into_connection();
+    fn connection(
+        name: &str,
+        project: Option<ProjectId>,
+        owner_team: Option<TeamId>,
+    ) -> MGitHostConnection {
+        MGitHostConnection {
+            id: GitHostConnectionId::now_v7(),
+            name: name.into(),
+            project,
+            owner_team,
+            ..Default::default()
+        }
+    }
 
-        inbound_integrations_by_name(&db, project_id())
-            .await
-            .unwrap();
+    #[test]
+    fn project_connection_wins_over_team_and_team_over_instance() {
+        let (project, team) = (ProjectId::now_v7(), TeamId::now_v7());
+        let instance_forge = connection("forge", None, None);
+        let team_forge = connection("forge", None, Some(team));
+        let project_forge = connection("forge", Some(project), None);
+        let team_only = connection("team-only", None, Some(team));
+        let instance_only = connection("instance-only", None, None);
+        let instance_team_only = connection("team-only", None, None);
 
-        let logs = db.into_transaction_log();
-        let select = logs
-            .iter()
-            .flat_map(|t| t.statements())
-            .find(|s| s.sql.to_lowercase().contains("from \"integration\""))
-            .expect("expected a SELECT FROM integration statement");
+        let closest = keep_closest_owner_git_host_connection_for_each_name(vec![
+            instance_forge,
+            team_forge,
+            project_forge.clone(),
+            instance_team_only,
+            team_only.clone(),
+            instance_only.clone(),
+        ]);
 
-        assert!(
-            select.sql.contains("\"kind\""),
-            "SELECT must filter by kind column: {}",
-            select.sql,
-        );
-
-        let inbound = i16::from(IntegrationKind::Inbound);
-        let bound: Vec<sea_orm::Value> = select
-            .values
-            .as_ref()
-            .map(|v| v.0.clone())
-            .unwrap_or_default();
-        assert!(
-            bound
-                .iter()
-                .any(|v| matches!(v, sea_orm::Value::SmallInt(Some(n)) if *n == inbound)),
-            "SELECT must bind inbound kind as SmallInt({inbound}); bound values: {bound:?}",
-        );
+        assert_eq!(closest.len(), 3);
+        assert_eq!(closest["forge"].id, project_forge.id);
+        assert_eq!(closest["team-only"].id, team_only.id);
+        assert_eq!(closest["instance-only"].id, instance_only.id);
     }
 }

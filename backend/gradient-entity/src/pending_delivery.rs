@@ -42,6 +42,8 @@ pub enum PendingDeliveryKind {
     TriggerFire = 6,
     #[sea_orm(num_value = 7)]
     EvalCacheCompact = 7,
+    #[sea_orm(num_value = 8)]
+    TaskEventCommitStatusPost = 8,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

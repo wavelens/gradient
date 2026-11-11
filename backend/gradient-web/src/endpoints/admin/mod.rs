@@ -14,6 +14,7 @@ pub mod storage;
 pub mod tasks;
 pub mod workers;
 
+use crate::endpoints::git_host_connections;
 use crate::endpoints::webhooks::{self, WebhookMount};
 use crate::error::{WebResult, require_superuser};
 use axum::Extension;
@@ -42,6 +43,18 @@ pub fn admin_router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(config::get_server_options_for_instance_admins))
         .routes(routes!(github_app::request_manifest))
         .routes(routes!(github_app::credentials))
+        .routes(routes!(
+            git_host_connections::admin::list_instance_git_host_connections,
+            git_host_connections::admin::create_instance_git_host_connection
+        ))
+        .routes(routes!(
+            git_host_connections::admin::get_instance_git_host_connection,
+            git_host_connections::admin::patch_instance_git_host_connection,
+            git_host_connections::admin::delete_instance_git_host_connection
+        ))
+        .routes(routes!(
+            git_host_connections::admin::list_instance_git_host_connection_deliveries
+        ))
         .routes(routes!(maintenance::start_deep_gc))
         .routes(routes!(maintenance::start_gc_round_now))
         .routes(routes!(storage::get_storage))

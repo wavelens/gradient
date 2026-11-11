@@ -10,21 +10,6 @@ use serde::Deserialize;
 pub(super) struct GitHubInstallationPayload {
     pub(super) action: String,
     pub(super) installation: GitHubInstallation,
-    pub(super) sender: Option<InstallationSender>,
-    #[serde(default)]
-    pub(super) repositories: Vec<GitHubRepoRef>,
-    #[serde(default)]
-    pub(super) repositories_added: Vec<GitHubRepoRef>,
-}
-
-impl GitHubInstallationPayload {
-    pub(super) fn installed_full_names(&self) -> std::collections::HashSet<String> {
-        self.repositories
-            .iter()
-            .chain(self.repositories_added.iter())
-            .map(|r| r.full_name.to_ascii_lowercase())
-            .collect()
-    }
 }
 
 #[derive(Deserialize)]
@@ -35,16 +20,6 @@ pub(super) struct GitHubInstallation {
 
 #[derive(Deserialize)]
 pub(super) struct GitHubAccount {
-    pub(super) login: String,
-}
-
-#[derive(Deserialize)]
-pub(super) struct GitHubRepoRef {
-    pub(super) full_name: String,
-}
-
-#[derive(Deserialize)]
-pub(super) struct InstallationSender {
     pub(super) login: String,
 }
 
@@ -159,35 +134,4 @@ pub(super) struct GitlabNoteProject {
 pub(super) struct GitlabNoteMr {
     #[serde(default)]
     pub(super) iid: Option<u64>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::GitHubInstallationPayload;
-
-    #[test]
-    fn installation_payload_collects_full_names_from_both_arrays() {
-        let created: GitHubInstallationPayload = serde_json::from_value(serde_json::json!({
-            "action": "created",
-            "installation": { "id": 1, "account": { "login": "NuschtOS" } },
-            "sender": { "login": "tester" },
-            "repositories": [
-                { "full_name": "NuschtOS/search" },
-                { "full_name": "NuschtOS/nixos-modules" },
-            ],
-        }))
-        .unwrap();
-        let names = created.installed_full_names();
-        assert!(names.contains("nuschtos/search"));
-        assert!(names.contains("nuschtos/nixos-modules"));
-
-        let added: GitHubInstallationPayload = serde_json::from_value(serde_json::json!({
-            "action": "added",
-            "installation": { "id": 1, "account": { "login": "NuschtOS" } },
-            "sender": { "login": "tester" },
-            "repositories_added": [ { "full_name": "NuschtOS/ixx" } ],
-        }))
-        .unwrap();
-        assert!(added.installed_full_names().contains("nuschtos/ixx"));
-    }
 }

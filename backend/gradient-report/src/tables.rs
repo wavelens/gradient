@@ -826,9 +826,9 @@ pub fn exec_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "exec_job_pull_request",
-            "CREATE TABLE exec_job_pull_request (id TEXT, exec_job TEXT, integration TEXT, url TEXT, branch TEXT, number INTEGER, created_at TEXT)",
+            "CREATE TABLE exec_job_pull_request (id TEXT, exec_job TEXT, git_host_connection TEXT, url TEXT, branch TEXT, number INTEGER, created_at TEXT)",
             concat!(
-                "SELECT r.id::text, r.exec_job::text, r.integration::text, r.url::text, r.branch::text, r.number::text, r.created_at::text FROM exec_job_pull_request r WHERE r.exec_job IN (",
+                "SELECT r.id::text, r.exec_job::text, r.git_host_connection::text, r.url::text, r.branch::text, r.number::text, r.created_at::text FROM exec_job_pull_request r WHERE r.exec_job IN (",
                 own_exec_jobs!(),
                 ")"
             ),
@@ -836,7 +836,7 @@ pub fn exec_tables() -> &'static [TableSpec] {
             [
                 "id",
                 "exec_job",
-                "integration",
+                "git_host_connection",
                 "url",
                 "branch",
                 "number",

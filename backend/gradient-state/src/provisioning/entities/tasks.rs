@@ -7,13 +7,13 @@
 use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{
-    inbound_integrations_by_name, lookup_id, outbound_integrations_by_name, read_credential,
+    load_git_host_connections_usable_by_project_by_name, lookup_id, read_credential,
 };
 use crate::config::*;
 use anyhow::{Context, Result};
 use gradient_db::lookup::by_id;
 use gradient_entity::*;
-use gradient_types::triggers::TriggerConfig;
+use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, Iterable,
@@ -30,10 +30,35 @@ impl<'a> StateApplicator<'a> {
         let user_map = self.user_lookup().await?;
         let project_map = self.project_lookup().await?;
         let mut applied = Vec::with_capacity(state_tasks.len());
+        let mut connections_by_project: HashMap<ProjectId, HashMap<String, MGitHostConnection>> =
+            HashMap::new();
 
         for state_task in state_tasks.values() {
             let created_by_id = lookup_id(&user_map, &state_task.created_by, "User")?;
             let project_id = lookup_id(&project_map, &state_task.project, "Project")?;
+
+            let connections = match connections_by_project.entry(project_id) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                    load_git_host_connections_usable_by_project_by_name(self.db, project_id)
+                        .await?,
+                ),
+            };
+            let connection = state_task
+                .git_host_connection
+                .as_deref()
+                .map(|name| {
+                    connections.get(name).ok_or_else(|| {
+                        format!(
+                            "Git host connection '{}' isn't available to project '{}'",
+                            name, state_task.project
+                        )
+                    })
+                })
+                .transpose()?;
+            check_task_git_host_connection_capabilities(state_task, connection)
+                .map_err(|e| format!("Task '{}': {}", state_task.name, e))?;
+            let connection_id = connection.map(|connection| connection.id);
 
             let existing_task = task::Entity::find()
                 .filter(task::Column::Name.eq(&state_task.name))
@@ -61,6 +86,8 @@ impl<'a> StateApplicator<'a> {
                 proj.multi_node_evaluation = Set(state_task.multi_node_evaluation);
                 proj.exec_enabled = Set(state_task.exec_enabled);
                 proj.only_evaluate = Set(state_task.only_evaluate);
+                proj.git_host_connection = Set(connection_id);
+                proj.report_status = Set(state_task.report_status);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!(name = %state_task.name, "Updated managed task");
@@ -88,6 +115,8 @@ impl<'a> StateApplicator<'a> {
                     multi_node_evaluation: state_task.multi_node_evaluation,
                     exec_enabled: state_task.exec_enabled,
                     only_evaluate: state_task.only_evaluate,
+                    git_host_connection: connection_id,
+                    report_status: state_task.report_status,
                     ..Default::default()
                 }
                 .into_active_model();
@@ -103,25 +132,14 @@ impl<'a> StateApplicator<'a> {
                 None => None,
             };
             if let Some(triggers) = &triggers {
-                let inbound_integrations_by_name =
-                    inbound_integrations_by_name(self.db, project_id).await?;
-                let outbound_integrations_by_name =
-                    outbound_integrations_by_name(self.db, project_id).await?;
-
-                apply_task_triggers(
-                    self.db,
-                    &task_row,
-                    triggers,
-                    &inbound_integrations_by_name,
-                    &outbound_integrations_by_name,
-                )
-                .await
-                .map_err(|e| {
-                    format!(
-                        "Failed to apply triggers for task '{}': {}",
-                        state_task.name, e
-                    )
-                })?;
+                apply_task_triggers(self.db, &task_row, triggers)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "Failed to apply triggers for task '{}': {}",
+                            state_task.name, e
+                        )
+                    })?;
             }
 
             self.apply_flake_input_overrides(task_row.id, &state_task.flake_input_overrides)
@@ -137,14 +155,20 @@ impl<'a> StateApplicator<'a> {
         }
 
         for (task_id, created_by_id, project_id, state_task) in applied {
-            self.apply_task_actions(task_id, created_by_id, project_id, state_task)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "Failed to apply actions for task '{}': {}",
-                        state_task.name, e
-                    )
-                })?;
+            self.apply_task_actions(
+                task_id,
+                created_by_id,
+                project_id,
+                &connections_by_project[&project_id],
+                state_task,
+            )
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to apply actions for task '{}': {}",
+                    state_task.name, e
+                )
+            })?;
         }
 
         Ok(())
@@ -155,11 +179,11 @@ impl<'a> StateApplicator<'a> {
         task_id: TaskId,
         created_by: UserId,
         project_id: ProjectId,
+        connections: &HashMap<String, MGitHostConnection>,
         state_task: &StateTask,
     ) -> Result<(), DynError> {
         let task_name = state_task.name.as_str();
         let desired = &state_task.actions;
-        let outbound = outbound_integrations_by_name(self.db, project_id).await?;
         let tasks = task_ids_by_name(self.db, project_id).await?;
         let crypt_key = load_secret_bytes(self.crypt_secret_file)
             .map_err(|e| format!("Failed to load crypt secret: {}", e))?;
@@ -189,7 +213,7 @@ impl<'a> StateApplicator<'a> {
                     project: &state_task.project,
                     task: task_name,
                 },
-                &outbound,
+                connections,
                 &tasks,
                 self.email_enabled,
                 crypt_key.expose(),
@@ -326,8 +350,6 @@ pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
     desired: &[StateTrigger],
-    inbound_by_name: &HashMap<String, IntegrationId>,
-    outbound_by_name: &HashMap<String, IntegrationId>,
 ) -> anyhow::Result<()> {
     if desired.is_empty() {
         anyhow::bail!("task '{}' must have at least one trigger", task.name);
@@ -336,7 +358,7 @@ pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
     let mut desired_by_key: HashMap<String, (TriggerConfig, bool)> = HashMap::new();
     let mut default_key = None;
     for t in desired {
-        let cfg = build_trigger_config(t, inbound_by_name, outbound_by_name)?;
+        let cfg = build_trigger_config(t)?;
         let key = trigger_key(&cfg);
         if t.is_default || default_key.is_none() {
             default_key = Some(key.clone());
@@ -406,11 +428,7 @@ pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
     Ok(())
 }
 
-pub(crate) fn build_trigger_config(
-    t: &StateTrigger,
-    inbound: &HashMap<String, IntegrationId>,
-    outbound: &HashMap<String, IntegrationId>,
-) -> anyhow::Result<TriggerConfig> {
+pub(crate) fn build_trigger_config(t: &StateTrigger) -> anyhow::Result<TriggerConfig> {
     use gradient_types::triggers::TriggerType as TT;
     let cfg = match t.trigger_type {
         TT::Polling => {
@@ -431,23 +449,8 @@ pub(crate) fn build_trigger_config(
             }
         }
         TT::ReporterPush | TT::ReporterPullRequest => {
-            let name = t
-                .integration
-                .as_ref()
-                .context("reporter trigger requires `integration` name")?;
-            let id = match inbound.get(name) {
-                Some(id) => *id,
-                None if outbound.contains_key(name) => anyhow::bail!(
-                    "integration '{name}' is configured as `outbound`, but reporter triggers \
-                     require an `inbound` integration to receive Git host webhooks. Declare an \
-                     `inbound` integration and reference outbound integrations via the task's \
-                     `outbound_integration` or a `git_host_status_report` action."
-                ),
-                None => anyhow::bail!("unknown integration: {name}"),
-            };
             if t.trigger_type == TT::ReporterPush {
                 TriggerConfig::ReporterPush {
-                    integration_id: id,
                     branches: t
                         .config
                         .get("branches")
@@ -471,7 +474,6 @@ pub(crate) fn build_trigger_config(
                 }
             } else {
                 TriggerConfig::ReporterPullRequest {
-                    integration_id: id,
                     branches: t
                         .config
                         .get("branches")
@@ -528,7 +530,7 @@ pub(crate) struct ProjectAndTaskNames<'a> {
 pub(crate) fn build_action_config(
     a: &StateAction,
     owner: &ProjectAndTaskNames,
-    outbound: &HashMap<String, IntegrationId>,
+    connections: &HashMap<String, MGitHostConnection>,
     tasks: &HashMap<String, TaskId>,
     email_enabled: bool,
     crypt_key: &[u8],
@@ -610,35 +612,20 @@ pub(crate) fn build_action_config(
                 webhook_url: Some(encrypt(&plain)?),
             })
         }
-        "git_host_status_report" => {
-            if !a.events.is_empty() {
-                return Err(format!(
-                    "action '{}': git_host_status_report cannot carry custom events",
+        "open_pr" => {
+            let connection_name = want("git_host_connection")?.as_str().ok_or_else(|| {
+                format!(
+                    "action '{}': git_host_connection needs to be a string",
                     a.name
                 )
-                .into());
-            }
-            let int_name = want("integration")?
-                .as_str()
-                .ok_or_else(|| format!("action '{}': integration must be a string", a.name))?;
-            let integration_id = *outbound.get(int_name).ok_or_else(|| {
-                format!(
-                    "action '{}': outbound integration '{}' not found in task's project",
-                    a.name, int_name
-                )
             })?;
-            Ok(ActionConfig::GitHostStatusReport { integration_id })
-        }
-        "open_pr" => {
-            let int_name = want("integration")?
-                .as_str()
-                .ok_or_else(|| format!("action '{}': integration must be a string", a.name))?;
-            let integration_id = *outbound.get(int_name).ok_or_else(|| {
+            let git_host_connection_id = connections.get(connection_name).ok_or_else(|| {
                 format!(
-                    "action '{}': outbound integration '{}' not found in task's project",
-                    a.name, int_name
+                    "action '{}': connection to git host '{}' is not available in the task's project",
+                    a.name, connection_name
                 )
-            })?;
+            })?
+                .id;
             let generator: PatchGeneratorKind = parse_action_enum(a, "generator")?;
             let granularity: PrGranularity = parse_action_enum(a, "granularity")?;
             let verify_gate: VerifyGate = parse_action_enum(a, "verify_gate")?;
@@ -664,7 +651,7 @@ pub(crate) fn build_action_config(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             Ok(ActionConfig::OpenPr {
-                integration_id,
+                git_host_connection_id,
                 generator,
                 granularity,
                 verify_gate,
@@ -692,6 +679,45 @@ pub(crate) fn build_action_config(
         )
         .into()),
     }
+}
+
+pub(crate) fn check_task_git_host_connection_capabilities(
+    task: &StateTask,
+    connection: Option<&MGitHostConnection>,
+) -> Result<(), String> {
+    if task.report_status {
+        match connection {
+            None => {
+                return Err("A task with report_status needs a git_host_connection field.".into());
+            }
+            Some(connection) if !connection.reports_status => {
+                return Err(format!(
+                    "report_status needs a connection to a Git host with reports_status set. The connection '{}' has reports_status = false.",
+                    connection.name
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    let has_reporter_trigger = task.triggers.iter().flatten().any(|trigger| {
+        matches!(
+            trigger.trigger_type,
+            TriggerType::ReporterPush | TriggerType::ReporterPullRequest
+        )
+    });
+    if has_reporter_trigger {
+        match connection {
+            None => return Err("The `reporter_push` and `reporter_pull_request` triggers require the task's `git_host_connection`.".into()),
+            Some(connection) if !connection.receives_events => {
+                return Err(format!(
+                    "The reporter_push/reporter_pull_request triggers need a connection to a git host with receives_events set. '{}' does not have that setting.",
+                    connection.name
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
 }
 
 async fn task_ids_by_name<C: ConnectionTrait>(
@@ -764,28 +790,21 @@ where
 mod trigger_helper_tests {
     use super::{build_trigger_config, trigger_key};
     use crate::StateTrigger;
-    use gradient_types::IntegrationId;
     use gradient_types::triggers::{TriggerConfig, TriggerType};
-    use std::collections::HashMap;
 
     pub(crate) fn polling_trigger(interval_secs: u64) -> StateTrigger {
         StateTrigger {
             trigger_type: TriggerType::Polling,
-            integration: None,
             config: serde_json::json!({ "interval_secs": interval_secs }),
             active: true,
             is_default: false,
         }
     }
 
-    pub(crate) fn empty_integrations() -> HashMap<String, IntegrationId> {
-        HashMap::new()
-    }
-
     #[test]
     fn build_polling_trigger() {
         let t = polling_trigger(60);
-        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::Polling {
@@ -799,12 +818,11 @@ mod trigger_helper_tests {
     fn build_polling_defaults_interval_when_missing() {
         let t = StateTrigger {
             trigger_type: TriggerType::Polling,
-            integration: None,
             config: serde_json::Value::Null,
             active: true,
             is_default: false,
         };
-        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::Polling {
@@ -817,8 +835,7 @@ mod trigger_helper_tests {
     #[test]
     fn build_polling_rejects_too_small_interval() {
         let t = polling_trigger(5);
-        let err =
-            build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
+        let err = build_trigger_config(&t).unwrap_err();
         let full = format!("{err:#}");
         assert!(
             full.contains("interval_secs") || full.contains("validation"),
@@ -830,12 +847,11 @@ mod trigger_helper_tests {
     fn build_time_trigger() {
         let t = StateTrigger {
             trigger_type: TriggerType::Time,
-            integration: None,
             config: serde_json::json!({ "cron": "0 0 2 * * *" }),
             active: true,
             is_default: false,
         };
-        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::Time {
@@ -849,12 +865,11 @@ mod trigger_helper_tests {
     fn build_time_trigger_with_branch_and_five_field_cron() {
         let t = StateTrigger {
             trigger_type: TriggerType::Time,
-            integration: None,
             config: serde_json::json!({ "cron": "0 2 * * *", "branch": "release" }),
             active: true,
             is_default: false,
         };
-        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::Time {
@@ -868,57 +883,18 @@ mod trigger_helper_tests {
     fn build_time_trigger_requires_cron() {
         let t = StateTrigger {
             trigger_type: TriggerType::Time,
-            integration: None,
             config: serde_json::json!({}),
             active: true,
             is_default: false,
         };
-        let err =
-            build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
+        let err = build_trigger_config(&t).unwrap_err();
         assert!(err.to_string().contains("cron"));
     }
 
     #[test]
-    fn build_reporter_push_requires_integration_name() {
+    fn build_reporter_push_trigger() {
         let t = StateTrigger {
             trigger_type: TriggerType::ReporterPush,
-            integration: None,
-            config: serde_json::json!({}),
-            active: true,
-            is_default: false,
-        };
-        let err =
-            build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
-        assert!(err.to_string().contains("integration"));
-    }
-
-    #[test]
-    fn build_reporter_push_errors_on_unknown_integration() {
-        let t = StateTrigger {
-            trigger_type: TriggerType::ReporterPush,
-            integration: Some("github-app".into()),
-            config: serde_json::json!({}),
-            active: true,
-            is_default: false,
-        };
-        let err =
-            build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("github-app"),
-            "expected integration name in error: {msg}"
-        );
-    }
-
-    #[test]
-    fn build_reporter_push_with_known_integration() {
-        let int_id = IntegrationId::nil();
-        let mut integrations = HashMap::new();
-        integrations.insert("gh".into(), int_id);
-
-        let t = StateTrigger {
-            trigger_type: TriggerType::ReporterPush,
-            integration: Some("gh".into()),
             config: serde_json::json!({
                 "branches": ["main"],
                 "tags": [],
@@ -928,11 +904,10 @@ mod trigger_helper_tests {
             active: true,
             is_default: false,
         };
-        let cfg = build_trigger_config(&t, &integrations, &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::ReporterPush {
-                integration_id: int_id,
                 branches: vec!["main".into()],
                 tags: vec![],
                 releases_only: false,
@@ -952,31 +927,6 @@ mod trigger_helper_tests {
             branch: None,
         };
         assert_ne!(trigger_key(&polling), trigger_key(&time));
-    }
-
-    #[test]
-    fn build_reporter_pr_rejects_outbound_integration_with_kind_aware_error() {
-        let mut outbound = HashMap::new();
-        outbound.insert("forgejo-status-reports".into(), IntegrationId::nil());
-
-        let t = StateTrigger {
-            trigger_type: TriggerType::ReporterPullRequest,
-            integration: Some("forgejo-status-reports".into()),
-            config: serde_json::json!({}),
-            active: true,
-            is_default: false,
-        };
-
-        let err = build_trigger_config(&t, &empty_integrations(), &outbound).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("forgejo-status-reports"),
-            "error names the integration: {msg}"
-        );
-        assert!(
-            msg.contains("outbound") && msg.contains("inbound"),
-            "error explains the inbound/outbound kind mismatch: {msg}"
-        );
     }
 }
 
@@ -1156,90 +1106,59 @@ mod action_helper_tests {
         }
     }
 
-    #[test]
-    fn build_git_host_status_report_resolves_integration() {
-        let int_id = IntegrationId::new(Uuid::nil());
-        let mut outbound = HashMap::new();
-        outbound.insert("gitea-prod".to_string(), int_id);
-        let a = StateAction {
-            name: "status".into(),
-            action_type: "git_host_status_report".into(),
+    fn open_pr(connection: &str) -> StateAction {
+        StateAction {
+            name: "flake-update".into(),
+            action_type: "open_pr".into(),
             active: true,
             events: vec![],
-            config: serde_json::json!({ "integration": "gitea-prod" }),
-        };
-        let cfg = build_action_config(
-            &a,
+            config: serde_json::json!({ "git_host_connection": connection }),
+        }
+    }
+
+    fn build_with_connections(
+        a: &StateAction,
+        connections: &HashMap<String, MGitHostConnection>,
+    ) -> Result<ActionConfig, DynError> {
+        build_action_config(
+            a,
             &ProjectAndTaskNames {
                 project: "acme",
                 task: "web",
             },
-            &outbound,
+            connections,
             &HashMap::new(),
             true,
             &key(),
             Path::new("/nonexistent"),
         )
-        .unwrap();
-        assert_eq!(
+    }
+
+    #[test]
+    fn test_open_pr_git_host_connection_name_resolves_to_id() {
+        let forge = GitHostConnectionId::new(Uuid::from_u128(3));
+        let connections = HashMap::from([(
+            "forge".to_string(),
+            MGitHostConnection {
+                id: forge,
+                name: "forge".into(),
+                ..Default::default()
+            },
+        )]);
+
+        let cfg = build_with_connections(&open_pr("forge"), &connections).unwrap();
+
+        assert!(matches!(
             cfg,
-            ActionConfig::GitHostStatusReport {
-                integration_id: int_id
-            }
-        );
+            ActionConfig::OpenPr { git_host_connection_id, .. } if git_host_connection_id == forge
+        ));
     }
 
     #[test]
-    fn build_git_host_status_report_errors_on_unknown_integration() {
-        let a = StateAction {
-            name: "status".into(),
-            action_type: "git_host_status_report".into(),
-            active: true,
-            events: vec![],
-            config: serde_json::json!({ "integration": "missing" }),
-        };
-        let err = build_action_config(
-            &a,
-            &ProjectAndTaskNames {
-                project: "acme",
-                task: "web",
-            },
-            &HashMap::new(),
-            &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("missing"), "got: {err}");
-    }
+    fn open_pr_with_unavailable_connection_fails_with_error_naming_it() {
+        let err = build_with_connections(&open_pr("missing"), &HashMap::new()).unwrap_err();
 
-    #[test]
-    fn build_git_host_status_report_rejects_events() {
-        let int_id = IntegrationId::new(Uuid::nil());
-        let mut outbound = HashMap::new();
-        outbound.insert("gh".to_string(), int_id);
-        let a = StateAction {
-            name: "status".into(),
-            action_type: "git_host_status_report".into(),
-            active: true,
-            events: vec!["build.completed".into()],
-            config: serde_json::json!({ "integration": "gh" }),
-        };
-        let err = build_action_config(
-            &a,
-            &ProjectAndTaskNames {
-                project: "acme",
-                task: "web",
-            },
-            &outbound,
-            &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("events"), "got: {err}");
+        assert!(err.to_string().contains("'missing'"), "got: {err}");
     }
 
     #[test]
@@ -1400,6 +1319,75 @@ mod action_helper_tests {
         assert_eq!(
             err.to_string(),
             "action 'evaluate-deploy': task 'deploy' not found in the task's project"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests_check_task_git_host_connection_capabilities {
+    use super::*;
+
+    fn task(report_status: bool, triggers: Vec<StateTrigger>) -> StateTask {
+        serde_json::from_value(serde_json::json!({
+            "name": "web",
+            "project": "acme",
+            "display_name": "Web",
+            "repository": "https://example.com/acme/web.git",
+            "created_by": "alice",
+            "git_host_connection": "forge",
+            "report_status": report_status,
+            "triggers": triggers,
+        }))
+        .unwrap()
+    }
+
+    fn push_trigger() -> StateTrigger {
+        StateTrigger {
+            trigger_type: TriggerType::ReporterPush,
+            config: serde_json::json!({}),
+            active: true,
+            is_default: false,
+        }
+    }
+
+    fn connection(receives_events: bool, reports_status: bool) -> MGitHostConnection {
+        MGitHostConnection {
+            name: "forge".into(),
+            receives_events,
+            reports_status,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn report_status_is_refused_without_connection_or_with_reports_status_false() {
+        let reporting = task(true, vec![StateTrigger::default_polling()]);
+
+        let without = check_task_git_host_connection_capabilities(&reporting, None).unwrap_err();
+        assert!(without.contains("git_host_connection"), "got: {without}");
+
+        let silent = connection(true, false);
+        let err =
+            check_task_git_host_connection_capabilities(&reporting, Some(&silent)).unwrap_err();
+        assert!(
+            err.contains("reports_status") && err.contains("'forge'"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn push_trigger_rejects_connection_without_receives_events_and_accepts_connection_with_both_flags()
+     {
+        let pushed = task(true, vec![push_trigger()]);
+
+        let deaf = connection(false, true);
+        let err = check_task_git_host_connection_capabilities(&pushed, Some(&deaf)).unwrap_err();
+        assert!(err.contains("receives_events"), "got: {err}");
+
+        let capable = connection(true, true);
+        assert_eq!(
+            check_task_git_host_connection_capabilities(&pushed, Some(&capable)),
+            Ok(())
         );
     }
 }

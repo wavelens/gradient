@@ -96,7 +96,7 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_cache::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_worker::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::git_host_connection::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
@@ -104,7 +104,6 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task_action::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::github_installation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project_secret::Model>::new()])
 }
 
@@ -176,7 +175,7 @@ async fn export_state_json_returns_empty_shape() {
         "roles",
         "api_keys",
         "workers",
-        "integrations",
+        "git_host_connections",
         "teams",
     ] {
         assert!(

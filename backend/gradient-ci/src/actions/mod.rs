@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod crypto;
+pub(crate) mod crypto;
 pub(crate) mod evaluation_rows;
 mod executor;
 mod matchers;
 mod payload;
-mod report;
+pub(crate) mod report;
 pub(crate) mod send;
 pub(crate) mod summary;
 
@@ -27,7 +27,6 @@ pub use crypto::{
 pub use executor::{execute_action, test_git_host_action};
 pub use matchers::{GIT_HOST_STATUS_EVENTS, git_host_status_for_event, matches_event};
 pub use payload::git_host_status_payload;
-pub use send::reporter_for_task;
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
@@ -69,9 +68,7 @@ pub async fn active_actions_for_task(
         .await
 }
 
-/// A flake.lock `OpenPr` must act only on `input_update` evaluations. Git host reports must skip
-/// them because their commit is blank until the PR is pushed. The PR's own CI run is reporting
-/// normally.
+/// A flake.lock `OpenPr` must act only on `input_update` evaluations.
 pub fn matching_actions(
     actions: Vec<gradient_types::MTaskAction>,
     event: &str,
@@ -84,7 +81,6 @@ pub fn matching_actions(
         .into_iter()
         .filter(|a| matches_event(a, event))
         .filter(|a| a.action_type != ActionType::OpenPr || opens_for(a, is_input_update))
-        .filter(|a| a.action_type != ActionType::GitHostStatusReport || !is_input_update)
         .collect()
 }
 

@@ -7,7 +7,10 @@
 mod fixtures;
 
 use super::StateConfiguration;
-use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
+use fixtures::{
+    make_state_with_git_host_connections_and_web_task_extra_fields, reporter_cfg,
+    state_with_one_user_one_project_and_git_host_connections, worker_cfg,
+};
 
 const WITHOUT_OPTIONAL_FIELDS: &str = r#"{
         "users": {
@@ -142,6 +145,14 @@ fn state_task_with_two_default_triggers_rejected() {
     );
 }
 
+fn errors_of(cfg: &StateConfiguration) -> Vec<(String, String)> {
+    cfg.validate()
+        .errors
+        .into_iter()
+        .map(|e| (e.field, e.message))
+        .collect()
+}
+
 #[test]
 fn state_validation_rejects_extra_allowed_url_prefix_with_whitespace() {
     let mut cfg = reporter_cfg("github", "{}");
@@ -160,76 +171,214 @@ fn state_validation_rejects_extra_allowed_url_prefix_with_whitespace() {
 }
 
 #[test]
-fn state_reporter_trigger_accepts_declared_inbound_integration() {
-    let integrations = r#"{
-        "git-host": { "name": "git-host", "project": "acme", "kind": "inbound", "git_host_type": "forgejo", "created_by": "alice" }
+fn state_reporter_trigger_accepts_declared_receiving_connection() {
+    let connections = r#"{
+        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "created_by": "alice" }
     }"#;
-    let cfg = reporter_cfg("git-host", integrations);
+    let cfg = reporter_cfg("git-host", connections);
     let v = cfg.validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
 }
 
 #[test]
-fn state_reporter_trigger_rejects_unknown_integration() {
+fn state_reporter_trigger_rejects_unknown_connection() {
     let cfg = reporter_cfg("ghost", "{}");
-    let v = cfg.validate();
-    assert!(!v.is_valid);
+    let errors = errors_of(&cfg);
     assert!(
-        v.errors
+        errors
             .iter()
-            .any(|e| e.field == "tasks.web.triggers" && e.message.contains("ghost")),
-        "expected unknown-integration trigger error, got: {:?}",
-        v.errors
+            .any(|(field, message)| field == "tasks.web.git_host_connection"
+                && message.contains("ghost")),
+        "expected unknown-connection error, got: {errors:?}"
     );
 }
 
 #[test]
-fn state_reporter_trigger_rejects_outbound_integration() {
-    let integrations = r#"{
-        "git-host": { "name": "git-host", "project": "acme", "kind": "outbound", "git_host_type": "forgejo", "created_by": "alice" }
+fn push_trigger_rejects_missing_or_non_receiving_connection() {
+    let deaf = r#"{
+        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "receives_events": false, "created_by": "alice" }
     }"#;
-    let cfg = reporter_cfg("git-host", integrations);
-    let v = cfg.validate();
-    assert!(!v.is_valid);
+    let errors = errors_of(&reporter_cfg("git-host", deaf));
     assert!(
-        v.errors.iter().any(|e| e.field == "tasks.web.triggers"),
-        "expected outbound-integration trigger error, got: {:?}",
-        v.errors
+        errors
+            .iter()
+            .any(|(field, message)| field == "tasks.web.triggers"
+                && message.contains("receives_events")),
+        "expected receives_events error, got: {errors:?}"
+    );
+
+    let without_connection = make_state_with_git_host_connections_and_web_task_extra_fields(
+        "{}",
+        r#""triggers": [{ "type": "reporter_pull_request" }]"#,
+    );
+    let errors = errors_of(&without_connection);
+    assert!(
+        errors
+            .iter()
+            .any(|(field, message)| field == "tasks.web.triggers"
+                && message.contains("git_host_connection")),
+        "expected missing-connection error, got: {errors:?}"
     );
 }
 
 #[test]
 fn state_reporter_trigger_accepts_github_app_name() {
-    let cfg = reporter_cfg("github", "{}");
+    let cfg = reporter_cfg("github-acme", "{}");
     let v = cfg.validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
 }
 
 #[test]
-fn state_github_integration_requires_installation_id() {
-    let integrations = r#"{
-        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "git_host_type": "github", "created_by": "alice" }
-    }"#;
-    let cfg = integration_cfg(integrations);
-    let v = cfg.validate();
-    assert!(!v.is_valid);
-    assert!(
-        v.errors
+fn task_connection_name_resolves_to_project_before_owner_team_before_instance() {
+    let connection = |owner: &str, reports_status: bool| {
+        format!(
+            r#"{{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "reports_status": {reports_status}, "created_by": "alice" }}"#
+        )
+    };
+    let reporting = r#""git_host_connection": "forge", "report_status": true"#;
+    let validate = |connections: &[(&str, String)]| {
+        let entries: Vec<String> = connections
             .iter()
-            .any(|e| e.field == "integrations.gh.installation_id"),
-        "expected installation_id requirement, got: {:?}",
-        v.errors
+            .map(|(label, connection)| format!(r#""{label}": {connection}"#))
+            .collect();
+        let cfg = make_state_with_git_host_connections_and_web_task_extra_fields(
+            &format!("{{ {} }}", entries.join(", ")),
+            reporting,
+        );
+        cfg.validate().is_valid
+    };
+
+    let instance_reports = ("instance", connection("instance", true));
+    let team_silent = ("team", connection("team/platform", false));
+    let project_reports = ("project", connection("project/acme", true));
+
+    assert!(validate(std::slice::from_ref(&instance_reports)));
+    assert!(!validate(&[instance_reports.clone(), team_silent.clone()]));
+    assert!(validate(&[instance_reports, team_silent, project_reports]));
+}
+
+#[test]
+fn test_report_status_is_refused_for_task_without_reports_status_connection() {
+    let silent = r#"{
+        "forge": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" }
+    }"#;
+    for task_fields in [
+        r#""git_host_connection": "forge", "report_status": true"#,
+        r#""report_status": true"#,
+    ] {
+        let cfg =
+            make_state_with_git_host_connections_and_web_task_extra_fields(silent, task_fields);
+        let errors = errors_of(&cfg);
+        assert!(
+            errors
+                .iter()
+                .any(|(field, _)| field == "tasks.web.report_status"),
+            "{task_fields}: expected report_status error, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn git_host_connection_owner_that_does_not_parse_fails_validation() {
+    for owner in ["cache/x", "team/", "acme"] {
+        let cfg = state_with_one_user_one_project_and_git_host_connections(&format!(
+            r#"{{ "forge": {{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "created_by": "alice" }} }}"#
+        ));
+        let errors = errors_of(&cfg);
+        assert!(
+            errors.iter().any(
+                |(field, message)| field == "git_host_connections.forge.owner"
+                    && message.contains(owner)
+            ),
+            "{owner}: expected owner parse error, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn rejects_owner_naming_undeclared_team_or_project() {
+    for owner in ["team/ghost", "project/ghost"] {
+        let cfg = state_with_one_user_one_project_and_git_host_connections(&format!(
+            r#"{{ "forge": {{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "created_by": "alice" }} }}"#
+        ));
+        let errors = errors_of(&cfg);
+        assert!(
+            errors.iter().any(
+                |(field, message)| field == "git_host_connections.forge.owner"
+                    && message.contains("ghost")
+            ),
+            "{owner}: expected unknown owner error, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn rejects_duplicate_connection_name_for_same_owner_but_allows_it_for_different_owners() {
+    let duplicated = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "created_by": "alice" },
+            "b": { "name": "forge", "owner": "project/acme", "git_host_type": "gitlab", "created_by": "alice" }
+        }"#,
+    );
+    let errors = errors_of(&duplicated);
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|(_, message)| message.contains("duplicate"))
+            .count(),
+        1,
+        "expected one duplicate error, got: {errors:?}"
+    );
+
+    let spread = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "created_by": "alice" },
+            "b": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" }
+        }"#,
+    );
+    let v = spread.validate();
+    assert!(v.is_valid, "errors: {:?}", v.errors);
+}
+
+#[test]
+fn state_github_connection_requires_installation_id() {
+    let connections = r#"{
+        "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "created_by": "alice" }
+    }"#;
+    let cfg = state_with_one_user_one_project_and_git_host_connections(connections);
+    let errors = errors_of(&cfg);
+    assert!(
+        errors
+            .iter()
+            .any(|(field, _)| field == "git_host_connections.gh.installation_id"),
+        "expected installation_id requirement, got: {errors:?}"
     );
 }
 
 #[test]
-fn state_github_integration_with_installation_id_is_valid() {
-    let integrations = r#"{
-        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
+fn state_github_connection_with_installation_id_is_valid() {
+    let connections = r#"{
+        "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
     }"#;
-    let cfg = integration_cfg(integrations);
+    let cfg = state_with_one_user_one_project_and_git_host_connections(connections);
     let v = cfg.validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
+}
+
+#[test]
+fn installation_id_on_connection_not_owned_by_instance_is_refused() {
+    let connections = r#"{
+        "gh": { "name": "gh", "owner": "project/acme", "git_host_type": "github", "installation_id": 42, "created_by": "alice" }
+    }"#;
+    let cfg = state_with_one_user_one_project_and_git_host_connections(connections);
+    let errors = errors_of(&cfg);
+    assert!(
+        errors.iter().any(
+            |(field, message)| field == "git_host_connections.gh.installation_id"
+                && message.contains("instance")
+        ),
+        "expected instance-owner requirement, got: {errors:?}"
+    );
 }
 
 #[test]
@@ -334,43 +483,6 @@ fn state_action_validate_rejects_duplicate_names() {
 }
 
 #[test]
-fn state_action_validate_rejects_events_on_git_host_status_report() {
-    let json = r#"{
-        "users": {
-            "alice": {
-                "username": "alice", "name": "Alice", "email": "a@x.io",
-                "password_file": "/dev/null"
-            }
-        },
-        "projects": {
-            "acme": {
-                "name": "acme", "display_name": "ACME",
-                "private_key_file": "/dev/null", "public": false, "created_by": "alice"
-            }
-        },
-        "tasks": {
-            "web": {
-                "name": "web", "project": "acme", "display_name": "Web",
-                "repository": "https://example.com/acme/web.git", "created_by": "alice",
-                "actions": [
-                    { "name": "x", "type": "git_host_status_report", "events": ["build.completed"], "config": { "integration": "gh" } }
-                ]
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    let v = cfg.validate();
-    assert!(!v.is_valid);
-    assert!(
-        v.errors
-            .iter()
-            .any(|e| e.field == "tasks.web.actions.x.events"),
-        "expected git_host_status_report-events error, got: {:?}",
-        v.errors
-    );
-}
-
-#[test]
 fn state_action_validate_accepts_open_pr() {
     let json = r#"{
         "users": {
@@ -390,7 +502,7 @@ fn state_action_validate_accepts_open_pr() {
                 "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
-                    { "name": "flake-update", "type": "open_pr", "config": { "integration": "gh" } }
+                    { "name": "flake-update", "type": "open_pr", "config": { "git_host_connection": "gh" } }
                 ]
             }
         }
@@ -424,7 +536,7 @@ fn state_action_validate_rejects_events_on_open_pr() {
                 "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
-                    { "name": "x", "type": "open_pr", "events": ["build.completed"], "config": { "integration": "gh" } }
+                    { "name": "x", "type": "open_pr", "events": ["build.completed"], "config": { "git_host_connection": "gh" } }
                 ]
             }
         }

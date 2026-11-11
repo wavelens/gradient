@@ -5,7 +5,7 @@
  */
 
 use gradient_types::{
-    CExecJobPullRequest, EExecJobPullRequest, ExecJobId, ExecJobPullRequestId, IntegrationId,
+    CExecJobPullRequest, EExecJobPullRequest, ExecJobId, ExecJobPullRequestId, GitHostConnectionId,
     MExecJobPullRequest,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
@@ -13,7 +13,7 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, Que
 pub async fn record<C: ConnectionTrait>(
     db: &C,
     job: ExecJobId,
-    integration: IntegrationId,
+    git_host_connection: GitHostConnectionId,
     url: &str,
     branch: &str,
     number: i64,
@@ -23,7 +23,7 @@ pub async fn record<C: ConnectionTrait>(
         MExecJobPullRequest {
             id: ExecJobPullRequestId::now_v7(),
             exec_job: job,
-            integration,
+            git_host_connection,
             url: url.to_owned(),
             branch: branch.to_owned(),
             number,

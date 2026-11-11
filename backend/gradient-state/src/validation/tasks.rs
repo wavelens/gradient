@@ -5,6 +5,8 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
+use crate::config::{StateGitHostConnection, StateTask};
+use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::triggers::TriggerType;
 use gradient_types::{ActionType, RepositoryLocation};
 use sea_orm::Iterable;
@@ -59,11 +61,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 );
             }
 
-            if matches!(
-                action.action_type.as_str(),
-                "git_host_status_report" | "open_pr"
-            ) && !action.events.is_empty()
-            {
+            if action.action_type == ActionType::OpenPr.as_str() && !action.events.is_empty() {
                 errors.push(
                     format!("tasks.{}.actions.{}.events", task.name, action.name),
                     format!("{} actions cannot carry custom events", action.action_type),
@@ -88,39 +86,98 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        // Reporter triggers are resolving `integration` against inbound integrations at apply time.
-        // A missing, outbound or mistyped reference must fail validation here instead of mid-apply
-        // (#332).
-        for trigger in task.triggers.iter().flatten() {
-            if !matches!(
-                trigger.trigger_type,
-                TriggerType::ReporterPush | TriggerType::ReporterPullRequest
-            ) {
-                continue;
-            }
-            let Some(name) = &trigger.integration else {
-                errors.push(
-                    format!("tasks.{}.triggers", task.name),
-                    "reporter_push/reporter_pull_request triggers require an `integration`",
-                );
-                continue;
-            };
-            if name == "github" || name.starts_with("github-") {
-                continue;
-            }
-            let declared_inbound = config
-                .integrations
-                .values()
-                .any(|i| i.name == *name && i.project == task.project && i.kind == "inbound");
-            if !declared_inbound {
-                errors.push(
-                    format!("tasks.{}.triggers", task.name),
-                    format!(
-                        "Reporter trigger references integration '{}' which is not a declared inbound integration in project '{}'",
-                        name, task.project
-                    ),
-                );
-            }
+        validate_task_git_host_connection_reference(lookup, task, errors);
+    }
+}
+
+fn validate_task_git_host_connection_reference(
+    lookup: &EntityLookup,
+    task: &StateTask,
+    errors: &mut ErrorCollector,
+) {
+    let name = task.git_host_connection.as_deref();
+    let connection = name
+        .and_then(|name| find_declared_git_host_connection_for_task(lookup, &task.project, name));
+    if let Some(name) = name
+        && connection.is_none()
+        && !is_auto_created_github_app_connection_name(name)
+    {
+        errors.push(
+            format!("tasks.{}.git_host_connection", task.name),
+            format!(
+                "Git host connection '{}' does not match any connection owned by project '{}', its owner team, or the instance.",
+                name, task.project
+            ),
+        );
+    }
+
+    if task.report_status {
+        match (name, connection) {
+            (None, _) => errors.push(
+                format!("tasks.{}.report_status", task.name),
+                "A task with report_status needs a git_host_connection field.",
+            ),
+            (Some(_), Some(connection)) if !connection.reports_status => errors.push(
+                format!("tasks.{}.report_status", task.name),
+                format!(
+                    "report_status needs a connection to a Git host with reports_status set. The connection '{}' has reports_status = false.",
+                    connection.name
+                ),
+            ),
+            _ => {}
         }
     }
+
+    let has_reporter_trigger = task.triggers.iter().flatten().any(|trigger| {
+        matches!(
+            trigger.trigger_type,
+            TriggerType::ReporterPush | TriggerType::ReporterPullRequest
+        )
+    });
+    if has_reporter_trigger {
+        match (name, connection) {
+            (None, _) => errors.push(
+                format!("tasks.{}.triggers", task.name),
+                "The `reporter_push` and `reporter_pull_request` triggers require the task's `git_host_connection`.",
+            ),
+            (Some(_), Some(connection)) if !connection.receives_events => errors.push(
+                format!("tasks.{}.triggers", task.name),
+                format!(
+                    "The reporter_push/reporter_pull_request triggers need a connection to a git host with receives_events set. '{}' does not have that setting.",
+                    connection.name
+                ),
+            ),
+            _ => {}
+        }
+    }
+}
+
+fn find_declared_git_host_connection_for_task<'a>(
+    lookup: &EntityLookup<'a>,
+    project: &str,
+    name: &str,
+) -> Option<&'a StateGitHostConnection> {
+    let config = lookup.config;
+    let owner_team = config
+        .projects
+        .get(project)
+        .and_then(|project| project.owner_team.clone());
+    [
+        Some(GitHostConnectionOwner::Project {
+            name: project.to_owned(),
+        }),
+        owner_team.map(|name| GitHostConnectionOwner::Team { name }),
+        Some(GitHostConnectionOwner::Instance),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|owner| {
+        config.git_host_connections.values().find(|connection| {
+            connection.name == name && connection.owner.parse().ok().as_ref() == Some(&owner)
+        })
+    })
+}
+
+fn is_auto_created_github_app_connection_name(name: &str) -> bool {
+    name == "github" || name.starts_with("github-")
 }

@@ -74,8 +74,8 @@ fn fixture_date() -> chrono::NaiveDateTime {
 fn project_id() -> ProjectId {
     ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000001").unwrap())
 }
-fn integration_id() -> IntegrationId {
-    IntegrationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000002").unwrap())
+fn fixed_gitea_git_host_connection_id_for_webhook_tests() -> GitHostConnectionId {
+    GitHostConnectionId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000002").unwrap())
 }
 fn task_id() -> TaskId {
     TaskId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000003").unwrap())
@@ -150,47 +150,32 @@ fn project_row(name: &str) -> gradient_entity::project::Model {
     }
 }
 
-fn github_installation_id() -> gradient_entity::ids::GithubInstallationId {
-    gradient_entity::ids::GithubInstallationId::new(
-        Uuid::parse_str("a0000000-0000-0000-0000-000000000008").unwrap(),
-    )
-}
-
-fn github_installation_row(
-    project: gradient_types::ids::ProjectId,
-    installation_id: i64,
-) -> gradient_entity::github_installation::Model {
-    gradient_entity::github_installation::Model {
-        id: github_installation_id(),
-        project,
-        installation_id,
-        account_login: Some("gh-project".into()),
-        created_by: user_id(),
-        created_at: fixture_date(),
-    }
-}
-
-fn integration_row(secret_ciphertext: &str) -> gradient_entity::integration::Model {
-    gradient_entity::integration::Model {
-        id: integration_id(),
-        project: project_id(),
+fn test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(
+    secret_ciphertext: &str,
+) -> gradient_entity::git_host_connection::Model {
+    gradient_entity::git_host_connection::Model {
+        id: fixed_gitea_git_host_connection_id_for_webhook_tests(),
+        project: Some(project_id()),
         name: "my-hook".into(),
         display_name: "my-hook".into(),
         secret: Some(secret_ciphertext.to_string()),
+        receives_events: true,
         created_by: user_id(),
         created_at: fixture_date(),
         ..Default::default()
     }
 }
 
-fn github_integration_row() -> gradient_entity::integration::Model {
-    gradient_entity::integration::Model {
-        id: integration_id(),
-        project: project_id(),
-        name: "github-app".into(),
-        display_name: "GitHub App".into(),
+fn build_instance_wide_git_host_connection_row_for_github_app_installation()
+-> gradient_entity::git_host_connection::Model {
+    gradient_entity::git_host_connection::Model {
+        id: fixed_gitea_git_host_connection_id_for_webhook_tests(),
+        name: "github-gh-project".into(),
+        display_name: "GitHub".into(),
         git_host_type: GitHostType::GitHub,
-        github_installation: Some(github_installation_id()),
+        receives_events: true,
+        reports_status: true,
+        github_installation_id: Some(9999),
         created_by: user_id(),
         created_at: fixture_date(),
         ..Default::default()
@@ -306,7 +291,6 @@ fn trigger_row(cfg: TriggerConfig) -> gradient_entity::task_trigger::Model {
 
 fn reporter_push_trigger(branches: Vec<&str>) -> TriggerConfig {
     TriggerConfig::ReporterPush {
-        integration_id: integration_id(),
         branches: branches.into_iter().map(String::from).collect(),
         tags: vec![],
         releases_only: false,
@@ -316,7 +300,6 @@ fn reporter_push_trigger(branches: Vec<&str>) -> TriggerConfig {
 
 fn reporter_push_releases_only_trigger() -> TriggerConfig {
     TriggerConfig::ReporterPush {
-        integration_id: integration_id(),
         branches: vec![],
         tags: vec![],
         releases_only: true,
@@ -326,7 +309,6 @@ fn reporter_push_releases_only_trigger() -> TriggerConfig {
 
 fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
     TriggerConfig::ReporterPullRequest {
-        integration_id: integration_id(),
         branches: vec![],
         actions: actions.into_iter().map(String::from).collect(),
         require_approval: false,
@@ -367,7 +349,9 @@ async fn git_host_webhook_no_matching_trigger() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .into_connection();
 
@@ -403,7 +387,9 @@ async fn git_host_webhook_push_fires_trigger() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]]);
@@ -445,7 +431,9 @@ async fn git_host_webhook_test_ping_zero_sha_is_ok_noop() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -479,7 +467,9 @@ async fn git_host_webhook_invalid_signature() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -503,10 +493,10 @@ async fn git_host_webhook_invalid_signature() {
 }
 
 #[tokio::test]
-async fn git_host_webhook_integration_not_found() {
+async fn gitea_old_webhook_path_with_unknown_connection_name_returns_404() {
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::git_host_connection::Model>::new()])
         .into_connection();
 
     let state = make_state(
@@ -527,14 +517,17 @@ async fn git_host_webhook_integration_not_found() {
     response.assert_status_not_found();
     let json: Value = response.json();
     assert_eq!(json["error"], true);
-    assert_eq!(json["message"], "integration not found");
+    assert_eq!(
+        json["message"],
+        "No Git host connection at this address. No events reach that connection."
+    );
 }
 
 #[tokio::test]
 async fn git_host_webhook_without_secret_names_the_missing_secret() {
-    let secretless = gradient_entity::integration::Model {
+    let secretless = gradient_entity::git_host_connection::Model {
         secret: None,
-        ..integration_row("unused")
+        ..test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret("unused")
     };
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
@@ -561,16 +554,17 @@ async fn git_host_webhook_without_secret_names_the_missing_secret() {
         json["message"]
             .as_str()
             .unwrap()
+            .to_lowercase()
             .contains("no webhook secret"),
         "{json}"
     );
 }
 
 #[tokio::test]
-async fn a_refused_delivery_is_logged_for_the_integration() {
-    let secretless = gradient_entity::integration::Model {
+async fn refused_delivery_without_secret_is_logged_for_connection() {
+    let secretless = gradient_entity::git_host_connection::Model {
         secret: None,
-        ..integration_row("unused")
+        ..test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret("unused")
     };
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
@@ -608,7 +602,10 @@ async fn a_refused_delivery_is_logged_for_the_integration() {
         statements.contains("incoming_webhook_delivery"),
         "{statements}"
     );
-    assert!(statements.contains("no webhook secret"), "{statements}");
+    assert!(
+        statements.to_lowercase().contains("no webhook secret"),
+        "{statements}"
+    );
 }
 
 #[tokio::test]
@@ -617,7 +614,9 @@ async fn a_delivery_with_an_invalid_signature_is_not_logged() {
     let ciphertext = encrypt_webhook_secret(&crypt_path, "correct-secret").expect("encrypt");
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_exec_results([
             MockExecResult {
                 last_insert_id: 0,
@@ -658,7 +657,9 @@ async fn git_host_webhook_branch_glob_no_match_skipped() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec!["release/*"]))]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]])
@@ -720,7 +721,9 @@ async fn git_host_webhook_pr_fires_trigger() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec![
             "opened",
             "synchronize",
@@ -781,7 +784,9 @@ async fn git_host_webhook_pr_action_mismatch_skipped() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]])
@@ -837,7 +842,9 @@ async fn git_host_webhook_release_fires_releases_only_trigger() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]]);
@@ -878,7 +885,9 @@ async fn git_host_webhook_push_does_not_fire_releases_only_trigger() {
 
     let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
-        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
         .into_connection();
 
@@ -911,9 +920,9 @@ async fn github_app_webhook_push_fires_trigger() {
     let gh_secret_path = temp_secret_file(gh_secret);
 
     let db = mock_db()
-        .append_query_results([vec![github_installation_row(project_id(), 9999)]])
-        .append_query_results([vec![github_task_row()]])
-        .append_query_results([vec![github_integration_row()]])
+        .append_query_results([vec![
+            build_instance_wide_git_host_connection_row_for_github_app_installation(),
+        ]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_query_results([vec![github_task_row()]])
         .append_query_results([vec![project_row("gh-project")]]);
@@ -1035,67 +1044,7 @@ async fn github_app_webhook_not_configured() {
     response.assert_status(axum::http::StatusCode::SERVICE_UNAVAILABLE);
     let json: Value = response.json();
     assert_eq!(json["error"], true);
-    assert_eq!(json["message"], "github app integration not configured");
-}
-
-#[tokio::test]
-async fn github_app_webhook_multi_project_routes_to_matching_project() {
-    let gh_secret = "github-webhook-secret";
-    let gh_secret_path = temp_secret_file(gh_secret);
-
-    let project_a_id =
-        ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap());
-    let inst_a_id = gradient_entity::ids::GithubInstallationId::new(
-        Uuid::parse_str("a0000000-0000-0000-0000-0000000000a8").unwrap(),
-    );
-    let inst_a = gradient_entity::github_installation::Model {
-        id: inst_a_id,
-        project: project_a_id,
-        installation_id: 9999,
-        account_login: Some("project-a".into()),
-        created_by: user_id(),
-        created_at: fixture_date(),
-    };
-    let inst_b = github_installation_row(project_id(), 9999);
-
-    let project_a_task = task_row_with(
-        TaskId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000ab").unwrap()),
-        project_a_id,
-        "unrelated",
-        "https://github.com/org-a/different-repo",
-    );
-    let project_b_task = github_task_row();
-
-    let db = mock_db()
-        .append_query_results([vec![inst_a, inst_b]])
-        .append_query_results([vec![project_a_task, project_b_task.clone()]])
-        .append_query_results([vec![github_integration_row()]])
-        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
-        .append_query_results([vec![project_b_task.clone()]])
-        .append_query_results([vec![project_row("gh-project")]]);
-    let db = apply_trigger_db_chain(db).into_connection();
-
-    let state = make_state(db, None, Some(gh_secret_path));
-    let router = create_router(state).expect("router");
-    let server = TestServer::new(router);
-
-    let body = GITHUB_PUSH_BODY.as_bytes();
-    let sig = github_signature(gh_secret, body);
-
-    let response = server
-        .post("/api/v1/hooks/github")
-        .add_header("X-Hub-Signature-256", &sig)
-        .add_header("X-GitHub-Event", "push")
-        .bytes(body.into())
-        .await;
-
-    response.assert_status_ok();
-    let json: Value = response.json();
-    let msg = &json["message"];
-    assert_eq!(msg["tasks_scanned"], 1);
-    let queued = msg["queued"].as_array().unwrap();
-    assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0]["project"], "gh-project");
+    assert_eq!(json["message"], "No GitHub App configured");
 }
 
 #[tokio::test]
@@ -1111,8 +1060,12 @@ async fn github_app_webhook_no_matching_repo_returns_zero() {
     );
 
     let db = mock_db()
-        .append_query_results([vec![github_installation_row(project_id(), 9999)]])
+        .append_query_results([vec![
+            build_instance_wide_git_host_connection_row_for_github_app_installation(),
+        ]])
+        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_query_results([vec![unrelated]])
+        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));

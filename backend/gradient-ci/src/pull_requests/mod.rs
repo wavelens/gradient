@@ -7,9 +7,9 @@
 pub mod apply;
 pub mod branch;
 
-use crate::actions::send::git_host_status::build_reporter_for_integration;
 use crate::actions::send::open_pr::configured_commit_ident;
 use crate::context::CiContext;
+use crate::task_commit_status_posting::build_commit_status_posting_client_from_git_host_connection_id;
 use anyhow::{Context, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReporter, parse_owner_repo};
@@ -18,7 +18,7 @@ use gradient_types::SecretString;
 use gradient_types::input::{check_repository_url_is_ssh, vec_to_hex};
 use gradient_types::{
     ActionConfig, ActionType, CTaskAction, ECommit, EEvaluation, EExecJob, EProject, ETaskAction,
-    ExecJobId, IntegrationId, MCommit, MTask, TaskId,
+    ExecJobId, GitHostConnectionId, MCommit, MTask, TaskId,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
 
@@ -32,7 +32,7 @@ const COMMIT_HASH_BYTES: usize = 20;
 #[derive(Debug, Clone)]
 pub struct PatchPullRequest {
     pub task: MTask,
-    pub integration: IntegrationId,
+    pub git_host_connection: GitHostConnectionId,
     pub start_commit: String,
     pub patch: Vec<u8>,
     pub title: String,
@@ -51,8 +51,8 @@ pub struct OpenedPullRequest {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PullRequestError {
-    #[error("the task has no open_pr action naming a Git host integration")]
-    NoIntegration,
+    #[error("There is no open_pr action on the task to specify a connection to the Git host.")]
+    NoGitHostConnection,
     #[error("the job's evaluation has no git commit to apply the patch to")]
     NoCommit,
     #[error("the patch deletes {0}; deleting files is not supported")]
@@ -76,9 +76,12 @@ pub async fn open_from_patch(
         ))
     })?;
     let files = files_of_patch(ctx, &request).await?;
-    let reporter = build_reporter_for_integration(ctx, request.integration)
-        .await
-        .map_err(PullRequestError::Forge)?;
+    let reporter = build_commit_status_posting_client_from_git_host_connection_id(
+        ctx,
+        request.git_host_connection,
+    )
+    .await
+    .map_err(PullRequestError::Forge)?;
     let author = configured_commit_ident(
         &ctx.db.config.pull_requests.commit_name,
         &ctx.db.config.pull_requests.commit_email,
@@ -131,10 +134,10 @@ pub(crate) async fn open_with_reporter(
     })
 }
 
-pub async fn pull_request_integration<C: ConnectionTrait>(
+pub async fn pull_request_git_host_connection<C: ConnectionTrait>(
     db: &C,
     task: TaskId,
-) -> Result<Option<IntegrationId>, DbErr> {
+) -> Result<Option<GitHostConnectionId>, DbErr> {
     let actions = ETaskAction::find()
         .filter(CTaskAction::Task.eq(task))
         .filter(CTaskAction::Active.eq(true))
@@ -144,7 +147,10 @@ pub async fn pull_request_integration<C: ConnectionTrait>(
         .await?;
     Ok(actions.into_iter().find_map(|action| {
         match serde_json::from_value::<ActionConfig>(action.config).ok()? {
-            ActionConfig::OpenPr { integration_id, .. } => Some(integration_id),
+            ActionConfig::OpenPr {
+                git_host_connection_id,
+                ..
+            } => Some(git_host_connection_id),
             _ => None,
         }
     }))
@@ -233,7 +239,7 @@ async fn record_for_job(
     gradient_db::exec_jobs::pull_requests::record(
         &ctx.db.worker_db,
         job,
-        request.integration,
+        request.git_host_connection,
         &opened.url,
         &opened.branch,
         opened.number,
@@ -323,7 +329,7 @@ mod tests {
         let touched: Vec<String> = paths.iter().map(|path| (*path).into()).collect();
         PatchPullRequest {
             task: MTask::default(),
-            integration: IntegrationId::nil(),
+            git_host_connection: GitHostConnectionId::nil(),
             start_commit: "0".repeat(40),
             patch: Vec::new(),
             title: "update".into(),

@@ -9,14 +9,14 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_entity::{ids::*, integration, task, task_trigger};
+use gradient_entity::{ids::*, task, task_trigger};
 use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::mock::{all_statements, mock_db, ran};
 use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use gradient_types::{ConcurrencyPolicy, GitHostType, SessionId, TriggerType};
+use gradient_types::{ConcurrencyPolicy, SessionId, TriggerType};
 use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
@@ -37,30 +37,12 @@ fn polling_trigger_row() -> task_trigger::Model {
     }
 }
 
-fn github_integration_id() -> IntegrationId {
-    IntegrationId::new(Uuid::parse_str("019e16b2-e958-7652-ad97-67cd7b0fea61").unwrap())
-}
-
-fn github_inbound_integration_row() -> integration::Model {
-    integration::Model {
-        id: github_integration_id(),
-        project: project_id(),
-        name: "github".into(),
-        display_name: "GitHub".into(),
-        git_host_type: GitHostType::GitHub,
-        created_by: user_id(),
-        created_at: test_date(),
-        ..Default::default()
-    }
-}
-
 fn reporter_push_trigger_row() -> task_trigger::Model {
     task_trigger::Model {
         id: trigger_id(),
         task: task_id(),
         trigger_type: TriggerType::ReporterPush,
         config: serde_json::json!({
-            "integration_id": github_integration_id().to_string(),
             "branches": ["main"],
             "tags": [],
             "releases_only": false,
@@ -559,13 +541,12 @@ async fn a_description_only_task_patch_does_not_force_an_evaluation() {
 }
 
 #[tokio::test]
-async fn list_reporter_trigger_includes_integration_metadata() {
+async fn list_triggers_returns_push_trigger_without_git_host_connection_or_integration_field() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
     let db = with_task_member(with_auth(mock_db(), session_id))
-        .append_query_results([vec![reporter_push_trigger_row()]])
-        .append_query_results([vec![github_inbound_integration_row()]]);
+        .append_query_results([vec![reporter_push_trigger_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -577,77 +558,5 @@ async fn list_reporter_trigger_includes_integration_metadata() {
     let body: Value = res.json();
     let item = &body["message"][0];
     assert_eq!(item["type"], "reporter_push");
-    assert_eq!(
-        item["integration"]["id"],
-        github_integration_id().to_string()
-    );
-    assert_eq!(item["integration"]["name"], "github");
-    assert_eq!(item["integration"]["display_name"], "GitHub");
-    assert_eq!(item["integration"]["git_host_type"], "github");
-}
-
-#[tokio::test]
-async fn list_reporter_trigger_with_missing_integration_returns_null() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-
-    let db = with_task_member(with_auth(mock_db(), session_id))
-        .append_query_results([vec![reporter_push_trigger_row()]])
-        .append_query_results([Vec::<integration::Model>::new()]);
-
-    let server = make_test_server(db.into_connection());
-    let res = server
-        .get(BASE_URL)
-        .add_header("authorization", format!("Bearer {}", token))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["message"][0]["type"], "reporter_push");
-    assert!(body["message"][0]["integration"].is_null());
-}
-
-#[tokio::test]
-async fn list_polling_trigger_has_null_integration_and_skips_lookup() {
-    // No reporter trigger is listed, and the handler must not issue an integration SELECT.
-    // MockDatabase is panicking on unexpected queries, and that is the assertion.
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-
-    let db = with_task_member(with_auth(mock_db(), session_id))
-        .append_query_results([vec![polling_trigger_row()]]);
-
-    let server = make_test_server(db.into_connection());
-    let res = server
-        .get(BASE_URL)
-        .add_header("authorization", format!("Bearer {}", token))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["message"][0]["type"], "polling");
-    assert!(body["message"][0]["integration"].is_null());
-}
-
-#[tokio::test]
-async fn get_reporter_trigger_includes_integration_metadata() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-    let tid = trigger_id();
-
-    let db = with_task_member(with_auth(mock_db(), session_id))
-        .append_query_results([vec![reporter_push_trigger_row()]])
-        .append_query_results([vec![github_inbound_integration_row()]]);
-
-    let server = make_test_server(db.into_connection());
-    let res = server
-        .get(&format!("{}/{}", BASE_URL, tid))
-        .add_header("authorization", format!("Bearer {}", token))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["message"]["type"], "reporter_push");
-    assert_eq!(body["message"]["integration"]["display_name"], "GitHub");
-    assert_eq!(body["message"]["integration"]["git_host_type"], "github");
+    assert!(item.get("integration").is_none(), "{item}");
 }

@@ -5,62 +5,10 @@
  */
 
 use crate::ActionError;
-use crate::actions::ExecutorOk;
-use crate::actions::matchers::git_host_status_for_event;
-use crate::actions::report::{build_ci_reports_from_payload, persist_evaluation_check_id};
 use crate::context::CiContext;
-use crate::integration_lookup::IntegrationKind;
-use crate::outbound_integration_access_token::refresh_and_get_usable_decrypted_access_token;
-use anyhow::{Context, Result, anyhow};
-use gradient_db::lookup::by_id;
-use gradient_git_host::reporter::{CiReporter, GithubAppReporter};
-use gradient_types::{
-    ActionConfig, ActionType, CIntegration, CTaskAction, EIntegration, ETaskAction, EvaluationId,
-    IntegrationId, TaskId,
-};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use serde_json::Value as JsonValue;
-use std::sync::Arc;
-
-pub(crate) async fn execute_git_host_status_report(
-    ctx: &CiContext,
-    event: &str,
-    payload: &JsonValue,
-    integration_id: IntegrationId,
-) -> Result<ExecutorOk> {
-    let ci_status = git_host_status_for_event(event)
-        .ok_or_else(|| anyhow!("event '{}' has no Git host status mapping", event))?;
-
-    let reports = build_ci_reports_from_payload(ctx, event, payload, ci_status).await?;
-    if reports.is_empty() {
-        return Ok(ExecutorOk {
-            status_code: Some(204),
-            response_body: None,
-        });
-    }
-    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
-    let evaluation_id = payload
-        .get("evaluation_id")
-        .or_else(|| payload.get("evaluation"))
-        .and_then(|v| v.as_str())
-        .and_then(|eid| eid.parse::<EvaluationId>().ok());
-    let mut first_id = None;
-    for report in &reports {
-        let new_id = reporter
-            .report(report)
-            .await
-            .context("send Git host status report")?;
-        if let (Some(new_id), Some(evaluation_id)) = (new_id, evaluation_id) {
-            persist_evaluation_check_id(ctx, evaluation_id, &report.context, new_id).await;
-        }
-        first_id = first_id.or(new_id);
-    }
-    let body = first_id.map(|id| format!("{{\"check_run_id\":{}}}", id));
-    Ok(ExecutorOk {
-        status_code: Some(200),
-        response_body: body,
-    })
-}
+use crate::task_commit_status_posting::build_commit_status_posting_client_from_git_host_connection_id;
+use anyhow::{Context, Result};
+use gradient_types::ActionConfig;
 
 /// The regular synthetic test-fire is posting against placeholder owner, repo and sha, which Git
 /// hosts reject. A connectivity check is the only test these actions can pass.
@@ -69,113 +17,25 @@ pub async fn verify_git_host_action(
     action: &gradient_types::MTaskAction,
     repository: &str,
 ) -> Result<()> {
-    let integration_id = match serde_json::from_value::<ActionConfig>(action.config.clone())
+    let ActionConfig::OpenPr {
+        git_host_connection_id,
+        ..
+    } = serde_json::from_value::<ActionConfig>(action.config.clone())
         .context("decode action config")?
-    {
-        ActionConfig::GitHostStatusReport { integration_id }
-        | ActionConfig::OpenPr { integration_id, .. } => integration_id,
-        _ => anyhow::bail!("action does not use a Git host integration"),
+    else {
+        anyhow::bail!("action does not use a Git host connection");
     };
 
     let (owner, repo) =
         crate::parse_owner_repo(repository).ok_or_else(|| ActionError::RepositoryUnparsable {
             repository: repository.to_owned(),
         })?;
-    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
+    let reporter =
+        build_commit_status_posting_client_from_git_host_connection_id(ctx, git_host_connection_id)
+            .await?;
 
     reporter
         .verify(&owner, &repo)
         .await
         .context("check Git host connectivity")
-}
-
-pub async fn reporter_for_task(
-    ctx: &CiContext,
-    task_id: TaskId,
-) -> Result<Option<Arc<dyn CiReporter>>> {
-    let action = ETaskAction::find()
-        .filter(CTaskAction::Task.eq(task_id))
-        .filter(CTaskAction::Active.eq(true))
-        .filter(CTaskAction::ActionType.eq(ActionType::GitHostStatusReport))
-        .one(&ctx.db.worker_db)
-        .await
-        .context("load git_host_status_report action")?;
-    let Some(action) = action else {
-        return Ok(None);
-    };
-    let cfg: ActionConfig =
-        serde_json::from_value(action.config.clone()).context("decode action config")?;
-    let ActionConfig::GitHostStatusReport { integration_id } = cfg else {
-        return Ok(None);
-    };
-    Ok(Some(
-        build_reporter_for_integration(ctx, integration_id).await?,
-    ))
-}
-
-pub(crate) async fn build_reporter_for_integration(
-    ctx: &CiContext,
-    integration_id: IntegrationId,
-) -> Result<Arc<dyn CiReporter>> {
-    let integration = EIntegration::find_by_id(integration_id)
-        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
-        .one(&ctx.db.worker_db)
-        .await
-        .context("load integration")?
-        .ok_or_else(|| anyhow!("outbound integration {} not found", integration_id))?;
-
-    let git_host = integration.git_host_type;
-    let provider = ctx
-        .git_host
-        .get(git_host)
-        .ok_or_else(|| anyhow!("no Git host provider registered for {:?}", git_host))?;
-
-    let token = refresh_and_get_usable_decrypted_access_token(
-        &ctx.db.worker_db,
-        &ctx.db.config,
-        &ctx.http,
-        &integration,
-    )
-    .await?;
-
-    if provider.supports_app_auth()
-        && let Some(reporter) = build_github_app_reporter(ctx, &integration).await?
-    {
-        return Ok(reporter);
-    }
-
-    provider.build_reporter(
-        ctx.http.clone(),
-        integration.endpoint_url.as_deref(),
-        token.as_ref().map(|t| t.expose()),
-    )
-}
-
-async fn build_github_app_reporter(
-    ctx: &CiContext,
-    integration: &gradient_entity::integration::Model,
-) -> Result<Option<Arc<dyn CiReporter>>> {
-    let Some(github_app) = ctx.db.config.github_app.clone() else {
-        return Ok(None);
-    };
-    let Some(install_fk) = integration.github_installation else {
-        return Ok(None);
-    };
-    let install =
-        by_id::<gradient_entity::github_installation::Entity, _>(&ctx.db.worker_db, install_fk)
-            .await
-            .context("load github installation")?
-            .ok_or_else(|| anyhow!("github installation {} not found", install_fk))?;
-    let installation_id = install.installation_id;
-    let pem = tokio::fs::read_to_string(&github_app.private_key_file)
-        .await
-        .context("read github app private key")?;
-    let r = GithubAppReporter::new(
-        ctx.http.clone(),
-        "",
-        github_app.app_id,
-        pem,
-        installation_id,
-    )?;
-    Ok(Some(Arc::new(r)))
 }

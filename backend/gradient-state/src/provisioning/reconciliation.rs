@@ -6,9 +6,10 @@
 
 use super::DynError;
 use super::StateApplicator;
-use super::parse_integration_kind;
 use crate::config::StateConfiguration;
+use gradient_db::git_host_connections::GitHostConnectionOwnerByDatabaseId;
 use gradient_entity::*;
+use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
@@ -102,8 +103,19 @@ impl<'a> StateApplicator<'a> {
 
         self.unmark_removed_roles(config, &project_name_by_id, delete_state)
             .await?;
-        self.unmark_removed_integrations(config, &project_name_by_id, delete_state)
-            .await?;
+        let team_name_by_id: HashMap<TeamId, String> = team::Entity::find()
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|team| (team.id, team.name))
+            .collect();
+        self.delete_or_unmark_managed_git_host_connections_not_declared_in_state(
+            config,
+            &project_name_by_id,
+            &team_name_by_id,
+            delete_state,
+        )
+        .await?;
 
         let managed_workers = worker_registration::Entity::find()
             .filter(worker_registration::Column::Managed.eq(true))
@@ -186,43 +198,52 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    async fn unmark_removed_integrations(
+    async fn delete_or_unmark_managed_git_host_connections_not_declared_in_state(
         &self,
         config: &StateConfiguration,
         project_name_by_id: &HashMap<ProjectId, String>,
+        team_name_by_id: &HashMap<TeamId, String>,
         delete_state: bool,
     ) -> Result<(), DynError> {
-        let integration_keys: HashSet<(&str, integration::IntegrationKind, &str)> = config
-            .integrations
+        let declared: HashSet<(GitHostConnectionOwner, &str)> = config
+            .git_host_connections
             .values()
-            .filter_map(|i| {
-                let kind = parse_integration_kind(&i.kind)?;
-                Some((i.project.as_str(), kind, i.name.as_str()))
-            })
+            .filter_map(|c| Some((c.owner.parse().ok()?, c.name.as_str())))
             .collect();
-        let managed_integrations = integration::Entity::find()
-            .filter(integration::Column::Managed.eq(true))
+        let managed_connections = EGitHostConnection::find()
+            .filter(CGitHostConnection::Managed.eq(true))
             .all(self.db)
             .await?;
-        for managed in managed_integrations {
-            let Some(project_name) = project_name_by_id.get(&managed.project) else {
-                continue;
+        for managed in managed_connections {
+            let owner = match GitHostConnectionOwnerByDatabaseId::of(&managed) {
+                GitHostConnectionOwnerByDatabaseId::Instance => GitHostConnectionOwner::Instance,
+                GitHostConnectionOwnerByDatabaseId::Team(id) => {
+                    let Some(name) = team_name_by_id.get(&id) else {
+                        continue;
+                    };
+                    GitHostConnectionOwner::Team { name: name.clone() }
+                }
+                GitHostConnectionOwnerByDatabaseId::Project(id) => {
+                    let Some(name) = project_name_by_id.get(&id) else {
+                        continue;
+                    };
+                    GitHostConnectionOwner::Project { name: name.clone() }
+                }
             };
-            let key = (project_name.as_str(), managed.kind, managed.name.as_str());
-            if integration_keys.contains(&key) {
+            if declared.contains(&(owner.clone(), managed.name.as_str())) {
                 continue;
             }
-            let integration_name = managed.name.clone();
+            let name = managed.name.clone();
             if delete_state {
-                integration::Entity::delete_by_id(managed.id)
+                EGitHostConnection::delete_by_id(managed.id)
                     .exec(self.db)
                     .await?;
-                tracing::info!(project = %project_name, integration = %integration_name, "Deleted managed integration");
+                tracing::info!(%owner, %name, "Deleted the managed connection to the Git host.");
             } else {
-                let mut active: integration::ActiveModel = managed.into();
+                let mut active: AGitHostConnection = managed.into();
                 active.managed = Set(false);
                 active.update(self.db).await?;
-                tracing::info!(project = %project_name, integration = %integration_name, "Unmarked managed integration");
+                tracing::info!(%owner, %name, "Unmarked Connection to a Managed Git Host");
             }
         }
         Ok(())
@@ -311,111 +332,145 @@ mod keep_set_tests {
 }
 
 #[cfg(test)]
-mod integration_reconciliation_tests {
+mod managed_git_host_connection_reconciliation_tests {
     use super::*;
     use gradient_fixtures::mock::{all_statements, mock_db};
-    use integration::IntegrationKind;
     use sea_orm::{DatabaseConnection, MockExecResult, Statement};
 
-    fn state_listing_inbound_hook_of_acme() -> StateConfiguration {
+    struct Owners {
+        acme: ProjectId,
+        other: ProjectId,
+        platform: TeamId,
+    }
+
+    impl Owners {
+        fn new() -> Self {
+            Self {
+                acme: ProjectId::now_v7(),
+                other: ProjectId::now_v7(),
+                platform: TeamId::now_v7(),
+            }
+        }
+    }
+
+    fn state_listing_hook_of_acme_and_forge_of_platform_and_instance() -> StateConfiguration {
+        let connection = |name: &str, owner: &str| {
+            serde_json::json!({
+                "name": name,
+                "owner": owner,
+                "git_host_type": "gitea",
+                "created_by": "alice"
+            })
+        };
         serde_json::from_value(serde_json::json!({
-            "integrations": {
-                "hook-key": {
-                    "name": "hook",
-                    "project": "acme",
-                    "kind": "inbound",
-                    "git_host_type": "gitea",
-                    "created_by": "alice"
-                }
+            "git_host_connections": {
+                "acme-hook": connection("hook", "project/acme"),
+                "platform-forge": connection("forge", "team/platform"),
+                "instance-forge": connection("forge", "instance"),
             }
         }))
         .unwrap()
     }
 
-    fn managed_row(project: ProjectId, kind: IntegrationKind, name: &str) -> integration::Model {
-        integration::Model {
-            id: IntegrationId::now_v7(),
+    fn managed_row(
+        name: &str,
+        project: Option<ProjectId>,
+        owner_team: Option<TeamId>,
+    ) -> MGitHostConnection {
+        MGitHostConnection {
+            id: GitHostConnectionId::now_v7(),
             project,
+            owner_team,
             name: name.into(),
-            kind,
             managed: true,
             ..Default::default()
         }
     }
 
-    async fn reconcile(db: &DatabaseConnection, acme: ProjectId, other: ProjectId, delete: bool) {
+    async fn reconcile(db: &DatabaseConnection, owners: &Owners, delete: bool) {
         let app = StateApplicator {
             db,
             crypt_secret_file: "",
             credentials_dir: std::path::Path::new(""),
             email_enabled: false,
         };
-        let project_name_by_id =
-            HashMap::from([(acme, "acme".to_string()), (other, "other".to_string())]);
-        app.unmark_removed_integrations(
-            &state_listing_inbound_hook_of_acme(),
+        let project_name_by_id = HashMap::from([
+            (owners.acme, "acme".to_string()),
+            (owners.other, "other".to_string()),
+        ]);
+        let team_name_by_id = HashMap::from([(owners.platform, "platform".to_string())]);
+        app.delete_or_unmark_managed_git_host_connections_not_declared_in_state(
+            &state_listing_hook_of_acme_and_forge_of_platform_and_instance(),
             &project_name_by_id,
+            &team_name_by_id,
             delete,
         )
         .await
         .unwrap();
     }
 
-    fn mentions(statement: &Statement, id: IntegrationId) -> bool {
+    fn mentions(statement: &Statement, id: GitHostConnectionId) -> bool {
         format!("{:?}", statement.values).contains(&id.to_string())
     }
 
     #[tokio::test]
-    async fn delete_state_removes_integrations_missing_by_project_kind_and_name() {
-        let (acme, other) = (ProjectId::now_v7(), ProjectId::now_v7());
-        let listed = managed_row(acme, IntegrationKind::Inbound, "hook");
-        let other_kind = managed_row(acme, IntegrationKind::Outbound, "hook");
-        let other_project = managed_row(other, IntegrationKind::Inbound, "hook");
+    async fn delete_mode_deletes_managed_connections_missing_from_state_by_owner_and_name_and_keeps_listed_connection()
+     {
+        let owners = Owners::new();
+        let listed = [
+            managed_row("hook", Some(owners.acme), None),
+            managed_row("forge", None, Some(owners.platform)),
+            managed_row("forge", None, None),
+        ];
+        let removed = [
+            managed_row("hook", Some(owners.other), None),
+            managed_row("hook", None, Some(owners.platform)),
+            managed_row("hook", None, None),
+        ];
         let deleted = MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         };
         let db = mock_db()
-            .append_query_results([vec![
-                listed.clone(),
-                other_kind.clone(),
-                other_project.clone(),
-            ]])
-            .append_exec_results([deleted.clone(), deleted])
+            .append_query_results([listed.iter().chain(&removed).cloned().collect::<Vec<_>>()])
+            .append_exec_results(std::iter::repeat_n(deleted, removed.len()))
             .into_connection();
 
-        reconcile(&db, acme, other, true).await;
+        reconcile(&db, &owners, true).await;
 
         let deletes: Vec<Statement> = all_statements(db.into_transaction_log())
             .into_iter()
-            .filter(|s| s.sql.starts_with("DELETE FROM \"integration\""))
+            .filter(|s| s.sql.starts_with("DELETE FROM \"git_host_connection\""))
             .collect();
-        assert_eq!(deletes.len(), 2);
-        assert!(deletes.iter().any(|s| mentions(s, other_kind.id)));
-        assert!(deletes.iter().any(|s| mentions(s, other_project.id)));
-        assert!(!deletes.iter().any(|s| mentions(s, listed.id)));
+        assert_eq!(deletes.len(), removed.len());
+        for row in &removed {
+            assert!(deletes.iter().any(|s| mentions(s, row.id)));
+        }
+        for row in &listed {
+            assert!(!deletes.iter().any(|s| mentions(s, row.id)));
+        }
     }
 
     #[tokio::test]
-    async fn without_delete_state_a_removed_integration_is_unmanaged_not_deleted() {
-        let (acme, other) = (ProjectId::now_v7(), ProjectId::now_v7());
-        let listed = managed_row(acme, IntegrationKind::Inbound, "hook");
-        let removed = managed_row(acme, IntegrationKind::Inbound, "old-hook");
+    async fn removed_connection_is_unmanaged_and_not_deleted_when_delete_mode_is_off() {
+        let owners = Owners::new();
+        let listed = managed_row("hook", Some(owners.acme), None);
+        let removed = managed_row("old-hook", Some(owners.acme), None);
         let db = mock_db()
             .append_query_results([vec![listed.clone(), removed.clone()]])
-            .append_query_results([vec![integration::Model {
+            .append_query_results([vec![MGitHostConnection {
                 managed: false,
                 ..removed.clone()
             }]])
             .into_connection();
 
-        reconcile(&db, acme, other, false).await;
+        reconcile(&db, &owners, false).await;
 
         let log = all_statements(db.into_transaction_log());
         assert!(!log.iter().any(|s| s.sql.starts_with("DELETE")));
         let updates: Vec<&Statement> = log
             .iter()
-            .filter(|s| s.sql.starts_with("UPDATE \"integration\""))
+            .filter(|s| s.sql.starts_with("UPDATE \"git_host_connection\""))
             .collect();
         assert_eq!(updates.len(), 1);
         assert!(mentions(updates[0], removed.id));

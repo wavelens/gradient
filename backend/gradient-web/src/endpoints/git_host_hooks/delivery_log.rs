@@ -8,36 +8,40 @@ use super::IncomingWebhookResponse;
 use crate::error::WebResult;
 use gradient_db::WebDb;
 use gradient_entity::incoming_webhook_delivery::{DeliveryResult, Model};
-use gradient_types::{IncomingWebhookDeliveryId, IntegrationId};
+use gradient_types::{GitHostConnectionId, IncomingWebhookDeliveryId};
 use tracing::warn;
 
 const MAX_EVENT_NAME_LENGTH: usize = 64;
 
 #[derive(Default)]
 pub(super) struct DeliveryLog {
-    pub(super) integrations: Vec<IntegrationId>,
+    pub(super) connections: Vec<GitHostConnectionId>,
     pub(super) event: Option<String>,
 }
 
 impl DeliveryLog {
-    pub(super) fn set_integration_and_event(&mut self, integration: IntegrationId, event: &str) {
-        self.integrations.push(integration);
+    pub(super) fn set_connection_and_event(
+        &mut self,
+        connection: GitHostConnectionId,
+        event: &str,
+    ) {
+        self.connections.push(connection);
         self.event = Some(event.to_owned());
     }
 
     pub(super) async fn record(&self, db: &WebDb, result: &WebResult<IncomingWebhookResponse>) {
-        if self.integrations.is_empty() {
+        if self.connections.is_empty() {
             return;
         }
         let entry = entry(self.event.as_deref(), result);
-        for integration in &self.integrations {
+        for connection in &self.connections {
             let row = Model {
                 id: IncomingWebhookDeliveryId::now_v7(),
-                integration: *integration,
+                git_host_connection: *connection,
                 ..entry.clone()
             };
             if let Err(e) = gradient_db::incoming_deliveries::record(db, row).await {
-                warn!(error = %e, %integration, "Failed to record an inbound webhook delivery.");
+                warn!(error = %e, %connection, "Failed to record an inbound webhook delivery.");
             }
         }
     }

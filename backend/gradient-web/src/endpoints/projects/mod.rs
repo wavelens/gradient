@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod integrations;
 pub mod management;
 pub mod project_gitea_oauth2_connection;
 pub mod readiness;
@@ -14,12 +13,6 @@ pub mod settings;
 pub mod ssh;
 pub mod workers;
 
-pub use self::integrations::{
-    ConnectGitHostRequest, ConnectGitHostResponse, CreateIntegrationRequest,
-    IncomingWebhookDeliveryResponse, IntegrationResponse, IntegrationSummaryResponse,
-    PatchIntegrationRequest, delete_integration, get_integration, get_integration_deliveries,
-    get_integration_summaries, get_integrations, patch_integration, put_integration,
-};
 pub use self::management::{
     MakeProjectRequest, PatchProjectRequest, ProjectResponse, ProjectSummary, delete_project, get,
     get_project, get_project_name_available, get_public_projects, patch_project, put,

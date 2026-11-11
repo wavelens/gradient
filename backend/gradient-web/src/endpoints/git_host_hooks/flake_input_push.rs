@@ -20,14 +20,14 @@ use tracing::{info, warn};
 
 pub(super) async fn trigger_input_updates_for_push(
     ci: &CiContext,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     push: &ParsedPushEvent,
 ) -> WebhookTriggerOutcome {
     let mut outcome = WebhookTriggerOutcome::default();
     if push.is_tag {
         return outcome;
     }
-    for (trig, task) in input_update_triggers(ci, integration_id, push).await {
+    for (trig, task) in input_update_triggers(ci, connection_id, push).await {
         if !task_follows_pushed_input(ci, &task, push).await {
             continue;
         }
@@ -38,17 +38,21 @@ pub(super) async fn trigger_input_updates_for_push(
 
 async fn input_update_triggers(
     ci: &CiContext,
-    integration_id: IntegrationId,
+    connection_id: GitHostConnectionId,
     push: &ParsedPushEvent,
 ) -> Vec<(ept::Model, MTask)> {
     let db = &ci.db.web_db;
     let triggers =
-        gradient_db::triggers::active_of_integration(db, integration_id, TriggerType::ReporterPush)
-            .await
-            .unwrap_or_else(|e| {
-                warn!(error = %e, "load triggers for integration");
-                Vec::new()
-            });
+        gradient_db::triggers::list_active_triggers_of_type_on_tasks_using_git_host_connection(
+            db,
+            connection_id,
+            TriggerType::ReporterPush,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            warn!(error = %e, "Load triggers for connections to Git hosts.");
+            Vec::new()
+        });
 
     let mut found = Vec::new();
     for trig in triggers {
