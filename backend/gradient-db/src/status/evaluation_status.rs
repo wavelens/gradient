@@ -20,20 +20,32 @@ pub async fn update_evaluation_status(
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> Result<MEvaluation, DbErr> {
-    let id = evaluation.id;
-    let fallback = evaluation.clone();
-    match update_evaluation_status_only_if_changed(ctx, evaluation, status).await? {
+    // All build transitions embed this future, so we box the future. The size of the unboxed future can overflow the stack in debug builds.
+    match Box::pin(update_evaluation_status_only_if_changed(
+        ctx,
+        &evaluation,
+        status,
+    ))
+    .await?
+    {
         Some(updated) => Ok(updated),
-        None => Ok(EEvaluation::find_by_id(id)
-            .one(&ctx.worker_db)
-            .await?
-            .unwrap_or(fallback)),
+        None => read_evaluation_row_or_return_given_evaluation(ctx, evaluation).await,
     }
+}
+
+async fn read_evaluation_row_or_return_given_evaluation(
+    ctx: &DbContext,
+    evaluation: MEvaluation,
+) -> Result<MEvaluation, DbErr> {
+    Ok(EEvaluation::find_by_id(evaluation.id)
+        .one(&ctx.worker_db)
+        .await?
+        .unwrap_or(evaluation))
 }
 
 async fn update_evaluation_status_only_if_changed(
     ctx: &DbContext,
-    evaluation: MEvaluation,
+    evaluation: &MEvaluation,
     status: EvaluationStatus,
 ) -> Result<Option<MEvaluation>, DbErr> {
     if evaluation.status != status && !status.sources().contains(&evaluation.status) {
@@ -247,19 +259,19 @@ pub async fn update_evaluation_status_with_error(
     let source = failure.source();
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %failure, source, "Updating evaluation status with error");
 
-    let id = evaluation.id;
-    let fallback = evaluation.clone();
-    let Some(updated) = update_evaluation_status_only_if_changed(ctx, evaluation, status).await?
+    let Some(updated) = Box::pin(update_evaluation_status_only_if_changed(
+        ctx,
+        &evaluation,
+        status,
+    ))
+    .await?
     else {
-        return Ok(EEvaluation::find_by_id(id)
-            .one(&ctx.worker_db)
-            .await?
-            .unwrap_or(fallback));
+        return read_evaluation_row_or_return_given_evaluation(ctx, evaluation).await;
     };
 
     insert_evaluation_message(
         &ctx.worker_db,
-        id,
+        evaluation.id,
         MessageLevel::Error,
         failure.to_string(),
         Some(source.to_owned()),
