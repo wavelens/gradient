@@ -127,6 +127,7 @@ zstd              = { version = "0.14", default-features = false, features = ["z
 
 # Bytes / buffers
 bytes = { version = "1.11", default-features = false, features = ["std"] }
+prost = { version = "0.14", default-features = false, features = ["std", "derive"] }
 
 # Text search
 aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"] }
@@ -160,6 +161,8 @@ hyper-util           = { version = "0.1", default-features = false, features = [
 jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
 lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "rustls-native-certs", "aws-lc-rs", "tokio1-rustls"] }
 reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate", "zstd"] }
+tonic                = { version = "0.14", default-features = false, features = ["codegen"] }
+tonic-prost          = { version = "0.14", default-features = false }
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.7", default-features = false, features = ["cors", "request-id", "trace"] }
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
@@ -217,6 +220,9 @@ num_enum = { version = "0.7", default-features = false }
 
 # MIME type detection
 mime_guess = { version = "2", default-features = false }
+
+# Protobuf code generation
+tonic-prost-build = { version = "0.14", default-features = false }
 
 # Test utilities
 axum-test = { version = "21.0", default-features = false }

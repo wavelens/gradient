@@ -140,6 +140,7 @@
       nativeBuildInputs = [
         gradient-nix.dev
         pkg-config
+        protobuf
         glibc.dev
       ];
 

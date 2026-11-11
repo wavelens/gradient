@@ -1,0 +1,315 @@
+// SPDX-FileCopyrightText: 2026 Jörg Thalheim
+// SPDX-License-Identifier: MIT
+// Vendored from https://github.com/Mic92/nix-grpc-store at commit 80f943839f0b4240f97fd8c12798f7618940aca6
+
+syntax = "proto3";
+
+package nix.remote;
+
+// A zstd-compressed chunk of the Nix worker protocol byte stream. The
+// concatenation of all chunks in one direction is a single zstd stream; each
+// chunk ends on a ZSTD_e_flush boundary so it can be decoded in isolation.
+message Chunk {
+  bytes data = 1;
+}
+
+// Batched validity query. Paths are store path base names ("<hash>-<name>").
+message QueryValidPathsRequest {
+  repeated string paths = 1;
+  // If true, the server may try to substitute missing paths.
+  bool substitute = 2;
+}
+
+message QueryValidPathsReply {
+  repeated string paths = 1;
+}
+
+// One message of a client-streamed bulk import. The concatenation of all
+// `data` fields is a single zstd stream; its decompressed content uses the
+// worker-protocol AddMultipleToStore framing: a count, then for each path a
+// ValidPathInfo (protocol 1.16 serialisation) followed by its NAR.
+message AddMultipleChunk {
+  // Only meaningful on the first message of the stream.
+  bool repair = 1;
+  bool check_sigs = 2;
+  bytes data = 3;
+}
+
+message AddMultipleReply {}
+
+message QueryPathInfosRequest {
+  repeated string paths = 1;
+}
+
+// `info` is the worker-protocol UnkeyedValidPathInfo (protocol 1.16)
+// serialisation. Paths unknown to the store are omitted from the reply.
+message PathInfo {
+  string path = 1;
+  bytes info = 2;
+}
+
+message QueryPathInfosReply {
+  repeated PathInfo infos = 1;
+}
+
+// `drv` is the worker-protocol BasicDerivation serialisation. `protocol`
+// (major << 8 | minor) pins the BuildResult serialisation in the reply.
+// The worker only accepts this after the scheduler sent it Expect{drv_path}.
+message BuildDerivationRequest {
+  string drv_path = 1;
+  bytes drv = 2;
+  uint32 build_mode = 3;
+  uint32 protocol = 4;
+  // From Assigned, for log correlation only.
+  uint64 assign_id = 5;
+  // The client's build-timeout / max-silent-time settings, 0 = none.
+  uint64 build_timeout = 6;
+  uint64 max_silent_time = 7;
+}
+
+// `result` is the worker-protocol BuildResult serialisation at the request's
+// `protocol`. Output path infos ride along so the client needs no follow-up
+// queries.
+message BuildDerivationDone {
+  bytes result = 1;
+  repeated PathInfo outputs = 2;
+}
+
+message BuildDerivationChunk {
+  oneof event {
+    // Raw builder stderr, which need not be valid UTF-8.
+    bytes log_line = 1;
+    BuildDerivationDone done = 2;
+    // stdenv phase name (resSetPhase), for progress displays.
+    string phase = 3;
+  }
+}
+
+message QueryMissingRequest {
+  // DerivedPaths in nix's string notation.
+  repeated string targets = 1;
+}
+
+message QueryMissingReply {
+  repeated string will_build = 1;
+  repeated string will_substitute = 2;
+  repeated string unknown = 3;
+  uint64 download_size = 4;
+  uint64 nar_size = 5;
+}
+
+message StoreInfoRequest {}
+
+message StoreInfoReply {
+  optional bool trusted = 1;
+  reserved 2;
+}
+
+message FetchNarsRequest {
+  // Store paths to send, streamed back in this order.
+  repeated string paths = 1;
+}
+
+// One frame of a NAR download. The concatenation of all `data` fields in one
+// FetchNars call is a single zstd stream, so the compression window is
+// shared across paths. The stream is flushed at every frame boundary, so
+// each frame decodes in isolation and its decompressed bytes belong to
+// `paths[path_index]`. `eof` marks the last frame of that path's NAR; the
+// client can restore the path as soon as its frames arrive, while later
+// paths are still in flight.
+message NarFrame {
+  uint32 path_index = 1;
+  bytes data = 2;
+  bool eof = 3;
+}
+
+// Build log of a derivation built on the server. `drv_path` is a store path
+// base name. Errors: NOT_FOUND (no log), UNIMPLEMENTED (the store keeps no
+// logs), DATA_LOSS (a corrupt .bz2 log).
+message GetBuildLogRequest {
+  string drv_path = 1;
+}
+
+// The `data` fields of all chunks together form one zstd stream.
+message GetBuildLogChunk {
+  bytes data = 1;
+}
+
+// Bidirectional tunnel that carries the same byte stream `nix-daemon --stdio`
+// would exchange over stdin/stdout. The server side hands the stream to
+// `nix::daemon::processConnection`, the client side to `nix::RemoteStore`.
+// QueryValidPaths / AddMultipleToStore bypass the tunnel for the `nix copy`
+// hot path so many small paths share one zstd stream and one round trip.
+service NixRemote {
+  rpc Connect(stream Chunk) returns (stream Chunk);
+  rpc QueryValidPaths(QueryValidPathsRequest) returns (QueryValidPathsReply);
+  rpc AddMultipleToStore(stream AddMultipleChunk) returns (AddMultipleReply);
+  rpc QueryPathInfos(QueryPathInfosRequest) returns (QueryPathInfosReply);
+  rpc FetchNars(FetchNarsRequest) returns (stream NarFrame);
+  rpc BuildDerivation(BuildDerivationRequest) returns (stream BuildDerivationChunk);
+  rpc QueryMissing(QueryMissingRequest) returns (QueryMissingReply);
+  rpc StoreInfo(StoreInfoRequest) returns (StoreInfoReply);
+  rpc GetBuildLog(GetBuildLogRequest) returns (stream GetBuildLogChunk);
+}
+
+// ---- scheduling ----------------------------------------------------------
+//
+// A client opens one Schedule stream per build and sends a Want for every
+// derivation whose inputs exist. The scheduler answers Cached (outputs are in
+// the cache), Unplaceable, or Assigned once a worker has a free slot; the
+// client then calls BuildDerivation with `x-nix-worker: <worker_addr>`.
+// Workers hold one WorkerSession to the scheduler; the scheduler announces each
+// assignment with Expect before telling the client, and learns the outcome
+// from Done. All scheduler state is rebuilt from Hello after a restart.
+
+message Want {
+  string drv_path = 1;
+  // "<hash>.narinfo" of every output; all present in the cache => Cached.
+  repeated string out_keys = 2;
+  // Store paths of all inputs (sources and input drv outputs), for locality.
+  repeated string inputs = 3;
+  // Remaining critical path below this drv in the client's DAG, ms.
+  uint64 cp_hint_ms = 4;
+  uint32 build_mode = 5;
+  repeated string required_features = 6;
+  // drv.platform; empty means the scheduler's own system.
+  string system = 7;
+}
+
+message Cancel {
+  string drv_path = 1;
+}
+
+message ClientMsg {
+  oneof msg {
+    Want want = 1;
+    Cancel cancel = 2;
+  }
+}
+
+message Assigned {
+  string drv_path = 1;
+  // IP:port the balancer knows the worker by; goes into x-nix-worker.
+  string worker_addr = 2;
+  uint64 assign_id = 3;
+  // The worker's native system, for the balancer's x-nix-system routing.
+  string worker_system = 4;
+}
+
+message Cached {
+  string drv_path = 1;
+}
+
+// No connected worker can take this drv right now. The Want stays queued
+// and Assigned follows if one shows up. The client gives up on its own clock.
+message Unplaceable {
+  string drv_path = 1;
+  string reason = 2;
+}
+
+// The scheduler stops serving on purpose (restart, or yielding to another
+// node). Close the stream, reconnect right away and say again what you
+// want or are running. Not an error.
+message Restarting {}
+
+// A worker that can run the drv is back after Unplaceable. Assigned follows.
+message Placeable {
+  string drv_path = 1;
+}
+
+message SchedMsg {
+  oneof msg {
+    Assigned assigned = 1;
+    Cached cached = 2;
+    Unplaceable unplaceable = 3;
+    Restarting restarting = 4;
+    Placeable placeable = 5;
+  }
+}
+
+message PathSize {
+  string path = 1;
+  uint64 nar_size = 2;
+}
+
+message RunningBuild {
+  string drv_path = 1;
+  uint64 assign_id = 2;
+}
+
+message Hello {
+  string addr = 1;
+  repeated string systems = 2; // native first, then extra-platforms
+  repeated string features = 3;
+  uint32 max_jobs = 4;
+  // Builds in progress and Expects not yet claimed, so a restarted scheduler
+  // neither double-assigns them nor counts their slots as free.
+  repeated RunningBuild running = 5;
+}
+
+message Done {
+  enum Outcome {
+    BUILT = 0;
+    FAILED = 1;
+    CANCELLED = 2;
+    // Expect expired without a BuildDerivation arriving. Older builders;
+    // newer ones give it back as UNREACHABLE.
+    NO_SHOW = 3;
+    // The worker can't run it: place it elsewhere, here only as a last resort.
+    GIVEN_BACK = 4;
+  }
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    DRAINING = 1;
+    PUBLISH_UNAVAILABLE = 2;
+    INPUT_UNAVAILABLE = 3;
+    UNREACHABLE = 4; // no client came for it
+    TRANSIENT_FAILURE = 5; // e.g. ENOSPC
+  }
+  string drv_path = 1;
+  uint64 assign_id = 2;
+  Outcome outcome = 3;
+  repeated PathSize outputs = 4;
+  Reason reason = 5; // with GIVEN_BACK
+}
+
+message Load {
+  bool draining = 1;
+}
+
+message WorkerMsg {
+  oneof msg {
+    Hello hello = 1;
+    Done done = 2;
+    Load load = 3;
+  }
+}
+
+message Expect {
+  string drv_path = 1;
+  uint64 assign_id = 2;
+}
+
+message Revoke {
+  string drv_path = 1;
+}
+
+message SchedCmd {
+  oneof cmd {
+    Expect expect = 1;
+    Revoke revoke = 2;
+    Restarting restarting = 3;
+  }
+}
+
+// Each stream message carries a batch, applied in order; gRPC's per-message
+// cost dominates otherwise.
+message ClientMsgs { repeated ClientMsg msgs = 1; }
+message SchedMsgs { repeated SchedMsg msgs = 1; }
+message WorkerMsgs { repeated WorkerMsg msgs = 1; }
+message SchedCmds { repeated SchedCmd msgs = 1; }
+
+service Scheduler {
+  rpc Schedule(stream ClientMsgs) returns (stream SchedMsgs);
+  rpc WorkerSession(stream WorkerMsgs) returns (stream SchedCmds);
+}
