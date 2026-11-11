@@ -11,20 +11,26 @@ use crate::refusal::SharedRefusal;
 use axum::Router;
 use axum::extract::ConnectInfo;
 use axum::http::StatusCode;
-use gradient_core::ServerState;
 use gradient_daemon::grpc_store_server::{
     AuthenticatedNixGrpcStoreService, GrpcCallCredentialChecker,
 };
-use gradient_scheduler::Scheduler;
+use gradient_db::WebDb;
 use gradient_ssh::{SshBackend, SshHandles, open_project_store_backend_for_api_key};
+use gradient_types::SecretString;
+use gradient_util::debounce::Debounce;
+use ipnet::IpNet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tonic::metadata::MetadataMap;
 use tonic::{Extensions, Status};
+use uuid::Uuid;
 
 pub struct GrpcCallerAuthenticator {
-    state: Arc<ServerState>,
-    handles: SshHandles,
+    pub(crate) web_db: WebDb,
+    pub(crate) jwt_secret: SecretString,
+    pub(crate) last_used_stamps: Arc<Debounce<Uuid>>,
+    pub(crate) trusted_proxies: Vec<IpNet>,
+    pub(crate) handles: SshHandles,
 }
 
 impl GrpcCallCredentialChecker for GrpcCallerAuthenticator {
@@ -40,9 +46,9 @@ impl GrpcCallCredentialChecker for GrpcCallerAuthenticator {
             Status::unauthenticated(SharedRefusal::AuthorizationRequired.to_string())
         })?;
         let decoded = decode_jwt(
-            &self.state.web_db,
-            &self.state.jwt_secret,
-            &self.state.memory.last_used_stamps,
+            &self.web_db,
+            &self.jwt_secret,
+            &self.last_used_stamps,
             token.to_owned(),
         )
         .await
@@ -64,8 +70,7 @@ impl GrpcCallCredentialChecker for GrpcCallerAuthenticator {
         let peer = extensions
             .get::<ConnectInfo<SocketAddr>>()
             .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |info| info.0.ip());
-        let client_ip =
-            resolve_client_ip(&headers, peer, &self.state.config.network.trusted_proxies);
+        let client_ip = resolve_client_ip(&headers, peer, &self.trusted_proxies);
         if !ip_allowed(client_ip, &context.allowed_ips) {
             return Err(Status::permission_denied(
                 SharedRefusal::SourceIpNotAllowed.to_string(),
@@ -88,15 +93,11 @@ impl GrpcCallCredentialChecker for GrpcCallerAuthenticator {
     }
 }
 
-pub fn add_grpc_nix_store_service_routes_to_router(
-    router: Router<Arc<ServerState>>,
-    state: &Arc<ServerState>,
-    scheduler: Arc<Scheduler>,
-) -> Router<Arc<ServerState>> {
-    let service = AuthenticatedNixGrpcStoreService::new(Arc::new(GrpcCallerAuthenticator {
-        state: Arc::clone(state),
-        handles: SshHandles::from_state(state, scheduler),
-    }));
+pub fn add_grpc_nix_store_service_routes_to_router<S: Clone + Send + Sync + 'static>(
+    router: Router<S>,
+    authenticator: GrpcCallerAuthenticator,
+) -> Router<S> {
+    let service = AuthenticatedNixGrpcStoreService::new(Arc::new(authenticator));
     router
         .route_service(
             "/nix.remote.NixRemote/{method}",
@@ -113,9 +114,22 @@ mod tests {
     use super::*;
     use gradient_entity::api;
     use gradient_fixtures::mock::mock_db;
+    use gradient_scheduler::Scheduler;
     use gradient_test_support::state::TestState;
     use gradient_types::ProjectId;
     use tonic::Code;
+
+    fn grpc_caller_authenticator_from_test_state(test_state: TestState) -> GrpcCallerAuthenticator {
+        let state = test_state.build();
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        GrpcCallerAuthenticator {
+            web_db: state.web_db.clone(),
+            jwt_secret: state.jwt_secret.clone(),
+            last_used_stamps: Arc::clone(&state.memory.last_used_stamps),
+            trusted_proxies: state.config.network.trusted_proxies.clone(),
+            handles: SshHandles::from_state(&state, scheduler),
+        }
+    }
 
     async fn check_bearer_token_from_client_ip_against_api_key_rows_and_return_status_error(
         api_keys: Vec<api::Model>,
@@ -123,12 +137,7 @@ mod tests {
         client_ip: &str,
     ) -> Status {
         let db = mock_db().append_query_results([api_keys]).into_connection();
-        let state = TestState::new().web_db(db).build();
-        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
-        let authenticator = GrpcCallerAuthenticator {
-            handles: SshHandles::from_state(&state, scheduler),
-            state,
-        };
+        let authenticator = grpc_caller_authenticator_from_test_state(TestState::new().web_db(db));
         let mut metadata = MetadataMap::new();
         if let Some(token) = token {
             metadata.insert(
@@ -205,10 +214,10 @@ mod tests {
     #[tokio::test]
     async fn grpc_client_over_http2_without_tls_without_bearer_token_gets_unauthenticated_status_from_nix_store_routes()
      {
-        let state = TestState::new().build();
-        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
-        let app = add_grpc_nix_store_service_routes_to_router(Router::new(), &state, scheduler)
-            .with_state(Arc::clone(&state));
+        let app: Router = add_grpc_nix_store_service_routes_to_router(
+            Router::new(),
+            grpc_caller_authenticator_from_test_state(TestState::new()),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
