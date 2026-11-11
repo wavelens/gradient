@@ -29,7 +29,7 @@ pub const TAP_PREFIX: &str = "gr-tap-";
 const MAX_INTERFACE_NAME: usize = 15;
 const USBIPD: &str = "127.0.0.1:3240";
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
-pub const SHARED_SOCKET_MODE: u32 = 0o660;
+const SHARED_SOCKET_MODE: u32 = 0o660;
 const RELAY_RETRY: Duration = Duration::from_secs(1);
 
 pub fn run_supervisor(dir: &Path, config: SupervisorConfig) -> Result<()> {

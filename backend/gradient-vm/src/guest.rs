@@ -5,7 +5,7 @@
  */
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ use crate::console::{CONSOLE_LOG, console_tail};
 use crate::devices::DeviceUnit;
 use crate::hypervisor::{GuestImage, HypervisorApi, vm_config};
 use crate::state::{GuestId, GuestState, HeldDevice, StoredRelay, write_state};
-use crate::supervisor::{SHARED_SOCKET_MODE, TAP_PREFIX};
+use crate::supervisor::TAP_PREFIX;
 use crate::unit::{GuestUnits, unit_name};
 use crate::writable_store::create_writable_store;
 
@@ -225,13 +225,7 @@ impl Guest {
     }
 
     async fn start_vm(&mut self, image: &GuestImage, store_mb: u64) -> Result<()> {
-        let group = std::fs::metadata(&self.dir)
-            .with_context(|| format!("read the group of {}", self.dir.display()))?
-            .gid();
-        wait_for_file(&self.dir.join("api.sock"), |m| {
-            m.gid() == group && m.mode() & SHARED_SOCKET_MODE == SHARED_SOCKET_MODE
-        })
-        .await?;
+        wait_until_socket_accepts_connections(&self.dir.join("api.sock")).await?;
         create_writable_store(&self.dir, store_mb).await?;
 
         let guest = &self.state.guest_id;
@@ -465,20 +459,17 @@ fn vfio_id(n: usize) -> String {
     format!("vfio-{n}")
 }
 
-async fn wait_for_file(path: &Path, usable: impl Fn(&std::fs::Metadata) -> bool) -> Result<()> {
+async fn wait_until_socket_accepts_connections(socket: &Path) -> Result<()> {
     let deadline = tokio::time::Instant::now() + SOCKET_WAIT;
     loop {
-        let found = tokio::fs::metadata(path).await.ok();
-        if found.as_ref().is_some_and(&usable) {
-            return Ok(());
-        }
+        let refused = match UnixStream::connect(socket).await {
+            Ok(_) => return Ok(()),
+            Err(e) => e,
+        };
         if tokio::time::Instant::now() >= deadline {
-            let seen = found.map_or("missing".to_owned(), |m| {
-                format!("uid {} gid {} mode {:o}", m.uid(), m.gid(), m.mode())
-            });
             bail!(
-                "{} not usable within {}s ({seen})",
-                path.display(),
+                "{} not usable within {}s ({refused})",
+                socket.display(),
                 SOCKET_WAIT.as_secs()
             );
         }
