@@ -21,7 +21,6 @@ pub fn make_task() -> MTask {
         created_by: UserId::nil(),
         keep_evaluations: 10,
         concurrency: ConcurrencyPolicy::Skip,
-        sign_cache: true,
         ..Default::default()
     }
 }

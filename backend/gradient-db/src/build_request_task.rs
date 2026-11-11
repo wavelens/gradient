@@ -75,7 +75,6 @@ fn new_task(project: ProjectId, created_by: UserId, keep_evaluations: i32) -> MT
         managed: true,
         keep_evaluations,
         concurrency: ConcurrencyPolicy::All,
-        sign_cache: true,
         retry_failed_builds: true,
         ..Default::default()
     }

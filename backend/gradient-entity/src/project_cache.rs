@@ -36,9 +36,13 @@ impl CacheSubscriptionMode {
     pub fn writes_build_outputs_to_cache(&self) -> bool {
         matches!(self, Self::ReadWrite | Self::WriteOnly)
     }
+
+    pub fn grants_no_access_beyond(&self, other: &Self) -> bool {
+        self == other || *other == Self::ReadWrite
+    }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project_cache")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -46,6 +50,21 @@ pub struct Model {
     pub project: ProjectId,
     pub cache: CacheId,
     pub mode: CacheSubscriptionMode,
+    pub managed: bool,
+    pub sign_outputs: bool,
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Self {
+            id: ProjectCacheId::now_v7(),
+            project: ProjectId::default(),
+            cache: CacheId::default(),
+            mode: CacheSubscriptionMode::default(),
+            managed: false,
+            sign_outputs: true,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

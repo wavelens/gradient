@@ -70,6 +70,8 @@ pub(crate) enum CacheRefusal {
     NarVerificationFailed { reason: String },
     #[error("nar exceeds max upload size of {max} bytes")]
     NarTooLarge { max: u64 },
+    #[error("The approved mode can't grant more access rights than the project requested.")]
+    GrantedModeHasMoreAccessThanRequested,
     #[error("invalid store hash")]
     InvalidStoreHash,
     #[error("The store hash in the URL doesn't match the store path in the narinfo.")]
@@ -113,6 +115,7 @@ impl Refusal for CacheRefusal {
             | Self::UploadedNarSizeMismatch { .. }
             | Self::StagedNarSizeMismatch { .. }
             | Self::NarVerificationFailed { .. }
+            | Self::GrantedModeHasMoreAccessThanRequested
             | Self::InvalidStoreHash
             | Self::UrlPathStoreHashNarInfoStorePathHashMismatch
             | Self::NegativeNarInfoSize => RefusalStatus::BadRequest,
@@ -127,6 +130,7 @@ impl Refusal for CacheRefusal {
             | Self::UploadedNarSizeMismatch { .. }
             | Self::StagedNarSizeMismatch { .. }
             | Self::NarVerificationFailed { .. }
+            | Self::GrantedModeHasMoreAccessThanRequested
             | Self::InvalidStoreHash
             | Self::UrlPathStoreHashNarInfoStorePathHashMismatch
             | Self::NegativeNarInfoSize => ErrorCode::INPUT_VALIDATION,

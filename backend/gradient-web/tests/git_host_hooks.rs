@@ -225,7 +225,6 @@ fn task_row_with(
         created_at: fixture_date(),
         keep_evaluations: 10,
         concurrency: ConcurrencyPolicy::Skip,
-        sign_cache: true,
         ..Default::default()
     }
 }
@@ -280,6 +279,7 @@ fn project_cache_row() -> gradient_entity::project_cache::Model {
         project: project_id(),
         cache: CacheId::now_v7(),
         mode: gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
+        ..Default::default()
     }
 }
 

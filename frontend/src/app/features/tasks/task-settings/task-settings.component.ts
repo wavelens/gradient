@@ -47,7 +47,6 @@ interface TaskForm {
   wildcard: string;
   keep_evaluations: number | null;
   concurrency: ConcurrencyPolicy;
-  sign_cache: boolean;
   wait_for_workers: boolean;
   retry_failed_builds: boolean;
   multi_node_evaluation: boolean;
@@ -142,7 +141,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     wildcard: '',
     keep_evaluations: 30,
     concurrency: 'auto',
-    sign_cache: true,
     wait_for_workers: false,
     retry_failed_builds: true,
     multi_node_evaluation: false,
@@ -207,7 +205,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
           wildcard: task.wildcard,
           keep_evaluations: task.keep_evaluations,
           concurrency: task.concurrency,
-          sign_cache: task.sign_cache,
           wait_for_workers: task.wait_for_workers,
           retry_failed_builds: task.retry_failed_builds,
           multi_node_evaluation: task.multi_node_evaluation,

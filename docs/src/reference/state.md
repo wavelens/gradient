@@ -95,7 +95,6 @@ services.gradient.state = {
 | `project` | string | - | Name of the project that owns this task. |
 | `repository` | string | - | Git repository URL of the task. |
 | `retry_failed_builds` | bool | `true` | Whether a new evaluation of this task re-queues its permanently failed builds and their dependents. With `false`, they remain failed until a user retries the build or the evaluation. |
-| `sign_cache` | bool | `true` | Whether to sign the narinfo of outputs pushed by this task. |
 | `wait_for_workers` | bool | `false` | Whether to wait for workers when an evaluation can require an architecture or system feature that no connected worker can offer for its builds. The server can abort that evaluation and show a warning about what is missing when this field is absent. Exec jobs that no connected worker can run have the same behavior. |
 | `triggers` | null or list of submodule | `null` | Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule. |
 | `triggers.*.active` | bool | `true` | Whether this trigger is active. |
@@ -137,7 +136,10 @@ services.gradient.state = {
 | `name` | string | attribute name | Unique name of the cache. |
 | `owner_team` | null or string | `null` | The team in charge of the cache. Cache admins can add members of that team without an invitation. |
 | `priority` | int | `10` | Priority written to `nix-cache-info`. Nix queries caches with lower values first. |
-| `projects` | list of string | `[ ]` | Names of the projects that use this cache. |
+| `projects` | list of string or submodule | `[ ]` | Projects that subscribe to this cache (project names or submodules). Plain names subscribe with `ReadWrite` and signed outputs. The Web UI and API can't change or delete these subscriptions. |
+| `projects.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Three access modes exist for a subscription. `ReadWrite` can pull and push, while `ReadOnly` can pull only. `WriteOnly` can push only. |
+| `projects.*.name` | string | - | Name of the subscribed project. |
+| `projects.*.sign_outputs` | bool | `true` | Signature with the cache key on outputs that projects push to this cache. External Nix clients don't trust unsigned paths. |
 | `pull_through` | bool | `true` | Whether this cache serves paths from its upstream caches to Nix clients. |
 | `public` | bool | `false` | Whether every project can use this cache. |
 | `teams` | list of submodule | `[ ]` | Teams with a grant on this cache. Grants declared here but removed from the list get revoked on the next state apply. Grants made through the API remain untouched. |

@@ -56,7 +56,6 @@ impl<'a> StateApplicator<'a> {
                 proj.keep_evaluations = Set(state_task.keep_evaluations);
                 proj.created_by = Set(created_by_id);
                 proj.concurrency = Set(state_task.concurrency);
-                proj.sign_cache = Set(state_task.sign_cache);
                 proj.wait_for_workers = Set(state_task.wait_for_workers);
                 proj.retry_failed_builds = Set(state_task.retry_failed_builds);
                 proj.multi_node_evaluation = Set(state_task.multi_node_evaluation);
@@ -84,7 +83,6 @@ impl<'a> StateApplicator<'a> {
                     managed: true,
                     keep_evaluations: state_task.keep_evaluations,
                     concurrency: state_task.concurrency,
-                    sign_cache: state_task.sign_cache,
                     wait_for_workers: state_task.wait_for_workers,
                     retry_failed_builds: state_task.retry_failed_builds,
                     multi_node_evaluation: state_task.multi_node_evaluation,

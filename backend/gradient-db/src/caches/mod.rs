@@ -40,6 +40,20 @@ pub fn ordered_by_name(condition: Condition) -> Select<ECache> {
         .order_by_asc(CCache::Id)
 }
 
+pub async fn visible_or_public_to_user<C: ConnectionTrait>(
+    db: &C,
+    user: &MUser,
+) -> Result<Vec<MCache>, DbErr> {
+    let condition = if user.superuser {
+        Condition::all()
+    } else {
+        Condition::any()
+            .add(visible_to_user(user.id))
+            .add(CCache::Public.eq(true))
+    };
+    ordered_by_name(condition).all(db).await
+}
+
 pub async fn all_public<C: ConnectionTrait>(db: &C) -> Result<Vec<MCache>, DbErr> {
     ECache::find().filter(CCache::Public.eq(true)).all(db).await
 }

@@ -51,16 +51,6 @@
 
     <gr-form-field>
       <gr-checkbox
-        inputId="task-sign-cache"
-        [(ngModel)]="formData.sign_cache"
-        [binary]="true"
-        [appManagedDisable]="access()"
-        label="Sign cache (allow public access to build outputs)"
-      />
-    </gr-form-field>
-
-    <gr-form-field>
-      <gr-checkbox
         inputId="task-wait-for-workers"
         [(ngModel)]="formData.wait_for_workers"
         [binary]="true"

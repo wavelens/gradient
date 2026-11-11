@@ -136,7 +136,7 @@ async fn k03_a_private_path_gets_a_null_row_and_a_signing_task_among_its_produce
             .without_cache_signing();
 
         let case = Case::start(if signing_producer {
-            private.evaluation(e2).derivation(B).job()
+            private.evaluation(e2).into_cache(c1).derivation(B).job()
         } else {
             private
         })

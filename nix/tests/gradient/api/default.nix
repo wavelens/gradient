@@ -94,7 +94,6 @@ in {
                 repository = "git@github.com:Wavelens/Gradient.git";
                 wildcard = "packages.x86_64-linux.**";
                 concurrency = "hard_abort";
-                sign_cache = false;
                 keep_evaluations = 5;
                 created_by = "stateadmin";
                 triggers = [
@@ -107,7 +106,7 @@ in {
               caches.statecache = {
                 display_name = "State Cache";
                 signing_key_file = toString stateSigningKey;
-                projects = [ "stateproject" ];
+                projects = [ { name = "stateproject"; sign_outputs = false; } ];
                 public = true;
                 priority = 20;
                 local_priority = 5;

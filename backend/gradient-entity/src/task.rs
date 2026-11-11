@@ -65,7 +65,6 @@ pub struct Model {
     pub managed: bool,
     pub keep_evaluations: i32,
     pub concurrency: ConcurrencyPolicy,
-    pub sign_cache: bool,
     pub wait_for_workers: bool,
     pub retry_failed_builds: bool,
     pub multi_node_evaluation: bool,

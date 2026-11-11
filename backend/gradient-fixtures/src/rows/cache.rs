@@ -88,6 +88,7 @@ pub fn project_cache_link(
         project,
         cache,
         mode,
+        ..Default::default()
     }
 }
 

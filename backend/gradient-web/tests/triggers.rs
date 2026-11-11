@@ -419,7 +419,6 @@ async fn create_task_seeds_default_polling_trigger() {
         created_at: test_date(),
         keep_evaluations: 30,
         concurrency: ConcurrencyPolicy::Skip,
-        sign_cache: true,
         ..Default::default()
     };
 

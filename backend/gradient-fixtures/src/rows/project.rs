@@ -62,15 +62,7 @@ pub fn task() -> task::Model {
         created_at: test_date(),
         keep_evaluations: 10,
         concurrency: ConcurrencyPolicy::Skip,
-        sign_cache: true,
         ..Default::default()
-    }
-}
-
-pub fn task_without_cache_signing() -> task::Model {
-    task::Model {
-        sign_cache: false,
-        ..task()
     }
 }
 
@@ -170,7 +162,6 @@ pub fn build_request_task(id: TaskId) -> task::Model {
         managed: true,
         keep_evaluations: 30,
         concurrency: ConcurrencyPolicy::SoftAbort,
-        sign_cache: true,
         ..Default::default()
     }
 }

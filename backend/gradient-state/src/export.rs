@@ -5,10 +5,10 @@
  */
 
 use super::{
-    StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateCacheTeam,
-    StateConfiguration, StateFlakeInputOverride, StateIntegration, StateNewProjectGrant,
-    StateProject, StateProjectMemberEntry, StateProjectTeam, StateRole, StateTask, StateTeam,
-    StateTeamMember, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateApiKey, StateCache, StateCacheMemberEntry, StateCacheProject, StateCacheRoleEntry,
+    StateCacheTeam, StateConfiguration, StateFlakeInputOverride, StateIntegration,
+    StateNewProjectGrant, StateProject, StateProjectMemberEntry, StateProjectTeam, StateRole,
+    StateTask, StateTeam, StateTeamMember, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
@@ -199,7 +199,13 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         let projects = project_caches
             .iter()
             .filter(|oc| oc.cache == c.id)
-            .filter_map(|oc| project_name.get(&oc.project).cloned())
+            .filter_map(|oc| {
+                Some(StateCacheProject {
+                    name: project_name.get(&oc.project)?.clone(),
+                    mode: oc.mode.clone(),
+                    sign_outputs: oc.sign_outputs,
+                })
+            })
             .collect();
         let upstream_caches = all_upstream_caches
             .iter()
@@ -420,7 +426,6 @@ fn export_task(
         keep_evaluations: task.keep_evaluations,
         triggers: None,
         concurrency: task.concurrency,
-        sign_cache: task.sign_cache,
         wait_for_workers: task.wait_for_workers,
         retry_failed_builds: task.retry_failed_builds,
         multi_node_evaluation: task.multi_node_evaluation,

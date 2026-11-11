@@ -125,6 +125,7 @@ async fn subscribe_succeeds_when_both_granted() {
         project: project_id(),
         cache: cache_id(),
         mode: project_cache::CacheSubscriptionMode::ReadWrite,
+        ..Default::default()
     };
 
     let db = db

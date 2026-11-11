@@ -130,8 +130,8 @@ async fn narinfo_served_from_db_without_daemon_probe() {
     );
 }
 
-/// A NULL `signature` must answer 404. The whole `sign_cache=false` privacy guarantee is depending
-/// on never serving an unsigned narinfo.
+/// Return 404 if `signature` is NULL. The entire privacy guarantee for `sign_outputs=false` can rest
+/// on one rule. Never serve an unsigned narinfo.
 #[tokio::test]
 async fn narinfo_returns_404_when_signature_null() {
     let cache_row = gradient_entity::cache::Model {

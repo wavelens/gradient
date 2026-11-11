@@ -96,6 +96,7 @@ mod tests {
             project: project_id,
             cache: cache_id,
             mode,
+            ..Default::default()
         }
     }
 

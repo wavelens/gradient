@@ -8,9 +8,7 @@ use axum::http::StatusCode;
 use gradient_entity::{project, task, task_trigger};
 use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{
-    admin_role, live_session, project_member, task_without_cache_signing, user,
-};
+use gradient_fixtures::rows::{admin_role, live_session, project_member, task, user};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token};
 use gradient_types::SessionId;
@@ -19,7 +17,7 @@ use sea_orm::MockDatabase;
 use serde_json::{Value, json};
 
 fn authorized_db(session_id: SessionId) -> MockDatabase {
-    authorized_db_with_task(session_id, task_without_cache_signing())
+    authorized_db_with_task(session_id, task())
 }
 
 fn authorized_db_with_task(session_id: SessionId, task: task::Model) -> MockDatabase {
@@ -79,7 +77,7 @@ async fn answers_400_without_raw_git_error_when_commit_cannot_be_fetched() {
     let missing_repository = "/nonexistent/gradient-missing-repository";
     let task = task::Model {
         repository: missing_repository.into(),
-        ..task_without_cache_signing()
+        ..task()
     };
     let res = evaluate(
         authorized_db_with_task(session_id, task),
@@ -104,7 +102,7 @@ async fn answers_400_without_raw_git_error_when_head_commit_cannot_be_fetched() 
     let missing_repository = "/nonexistent/gradient-missing-repository";
     let task = task::Model {
         repository: missing_repository.into(),
-        ..task_without_cache_signing()
+        ..task()
     };
     let default_trigger = task_trigger::Model {
         task: task_id(),

@@ -17,7 +17,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        for project_name in &cache.projects {
+        for project_name in cache.projects.iter().map(|p| &p.name) {
             if !lookup.project_exists(project_name) {
                 errors.push(
                     format!("caches.{}.projects", cache.name),

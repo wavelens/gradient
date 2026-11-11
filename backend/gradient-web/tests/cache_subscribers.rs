@@ -35,6 +35,7 @@ fn subscription(cache: CacheId, project: ProjectId) -> project_cache::Model {
         project,
         cache,
         mode: CacheSubscriptionMode::ReadWrite,
+        ..Default::default()
     }
 }
 

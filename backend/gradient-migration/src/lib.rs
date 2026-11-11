@@ -73,6 +73,7 @@ mod m20261201_000004_add_retention_delete_indexes;
 mod m20261202_000000_add_view_project_permission_bit_to_existing_api_keys_not_pinned_to_cache;
 mod m20261203_000000_project_owner_team_and_direct_role_precedence;
 mod m20261204_000000_create_retired_cache_key_table_and_add_previous_signature_column;
+mod m20261206_000000_add_sign_outputs_to_project_cache;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -173,6 +174,7 @@ impl MigratorTrait for Migrator {
             ),
             Box::new(m20261203_000000_project_owner_team_and_direct_role_precedence::Migration),
             Box::new(m20261204_000000_create_retired_cache_key_table_and_add_previous_signature_column::Migration),
+            Box::new(m20261206_000000_add_sign_outputs_to_project_cache::Migration),
         ]
     }
 }

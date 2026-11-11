@@ -751,7 +751,6 @@ mod tests {
             managed,
             keep_evaluations: 30,
             concurrency: ConcurrencyPolicy::Skip,
-            sign_cache: true,
             ..Default::default()
         }
     }
@@ -1652,6 +1651,7 @@ mod tests {
             project: ProjectId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
             cache: gradient_types::ids::CacheId::new(uuid!("a0000000-0000-0000-0000-000000000020")),
             mode: gradient_entity::project_cache::CacheSubscriptionMode::ReadOnly,
+            ..Default::default()
         }
     }
 

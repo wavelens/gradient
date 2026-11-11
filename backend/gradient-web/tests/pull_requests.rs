@@ -8,9 +8,7 @@ use axum::http::StatusCode;
 use gradient_entity::{project, task_action};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{
-    admin_role, live_session, project_member, task_without_cache_signing, user,
-};
+use gradient_fixtures::rows::{admin_role, live_session, project_member, task, user};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token};
 use gradient_types::SessionId;
@@ -36,7 +34,7 @@ fn authorized_db(session_id: SessionId) -> MockDatabase {
             created_at: test_date(),
             ..Default::default()
         }]])
-        .append_query_results([vec![task_without_cache_signing()]])
+        .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
 }

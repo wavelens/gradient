@@ -327,16 +327,6 @@
         '';
       };
 
-      sign_cache = mkOption {
-        type = types.bool;
-        default = true;
-        description = ''
-          Whether to sign the narinfo of outputs pushed by this task. External Nix clients do not
-          trust unsigned outputs, which keeps them private even in a public cache. A path
-          also produced by a signing task is still signed.
-        '';
-      };
-
       wait_for_workers = mkOption {
         type = types.bool;
         default = false;
@@ -905,6 +895,27 @@
     };
   };
 
+  cacheProjectType = types.submodule {
+    options = {
+      name = mkOption {
+        type = types.str;
+        description = "The name of a project with a subscription to this cache.";
+      };
+      mode = mkOption {
+        type = types.enum [ "ReadWrite" "ReadOnly" "WriteOnly" ];
+        default = "ReadWrite";
+        description = "Subscriptions have an access mode. A project can pull and push in ReadWrite mode. ReadOnly mode: pull only. WriteOnly mode: push only.";
+      };
+      sign_outputs = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Projects can push outputs to a cache. This option can set whether those outputs carry a signature with the cache key. Nix clients outside the cache don't trust unsigned paths, so those outputs stay private even in a public cache. Another signing subscription can push a path as well and those paths still get a signature.
+        '';
+      };
+    };
+  };
+
   cacheRoleType = types.submodule {
     options = {
       name = mkOption {
@@ -993,9 +1004,9 @@
       };
 
       projects = mkOption {
-        type = types.listOf types.str;
+        type = types.listOf (types.coercedTo types.str (name: { inherit name; }) cacheProjectType);
         default = [ ];
-        description = "Names of the projects using this cache.";
+        description = "Projects with a subscription to this cache. Names that reference only a project subscribe with ReadWrite and signed outputs. The server can lock these subscriptions. The web UI and API can't change or delete them.";
       };
 
       upstream_caches = mkOption {

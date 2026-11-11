@@ -146,9 +146,11 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 ))
                 .routes(routes!(projects::secrets::get_project_sops_recipient))
                 .routes(routes!(projects::settings::get_project_subscribe))
+                .routes(routes!(projects::settings::get_subscribable_caches))
                 .routes(routes!(
                     projects::settings::post_project_subscribe_cache,
-                    projects::settings::delete_project_subscribe_cache
+                    projects::settings::delete_project_subscribe_cache,
+                    projects::settings::patch_project_subscribe_cache
                 ))
                 .routes(routes!(
                     projects::workers::get_project_workers,

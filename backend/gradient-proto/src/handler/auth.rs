@@ -448,6 +448,7 @@ mod tests {
             project,
             cache,
             mode: CacheSubscriptionMode::ReadWrite,
+            ..Default::default()
         }
     }
 

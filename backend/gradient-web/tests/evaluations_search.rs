@@ -8,7 +8,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::{commit, evaluation, ids::*};
 use gradient_fixtures::ids::{commit_id, task_id};
 use gradient_fixtures::mock::{all_statements, mock_db};
-use gradient_fixtures::rows::{public_project, task_without_cache_signing};
+use gradient_fixtures::rows::{public_project, task};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
 use gradient_types::SessionId;
@@ -43,7 +43,7 @@ fn eval_row(id: EvaluationId, wildcard: &str, status: EvaluationStatus) -> evalu
 
 fn with_task(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![public_project()]])
-        .append_query_results([vec![task_without_cache_signing()]])
+        .append_query_results([vec![task()]])
 }
 
 fn with_summary_rollups(db: MockDatabase) -> MockDatabase {

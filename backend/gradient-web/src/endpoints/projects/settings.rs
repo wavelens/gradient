@@ -45,6 +45,11 @@ pub enum SubscriptionStatus {
     Pending,
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct UpdateCacheSubscriptionRequest {
+    pub sign_outputs: bool,
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CacheSubscriptionItem {
     pub id: CacheId,
@@ -52,6 +57,35 @@ pub struct CacheSubscriptionItem {
     pub display_name: String,
     pub mode: CacheSubscriptionMode,
     pub status: SubscriptionStatus,
+    pub managed: bool,
+    pub sign_outputs: bool,
+    /// Usernames of the users that can approve a pending request. Empty for an active subscription.
+    pub approvers: Vec<String>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct SubscribableCache {
+    pub name: String,
+    pub display_name: String,
+    pub owner_team: Option<String>,
+    pub owner_team_display_name: Option<String>,
+    pub public: bool,
+    pub needs_approval: bool,
+    pub approvers: Vec<String>,
+}
+
+pub(crate) async fn subscription_approvers(db: &WebDb, cache: CacheId) -> WebResult<Vec<String>> {
+    Ok(
+        gradient_db::access::list_active_users_with_cache_permission(
+            db,
+            cache,
+            CachePermission::ManageCacheSubscriptions.bit(),
+        )
+        .await?
+        .into_iter()
+        .map(|user| user.username)
+        .collect(),
+    )
 }
 
 #[utoipa::path(
@@ -116,29 +150,37 @@ pub async fn get_project_subscribe(
         .collect();
     let caches: HashMap<CacheId, MCache> = by_ids::<ECache, _>(&db.web_db, &cache_ids).await?;
 
-    let active = project_caches.into_iter().map(|subscription| {
-        (
-            subscription.cache,
-            subscription.mode,
-            SubscriptionStatus::Active,
-        )
-    });
-    let requested = pending
+    let mut subscribed: Vec<CacheSubscriptionItem> = project_caches
         .into_iter()
-        .map(|request| (request.cache, request.mode, SubscriptionStatus::Pending));
-    let subscribed: Vec<CacheSubscriptionItem> = active
-        .chain(requested)
-        .filter_map(|(id, mode, status)| {
-            let cache = caches.get(&id)?;
+        .filter_map(|subscription| {
+            let cache = caches.get(&subscription.cache)?;
             Some(CacheSubscriptionItem {
-                id,
+                id: cache.id,
                 name: cache.name.clone(),
                 display_name: cache.display_name.clone(),
-                mode,
-                status,
+                mode: subscription.mode,
+                status: SubscriptionStatus::Active,
+                managed: subscription.managed,
+                sign_outputs: subscription.sign_outputs,
+                approvers: Vec::new(),
             })
         })
         .collect();
+    for request in pending {
+        let Some(cache) = caches.get(&request.cache) else {
+            continue;
+        };
+        subscribed.push(CacheSubscriptionItem {
+            id: cache.id,
+            name: cache.name.clone(),
+            display_name: cache.display_name.clone(),
+            mode: request.mode,
+            status: SubscriptionStatus::Pending,
+            managed: false,
+            sign_outputs: true,
+            approvers: subscription_approvers(&db.web_db, cache.id).await?,
+        });
+    }
 
     Ok(ok_json(subscribed))
 }
@@ -245,10 +287,10 @@ pub async fn post_project_subscribe_cache(
     gradient_db::rows::insert::<EProjectCache, _>(
         &state.web_db,
         MProjectCache {
-            id: ProjectCacheId::now_v7(),
             project: project.id,
             cache: cache.id,
             mode,
+            ..Default::default()
         },
     )
     .await
@@ -447,6 +489,9 @@ pub async fn delete_project_subscribe_cache(
         return Ok(ok_json("Subscription request cancelled".to_string()));
     };
 
+    if subscription.managed {
+        return Err(ProjectRefusal::DeclaredInServerStateConfiguration.into());
+    }
     gradient_db::rows::delete::<EProjectCache, _>(&db.web_db, subscription).await?;
     reauth_project_workers(&db.web_db, &scheduler, project.id).await;
     audit
@@ -458,4 +503,135 @@ pub async fn delete_project_subscribe_cache(
         .await;
 
     Ok(ok_json("Cache unsubscribed".to_string()))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/projects/{project}/subscribe/{cache}",
+    operation_id = "updateProjectCacheSubscription",
+    tag = "projects",
+    summary = "Change a cache subscription",
+    description = "Turn signing of store paths that the project pushed on or off with this cache key. Projects need the `manageSubscriptions` permission. This endpoint can't change subscriptions from server settings.",
+    params(ProjectPath, ("cache" = String, Path)),
+    request_body = UpdateCacheSubscriptionRequest,
+    responses((status = OK, description = "Saved subscriptions", body = String, content_type = "application/json"), WebError)
+)]
+pub async fn patch_project_subscribe_cache(
+    ProjectScope {
+        project,
+        user,
+        api_key,
+        db,
+        params,
+        ..
+    }: ProjectScope<Requires<can::ManageSubscriptions>>,
+    Json(body): Json<UpdateCacheSubscriptionRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache: String = params.param("cache")?;
+    let cache = load_cache(
+        &db,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Readable,
+    )
+    .await?;
+
+    let subscription =
+        gradient_db::projects::caches::subscription(&db.web_db, project.id, cache.id)
+            .await?
+            .ok_or(ProjectRefusal::NotSubscribedToCache)?;
+    if subscription.managed {
+        return Err(ProjectRefusal::DeclaredInServerStateConfiguration.into());
+    }
+
+    let starts_signing = body.sign_outputs && !subscription.sign_outputs;
+    let mut active = subscription.into_active_model();
+    active.sign_outputs = sea_orm::Set(body.sign_outputs);
+    gradient_db::rows::update::<EProjectCache, _>(&db.web_db, active).await?;
+    if starts_signing {
+        enqueue_backfill_signatures(&db.web_db, project.id, cache.id).await;
+    }
+
+    Ok(ok_json("Subscription saved".to_string()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/subscribable-caches",
+    operation_id = "listSubscribableCaches",
+    tag = "projects",
+    summary = "List caches for the subscribe dialog",
+    description = "The subscription dialog can offer only the caches that the caller can select, in display-name order. Set `needs_approval` to true when the caller cannot approve subscriptions. `approvers` can then list the users who can approve subscriptions, the holders of `manageCacheSubscriptions`. Caches with an existing project subscription, or caches with pending requests, do not appear. Requests to this endpoint need `manageSubscriptions` on the project.",
+    params(ProjectPath),
+    responses((status = OK, description = "Cache That Projects Can Subscribe To", body = Vec<SubscribableCache>), WebError)
+)]
+pub async fn get_subscribable_caches(
+    ProjectScope {
+        project,
+        user,
+        api_key,
+        db,
+        ..
+    }: ProjectScope<Requires<can::ManageSubscriptions>>,
+) -> WebResult<Json<BaseResponse<Vec<SubscribableCache>>>> {
+    let taken: std::collections::HashSet<CacheId> =
+        gradient_db::projects::caches::subscriptions_of(&db.web_db, project.id)
+            .await?
+            .into_iter()
+            .map(|s| s.cache)
+            .chain(
+                gradient_db::cache_subscription_requests::of_project(&db.web_db, project.id)
+                    .await?
+                    .into_iter()
+                    .map(|r| r.cache),
+            )
+            .collect();
+    let caches: Vec<MCache> = gradient_db::caches::visible_or_public_to_user(&db.web_db, &user)
+        .await?
+        .into_iter()
+        .filter(|cache| !taken.contains(&cache.id))
+        .filter(|cache| {
+            api_key
+                .as_ref()
+                .is_none_or(|k| k.cache_pin.is_none_or(|pin| pin == cache.id))
+        })
+        .collect();
+    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(
+        &db.web_db,
+        &caches
+            .iter()
+            .filter_map(|c| c.owner_team)
+            .collect::<Vec<_>>(),
+    )
+    .await?;
+
+    let mut items = Vec::with_capacity(caches.len());
+    for cache in caches {
+        let needs_approval = !(user.superuser
+            || has_cache_permission(
+                &db.web_db,
+                user.id,
+                cache.id,
+                CachePermission::ManageCacheSubscriptions,
+                api_key.as_ref(),
+            )
+            .await?);
+        let owner = cache.owner_team.and_then(|team| teams.get(&team));
+        items.push(SubscribableCache {
+            approvers: if needs_approval {
+                subscription_approvers(&db.web_db, cache.id).await?
+            } else {
+                Vec::new()
+            },
+            name: cache.name,
+            display_name: cache.display_name,
+            owner_team: owner.map(|t| t.name.clone()),
+            owner_team_display_name: owner.map(|t| t.display_name.clone()),
+            public: cache.public,
+            needs_approval,
+        });
+    }
+
+    Ok(ok_json(items))
 }

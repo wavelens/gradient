@@ -145,8 +145,13 @@ impl Shape {
         shape
     }
 
-    pub fn without_cache_signing(self) -> Self {
-        self.task_option(|task| task.sign_cache = false)
+    pub fn without_cache_signing(mut self) -> Self {
+        let project = self.projects[self.current_task()].id;
+        self.project_caches
+            .iter_mut()
+            .filter(|link| link.project == project)
+            .for_each(|link| link.sign_outputs = false);
+        self
     }
 
     pub fn derivation(mut self, path: &str) -> Self {

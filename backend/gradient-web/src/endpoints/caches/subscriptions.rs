@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::CacheRefusal;
 use crate::access::{
     Caller, api_key_is_pinned_to_other_project, caller_cache_mask, project_admin_emails,
 };
@@ -14,7 +15,7 @@ use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
-use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
+use crate::scope::{CacheScope, Readable, Requires, can};
 use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -29,7 +30,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::TransactionTrait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -104,6 +105,11 @@ pub async fn get_cache_subscription_requests(
         .collect();
 
     Ok(ok_json(items))
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct ApproveSubscriptionRequest {
+    pub mode: Option<CacheSubscriptionMode>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -250,8 +256,9 @@ async fn notify_project_admins(
     operation_id = "approveCacheSubscriptionRequest",
     tag = "caches",
     summary = "Approve a subscription request",
-    description = "Turns the pending request into a real subscription, using the mode the\nproject asked for, and re-queues any evaluation parked for want of a\ncache. Requires `manageCacheSubscriptions`.",
+    description = "Convert pending requests into actual subscriptions. Requeue evaluations with no cache. Subscriptions take the mode from the project request. The optional body `mode` can lower access, for example from read-write to read-only. The body cannot grant more access. Provide `manageCacheSubscriptions`. The endpoint can also work with caches from the server configuration.",
     params(CachePath, ("project" = String, Path)),
+    request_body = Option<ApproveSubscriptionRequest>,
     responses((status = OK, description = "Subscription approved", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn post_approve_subscription_request(
@@ -261,15 +268,22 @@ pub async fn post_approve_subscription_request(
         db,
         params,
         ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheSubscriptions>>,
+    }: CacheScope<Requires<can::ManageCacheSubscriptions>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
+    body: Option<Json<Option<ApproveSubscriptionRequest>>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project: String = params.param("project")?;
 
     let (project, request) = load_request(&db, cache.id, project).await?;
-    let mode = request.mode.clone();
+    let mode = match body.and_then(|Json(b)| b?.mode) {
+        Some(mode) if !mode.grants_no_access_beyond(&request.mode) => {
+            return Err(CacheRefusal::GrantedModeHasMoreAccessThanRequested.into());
+        }
+        Some(mode) => mode,
+        None => request.mode.clone(),
+    };
 
     let tx = state.web_db.inner().begin().await?;
     if !gradient_db::rows::delete_was_present::<ECacheSubscriptionRequest, _>(&tx, request).await? {
@@ -278,10 +292,10 @@ pub async fn post_approve_subscription_request(
     gradient_db::rows::insert::<EProjectCache, _>(
         &tx,
         MProjectCache {
-            id: ProjectCacheId::now_v7(),
             project: project.id,
             cache: cache.id,
             mode: mode.clone(),
+            ..Default::default()
         },
     )
     .await
@@ -333,7 +347,7 @@ pub async fn delete_subscription_request(
         db,
         params,
         ..
-    }: CacheScope<RequiresUnmanaged<can::ManageCacheSubscriptions>>,
+    }: CacheScope<Requires<can::ManageCacheSubscriptions>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
 ) -> WebResult<Json<BaseResponse<String>>> {

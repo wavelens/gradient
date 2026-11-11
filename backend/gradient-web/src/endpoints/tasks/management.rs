@@ -57,8 +57,6 @@ pub struct MakeTaskRequest {
     #[serde(default)]
     pub concurrency: Option<ConcurrencyPolicy>,
     #[serde(default)]
-    pub sign_cache: Option<bool>,
-    #[serde(default)]
     pub wait_for_workers: Option<bool>,
     #[serde(default)]
     pub retry_failed_builds: Option<bool>,
@@ -117,7 +115,6 @@ pub struct PatchTaskRequest {
     pub wildcard: Option<String>,
     pub keep_evaluations: Option<i32>,
     pub concurrency: Option<ConcurrencyPolicy>,
-    pub sign_cache: Option<bool>,
     pub wait_for_workers: Option<bool>,
     pub retry_failed_builds: Option<bool>,
     pub multi_node_evaluation: Option<bool>,
@@ -303,7 +300,6 @@ pub async fn put(
         created_at: now,
         keep_evaluations: state.config.eval.default_keep_evaluations(),
         concurrency: body.concurrency.unwrap_or_default(),
-        sign_cache: body.sign_cache.unwrap_or(true),
         wait_for_workers: body.wait_for_workers.unwrap_or(false),
         retry_failed_builds: body.retry_failed_builds.unwrap_or(true),
         multi_node_evaluation: body.multi_node_evaluation.unwrap_or(false),
@@ -440,7 +436,6 @@ pub async fn patch_task(
         ("wildcard", body.wildcard.is_some()),
         ("keep_evaluations", body.keep_evaluations.is_some()),
         ("concurrency", body.concurrency.is_some()),
-        ("sign_cache", body.sign_cache.is_some()),
         ("wait_for_workers", body.wait_for_workers.is_some()),
         ("retry_failed_builds", body.retry_failed_builds.is_some()),
         (
@@ -482,9 +477,6 @@ pub async fn patch_task(
     }
     if let Some(concurrency) = body.concurrency {
         patcher.apply_concurrency(concurrency)?;
-    }
-    if let Some(sign_cache) = body.sign_cache {
-        patcher.apply_sign_cache(sign_cache);
     }
     if let Some(wait_for_workers) = body.wait_for_workers {
         patcher.atask.wait_for_workers = Set(wait_for_workers);
@@ -597,10 +589,6 @@ impl<'a> TaskPatcher<'a> {
     fn apply_concurrency(&mut self, concurrency: ConcurrencyPolicy) -> WebResult<()> {
         self.atask.concurrency = Set(concurrency);
         Ok(())
-    }
-
-    fn apply_sign_cache(&mut self, sign_cache: bool) {
-        self.atask.sign_cache = Set(sign_cache);
     }
 }
 

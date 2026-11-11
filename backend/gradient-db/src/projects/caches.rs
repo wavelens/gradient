@@ -73,3 +73,98 @@ pub async fn first_subscription_of<C: ConnectionTrait>(
         .one(db)
         .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+    use gradient_migration::{Migrator, MigratorTrait};
+    use gradient_types::ids::{ProjectCacheId, TaskId};
+    use gradient_types::{ECache, EProject, ETask, EUser, MTask};
+    use sea_orm_migration::SchemaManager;
+
+    #[tokio::test]
+    async fn migration_sets_project_sign_outputs_true_if_any_task_signed_and_false_if_all_opted_out()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        crate::rows::insert::<ECache, _>(&conn, rows::cache())
+            .await
+            .expect("the cache is written");
+        let mixed = rows::project();
+        let opted_out = rows::project_with_id(ProjectId::now_v7(), "opted-out");
+        let without_tasks = rows::project_with_id(ProjectId::now_v7(), "without-tasks");
+        for project in [&mixed, &opted_out, &without_tasks] {
+            crate::rows::insert::<EProject, _>(&conn, project.clone())
+                .await
+                .expect("the project is written");
+            crate::rows::insert::<EProjectCache, _>(
+                &conn,
+                MProjectCache {
+                    id: ProjectCacheId::now_v7(),
+                    project: project.id,
+                    cache: rows::cache().id,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the subscription is written");
+        }
+        let mut unsigned = Vec::new();
+        for (project, name, signs) in [
+            (&mixed, "signs", true),
+            (&mixed, "skips", false),
+            (&opted_out, "skips", false),
+        ] {
+            let task = crate::rows::insert::<ETask, _>(
+                &conn,
+                MTask {
+                    id: TaskId::now_v7(),
+                    project: project.id,
+                    name: name.into(),
+                    ..rows::task()
+                },
+            )
+            .await
+            .expect("the task is written");
+            if !signs {
+                unsigned.push(format!("'{}'", task.id));
+            }
+        }
+        let migration = Migrator::migrations()
+            .into_iter()
+            .find(|m| m.name() == "m20261206_000000_add_sign_outputs_to_project_cache")
+            .expect("the migration is registered");
+        migration
+            .down(&SchemaManager::new(&conn))
+            .await
+            .expect("the migration reverts");
+        db.execute(&format!(
+            "UPDATE task SET sign_cache = false WHERE id IN ({});",
+            unsigned.join(", ")
+        ))
+        .await;
+
+        migration
+            .up(&SchemaManager::new(&conn))
+            .await
+            .expect("the migration applies");
+
+        let conn = &conn;
+        let signs = |project: ProjectId| async move {
+            subscription(conn, project, rows::cache().id)
+                .await
+                .expect("the subscription reads")
+                .expect("the subscription exists")
+                .sign_outputs
+        };
+        assert!(signs(mixed.id).await);
+        assert!(!signs(opted_out.id).await);
+        assert!(signs(without_tasks.id).await);
+        db.finish().await;
+    }
+}

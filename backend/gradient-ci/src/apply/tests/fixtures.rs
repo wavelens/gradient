@@ -34,7 +34,6 @@ pub fn make_task_with_concurrency(
         created_by: UserId::nil(),
         keep_evaluations: 10,
         concurrency,
-        sign_cache: true,
         ..Default::default()
     }
 }
@@ -100,6 +99,7 @@ fn project_cache_row(cache: CacheId) -> gradient_entity::project_cache::Model {
         project: ProjectId::nil(),
         cache,
         mode: gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
+        ..Default::default()
     }
 }
 

@@ -40,7 +40,6 @@ function taskFor(c: AccessCase) {
     force_evaluation: false,
     keep_evaluations: 30,
     concurrency: 'soft_abort' as const,
-    sign_cache: true,
     wait_for_workers: false,
     retry_failed_builds: true,
     multi_node_evaluation: false,

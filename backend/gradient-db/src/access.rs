@@ -279,6 +279,59 @@ pub async fn direct_memberships_of_user<C: ConnectionTrait>(
     })
 }
 
+async fn cache_roles_with_permission<C: ConnectionTrait>(
+    db: &C,
+    permission: PermissionMask,
+) -> Result<Vec<RoleId>, DbErr> {
+    Ok(ECacheRole::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .filter(|role| role.permission & permission != 0)
+        .map(|role| role.id)
+        .collect())
+}
+
+pub async fn list_active_users_with_cache_permission<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    permission: PermissionMask,
+) -> Result<Vec<MUser>, DbErr> {
+    let users: Vec<UserId> = ECacheAccess::find()
+        .filter(CCacheAccess::Cache.eq(cache))
+        .filter(CCacheAccess::Role.is_in(cache_roles_with_permission(db, permission).await?))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|row| row.user)
+        .collect();
+    let mut holders: Vec<MUser> = EUser::find()
+        .filter(CUser::Id.is_in(users))
+        .filter(CUser::Active.eq(true))
+        .all(db)
+        .await?;
+    holders.sort_by(|a, b| a.username.cmp(&b.username));
+    Ok(holders)
+}
+
+pub async fn list_cache_ids_where_user_has_permission<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+    permission: PermissionMask,
+) -> Result<Vec<CacheId>, DbErr> {
+    let mut caches: Vec<CacheId> = ECacheAccess::find()
+        .filter(CCacheAccess::User.eq(user))
+        .filter(CCacheAccess::Role.is_in(cache_roles_with_permission(db, permission).await?))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|row| row.cache)
+        .collect();
+    caches.sort();
+    caches.dedup();
+    Ok(caches)
+}
+
 pub async fn superusers<C: ConnectionTrait>(db: &C) -> Result<Vec<MUser>, DbErr> {
     EUser::find()
         .filter(CUser::Superuser.eq(true))

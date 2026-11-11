@@ -32,6 +32,8 @@ pub(crate) enum ProjectRefusal {
         "GitHub integrations are managed through the server-wide GitHub App; enable the App on the project instead of switching git_host_type to github."
     )]
     SwitchToGitHubNotAllowed,
+    #[error("Settings in the server configuration define this subscription. Make changes there.")]
+    DeclaredInServerStateConfiguration,
     #[error("Project not subscribed to Cache")]
     NotSubscribedToCache,
     #[error("the worker id belongs to a team worker")]
@@ -96,6 +98,7 @@ impl Refusal for ProjectRefusal {
             | Self::WorkerIdBelongsToOtherConnection
             | Self::TeamWorkerManagedOnTeamPage
             | Self::ProjectWorkerPageCannotDrainWorkerOnSharedMachine
+            | Self::DeclaredInServerStateConfiguration
             | Self::ManagedSecret { .. }
             | Self::UnusableSopsKey { .. } => RefusalStatus::Conflict,
         }

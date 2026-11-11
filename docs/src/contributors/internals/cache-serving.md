@@ -34,7 +34,7 @@ sequenceDiagram
     - To get the public key as `<host>-<name>:<base64>`, call `format_cache_public_key`.
 - **Signer:** Only the server can sign; the worker cannot. Most signatures come from the graph writer's transaction, which covers worker and REST uploads alike.
 - **Signatures:** Every cache of a project that needs a path gets a signed `cached_path_signature` row for that path.
-    - A project needs a path once its signing tasks have a job on the path's derivation. Tasks with `sign_cache` off add no row.
+    - Projects need a path once any of their jobs run on the path's derivation. Subscriptions with `sign_outputs` off add no row for that cache.
     - Each NAR commit can sign into the caches of the upload (`sign_into_caches` in `gradient-graph/src/nar.rs`).
     - Projects with a job on a committed path then receive its signature in their caches (`gradient-graph/src/claims.rs`).
     - Recorded batches sign the already cached outputs of their jobs into their project's caches. Builds finished earlier for another project qualify too.

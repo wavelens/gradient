@@ -344,7 +344,6 @@ mod tests {
             created_by: gradient_types::ids::UserId::nil(),
             keep_evaluations: 10,
             concurrency: ConcurrencyPolicy::Skip,
-            sign_cache: true,
             ..Default::default()
         }
     }

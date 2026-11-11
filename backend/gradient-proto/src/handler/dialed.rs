@@ -218,6 +218,7 @@ mod tests {
             project,
             cache: CacheId::now_v7(),
             mode: CacheSubscriptionMode::ReadWrite,
+            ..Default::default()
         }]])
     }
 
@@ -317,6 +318,7 @@ mod tests {
             project,
             cache: CacheId::now_v7(),
             mode: CacheSubscriptionMode::ReadWrite,
+            ..Default::default()
         };
         let db = mock_db()
             .append_query_results([Vec::<worker_registration::Model>::new()])

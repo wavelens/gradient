@@ -122,37 +122,8 @@ impl<'a> StateApplicator<'a> {
             self.apply_upstream_caches(cache_id, &state_cache.name, &state_cache.upstream_caches)
                 .await?;
 
-            for project_name in &state_cache.projects {
-                let project_id = project_map.get(project_name).copied().ok_or_else(|| {
-                    format!(
-                        "Project '{}' not found for cache '{}'",
-                        project_name, state_cache.name
-                    )
-                })?;
-
-                let existing_association = project_cache::Entity::find()
-                    .filter(project_cache::Column::Project.eq(project_id))
-                    .filter(project_cache::Column::Cache.eq(cache_id))
-                    .one(self.db)
-                    .await?;
-
-                if existing_association.is_none() {
-                    let project_cache_model = project_cache::Model {
-                        id: ProjectCacheId::now_v7(),
-                        project: project_id,
-                        cache: cache_id,
-                        mode: project_cache::CacheSubscriptionMode::ReadWrite,
-                    }
-                    .into_active_model();
-
-                    project_cache_model.insert(self.db).await?;
-                    tracing::info!(
-                        project = %project_name,
-                        cache = %state_cache.name,
-                        "Created project_cache association"
-                    );
-                }
-            }
+            self.apply_cache_subscriptions(cache_id, state_cache, &project_map)
+                .await?;
 
             self.apply_cache_roles_and_members(
                 cache_id,
@@ -181,6 +152,80 @@ impl<'a> StateApplicator<'a> {
                 })?;
         }
 
+        Ok(())
+    }
+
+    async fn apply_cache_subscriptions(
+        &self,
+        cache_id: CacheId,
+        state_cache: &StateCache,
+        project_map: &HashMap<String, ProjectId>,
+    ) -> Result<(), DynError> {
+        let existing: HashMap<ProjectId, project_cache::Model> = project_cache::Entity::find()
+            .filter(project_cache::Column::Cache.eq(cache_id))
+            .all(self.db)
+            .await?
+            .into_iter()
+            .map(|row| (row.project, row))
+            .collect();
+        let mut declared = HashSet::new();
+
+        for subscription in &state_cache.projects {
+            let project_id = project_map
+                .get(&subscription.name)
+                .copied()
+                .ok_or_else(|| {
+                    format!(
+                        "Project '{}' not found for cache '{}'",
+                        subscription.name, state_cache.name
+                    )
+                })?;
+            declared.insert(project_id);
+
+            match existing.get(&project_id) {
+                Some(row)
+                    if row.managed
+                        && row.mode == subscription.mode
+                        && row.sign_outputs == subscription.sign_outputs => {}
+                Some(row) => {
+                    let mut active = row.clone().into_active_model();
+                    active.managed = Set(true);
+                    active.mode = Set(subscription.mode.clone());
+                    active.sign_outputs = Set(subscription.sign_outputs);
+                    active.update(self.db).await?;
+                }
+                None => {
+                    project_cache::Model {
+                        project: project_id,
+                        cache: cache_id,
+                        mode: subscription.mode.clone(),
+                        managed: true,
+                        sign_outputs: subscription.sign_outputs,
+                        ..Default::default()
+                    }
+                    .into_active_model()
+                    .insert(self.db)
+                    .await?;
+                    tracing::info!(
+                        project = %subscription.name,
+                        cache = %state_cache.name,
+                        "Created project_cache association"
+                    );
+                }
+            }
+        }
+
+        let stale: Vec<ProjectCacheId> = existing
+            .values()
+            .filter(|row| row.managed && !declared.contains(&row.project))
+            .map(|row| row.id)
+            .collect();
+        if !stale.is_empty() {
+            project_cache::Entity::delete_many()
+                .filter(project_cache::Column::Id.is_in(stale))
+                .exec(self.db)
+                .await?;
+        }
         Ok(())
     }
 
@@ -512,6 +557,88 @@ mod tests {
             role.permission,
             CachePermission::WriteStore
         ));
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn applying_server_state_config_marks_declared_cache_subscriptions_managed_removes_undeclared_managed_and_keeps_hand_made_subscriptions()
+     {
+        let db = TestDatabase::create().await;
+        let connection = db.connection();
+        rows::user()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let cache = rows::cache()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let mut project_map = HashMap::new();
+        for name in ["taken-over", "added", "dropped", "hand-made"] {
+            let project = rows::project_with_id(ProjectId::now_v7(), name)
+                .into_active_model()
+                .insert(&connection)
+                .await
+                .unwrap();
+            project_map.insert(name.to_string(), project.id);
+        }
+        for (name, managed) in [
+            ("taken-over", false),
+            ("dropped", true),
+            ("hand-made", false),
+        ] {
+            project_cache::Model {
+                project: project_map[name],
+                cache: cache.id,
+                managed,
+                ..Default::default()
+            }
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        }
+        let state_cache: StateCache = serde_json::from_value(serde_json::json!({
+            "name": cache.name,
+            "display_name": "Test Cache",
+            "signing_key_file": "/dev/null",
+            "public": false,
+            "created_by": "test",
+            "projects": [
+                { "name": "taken-over", "mode": "ReadOnly", "sign_outputs": false },
+                { "name": "added" }
+            ]
+        }))
+        .unwrap();
+        let app = StateApplicator {
+            db: &connection,
+            crypt_secret_file: "",
+            credentials_dir: Path::new(""),
+            email_enabled: false,
+        };
+
+        app.apply_cache_subscriptions(cache.id, &state_cache, &project_map)
+            .await
+            .unwrap();
+
+        let rows: HashMap<ProjectId, project_cache::Model> = db
+            .rows::<EProjectCache>()
+            .await
+            .into_iter()
+            .map(|row| (row.project, row))
+            .collect();
+        assert_eq!(rows.len(), 3);
+        let taken_over = &rows[&project_map["taken-over"]];
+        assert!(taken_over.managed);
+        assert_eq!(taken_over.mode, CacheSubscriptionMode::ReadOnly);
+        assert!(!taken_over.sign_outputs);
+        let added = &rows[&project_map["added"]];
+        assert!(added.managed);
+        assert_eq!(added.mode, CacheSubscriptionMode::ReadWrite);
+        assert!(added.sign_outputs);
+        assert!(!rows[&project_map["hand-made"]].managed);
         db.finish().await;
     }
 }

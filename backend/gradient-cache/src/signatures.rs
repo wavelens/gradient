@@ -42,7 +42,7 @@ WITH orphan AS (
     JOIN task t                 ON t.id = e.task
     JOIN project_cache pc       ON pc.project = t.project
     JOIN cache c                ON c.id = pc.cache
-    WHERE t.sign_cache
+    WHERE pc.sign_outputs
 )
 INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at)
 SELECT uuidv7(), claim.cached_path, claim.cache, 0, (now() AT TIME ZONE 'UTC')
@@ -179,7 +179,7 @@ impl SignSweep {
                 debug!(
                     store_path = %store_path,
                     cache = %cache.id,
-                    "sign sweep: skipping (task sign_cache=false)"
+                    "Sign sweep: skip (no subscription of the originating project to sign outputs)"
                 );
                 continue;
             }
@@ -229,12 +229,12 @@ mod orphan_claim_tests {
     /// An unbounded fixpoint over `cached_path` starved this scheduler before. The pass is running
     /// on a timer.
     #[test]
-    fn the_repair_is_bounded_and_respects_the_sign_cache_opt_out() {
+    fn the_repair_is_bounded_and_respects_the_sign_outputs_opt_out() {
         let sql = REPAIR_ORPHAN_CLAIMS.text();
         assert!(sql.contains("LIMIT $1"), "{sql}");
         assert!(
-            sql.contains("t.sign_cache"),
-            "a task that opted out of signing must not be handed a claim"
+            sql.contains("pc.sign_outputs"),
+            "Pass no claims to subscriptions that opted out of signing."
         );
     }
 }

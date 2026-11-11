@@ -6,7 +6,7 @@
 
 use gradient_entity::entry_point;
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{public_project, task_without_cache_signing};
+use gradient_fixtures::rows::{public_project, task};
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
 use gradient_types::SessionId;
 
@@ -15,7 +15,7 @@ async fn entry_point_metrics_returns_404_for_attribute_path_that_was_never_evalu
     let session_id = SessionId::now_v7();
     let db = with_auth(mock_db(), session_id)
         .append_query_results([vec![public_project()]])
-        .append_query_results([vec![task_without_cache_signing()]])
+        .append_query_results([vec![task()]])
         .append_query_results([Vec::<entry_point::Model>::new()])
         .append_query_results([Vec::<entry_point::Model>::new()])
         .into_connection();

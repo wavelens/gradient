@@ -48,7 +48,7 @@ WITH RECURSIVE claim(hash, cache) AS (
     JOIN evaluation e           ON e.id = bj.evaluation
     JOIN task t                 ON t.id = e.task
     JOIN project_cache pc       ON pc.project = t.project
-    WHERE {jobs} AND t.sign_cache
+    WHERE {jobs} AND pc.sign_outputs
     UNION
     SELECT split_part(regexp_replace(r.token, '^/nix/store/', ''), '-', 1), claim.cache
     FROM claim

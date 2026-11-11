@@ -84,8 +84,6 @@ pub struct StateTask {
     pub triggers: Option<Vec<StateTrigger>>,
     #[serde(default)]
     pub concurrency: ConcurrencyPolicy,
-    #[serde(default = "default_true")]
-    pub sign_cache: bool,
     #[serde(default)]
     pub wait_for_workers: bool,
     #[serde(default = "default_true")]
@@ -192,7 +190,7 @@ pub struct StateCache {
     pub pull_through: bool,
     pub signing_key_file: String,
     #[serde(default)]
-    pub projects: Vec<String>,
+    pub projects: Vec<StateCacheProject>,
     #[serde(default = "default_upstream_caches")]
     pub upstream_caches: Vec<StateUpstream>,
     pub public: bool,
@@ -328,6 +326,15 @@ pub struct StateProjectTeam {
     pub users: bool,
     #[serde(default = "default_true")]
     pub workers: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StateCacheProject {
+    pub name: String,
+    #[serde(default = "default_upstream_mode")]
+    pub mode: CacheSubscriptionMode,
+    #[serde(default = "default_true")]
+    pub sign_outputs: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -312,7 +312,6 @@ async fn api_key_with_only_view_cannot_trigger_evaluation() {
                     .unwrap(),
                 keep_evaluations: 30,
                 concurrency: ConcurrencyPolicy::Skip,
-                sign_cache: true,
                 ..Default::default()
             }]])
             .append_query_results([vec![admin_membership]])
