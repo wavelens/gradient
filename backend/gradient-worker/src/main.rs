@@ -37,7 +37,7 @@ use gradient_util::logging::{LogSetup, LogWriter, TraceSetup};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
 };
-use worker::{DrainAndStopTokens, Worker};
+use worker::Worker;
 
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
@@ -100,9 +100,8 @@ fn main() -> Result<()> {
             );
         }
 
-        let tokens = DrainAndStopTokens::default();
-        let stop = tokens.stop.clone();
-        install_signal_handler(tokens.clone());
+        let stop = CancellationToken::new();
+        install_signal_handler(stop.clone());
         let (exec, resumed) = start_exec_host(&config, &stop).await?;
         if let Some(exec) = &exec {
             install_reload_handler(Arc::clone(&exec.secrets));
@@ -153,14 +152,14 @@ fn main() -> Result<()> {
                 );
             }
             let listener_config = config.clone();
-            let listener_tokens = tokens.clone();
+            let listener_stop = stop.clone();
             let listener_sessions = sessions.clone();
             let listener_executor = executor.clone();
             #[expect(clippy::disallowed_methods, reason = "returns once the worker stops")]
             tokio::spawn(async move {
                 if let Err(e) = listener::start_listener(
                     listener_config,
-                    listener_tokens,
+                    listener_stop,
                     listener_sessions,
                     listener_executor,
                 )
@@ -175,13 +174,13 @@ fn main() -> Result<()> {
         let served = match server_url {
             Some(server_url) => {
                 let worker = Worker::start(config.clone(), executor.clone(), resumed);
-                run_outbound(worker, &server_url, tokens, &sessions, config.exit_limits()).await
+                run_outbound(worker, &server_url, stop, &sessions, config.exit_limits()).await
             }
             None => {
                 if let Some(exec) = &exec {
                     exec.stop_resumed(resumed).await;
                 }
-                serve_incoming_only(&tokens, &sessions, config.exit_limits()).await;
+                serve_incoming_only(&stop, &sessions, config.exit_limits()).await;
                 Ok(())
             }
         };
@@ -206,42 +205,31 @@ async fn start_exec_host(
 }
 
 async fn serve_incoming_only(
-    tokens: &DrainAndStopTokens,
+    stop: &CancellationToken,
     sessions: &TaskTracker,
     limits: exit_clock::ExitLimits,
 ) {
     info!("no server URL; serving incoming server connections only");
     tokio::select! {
-        _ = tokens.stop.cancelled() => {}
+        _ = stop.cancelled() => {}
         () = exit_deadline(limits) => {}
-        () = wait_until_drain_requested_and_no_running_jobs(tokens) => tokens.stop.cancel(),
     }
     info!("shutdown requested or exit limit reached");
     wait_for_inbound_sessions(sessions).await;
 }
 
-async fn wait_until_drain_requested_and_no_running_jobs(tokens: &DrainAndStopTokens) {
-    tokens.graceful_drain_cancellation_token.cancelled().await;
-    let mut check = tokio::time::interval(std::time::Duration::from_secs(1));
-    while !exit_clock::clock().is_idle() {
-        check.tick().await;
-    }
-}
-
 async fn run_outbound(
     worker: Worker<Disconnected>,
     server_url: &str,
-    tokens: DrainAndStopTokens,
+    stop: CancellationToken,
     sessions: &TaskTracker,
     limits: exit_clock::ExitLimits,
 ) -> Result<()> {
-    let stop = tokens.stop.clone();
     let mut backoff = INITIAL_BACKOFF;
 
     let initial = tokio::select! {
         _ = stop.cancelled() => None,
         () = exit_deadline(limits) => None,
-        () = wait_until_drain_requested_and_no_running_jobs(&tokens) => None,
         conn = async {
             loop {
                 match worker.connect(server_url).await {
@@ -269,7 +257,7 @@ async fn run_outbound(
     backoff = INITIAL_BACKOFF;
 
     loop {
-        let (disconnected, outcome) = worker.run(tokens.clone()).await;
+        let (disconnected, outcome) = worker.run(stop.clone()).await;
 
         if stop.is_cancelled() {
             info!("worker stopped or reached an exit limit; tearing down");
@@ -307,7 +295,6 @@ async fn run_outbound(
         let reconnected = tokio::select! {
             _ = stop.cancelled() => None,
             () = exit_deadline(limits) => None,
-            () = wait_until_drain_requested_and_no_running_jobs(&tokens) => None,
             conn = retry_reconnect(
                 async || disconnected.connect(server_url).await,
                 |delay| tokio::time::sleep(delay),
@@ -331,22 +318,15 @@ async fn run_outbound(
     }
 }
 
-fn install_signal_handler(tokens: DrainAndStopTokens) {
+fn install_signal_handler(stop: CancellationToken) {
     #[expect(
         clippy::disallowed_methods,
-        reason = "outlives every session; ends with the second stop signal"
+        reason = "outlives every session; ends with the first stop signal"
     )]
     tokio::spawn(async move {
         next_stop_signal().await;
-        info!(
-            "A stop request arrived. Finish running jobs before exit. A second signal can abort them."
-        );
-        tokens.graceful_drain_cancellation_token.cancel();
-        next_stop_signal().await;
-        info!(
-            "Second stop signal. Abort running jobs so the server can put them back in the queue."
-        );
-        tokens.stop.cancel();
+        info!("stop requested; aborting running jobs so the server queues them again");
+        stop.cancel();
     });
 }
 

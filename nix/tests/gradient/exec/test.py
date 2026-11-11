@@ -293,18 +293,6 @@ def wait_started(name):
     return wait_for(f"{name} runs", check)
 
 
-def stop_worker_service_and_abort_running_jobs(node):
-    since = node.succeed("date +%s").strip()
-    node.succeed("systemctl stop --no-block gradient-worker.service")
-    node.wait_until_succeeds(
-        f"journalctl -u gradient-worker --no-pager --since=@{since} | grep -q 'A stop request arrived'",
-        timeout=30)
-    node.succeed("systemctl kill --kill-whom=main --signal=SIGTERM gradient-worker.service")
-    node.wait_until_succeeds(
-        "test \"$(systemctl show -p ActiveState --value gradient-worker.service)\" = inactive",
-        timeout=60)
-
-
 def active_guests(node):
     listing = node.succeed(
         "systemctl list-units --plain --no-legend --state=active 'gradient-guest@*.service'")
@@ -511,8 +499,7 @@ banner("Phase 10: a worker stopping its guests stops the guest of a running job"
 wait_running("long-stop", 5)
 stop_guest = guest_of_job(stopper, JOBS["long-stop"])
 assert stop_guest, "no guest state names the long-stop job"
-stop_worker_service_and_abort_running_jobs(stopper)
-stopper.succeed("systemctl start gradient-worker.service")
+stopper.succeed("systemctl restart gradient-worker.service")
 stopper.wait_until_fails(f"systemctl is-active --quiet gradient-guest-{stop_guest}.service", timeout=60)
 
 banner("Phase 11: a failing job uses its retry")
@@ -528,7 +515,7 @@ keep_guest = guest_of_job(keeper, JOBS["long-keep"])
 lost_guest = guest_of_job(keeper, JOBS["lost"])
 assert keep_guest and lost_guest, f"guests of the kept jobs: {keep_guest!r} {lost_guest!r}"
 pid = main_pid(keeper, keep_guest)
-stop_worker_service_and_abort_running_jobs(keeper)
+keeper.succeed("systemctl stop gradient-worker.service")
 restart = keeper.succeed(
     f"printf 'CONNECT {RESTART_AGENT_PORT}\\n' | timeout 90 socat STDIO,ignoreeof UNIX-CONNECT:{GUESTS}/{lost_guest}/vsock.sock")
 assert "restarted" in restart, f"the lost guest did not restart its agent: {restart!r}"
