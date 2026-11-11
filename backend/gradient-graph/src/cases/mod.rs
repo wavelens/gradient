@@ -425,6 +425,46 @@ impl Case {
         path: &str,
         substitute: bool,
     ) -> Option<DispatchedJobId> {
+        let output_names = if substitute {
+            let unneeded = self.sb(path).await.unneeded_outputs;
+            let outputs = derivation_output::Entity::find()
+                .filter(derivation_output::Column::Derivation.eq(self.db.id_of(path).await))
+                .all(&self.db.connection())
+                .await
+                .expect("the outputs read");
+            Some(
+                outputs
+                    .into_iter()
+                    .map(|o| o.name)
+                    .filter(|name| !unneeded.contains(name))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
+        self.claim_shared_build_and_assign_with_output_names(evaluation, path, output_names)
+            .await
+    }
+
+    pub async fn claim_substitute_build_with_output_names(
+        &self,
+        evaluation: EvaluationId,
+        path: &str,
+        output_names: &[&str],
+    ) -> Option<DispatchedJobId> {
+        let output_names = output_names.iter().map(ToString::to_string).collect();
+        self.claim_shared_build_and_assign_with_output_names(evaluation, path, Some(output_names))
+            .await
+    }
+
+    async fn claim_shared_build_and_assign_with_output_names(
+        &self,
+        evaluation: EvaluationId,
+        path: &str,
+        output_names: Option<Vec<String>>,
+    ) -> Option<DispatchedJobId> {
+        let substitute = output_names.is_some();
         let shared_build = self.sb(path).await.id;
         let assignment = build_assignment(
             evaluation,
@@ -434,7 +474,7 @@ impl Case {
             gradient_types::now(),
         );
         let dispatched_job = assignment.id;
-        if !claim_build(&self.ctx.worker_db, assignment, shared_build, substitute).await {
+        if !claim_build(&self.ctx.worker_db, assignment, shared_build, output_names).await {
             return None;
         }
 

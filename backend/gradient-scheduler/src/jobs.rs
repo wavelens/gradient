@@ -404,18 +404,18 @@ pub struct AssignmentRecord {
     pub job_context: serde_json::Value,
     pub instance_context: serde_json::Value,
     pub substitute: bool,
+    pub output_names: Vec<String>,
     pub choice: Option<CoreChoice>,
     pub exec: Option<ExecAssignment>,
 }
 
-/// An upstream probe landing in between can turn a build into a passthrough. A stale build would
-/// then rebuild bytes already available upstream (#593).
+/// An upstream probe can happen midway. That probe can turn a build into a passthrough. An old build can then rebuild bytes already available upstream (#593). Outputs that become necessary later can widen the set of outputs for a passthrough fetch. An old passthrough can miss that output. The build can look complete, but no later fetch can retrieve that output.
 impl From<&AssignmentRecord> for ClaimGate {
     fn from(rec: &AssignmentRecord) -> Self {
         match (rec.derivation_build, &rec.exec) {
             (Some(shared_build), _) => ClaimGate::Build {
                 shared_build,
-                substitute: rec.substitute,
+                output_names_to_substitute: rec.substitute.then(|| rec.output_names.clone()),
             },
             (None, Some(exec)) => ClaimGate::Exec {
                 exec_job: exec.exec_job,
@@ -573,10 +573,15 @@ fn assignment_record_for(
     worker_context: serde_json::Value,
     instance_context: serde_json::Value,
 ) -> AssignmentRecord {
-    let (kind_disc, derivation_build, task) = match job {
-        PendingJob::Build(b) => (DispatchedJobKind::Build, Some(b.derivation_build), None),
-        PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.task_id),
-        PendingJob::Exec(r) => (DispatchedJobKind::Exec, None, Some(r.task_id)),
+    let (kind_disc, derivation_build, task, output_names) = match job {
+        PendingJob::Build(b) => (
+            DispatchedJobKind::Build,
+            Some(b.derivation_build),
+            None,
+            b.job.build.outputs.iter().map(|o| o.name.clone()).collect(),
+        ),
+        PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.task_id, Vec::new()),
+        PendingJob::Exec(r) => (DispatchedJobKind::Exec, None, Some(r.task_id), Vec::new()),
     };
     AssignmentRecord {
         job_id: job_id.to_owned(),
@@ -594,6 +599,7 @@ fn assignment_record_for(
         job_context: sc.job_context.clone(),
         instance_context,
         substitute: matches!(job, PendingJob::Build(b) if b.substitute),
+        output_names,
         choice: sc.choice,
         exec: None,
     }

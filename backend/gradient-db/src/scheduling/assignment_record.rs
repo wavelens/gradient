@@ -17,8 +17,8 @@ use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::ids::{
     DerivationBuildId, DispatchedJobId, EvaluationId, ExecJobId, ProjectId,
 };
-use gradient_types::{CDerivationBuild, CEvaluation, CExecJob};
-use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query, Value};
+use gradient_types::{CDerivationBuild, CDerivationOutput, CEvaluation, CExecJob};
+use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query, SelectStatement, Value};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, IntoActiveModel,
     Iterable, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
@@ -69,11 +69,11 @@ pub fn no_open_assignment_predicate(job_key_sql: &str) -> String {
     )
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ClaimGate {
     Build {
         shared_build: DerivationBuildId,
-        substitute: bool,
+        output_names_to_substitute: Option<Vec<String>>,
     },
     Eval {
         evaluation: EvaluationId,
@@ -88,14 +88,27 @@ impl ClaimGate {
         let subject = match self {
             ClaimGate::Build {
                 shared_build,
-                substitute,
-            } => Query::select()
-                .expr(Expr::val(1))
-                .from(gradient_entity::derivation_build::Entity)
-                .and_where(CDerivationBuild::Id.eq(shared_build))
-                .and_where(CDerivationBuild::Status.eq(BuildStatus::Queued))
-                .and_where(CDerivationBuild::CacheAvailable.eq(substitute))
-                .to_owned(),
+                output_names_to_substitute,
+            } => {
+                let mut build = Query::select()
+                    .expr(Expr::val(1))
+                    .from(gradient_entity::derivation_build::Entity)
+                    .and_where(CDerivationBuild::Id.eq(shared_build))
+                    .and_where(CDerivationBuild::Status.eq(BuildStatus::Queued))
+                    .and_where(
+                        CDerivationBuild::CacheAvailable.eq(output_names_to_substitute.is_some()),
+                    )
+                    .to_owned();
+                if let Some(names) = output_names_to_substitute {
+                    build.and_where(
+                        Expr::exists(
+                            select_needed_outputs_missing_from_substitute_job_output_names(names),
+                        )
+                        .not(),
+                    );
+                }
+                build
+            }
             ClaimGate::Eval { evaluation } => Query::select()
                 .expr(Expr::val(1))
                 .from(gradient_entity::evaluation::Entity)
@@ -116,6 +129,27 @@ impl ClaimGate {
 
         Expr::exists(subject)
     }
+}
+
+fn select_needed_outputs_missing_from_substitute_job_output_names(
+    names: Vec<String>,
+) -> SelectStatement {
+    use gradient_entity::derivation_output::Entity as EDerivationOutput;
+
+    Query::select()
+        .expr(Expr::val(1))
+        .from(EDerivationOutput)
+        .and_where(
+            Expr::col((EDerivationOutput, CDerivationOutput::Derivation)).equals((
+                gradient_entity::derivation_build::Entity,
+                CDerivationBuild::Derivation,
+            )),
+        )
+        .and_where(Expr::cust(
+            "\"derivation_output\".\"name\" <> ALL(\"derivation_build\".\"unneeded_outputs\")",
+        ))
+        .and_where(Expr::col((EDerivationOutput, CDerivationOutput::Name)).is_not_in(names))
+        .to_owned()
 }
 
 pub async fn claim_assignment<C: ConnectionTrait>(
@@ -488,7 +522,7 @@ mod tests {
     fn build_gate() -> ClaimGate {
         ClaimGate::Build {
             shared_build: DerivationBuildId::now_v7(),
-            substitute: false,
+            output_names_to_substitute: None,
         }
     }
 
@@ -524,6 +558,34 @@ mod tests {
             sql.contains("\"derivation_build\".\"cache_available\" ="),
             "{sql}"
         );
+    }
+
+    #[tokio::test]
+    async fn the_substitute_build_claim_sql_requires_needed_shared_build_outputs_in_the_job_output_names_unlike_the_full_build_claim_sql()
+     {
+        let shared_build = DerivationBuildId::now_v7();
+        let (_, substitute) = claimed(
+            1,
+            ClaimGate::Build {
+                shared_build,
+                output_names_to_substitute: Some(vec!["out".into()]),
+            },
+        )
+        .await;
+        let (_, full) = claimed(1, build_gate()).await;
+
+        let sql = &substitute.sql;
+        assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
+        assert!(sql.contains("FROM \"derivation_output\""), "{sql}");
+        assert!(
+            sql.contains("<> ALL(\"derivation_build\".\"unneeded_outputs\")"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("\"derivation_output\".\"name\" NOT IN"),
+            "{sql}"
+        );
+        assert!(!full.sql.contains("\"derivation_output\""), "{}", full.sql);
     }
 
     #[tokio::test]
