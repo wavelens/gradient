@@ -197,9 +197,11 @@ fn nars_select_sql(
 ) -> String {
     format!(
         "SELECT cp.hash, cp.hash || '-' || cp.package AS store_path, cp.package, \
-                cp.nar_size, cp.file_size, cp.created_at, cps.last_fetched_at \
+                cp.nar_size, cp.file_size, cp.created_at, cps.last_fetched_at, \
+                cps.pinned_at, u.username AS pinned_by_username \
          FROM cached_path_signature cps \
          JOIN cached_path cp ON cp.id = cps.cached_path \
+         LEFT JOIN \"user\" u ON u.id = cps.pinned_by_user_id \
          WHERE {where_sql} \
          ORDER BY {sort_col} {order_dir} NULLS LAST, cp.id ASC \
          LIMIT ${limit_idx} OFFSET ${offset_idx}"
@@ -231,6 +233,7 @@ pub struct NarFilter<'a> {
     pub cache: CacheId,
     pub hash_prefix: Option<&'a str>,
     pub package: Option<&'a str>,
+    pub pinned: Option<bool>,
 }
 
 impl NarFilter<'_> {
@@ -247,6 +250,11 @@ impl NarFilter<'_> {
             let n = values.len() + 1;
             where_clauses.push(format!("cp.package LIKE ${n}"));
             values.push(Value::String(Some(format!("%{needle}%"))));
+        }
+        match self.pinned {
+            Some(true) => where_clauses.push("cps.pinned_at IS NOT NULL".to_string()),
+            Some(false) => where_clauses.push("cps.pinned_at IS NULL".to_string()),
+            None => {}
         }
 
         (where_clauses.join(" AND "), values)
@@ -279,6 +287,64 @@ pub struct NarSummary {
     pub file_size: Option<i64>,
     pub created_at: NaiveDateTime,
     pub last_fetched_at: Option<NaiveDateTime>,
+    pub pinned_at: Option<NaiveDateTime>,
+    pub pinned_by_username: Option<String>,
+}
+
+crate::sql! {
+    PIN_CACHE_CLAIMS = "UPDATE cached_path_signature s \
+         SET pinned_at = $1, pinned_by_user_id = $2 \
+         FROM cached_path cp \
+         WHERE cp.id = s.cached_path AND s.cache = $3 \
+           AND cp.hash = ANY($4::text[]) AND s.pinned_at IS NULL",
+        params = [Now, UserId, CacheId, CachedPathHashes(64)];
+
+    UNPIN_CACHE_CLAIMS = "UPDATE cached_path_signature s \
+         SET pinned_at = NULL, pinned_by_user_id = NULL \
+         FROM cached_path cp \
+         WHERE cp.id = s.cached_path AND s.cache = $1 \
+           AND cp.hash = ANY($2::text[]) AND s.pinned_at IS NOT NULL",
+        params = [CacheId, CachedPathHashes(64)];
+}
+
+pub async fn set_claim_pin_timestamp_and_user_for_cached_path_hashes<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    user: UserId,
+    hashes: &[String],
+) -> Result<u64, DbErr> {
+    let pinned_at = gradient_types::now();
+    let mut changed = 0;
+    for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
+        changed += db
+            .execute_raw(PIN_CACHE_CLAIMS.bind([
+                Value::ChronoDateTime(Some(pinned_at)),
+                Value::Uuid(Some(user.into_inner())),
+                Value::Uuid(Some(cache.into_inner())),
+                chunk.to_vec().into(),
+            ]))
+            .await?
+            .rows_affected();
+    }
+    Ok(changed)
+}
+
+pub async fn clear_cache_claim_pin_for_cached_path_hashes<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    hashes: &[String],
+) -> Result<u64, DbErr> {
+    let mut changed = 0;
+    for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
+        changed += db
+            .execute_raw(
+                UNPIN_CACHE_CLAIMS
+                    .bind([Value::Uuid(Some(cache.into_inner())), chunk.to_vec().into()]),
+            )
+            .await?
+            .rows_affected();
+    }
+    Ok(changed)
 }
 
 pub async fn count_in_cache<C: ConnectionTrait>(

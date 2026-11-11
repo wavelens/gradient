@@ -105,6 +105,8 @@ actions! {
     CacheStar => "cache.star",
     CacheUnstar => "cache.unstar",
     CacheNarDelete => "cache.nar.delete",
+    CacheNarPin => "cache.nar.pin",
+    CacheNarUnpin => "cache.nar.unpin",
     CacheNarUpload => "cache.nar.upload",
     CacheKeyRotate => "cache.key.rotate",
     CacheRoleCreate => "cache.role.create",

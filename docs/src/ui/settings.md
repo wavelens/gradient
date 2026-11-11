@@ -55,6 +55,8 @@ Public projects and caches also appear in lists of projects and caches, search, 
 
 The cache page also includes **Upstream Caches**, **NARs**, **Members**, **Subscriptions** and **Webhooks**.
 
+The pin button on the NARs tab can keep a path beyond garbage collection. This works regardless of gc.narTtlHours. A popup can ask whether to pin only this path or all paths that the path can reference. The Pinned column can show which user pinned a path. Filters can show only pinned paths. They can also show only unpinned paths.
+
 ![Cache NARs](../assets/screenshots/cache_nars.png)
 
 ## Related

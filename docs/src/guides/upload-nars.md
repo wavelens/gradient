@@ -58,6 +58,10 @@ The cache page shows the same entries under **NARs**, filterable by hash and pac
 | `gradient cache nar show <cache> <hash>` | Show one NAR: store path, sizes, signature and fetch count. |
 | `gradient cache nar stats <cache>` | Show the NAR count and total size. |
 | `gradient cache nar delete <cache> <hash>` | Delete the NAR from the cache. |
+| `gradient cache nar pin <cache> <hash>` | Pin the NAR so garbage collection doesn't delete it. Add `--include-referenced-paths` to pin its closure too. |
+| `gradient cache nar unpin <cache> <hash>` | Unpin the NAR. Add `--include-referenced-paths` to unpin that closure too. |
+
+Pinned NARs survive garbage collection and stay in the cache, no matter `gc.narTtlHours` or the evaluations that remain. Use `gradient cache nar list --pinned true` to list pinned NARs. NARs that leave the cache lose their pin.
 
 A NAR can live in several caches at once. Storage of a NAR continue until the last cache delete it. A delete in one cache leave all other caches intact.
 

@@ -4164,9 +4164,7 @@ paths:
       tags:
       - caches
       summary: List cached NARs
-      description: |-
-        Returns a paginated list of NARs (cached store paths) currently signed by this cache.
-        Public caches allow anonymous access; otherwise requires `readStore`.
+      description: Return a paginated list of NARs (cached store paths) with a current signature from this cache. Use `pinned=true` to list pinned paths only. Use `pinned=false` to list unpinned paths only. Public caches allow anonymous access. Other caches require `readStore`.
       operationId: listCacheNars
       parameters:
       - name: cache
@@ -4194,6 +4192,11 @@ paths:
         required: false
         schema:
           type: string
+      - name: pinned
+        in: query
+        required: false
+        schema:
+          type: boolean
       - name: page
         in: query
         required: false
@@ -4523,6 +4526,89 @@ paths:
                     type: boolean
                   message:
                     $ref: '#/components/schemas/StoredNar'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/caches/{cache}/nars/{hash}/pin:
+    post:
+      tags:
+      - caches
+      summary: Pin a NAR in this cache
+      description: Mark a copy of a store path in this cache as pinned. Pinned paths survive cache garbage collection regardless of `gc.narTtlHours` and retained evaluations. Values of `include_referenced_paths=true` also pin all paths in the transitive reference set of the store path and in this cache. Already pinned paths keep their original pinning user. `writeStore` is mandatory.
+      operationId: pinCacheNar
+      parameters:
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: hash
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: include_referenced_paths
+        in: query
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: Number of paths whose pin state changed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/CachedPathPinStateChangeCount'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - caches
+      summary: Unpin the NAR in this cache
+      description: Unpin a copy of a store path in the cache. The ``include_referenced_paths=true`` option can also unpin all paths that the store path references transitively. An unpinned path can become subject to garbage collection in the cache again. ``writeStore`` is necessary.
+      operationId: unpinCacheNar
+      parameters:
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: hash
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: include_referenced_paths
+        in: query
+        required: false
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: Number of paths whose pin state changed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/CachedPathPinStateChangeCount'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -16959,6 +17045,15 @@ components:
     CacheUpstreamId:
       type: string
       format: uuid
+    CachedPathPinStateChangeCount:
+      type: object
+      required:
+      - pin_state_changed_path_count
+      properties:
+        pin_state_changed_path_count:
+          type: integer
+          format: int64
+          minimum: 0
     CatalogEntry:
       type: object
       required:
@@ -20960,6 +21055,15 @@ components:
           format: int64
         signed:
           type: boolean
+        pinned_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        pinned_by_username:
+          type:
+          - string
+          - 'null'
     NarList:
       type: object
       required:
@@ -21030,6 +21134,15 @@ components:
           - string
           - 'null'
           format: date-time
+        pinned_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        pinned_by_username:
+          type:
+          - string
+          - 'null'
     NarUploadForm:
       type: object
       required:

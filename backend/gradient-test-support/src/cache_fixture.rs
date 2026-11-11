@@ -349,6 +349,7 @@ fn cached_path_sig_row_fixture() -> gradient_entity::cached_path_signature::Mode
         created_at: test_date(),
         last_fetched_at: Some(test_date()),
         fetch_count: 3,
+        ..Default::default()
     }
 }
 
@@ -402,6 +403,8 @@ pub async fn public_cache_list_one_signed_nar() -> Arc<ServerState> {
     nar_row.insert("file_size", Value::BigInt(Some(12345)));
     nar_row.insert("created_at", Value::ChronoDateTime(Some(test_date())));
     nar_row.insert("last_fetched_at", Value::ChronoDateTime(Some(test_date())));
+    nar_row.insert("pinned_at", Value::ChronoDateTime(Some(test_date())));
+    nar_row.insert("pinned_by_username", Value::String(Some("alice".into())));
 
     let db = mock_db()
         .append_query_results([vec![cache_row()]])

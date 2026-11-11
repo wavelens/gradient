@@ -19,7 +19,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_db::cached_paths::{CacheTotals, NarFilter, NarOrder, NarSummary};
+use gradient_db::lookup::by_id;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -37,6 +39,19 @@ pub struct NarListQuery {
     pub sort: Option<String>,
     #[serde(default)]
     pub order: Option<String>,
+    pub pinned: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PinUnpinClosureQuery {
+    #[serde(default)]
+    pub include_referenced_paths: bool,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct CachedPathPinStateChangeCount {
+    pub pin_state_changed_path_count: u64,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -55,6 +70,8 @@ pub struct NarDetail {
     pub last_fetched_at: Option<NaiveDateTime>,
     pub fetch_count: i64,
     pub signed: bool,
+    pub pinned_at: Option<NaiveDateTime>,
+    pub pinned_by_username: Option<String>,
 }
 
 impl NarDetail {
@@ -62,6 +79,7 @@ impl NarDetail {
         path: MCachedPath,
         signature: MCachedPathSignature,
         references: Vec<String>,
+        pinned_by_username: Option<String>,
         mapper: &StorePathMapper,
     ) -> Self {
         Self {
@@ -82,6 +100,8 @@ impl NarDetail {
             last_fetched_at: signature.last_fetched_at,
             fetch_count: signature.fetch_count,
             signed: signature.signature.is_some(),
+            pinned_at: signature.pinned_at,
+            pinned_by_username,
         }
     }
 }
@@ -123,7 +143,7 @@ type PaginatedNarSummary = Paginated<NarSummary>;
     operation_id = "listCacheNars",
     tag = "caches",
     summary = "List cached NARs",
-    description = "Returns a paginated list of NARs (cached store paths) currently signed by this cache.\nPublic caches allow anonymous access; otherwise requires `readStore`.",
+    description = "Return a paginated list of NARs (cached store paths) with a current signature from this cache. Use `pinned=true` to list pinned paths only. Use `pinned=false` to list unpinned paths only. Public caches allow anonymous access. Other caches require `readStore`.",
     params(CachePath, NarListQuery, PaginationParams),
     responses((status = OK, description = "Paginated NAR list", body = PaginatedNarSummary), WebError)
 )]
@@ -164,6 +184,7 @@ pub async fn list(
         cache: cache.id,
         hash_prefix: hash_prefix.as_deref(),
         package: q.package.as_deref().filter(|s| !s.is_empty()),
+        pinned: q.pinned,
     };
 
     let total = gradient_db::cached_paths::count_in_cache(&db.web_db, filter).await?;
@@ -214,7 +235,125 @@ pub async fn show(
         .or_not_found(Resource::Signature)?;
     let references =
         gradient_db::graph::runtime_closure::references_for_hash(&db.web_db, &hash).await?;
-    Ok(ok_json(NarDetail::new(cp, sig, references, &mapper)))
+    let pinned_by_username = match sig.pinned_by_user_id {
+        Some(user) => by_id::<EUser, _>(&db.web_db, user)
+            .await?
+            .map(|user| user.username),
+        None => None,
+    };
+    Ok(ok_json(NarDetail::new(
+        cp,
+        sig,
+        references,
+        pinned_by_username,
+        &mapper,
+    )))
+}
+
+async fn get_cache_nar_store_path_and_hashes_to_pin_or_unpin(
+    db: &DbContext,
+    cache: &MCache,
+    hash: &str,
+    include_referenced_paths: bool,
+) -> WebResult<(String, Vec<String>)> {
+    let stored = stored_hash(&db.cache_mapper(cache.id), hash)?;
+    let cp = gradient_db::cached_paths::by_hash(&db.web_db, &stored)
+        .await?
+        .or_not_found(Resource::Path)?;
+    gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
+        .await?
+        .or_not_found(Resource::Signature)?;
+    let store_path = cp.store_path();
+    if !include_referenced_paths {
+        return Ok((store_path, vec![stored]));
+    }
+
+    let closure = gradient_db::graph::sbom::with_referenced_paths(
+        &db.web_db,
+        std::collections::HashMap::from([(stored, cp)]),
+    )
+    .await?;
+    Ok((store_path, closure.into_keys().collect()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/caches/{cache}/nars/{hash}/pin",
+    operation_id = "pinCacheNar",
+    tag = "caches",
+    summary = "Pin a NAR in this cache",
+    description = "Mark a copy of a store path in this cache as pinned. Pinned paths survive cache garbage collection regardless of `gc.narTtlHours` and retained evaluations. Values of `include_referenced_paths=true` also pin all paths in the transitive reference set of the store path and in this cache. Already pinned paths keep their original pinning user. `writeStore` is mandatory.",
+    params(CachePath, ("hash" = String, Path), PinUnpinClosureQuery),
+    responses((status = OK, description = "Number of paths whose pin state changed", body = CachedPathPinStateChangeCount), WebError)
+)]
+pub async fn pin(
+    CacheScope {
+        cache,
+        user,
+        params,
+        db,
+        ..
+    }: CacheScope<Requires<can::WriteStore>>,
+    Query(q): Query<PinUnpinClosureQuery>,
+    audit: Audit,
+) -> WebResult<Json<BaseResponse<CachedPathPinStateChangeCount>>> {
+    let hash: String = params.param("hash")?;
+    let (store_path, hashes) = get_cache_nar_store_path_and_hashes_to_pin_or_unpin(
+        &db,
+        &cache,
+        &hash,
+        q.include_referenced_paths,
+    )
+    .await?;
+    let pin_state_changed_path_count =
+        gradient_db::cached_paths::set_claim_pin_timestamp_and_user_for_cached_path_hashes(
+            &db.web_db, cache.id, user.id, &hashes,
+        )
+        .await?;
+    let mapper = db.cache_mapper(cache.id);
+    audit.write(Action::CacheNarPin, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "hash": hash, "store_path": original_text(&mapper, store_path), "include_referenced_paths": q.include_referenced_paths, "pin_state_changed_path_count": pin_state_changed_path_count, }))
+    .await;
+    Ok(ok_json(CachedPathPinStateChangeCount {
+        pin_state_changed_path_count,
+    }))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/caches/{cache}/nars/{hash}/pin",
+    operation_id = "unpinCacheNar",
+    tag = "caches",
+    summary = "Unpin the NAR in this cache",
+    description = "Unpin a copy of a store path in the cache. The ``include_referenced_paths=true`` option can also unpin all paths that the store path references transitively. An unpinned path can become subject to garbage collection in the cache again. ``writeStore`` is necessary.",
+    params(CachePath, ("hash" = String, Path), PinUnpinClosureQuery),
+    responses((status = OK, description = "Number of paths whose pin state changed", body = CachedPathPinStateChangeCount), WebError)
+)]
+pub async fn remove_cache_nar_pin(
+    CacheScope {
+        cache, params, db, ..
+    }: CacheScope<Requires<can::WriteStore>>,
+    Query(q): Query<PinUnpinClosureQuery>,
+    audit: Audit,
+) -> WebResult<Json<BaseResponse<CachedPathPinStateChangeCount>>> {
+    let hash: String = params.param("hash")?;
+    let (store_path, hashes) = get_cache_nar_store_path_and_hashes_to_pin_or_unpin(
+        &db,
+        &cache,
+        &hash,
+        q.include_referenced_paths,
+    )
+    .await?;
+    let pin_state_changed_path_count =
+        gradient_db::cached_paths::clear_cache_claim_pin_for_cached_path_hashes(
+            &db.web_db, cache.id, &hashes,
+        )
+        .await?;
+    let mapper = db.cache_mapper(cache.id);
+    audit.write(Action::CacheNarUnpin, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "hash": hash, "store_path": original_text(&mapper, store_path), "include_referenced_paths": q.include_referenced_paths, "pin_state_changed_path_count": pin_state_changed_path_count, }))
+    .await;
+    Ok(ok_json(CachedPathPinStateChangeCount {
+        pin_state_changed_path_count,
+    }))
 }
 
 #[utoipa::path(

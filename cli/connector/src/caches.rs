@@ -3,13 +3,13 @@
 
 use crate::api::{
     AddMemberRequest, AddUpstreamRequest, CacheResponse, CacheStatsResponse,
-    CacheSubscribersResponse, CacheUpstreamId, ChangeMemberRoleRequest, ChunkReceived,
-    CreateRoleRequest, CreatedEntityResponse, GrantCacheRequest, MakeCacheRequest, MemberItem,
-    NarDetail, NarStats, NarinfoPart, PaginatedCache, PaginatedNarSummary, PatchCacheGrantRequest,
-    PatchCacheRequest, PatchRoleRequest, PatchUpstreamRequest, PendingInvitationItem,
-    RemoveMemberRequest, RevokeInvitationRequest, RoleListResponseCacheRoleOwner,
-    RoleResponseCacheRoleOwner, SubscriptionRequestItem, TeamGrantEntry, UpstreamCacheItem,
-    UpstreamTestResponse,
+    CacheSubscribersResponse, CacheUpstreamId, CachedPathPinStateChangeCount,
+    ChangeMemberRoleRequest, ChunkReceived, CreateRoleRequest, CreatedEntityResponse,
+    GrantCacheRequest, MakeCacheRequest, MemberItem, NarDetail, NarStats, NarinfoPart,
+    PaginatedCache, PaginatedNarSummary, PatchCacheGrantRequest, PatchCacheRequest,
+    PatchRoleRequest, PatchUpstreamRequest, PendingInvitationItem, RemoveMemberRequest,
+    RevokeInvitationRequest, RoleListResponseCacheRoleOwner, RoleResponseCacheRoleOwner,
+    SubscriptionRequestItem, TeamGrantEntry, UpstreamCacheItem, UpstreamTestResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -22,6 +22,7 @@ pub struct NarListQuery {
     pub package: Option<String>,
     pub sort: Option<String>,
     pub order: Option<String>,
+    pub pinned: Option<bool>,
     pub page: Option<u32>,
     pub per_page: Option<u32>,
 }
@@ -595,6 +596,9 @@ impl CachesApi<'_> {
         if let Some(v) = q.order {
             qs.push(("order", v));
         }
+        if let Some(v) = q.pinned {
+            qs.push(("pinned", v.to_string()));
+        }
         if let Some(v) = q.page {
             qs.push(("page", v.to_string()));
         }
@@ -626,6 +630,42 @@ impl CachesApi<'_> {
             ),
             true,
         )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn nar_pin(
+        &self,
+        cache: &str,
+        hash: &str,
+        include_referenced_paths: bool,
+    ) -> Result<CachedPathPinStateChangeCount, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("caches/{cache}/nars/{hash}/pin"),
+            true,
+        )?
+        .query(&[("include_referenced_paths", include_referenced_paths)]);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn nar_unpin_with_include_referenced_paths(
+        &self,
+        cache: &str,
+        hash: &str,
+        include_referenced_paths: bool,
+    ) -> Result<CachedPathPinStateChangeCount, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("caches/{cache}/nars/{hash}/pin"),
+            true,
+        )?
+        .query(&[("include_referenced_paths", include_referenced_paths)]);
         http::decode(req.send().await?).await
     }
 
