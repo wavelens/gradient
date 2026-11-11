@@ -1058,11 +1058,7 @@ paths:
       tags:
       - auth
       summary: Login with username/password
-      description: |-
-        Validates credentials and returns a signed JWT. Pass the token as
-        `Authorization: Bearer <token>` on subsequent requests.
-        `loginname` accepts either the username or the email address.
-        Set `remember_me: true` for a long-lived token.
+      description: 'Verify credentials. Return a signed JWT. Pass the token as ``Authorization: Bearer <token>`` on later requests. Use either a username or an email address for ``loginname``. Set ``remember_me: true`` to get a long-lived token. Sessions expire 24 hours after last use (30 days with ``remember_me``). Browsers refresh cookie ``jwt_token`` automatically while the session is valid. Bearer clients use ``POST /auth/session/renew`` to refresh the token.'
       operationId: loginUser
       requestBody:
         content:
@@ -1317,7 +1313,7 @@ paths:
       tags:
       - auth
       summary: Logout
-      description: Invalidates the current session (no-op for stateless JWTs; present for API completeness).
+      description: 'Calls to this endpoint revoke the session of the presented token (`Authorization: Bearer` header or `jwt_token` cookie). The token and the matching session stop working immediately. Calls to this endpoint clear the `jwt_token` cookie. Calls without a valid token still succeed.'
       operationId: logout
       responses:
         '200':
@@ -1537,6 +1533,32 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security: []
+  /api/v1/auth/session/renew:
+    post:
+      tags:
+      - auth
+      summary: Renew session
+      description: Extend the expiry of the caller session to 24 hours from now. Use 30 days for a `remember_me` session instead. Send back a new signed JWT for that session. Previous tokens keep working until their own expiry. Bearer clients such as the CLI call this endpoint to stay signed in while they work. Browser cookies refresh automatically.
+      operationId: renewSession
+      responses:
+        '200':
+          description: New session token
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/auth/verify-email:
     get:
       tags:
@@ -2474,13 +2496,16 @@ paths:
       - build-requests
       summary: Append a chunk of a source NAR to a staged upload
       description: |-
-        Streams a large source NAR to the server in slices so no single request
-        hits a body limit. `upload` is a client-chosen id (the CLI uses the NAR's
-        content hash, which makes a retry resumable). `offset` must equal the
-        bytes already received (`0` starts fresh); a mismatch appends nothing and
-        returns the authoritative `received` so the client resumes. The staged
-        total is bounded by `max_source_upload_size`. Finalise with
-        `POST /build-requests/source/{upload}/finalize`.
+        Large source NARs stream to the server in slices, so requests never hit the limit on body size.
+        The client can choose `upload`.
+        The CLI can use the content hash of the NAR as that ID, so retries can resume.
+        Match `offset` to the number of bytes already received.
+        Use `0` to start a new upload.
+        Mismatches add no bytes.
+        The server can return the authoritative `received`, so the client can resume.
+        Use `triggerEvaluation` on `project`.
+        All incomplete uploads for one user share one `max_source_upload_size` limit.
+        Use `POST /build-requests/source/{upload}/finalize` to finalize the upload.
       operationId: putBuildRequestSourceChunk
       parameters:
       - name: upload
@@ -2495,6 +2520,11 @@ paths:
           type: integer
           format: int64
           minimum: 0
+      - name: project
+        in: query
+        required: true
+        schema:
+          type: string
       requestBody:
         content:
           application/octet-stream:
@@ -6398,7 +6428,7 @@ paths:
   /api/v1/evals/{evaluation}/retry:
     post:
       tags:
-      - evaluations
+      - evals
       summary: Retry evaluation
       description: |-
         Start a new evaluation for the same commit without another fetch or evaluation. Put the UUID in `message`. Completed evaluations stay immutable. Status, duration and logs stay intact. Set `retry_of` to the completed evaluation.
@@ -7004,6 +7034,30 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/git-host-connections/oauth/callback:
+    get:
+      tags:
+      - git-host-connections
+      summary: Gitea or Forgejo OAuth2 Callback
+      description: Redirects from the Git host arrive here. Verify `state` against the `git_host_oauth_connect` cookie first. Exchange the code for a token. Create the connection while the session that started the flow is still valid. Then redirect to the connection page for the project's Git host with `oauth_connected` and `webhooks_installed`, or with the `oauth_error` code.
+      operationId: gitHostOAuthCallback
+      parameters:
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect to the frontend
+        default:
+          $ref: '#/components/responses/Error'
+      security: []
   /api/v1/gradient-ci/connections:
     post:
       tags:
@@ -7766,6 +7820,38 @@ paths:
                     type: boolean
                   message:
                     $ref: '#/components/schemas/GitHostConnectionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/git-host-connections/oauth/connect:
+    get:
+      tags:
+      - git-host-connections
+      summary: Connect Gitea or Forgejo with OAuth2
+      description: Redirect a signed-in browser to a Gitea or Forgejo instance (HTTP 302). That instance can run Gradient authorization setup. Use PKCE (S256). Set a short-lived signed `git_host_oauth_connect` cookie with state, project and connection name. The callback can create a project connection named `name` after approval. The connection can receive events and report commit status. Gradient can refresh the access token of that connection automatically. The callback can also link that connection to project tasks that have no connection on the same Git host. The callback can install webhooks in those repositories. API keys can't call this endpoint.
+      operationId: connectGitHostWithOAuth
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: query
+        description: Name of a new connection to the Git host.
+        required: true
+        schema:
+          type: string
+      - name: display_name
+        in: query
+        description: Name to display in the UI. Default is `name`.
+        required: false
+        schema:
+          type: string
+      responses:
+        '302':
+          description: Redirect to Git host
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -8803,7 +8889,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
-      - {}
       - bearerAuth: []
     post:
       tags:
@@ -9549,7 +9634,7 @@ paths:
       description: |-
         Removes the worker registration. The worker may still be connected until
         it disconnects naturally - it will not be able to reconnect after that.
-        A team worker answers `409`; it is deleted on its team.
+        A team worker or a state-managed worker returns `409`. Delete a team worker in its team.
       operationId: deleteProjectWorker
       parameters:
       - name: project
@@ -9951,7 +10036,7 @@ paths:
       tags:
       - tasks
       summary: Update task
-      description: Updates one or more task fields.
+      description: Update one or more fields of a task. Changes to `repository`, `wildcard`, `only_evaluate`, `exec_enabled` or `multi_node_evaluation` trigger a re-evaluation of the latest commit. Other fields take effect at the next evaluation.
       operationId: patchTask
       parameters:
       - name: project
@@ -11271,7 +11356,7 @@ paths:
       - tasks
       summary: Open a pull request from a patch
       description: |-
-        Apply a unified diff to the start commit and create or update a pull request through the Git host connection of the task's `open_pr` action. Exec jobs use the job's evaluation commit as the start commit and can show the pull request on the job. Other callers pass `commit`. Callers that omit `branch` get a branch name from the changed paths, so the same path can update one pull request. A patch can add and change files but cannot delete files.
+        Apply a unified diff to the start commit and create or update a pull request through the Git host connection of the task's `open_pr` action. Exec jobs use the job's evaluation commit as the start commit and can show the pull request on the job. Other callers pass `commit`. Start the specified `branch` with `gradient/`. Callers that omit `branch` get a branch name from the changed paths, so the same path can update one pull request. A patch can add and change files but cannot delete files.
 
         **Access:** Members with the `triggerEvaluation` permission, or the job token of an exec job of the task.
       operationId: openTaskPullRequest
@@ -11515,7 +11600,7 @@ paths:
       tags:
       - tasks
       summary: Move task to another project
-      description: Moves the task into the project named in the body. Allowed for the task owner or a member with the edit-task permission, who also needs the create-task permission in the target project. Rejects state-managed tasks and target projects.
+      description: Move the task to the project in the request body. The task owner can move the task. A member with edit-task permission can also move the task, but that member must also have create-task permission in the target project. Reject tasks and target projects under state management. A task can use a connection to a Git host in repository settings or in an action to open a pull request. Reject that task if the connection is unavailable to the target project. Return `409` for a name already present in the target project.
       operationId: transferTask
       parameters:
       - name: project
@@ -13213,10 +13298,10 @@ paths:
       - user
       summary: Delete current user
       description: |-
-        Permanently deletes the authenticated user and all associated data.
-        Requires re-authentication: password-auth users must supply their
-        current password in `password`; users without a password must echo
-        their username in `confirm_username`.
+        Completely delete the authenticated user and all related data.
+        This request requires re-authentication. Users with password authentication enter their current
+        password in `password`. Users without a password enter
+        their username as-is in `confirm_username`. Managed users (created in the NixOS configuration) answer `403`.
       operationId: deleteUser
       requestBody:
         content:
@@ -13703,7 +13788,7 @@ paths:
       tags:
       - user
       summary: Search users by username
-      description: Returns up to 10 users whose username contains the given query string. Used for autocomplete in member and ownership dialogs.
+      description: The endpoint can return up to 10 users with usernames that contain the specified query string. No users match an empty query. The member and ownership dialogs use this endpoint for autocomplete.
       operationId: searchUsers
       parameters:
       - name: q
@@ -13837,10 +13922,7 @@ paths:
       tags:
       - user
       summary: Update user settings
-      description: |-
-        Updates one or more user profile fields. Only fields that are present in the
-        request body are changed. Managed users (created via NixOS config) cannot be
-        modified through the API.
+      description: Update one or more fields of a user profile. Only fields present in the request body change. Managed users (accounts declared in NixOS configuration) can't change through the API. A new `email` must be a valid address. No other account can have that address. The comparison is case-insensitive. The changed address can become unverified. The server can send a new verification email if email verification is enabled. Sign-in again can proceed only with a verified address.
       operationId: patchUserSettings
       requestBody:
         content:
@@ -14813,9 +14895,7 @@ paths:
       tags:
       - scim
       summary: Patch SCIM group membership
-      description: |-
-        Adds or removes members of the team whose `scim_group` matches. Added users
-        join as Members. Unknown group names return 404.
+      description: Use this endpoint to add, remove, or replace members of the team with a matching `scim_group`. Added users join as members. Use a `replace` for `members` to remove SCIM-added members that aren't in the new list. Members added manually or by the state remain. Unknown group names return 404.
       operationId: scimPatchGroup
       parameters:
       - name: id
@@ -15172,7 +15252,7 @@ paths:
       tags:
       - scim
       summary: Patch a SCIM user
-      description: Applies a SCIM PatchOp. Typically toggles `active` for deactivation/reactivation.
+      description: A SCIM PatchOp can carry `add` or `replace` operations. These operations apply to `active`, `displayName`, `name.formatted`. Other operations and attributes produce a 400 response and leave everything unchanged.
       operationId: scimPatchUser
       parameters:
       - name: id
@@ -18367,6 +18447,10 @@ components:
           - 'null'
           format: int64
           minimum: 0
+    EvaluationAction:
+      type: string
+      enum:
+      - abort
     EvaluationFailureSummary:
       type: object
       required:
@@ -19622,6 +19706,7 @@ components:
       - git_host_type
       - has_secret
       - has_access_token
+      - access_token_refreshes_automatically
       - allowed_ips
       - receives_events
       - reports_status
@@ -19646,6 +19731,8 @@ components:
         has_secret:
           type: boolean
         has_access_token:
+          type: boolean
+        access_token_refreshes_automatically:
           type: boolean
         allowed_ips:
           type: array
@@ -19711,6 +19798,16 @@ components:
           type: boolean
         can_manage:
           type: boolean
+    GiteaOAuthAppConfig:
+      type: object
+      required:
+      - git_host_type
+      - instance_base_url
+      properties:
+        git_host_type:
+          type: string
+        instance_base_url:
+          type: string
     GithubAppManifestRequest:
       type: object
       properties:
@@ -20529,7 +20626,7 @@ components:
       - method
       properties:
         method:
-          type: string
+          $ref: '#/components/schemas/EvaluationAction'
     MakeLoginRequest:
       type: object
       required:
@@ -21010,7 +21107,7 @@ components:
           type: string
         FileSize:
           type: integer
-          format: int32
+          format: int64
           minimum: 0
         NarHash:
           type: string
@@ -21485,6 +21582,16 @@ components:
           type:
           - boolean
           - 'null'
+        restrict_evaluation_fetches:
+          type:
+          - boolean
+          - 'null'
+        extra_allowed_uri_prefixes:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
         owner_team:
           type:
           - string
@@ -21972,6 +22079,8 @@ components:
       - public
       - hide_build_requests
       - allow_exec_in_build_requests
+      - restrict_evaluation_fetches
+      - extra_allowed_uri_prefixes
       - managed
       - created_by
       - created_at
@@ -21996,6 +22105,12 @@ components:
           type: boolean
         allow_exec_in_build_requests:
           type: boolean
+        restrict_evaluation_fetches:
+          type: boolean
+        extra_allowed_uri_prefixes:
+          type: array
+          items:
+            type: string
         managed:
           type: boolean
         owner_team:
@@ -22083,6 +22198,8 @@ components:
       - public
       - hide_build_requests
       - allow_exec_in_build_requests
+      - restrict_evaluation_fetches
+      - extra_allowed_uri_prefixes
       - managed
       - created_by
       - created_at
@@ -22108,6 +22225,12 @@ components:
           type: boolean
         allow_exec_in_build_requests:
           type: boolean
+        restrict_evaluation_fetches:
+          type: boolean
+        extra_allowed_uri_prefixes:
+          type: array
+          items:
+            type: string
         managed:
           type: boolean
         owner_team:
@@ -22824,6 +22947,10 @@ components:
           $ref: '#/components/schemas/CreatePermission'
         github_app_enabled:
           type: boolean
+        gitea_oauth_app:
+          oneOf:
+          - $ref: '#/components/schemas/GiteaOAuthAppConfig'
+          - type: 'null'
         ssh_enabled:
           type: boolean
         ssh_port:

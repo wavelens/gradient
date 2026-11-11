@@ -1075,6 +1075,8 @@ export interface EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
   expected_duration_ms?: number | null;
 }
 
+export type EvaluationAction = "abort";
+
 export interface EvaluationFailureSummary {
   compared_with?: ComparedEvaluation | null;
   packages: PackageCounts;
@@ -1466,6 +1468,7 @@ export interface GitHostConnectionResponse {
   base_url?: string | null;
   has_secret: boolean;
   has_access_token: boolean;
+  access_token_refreshes_automatically: boolean;
   allowed_ips: string[];
   receives_events: boolean;
   reports_status: boolean;
@@ -1488,6 +1491,11 @@ export interface GitHostConnectionSummary {
   receives_events: boolean;
   reports_status: boolean;
   can_manage: boolean;
+}
+
+export interface GiteaOAuthAppConfig {
+  git_host_type: string;
+  instance_base_url: string;
 }
 
 export interface GithubAppManifestRequest {
@@ -1774,7 +1782,7 @@ export interface MakeCacheRequest {
 }
 
 export interface MakeEvaluationRequest {
-  method: string;
+  method: EvaluationAction;
 }
 
 export interface MakeLoginRequest {
@@ -2106,6 +2114,8 @@ export interface PatchProjectRequest {
   description?: string | null;
   hide_build_requests?: boolean | null;
   allow_exec_in_build_requests?: boolean | null;
+  restrict_evaluation_fetches?: boolean | null;
+  extra_allowed_uri_prefixes?: string[] | null;
   owner_team?: string | null;
 }
 
@@ -2273,6 +2283,8 @@ export interface ProjectResponse {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
+  restrict_evaluation_fetches: boolean;
+  extra_allowed_uri_prefixes: string[];
   managed: boolean;
   owner_team?: TeamNameAndDisplayName | null;
   created_by: UserId;
@@ -2314,6 +2326,8 @@ export interface ProjectSummary {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
+  restrict_evaluation_fetches: boolean;
+  extra_allowed_uri_prefixes: string[];
   managed: boolean;
   owner_team?: TeamNameAndDisplayName | null;
   created_by: UserId;
@@ -2580,6 +2594,7 @@ export interface ServerConfig {
   create_team: CreatePermission;
   create_cache: CreatePermission;
   github_app_enabled: boolean;
+  gitea_oauth_app?: GiteaOAuthAppConfig | null;
   ssh_enabled: boolean;
   ssh_port?: number | null;
   gradient_ci_enabled: boolean;

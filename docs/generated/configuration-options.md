@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 ## General
 
 | Option | Type | Default | Env | Description |
@@ -102,7 +107,7 @@
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `giteaApp.clientId` | string | - | `GRADIENT_GITEA_APP_CLIENT_ID` | The client ID of the OAuth2 application. |
-| `giteaApp.clientSecretFile` | path | - | `GRADIENT_GITEA_APP_CLIENT_SECRET_FILE` | File for the client secret of the OAuth2 application. Register the application on the Git host with redirect URI `<serveUrl>/api/v1/integrations/oauth/callback`. |
+| `giteaApp.clientSecretFile` | path | - | `GRADIENT_GITEA_APP_CLIENT_SECRET_FILE` | File for the client secret of an OAuth2 application. Register the application on the Git host with redirect URI `<serveUrl>/api/v1/git-host-connections/oauth/callback`. |
 | `giteaApp.enable` | bool | `false` | - | Whether to enable an OAuth2 application for Gitea or Forgejo that project members can use for one-click connection to a Git host. |
 | `giteaApp.gitHostType` | one of `gitea` `forgejo` | `"forgejo"` | `GRADIENT_GITEA_APP_GIT_HOST_TYPE` | Software to host Git on the instance. |
 | `giteaApp.instanceBaseUrl` | string | - | `GRADIENT_GITEA_APP_INSTANCE_BASE_URL` | Base URL of the Gitea or Forgejo instance that has the OAuth2 application registered. |

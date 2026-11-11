@@ -97,16 +97,6 @@
   },
   {
     "group": "",
-    "field": "store_path",
-    "flag": "store-path",
-    "env": "GRADIENT_STORE_PATH",
-    "type": "Option<String>",
-    "description": "",
-    "default": null,
-    "values": []
-  },
-  {
-    "group": "",
     "field": "public_listing",
     "flag": "public-listing",
     "env": "GRADIENT_PUBLIC_LISTING",
@@ -463,12 +453,35 @@
   },
   {
     "group": "proto",
+    "field": "allow_worker_urls_on_private_networks",
+    "flag": "proto-allow-worker-urls-on-private-networks",
+    "env": "GRADIENT_PROTO_ALLOW_WORKER_URLS_ON_PRIVATE_NETWORKS",
+    "type": "bool",
+    "description": "Whether the server can connect to worker URLs on private, loopback, or link-local\naddresses. Leave this option off unless a worker is reachable only on an internal network.\nOtherwise, a project member with permission to manage workers can make the server open a\nconnection to that network.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "proto",
     "field": "max_connections",
     "flag": "proto-max-connections",
     "env": "GRADIENT_PROTO_MAX_CONNECTIONS",
     "type": "NonZeroUsize",
     "description": "Maximum simultaneous `/proto` WebSocket connections.",
     "default": "256",
+    "values": []
+  },
+  {
+    "group": "proto",
+    "field": "max_connections_per_ip",
+    "flag": "proto-max-connections-per-ip",
+    "env": "GRADIENT_PROTO_MAX_CONNECTIONS_PER_IP",
+    "type": "NonZeroUsize",
+    "description": "Maximum number of simultaneous `/proto` WebSocket connections from one IP address of a\nclient. Raise this value when many workers connect through one NAT address.",
+    "default": "64",
     "values": []
   },
   {
@@ -713,7 +726,7 @@
     "flag": "gc-nar-ttl-hours",
     "env": "GRADIENT_GC_NAR_TTL_HOURS",
     "type": "u64",
-    "description": "Hours to keep a cached path outside the live closure of retained evaluations after its\nlast fetch, or its upload if never fetched. These hours always come on top of\n{option}`services.gradient.gc.narUploadGraceHours`. Set it to `0` to keep nothing\nbeyond that grace.",
+    "description": "The number of hours a cache can hold claims for cached paths outside the live closure of\nretained evaluations. Start the count at the last fetch of that cache. Start the count at\nclaim creation when the cache never had a fetch. The system can remove the cached path\nitself once the claims on that path drop to zero. Always add this number to\n{option}`services.gradient.gc.narUploadGraceHours`. Set this option to `0` to keep nothing\nbeyond this grace period.",
     "default": "336",
     "values": []
   },
@@ -723,7 +736,7 @@
     "flag": "gc-nar-upload-grace-hours",
     "env": "GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS",
     "type": "u32",
-    "description": "Hours before the deletion of an unreferenced NAR object, covering the window between its\nupload and the commit of its database rows.",
+    "description": "Hours before deletion of an unreferenced NAR object or build-request blob. These hours cover\nthe window between upload and the commit of database rows.",
     "default": "24",
     "values": []
   },
@@ -795,6 +808,16 @@
     "type": "NonZeroU64",
     "description": "Seconds between eval cache eviction passes.",
     "default": "3600",
+    "values": []
+  },
+  {
+    "group": "eval",
+    "field": "allowed_uri_prefixes",
+    "flag": "eval-allowed-uri-prefixes",
+    "env": "GRADIENT_EVAL_ALLOWED_URI_PREFIXES",
+    "type": "Vec<String>",
+    "description": "Allowed URL prefixes that each project evaluation can fetch from in addition to the inputs locked in `flake.lock`. Evaluations in Nix under `restrict-eval` make `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` can allow the whole scheme. Projects can add prefixes of their own or disable the restriction.",
+    "default": null,
     "values": []
   },
   {
@@ -896,7 +919,7 @@
     "flag": "scheduler-cluster-reserve-timeout-secs",
     "env": "GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS",
     "type": "NonZeroU64",
-    "description": "Seconds to hold a cluster job reservation before releasing it and planning the cluster\njob again.",
+    "description": "Number of seconds to keep a reservation for a cluster job before release. Cluster jobs wait\none cluster-reserve-after period before they can reserve workers again.",
     "default": "1800",
     "values": []
   },
@@ -1411,6 +1434,49 @@
     "env": "GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE",
     "type": "Option<String>",
     "description": "Path to a file containing the shared secret used to verify incoming\nGitHub App webhook payloads (`X-Hub-Signature-256`). The file's\ncontents must match the value configured on the GitHub App's webhook\nsettings page.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "gitea_app",
+    "field": "instance_base_url",
+    "flag": "gitea-app-instance-base-url",
+    "env": "GRADIENT_GITEA_APP_INSTANCE_BASE_URL",
+    "type": "Option<String>",
+    "description": "Base URL of the Gitea or Forgejo instance that has the OAuth2 application registered (example: `https://codeberg.org`).",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "gitea_app",
+    "field": "git_host_type",
+    "flag": "gitea-app-git-host-type",
+    "env": "GRADIENT_GITEA_APP_GIT_HOST_TYPE",
+    "type": "GitHostSoftwareChoice",
+    "description": "Software to host Git on the instance.",
+    "default": "forgejo",
+    "values": [
+      "gitea",
+      "forgejo"
+    ]
+  },
+  {
+    "group": "gitea_app",
+    "field": "client_id",
+    "flag": "gitea-app-client-id",
+    "env": "GRADIENT_GITEA_APP_CLIENT_ID",
+    "type": "Option<String>",
+    "description": "The client ID for the OAuth2 application.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "gitea_app",
+    "field": "client_secret_file",
+    "flag": "gitea-app-client-secret-file",
+    "env": "GRADIENT_GITEA_APP_CLIENT_SECRET_FILE",
+    "type": "Option<String>",
+    "description": "Path to the client secret file for the OAuth2 application. Register the application on the Git host with the redirect URI `<serve URL>/api/v1/git-host-connections/oauth/callback`.",
     "default": null,
     "values": []
   },
