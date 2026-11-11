@@ -53,8 +53,8 @@ gradient login https://gradient.example.com
 - Settings live in `~/.config/gradient/accounts.toml` (or `$XDG_CONFIG_HOME/gradient`). Only the owner can read the file, since it holds the login tokens.
 - `gradient config <key> [value]` reads or writes one of `server`, `authtoken`, `selectedproject`, `selectedtask` for the current account.
 - `GRADIENT_SERVER` and `GRADIENT_TOKEN` replace the saved server and token. Use them in a CI job with no config file, for example. A saved token can go only to the server that stored it. Pass `GRADIENT_TOKEN` too with another `GRADIENT_SERVER`. `gradient config server <url>` with another server can also clear the saved token.
-- Add `--json` to any command for machine-readable output with all prompts disabled.
 - Tokens in the output of `gradient config authtoken` show only the first and last characters (example: `GRAD…1234`).
+- Add `--json` to any command for machine-readable output with all prompts disabled.
 - Without a terminal on stdin, or with `--json`, commands never open `$EDITOR`: pass every required field as a flag, otherwise the command fails and names the missing flag.
 - Delete commands ask for confirmation in the terminal. Pass `--yes` (`-y`) to skip the prompt. The delete command fails without `--yes` when there's no terminal or `--json` is present.
 - The `edit` commands open the current values in `$EDITOR` without a field flag. Use any flag to change only those fields and keep the rest untouched. The description can stay empty.
