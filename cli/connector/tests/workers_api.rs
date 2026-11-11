@@ -34,7 +34,10 @@ async fn create_worker_returns_response() {
         .and(path("/api/v1/projects/my-project/workers"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "peer_id": "00000000-0000-0000-0000-000000000001", "token": "tok123"
+                "id": "00000000-0000-0000-0000-000000000002", "name": "My Worker",
+                "url": "https://gradient.example/projects/my-project/workers",
+                "peer_id": "00000000-0000-0000-0000-000000000001", "token": "tok123",
+                "nixos_configuration": "services.gradient.worker = { };"
             }))),
         )
         .mount(&server)
@@ -50,10 +53,8 @@ async fn create_worker_returns_response() {
         .create(
             "my-project",
             connector::api::RegisterWorkerRequest {
-                worker_id: "worker-1".into(),
                 display_name: "My Worker".into(),
                 url: None,
-                token: None,
                 enable_build: None,
                 enable_eval: None,
                 enable_exec: None,

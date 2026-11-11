@@ -339,7 +339,12 @@ async fn register_team_worker_returns_team_and_token() {
     let (_s, client) = serve(
         "POST",
         "teams/ops/workers",
-        json!({"team": "00000000-0000-0000-0000-000000000002", "token": "tok"}),
+        json!({
+            "id": "00000000-0000-0000-0000-000000000001", "name": "builder",
+            "url": "https://gradient.example/teams/ops/workers",
+            "peer_id": "00000000-0000-0000-0000-000000000002", "token": "tok",
+            "nixos_configuration": "services.gradient.worker = { };"
+        }),
     )
     .await;
     let registered = client
@@ -347,10 +352,8 @@ async fn register_team_worker_returns_team_and_token() {
         .register_team_worker(
             "ops",
             RegisterWorkerRequest {
-                worker_id: "00000000-0000-0000-0000-000000000001".into(),
                 display_name: "builder".into(),
                 url: None,
-                token: None,
                 enable_network: None,
                 enable_secrets: None,
                 enable_exec: None,
@@ -360,7 +363,8 @@ async fn register_team_worker_returns_team_and_token() {
         )
         .await
         .unwrap();
-    assert_eq!(registered.token.as_deref(), Some("tok"));
+    assert_eq!(registered.token, "tok");
+    assert_eq!(registered.peer_id, "00000000-0000-0000-0000-000000000002");
 }
 
 #[tokio::test]

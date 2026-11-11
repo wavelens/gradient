@@ -118,3 +118,71 @@ async fn unauthenticated_client_errors_before_send() {
     let err = client.projects().list().await.unwrap_err();
     assert!(matches!(err, connector::ConnectorError::Unauthorized));
 }
+
+#[tokio::test]
+async fn subscribe_project_sends_read_only_subscription_mode() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/p/subscribe/c"))
+        .and(body_json(json!({ "mode": "ReadOnly" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok("Subscribed")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    client
+        .projects()
+        .subscribe(
+            "p",
+            "c",
+            connector::api::SubscribeCacheRequest {
+                mode: Some(connector::api::CacheSubscriptionMode::ReadOnly),
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn get_readiness_decodes_team_without_workers_and_pending_cache_subscription() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/p/readiness"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!({
+            "ready": false,
+            "workers": {
+                "ready": false, "registered": 0, "teams": [], "teams_you_can_grant": [],
+                "teams_granted_without_workers": [
+                    { "name": "ops", "display_name": "Ops", "workers": 2 }
+                ]
+            },
+            "cache": {
+                "ready": false,
+                "subscriptions": [{
+                    "id": "00000000-0000-0000-0000-000000000003", "name": "main",
+                    "display_name": "Main", "mode": "ReadWrite", "status": "pending",
+                    "managed": false, "sign_outputs": true, "approvers": ["admin"]
+                }]
+            },
+            "repository": { "status": "unchecked", "tasks": [] }
+        }))))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    let readiness = client.projects().get_project_readiness("p").await.unwrap();
+    assert_eq!(
+        readiness.workers.teams_granted_without_workers[0].name,
+        "ops"
+    );
+    assert_eq!(readiness.cache.subscriptions[0].approvers, ["admin"]);
+}

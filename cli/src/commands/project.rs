@@ -19,8 +19,9 @@ use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{
-    AddMemberRequest, GrantProjectRequest, MakeProjectRequest, PatchProjectGrantRequest,
-    PatchProjectRequest, PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
+    AddMemberRequest, CacheSubscriptionMode, GrantProjectRequest, MakeProjectRequest,
+    PatchProjectGrantRequest, PatchProjectRequest, PutProjectSecretRequest, RemoveMemberRequest,
+    RevokeInvitationRequest, SubscribeCacheRequest, SubscriptionStatus, TaskRepositoryFetchStatus,
 };
 use connector::webhooks::WebhookResource;
 use connector::{Client, ConnectorError};
@@ -155,6 +156,9 @@ pub enum CacheCommands {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
+        /// Access mode: ReadWrite, ReadOnly, or WriteOnly
+        #[arg(long)]
+        mode: Option<CacheSubscriptionMode>,
     },
     /// Unsubscribe from a cache
     Remove {
@@ -295,7 +299,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             {
                 Ok(created) => {
                     if !out.is_json() {
-                        set_value(ConfigKey::SelectedProject, name, true);
+                        set_value(ConfigKey::SelectedProject, name.clone(), true);
                     }
                     out.ok(&created);
                     match owner_team {
@@ -303,6 +307,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         None => out.progress("Project created."),
                     }
                     out.human(created.id);
+                    print_missing_project_prerequisites(&client, &name, out).await;
                 }
                 Err(e) => out.fail(e),
             }
@@ -336,10 +341,11 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let client = client_from_config(out);
             match client.projects().get(&project).await {
-                Ok(project) => {
-                    out.ok(&project);
-                    out.human(format!("Name: {}", project.name));
-                    out.human(format!("Description: {}", project.description));
+                Ok(details) => {
+                    out.ok(&details);
+                    out.human(format!("Name: {}", details.name));
+                    out.human(format!("Description: {}", details.description));
+                    print_missing_project_prerequisites(&client, &project, out).await;
                 }
                 Err(e) => out.fail(e),
             }
@@ -559,8 +565,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     Err(e) => out.fail(e),
                 },
 
-                CacheCommands::Add { cache } => {
-                    match client.projects().subscribe(&project, &cache).await {
+                CacheCommands::Add { cache, mode } => {
+                    match client
+                        .projects()
+                        .subscribe(&project, &cache, SubscribeCacheRequest { mode })
+                        .await
+                    {
                         Ok(_) => {
                             out.ok(&serde_json::json!({"subscribed": true}));
                             out.human("Subscribed to cache.");
@@ -843,6 +853,65 @@ async fn get_team_name_if_member_of_exactly_one_team(client: &Client) -> Option<
     match teams.len() {
         1 => teams.pop().map(|team| team.name),
         _ => None,
+    }
+}
+
+pub async fn print_missing_project_prerequisites(client: &Client, project: &str, out: Output) {
+    if out.is_json() {
+        return;
+    }
+    let Ok(readiness) = client.projects().get_project_readiness(project).await else {
+        return;
+    };
+    if readiness.workers.ready {
+        out.human("Worker: Ready");
+    } else {
+        out.human(
+            "Evaluation cannot run before worker registration. `gradient worker register --display-name <name>`",
+        );
+    }
+    for team in readiness.workers.teams_granted_without_workers {
+        out.human(format!(
+            "There are {workers} workers on team {team}, but the grant doesn't include them: gradient project team-grant edit {team} --workers true",
+            workers = team.workers,
+            team = team.name,
+        ));
+    }
+    if readiness.cache.ready {
+        out.human("Cache: Ready");
+    } else {
+        out.human(
+            "Wait for a cache subscription before evaluation: gradient project cache add <cache>",
+        );
+    }
+    for pending in readiness
+        .cache
+        .subscriptions
+        .iter()
+        .filter(|subscription| subscription.status == SubscriptionStatus::Pending)
+    {
+        out.human(format!(
+            "Subscription to {cache} pending approval from {approvers}",
+            cache = pending.name,
+            approvers = pending.approvers.join(", "),
+        ));
+    }
+    match readiness.repository.status {
+        TaskRepositoryFetchStatus::Verified => out.human("Git access: verified"),
+        TaskRepositoryFetchStatus::Unchecked => out.human("Git access: not checked yet"),
+        TaskRepositoryFetchStatus::Failing => {
+            for task in readiness
+                .repository
+                .tasks
+                .iter()
+                .filter(|task| task.status == TaskRepositoryFetchStatus::Failing)
+            {
+                out.human(format!(
+                    "Git access: failed to fetch task {task}",
+                    task = task.name
+                ));
+            }
+        }
     }
 }
 

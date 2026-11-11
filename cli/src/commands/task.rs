@@ -553,7 +553,6 @@ pub async fn handle(cmd: Commands, out: Output) {
                         concurrency: None,
                         retry_failed_builds: None,
                         multi_node_evaluation: None,
-                        sign_cache: None,
                         wait_for_workers: None,
                         exec_enabled: None,
                         triggers,
@@ -568,6 +567,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&created);
                     out.progress("Task created.");
                     out.human(created.id);
+                    crate::commands::project::print_missing_project_prerequisites(
+                        &client, &project, out,
+                    )
+                    .await;
                 }
                 Err(e) => out.fail(e),
             }

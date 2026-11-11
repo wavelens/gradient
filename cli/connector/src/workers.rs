@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, RegisterWorkerResponse,
-    WorkerMetricsResponse, WorkerTestResponse,
+    PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, WorkerMetricsResponse,
+    WorkerRegistrationResponse, WorkerTestResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -28,7 +28,7 @@ impl WorkersApi<'_> {
         &self,
         project: &str,
         body: RegisterWorkerRequest,
-    ) -> Result<RegisterWorkerResponse, ConnectorError> {
+    ) -> Result<WorkerRegistrationResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

@@ -305,7 +305,7 @@ async fn mcp_list_tasks_defaults_to_the_selected_project() {
                     "can_trigger": true, "permissions": ["editTask", "triggerEvaluation"], "concurrency": "skip", "force_evaluation": false,
                     "keep_evaluations": 30, "last_evaluation": null,
                     "last_evaluation_status": null, "recent_evaluations": [], "retry_failed_builds": false, "multi_node_evaluation": false, "exec_enabled": false, "only_evaluate": false, "branches": [],
-                    "sign_cache": true, "wait_for_workers": false
+                    "wait_for_workers": false
                 }],
                 "total": 1, "page": 1, "per_page": 20
             }

@@ -3,9 +3,9 @@
 
 use crate::api::{
     ApiKeyInfo, ApiKeyPermissionsResponse, ApiKeyRequest, AuditLogEntry, CreateApiKeyRequest,
-    CreateSshKeyRequest, DeleteUserRequest, GetUserSettingsResponse, InviteItem,
-    InviteTokenRequest, PaginatedSessionInfo, PatchApiKeyRequest, PatchUserSettingsRequest,
-    SshKeyInfo, UserAccessSummary, UserInfoResponse,
+    CreateSshKeyRequest, DeleteUserRequest, GetUserSettingsResponse, InviteTokenRequest,
+    PaginatedSessionInfo, PatchApiKeyRequest, PatchUserSettingsRequest,
+    PendingUserDecisionsResponse, SshKeyInfo, UserAccessSummary, UserInfoResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -254,15 +254,15 @@ impl UserApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn list_invitations_addressed_to_me(
+    pub async fn list_requests_awaiting_my_decision(
         &self,
-    ) -> Result<Vec<InviteItem>, ConnectorError> {
+    ) -> Result<PendingUserDecisionsResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            "user/invites",
+            "user/requests",
             true,
         )?;
         http::decode(req.send().await?).await

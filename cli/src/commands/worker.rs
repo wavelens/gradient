@@ -5,28 +5,25 @@
  */
 
 use crate::commands::completion;
+use crate::commands::team::WorkerCapabilityToggles;
 use crate::input::{client_from_config, confirm_delete, selected_project};
 use crate::output::Output;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use connector::api::RegisterWorkerRequest;
+use connector::api::WorkerRegistrationResponse;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Register a new worker under the selected project
+    /// Register a new worker under the selected project. The server can generate a worker ID and token, then write the NixOS configuration for the worker machine.
     Register {
-        /// Worker UUID
-        worker_id: uuid::Uuid,
         /// Human-readable display name shown in the workers list
         #[arg(short = 'n', long = "display-name")]
         display_name: String,
         /// Optional WebSocket URL the worker is listening on for incoming server connections
         #[arg(short, long)]
         url: Option<String>,
-        /// Pre-generated token (output of `openssl rand -base64 48`). The server is generating and
-        /// printing one when omitted. Store it securely, it cannot be retrieved again.
-        #[arg(short, long)]
-        token: Option<String>,
+        #[command(flatten)]
+        capabilities: WorkerCapabilityToggles,
     },
     /// List all workers registered under the selected project
     List,
@@ -56,46 +53,21 @@ pub enum Commands {
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Register {
-            worker_id,
             display_name,
             url,
-            token,
+            capabilities,
         } => {
             let project = selected_project(out);
-
-            let token_provided = token.is_some();
             let client = client_from_config(out);
-
             match client
                 .workers()
                 .create(
                     &project,
-                    RegisterWorkerRequest {
-                        worker_id: worker_id.to_string(),
-                        display_name,
-                        url,
-                        token,
-                        enable_build: None,
-                        enable_eval: None,
-                        enable_exec: None,
-                        enable_network: None,
-                        enable_secrets: None,
-                    },
+                    capabilities.build_register_worker_request(display_name, url),
                 )
                 .await
             {
-                Ok(resp) => {
-                    out.ok(&resp);
-                    out.human("Worker registered.");
-                    out.human(format!("Peer ID:  {}", resp.peer_id));
-                    if let Some(tok) = resp.token {
-                        out.human(format!("Token:    {}", tok));
-                        out.human("");
-                        out.human("Store the token securely - it cannot be retrieved again.");
-                    } else if token_provided {
-                        out.human("Token was pre-supplied; not echoed back.");
-                    }
-                }
+                Ok(registered) => print_worker_registration_result_text(&registered, out),
                 Err(e) => out.fail(e),
             }
         }
@@ -205,4 +177,16 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
     }
+}
+
+pub fn print_worker_registration_result_text(registered: &WorkerRegistrationResponse, out: Output) {
+    out.ok(registered);
+    out.human("Worker registered.");
+    out.human(format!("Worker ID: {}", registered.id));
+    out.human("");
+    out.human("NixOS Configuration for Worker Machines");
+    out.human(&registered.nixos_configuration);
+    out.human("Add this line to the peers file on the worker machine.");
+    out.human(format!("{}:{}", registered.peer_id, registered.token));
+    out.human("Save the peer line as a secret. The token is visible only once.");
 }

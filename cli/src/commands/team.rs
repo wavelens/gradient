@@ -5,6 +5,7 @@
  */
 
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
+use crate::commands::worker::print_worker_registration_result_text;
 use crate::input::{CommandLineFormField, client_from_config, confirm_delete, handle_input};
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
@@ -196,6 +197,24 @@ pub struct WorkerCapabilityToggles {
     enable_build: Option<bool>,
 }
 
+impl WorkerCapabilityToggles {
+    pub fn build_register_worker_request(
+        self,
+        display_name: String,
+        url: Option<String>,
+    ) -> RegisterWorkerRequest {
+        RegisterWorkerRequest {
+            display_name,
+            url,
+            enable_network: self.enable_network,
+            enable_secrets: self.enable_secrets,
+            enable_exec: self.enable_exec,
+            enable_eval: self.enable_eval,
+            enable_build: self.enable_build,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum TeamWorkerSubcommand {
     /// List the workers of a team and show their connection status.
@@ -207,18 +226,12 @@ pub enum TeamWorkerSubcommand {
     Register {
         /// Team name
         team: String,
-        /// Worker ID
-        worker_id: uuid::Uuid,
         /// Name shown in the web interface
         #[arg(short = 'n', long)]
         display_name: String,
         /// Optional WebSocket URL the worker is listening on for incoming server connections
         #[arg(short, long)]
         url: Option<String>,
-        /// Pre-generated token (output of `openssl rand -base64 48`). The server is generating and
-        /// printing one when omitted. Store it securely, it cannot be retrieved again.
-        #[arg(short, long)]
-        token: Option<String>,
         #[command(flatten)]
         capabilities: WorkerCapabilityToggles,
     },
@@ -596,33 +609,13 @@ async fn handle_workers(cmd: TeamWorkerSubcommand, client: &connector::Client, o
 
         TeamWorkerSubcommand::Register {
             team,
-            worker_id,
             display_name,
             url,
-            token,
             capabilities,
         } => {
-            let body = RegisterWorkerRequest {
-                worker_id: worker_id.to_string(),
-                display_name,
-                url,
-                token,
-                enable_network: capabilities.enable_network,
-                enable_secrets: capabilities.enable_secrets,
-                enable_exec: capabilities.enable_exec,
-                enable_eval: capabilities.enable_eval,
-                enable_build: capabilities.enable_build,
-            };
+            let body = capabilities.build_register_worker_request(display_name, url);
             match teams.register_team_worker(&team, body).await {
-                Ok(registered) => {
-                    out.ok(&registered);
-                    out.human("Worker registered.");
-                    out.human(format!("Team ID:  {}", registered.team));
-                    if let Some(token) = registered.token {
-                        out.human(format!("Token:    {token}"));
-                        out.human("Store the token securely. It cannot be shown again.");
-                    }
-                }
+                Ok(registered) => print_worker_registration_result_text(&registered, out),
                 Err(e) => out.fail(e),
             }
         }

@@ -338,12 +338,16 @@ async fn delete_session_uses_the_session_path() {
 async fn invitations_list_accept_and_decline() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/user/invites"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!([{
-            "kind": "project", "token": "tok", "scope": "p", "scope_display_name": "P",
-            "role": "Write", "invited_by": "alice", "created_at": "2026-01-01T00:00:00",
-            "expires_at": "2026-01-08T00:00:00"
-        }]))))
+        .and(path("/api/v1/user/requests"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!({
+            "invites": [{
+                "kind": "project", "token": "tok", "scope": "p", "scope_display_name": "P",
+                "role": "Write", "invited_by": "alice", "created_at": "2026-01-01T00:00:00",
+                "expires_at": "2026-01-08T00:00:00"
+            }],
+            "subscription_requests": [],
+            "team_requests": []
+        }))))
         .mount(&server)
         .await;
     for action in ["accept", "decline"] {
@@ -357,12 +361,12 @@ async fn invitations_list_accept_and_decline() {
     }
 
     let client = connector_client_for_wiremock_with_bearer_token(&server);
-    let invites = client
+    let requests = client
         .user()
-        .list_invitations_addressed_to_me()
+        .list_requests_awaiting_my_decision()
         .await
         .unwrap();
-    assert_eq!(invites[0].token, "tok");
+    assert_eq!(requests.invites[0].token, "tok");
     client.user().accept_user_invite("tok").await.unwrap();
     client.user().decline_user_invite("tok").await.unwrap();
 }

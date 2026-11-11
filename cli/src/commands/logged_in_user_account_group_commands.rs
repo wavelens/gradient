@@ -379,8 +379,9 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::Invitations { cmd } => {
             let result = match cmd {
                 InvitationCommands::List => {
-                    match user.list_invitations_addressed_to_me().await {
-                        Ok(invites) => {
+                    match user.list_requests_awaiting_my_decision().await {
+                        Ok(requests) => {
+                            let invites = requests.invites;
                             out.ok(&invites);
                             if invites.is_empty() {
                                 out.human("No pending invitations.");

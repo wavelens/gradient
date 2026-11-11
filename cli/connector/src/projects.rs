@@ -5,9 +5,10 @@ use crate::api::{
     AddMemberRequest, CacheSubscriptionItem, ChangeMemberRoleRequest, CreateRoleRequest,
     CreatedEntityResponse, GrantProjectRequest, MakeProjectRequest, MemberItem,
     PaginatedProjectSummary, PatchProjectGrantRequest, PatchProjectRequest, PatchRoleRequest,
-    PendingInvitationItem, PersonWithAccessToProjectOrCache, ProjectResponse, ProjectSecretSummary,
-    PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
-    RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
+    PendingInvitationItem, PersonWithAccessToProjectOrCache, ProjectReadinessResponse,
+    ProjectResponse, ProjectSecretSummary, PutProjectSecretRequest, RemoveMemberRequest,
+    RevokeInvitationRequest, RoleResponseProjectRoleOwner, SopsRecipientResponse,
+    SubscribeCacheRequest, TeamGrantEntry,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -307,7 +308,12 @@ impl ProjectsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn subscribe(&self, project: &str, cache: &str) -> Result<String, ConnectorError> {
+    pub async fn subscribe(
+        &self,
+        project: &str,
+        cache: &str,
+        body: SubscribeCacheRequest,
+    ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -318,6 +324,22 @@ impl ProjectsApi<'_> {
                 encode_url_component(project),
                 encode_url_component(cache)
             ),
+            true,
+        )?
+        .json(&body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn get_project_readiness(
+        &self,
+        project: &str,
+    ) -> Result<ProjectReadinessResponse, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/readiness"),
             true,
         )?;
         http::decode(req.send().await?).await

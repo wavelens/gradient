@@ -3,9 +3,9 @@
 
 use crate::api::{
     AddTeamMemberRequest, CreatedEntityResponse, MakeTeamRequest, PatchTeamRequest,
-    PatchWorkerRequest, PendingInvitationItem, RegisterWorkerRequest, RegisteredTeamWorker,
-    RemoveTeamMemberRequest, RevokeInvitationRequest, TeamDemand, TeamGrants, TeamMemberItem,
-    TeamMemberRequest, TeamRequestItem, TeamResponse, TeamSummary, TeamWorkerEntry,
+    PatchWorkerRequest, PendingInvitationItem, RegisterWorkerRequest, RemoveTeamMemberRequest,
+    RevokeInvitationRequest, TeamDemand, TeamGrants, TeamMemberItem, TeamMemberRequest,
+    TeamRequestItem, TeamResponse, TeamSummary, TeamWorkerEntry, WorkerRegistrationResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -220,7 +220,7 @@ impl TeamsApi<'_> {
         &self,
         team: &str,
         body: RegisterWorkerRequest,
-    ) -> Result<RegisteredTeamWorker, ConnectorError> {
+    ) -> Result<WorkerRegistrationResponse, ConnectorError> {
         Self::send(
             self.request(
                 Method::POST,
