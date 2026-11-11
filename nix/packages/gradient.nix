@@ -19,6 +19,7 @@
 , pkgs
 , postgresql_18
 , postgresqlTestHook
+, protobuf
 , sqlite
 , stdenv
 , xz
@@ -48,6 +49,7 @@ let
       (lib.fileset.fileFilter (file: file.hasExt "sql") unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-db/tests)
       (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-daemon/tests)
+      ../../backend/gradient-daemon/proto
       ../../backend/gradient-types/options.json
       ../../backend/gradient-worker/options.json
       ../../backend/gradient-wire/schema
@@ -86,6 +88,7 @@ let
     nativeBuildInputs = [
       installShellFiles
       pkg-config
+      protobuf
     ];
 
     buildInputs = [

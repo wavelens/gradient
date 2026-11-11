@@ -7,6 +7,7 @@
 pub mod backend;
 pub mod ca_path;
 pub mod control;
+pub mod grpc_store_server;
 pub mod journal;
 pub mod server;
 pub mod store;
