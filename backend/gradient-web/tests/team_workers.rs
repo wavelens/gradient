@@ -7,7 +7,7 @@
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::team_user::TeamRole;
-use gradient_entity::{project_user, team, team_project, team_worker, worker_registration};
+use gradient_entity::{project_user, team, team_project, team_worker};
 use gradient_fixtures::ids::{project_id, team_id, user_id};
 use gradient_fixtures::mock::exec_ok;
 use gradient_fixtures::rows::{admin_role, project, team, team_member};
