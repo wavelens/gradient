@@ -435,8 +435,16 @@ pub fn create_router_with_scheduler(
     }
 
     if state.config.ssh.enable {
+        let authenticator = authenticated_nix_grpc_store_routes::GrpcCallerAuthenticator {
+            web_db: state.web_db.clone(),
+            jwt_secret: state.jwt_secret.clone(),
+            last_used_stamps: Arc::clone(&state.memory.last_used_stamps),
+            trusted_proxies: state.config.network.trusted_proxies.clone(),
+            handles: gradient_ssh::SshHandles::from_state(&state, scheduler),
+        };
         app = authenticated_nix_grpc_store_routes::add_grpc_nix_store_service_routes_to_router(
-            app, &state, scheduler,
+            app,
+            authenticator,
         );
     }
 
