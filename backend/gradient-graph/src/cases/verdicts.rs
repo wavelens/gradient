@@ -14,7 +14,7 @@ use gradient_wire::types::BuildFailureKind;
 
 use super::{
     A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, BUILDER_EXIT, Case, F, F_OUT, S, T, T_OUT, X,
-    X_OUT, Z, Z_OUT, chain, drv, nar, pass, with_attr, with_output, with_references,
+    X_OUT, Z, Z_OUT, chain, drv, nar, pass, with_attr, with_ifd, with_output, with_references,
 };
 use crate::messages::{NarCommit, OrphanCause, Transition};
 
@@ -81,6 +81,32 @@ async fn v01b_an_only_evaluate_evaluation_completes_without_wanting_its_entry_po
         "after 2: sb(A) is Created, wanted false"
     );
     case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn v01c_an_only_evaluate_evaluation_wants_a_derivation_that_it_imports_during_evaluation() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1).only_evaluate()).await;
+
+    case.walk(
+        case.tasked(
+            e1,
+            vec![
+                with_attr(with_output(drv(B, &[]), B_OUT), "pkg.b"),
+                with_ifd(with_attr(
+                    with_output(drv(A, &[]), A_OUT),
+                    "other.x86_64-linux.a",
+                )),
+            ],
+        )
+        .await,
+    )
+    .await;
+
+    assert!(case.sb(A).await.wanted, "after 1: sb(A).wanted");
+    assert!(!case.sb(B).await.wanted, "after 1: sb(B).wanted");
+    case.zero_drift("step 1").await;
     case.finish().await;
 }
 
