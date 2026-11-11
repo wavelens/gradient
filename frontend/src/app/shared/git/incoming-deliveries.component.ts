@@ -6,8 +6,8 @@
 
 import { ChangeDetectionStrategy, Component, OnInit, inject, input, signal } from '@angular/core';
 import { BadgeComponent, ButtonComponent, LoadStateComponent } from '@gradient/ui/ui';
-import { DeliveryResult, IncomingWebhookDeliveryResponse } from '@core/models';
-import { IntegrationsService } from '@core/services/integrations.service';
+import { DeliveryResult, GitHostConnectionOwner, IncomingWebhookDeliveryResponse } from '@core/models';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { RelativeTimePipe } from '@shared/text';
 
 type Severity = 'success' | 'info' | 'warning' | 'danger';
@@ -79,10 +79,10 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
   `,
 })
 export class IncomingDeliveriesComponent implements OnInit {
-  private integrations = inject(IntegrationsService);
+  private connections = inject(GitHostConnectionsApi);
 
-  project = input.required<string>();
-  integrationId = input.required<string>();
+  gitHostConnectionOwner = input.required<GitHostConnectionOwner>();
+  connectionId = input.required<string>();
   limit = input(10);
 
   deliveries = signal<IncomingWebhookDeliveryResponse[]>([]);
@@ -96,7 +96,7 @@ export class IncomingDeliveriesComponent implements OnInit {
   load(): void {
     this.loading.set(true);
     this.error.set(null);
-    this.integrations.listIntegrationDeliveries(this.project(), this.integrationId()).subscribe({
+    this.connections.listDeliveries(this.gitHostConnectionOwner(), this.connectionId()).subscribe({
       next: (list) => {
         this.deliveries.set(list);
         this.loading.set(false);

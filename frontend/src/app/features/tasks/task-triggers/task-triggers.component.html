@@ -127,14 +127,13 @@
     </div>
   </gr-load-state>
   @if (missingTriggerConfigSuggestions().length && access().canEdit) {
-    <gr-settings-section title="Recommended Triggers" description="Use the project's webhook receiver for this Git host. Add a trigger to start an evaluation on push or pull request.">
+    <gr-settings-section title="Recommended Triggers" description="Events arrive at the Git host connection for the repository of this task. Add a trigger to start an evaluation on push or pull request.">
       <div class="triggers-list" data-testid="trigger-suggestions">
         @for (suggestion of missingTriggerConfigSuggestions(); track suggestion.type) {
           <div class="trigger-row">
             <div class="trigger-header">
               <div class="trigger-info">
                 <gr-badge>{{ typeLabel(suggestion.type) }}</gr-badge>
-                <div class="trigger-summary">{{ suggestionSummary(suggestion) }}</div>
               </div>
               <div class="trigger-actions">
                 <button grButton label="Add" icon="add" severity="secondary" size="small" [appManagedDisable]="access()"
@@ -226,22 +225,10 @@
   }
 
   @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {
-    <gr-form-field label="Integration" for="trig-integration" required hint="Inbound integration that delivers webhooks for this trigger."
-      [invalid]="submitAttempted() && !!integrationError" [error]="integrationError ?? ''">
-      <gr-select
-        inputId="trig-integration"
-        [(ngModel)]="form.integration_id"
-        [options]="integrationOptions()"
-        optionLabel="label"
-        optionValue="value"
-      />
-    </gr-form-field>
-    @if (!inboundIntegrations().length && integrationAccess().canEdit) {
-      <p class="gr-form-aside">
-        No inbound integration yet.
-        <a [routerLink]="integrationSetupLink()">Set up an integration</a>
-      </p>
-    }
+    <p class="gr-form-aside" data-testid="trigger-connection-hint">
+      Events for this trigger go to the git host connection for this task. Select the connection on the
+      <a [routerLink]="links.taskPage(projectName, taskName, 'repository')">Repository page</a>.
+    </p>
     <gr-form-field label="Branches" for="trig-branches" hint="Comma-separated list. Leave blank to match any branch.">
       <input
         grInput

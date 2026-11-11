@@ -12,7 +12,6 @@ import { ConfigService } from '@core/services/config.service';
 import {
   ACTION_TYPE_LABEL,
   ActionType,
-  GIT_HOST_STATUS_EVENTS,
   ActionResponse,
   CreateActionRequest,
   UpdateActionRequest,
@@ -20,6 +19,7 @@ import {
   PrGranularity,
   VerifyGate,
   ActionConfig,
+  GitHostConnectionSummary,
 } from '@core/models';
 import { ActionEventsComponent } from './action-events.component';
 import {
@@ -35,11 +35,6 @@ import { fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { links } from '@shared/routing';
 
 type FormMode = 'create' | 'edit';
-
-interface IntegrationOption {
-  id: string;
-  display_name: string;
-}
 
 interface TaskOption extends DisplayNameAndName {
   id: string;
@@ -62,7 +57,7 @@ type ActionField =
   | 'roomId'
   | 'matrixToken'
   | 'slackUrl'
-  | 'integration'
+  | 'gitHostConnection'
   | 'branchPattern'
   | 'startTask'
   | 'events';
@@ -72,8 +67,7 @@ const FIELDS_OF_TYPE: Record<ActionType, ActionField[]> = {
   send_web_request: ['name', 'url', 'events'],
   send_matrix_message: ['name', 'homeserver', 'roomId', 'matrixToken', 'events'],
   send_slack_message: ['name', 'slackUrl', 'events'],
-  git_host_status_report: ['name', 'integration'],
-  open_pr: ['name', 'integration', 'branchPattern'],
+  open_pr: ['name', 'gitHostConnection', 'branchPattern'],
   start_evaluation: ['name', 'startTask', 'events'],
 };
 
@@ -110,7 +104,7 @@ export class ActionFormComponent implements OnChanges {
 
   mode = input<FormMode>('create');
   existing = input<ActionResponse | null>(null);
-  outboundIntegrations = input<IntegrationOption[]>([]);
+  gitHostConnectionsThatCanReportCommitStatus = input<GitHostConnectionSummary[]>([]);
   tasks = input<TaskOption[]>([]);
   open = input<boolean>(false);
   error = input<string | null>(null);
@@ -144,7 +138,7 @@ export class ActionFormComponent implements OnChanges {
   homeserver = signal('');
   roomId = signal('');
   secretValue = signal('');
-  integrationId = signal('');
+  gitHostConnectionId = signal('');
   prGenerator = signal<PatchGeneratorKind>('flake_lock');
   prGranularity = signal<PrGranularity>('per_run');
   prVerifyGate = signal<VerifyGate>('build');
@@ -179,31 +173,18 @@ export class ActionFormComponent implements OnChanges {
         'send_web_request',
         'send_matrix_message',
         'send_slack_message',
-        'git_host_status_report',
         'open_pr',
         'start_evaluation',
       ] as ActionType[]
     )
       .filter((value) => value !== 'send_mail' || this.smtpEnabled())
-      .filter((value) => value !== 'git_host_status_report' || this.existing()?.action_type === value)
       .map((value) => ({ label: ACTION_TYPE_LABEL[value], value })),
   );
 
   readonly taskOptions = computed(() => this.tasks().map((t) => entityToPickerOption(t, t.id)));
 
-  readonly integrationOptions = computed(() =>
-    this.outboundIntegrations().map((i) => ({ label: i.display_name, value: i.id })),
-  );
-
-  readonly displayedEvents = computed(() =>
-    this.type() === 'git_host_status_report' ? GIT_HOST_STATUS_EVENTS : this.events(),
-  );
-
-  // `git_host_status_report` and `open_pr` fire on an internal gate, not
-  // user-selected events: the status reporter tracks the whole lifecycle, and
-  // a PR action fires on the gate of its generator.
-  readonly eventsHardwired = computed(
-    () => this.type() === 'git_host_status_report' || this.type() === 'open_pr',
+  readonly gitHostConnectionDropdownOptions = computed(() =>
+    this.gitHostConnectionsThatCanReportCommitStatus().map((connection) => ({ label: connection.display_name, value: connection.id })),
   );
 
   readonly defaultBranchPattern = computed(() => DEFAULT_BRANCH_PATTERN[this.prGenerator()]);
@@ -235,7 +216,7 @@ export class ActionFormComponent implements OnChanges {
       slackUrl: creating
         ? requiredUrl(this.secretValue(), 'Enter the webhook URL.')
         : fieldChecks.httpUrl(this.secretValue()),
-      integration: this.integrationId() ? null : 'Select an outbound integration.',
+      gitHostConnection: this.gitHostConnectionId() ? null : 'Select a connection to a Git host.',
       branchPattern: this.branchPatternError(),
       startTask: this.startTask() ? null : 'Select a task.',
       events: this.events().length ? null : 'Select at least one event.',
@@ -307,7 +288,7 @@ export class ActionFormComponent implements OnChanges {
     this.homeserver.set('');
     this.roomId.set('');
     this.secretValue.set('');
-    this.integrationId.set('');
+    this.gitHostConnectionId.set('');
     this.startTask.set('');
     this.resetPrFields();
   }
@@ -331,11 +312,8 @@ export class ActionFormComponent implements OnChanges {
       case 'send_web_request':
         this.url.set(cfg.url);
         break;
-      case 'git_host_status_report':
-        this.integrationId.set(cfg.integration_id);
-        break;
       case 'open_pr':
-        this.integrationId.set(cfg.integration_id);
+        this.gitHostConnectionId.set(cfg.git_host_connection_id);
         this.resetPrFields();
         this.prGenerator.set(cfg.generator ?? this.prGenerator());
         this.prGranularity.set(cfg.granularity ?? this.prGranularity());
@@ -362,7 +340,6 @@ export class ActionFormComponent implements OnChanges {
     this.submitAttempted.set(false);
     this.touched.set(new Set());
     this.resetConfigFields();
-    if (newType === 'git_host_status_report') this.events.set([...GIT_HOST_STATUS_EVENTS]);
   }
 
   onGeneratorChange(generator: PatchGeneratorKind): void {
@@ -403,12 +380,10 @@ export class ActionFormComponent implements OnChanges {
         if (token) cfg.token = token;
         return cfg;
       }
-      case 'git_host_status_report':
-        return { type: 'git_host_status_report', integration_id: this.integrationId() };
       case 'open_pr': {
         const cfg: Extract<ActionConfig, { type: 'open_pr' }> = {
           type: 'open_pr',
-          integration_id: this.integrationId(),
+          git_host_connection_id: this.gitHostConnectionId(),
           generator: this.prGenerator(),
           branch_pattern: this.prBranchPattern().trim(),
           update_existing: this.prUpdateExisting(),
@@ -452,7 +427,7 @@ export class ActionFormComponent implements OnChanges {
       return;
     }
     const config = this.buildConfig();
-    const events = this.eventsHardwired() ? [] : this.events();
+    const events = this.type() === 'open_pr' ? [] : this.events();
     if (this.mode() === 'create') {
       const req: CreateActionRequest = {
         name: this.name().trim(),

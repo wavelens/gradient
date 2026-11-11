@@ -10,7 +10,6 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { Observable, of, throwError } from 'rxjs';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
-import { IntegrationsService } from '@core/services/integrations.service';
 import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
 import { RepositoryAccessComponent } from './repository-access.component';
@@ -22,8 +21,9 @@ const state: TaskRepositoryResponse = {
   deploy_key: 'ssh-ed25519 AAAAkey',
   fetch: { checked_at: '2026-01-01T10:00:00', ok_at: '2026-01-01T10:00:00', failed: false, error: null },
   last_event: null,
-  report_status: null,
-  integrations: [],
+  report_status: false,
+  status_posts: [],
+  available_connections: [],
   can_edit: true,
   can_manage_integrations: true,
 };
@@ -40,7 +40,6 @@ function render(getRepository: () => unknown, member = true, canEdit = member) {
         useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'app' }) }, parent: { data: of(data) } },
       },
       { provide: TasksService, useValue: { getRepository, getTaskInfo: () => of({ display_name: 'App' }) } },
-      { provide: IntegrationsService, useValue: { listIntegrationDeliveries: () => of([]) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskRepositoryComponent);
@@ -55,7 +54,7 @@ describe('TaskRepositoryComponent', () => {
     expect(getRepository).toHaveBeenCalledWith('acme', 'app');
     expect(el.querySelector('[data-testid="fetch-ok"]')).not.toBeNull();
     expect(Array.from(el.querySelectorAll('textarea')).map((t) => t.value)).toContain('ssh-ed25519 AAAAkey');
-    expect(el.textContent).toContain('Commit status');
+    expect(el.textContent).toContain('Git host connection');
   });
 
   it('shows a load error with a retry instead of an empty page', () => {

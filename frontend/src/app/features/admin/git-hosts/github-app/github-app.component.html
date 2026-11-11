@@ -4,10 +4,10 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings"
-  [breadcrumb]="trail"
+<gr-settings-section
   title="GitHub App"
-  subtitle="Register a new GitHub App for this Gradient instance using GitHub's manifest flow."
+  description="Register a new GitHub App for this Gradient instance using GitHub's manifest flow."
+  [card]="false"
 >
 
   @if (!showResult()) {
@@ -103,4 +103,4 @@
     }
     </gr-load-state>
   }
-</gr-page-layout>
+</gr-settings-section>

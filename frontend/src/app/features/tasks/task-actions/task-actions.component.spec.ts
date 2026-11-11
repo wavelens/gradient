@@ -15,13 +15,13 @@ import { TaskActionsComponent } from './task-actions.component';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { ActionsService } from '@core/services/actions.service';
-import { IntegrationsService } from '@core/services/integrations.service';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import type { ActionResponse, TaskDetailsResponse, UpdateActionRequest } from '@core/models';
+import type { ActionResponse, GitHostConnectionSummary, TaskDetailsResponse, UpdateActionRequest } from '@core/models';
 import { By } from '@angular/platform-browser';
 import { ActionFormComponent } from './action-form.component';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
@@ -55,15 +55,16 @@ const action: ActionResponse = {
 };
 
 const list = vi.fn();
-const listProjectIntegrationSummaries = vi.fn();
+const listGitHostConnections = vi.fn();
 
 function setup(
   access: AccessState,
   actions: ActionResponse[] = [action],
   task: Partial<TaskDetailsResponse> = {},
+  gitHostConnections: GitHostConnectionSummary[] = [],
 ): ComponentFixture<TaskActionsComponent> {
   list.mockReset().mockReturnValue(of(actions));
-  listProjectIntegrationSummaries.mockReset().mockReturnValue(of([]));
+  listGitHostConnections.mockReset().mockReturnValue(of(gitHostConnections));
   TestBed.configureTestingModule({
     imports: [TaskActionsComponent],
     providers: [
@@ -81,7 +82,7 @@ function setup(
           test: () => of(undefined),
         },
       },
-      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries } },
+      { provide: GitHostConnectionsApi, useValue: { list: listGitHostConnections } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       {
         provide: TasksService,
@@ -104,7 +105,7 @@ describe('TaskActionsComponent', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [action], { permissions: [] });
     const el = fixture.nativeElement as HTMLElement;
     expect(list).not.toHaveBeenCalled();
-    expect(listProjectIntegrationSummaries).not.toHaveBeenCalled();
+    expect(listGitHostConnections).not.toHaveBeenCalled();
     expect(el.textContent).toContain('Only the members of this project can view this.');
     expect(Array.from(el.querySelectorAll('a')).some((a) => a.textContent?.includes('Repository'))).toBe(false);
   });
@@ -118,9 +119,21 @@ describe('TaskActionsComponent', () => {
     expect(editor.textContent).toContain('Create actions');
   });
 
-  it('lists the outbound integrations from the summary every project member can read', () => {
-    setup({ managed: false, canEdit: false, canTrigger: false });
-    expect(listProjectIntegrationSummaries).toHaveBeenCalledWith('acme');
+  it('offers the pull request action only the git host connections that can report commit status', () => {
+    const connection = (id: string, reports_status: boolean): GitHostConnectionSummary => ({
+      id,
+      owner: { type: 'project', name: 'acme' },
+      name: id,
+      display_name: id,
+      git_host_type: 'forgejo',
+      receives_events: true,
+      reports_status,
+      can_manage: false,
+    });
+    const connections = [connection('reporting', true), connection('events-only', false)];
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [action], {}, connections);
+    expect(listGitHostConnections).toHaveBeenCalledWith({ type: 'project', name: 'acme' });
+    expect(fixture.componentInstance.gitHostConnectionsThatCanReportCommitStatus().map((c) => c.id)).toEqual(['reporting']);
   });
 
   it('hides New Action / Edit / Delete / Test buttons under read-only', () => {

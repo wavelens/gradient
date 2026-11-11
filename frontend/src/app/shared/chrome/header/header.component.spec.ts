@@ -155,8 +155,8 @@ describe('AppHeaderComponent - user menu', () => {
 
   it('leads a superuser to the admin pages, which have no other entry point', async () => {
     const { items } = await openMenu(true);
-    const admin = items.filter((item) => ['Event notifications', 'GitHub App', 'User access'].some((label) => item.textContent?.includes(label)));
-    expect(admin.map((item) => item.getAttribute('href'))).toEqual(['/admin/webhooks', '/admin/github-app', '/admin/users']);
+    const admin = items.filter((item) => ['Event notifications', 'User access'].some((label) => item.textContent?.includes(label)));
+    expect(admin.map((item) => item.getAttribute('href'))).toEqual(['/admin/webhooks', '/admin/users']);
   });
 
   it('logs out from the dropdown', async () => {

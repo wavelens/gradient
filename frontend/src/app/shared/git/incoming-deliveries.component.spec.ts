@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { IncomingWebhookDeliveryResponse } from '@core/models';
-import { IntegrationsService } from '@core/services/integrations.service';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { IncomingDeliveriesComponent, deliverySummary } from './incoming-deliveries.component';
 
 const base: IncomingWebhookDeliveryResponse = {
@@ -34,17 +34,17 @@ describe('deliverySummary', () => {
 });
 
 describe('IncomingDeliveriesComponent', () => {
-  it('lists the deliveries of the integration', () => {
+  it('lists the deliveries of the git host connection', () => {
     const list = vi.fn(() => of([base, { ...base, id: 'd2', result: 'refused' as const, status_code: 401, detail: 'bad' }]));
     TestBed.configureTestingModule({
       imports: [IncomingDeliveriesComponent],
-      providers: [{ provide: IntegrationsService, useValue: { listIntegrationDeliveries: list } }],
+      providers: [{ provide: GitHostConnectionsApi, useValue: { listDeliveries: list } }],
     });
     const fixture = TestBed.createComponent(IncomingDeliveriesComponent);
-    fixture.componentRef.setInput('project', 'acme');
-    fixture.componentRef.setInput('integrationId', 'i1');
+    fixture.componentRef.setInput('gitHostConnectionOwner', { type: 'project', name: 'acme' });
+    fixture.componentRef.setInput('connectionId', 'i1');
     fixture.detectChanges();
-    expect(list).toHaveBeenCalledWith('acme', 'i1');
+    expect(list).toHaveBeenCalledWith({ type: 'project', name: 'acme' }, 'i1');
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('Queued 1 evaluation');
     expect(text).toContain('Refused with HTTP 401: bad');
@@ -53,11 +53,11 @@ describe('IncomingDeliveriesComponent', () => {
   it('says in one line without a heading that nothing was delivered yet', () => {
     TestBed.configureTestingModule({
       imports: [IncomingDeliveriesComponent],
-      providers: [{ provide: IntegrationsService, useValue: { listIntegrationDeliveries: () => of([]) } }],
+      providers: [{ provide: GitHostConnectionsApi, useValue: { listDeliveries: () => of([]) } }],
     });
     const fixture = TestBed.createComponent(IncomingDeliveriesComponent);
-    fixture.componentRef.setInput('project', 'acme');
-    fixture.componentRef.setInput('integrationId', 'i1');
+    fixture.componentRef.setInput('gitHostConnectionOwner', { type: 'project', name: 'acme' });
+    fixture.componentRef.setInput('connectionId', 'i1');
     fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
     expect(element.textContent).toContain('No deliveries yet.');

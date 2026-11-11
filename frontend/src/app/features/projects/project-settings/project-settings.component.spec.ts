@@ -241,7 +241,7 @@ describe('ProjectSettingsComponent - permissions', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).not.toContain('Members');
     expect(text).toContain('Event notifications');
-    expect(text).not.toContain('Integrations');
+    expect(text).toContain('Git host connections');
   });
 });
 

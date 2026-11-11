@@ -42,7 +42,7 @@ export class PatternsComponent {
   crumbs: Crumb[] = [
     { label: 'my-project', link: ['/styleguide'] },
     { label: 'Settings', link: ['/styleguide'] },
-    { label: 'Integrations' },
+    { label: 'Git host connections' },
   ];
   role = signal('admin');
   roleOptions = [

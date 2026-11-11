@@ -12,15 +12,13 @@ import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TeamsService } from '@core/services/teams.service';
 import type { ProjectReadinessResponse } from '@core/models';
-import { IntegrationsService } from '@core/services/integrations.service';
 import { TriggersService } from '@core/services/triggers.service';
 import { ConfigService } from '@core/services/config.service';
 import { ApiError } from '@core/services/api.service';
 import { ConnectRepositoryComponent, buildTaskCreationTriggersFromWizardChoices } from './connect-repository.component';
 
-const inbound = { id: 'in-1', name: 'forgejo', display_name: 'forgejo.example.com', kind: 'inbound', git_host_type: 'forgejo' };
-const pushSuggestion = { type: 'reporter_push' as const, integration_id: 'in-1' };
-const pullRequestSuggestion = { type: 'reporter_pull_request' as const, integration_id: 'in-1' };
+const pushSuggestion = { type: 'reporter_push' as const };
+const pullRequestSuggestion = { type: 'reporter_pull_request' as const };
 const MISSING_CACHE: ProjectReadinessResponse = {
   ready: false,
   workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
@@ -41,7 +39,6 @@ function render(query: Record<string, string>, tasks: object, projects: object =
       { provide: TasksService, useValue: { checkTaskNameAvailable: () => of(true), ...tasks } },
       { provide: ProjectsService, useValue: { getProjectReadiness: () => of(MISSING_CACHE), getProject: () => of({ display_name: 'Acme' }), getSSHKey: () => of('ssh-ed25519 AAAA'), ...projects } },
       { provide: TeamsService, useValue: {} },
-      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of([inbound]) } },
       { provide: ConfigService, useValue: { execEnabled: false } },
       { provide: TriggersService, useValue: { getSuggestedPushAndPullRequestTriggerConfigs: vi.fn(() => of(suggestions)) } },
     ],
@@ -73,7 +70,7 @@ describe('ConnectRepositoryComponent', () => {
     expect(createTask).not.toHaveBeenCalled();
 
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.textContent).toContain('Build pushes from forgejo.example.com');
+    expect(el.textContent).toContain('Build pushes from ssh://git@forgejo.example.com/acme/my-app.git');
     expect(comp.suggestions().every((choice) => !choice.selected)).toBe(true);
     comp.toggleSuggestion(0, true);
     comp.form.cron = '0 2 * * *';
@@ -84,7 +81,7 @@ describe('ConnectRepositoryComponent', () => {
       exec_enabled: false,
       triggers: [
         { type: 'polling', interval_secs: 300, branch: 'release' },
-        { type: 'reporter_push', integration_id: 'in-1', branches: ['release'] },
+        { type: 'reporter_push', branches: ['release'] },
         { type: 'time', cron: '0 2 * * *', branch: 'release' },
       ],
     }));

@@ -9,7 +9,6 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TriggersService } from '@core/services/triggers.service';
-import { IntegrationsService } from '@core/services/integrations.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -35,7 +34,6 @@ import { injectTaskAccess, injectTaskAccessData, injectTaskAccessTo } from '@cor
 import {
   TriggerType,
   TriggerOut,
-  IntegrationSummaryResponse,
   TriggerConfig,
   CreateTriggerRequest,
   UpdateTriggerRequest,
@@ -43,7 +41,6 @@ import {
 import { CurrentTimeSignal, RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { splitList } from '@shared/forms';
-import { gitHostLabel } from '@shared/git';
 import { getCiTriggerTypeLabel, getNextPollTime, nextPollText } from '@shared/evaluation';
 import { cronExpressionToPlainEnglish } from './cron-expression-description';
 
@@ -58,7 +55,6 @@ interface TriggerFormState {
   active: boolean;
   interval_secs: number | null;
   branch: string;
-  integration_id: string;
   branches: string;
   tags: string;
   releases_only: boolean;
@@ -73,7 +69,6 @@ const DEFAULT_FORM: TriggerFormState = {
   active: true,
   interval_secs: 300,
   branch: '',
-  integration_id: '',
   branches: '',
   tags: '',
   releases_only: false,
@@ -117,7 +112,6 @@ export class TaskTriggersComponent implements OnInit {
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private triggersService = inject(TriggersService);
-  private integrationsService = inject(IntegrationsService);
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private notify = inject(NotifyService);
@@ -128,7 +122,6 @@ export class TaskTriggersComponent implements OnInit {
   private taskAccessData = injectTaskAccessData();
   viewerIsProjectMember = computed(() => isViewerProjectMember(this.taskAccessData()?.task));
   access = injectTaskAccessTo('manageTriggers');
-  integrationAccess = injectTaskAccessTo('manageIntegrations');
 
   rowBusy = computed(() => this.firingId() !== null || this.makingDefaultId() !== null);
 
@@ -157,11 +150,10 @@ export class TaskTriggersComponent implements OnInit {
   showEditDialog = signal(false);
   error = signal<string | null>(null);
 
-  inboundIntegrations = signal<IntegrationSummaryResponse[]>([]);
   private suggestions = signal<TriggerConfig[]>([]);
   missingTriggerConfigSuggestions = computed(() =>
     this.suggestions().filter((suggestion) =>
-      !this.triggers().some((t) => t.type === suggestion.type && (t.config as { integration_id?: string }).integration_id === (suggestion as { integration_id?: string }).integration_id),
+      !this.triggers().some((t) => t.type === suggestion.type),
     ),
   );
   fallbackPollingTrigger = computed(() => {
@@ -172,32 +164,15 @@ export class TaskTriggersComponent implements OnInit {
   form: TriggerFormState = { ...DEFAULT_FORM };
   submitAttempted = signal(false);
   private loadedForm = '';
-  private editRequestHandled = false;
-
-  integrationSetupLink = computed(() => {
-    const trigger = this.editingTrigger();
-    return trigger
-      ? links.integrationForTrigger(this.projectName, this.taskName, trigger.id)
-      : links.projectPage(this.projectName, 'integrations');
-  });
 
   readonly typeLabel = getCiTriggerTypeLabel;
   typeOptions: Option<TriggerType>[] = (['polling', 'reporter_push', 'reporter_pull_request', 'time'] as const)
     .map((value) => ({ label: getCiTriggerTypeLabel(value), value }));
 
-  integrationOptions = computed<Option<string>[]>(() => {
-    const opts: Option<string>[] = [{ label: '- select integration -', value: '' }];
-    for (const i of this.inboundIntegrations()) {
-      opts.push({ label: `${i.display_name || i.name} (${gitHostLabel(i.git_host_type)})`, value: i.id });
-    }
-    return opts;
-  });
-
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.loadTriggers();
-    this.loadIntegrations();
     this.loadSuggestions();
   }
 
@@ -208,30 +183,11 @@ export class TaskTriggersComponent implements OnInit {
       next: (list) => {
         this.triggers.set([...list].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)));
         this.loading.set(false);
-        this.openRequestedEdit(list);
       },
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);
       },
-    });
-  }
-
-  private openRequestedEdit(list: TriggerOut[]): void {
-    const query = this.route.snapshot.queryParamMap;
-    const trigger = list.find((t) => t.id === query.get('edit'));
-    if (!trigger || this.editRequestHandled || this.rowBusy() || this.accessSvc.shouldDisableInput(this.access())) return;
-    this.editRequestHandled = true;
-    this.startEdit(trigger);
-    const integration = query.get('integration');
-    if (integration) this.form.integration_id = integration;
-  }
-
-  private loadIntegrations(): void {
-    if (!this.viewerIsProjectMember()) return;
-    this.integrationsService.listProjectIntegrationSummaries(this.projectName).subscribe({
-      next: (list) => this.inboundIntegrations.set(list.filter((i) => i.kind === 'inbound')),
-      error: () => {},
     });
   }
 
@@ -249,10 +205,6 @@ export class TaskTriggersComponent implements OnInit {
     return interval !== null && /^\d+$/.test(String(interval)) && interval >= 10
       ? null
       : 'Enter an integer of at least 10 seconds.';
-  }
-
-  get integrationError(): string | null {
-    return this.form.integration_id ? null : 'Select an integration.';
   }
 
   get cronError(): string | null {
@@ -274,7 +226,7 @@ export class TaskTriggersComponent implements OnInit {
         return this.intervalError;
       case 'reporter_push':
       case 'reporter_pull_request':
-        return this.integrationError;
+        return null;
       case 'time':
         return this.cronError;
     }
@@ -300,7 +252,6 @@ export class TaskTriggersComponent implements OnInit {
       active: trigger.active,
       interval_secs: cfg.interval_secs ?? 300,
       branch: cfg.branch ?? '',
-      integration_id: cfg.integration_id ?? '',
       branches: (cfg.branches ?? []).join(', '),
       tags: (cfg.tags ?? []).join(', '),
       releases_only: cfg.releases_only ?? false,
@@ -329,7 +280,7 @@ export class TaskTriggersComponent implements OnInit {
       case 'polling':
         return { type: 'polling', interval_secs: Number(this.form.interval_secs), branch } as TriggerConfig;
       case 'reporter_push': {
-        const cfg: any = { type: 'reporter_push', integration_id: this.form.integration_id };
+        const cfg: any = { type: 'reporter_push' };
         const branches = splitList(this.form.branches);
         const tags = splitList(this.form.tags);
         if (branches.length) cfg.branches = branches;
@@ -339,7 +290,7 @@ export class TaskTriggersComponent implements OnInit {
         return cfg;
       }
       case 'reporter_pull_request': {
-        const cfg: any = { type: 'reporter_pull_request', integration_id: this.form.integration_id };
+        const cfg: any = { type: 'reporter_pull_request' };
         const branches = splitList(this.form.branches);
         const actions = splitList(this.form.actions);
         if (branches.length) cfg.branches = branches;
@@ -486,7 +437,7 @@ export class TaskTriggersComponent implements OnInit {
         return summary;
       }
       case 'reporter_push': {
-        const parts: string[] = [`from ${this.integrationLabel(trigger)}`];
+        const parts: string[] = [];
         if (cfg.branches?.length) parts.push(`branches: ${cfg.branches.join(', ')}`);
         if (cfg.tags?.length) parts.push(`tags: ${cfg.tags.join(', ')}`);
         if (cfg.releases_only) parts.push('releases only');
@@ -494,7 +445,7 @@ export class TaskTriggersComponent implements OnInit {
         return parts.join(' / ');
       }
       case 'reporter_pull_request': {
-        const parts: string[] = [`from ${this.integrationLabel(trigger)}`];
+        const parts: string[] = [];
         if (cfg.branches?.length) parts.push(`branches: ${cfg.branches.join(', ')}`);
         if (cfg.actions?.length) parts.push(`actions: ${cfg.actions.join(', ')}`);
         if (cfg.require_approval === false) parts.push('approval gate off');
@@ -508,20 +459,6 @@ export class TaskTriggersComponent implements OnInit {
       }
     }
   }
-
-  suggestionSummary(config: TriggerConfig): string {
-    const id = 'integration_id' in config ? config.integration_id : null;
-    const integration = this.inboundIntegrations().find((i) => i.id === id);
-    return integration ? `from ${integration.display_name || integration.name}` : '';
-  }
-
-  private integrationLabel(trigger: TriggerOut): string {
-    if (trigger.integration) {
-      return trigger.integration.display_name || trigger.integration.name;
-    }
-    return 'deleted integration';
-  }
-
 
   private formatSeconds(secs: number): string {
     if (secs < 60) return `${secs}s`;

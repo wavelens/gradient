@@ -50,7 +50,7 @@ const PULL_REQUEST = {
   url: 'https://github.com/acme/infra/pull/7',
   branch: 'update/flake',
   number: 7,
-  integration: 'github',
+  git_host_connection: 'c1',
   created_at: '2026-01-01T00:00:04',
 };
 

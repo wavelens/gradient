@@ -13,7 +13,6 @@ import { EMPTY, NEVER, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
-import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -44,11 +43,9 @@ const trigger = {
   config: { type: 'polling', interval_secs: 300, branch: null },
   last_fired_at: null,
   created_at: '2026-01-01T00:00:00',
-  integration: null,
 };
 
 const list = vi.fn();
-const listProjectIntegrationSummaries = vi.fn();
 const getSuggestedPushAndPullRequestTriggerConfigs = vi.fn();
 let suggested: unknown[] = [];
 
@@ -57,11 +54,9 @@ function setup(
   triggers: any[] = [trigger],
   update: (...args: any[]) => unknown = () => of({}),
   query: Record<string, string> = {},
-  integrations: unknown[] = [],
   task: Partial<TaskDetailsResponse> = {},
 ): ComponentFixture<TaskTriggersComponent> {
   list.mockReset().mockReturnValue(of(triggers));
-  listProjectIntegrationSummaries.mockReset().mockReturnValue(of(integrations));
   getSuggestedPushAndPullRequestTriggerConfigs.mockReset().mockReturnValue(of(suggested));
   TestBed.configureTestingModule({
     imports: [TaskTriggersComponent],
@@ -71,7 +66,6 @@ function setup(
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access, query, task) },
       { provide: TriggersService, useValue: { list, update, getSuggestedPushAndPullRequestTriggerConfigs } },
-      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
     ],
@@ -91,10 +85,9 @@ describe('TaskTriggersComponent - access gating', () => {
   });
 
   it('shows a visitor outside the project no access, asks the server nothing and offers no Repository page', () => {
-    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [trigger], undefined, {}, [], { permissions: [] });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [trigger], undefined, {}, { permissions: [] });
     const el = fixture.nativeElement as HTMLElement;
     expect(list).not.toHaveBeenCalled();
-    expect(listProjectIntegrationSummaries).not.toHaveBeenCalled();
     expect(el.textContent).toContain('Only the members of this project can view this.');
     expect(el.textContent).not.toContain('Try Again');
     expect(Array.from(el.querySelectorAll('a')).some((a) => a.textContent?.includes('Repository'))).toBe(false);
@@ -108,55 +101,25 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(document.querySelector('#trig-type')).not.toBeNull();
   });
 
-  it('renders reporter trigger using inlined integration display_name (not raw UUID)', () => {
+  it('summarises a push trigger by its filters', () => {
     const reporterTrigger = {
+      ...trigger,
       id: 't2',
       type: 'reporter_push' as const,
-      active: true,
-      config: {
-        type: 'reporter_push',
-        integration_id: '019e16b2-e958-7652-ad97-67cd7b0fea61',
-        branches: ['main'],
-      },
-      last_fired_at: null,
-      integration: {
-        id: '019e16b2-e958-7652-ad97-67cd7b0fea61',
-        name: 'github',
-        display_name: 'GitHub',
-        git_host_type: 'github',
-      },
+      config: { type: 'reporter_push', branches: ['main'], tags: ['v*'] },
     };
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [reporterTrigger]);
-    const text = fixture.nativeElement.textContent ?? '';
-    expect(text).toContain('from GitHub');
-    expect(text).not.toContain('019e16b2-e958-7652-ad97-67cd7b0fea61');
+    expect(fixture.nativeElement.textContent ?? '').toContain('branches: main / tags: v*');
   });
 
-  it('names the Git host of each integration in the picker instead of its raw type', () => {
+  it('points a push trigger to the git host connection on the Repository page', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
-    fixture.componentInstance.inboundIntegrations.set([
-      { id: 'i1', name: 'forge', display_name: 'Our Forge', kind: 'inbound', git_host_type: 'forgejo' },
-    ] as never);
-    expect(fixture.componentInstance.integrationOptions().map((o) => o.label)).toContain('Our Forge (Forgejo)');
-  });
-
-  it('falls back gracefully when reporter trigger references a deleted integration', () => {
-    const orphan = {
-      id: 't3',
-      type: 'reporter_push' as const,
-      active: true,
-      config: {
-        type: 'reporter_push',
-        integration_id: '019e16b2-e958-7652-ad97-67cd7b0fea61',
-        branches: ['main'],
-      },
-      last_fired_at: null,
-      integration: null,
-    };
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [orphan]);
-    const text = fixture.nativeElement.textContent ?? '';
-    expect(text).toContain('from deleted integration');
-    expect(text).not.toContain('019e16b2-e958-7652-ad97-67cd7b0fea61');
+    fixture.componentInstance.startCreate();
+    fixture.componentInstance.form.type = 'reporter_push';
+    fixture.detectChanges();
+    const hint = document.querySelector('[data-testid="trigger-connection-hint"]');
+    expect(hint?.textContent).toContain('git host connection');
+    expect(hint?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
   });
 
   it('shows but disables write buttons under state-managed access', () => {
@@ -213,10 +176,9 @@ describe('TaskTriggersComponent - flake inputs', () => {
     id: 't4',
     type: 'reporter_push' as const,
     active: true,
-    config: { type: 'reporter_push', integration_id: 'i1', include_flake_inputs: true },
+    config: { type: 'reporter_push', include_flake_inputs: true },
     last_fired_at: null,
-    integration: null,
-  };
+    };
 
   it('keeps include_flake_inputs when an edited push trigger is saved', () => {
     const update = vi.fn((..._args: any[]) => of({}));
@@ -372,14 +334,12 @@ describe('TaskTriggersComponent - validation', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('asks for an integration before creating a push trigger', () => {
-    const { fixture, component, create } = withCreate();
+  it('creates a push trigger without more fields', () => {
+    const { component, create } = withCreate();
     component.startCreate();
     component.form.type = 'reporter_push';
     component.saveCreate();
-    fixture.detectChanges();
-    expect(fieldError()).toBe('Select an integration.');
-    expect(create).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith('acme', 'demo', { config: { type: 'reporter_push' }, active: true });
   });
 
   it('refuses a cron expression with the wrong number of fields', () => {
@@ -430,66 +390,27 @@ describe('TaskTriggersComponent - validation', () => {
   });
 });
 
-describe('TaskTriggersComponent - setting up an integration from a trigger', () => {
-  const writer = { managed: false, canEdit: true, canTrigger: true };
-  const orphan = {
-    id: 't3',
-    type: 'reporter_push' as const,
-    active: true,
-    config: { type: 'reporter_push', integration_id: 'gone', branches: [] },
-    last_fired_at: null,
-    integration: null,
-  };
-  const inbound = { id: 'new-id', name: 'forgejo', display_name: 'Forgejo', kind: 'inbound', git_host_type: 'forgejo' };
-
-  it('links from the edit dialog to Integrations with the way back to this trigger', () => {
-    const fixture = setup(writer, [orphan]);
-    fixture.componentInstance.startEdit(orphan as any);
-    fixture.detectChanges();
-    const link = Array.from(document.querySelectorAll<HTMLAnchorElement>('.gr-dialog a')).find((a) => a.textContent?.includes('Set up an integration'));
-    expect(link?.getAttribute('href')).toBe('/project/acme/integrations?task=demo&trigger=t3');
-  });
-
-  it('reopens the trigger with the new integration selected on the way back', () => {
-    const fixture = setup(writer, [orphan], undefined, { edit: 't3', integration: 'new-id' }, [inbound]);
-    const component = fixture.componentInstance;
-    expect(component.showEditDialog()).toBe(true);
-    expect(component.editingTrigger()?.id).toBe('t3');
-    expect(component.form.integration_id).toBe('new-id');
-  });
-
-  it.each([
-    ['read-only', { managed: false, canEdit: false, canTrigger: false }],
-    ['state-managed', { managed: true, canEdit: true, canTrigger: true }],
-  ])('opens no edit dialog on the way back under %s access', (_label, access) => {
-    const fixture = setup(access, [orphan], undefined, { edit: 't3', integration: 'new-id' }, [inbound]);
-    expect(fixture.componentInstance.showEditDialog()).toBe(false);
-  });
-});
-
 describe('TaskTriggersComponent - push triggers next to polling', () => {
   const writer = { managed: false, canEdit: true, canTrigger: true };
-  const inbound = { id: 'in-1', name: 'forgejo', display_name: 'Forgejo', kind: 'inbound', git_host_type: 'forgejo' };
   const push = {
     ...trigger,
     id: 't-push',
     type: 'reporter_push' as const,
-    config: { type: 'reporter_push', integration_id: 'in-1', branches: [] },
-    integration: { id: 'in-1', name: 'forgejo', display_name: 'Forgejo', git_host_type: 'forgejo' },
+    config: { type: 'reporter_push', branches: [] },
   };
   const repository = { repository: 'ssh://git@forgejo.example.com/acme/app.git' };
   afterEach(() => (suggested = []));
 
   it('offers suggested push and pull request triggers unticked and creates one on Add', () => {
-    const pr = { type: 'reporter_pull_request', integration_id: 'in-1' };
+    const pr = { type: 'reporter_pull_request', actions: ['opened'] };
     suggested = [push.config, pr];
-    const fixture = setup(writer, [trigger], undefined, {}, [inbound], repository);
+    const fixture = setup(writer, [trigger], undefined, {}, repository);
     const create = vi.fn(() => of({}));
     Object.assign(TestBed.inject(TriggersService), { create });
 
     const section = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="trigger-suggestions"]')!;
     expect(getSuggestedPushAndPullRequestTriggerConfigs).toHaveBeenCalledWith('acme', repository.repository);
-    expect(section.textContent).toContain('from Forgejo');
+    expect(section.textContent).toContain('Pull request');
     expect(create).not.toHaveBeenCalled();
     findByText(section as HTMLElement, 'add')!.click();
     expect(create).toHaveBeenCalledWith('acme', 'demo', { config: push.config, active: true });
@@ -497,7 +418,7 @@ describe('TaskTriggersComponent - push triggers next to polling', () => {
 
   it('hides suggestions the task already has', () => {
     suggested = [push.config];
-    const fixture = setup(writer, [trigger, push], undefined, {}, [inbound], repository);
+    const fixture = setup(writer, [trigger, push], undefined, {}, repository);
     expect(getSuggestedPushAndPullRequestTriggerConfigs).toHaveBeenCalled();
     expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="trigger-suggestions"]')).toBeNull();
   });

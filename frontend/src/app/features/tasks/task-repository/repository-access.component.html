@@ -51,7 +51,7 @@
           <a grButton label="Open settings for the deploy key" icon="open_in_new" severity="secondary" [href]="link.deployKeys" target="_blank" rel="noopener noreferrer"></a>
         }
       }
-      @if (provisioner()) {
+      @if (shouldShowInstallDeployKeyButton()) {
         <button grButton severity="secondary" label="Install deploy key" icon="key" (click)="installDeployKey()" [loading]="installingKey()"
           [disabled]="installingKey()" data-testid="install-deploy-key"></button>
       }

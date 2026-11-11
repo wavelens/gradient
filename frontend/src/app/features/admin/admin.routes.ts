@@ -5,6 +5,7 @@
  */
 
 import { Routes } from '@angular/router';
+import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 
 export const ADMIN_ROUTES: Routes = [
   {
@@ -29,6 +30,12 @@ export const ADMIN_ROUTES: Routes = [
         path: 'storage',
         title: 'Storage · Administration',
         loadComponent: () => import('./storage/admin-storage-tab.component').then((m) => m.AdminStorageTabComponent),
+      },
+      {
+        path: 'git-hosts',
+        title: 'Git hosts · Administration',
+        canDeactivate: [unsavedChangesGuard],
+        loadComponent: () => import('./git-hosts/admin-git-hosts-tab.component').then((m) => m.AdminGitHostsTabComponent),
       },
       {
         path: 'settings',

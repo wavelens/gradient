@@ -77,8 +77,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 </gr-table>
 
 <h2>Feedback</h2>
-<gr-loading-spinner message="Loading integrations..." />
-<gr-empty-state icon="hub" title="No integrations" message="Create one to receive Git host webhooks." />
+<gr-loading-spinner message="Loading the connection to the Git host..." />
+<gr-empty-state icon="hub" title="No Connections to a Git Host" message="Create a connection to a Git host to receive webhooks." />
 
 <p>With the action that resolves it. The button centres under the message.</p>
 <gr-empty-state icon="schedule_send" title="No triggers configured"
@@ -88,7 +88,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <gr-stat-card icon="inbox" [value]="12" label="Queued" />
 
 <p>Lists that load their own data go inside <code>gr-load-state</code>. A failed load can show the reason and a "Try Again" button in place of the empty state.</p>
-<gr-load-state errorTitle="Couldn't load integrations" error="Database connection failed." />
+<gr-load-state errorTitle="Failed to Load Connection to Git Host" error="Database connection failed." />
 <p>Denied loads (403 or 404) show one inaccessible state with a lock and no retry option. A retry can't change the result. Pages can check beforehand that the role can't read the content. Those pages pass <code>createMissingPermissionLoadStateError</code> instead of sending a request.</p>
 <gr-load-state [error]="refusedExample" />
 

@@ -9,7 +9,6 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '@core/services/admin.service';
-import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import {
@@ -19,7 +18,7 @@ import {
   InputDirective,
   LoadStateComponent,
   MessageBannerComponent,
-  PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@gradient/ui/ui';
 import { Observable, defaultIfEmpty, of } from 'rxjs';
 import { LabelHelpComponent } from '@shared/ui';
@@ -30,14 +29,13 @@ import { ManifestResult } from '@core/models';
   selector: 'app-admin-github-app',
   standalone: true,
   imports: [
-    LabelHelpComponent,CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, LoadStateComponent, MessageBannerComponent, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
+    LabelHelpComponent,CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, LoadStateComponent, MessageBannerComponent, SettingsSectionComponent, CopyFieldComponent, FormFieldComponent],
   templateUrl: './github-app.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './github-app.component.scss',
 })
 export class GithubAppComponent implements OnInit {
   private admin = inject(AdminService);
-  protected readonly trail = inject(BreadcrumbsService).admin({ label: 'GitHub App' });
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private notify = inject(NotifyService);

@@ -424,15 +424,23 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
       },
-
-      // Integrations
       {
-        path: 'project/:project/integrations',
-        title: 'Integrations',
+        path: 'team/:team/git-host-connections',
+        title: 'Git host connections',
+        resolve: { teamAccess: teamAccessResolver },
+        loadComponent: () =>
+          import('./features/teams/team-git-host-connections/team-git-host-connections.component').then(
+            (m) => m.TeamGitHostConnectionsComponent
+          ),
+      },
+
+      {
+        path: 'project/:project/git-host-connections',
+        title: 'Git host connections',
         resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/projects/integrations/integrations.component').then(
-            (m) => m.IntegrationsComponent
+          import('./features/projects/git-host-connections/project-git-host-connections.component').then(
+            (m) => m.ProjectGitHostConnectionsComponent
           ),
       },
 
@@ -526,16 +534,7 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
   },
-  {
-    path: 'admin/github-app',
-    title: 'GitHub App (admin)',
-    canActivate: [authGuard, adminGuard],
-    canDeactivate: [unsavedChangesGuard],
-    loadComponent: () =>
-      import('./features/admin/github-app/github-app.component').then(
-        (m) => m.GithubAppComponent,
-      ),
-  },
+  { path: 'admin/github-app', redirectTo: 'admin/git-hosts' },
   ...['admin/users', 'admin/users/:username/access'].map((path) => ({
     path,
     title: 'User access (admin)',

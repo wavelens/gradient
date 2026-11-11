@@ -17,7 +17,7 @@ function createFixture(smtpEnabled: boolean): ComponentFixture<ActionFormCompone
   });
   const fixture = TestBed.createComponent(ActionFormComponent);
   fixture.componentRef.setInput('open', true);
-  fixture.componentRef.setInput('outboundIntegrations', []);
+  fixture.componentRef.setInput('gitHostConnectionsThatCanReportCommitStatus', []);
   return fixture;
 }
 
@@ -62,10 +62,9 @@ describe('ActionFormComponent', () => {
     expect(c.url()).toBe('');
     c.url.set('https://x');
     c.tokenValue.set('t');
-    c.onTypeChange('git_host_status_report');
+    c.onTypeChange('open_pr');
     expect(c.url()).toBe('');
     expect(c.tokenValue()).toBe('');
-    expect(c.events().length).toBeGreaterThan(0);
   });
 
   it('hides Send Mail option when smtp is disabled', () => {
@@ -74,7 +73,6 @@ describe('ActionFormComponent', () => {
     const opts = fixture.componentInstance.typeOptions().map((o) => o.value);
     expect(opts).not.toContain('send_mail');
     expect(opts).toContain('send_web_request');
-    expect(opts).not.toContain('git_host_status_report');
   });
 
   it('generateToken populates a gat_-prefixed string of reasonable length', () => {
@@ -84,19 +82,6 @@ describe('ActionFormComponent', () => {
     const v = fixture.componentInstance.tokenValue();
     expect(v.startsWith('gat_')).toBe(true);
     expect(v.length).toBeGreaterThan(20);
-  });
-
-  it('sends empty events for git_host_status_report', () => {
-    const fixture = createFixture(true);
-    fixture.detectChanges();
-    const c = fixture.componentInstance;
-    c.type.set('git_host_status_report');
-    c.integrationId.set('int-1');
-    c.name.set('report');
-    let emitted: any;
-    c.saved.subscribe((r) => (emitted = r));
-    c.onSubmit();
-    expect(emitted.events).toEqual([]);
   });
 
   it('moves focus to the first invalid field after an invalid submit', () => {
@@ -113,10 +98,9 @@ describe('ActionFormComponent', () => {
     fixture.detectChanges();
     const c = fixture.componentInstance;
     c.onTypeChange('open_pr');
-    c.integrationId.set('int-1');
+    c.gitHostConnectionId.set('int-1');
     c.name.set('updater');
     c.events.set(['build.completed']);
-    expect(c.eventsHardwired()).toBe(true);
     let emitted: any;
     c.saved.subscribe((r) => (emitted = r));
     c.onSubmit();
@@ -170,9 +154,9 @@ describe('ActionFormComponent', () => {
   it('renders the submit error inside the dialog', () => {
     const fixture = createFixture(true);
     fixture.componentRef.setInput('open', true);
-    fixture.componentRef.setInput('error', 'Integration not found');
+    fixture.componentRef.setInput('error', 'Git host connection not found');
     fixture.detectChanges();
-    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Integration not found');
+    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Git host connection not found');
   });
 
   it('emits a CreateActionRequest with the correct discriminated union on submit', () => {
@@ -265,14 +249,14 @@ describe('ActionFormComponent', () => {
     expect(c.generatorOptions.map((o) => o.value)).toContain('exec_tree');
     c.name.set('exec-pr');
     c.onTypeChange('open_pr');
-    c.integrationId.set('int-1');
+    c.gitHostConnectionId.set('int-1');
     c.onGeneratorChange('exec_tree');
     let emitted: CreateActionRequest | undefined;
     c.saved.subscribe((r) => (emitted = r as CreateActionRequest));
     c.onSubmit();
     expect(emitted!.config).toEqual({
       type: 'open_pr',
-      integration_id: 'int-1',
+      git_host_connection_id: 'int-1',
       generator: 'exec_tree',
       branch_pattern: 'gradient/{entry_point}',
       update_existing: true,
@@ -362,7 +346,7 @@ describe('ActionFormComponent - validation', () => {
     const c = fixture.componentInstance;
     c.name.set('updater');
     c.onTypeChange('open_pr');
-    c.integrationId.set('int-1');
+    c.gitHostConnectionId.set('int-1');
     c.prGranularity.set('per_input');
     const { emitted, errors } = submitAndCollect(fixture);
     expect(errors).toEqual([expect.stringContaining('{input}')]);

@@ -24,11 +24,10 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { IntegrationSummaryResponse, TriggerConfig } from '@core/models';
+import { TriggerConfig } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TriggersService } from '@core/services/triggers.service';
-import { IntegrationsService } from '@core/services/integrations.service';
 import { ConfigService } from '@core/services/config.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -110,7 +109,6 @@ export class ConnectRepositoryComponent implements OnInit {
   private tasks = inject(TasksService);
   private projects = inject(ProjectsService);
   private triggers = inject(TriggersService);
-  private integrations = inject(IntegrationsService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -141,7 +139,6 @@ export class ConnectRepositoryComponent implements OnInit {
   repositoryAccessTestPassedForCurrentUrl = signal(false);
   testError = signal<string | null>(null);
   suggestions = signal<SuggestedTriggerChoice[]>([]);
-  private inboundIntegrations = signal<IntegrationSummaryResponse[]>([]);
 
   get repositoryError(): string | null {
     const url = this.form.repository.trim();
@@ -216,10 +213,6 @@ export class ConnectRepositoryComponent implements OnInit {
 
   continueToTriggers(): void {
     this.step.set('triggers');
-    this.integrations.listProjectIntegrationSummaries(this.projectName).subscribe({
-      next: (list) => this.inboundIntegrations.set(list.filter((i) => i.kind === 'inbound')),
-      error: () => {},
-    });
     this.triggers.getSuggestedPushAndPullRequestTriggerConfigs(this.projectName, this.form.repository.trim()).subscribe({
       next: (configs) => this.suggestions.set(configs.map((config) => ({ config, selected: false }))),
       error: () => this.suggestions.set([]),
@@ -227,10 +220,8 @@ export class ConnectRepositoryComponent implements OnInit {
   }
 
   suggestionLabel(config: TriggerConfig): string {
-    const id = 'integration_id' in config ? config.integration_id : null;
-    const integration = this.inboundIntegrations().find((i) => i.id === id);
-    const from = integration ? integration.display_name || integration.name : this.form.repository.trim();
-    return config.type === 'reporter_pull_request' ? `Build pull requests from ${from}` : `Build pushes from ${from}`;
+    const repository = this.form.repository.trim();
+    return config.type === 'reporter_pull_request' ? `Build pull requests from ${repository}` : `Build pushes from ${repository}`;
   }
 
   toggleSuggestion(index: number, selected: boolean): void {

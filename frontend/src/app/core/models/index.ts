@@ -8,7 +8,7 @@ export * from './api.generated';
 export * from './api-response.model';
 export * from './worker.model';
 export * from './gradient-ci.model';
-export * from './integration.model';
+export * from './git-host-connection.model';
 export * from './access.model';
 export * from './action.model';
 export * from './dashboard.model';

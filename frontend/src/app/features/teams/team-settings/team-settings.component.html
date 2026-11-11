@@ -42,16 +42,20 @@
       }
     </gr-settings-section>
 
-    @if (team.role === 'admin' || isSuperuser()) {
-      <gr-settings-section title="More Settings" [card]="false">
-        <gr-row-list>
+    <gr-settings-section title="More Settings" [card]="false">
+      <gr-row-list>
+        <gr-row icon="hub" linkLabel="Git host connections" [link]="links.teamPage(teamName, 'git-host-connections')">
+          Git host connections
+          <span slot="meta">Receive events from a Git host and report commit status.</span>
+        </gr-row>
+        @if (team.role === 'admin' || isSuperuser()) {
           <gr-row icon="webhook" linkLabel="Event notifications" [link]="links.teamPage(teamName, 'webhooks')">
             Event notifications
             <span slot="meta">Signed HTTP requests for this team's events</span>
           </gr-row>
-        </gr-row-list>
-      </gr-settings-section>
-    }
+        }
+      </gr-row-list>
+    </gr-settings-section>
 
     @if (access().canEdit) {
       <gr-settings-section title="Danger Zone" danger>

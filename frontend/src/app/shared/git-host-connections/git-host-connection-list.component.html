@@ -1,0 +1,174 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-load-state [loading]="loading()" [error]="loadError()" loadingMessage="Loading connections for Git hosts..."
+  errorTitle="Failed to load connections to Git hosts" (retry)="load()">
+  <gr-settings-section title="Owned Connections" [card]="false">
+    @if (canCreate() && ownConnections().length) {
+      <button slot="actions" grButton label="New connection" icon="add" severity="secondary" (click)="openCreate()"
+        [appManagedDisable]="access()" data-testid="new-connection"></button>
+    }
+    @if (ownConnections().length === 0) {
+      <gr-empty-state icon="hub" title="No connections to Git hosts"
+        message="Create a connection. The Git host can send events to Gradient, or Gradient can report commit status to the Git host.">
+        @if (canCreate()) {
+          <button slot="action" grButton label="New connection" icon="add" (click)="openCreate()" [appManagedDisable]="access()"
+            data-testid="new-connection"></button>
+        }
+      </gr-empty-state>
+    } @else {
+      <div class="connection-list">
+        @for (connection of ownConnections(); track connection.id) {
+          <div class="connection-row" data-testid="own-connection">
+            <ng-container *ngTemplateOutlet="summary; context: { $implicit: connection, inherited: false }" />
+            <div class="connection-actions">
+              @if (canEditRow(connection)) {
+                <button grButton label="Edit" icon="edit" severity="secondary" size="small"
+                  [attr.aria-label]="'Edit ' + connection.display_name" [loading]="openingId() === connection.id"
+                  [appManagedDisable]="access()" (click)="openEdit(connection)"></button>
+              }
+              @if (canReadDeliveries(connection)) {
+                <button grButton label="Deliveries" icon="list" severity="secondary" size="small"
+                  [attr.aria-label]="'Deliveries of ' + connection.display_name"
+                  [attr.aria-expanded]="deliveriesShownFor() === connection.id" (click)="toggleDeliveries(connection)"></button>
+              }
+              @if (connection.can_manage) {
+                <button grButton label="Delete" icon="delete" severity="danger" size="small"
+                  [attr.aria-label]="'Delete ' + connection.display_name" [appManagedDisable]="access()"
+                  (click)="remove(connection)"></button>
+              }
+            </div>
+            @if (deliveriesShownFor() === connection.id) {
+              <app-incoming-deliveries [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id" />
+            }
+          </div>
+        }
+      </div>
+    }
+  </gr-settings-section>
+
+  @if (inheritedReadOnlyConnections().length) {
+    <gr-settings-section title="Inherited Connections" [card]="false"
+      description="Owner team and instance connections. Every task in this project can use them. Only the owners can change them.">
+      <div class="connection-list">
+        @for (connection of inheritedReadOnlyConnections(); track connection.id) {
+          <div class="connection-row" data-testid="inherited-connection">
+            <ng-container *ngTemplateOutlet="summary; context: { $implicit: connection, inherited: true }" />
+          </div>
+        }
+      </div>
+    </gr-settings-section>
+  }
+</gr-load-state>
+
+<ng-template #summary let-connection let-inherited="inherited">
+  <div class="connection-name">
+    <span>{{ connection.display_name || connection.name }}</span>
+    @if (connection.display_name && connection.display_name !== connection.name) {
+      <span class="text-secondary mono">{{ connection.name }}</span>
+    }
+    <gr-badge>{{ gitHostLabel(connection.git_host_type) }}</gr-badge>
+    @if (connection.receives_events) {
+      <gr-badge>events</gr-badge>
+    }
+    @if (connection.reports_status) {
+      <gr-badge>status</gr-badge>
+    }
+    @if (inherited) {
+      <gr-badge>inherited</gr-badge>
+    }
+  </div>
+  <div class="connection-meta text-secondary">
+    @if (connection.base_url) {
+      <span>{{ connection.base_url }}</span>
+    }
+    @if (inherited) {
+      <span>Inherited from {{ ownerText(connection.owner) }}</span>
+    }
+    @if (connection.git_host_type === 'github') {
+      <span>Installations of the GitHub App manage this connection.</span>
+    }
+  </div>
+</ng-template>
+
+<gr-dialog #connectionDialog [header]="editing() ? 'Edit Connection for a Git Host' : 'New Connection for a Git Host'"
+  [visible]="dialogOpen()" (visibleChange)="dialogOpen.set($event)" [error]="dialogError()" [busy]="saving()"
+  [confirmDiscard]="formChanges.changed()" width="560px">
+  @if (editing()?.managed) {
+    <gr-message-banner type="info">{{ managedReason }}</gr-message-banner>
+  }
+  @if (editing()?.webhook_url; as webhookUrl) {
+    <gr-form-field label="Webhook URL" [hint]="'Events to enable: ' + requiredWebhookEvents(form().git_host_type)">
+      <gr-copy-field [value]="webhookUrl" />
+    </gr-form-field>
+  }
+  <gr-form-field label="Name" for="connection-name" required [invalid]="!!nameError()" [error]="nameError() ?? ''"
+    hint="Lowercase letters, numbers and hyphens.">
+    <input grInput id="connection-name" [ngModel]="form().name" (ngModelChange)="patchForm({ name: $event })" placeholder="e.g. main-forgejo" />
+  </gr-form-field>
+  <gr-form-field label="Display name" for="connection-display-name" hint="Lists and pickers show the display name. The default value is the name.">
+    <input grInput id="connection-display-name" [ngModel]="form().display_name" (ngModelChange)="patchForm({ display_name: $event })" />
+  </gr-form-field>
+  <gr-form-field label="Host Type" for="connection-host-type">
+    <gr-select inputId="connection-host-type" [options]="gitHostOptions" optionLabel="label" optionValue="value"
+      [ngModel]="form().git_host_type" (ngModelChange)="patchForm({ git_host_type: $event })" />
+  </gr-form-field>
+  <gr-form-field [invalid]="!!capabilityError()" [error]="capabilityError() ?? ''" hint="Git hosts send push and pull request webhooks to Gradient.">
+    <gr-checkbox inputId="connection-receives-events" label="Receives events" [ngModel]="form().receives_events"
+      (ngModelChange)="patchForm({ receives_events: $event })" />
+  </gr-form-field>
+  <gr-form-field hint="Gradient can post commit statuses to the Git host.">
+    <gr-checkbox inputId="connection-reports-status" label="Reports status" [ngModel]="form().reports_status"
+      (ngModelChange)="patchForm({ reports_status: $event })" />
+  </gr-form-field>
+  <gr-form-field label="Base URL" for="connection-base-url" [required]="form().reports_status" [invalid]="!!baseUrlError()"
+    [error]="baseUrlError() ?? ''" hint="Base URL of the Git host. The `Reports status` switch can report status with this value.">
+    <input grInput id="connection-base-url" [ngModel]="form().base_url" (ngModelChange)="patchForm({ base_url: $event })"
+      placeholder="https://git.example.com" />
+  </gr-form-field>
+  <gr-form-field label="Access token" for="connection-access-token" [required]="form().reports_status && !editing()?.has_access_token"
+    [invalid]="!!accessTokenError()" [error]="accessTokenError() ?? ''"
+    hint="Token for a bot account with write access to commit status. Status reports require this token.">
+    <input grInput id="connection-access-token" type="password" autocomplete="off" [ngModel]="form().access_token"
+      (ngModelChange)="patchForm({ access_token: $event })"
+      [placeholder]="editing()?.has_access_token ? 'Leave this field blank to keep the current token.' : ''" />
+  </gr-form-field>
+  @if (form().receives_events) {
+    <gr-form-field label="Webhook secret" for="connection-secret" [invalid]="!!secretError()" [error]="secretError() ?? ''"
+      [hint]="editing()?.has_secret ? 'Leave blank to keep the current secret.' : 'Leave blank to let Gradient generate a secret and show it once.'">
+      <div class="field-with-button">
+        <input grInput id="connection-secret" autocomplete="off" [ngModel]="form().secret" (ngModelChange)="patchForm({ secret: $event })" />
+        <button grButton type="button" icon="refresh" severity="secondary" aria-label="Generate secret" (click)="generateSecret()"></button>
+      </div>
+    </gr-form-field>
+    <gr-form-field label="Allowed source IPs" for="connection-allowed-ips" [invalid]="!!allowedIpsError()" [error]="allowedIpsError() ?? ''"
+      hint="One IP address or CIDR range per line. Leave blank to allow webhooks from any address.">
+      <textarea grInput id="connection-allowed-ips" rows="3" [ngModel]="form().allowed_ips" (ngModelChange)="patchForm({ allowed_ips: $event })"
+        placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="connectionDialog.close()" [disabled]="saving()"></button>
+    <button grButton [label]="editing() ? 'Save' : 'Create'" icon="check" (grSubmit)="save()" [loading]="saving()"
+      [disabled]="saving()" [disabledReason]="editing()?.managed ? managedReason : null" data-testid="save-connection"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog header="Webhook secret" [visible]="!!createdConnectionWithOneTimeSecret()"
+  (visibleChange)="$event || createdConnectionWithOneTimeSecret.set(null)" [closable]="false" width="560px">
+  @if (createdConnectionWithOneTimeSecret(); as created) {
+    <p>Now copy the Webhook URL and secret into the webhook settings of the Git host. Gradient can show the secret only once.</p>
+    <gr-form-field label="Webhook URL" [hint]="'Events to enable: ' + requiredWebhookEvents(created.gitHostType)">
+      <gr-copy-field [value]="created.webhookUrl" />
+    </gr-form-field>
+    <gr-form-field label="Webhook secret">
+      <gr-copy-field [value]="created.secret" />
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    <button grButton label="Done" icon="check" (click)="createdConnectionWithOneTimeSecret.set(null)" data-testid="secret-done"></button>
+  </div>
+</gr-dialog>

@@ -11,7 +11,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import { ActionsService } from '@core/services/actions.service';
-import { IntegrationsService } from '@core/services/integrations.service';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -35,17 +35,13 @@ import {
   CreateActionRequest,
   UpdateActionRequest,
   ActionConfig,
+  GitHostConnectionSummary,
   eventNameToReadableText,
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
 import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@shared/outgoing-deliveries';
 import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
-
-interface IntegrationOption {
-  id: string;
-  display_name: string;
-}
 
 @Component({
   selector: 'app-task-actions',
@@ -77,7 +73,7 @@ export class TaskActionsComponent implements OnInit {
   protected readonly getDeliveryResultReason = getDeliveryResultReason;
   private route = inject(ActivatedRoute);
   private actionsService = inject(ActionsService);
-  private integrationsService = inject(IntegrationsService);
+  private gitHostConnections = inject(GitHostConnectionsApi);
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private teamsService = inject(TeamsService);
@@ -112,7 +108,7 @@ export class TaskActionsComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Actions' }));
 
   actions = signal<ActionResponse[]>([]);
-  outboundIntegrations = signal<IntegrationOption[]>([]);
+  gitHostConnectionsThatCanReportCommitStatus = signal<GitHostConnectionSummary[]>([]);
   mailTeams = signal<string[]>([]);
   projectTasks = signal<{ id: string; name: string; display_name: string }[]>([]);
 
@@ -139,7 +135,7 @@ export class TaskActionsComponent implements OnInit {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.loadActions();
-    this.loadIntegrations();
+    this.loadGitHostConnectionsThatCanReportCommitStatus();
     this.loadProjectTasks();
     this.teamsService.projectGrants(this.projectName).subscribe({
       next: (grants) => this.mailTeams.set(grants.filter((g) => g.users && !g.pending).map((g) => g.team)),
@@ -166,16 +162,11 @@ export class TaskActionsComponent implements OnInit {
     });
   }
 
-  private loadIntegrations(): void {
+  private loadGitHostConnectionsThatCanReportCommitStatus(): void {
     if (!this.viewerIsProjectMember()) return;
-    this.integrationsService.listProjectIntegrationSummaries(this.projectName).subscribe({
-      next: (list) =>
-        this.outboundIntegrations.set(
-          list
-            .filter((i) => i.kind === 'outbound')
-            .map((i) => ({ id: i.id, display_name: i.display_name })),
-        ),
-      error: () => this.outboundIntegrations.set([]),
+    this.gitHostConnections.list({ type: 'project', name: this.projectName }).subscribe({
+      next: (list) => this.gitHostConnectionsThatCanReportCommitStatus.set(list.filter((connection) => connection.reports_status)),
+      error: () => this.gitHostConnectionsThatCanReportCommitStatus.set([]),
     });
   }
 
@@ -298,7 +289,6 @@ export class TaskActionsComponent implements OnInit {
     switch (type) {
       case 'send_mail': return 'mail';
       case 'send_web_request': return 'public';
-      case 'git_host_status_report': return 'published_with_changes';
       case 'open_pr': return 'code';
       case 'send_matrix_message': return 'forum';
       case 'send_slack_message': return 'chat';

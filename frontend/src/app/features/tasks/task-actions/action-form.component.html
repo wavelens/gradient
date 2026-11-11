@@ -155,28 +155,14 @@
     </gr-form-field>
   }
 
-  @if (type() === 'git_host_status_report') {
-    <gr-form-field label="Outbound Integration" for="action-integration" required
-      [invalid]="showError('integration')" [error]="errors().integration ?? ''">
-      <gr-select
-        inputId="action-integration"
-        [ngModel]="integrationId()"
-        (ngModelChange)="integrationId.set($event)"
-        [options]="integrationOptions()"
-        optionLabel="label"
-        optionValue="value"
-      />
-    </gr-form-field>
-  }
-
   @if (type() === 'open_pr') {
-    <gr-form-field label="Outbound Integration" for="pr-integration" required
-      [invalid]="showError('integration')" [error]="errors().integration ?? ''">
+    <gr-form-field label="Git host connection" for="pr-git-host-connection" required
+      [invalid]="showError('gitHostConnection')" [error]="errors().gitHostConnection ?? ''">
       <gr-select
-        inputId="pr-integration"
-        [ngModel]="integrationId()"
-        (ngModelChange)="integrationId.set($event)"
-        [options]="integrationOptions()"
+        inputId="pr-git-host-connection"
+        [ngModel]="gitHostConnectionId()"
+        (ngModelChange)="gitHostConnectionId.set($event)"
+        [options]="gitHostConnectionDropdownOptions()"
         optionLabel="label"
         optionValue="value"
       />
@@ -278,18 +264,13 @@
   }
 
   @if (type() !== 'open_pr') {
-    <gr-form-field label="Events" [required]="!eventsHardwired()" [invalid]="!eventsHardwired() && showError('events')" [error]="errors().events ?? ''">
+    <gr-form-field label="Events" required [invalid]="showError('events')" [error]="errors().events ?? ''">
       <gr-label-help slot="label" doc="reference/events/#event-families" title="Event families" />
-      @if (type() === 'git_host_status_report') {
-        <app-action-events [selected]="displayedEvents()" [disabled]="true" [eventNamePrefixes]="taskFamilies" />
-        <small class="text-secondary">Events are fixed for Git host status reports.</small>
-      } @else {
-        <app-action-events
-          [selected]="events()"
-          [eventNamePrefixes]="taskFamilies"
-          (selectedChange)="events.set($event); touch('events', $event)"
-        />
-      }
+      <app-action-events
+        [selected]="events()"
+        [eventNamePrefixes]="taskFamilies"
+        (selectedChange)="events.set($event); touch('events', $event)"
+      />
     </gr-form-field>
   } @else {
     <gr-form-field label="Events" [hint]="prEventsHint()">

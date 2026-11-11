@@ -11,8 +11,6 @@ import { ApiService } from './api.service';
 import {
   CheckRepositoryRequest,
   CreatedEntityResponse,
-  InstallDeployKeyRequest,
-  InstallWebhookRequest,
   Paginated,
   TaskResponse,
   TaskDetailsResponse,
@@ -24,6 +22,8 @@ import {
   MakeTaskRequest,
   PatchTaskRequest,
   TaskRepositoryResponse,
+  TaskRepositoryConnectionAndCommitStatusPatchRequest,
+  TaskCommitStatusPostAttempt,
   RepositoryAccessCheckRequest,
   DuplicateTaskRequest,
 } from '@core/models';
@@ -124,12 +124,24 @@ export class TasksService {
     return this.api.post<string>(`tasks/${project}/${task}/duplicate`, body);
   }
 
-  installWebhook(project: string, task: string, body: InstallWebhookRequest): Observable<string> {
-    return this.api.post<string>(`tasks/${project}/${task}/repository/install-webhook`, body);
+  updateTaskRepositoryConnection(
+    project: string,
+    task: string,
+    body: TaskRepositoryConnectionAndCommitStatusPatchRequest,
+  ): Observable<TaskRepositoryResponse> {
+    return this.api.patch<TaskRepositoryResponse>(`tasks/${project}/${task}/repository`, body);
   }
 
-  installDeployKey(project: string, task: string, body: InstallDeployKeyRequest): Observable<string> {
-    return this.api.post<string>(`tasks/${project}/${task}/repository/install-deploy-key`, body);
+  postPendingTestCommitStatus(project: string, task: string): Observable<TaskCommitStatusPostAttempt> {
+    return this.api.post<TaskCommitStatusPostAttempt>(`tasks/${project}/${task}/repository/status-test`);
+  }
+
+  installWebhook(project: string, task: string): Observable<string> {
+    return this.api.post<string>(`tasks/${project}/${task}/repository/install-webhook`);
+  }
+
+  installDeployKey(project: string, task: string): Observable<string> {
+    return this.api.post<string>(`tasks/${project}/${task}/repository/install-deploy-key`);
   }
 
   deactivateTask(project: string, task: string): Observable<string> {

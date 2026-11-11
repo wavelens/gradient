@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { RepositoryIntegration, TaskRepositoryResponse } from '@core/models';
+import { GitHostConnectionSummary, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
@@ -19,8 +19,9 @@ const state: TaskRepositoryResponse = {
   deploy_key: 'ssh-ed25519 AAAAkey',
   fetch: null,
   last_event: null,
-  report_status: null,
-  integrations: [],
+  report_status: false,
+  status_posts: [],
+  available_connections: [],
   can_edit: true,
   can_manage_integrations: true,
 };
@@ -169,27 +170,26 @@ describe('RepositoryAccessComponent', () => {
   });
 
   it('installs the deploy key through the Git host and tests access afterwards', () => {
-    const outbound: RepositoryIntegration = {
-      id: 'out1',
+    const connection: GitHostConnectionSummary = {
+      id: 'c1',
+      owner: { type: 'project', name: 'acme' },
       name: 'forgejo',
       display_name: 'forgejo.example.com',
-      kind: 'outbound',
       git_host_type: 'forgejo',
-      serves_repository: true,
-      webhook_url: null,
-      has_secret: false,
-      has_access_token: true,
+      receives_events: true,
+      reports_status: true,
+      can_manage: true,
     };
     const installDeployKey = vi.fn(() => of('acme/app'));
     const checkRepository = vi.fn(() => of('1a2b'));
-    const fixture = render({ integrations: [outbound] }, { installDeployKey, checkRepository });
+    const fixture = render({ git_host_connection: connection }, { installDeployKey, checkRepository });
     const el = fixture.nativeElement as HTMLElement;
     (el.querySelector('[data-testid="install-deploy-key"]') as HTMLButtonElement).click();
-    expect(installDeployKey).toHaveBeenCalledWith('acme', 'app', { outbound_integration: 'out1' });
+    expect(installDeployKey).toHaveBeenCalledWith('acme', 'app');
     expect(checkRepository).toHaveBeenCalled();
   });
 
-  it('hides the deploy key install without a Git host token', () => {
+  it('hides the deploy key install without a git host connection that reports status', () => {
     const el = render({}, {}).nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="install-deploy-key"]')).toBeNull();
   });

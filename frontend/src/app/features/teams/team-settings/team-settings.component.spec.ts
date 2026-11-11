@@ -29,9 +29,9 @@ const team: TeamResponse = {
   new_project_role: null,
 };
 
-function setup(superuser: boolean, managed = false) {
+function setup(superuser: boolean, managed = false, role: TeamResponse['role'] = 'admin') {
   const update = vi.fn().mockReturnValue(of('Team updated'));
-  const resolved: TeamResponse = { ...team, managed, oidc_group: managed ? 'ci-admins' : null };
+  const resolved: TeamResponse = { ...team, managed, role, oidc_group: managed ? 'ci-admins' : null };
   const remove = vi.fn().mockReturnValue(of('Team deleted'));
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest) => request.action());
@@ -90,6 +90,17 @@ describe('TeamSettingsComponent', () => {
     expect(input(fixture, 'team-display-name').disabled).toBe(true);
     expect(input(fixture, 'team-oidc-group').value).toBe('ci-admins');
     expect(input(fixture, 'team-oidc-group').disabled).toBe(true);
+  });
+
+  it('links every member to the git host connections and only admins to event notifications', () => {
+    const rowLinks = (role: TeamResponse['role']) => {
+      TestBed.resetTestingModule();
+      const { fixture } = setup(false, false, role);
+      return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).map((a) => a.getAttribute('href'));
+    };
+    expect(rowLinks('member')).toContain('/team/platform/git-host-connections');
+    expect(rowLinks('member')).not.toContain('/team/platform/webhooks');
+    expect(rowLinks('admin')).toEqual(expect.arrayContaining(['/team/platform/git-host-connections', '/team/platform/webhooks']));
   });
 
   it('leaves the new project grants to superusers', () => {

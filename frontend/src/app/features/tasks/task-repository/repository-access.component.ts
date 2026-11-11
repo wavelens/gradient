@@ -23,7 +23,7 @@ import { ConfirmService } from '@shared/confirm';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { RelativeTimePipe } from '@shared/text';
 import { fieldChecks, firstFieldError, unsavedChanges } from '@shared/forms';
-import { provisioningIntegration } from './provisioning';
+import { canInstallWebhookOrDeployKeyForTask } from './provisioning';
 
 @Component({
   selector: 'app-repository-access',
@@ -68,7 +68,7 @@ export class RepositoryAccessComponent {
   });
   links = computed(() => gitHostSettingsLinks(this.state().repository, this.gitHost()));
   isGitHub = computed(() => repositoryHost(this.state().repository) === 'github.com');
-  provisioner = computed(() => (this.state().deploy_key ? provisioningIntegration(this.state()) : null));
+  shouldShowInstallDeployKeyButton = computed(() => !!this.state().deploy_key && canInstallWebhookOrDeployKeyForTask(this.state()));
   fetchOk = computed(() => {
     const fetch = this.state().fetch;
     return fetch && !fetch.failed ? fetch : null;
@@ -176,10 +176,9 @@ export class RepositoryAccessComponent {
   }
 
   installDeployKey(): void {
-    const outbound = this.provisioner()?.id;
-    if (!outbound || this.installingKey()) return;
+    if (!this.shouldShowInstallDeployKeyButton() || this.installingKey()) return;
     this.installingKey.set(true);
-    this.tasks.installDeployKey(this.project(), this.task(), { outbound_integration: outbound }).subscribe({
+    this.tasks.installDeployKey(this.project(), this.task()).subscribe({
       next: () => {
         this.installingKey.set(false);
         this.notify.success('Deploy key installed');
