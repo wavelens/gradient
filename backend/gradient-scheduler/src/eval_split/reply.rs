@@ -610,6 +610,7 @@ mod tests {
             .append_query_results([vec![done.clone()]])
             .append_query_results([Vec::<MEvalShard>::new()])
             .append_query_results([Vec::<MEvalShard>::new()])
+            .append_query_results([Vec::<MEvalShard>::new()])
             .append_query_results([Vec::<BTreeMap<&str, sea_orm::Value>>::new()])
             .into_connection();
         let scheduler = scheduler(db);

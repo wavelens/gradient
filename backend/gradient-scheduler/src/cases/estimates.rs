@@ -367,6 +367,7 @@ async fn e11_a_row_without_a_build_time_from_a_lost_worker_caps_nothing() {
         .derivation_metric(|m| {
             m.build_cores = Some(64);
             m.peak_ram_mb = Some(30_000);
+            m.created_at = gradient_types::now();
         });
     let case = start(seed).await;
     case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
@@ -393,6 +394,7 @@ async fn e12_a_build_too_large_at_full_cores_starts_with_fewer() {
                 m.build_cores = Some(cores);
                 m.peak_ram_mb = Some(peak);
                 m.build_time_ms = Some(60_000);
+                m.created_at = gradient_types::now();
             });
         }
     }
@@ -425,6 +427,7 @@ async fn e13_a_kill_of_another_build_of_the_package_holds_without_a_fit() {
             m.oom_killed = true;
             m.build_cores = Some(16);
             m.peak_ram_mb = Some(20_000);
+            m.created_at = gradient_types::now();
         });
     let case = start(seed).await;
     case.connect(W1, w_build().cpus(16).slots(2).ram_total_mb(256_000), &[])

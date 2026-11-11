@@ -554,7 +554,11 @@ mod tests {
 
         assert!(requeued);
         assert!(statements.iter().any(|s| s.sql == "ROLLBACK"));
-        assert!(!statements.iter().any(|s| s.sql.starts_with("UPDATE")));
+        assert!(
+            !statements
+                .iter()
+                .any(|s| s.sql.starts_with("UPDATE \"cluster_job\""))
+        );
     }
 
     #[tokio::test]

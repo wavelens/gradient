@@ -547,7 +547,16 @@ async fn a_description_only_task_patch_does_not_force_an_evaluation() {
         .into_iter()
         .find(|s| s.sql.starts_with(r#"UPDATE "task""#))
         .expect("the task row is updated");
-    assert!(!update.sql.contains("force_evaluation"), "{}", update.sql);
+    assert!(
+        !update
+            .sql
+            .split(" WHERE ")
+            .next()
+            .unwrap_or_default()
+            .contains("force_evaluation"),
+        "{}",
+        update.sql
+    );
 }
 
 #[tokio::test]

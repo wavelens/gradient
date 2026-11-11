@@ -291,7 +291,7 @@ mod tests {
     async fn latest_resource_samples_are_the_newest_in_time_order() {
         let db = TestDatabase::create().await;
         let conn = db.connection();
-        let start = gradient_types::now();
+        let start = chrono::DateTime::UNIX_EPOCH.naive_utc();
         for minutes in [0, 2, 1, 3] {
             crate::rows::insert::<worker_sample::Entity, _>(
                 &conn,

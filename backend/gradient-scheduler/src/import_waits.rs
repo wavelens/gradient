@@ -261,7 +261,7 @@ mod tests {
     fn wait(evaluation: EvaluationId, builds: Vec<ImportedBuild>) -> ImportWait {
         ImportWait {
             worker: "w1".into(),
-            job_id: "eval:x".into(),
+            job_id: format!("eval:{evaluation}"),
             request_id: "r1".into(),
             evaluation,
             builds,
@@ -355,7 +355,10 @@ mod tests {
         let (a, b) = (imported("a.drv"), imported("b.drv"));
         let (patient, impatient) = (EvaluationId::now_v7(), EvaluationId::now_v7());
         let mut waits = Waits::default();
-        let fresh = wait(impatient, vec![b.clone()]);
+        let fresh = ImportWait {
+            request_id: "r2".into(),
+            ..wait(impatient, vec![b.clone()])
+        };
         let old = |evaluation| ImportWait {
             since: fresh.since - chrono::Duration::minutes(10),
             ..wait(evaluation, vec![a.clone(), b.clone()])

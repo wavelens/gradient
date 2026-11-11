@@ -188,6 +188,6 @@ mod tests {
         .await
         .err()
         .expect("rejected refresh");
-        assert!(err.to_string().contains("invalid_grant"), "got: {err}");
+        assert!(format!("{err:#}").contains("invalid_grant"), "got: {err:#}");
     }
 }

@@ -403,6 +403,7 @@ mod tests {
                 cluster.dissolve_after = Some(long_ago + chrono::Duration::seconds(30));
             })
             .split_member_of(split, "primary", 0)
+            .evaluation(EvaluationId::now_v7())
             .cluster(plain, false, 2, ClusterJobStatus::Running, 1, long_ago)
             .evaluation_member_of(plain, "server", true, None)
             .into_database()
