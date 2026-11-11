@@ -14,6 +14,7 @@ pub mod team;
 
 pub(crate) use refusal::GitHostConnectionRefusal;
 
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::names::GitHostConnectionName;
@@ -25,6 +26,8 @@ use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_db::git_host_connections::{self as connections, GitHostConnectionOwnerByDatabaseId};
 use gradient_db::lookup::by_id;
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::*;
 use serde::{Deserialize, Serialize};
@@ -236,6 +239,27 @@ pub(crate) async fn load_of_owner(
         .or_not_found(Resource::GitHostConnection)
 }
 
+async fn write_audit(audit: &Audit, action: Action, connection: &MGitHostConnection) {
+    let owner = match GitHostConnectionOwnerByDatabaseId::of(connection) {
+        GitHostConnectionOwnerByDatabaseId::Instance => EventOwner::default(),
+        GitHostConnectionOwnerByDatabaseId::Team(team) => EventOwner::team(team),
+        GitHostConnectionOwnerByDatabaseId::Project(project) => EventOwner::project(project),
+    };
+    audit
+        .write(
+            action,
+            owner,
+            serde_json::json!({
+                "git_host_connection_id": connection.id.to_string(),
+                "name": connection.name,
+                "git_host_type": connection.git_host_type,
+                "receives_events": connection.receives_events,
+                "reports_status": connection.reports_status,
+            }),
+        )
+        .await;
+}
+
 fn reject_managed(connection: &MGitHostConnection) -> WebResult<()> {
     if connection.managed {
         return Err(
@@ -361,11 +385,13 @@ pub(crate) async fn create(
     owner: GitHostConnectionOwnerByDatabaseId,
     user: UserId,
     body: CreateGitHostConnectionRequest,
+    audit: &Audit,
 ) -> WebResult<GitHostConnectionResponse> {
     let git_host = parse_git_host(&body.git_host_type)?;
     let serve_url = &ci.db.config.server.serve_url;
     if git_host == GitHostType::GitHub {
         let created = create_github_app_connection(ci, owner, user, body.installation_id).await?;
+        write_audit(audit, Action::GitHostConnectionCreate, &created).await;
         return response(&ci.db.web_db, serve_url, created).await;
     }
 
@@ -419,6 +445,7 @@ pub(crate) async fn create(
     let created = gradient_db::rows::insert::<EGitHostConnection, _>(&ci.db.web_db, connection)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GitHostConnectionName))?;
+    write_audit(audit, Action::GitHostConnectionCreate, &created).await;
     let mut out = response(&ci.db.web_db, serve_url, created).await?;
     out.generated_secret = generated_secret;
     Ok(out)
@@ -429,6 +456,7 @@ pub(crate) async fn patch(
     owner: GitHostConnectionOwnerByDatabaseId,
     id: GitHostConnectionId,
     body: PatchGitHostConnectionRequest,
+    audit: &Audit,
 ) -> WebResult<GitHostConnectionResponse> {
     let current = load_of_owner(&ci.db.web_db, owner, id).await?;
     reject_managed(&current)?;
@@ -488,6 +516,7 @@ pub(crate) async fn patch(
     let updated = connections::write_all_columns_of_git_host_connection(&ci.db.web_db, next)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GitHostConnectionName))?;
+    write_audit(audit, Action::GitHostConnectionUpdate, &updated).await;
     let mut out = response(&ci.db.web_db, &ci.db.config.server.serve_url, updated).await?;
     out.generated_secret = generated_secret;
     Ok(out)
@@ -497,10 +526,12 @@ pub(crate) async fn delete(
     db: &impl sea_orm::ConnectionTrait,
     owner: GitHostConnectionOwnerByDatabaseId,
     id: GitHostConnectionId,
+    audit: &Audit,
 ) -> WebResult<()> {
     let connection = load_of_owner(db, owner, id).await?;
     reject_managed(&connection)?;
-    gradient_db::rows::delete::<EGitHostConnection, _>(db, connection).await?;
+    gradient_db::rows::delete::<EGitHostConnection, _>(db, connection.clone()).await?;
+    write_audit(audit, Action::GitHostConnectionDelete, &connection).await;
     Ok(())
 }
 

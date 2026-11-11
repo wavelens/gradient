@@ -10,6 +10,7 @@ use super::{
 };
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::ProjectPath;
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -84,10 +85,18 @@ pub async fn list_project_git_host_connections(
 pub async fn create_project_git_host_connection(
     ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
     State(state): State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<CreateGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::create(&state.ci(), Owner::Project(project.id), user.id, body).await?,
+        super::create(
+            &state.ci(),
+            Owner::Project(project.id),
+            user.id,
+            body,
+            &audit,
+        )
+        .await?,
     ))
 }
 
@@ -131,6 +140,7 @@ pub async fn patch_project_git_host_connection(
         project, params, ..
     }: ProjectScope<Requires<can::ManageIntegrations>>,
     State(state): State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
@@ -139,6 +149,7 @@ pub async fn patch_project_git_host_connection(
             Owner::Project(project.id),
             params.param("id")?,
             body,
+            &audit,
         )
         .await?,
     ))
@@ -161,8 +172,15 @@ pub async fn delete_project_git_host_connection(
         params,
         ..
     }: ProjectScope<Requires<can::ManageIntegrations>>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    super::delete(&db.web_db, Owner::Project(project.id), params.param("id")?).await?;
+    super::delete(
+        &db.web_db,
+        Owner::Project(project.id),
+        params.param("id")?,
+        &audit,
+    )
+    .await?;
     Ok(ok_json(true))
 }
 

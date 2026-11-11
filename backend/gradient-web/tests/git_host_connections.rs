@@ -455,3 +455,158 @@ async fn project_members_can_list_incoming_webhook_deliveries_of_project_git_hos
     assert_eq!(deliveries[0]["queued"], 1);
     s.db.finish().await;
 }
+
+#[tokio::test]
+async fn creating_updating_and_deleting_a_project_git_host_connection_writes_audit_events() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+
+    let created = s
+        .server
+        .put(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH)
+        .add_header("authorization", &s.auth)
+        .json(&json!({ "name": "gitea", "git_host_type": "gitea" }))
+        .await;
+    created.assert_status_ok();
+    let path = format!(
+        "{TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH}/{}",
+        created.json::<Value>()["message"]["id"].as_str().unwrap()
+    );
+    s.server
+        .patch(&path)
+        .add_header("authorization", &s.auth)
+        .json(&json!({ "display_name": "Gitea" }))
+        .await
+        .assert_status_ok();
+    s.server
+        .delete(&path)
+        .add_header("authorization", &s.auth)
+        .await
+        .assert_status_ok();
+
+    let mut events: Vec<(chrono::NaiveDateTime, String)> =
+        s.db.rows::<gradient_entity::audit_log::Entity>()
+            .await
+            .into_iter()
+            .filter(|row| row.event.starts_with("git_host_connection."))
+            .map(|row| (row.created_at, row.event))
+            .collect();
+    events.sort();
+    let events: Vec<String> = events.into_iter().map(|(_, event)| event).collect();
+    assert_eq!(
+        events,
+        [
+            "git_host_connection.create",
+            "git_host_connection.update",
+            "git_host_connection.delete"
+        ]
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn replacing_the_access_token_ends_the_automatic_token_refresh() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let connection = insert_test_git_host_connection(
+        &s,
+        git_host_connection::Model {
+            encrypted_refresh_token: Some("encrypted".into()),
+            access_token_expires_at: Some(test_date()),
+            ..build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+                project_id(),
+                "https://gitea.example.com",
+                true,
+            )
+        },
+    )
+    .await;
+    let path = format!("{TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH}/{}", connection.id);
+
+    let before = s
+        .server
+        .get(&path)
+        .add_header("authorization", &s.auth)
+        .await;
+    assert_eq!(
+        before.json::<Value>()["message"]["access_token_refreshes_automatically"],
+        true
+    );
+    let after = s
+        .server
+        .patch(&path)
+        .add_header("authorization", &s.auth)
+        .json(&json!({ "access_token": "new-token" }))
+        .await;
+
+    after.assert_status_ok();
+    assert_eq!(
+        after.json::<Value>()["message"]["access_token_refreshes_automatically"],
+        false
+    );
+    let stored = s.db.rows::<git_host_connection::Entity>().await;
+    assert_eq!(stored[0].encrypted_refresh_token, None);
+    assert_eq!(stored[0].access_token_expires_at, None);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn moving_a_task_needs_a_git_host_connection_the_target_project_can_use() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let conn = s.db.connection();
+    let target = project::Model {
+        id: ProjectId::now_v7(),
+        name: "target-project".into(),
+        ..rows::project()
+    };
+    gradient_db::rows::insert::<project::Entity, _>(&conn, target.clone())
+        .await
+        .unwrap();
+    gradient_db::rows::insert::<gradient_entity::project_user::Entity, _>(
+        &conn,
+        gradient_entity::project_user::Model {
+            project: target.id,
+            ..rows::project_member(rows::admin_role().id)
+        },
+    )
+    .await
+    .unwrap();
+    let project_connection = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            false,
+        ),
+    )
+    .await;
+    let instance_connection = insert_test_git_host_connection(
+        &s,
+        git_host_connection::Model {
+            project: None,
+            ..build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+                project_id(),
+                "https://gitea.example.com",
+                false,
+            )
+        },
+    )
+    .await;
+    let use_connection = |id: GitHostConnectionId| {
+        format!(
+            "UPDATE task SET git_host_connection = '{id}' WHERE id = '{}'",
+            gradient_fixtures::ids::task_id()
+        )
+    };
+    let transfer = || {
+        s.server
+            .post("/api/v1/tasks/test-project/test-task/transfer")
+            .add_header("authorization", &s.auth)
+            .json(&json!({ "project": "target-project" }))
+    };
+
+    s.db.execute(&use_connection(project_connection.id)).await;
+    transfer().await.assert_status_conflict();
+
+    s.db.execute(&use_connection(instance_connection.id)).await;
+    transfer().await.assert_status_ok();
+    s.db.finish().await;
+}

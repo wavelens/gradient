@@ -7,6 +7,7 @@
 use super::{RepositoryFetchStatus, error_message_if_caller_can_edit_task};
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::TaskPath;
+use crate::audit::Audit;
 use crate::authorization::ApiKeyContext;
 use crate::endpoints::git_host_connections::{
     self as connections, GitHostConnectionRefusal, GitHostConnectionSummary,
@@ -28,6 +29,8 @@ use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_db::git_host_connections::list_git_host_connections_available_to_project;
 use gradient_sources::format_public_key;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -237,6 +240,7 @@ pub async fn save_task_repository_connection_and_commit_status(
         db,
         ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    audit: Audit,
     JsonBody(body): JsonBody<TaskRepositoryConnectionAndCommitStatusPatchRequest>,
 ) -> WebResult<Json<BaseResponse<TaskRepositoryResponse>>> {
     match body.git_host_connection {
@@ -261,6 +265,16 @@ pub async fn save_task_repository_connection_and_commit_status(
     active.git_host_connection = Set(body.git_host_connection);
     active.report_status = Set(body.report_status);
     let task = gradient_db::tasks::update(&db.web_db, active).await?;
+    audit
+        .write(
+            Action::TaskRepositorySettingsReplaced,
+            EventOwner::task(project.id, task.id),
+            serde_json::json!({
+                "git_host_connection": task.git_host_connection.map(|id| id.to_string()),
+                "report_status": task.report_status,
+            }),
+        )
+        .await;
     Ok(ok_json(
         repository_response(&db, &project, &task, &user, api_key.as_ref()).await?,
     ))

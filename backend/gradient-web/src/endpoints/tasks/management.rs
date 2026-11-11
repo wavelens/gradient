@@ -819,7 +819,7 @@ pub async fn duplicate_task(
     operation_id = "transferTask",
     tag = "tasks",
     summary = "Move task to another project",
-    description = "Moves the task into the project named in the body. Allowed for the task owner or a member with the edit-task permission, who also needs the create-task permission in the target project. Rejects state-managed tasks and target projects. Reject tasks that use an integration with a Git host in a trigger or action. Return `409` for a name already taken in the target project.",
+    description = "Move the task to the project in the request body. The task owner can move the task. A member with edit-task permission can also move the task, but that member must also have create-task permission in the target project. Reject tasks and target projects under state management. A task can use a connection to a Git host in repository settings or in an action to open a pull request. Reject that task if the connection is unavailable to the target project. Return `409` for a name already present in the target project.",
     params(TaskPath),
     request_body = TransferOwnershipRequest,
     responses((status = OK, description = "Task moved", body = String, content_type = "application/json"), WebError)

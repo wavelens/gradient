@@ -8,6 +8,7 @@ use super::{
     CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
     IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -48,10 +49,11 @@ pub async fn list_instance_git_host_connections(
 pub async fn create_instance_git_host_connection(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    audit: Audit,
     JsonBody(body): JsonBody<CreateGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::create(&state.ci(), Owner::Instance, user.id, body).await?,
+        super::create(&state.ci(), Owner::Instance, user.id, body, &audit).await?,
     ))
 }
 
@@ -88,10 +90,11 @@ pub async fn get_instance_git_host_connection(
 pub async fn patch_instance_git_host_connection(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<GitHostConnectionId>,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::patch(&state.ci(), Owner::Instance, id, body).await?,
+        super::patch(&state.ci(), Owner::Instance, id, body, &audit).await?,
     ))
 }
 
@@ -108,8 +111,9 @@ pub async fn patch_instance_git_host_connection(
 pub async fn delete_instance_git_host_connection(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<GitHostConnectionId>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    super::delete(&state.web_db, Owner::Instance, id).await?;
+    super::delete(&state.web_db, Owner::Instance, id, &audit).await?;
     Ok(ok_json(true))
 }
 

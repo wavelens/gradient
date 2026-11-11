@@ -9,6 +9,7 @@ use super::{
     IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
 use crate::api_spec::TeamPath;
+use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -59,10 +60,11 @@ pub async fn list_team_git_host_connections(
 pub async fn create_team_git_host_connection(
     TeamScope { team, user, .. }: TeamScope<AdminUnmanaged>,
     State(state): State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<CreateGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::create(&state.ci(), Owner::Team(team.id), user.id, body).await?,
+        super::create(&state.ci(), Owner::Team(team.id), user.id, body, &audit).await?,
     ))
 }
 
@@ -100,10 +102,18 @@ pub async fn get_team_git_host_connection(
 pub async fn patch_team_git_host_connection(
     TeamScope { team, params, .. }: TeamScope<Admin>,
     State(state): State<Arc<ServerState>>,
+    audit: Audit,
     JsonBody(body): JsonBody<PatchGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::patch(&state.ci(), Owner::Team(team.id), params.param("id")?, body).await?,
+        super::patch(
+            &state.ci(),
+            Owner::Team(team.id),
+            params.param("id")?,
+            body,
+            &audit,
+        )
+        .await?,
     ))
 }
 
@@ -121,8 +131,15 @@ pub async fn delete_team_git_host_connection(
     TeamScope {
         team, db, params, ..
     }: TeamScope<Admin>,
+    audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    super::delete(&db.web_db, Owner::Team(team.id), params.param("id")?).await?;
+    super::delete(
+        &db.web_db,
+        Owner::Team(team.id),
+        params.param("id")?,
+        &audit,
+    )
+    .await?;
     Ok(ok_json(true))
 }
 
