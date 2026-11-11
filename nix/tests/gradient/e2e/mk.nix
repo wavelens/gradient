@@ -2581,7 +2581,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(f"gradient-worker stopped in {stop_secs:.1f}s")
     assert stop_secs < 40, f"an idle worker took {stop_secs:.1f}s to stop"
     builder.succeed(
-        "journalctl -u gradient-worker --no-pager | grep -q 'A stop request arrived'"
+        "journalctl -u gradient-worker --no-pager | grep -q 'stop requested; aborting running jobs'"
     )
     assert builder.succeed(
         "systemctl show -p Result --value gradient-worker.service"

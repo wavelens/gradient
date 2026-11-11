@@ -538,7 +538,6 @@ in {
             Restart = "on-failure";
             RestartSec = 10;
             KillMode = "mixed";
-            TimeoutStopSec = lib.mkDefault "infinity";
             LimitNOFILE = 65535;
             MemorySwapMax = lib.mkIf cfg.exec.noSwap 0;
             RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
