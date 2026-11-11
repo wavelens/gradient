@@ -25,12 +25,14 @@ mod session;
 mod store;
 mod store_paths;
 
+pub use auth::open_project_store_backend_for_api_key;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use russh::server::Server as _;
-use session::SshHandles;
+pub use session::SshHandles;
 use std::sync::Arc;
 use std::time::Duration;
+pub use store::SshBackend;
 use tokio::net::TcpListener;
 
 const ROOTS_TTL: Duration = Duration::from_secs(3600);
