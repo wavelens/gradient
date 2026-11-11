@@ -32,9 +32,7 @@ pub struct GiteaOAuth2ApplicationArgs {
     #[arg(value_enum, default_value_t = GitHostSoftwareChoice::Forgejo)]
     pub git_host_type: GitHostSoftwareChoice,
     /// The client ID for the OAuth2 application.
-    #[arg(id = "gitea-app-client-id")]
     pub client_id: Option<String>,
     /// Path to the file with the client secret for the OAuth2 application. Register an application on the Git host with redirect URI `<serve URL>/api/v1/integrations/oauth/callback`.
-    #[arg(id = "gitea-app-client-secret-file")]
     pub client_secret_file: Option<String>,
 }

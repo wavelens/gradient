@@ -14,7 +14,6 @@ use gradient_derive::config_group;
 pub struct MetricsArgs {
     /// Path to a file containing the bearer token required to scrape `/metrics`. An unset path is
     /// disabling the metrics endpoint with 404. The server reads the file once at startup.
-    #[arg(id = "metrics-token-file")]
     pub token_file: Option<String>,
 
     /// Seconds between metric rollup passes.

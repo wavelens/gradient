@@ -159,7 +159,7 @@ fn name_option(field: &mut Field, group: &Group) -> syn::Result<TokenStream> {
     };
     field
         .attrs
-        .push(syn::parse_quote!(#[arg(long = #flag #env_arg)]));
+        .push(syn::parse_quote!(#[arg(id = #flag, long = #flag #env_arg)]));
 
     let group_name = &group.name;
     let field_name = ident.to_string();
@@ -188,10 +188,12 @@ fn reject_hand_written_names(attr: &Attribute) -> syn::Result<()> {
     let mut starts_entry = true;
     for token in list.tokens.clone() {
         match &token {
-            TokenTree::Ident(ident) if starts_entry && (ident == "long" || ident == "env") => {
+            TokenTree::Ident(ident)
+                if starts_entry && (ident == "id" || ident == "long" || ident == "env") =>
+            {
                 return Err(syn::Error::new_spanned(
                     ident,
-                    "`config_group` derives the flag and the env name from the group and the field",
+                    "`config_group` can derive the argument ID, the flag, and the name of the environment variable from the group and the field.",
                 ));
             }
             TokenTree::Punct(punct) => starts_entry = punct.as_char() == ',',

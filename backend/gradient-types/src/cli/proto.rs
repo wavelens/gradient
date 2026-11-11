@@ -31,12 +31,12 @@ pub struct ProtoArgs {
     pub allow_worker_urls_on_private_networks: bool,
 
     /// Maximum simultaneous `/proto` WebSocket connections.
-    #[arg(id = "proto-max-connections", default_value = "256")]
+    #[arg(default_value = "256")]
     pub max_connections: NonZeroUsize,
 
     /// Maximum number of simultaneous `/proto` WebSocket connections from one IP address of a
     /// client. Raise this value when many workers connect through one NAT address.
-    #[arg(id = "proto-max-connections-per-ip", default_value = "64")]
+    #[arg(default_value = "64")]
     pub max_connections_per_ip: NonZeroUsize,
 
     /// Seconds a connected worker can stay silent before counting as dead, with its jobs

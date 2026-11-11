@@ -12,6 +12,6 @@ use gradient_derive::config_group;
 pub struct ExecArgs {
     /// Whether to enable exec jobs. When disabled, exec entry points fail with a message
     /// instead of starting a job.
-    #[arg(id = "exec-enable", default_value = "true")]
+    #[arg(default_value = "true")]
     pub enable: bool,
 }

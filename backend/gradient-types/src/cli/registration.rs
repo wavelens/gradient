@@ -11,6 +11,6 @@ use gradient_derive::config_group;
 #[derive(Args, Debug, Clone)]
 pub struct RegistrationArgs {
     /// Whether to enable self-service user registration.
-    #[arg(id = "registration-enable", default_value = "true")]
+    #[arg(default_value = "true")]
     pub enable: bool,
 }

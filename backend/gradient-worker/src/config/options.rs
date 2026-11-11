@@ -235,7 +235,7 @@ pub struct NixDaemonArgs {
 #[derive(Args, Debug, Clone)]
 pub struct EvalArgs {
     /// Maximum simultaneous evaluations.
-    #[arg(id = "eval-max-concurrent", default_value = "1")]
+    #[arg(default_value = "1")]
     pub max_concurrent: NonZeroU32,
 
     /// Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes
@@ -273,7 +273,7 @@ pub struct EvalArgs {
 #[derive(Args, Debug, Clone)]
 pub struct BuildArgs {
     /// Maximum simultaneous builds.
-    #[arg(id = "build-max-concurrent", default_value = "32")]
+    #[arg(default_value = "32")]
     pub max_concurrent: NonZeroU32,
 
     /// CPU cores for a build, passed as `--cores`. `null` for every core.

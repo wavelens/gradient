@@ -45,7 +45,6 @@ pub struct NarArgs {
     /// Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB.
     /// Smaller chunks can help slow or high-latency links like Tailscale over DERP.
     #[arg(
-        id = "nar-chunk-bytes",
         value_parser = clap::value_parser!(u64).range(crate::NAR_CHUNK_BYTES_RANGE),
         default_value_t = 512 * 1024,
     )]

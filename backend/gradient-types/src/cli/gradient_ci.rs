@@ -11,6 +11,6 @@ use gradient_derive::config_group;
 #[derive(Args, Debug, Clone)]
 pub struct GradientCiArgs {
     /// Whether to enable the Gradient.CI Servers offer on the workers pages.
-    #[arg(id = "gradient-ci-enable", default_value = "true")]
+    #[arg(default_value = "true")]
     pub enable: bool,
 }

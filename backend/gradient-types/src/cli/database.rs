@@ -21,7 +21,7 @@ pub struct DatabaseArgs {
     /// {option}`services.gradient.database.cache.maxConnections` and
     /// {option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`
     /// must accommodate that sum.
-    #[arg(id = "database-max-connections", default_value = "16")]
+    #[arg(default_value = "16")]
     pub max_connections: NonZeroU32,
 
     /// Minimum connections kept open in the scheduler and worker pool.

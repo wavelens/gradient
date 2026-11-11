@@ -11,7 +11,7 @@ use gradient_derive::config_group;
 #[derive(Args, Debug, Clone)]
 pub struct EmailArgs {
     /// Whether to enable sending email.
-    #[arg(id = "email-enable", default_value = "false")]
+    #[arg(default_value = "false")]
     pub enable: bool,
     /// Whether to enable email verification for new accounts.
     #[arg(default_value = "false")]
