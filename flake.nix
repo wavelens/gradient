@@ -119,7 +119,6 @@
         pkg-config
         rustc
         rustfmt
-        sea-orm-cli
         rustEnv
         rust-analyzer
 
