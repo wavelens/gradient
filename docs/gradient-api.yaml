@@ -162,6 +162,198 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/admin/git-host-connections:
+    get:
+      tags:
+      - admin
+      summary: List instance git host connections
+      description: List the Git host connections of the instance. Each installation of a GitHub App has one. Every project can use them.
+      operationId: listInstanceGitHostConnections
+      responses:
+        '200':
+          description: Instance Connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitHostConnectionSummary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - admin
+      summary: Create instance git host connection
+      description: Create a Git host connection for the instance. Set `git_host_type` to `github` for an installation of a GitHub App. Pass the `installation_id` of that installation. The connection name is `github-<account>`.
+      operationId: createInstanceGitHostConnection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGitHostConnectionRequest'
+        required: true
+      responses:
+        '200':
+          description: Connection created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/admin/git-host-connections/{id}:
+    get:
+      tags:
+      - admin
+      summary: Get instance git host connection
+      operationId: getInstanceGitHostConnection
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - admin
+      summary: Delete instance git host connection
+      description: Delete a connection to a Git host for the instance. Removal of a connection for a GitHub App doesn't uninstall the App on GitHub. The next install webhook can add it again.
+      operationId: deleteInstanceGitHostConnection
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    patch:
+      tags:
+      - admin
+      summary: Update instance git host connection
+      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.
+      operationId: patchInstanceGitHostConnection
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchGitHostConnectionRequest'
+        required: true
+      responses:
+        '200':
+          description: Connection updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/admin/git-host-connections/{id}/deliveries:
+    get:
+      tags:
+      - admin
+      summary: List incoming webhook deliveries
+      description: List the latest 50 webhook deliveries that reached the connection, newest first. Show the HTTP status and result that Gradient returned.
+      operationId: listInstanceGitHostConnectionDeliveries
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Delivery, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/admin/github-app/callback:
     get:
       tags:
@@ -328,21 +520,21 @@ paths:
       - admin
       summary: Export the live state configuration
       description: |-
-        Reconstructs the current users, projects, tasks, caches,
-        custom roles, API keys, teams with their members and grants, workers
-        (team workers name their team) and integrations into a
-        declarative `services.gradient.state` shape, so operators can codify
-        the running system back into their nix configuration.
+        This endpoint can rebuild a set of resources into declarative `services.gradient.state` format.
+        The resources are current users, projects, tasks, cache,
+        custom roles, API keys, teams with members and grants, workers
+        (team workers list their own team name) and connections to Git hosts.
+        Admins can copy the running system back into their own nix config.
 
-        Every credential-file field (`password_file`, `private_key_file`,
+        Fields of the credentials file (`password_file`, `private_key_file`,
         `signing_key_file`, `token_file`, `key_file`, `secret_file`,
-        `access_token_file`) is redacted to `null` - the hashed/encrypted
-        secrets cannot be recovered and must be filled in by hand. GitHub
-        integration rows are exported with their `installation_id` /
-        `account_login`. The auto-managed `build-request` task and the
-        built-in `Admin`/`Write`/`View` roles are omitted.
+        `access_token_file`) go into `null` as redacted values. The admin can't restore hashed or encrypted
+        secrets. Enter the secrets by hand. Connections for GitHub App
+        go into the export with `installation_id` /
+        `account_login`. Automatically managed `build-request` tasks and
+        built-in roles `Admin`/`Write`/`View` stay out of the export.
 
-        Requires `superuser`.
+        The export needs `superuser`.
       operationId: exportState
       parameters:
       - name: format
@@ -2588,44 +2780,6 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/builds/{build}/attempts:
-    get:
-      tags:
-      - builds
-      summary: List build attempts
-      description: |-
-        Returns every attempt of the build, oldest first. `number` counts from 1 and is the value that the `attempt` parameter of the log endpoints takes. A build is shared between evaluations of the same derivation, so the list can contain attempts that another evaluation started. `worker` is the ID of the worker that ran the attempt. It is empty for an attempt that failed before a worker picked it up.
-
-        **Access:** is identical to `GET /builds/{build}/log`.
-      operationId: listBuildAttempts
-      parameters:
-      - name: build
-        in: path
-        required: true
-        schema:
-          $ref: '#/components/schemas/BuildJobId'
-      responses:
-        '200':
-          description: Build Attempts
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/BuildAttemptResponse'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - {}
-      - bearerAuth: []
   /api/v1/builds/{build}/closure:
     get:
       tags:
@@ -2880,8 +3034,6 @@ paths:
         own, so the log of the most recent prior build of the same derivation is
         returned instead. The chunk/lines endpoints fall back the same way.
 
-        This endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.
-
         **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuildLog
       parameters:
@@ -2895,14 +3047,6 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/BuildLogOutputFormat'
-      - name: attempt
-        in: query
-        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
-        required: false
-        schema:
-          type: integer
-          format: int32
-          minimum: 0
       responses:
         '200':
           description: Build log
@@ -2979,14 +3123,6 @@ paths:
           type: integer
           format: int32
           minimum: 0
-      - name: attempt
-        in: query
-        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
-        required: false
-        schema:
-          type: integer
-          format: int32
-          minimum: 0
       responses:
         '200':
           description: Chunk plaintext
@@ -3018,14 +3154,6 @@ paths:
         required: true
         schema:
           $ref: '#/components/schemas/BuildJobId'
-      - name: attempt
-        in: query
-        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
-        required: false
-        schema:
-          type: integer
-          format: int32
-          minimum: 0
       responses:
         '200':
           description: Chunk index
@@ -3084,14 +3212,6 @@ paths:
         required: false
         schema:
           type: string
-      - name: attempt
-        in: query
-        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
-        required: false
-        schema:
-          type: integer
-          format: int32
-          minimum: 0
       responses:
         '200':
           description: Line range plaintext
@@ -3133,14 +3253,6 @@ paths:
         required: false
         schema:
           type: boolean
-      - name: attempt
-        in: query
-        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
-        required: false
-        schema:
-          type: integer
-          format: int32
-          minimum: 0
       responses:
         '200':
           description: NDJSON stream of search hits, terminated by a done frame
@@ -3190,7 +3302,7 @@ paths:
       tags:
       - builds
       summary: Retry build
-      description: Requeue the `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` builds in a running evaluation. Include dependent builds in that evaluation that failed only because of the retried build. The `DependencyFailed` builds retry the failed builds underneath them. Reproducible builder failures also receive a retry. Retries add a build attempt each. Previous attempts and their logs stay readable through `GET /builds/{build}/attempts`. Finished evaluations don't change. Use `POST /evals/{evaluation}/retry` to start a new evaluation and rerun the failed builds. The caller must have `triggerEvaluation` permission on the project. Return 409 for a finished evaluation, a build in another status, no retryable failed dependencies, or a worker that hasn't acknowledged a previous cancel yet.
+      description: Queues a `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` build again, together with its dependents in the evaluation that failed only through it. A `DependencyFailed` build retries the failed builds below it. A reproducible builder failure is retried too. A retry reopens a `Failed` or `Aborted` evaluation that reached its build phase. Callers need the `triggerEvaluation` permission on the project. Answers 409 when the evaluation has completed or never reached its build phase, a newer or running evaluation of the task exists, the build has another status, no failed dependency is retryable, or its worker has not confirmed an earlier abort yet.
       operationId: retryBuild
       parameters:
       - name: build
@@ -4711,7 +4823,10 @@ paths:
       tags:
       - caches
       summary: Approve a subscription request
-      description: Convert pending requests into actual subscriptions. Requeue evaluations with no cache. Subscriptions take the mode from the project request. The optional body `mode` can lower access, for example from read-write to read-only. The body cannot grant more access. Provide `manageCacheSubscriptions`. The endpoint can also work with caches from the server configuration.
+      description: |-
+        Turns the pending request into a real subscription, using the mode the
+        project asked for, and re-queues any evaluation parked for want of a
+        cache. Requires `manageCacheSubscriptions`.
       operationId: approveCacheSubscriptionRequest
       parameters:
       - name: cache
@@ -4724,13 +4839,6 @@ paths:
         required: true
         schema:
           type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - $ref: '#/components/schemas/ApproveSubscriptionRequest'
-              - type: 'null'
       responses:
         '200':
           description: Subscription approved
@@ -6208,12 +6316,7 @@ paths:
       tags:
       - evaluations
       summary: Retry evaluation
-      description: |-
-        Start a new evaluation for the same commit without another fetch or evaluation. Put the UUID in `message`. Completed evaluations stay immutable. Status, duration and logs stay intact. Set `retry_of` to the completed evaluation.
-
-        The new evaluation can requeue every build from the completed evaluation that failed, timed out, was canceled, or failed because of dependencies. Reproducible builder failures go back in the queue too, regardless of the `retry_failed_builds` value on the task. Reuse every build that already succeeded.
-
-        Triggers don't run. Store the caller as `triggered_by`. The caller must have `triggerEvaluation` permission on the project. Return 409 during an active run of the evaluation or of another evaluation on its task.
+      description: Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.
       operationId: retryEvaluation
       parameters:
       - name: evaluation
@@ -6708,7 +6811,7 @@ paths:
       - exec-jobs
       summary: List pull requests of an exec job
       description: |-
-        Returns the pull requests the job opened or updated, newest first. `integration` is the id of the Git host integration that opened it.
+        List the pull requests that the job opened or updated, newest first. `git_host_connection` is the ID of the Git host connection that opened each one.
 
         **Access:** Public projects, or members of the project.
       operationId: listExecJobPullRequests
@@ -6894,8 +6997,7 @@ paths:
         - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
         - `issue_comment` - `/gradient run` / `/gradient approve` / `/gradient summary` maintainer commands.
         - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
-        - `installation` / `installation_repositories` - stores or clears the GitHub App
-          `installation_id` on the matching Gradient project.
+        - `installation` / `installation_repositories` - Create or update the connection to the Git host for the installation's instance. Delete that connection after installation removal.
         - `ping` - always returns 200.
 
         This endpoint is unauthenticated (verified via HMAC signature).
@@ -6934,27 +7036,57 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security: []
-  /api/v1/hooks/{git_host}/{project}/{integration_name}:
+  /api/v1/hooks/{connection}:
+    post:
+      tags:
+      - git-host-webhooks
+      summary: Receive Git host webhook
+      description: |-
+        Accept events from a Git host for one Git host connection. Authenticate the request with the secret stored on the connection.
+
+        Signature headers for each Git host.
+        - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 as hex)
+        - `gitlab`: `X-Gitlab-Token` (a comparison of a plaintext token)
+
+        Pushes queue evaluations for all active tasks that use this connection, have a matching trigger, and have a repository URL equal to the clone URL in the payload. Pushes with an all-zero `after` SHA (deleted branch or tag, or a test delivery) return `200` and do nothing.
+
+        Requests to this endpoint need no login. Signatures prove who the sender is.
+      operationId: gitHostConnectionWebhook
+      parameters:
+      - name: connection
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      requestBody:
+        content:
+          application/json:
+            schema: {}
+        required: true
+      responses:
+        '200':
+          description: Webhook processed (may include zero queued evaluations)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/IncomingWebhookResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security: []
+  /api/v1/hooks/{git_host}/{project}/{connection_name}:
     post:
       tags:
       - git-host-webhooks
       summary: Receive Git host push webhook
-      description: |-
-        Receives push events for a named inbound integration.
-        Authenticated via the integration's stored HMAC secret.
-
-        Signature header by Git host:
-        - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)
-        - `gitlab`: `X-Gitlab-Token` (plain token comparison)
-
-        On a matching push, queues an evaluation for every active task whose
-        `task_integration.inbound_integration` points at this row and whose
-        repository URL matches the webhook payload's clone URL.
-
-        A push carrying an all-zero `after` SHA (a branch/tag deletion or a
-        Git host "test" delivery) is accepted as a `200` no-op rather than rejected.
-
-        This endpoint is unauthenticated (verified via Git host specific signature).
+      description: Old webhook address can still serve requests. Gradient can find the connection for the project's Git host by name and handle requests like `POST /hooks/{connection}`. Path segment `git_host` can select the payload format.
       operationId: gitHostWebhook
       parameters:
       - name: git_host
@@ -6967,7 +7099,7 @@ paths:
         required: true
         schema:
           type: string
-      - name: integration_name
+      - name: connection_name
         in: path
         required: true
         schema:
@@ -7472,13 +7604,19 @@ paths:
       security:
       - {}
       - bearerAuth: []
-  /api/v1/projects/{project}/integrations:
+  /api/v1/projects/{project}/git-host-connections:
     get:
       tags:
-      - integrations
-      summary: List integrations
-      description: List all inbound and outbound integrations in this project.
-      operationId: listProjectIntegrations
+      - git-host-connections
+      summary: List usable git host connections
+      description: |-
+        List the connections to Git hosts that this project can use. These groups appear in the result.
+        - connections of the project
+        - connections of its owner team
+        - connections of the instance, with installations of the GitHub App
+
+        Credentials don't appear. `can_manage` is true for the connections of the project when the caller can manage integrations.
+      operationId: listProjectGitHostConnections
       parameters:
       - name: project
         in: path
@@ -7487,7 +7625,7 @@ paths:
           type: string
       responses:
         '200':
-          description: List of integrations
+          description: Usable connections
           content:
             application/json:
               schema:
@@ -7501,31 +7639,17 @@ paths:
                   message:
                     type: array
                     items:
-                      $ref: '#/components/schemas/IntegrationResponse'
+                      $ref: '#/components/schemas/GitHostConnectionSummary'
         default:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
     put:
       tags:
-      - integrations
-      summary: Create integration
-      description: |-
-        Creates a named inbound or outbound integration. `secret` and
-        `access_token` are stored encrypted and never returned in responses.
-        Name is unique within `(project, kind)`.
-
-        Creating an inbound integration without `secret` makes the server generate one. The create response returns it once in `generated_secret`. Later responses only show `has_secret`.
-
-        ``webhook_url`` is the address to enter on the Git host. The public server URL and the stored ``git_host_type`` form its base. The same integration can also use ``/hooks/gitea/...``, ``/hooks/forgejo/...`` and ``/hooks/gitlab/...`` as path segments for other self-hosted hosts.
-
-        `git_host_type: "github"` integrations are creatable by supplying
-        `installation_id`. The server App must be configured (else `400`);
-        the installation id is validated against the App (invalid id returns
-        `400`). An inbound and outbound integration pair is created
-        automatically, named `github-<account>`. Multiple installations per project
-        are supported (one per GitHub account).
-      operationId: createProjectIntegration
+      - git-host-connections
+      summary: Create project git host connection
+      description: Create a connection to a Git host for this project. The Git host can send webhooks to `webhook_url` with `receives_events`. The server can generate `secret` if absent and return the new value once in `generated_secret`. Use `reports_status` to post commit statuses with `base_url` and `access_token`. GitHub repositories use the GitHub App of the instance instead.
+      operationId: createProjectGitHostConnection
       parameters:
       - name: project
         in: path
@@ -7536,11 +7660,11 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateIntegrationRequest'
+              $ref: '#/components/schemas/CreateGitHostConnectionRequest'
         required: true
       responses:
         '200':
-          description: Integration created
+          description: Connection created
           content:
             application/json:
               schema:
@@ -7552,99 +7676,17 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/IntegrationResponse'
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/projects/{project}/integrations/connect:
-    post:
-      tags:
-      - integrations
-      summary: Connect a Git host
-      description: Create a webhook receiver and a status reporter for a Gitea, Forgejo or GitLab host in one call with `access_token` set. Both integrations share `name`. The `inbound.generated_secret` and `inbound.webhook_url` fields in the response contain the generated webhook secret (shown once) and the address to enter in the Git host. These integrations don't add triggers or actions to a task. Use `GET /projects/{project}/trigger-suggestions` to list the push triggers and pull request triggers that a task can add.
-      operationId: connectGitHost
-      parameters:
-      - name: project
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ConnectGitHostRequest'
-        required: true
-      responses:
-        '200':
-          description: Created Integration
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    $ref: '#/components/schemas/ConnectGitHostResponse'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
-  /api/v1/projects/{project}/integrations/summary:
+  /api/v1/projects/{project}/git-host-connections/{id}:
     get:
       tags:
-      - integrations
-      summary: List integration summaries (credential-free)
-      description: |-
-        List integrations as credential-free summaries. Available to **any
-        project member**, in contrast to the full listing which requires
-        `ManageIntegrations`.
-
-        The response excludes `secret`, `endpoint_url`, `access_token`, and
-        the `has_secret` / `has_access_token` booleans so non-admin members
-        cannot fingerprint credential state. Intended for UIs that only need
-        an integration's name and Git host type - e.g. populating the trigger
-        create/edit dropdown for users who hold `EditTask` but not
-        `ManageIntegrations`.
-      operationId: listProjectIntegrationSummaries
-      parameters:
-      - name: project
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: List of integration summaries
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/IntegrationSummaryResponse'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
-  /api/v1/projects/{project}/integrations/{id}:
-    get:
-      tags:
-      - integrations
-      summary: Get integration
-      operationId: getProjectIntegration
+      - git-host-connections
+      summary: Get project git host connection
+      operationId: getProjectGitHostConnection
       parameters:
       - name: project
         in: path
@@ -7655,10 +7697,10 @@ paths:
         in: path
         required: true
         schema:
-          $ref: '#/components/schemas/IntegrationId'
+          $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Integration
+          description: Connection
           content:
             application/json:
               schema:
@@ -7670,17 +7712,17 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/IntegrationResponse'
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
     delete:
       tags:
-      - integrations
-      summary: Delete integration
-      description: Deletes an integration. Any task `task_integration` rows referencing it are cleared via `ON DELETE SET NULL`. `git_host_type=github` rows can be deleted; deleting removes the installation binding for that account. State-managed integrations are rejected with `403`, other integrations of a state-managed project can be deleted.
-      operationId: deleteProjectIntegration
+      - git-host-connections
+      summary: Delete project git host connection
+      description: Delete the connection to the Git host. Tasks that use the connection lose the connection and stop reporting commit status.
+      operationId: deleteProjectGitHostConnection
       parameters:
       - name: project
         in: path
@@ -7691,7 +7733,7 @@ paths:
         in: path
         required: true
         schema:
-          $ref: '#/components/schemas/IntegrationId'
+          $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
           description: Deleted
@@ -7713,16 +7755,10 @@ paths:
       - bearerAuth: []
     patch:
       tags:
-      - integrations
-      summary: Update integration
-      description: |-
-        Patch-updates an integration. Omit a field to leave it unchanged.
-        Pass an empty string for `access_token` to **clear** it. Inbound integrations reject an empty `secret` with `400`.
-
-        `git_host_type=github` rows are managed by the App and installation; PATCH
-        rejects them with `400`. Delete the row to remove the integration.
-        State-managed integrations are rejected with `403`.
-      operationId: patchProjectIntegration
+      - git-host-connections
+      summary: Update project git host connection
+      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.
+      operationId: patchProjectGitHostConnection
       parameters:
       - name: project
         in: path
@@ -7733,16 +7769,16 @@ paths:
         in: path
         required: true
         schema:
-          $ref: '#/components/schemas/IntegrationId'
+          $ref: '#/components/schemas/GitHostConnectionId'
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchIntegrationRequest'
+              $ref: '#/components/schemas/PatchGitHostConnectionRequest'
         required: true
       responses:
         '200':
-          description: Updated integration
+          description: Updated connection
           content:
             application/json:
               schema:
@@ -7754,18 +7790,18 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/IntegrationResponse'
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/projects/{project}/integrations/{id}/deliveries:
+  /api/v1/projects/{project}/git-host-connections/{id}/deliveries:
     get:
       tags:
-      - integrations
+      - git-host-connections
       summary: List incoming webhook deliveries
-      description: List the latest webhook deliveries that reach an inbound integration, newest first. The HTTP status that Gradient returned and the result appear in every entry. Results cover a queued evaluation, a skipped task, no task for the repository, an ignored event, or a refusal with a reason. Only the latest 50 deliveries for each integration stay in Gradient. All project members can access these deliveries.
-      operationId: listIntegrationDeliveries
+      description: List the latest 50 webhook deliveries that reached the connection, newest first. Show the HTTP status and result that Gradient returned.
+      operationId: listProjectGitHostConnectionDeliveries
       parameters:
       - name: project
         in: path
@@ -7776,10 +7812,10 @@ paths:
         in: path
         required: true
         schema:
-          $ref: '#/components/schemas/IntegrationId'
+          $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Delivery, newest first
+          description: Deliveries, newest first
           content:
             application/json:
               schema:
@@ -7930,38 +7966,6 @@ paths:
                     type: boolean
                   message:
                     type: string
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
-  /api/v1/projects/{project}/readiness:
-    get:
-      tags:
-      - projects
-      summary: Project Readiness
-      description: Show what this project needs before an evaluation run. These items include workers that can run evaluations, a cache subscription with write access, and repository access for each task. Only callers with `manageWorkers` can view the list of teams that the caller can grant with workers. Only callers with `editTask` can view repository errors.
-      operationId: getProjectReadiness
-      parameters:
-      - name: project
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    $ref: '#/components/schemas/ProjectReadinessResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -8443,40 +8447,6 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/projects/{project}/subscribable-caches:
-    get:
-      tags:
-      - projects
-      summary: List caches for the subscribe dialog
-      description: The subscription dialog can offer only the caches that the caller can select, in display-name order. Set `needs_approval` to true when the caller cannot approve subscriptions. `approvers` can then list the users who can approve subscriptions, the holders of `manageCacheSubscriptions`. Caches with an existing project subscription, or caches with pending requests, do not appear. Requests to this endpoint need `manageSubscriptions` on the project.
-      operationId: listSubscribableCaches
-      parameters:
-      - name: project
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: Cache That Projects Can Subscribe To
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/SubscribableCache'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
   /api/v1/projects/{project}/subscribe:
     get:
       tags:
@@ -8587,48 +8557,6 @@ paths:
       responses:
         '200':
           description: Unsubscribed, or subscription request cancelled
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: string
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
-    patch:
-      tags:
-      - projects
-      summary: Change a cache subscription
-      description: Turn signing of store paths that the project pushed on or off with this cache key. Projects need the `manageSubscriptions` permission. This endpoint can't change subscriptions from server settings.
-      operationId: updateProjectCacheSubscription
-      parameters:
-      - name: project
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: cache
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateCacheSubscriptionRequest'
-        required: true
-      responses:
-        '200':
-          description: Saved subscriptions
           content:
             application/json:
               schema:
@@ -8806,7 +8734,7 @@ paths:
       tags:
       - triggers
       summary: Suggest push and pull request triggers
-      description: Return the push triggers and pull request triggers that tasks with `repository` can add. Gradient can build them from the project's webhook receiver for that Git host. The list is empty if no webhook receiver can handle the host, or if several can. Gradient doesn't save the suggestions. Use the endpoint for task creation or the endpoint for trigger creation to create them.
+      description: List the triggers for pushes and pull requests that a task with `repository` can add. Entries appear in the list when the project can use a connection to a Git host that can receive events and match the host of the repository. Otherwise the list is empty. Gradient doesn't store suggestions. Use the endpoint to create a task or the endpoint to create a trigger.
       operationId: listTriggerSuggestions
       parameters:
       - name: project
@@ -9383,7 +9311,10 @@ paths:
       tags:
       - workers
       summary: Register a worker under a project
-      description: Register a new worker under this project. A worker ID and a one-time token come from the server. Response data include a NixOS configuration for the worker machine. The token is visible only once.
+      description: |-
+        Registers a worker ID under this project as a peer. Returns a one-time
+        plaintext token that the worker operator must add to their worker config.
+        The token is shown only once - it cannot be retrieved later.
       operationId: registerProjectWorker
       parameters:
       - name: project
@@ -9411,7 +9342,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/WorkerRegistrationResponse'
+                    $ref: '#/components/schemas/RegisterWorkerResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -9680,7 +9611,7 @@ paths:
       tags:
       - tasks
       summary: Create task
-      description: Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. Project integrations add no triggers and no actions.
+      description: Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers.
       operationId: createTask
       parameters:
       - name: project
@@ -10219,7 +10150,7 @@ paths:
       tags:
       - actions
       summary: Fire action now (synthetic test)
-      description: Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host. All tests enter the action's delivery history. Connectivity checks enter that history as event `test.connectivity`. Return 400 for an invalid action config on test failure. Return 502 for an unreachable receiver or a rejected request. The message can include the reason.
+      description: Run an action right now with a synthetic test event and no event matching. Skip the action run for `open_pr` actions. Run a connectivity check against the task repository instead. No changes occur. Git hosts reject pull requests against placeholder commits. All tests go into the delivery history of the action. Store the connectivity check there as event `test.connectivity`. Return 400 for an invalid action configuration. Return 502 for an unreachable receiver or a rejected request. The message can include the reason.
       operationId: testTaskAction
       parameters:
       - name: project
@@ -11146,7 +11077,7 @@ paths:
       - tasks
       summary: Open a pull request from a patch
       description: |-
-        Applies a unified diff to the start commit and opens or updates a pull request through the Git host integration of the task's `open_pr` action. Inside an exec job the start commit is the job's evaluation commit and the pull request is listed on the job; any other caller passes `commit`. Without `branch` the branch name follows the touched paths, so the same paths update one pull request. The patch may add and change files but not delete them.
+        Apply a unified diff to the start commit and create or update a pull request through the Git host connection of the task's `open_pr` action. Exec jobs use the job's evaluation commit as the start commit and can show the pull request on the job. Other callers pass `commit`. Callers that omit `branch` get a branch name from the changed paths, so the same path can update one pull request. A patch can add and change files but cannot delete files.
 
         **Access:** Members with the `triggerEvaluation` permission, or the job token of an exec job of the task.
       operationId: openTaskPullRequest
@@ -11191,7 +11122,7 @@ paths:
       tags:
       - tasks
       summary: Get repository connection
-      description: Description Retrieval
+      description: Show how tasks reach a repository. Include the selected connection to the Git host, reports of commit status, latest webhook events, the last 10 status posts, and selectable connections.
       operationId: getTaskRepository
       parameters:
       - name: project
@@ -11223,13 +11154,12 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/tasks/{project}/{task}/repository/install-deploy-key:
-    post:
+    patch:
       tags:
       - tasks
-      summary: Install deploy key on the Git host
-      description: 'Add the project SSH key to the repository on the Git host as a read-only deploy key. Gradient clones that repository over SSH. Gradient can call the Git host API with the access token of the selected status reporter. Give that token admin permission on the repository. Supported Git hosts: Gitea, Forgejo, GitLab. Callers need permission to manage integrations. Return the repository path on the Git host. Return `502` and the reason for a rejection from the Git host.'
-      operationId: installTaskRepositoryDeployKey
+      summary: Choose git host connection
+      description: Select a connection to the Git host for the task and turn reporting of commit status on or off. Allow only connections that belong to the project, the owner team, or the instance. Two checks apply in Gradient. The repository host and the connection match. The owner name and the repository name appear in the repository URL. Reports on commit status work only on a connection with reports_status.
+      operationId: saveTaskRepositoryConnection
       parameters:
       - name: project
         in: path
@@ -11245,8 +11175,45 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InstallDeployKeyRequest'
+              $ref: '#/components/schemas/TaskRepositoryConnectionAndCommitStatusPatchRequest'
         required: true
+      responses:
+        '200':
+          description: Repository connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TaskRepositoryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/repository/install-deploy-key:
+    post:
+      tags:
+      - tasks
+      summary: Install deploy key on the Git host
+      description: Add the SSH key of the project as a read-only deploy key to a repository on the Git host. Gradient can then clone over SSH. Gradient can call the API of the Git host with the access token for the task's connection to the Git host. Grant admin permissions for the repository to that token. Supported Git hosts are Gitea, Forgejo, and GitLab. The caller must have permission to manage integrations. Return the repository path on the Git host. Return `502` and the reason after a rejection from the Git host.
+      operationId: installTaskRepositoryDeployKey
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
         '200':
           description: Deploy key installed
@@ -11272,15 +11239,15 @@ paths:
       - tasks
       summary: Install webhook on the Git host
       description: |-
-        Create a webhook on the Git host. Send push, tag, pull request, comment, and release events to the selected webhook receiver. Sign them with the secret of that receiver.
+        Create a webhook on the Git host. The webhook can deliver push, tag, pull request, comment and release events to the task's connection to the Git host. Use the secret of that connection to sign each request.
 
-        Gradient can call the API of the Git host with the access token of the selected status reporter. Give that token admin rights on the repository.
+        Gradient can call the API of the Git host with the access token of the connection. Grant admin permission for the repository to that token.
 
-        Gitea, Forgejo, and GitLab work with this endpoint. GitHub repositories get events from a GitHub App instead.
+        Gitea, Forgejo and GitLab support the endpoint. GitHub repositories receive events from a GitHub App instead.
 
-        Callers need permission to manage integrations.
+        The caller needs permission to manage integrations.
 
-        Return the repository path on the Git host. Return `502` with the reason after the Git host rejected the request.
+        Return the repository path on the Git host. The API can return `502` with the reason after a rejection from the Git host.
       operationId: installTaskRepositoryWebhook
       parameters:
       - name: project
@@ -11293,12 +11260,6 @@ paths:
         required: true
         schema:
           type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/InstallWebhookRequest'
-        required: true
       responses:
         '200':
           description: Webhook installed
@@ -11314,6 +11275,43 @@ paths:
                     type: boolean
                   message:
                     type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/repository/status-test:
+    post:
+      tags:
+      - tasks
+      summary: Test commit status report
+      description: Post a pending commit status to the commit of the latest task evaluation. Entries in status_posts record this attempt. Return 409 for a task with no connection for status reports or no evaluated commit.
+      operationId: testTaskCommitStatusReport
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Recorded Attempts
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TaskCommitStatusPostAttempt'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -11865,6 +11863,230 @@ paths:
                     type: boolean
                   message:
                     type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/git-host-connections:
+    get:
+      tags:
+      - git-host-connections
+      summary: List team git host connections
+      description: List the connections to Git hosts for a team. All team projects can use them. Team members can read the list. The `can_manage` flag is true for team admins.
+      operationId: listTeamGitHostConnections
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Team Connections
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitHostConnectionSummary'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - git-host-connections
+      summary: Create team git host connection
+      description: Create a connection to a Git host for the team. Only a team Admin can create it. All projects that belong to the team can select that connection for tasks. `generated_secret` and `webhook_url` work the same way as for project connections.
+      operationId: createTeamGitHostConnection
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGitHostConnectionRequest'
+        required: true
+      responses:
+        '200':
+          description: Connection created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/git-host-connections/{id}:
+    get:
+      tags:
+      - git-host-connections
+      summary: Get team git host connection
+      operationId: getTeamGitHostConnection
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - git-host-connections
+      summary: Delete team git host connection
+      description: Delete the connection to the Git host. Tasks that use the connection lose the connection and stop reporting commit status.
+      operationId: deleteTeamGitHostConnection
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    patch:
+      tags:
+      - git-host-connections
+      summary: Update team git host connection
+      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.
+      operationId: patchTeamGitHostConnection
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchGitHostConnectionRequest'
+        required: true
+      responses:
+        '200':
+          description: Updated Connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/git-host-connections/{id}/deliveries:
+    get:
+      tags:
+      - git-host-connections
+      summary: List incoming webhook deliveries
+      description: List the latest 50 webhook deliveries that reached the connection, newest first. Show the HTTP status and result that Gradient returned.
+      operationId: listTeamGitHostConnectionDeliveries
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Delivery, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -12614,7 +12836,7 @@ paths:
       tags:
       - teams
       summary: Register team worker
-      description: Requests need admin permissions for the team. The server can generate a worker ID and a one-time token, then send back NixOS configuration for the worker machine. The worker can answer the challenge from the server with `<team id>:<token>` in the peer file.
+      description: Needs Admin in the team. The worker answers the server challenge with `<team id>:<token>` or `*:<token>` in its peers file. `token` is returned only when the server generated it.
       operationId: registerTeamWorker
       parameters:
       - name: team
@@ -12642,7 +12864,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/WorkerRegistrationResponse'
+                    $ref: '#/components/schemas/RegisteredTeamWorker'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -12955,6 +13177,36 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/user/invites:
+    get:
+      tags:
+      - user
+      summary: List my pending invitations
+      description: |-
+        Project and cache invitations addressed to the authenticated user,
+        newest first.
+      operationId: listUserInvites
+      responses:
+        '200':
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InviteItem'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/user/invites/accept:
     post:
       tags:
@@ -13245,39 +13497,6 @@ paths:
                     type: boolean
                   message:
                     type: string
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
-  /api/v1/user/requests:
-    get:
-      tags:
-      - user
-      summary: My Pending Requests
-      description: |-
-        All items that await a decision from the authenticated user appear newest first.
-
-        - Invitations to the user
-        - Subscription requests for caches where the user can use `manageCacheSubscriptions`
-        - Grant requests to teams with the user as Admin
-
-        Superusers can view requests for every cache and team.
-      operationId: listUserRequests
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    $ref: '#/components/schemas/PendingUserDecisionsResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -14805,12 +15024,6 @@ paths:
       - scimBearer: []
 components:
   schemas:
-    AbortReason:
-      type: string
-      enum:
-      - user
-      - superseded
-      - no_connected_worker_can_build_required_systems
     AccessReason:
       type: string
       enum:
@@ -14854,22 +15067,11 @@ components:
             - send_web_request
       - type: object
         required:
-        - integration_id
+        - git_host_connection_id
         - type
         properties:
-          integration_id:
-            $ref: '#/components/schemas/IntegrationId'
-          type:
-            type: string
-            enum:
-            - git_host_status_report
-      - type: object
-        required:
-        - integration_id
-        - type
-        properties:
-          integration_id:
-            $ref: '#/components/schemas/IntegrationId'
+          git_host_connection_id:
+            $ref: '#/components/schemas/GitHostConnectionId'
           generator:
             $ref: '#/components/schemas/PatchGeneratorKind'
           granularity:
@@ -15310,13 +15512,6 @@ components:
             $ref: '#/components/schemas/ApiKeyVisibleProjectOrCacheWithPermissions'
         create_project:
           type: boolean
-    ApproveSubscriptionRequest:
-      type: object
-      properties:
-        mode:
-          oneOf:
-          - $ref: '#/components/schemas/CacheSubscriptionMode'
-          - type: 'null'
     ArtefactTree:
       type: object
       required:
@@ -15385,28 +15580,6 @@ components:
       - timeout
       - lost
       - aborted
-    AttemptFailureReason:
-      type: string
-      enum:
-      - SubstituteUnavailable
-      - Oom
-      - DiskFull
-      - Network
-      - BuilderCrash
-      - BuilderNonzero
-      - WallClockTimeout
-      - SilentTimeout
-      - InputsUnavailable
-      - WorkerLost
-      - NotEnoughResources
-    AttemptOutcome:
-      type: string
-      enum:
-      - Running
-      - Built
-      - Substituted
-      - Failed
-      - Aborted
     AttemptSummary:
       type: object
       required:
@@ -15859,36 +16032,6 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ExecOffer'
           - type: 'null'
-    BuildAttemptResponse:
-      type: object
-      required:
-      - number
-      - outcome
-      properties:
-        number:
-          type: integer
-          format: int32
-          minimum: 0
-        outcome:
-          $ref: '#/components/schemas/AttemptOutcome'
-        reason:
-          oneOf:
-          - $ref: '#/components/schemas/AttemptFailureReason'
-          - type: 'null'
-        started_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        finished_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        worker:
-          type:
-          - string
-          - 'null'
     BuildGraph:
       type: object
       required:
@@ -16418,9 +16561,6 @@ components:
       - display_name
       - mode
       - status
-      - managed
-      - sign_outputs
-      - approvers
       properties:
         id:
           $ref: '#/components/schemas/CacheId'
@@ -16432,15 +16572,6 @@ components:
           $ref: '#/components/schemas/CacheSubscriptionMode'
         status:
           $ref: '#/components/schemas/SubscriptionStatus'
-        managed:
-          type: boolean
-        sign_outputs:
-          type: boolean
-        approvers:
-          type: array
-          items:
-            type: string
-          description: Usernames of the users that can approve a pending request. Empty for an active subscription.
     CacheSubscriptionMode:
       type: string
       enum:
@@ -16785,15 +16916,6 @@ components:
           - type: 'null'
         author_name:
           type: string
-        project:
-          oneOf:
-          - $ref: '#/components/schemas/ProjectId'
-          - type: 'null'
-        fetched_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
     CommitId:
       type: string
       format: uuid
@@ -16815,38 +16937,6 @@ components:
       - all
       - skip
       - auto
-    ConnectGitHostRequest:
-      type: object
-      required:
-      - name
-      - git_host_type
-      - endpoint_url
-      properties:
-        name:
-          $ref: '#/components/schemas/IndexName'
-        display_name:
-          type:
-          - string
-          - 'null'
-        git_host_type:
-          type: string
-        endpoint_url:
-          type: string
-        access_token:
-          type:
-          - string
-          - 'null'
-    ConnectGitHostResponse:
-      type: object
-      required:
-      - inbound
-      properties:
-        inbound:
-          $ref: '#/components/schemas/IntegrationResponse'
-        outbound:
-          oneOf:
-          - $ref: '#/components/schemas/IntegrationResponse'
-          - type: 'null'
     ConnectedLoginProvider:
       type: object
       required:
@@ -17001,11 +17091,10 @@ components:
           type:
           - string
           - 'null'
-    CreateIntegrationRequest:
+    CreateGitHostConnectionRequest:
       type: object
       required:
       - name
-      - kind
       - git_host_type
       properties:
         name:
@@ -17014,15 +17103,9 @@ components:
           type:
           - string
           - 'null'
-        kind:
-          type: string
         git_host_type:
           type: string
-        secret:
-          type:
-          - string
-          - 'null'
-        endpoint_url:
+        base_url:
           type:
           - string
           - 'null'
@@ -17030,6 +17113,14 @@ components:
           type:
           - string
           - 'null'
+        secret:
+          type:
+          - string
+          - 'null'
+        receives_events:
+          type: boolean
+        reports_status:
+          type: boolean
         allowed_ips:
           type:
           - array
@@ -17937,11 +18028,6 @@ components:
           type: string
         message:
           type: string
-        missing_permissions:
-          type: array
-          items:
-            type: string
-          description: Wire names of the permissions that the signed-in caller does not have for this request (for example, `readStore`). Only 401 and 403 responses to authenticated callers include this field. The names match the values of `permissions` on the API key.
     EvalCapability:
       type: string
       enum:
@@ -17964,35 +18050,6 @@ components:
           oneOf:
           - $ref: '#/components/schemas/WalkMode'
           - type: 'null'
-    EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration:
-      type: object
-      required:
-      - phase_started_at
-      properties:
-        abort_reason:
-          oneOf:
-          - $ref: '#/components/schemas/AbortReason'
-          - type: 'null'
-        aborted_by:
-          type:
-          - string
-          - 'null'
-        superseded_by:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationId'
-          - type: 'null'
-        retry_of:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationId'
-          - type: 'null'
-        phase_started_at:
-          $ref: '#/components/schemas/EvaluationPhaseStartTimestamps'
-        expected_duration_ms:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
     EvaluationFailureSummary:
       type: object
       required:
@@ -18064,29 +18121,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EntryPointId'
-    EvaluationPhaseStartTimestamps:
-      type: object
-      properties:
-        fetch:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        eval_flake:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        eval_derivation:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        building:
-          type:
-          - string
-          - 'null'
-          format: date-time
     EvaluationProgress:
       oneOf:
       - type: object
@@ -18116,111 +18150,109 @@ components:
             enum:
             - evaluating
     EvaluationResponse:
-      allOf:
-      - $ref: '#/components/schemas/EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration'
-      - type: object
-        required:
-        - id
-        - project_name
-        - repository
-        - commit
-        - wildcard
-        - status
-        - created_at
-        - updated_at
-        - error_count
-        - warning_count
-        - entry_points
-        - prioritized
-        properties:
-          id:
-            $ref: '#/components/schemas/EvaluationId'
-          task:
-            oneOf:
-            - $ref: '#/components/schemas/TaskId'
-            - type: 'null'
-          project_name:
-            type: string
-          task_name:
-            type:
-            - string
-            - 'null'
-          task_display_name:
-            type:
-            - string
-            - 'null'
-          repository:
-            type: string
-          commit:
-            type: string
-          wildcard:
-            type: string
-          status:
-            $ref: '#/components/schemas/EvaluationStatus'
-          previous:
-            oneOf:
-            - $ref: '#/components/schemas/EvaluationId'
-            - type: 'null'
-          next:
-            oneOf:
-            - $ref: '#/components/schemas/EvaluationId'
-            - type: 'null'
-          created_at:
-            type: string
-            format: date-time
-          started_at:
-            type:
-            - string
-            - 'null'
-            format: date-time
-          finished_at:
-            type:
-            - string
-            - 'null'
-            format: date-time
-          updated_at:
-            type: string
-            format: date-time
-          error_count:
-            type: integer
-            format: int64
-            minimum: 0
-          warning_count:
-            type: integer
-            format: int64
-            minimum: 0
-          error:
-            type:
-            - string
-            - 'null'
-          entry_points:
-            type: array
-            items:
-              $ref: '#/components/schemas/EntryPointBrief'
-          prioritized:
-            type: boolean
-          trigger:
-            oneOf:
-            - $ref: '#/components/schemas/EvaluationTriggerSummary'
-            - type: 'null'
-          triggered_by:
-            type:
-            - string
-            - 'null'
-          waiting_reason:
-            oneOf:
-            - $ref: '#/components/schemas/WaitingReason'
-            - type: 'null'
-          progress:
-            oneOf:
-            - $ref: '#/components/schemas/EvaluationProgress'
-            - type: 'null'
-          expected_thunks:
-            type:
-            - integer
-            - 'null'
-            format: int64
-            minimum: 0
+      type: object
+      required:
+      - id
+      - project_name
+      - repository
+      - commit
+      - wildcard
+      - status
+      - created_at
+      - updated_at
+      - error_count
+      - warning_count
+      - entry_points
+      - prioritized
+      properties:
+        id:
+          $ref: '#/components/schemas/EvaluationId'
+        task:
+          oneOf:
+          - $ref: '#/components/schemas/TaskId'
+          - type: 'null'
+        project_name:
+          type: string
+        task_name:
+          type:
+          - string
+          - 'null'
+        task_display_name:
+          type:
+          - string
+          - 'null'
+        repository:
+          type: string
+        commit:
+          type: string
+        wildcard:
+          type: string
+        status:
+          $ref: '#/components/schemas/EvaluationStatus'
+        previous:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationId'
+          - type: 'null'
+        next:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationId'
+          - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        error_count:
+          type: integer
+          format: int64
+          minimum: 0
+        warning_count:
+          type: integer
+          format: int64
+          minimum: 0
+        error:
+          type:
+          - string
+          - 'null'
+        entry_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryPointBrief'
+        prioritized:
+          type: boolean
+        trigger:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationTriggerSummary'
+          - type: 'null'
+        triggered_by:
+          type:
+          - string
+          - 'null'
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
+        progress:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationProgress'
+          - type: 'null'
+        expected_thunks:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
     EvaluationStatus:
       type: string
       enum:
@@ -18234,102 +18266,100 @@ components:
       - Aborted
       - Fetching
     EvaluationSummary:
-      allOf:
-      - $ref: '#/components/schemas/EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration'
-      - type: object
-        required:
-        - id
-        - commit
-        - status
-        - wildcard
-        - total_builds
-        - builds
-        - errors
-        - warnings
-        - prioritized
-        - only_evaluate
-        - created_at
-        - updated_at
-        properties:
-          id:
-            $ref: '#/components/schemas/EvaluationId'
-          commit:
-            type: string
-          commit_message:
-            type:
-            - string
-            - 'null'
-          status:
-            $ref: '#/components/schemas/EvaluationStatus'
-          wildcard:
-            type: string
-          trigger:
-            oneOf:
-            - $ref: '#/components/schemas/EvaluationTriggerSummary'
-            - type: 'null'
-          triggered_by:
-            type:
-            - string
-            - 'null'
-          pr_number:
-            type:
-            - integer
-            - 'null'
-            format: int64
-            minimum: 0
-          total_builds:
-            type: integer
-            format: int64
-          builds:
-            $ref: '#/components/schemas/BuildStatusCounts'
-          errors:
-            type: integer
-            format: int64
-          warnings:
-            type: integer
-            format: int64
-          dispatched_job:
-            oneOf:
-            - $ref: '#/components/schemas/DispatchedJobId'
-            - type: 'null'
-          cluster_job:
-            oneOf:
-            - $ref: '#/components/schemas/ClusterJobId'
-            - type: 'null'
-          prioritized:
-            type: boolean
-          only_evaluate:
-            type: boolean
-          created_at:
-            type: string
-            format: date-time
-          started_at:
-            type:
-            - string
-            - 'null'
-            format: date-time
-          finished_at:
-            type:
-            - string
-            - 'null'
-            format: date-time
-          updated_at:
-            type: string
-            format: date-time
-          progress:
-            oneOf:
-            - $ref: '#/components/schemas/EvaluationProgress'
-            - type: 'null'
-          expected_thunks:
-            type:
-            - integer
-            - 'null'
-            format: int64
-            minimum: 0
-          waiting_reason:
-            oneOf:
-            - $ref: '#/components/schemas/WaitingReason'
-            - type: 'null'
+      type: object
+      required:
+      - id
+      - commit
+      - status
+      - wildcard
+      - total_builds
+      - builds
+      - errors
+      - warnings
+      - prioritized
+      - only_evaluate
+      - created_at
+      - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/EvaluationId'
+        commit:
+          type: string
+        commit_message:
+          type:
+          - string
+          - 'null'
+        status:
+          $ref: '#/components/schemas/EvaluationStatus'
+        wildcard:
+          type: string
+        trigger:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationTriggerSummary'
+          - type: 'null'
+        triggered_by:
+          type:
+          - string
+          - 'null'
+        pr_number:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        total_builds:
+          type: integer
+          format: int64
+        builds:
+          $ref: '#/components/schemas/BuildStatusCounts'
+        errors:
+          type: integer
+          format: int64
+        warnings:
+          type: integer
+          format: int64
+        dispatched_job:
+          oneOf:
+          - $ref: '#/components/schemas/DispatchedJobId'
+          - type: 'null'
+        cluster_job:
+          oneOf:
+          - $ref: '#/components/schemas/ClusterJobId'
+          - type: 'null'
+        prioritized:
+          type: boolean
+        only_evaluate:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        progress:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationProgress'
+          - type: 'null'
+        expected_thunks:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
     EvaluationTriggerSummary:
       type: object
       required:
@@ -18472,7 +18502,7 @@ components:
       - url
       - branch
       - number
-      - integration
+      - git_host_connection
       - created_at
       properties:
         url:
@@ -18482,8 +18512,8 @@ components:
         number:
           type: integer
           format: int64
-        integration:
-          type: string
+        git_host_connection:
+          $ref: '#/components/schemas/GitHostConnectionId'
         created_at:
           type: string
           format: date-time
@@ -19191,18 +19221,140 @@ components:
             $ref: '#/components/schemas/ConnectedLoginProvider'
         managed:
           type: boolean
-    GitAccessReadiness:
+    GitHostConnectionId:
+      type: string
+      format: uuid
+    GitHostConnectionOwner:
+      oneOf:
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - instance
+      - type: object
+        required:
+        - name
+        - type
+        properties:
+          name:
+            type: string
+          type:
+            type: string
+            enum:
+            - team
+      - type: object
+        required:
+        - name
+        - type
+        properties:
+          name:
+            type: string
+          type:
+            type: string
+            enum:
+            - project
+    GitHostConnectionResponse:
       type: object
       required:
-      - status
-      - tasks
+      - id
+      - owner
+      - name
+      - display_name
+      - git_host_type
+      - has_secret
+      - has_access_token
+      - allowed_ips
+      - receives_events
+      - reports_status
+      - created_by
+      - created_at
+      - managed
       properties:
-        status:
-          $ref: '#/components/schemas/TaskRepositoryFetchStatus'
-        tasks:
+        id:
+          $ref: '#/components/schemas/GitHostConnectionId'
+        owner:
+          $ref: '#/components/schemas/GitHostConnectionOwner'
+        name:
+          type: string
+        display_name:
+          type: string
+        git_host_type:
+          type: string
+        base_url:
+          type:
+          - string
+          - 'null'
+        has_secret:
+          type: boolean
+        has_access_token:
+          type: boolean
+        allowed_ips:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectTaskReadinessEntry'
+            type: string
+        receives_events:
+          type: boolean
+        reports_status:
+          type: boolean
+        installation_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        account_login:
+          type:
+          - string
+          - 'null'
+        created_by:
+          $ref: '#/components/schemas/UserId'
+        created_at:
+          type: string
+          format: date-time
+        managed:
+          type: boolean
+        webhook_url:
+          type:
+          - string
+          - 'null'
+        generated_secret:
+          type:
+          - string
+          - 'null'
+    GitHostConnectionSummary:
+      type: object
+      required:
+      - id
+      - owner
+      - name
+      - display_name
+      - git_host_type
+      - receives_events
+      - reports_status
+      - can_manage
+      properties:
+        id:
+          $ref: '#/components/schemas/GitHostConnectionId'
+        owner:
+          $ref: '#/components/schemas/GitHostConnectionOwner'
+        name:
+          type: string
+        display_name:
+          type: string
+        git_host_type:
+          type: string
+        base_url:
+          type:
+          - string
+          - 'null'
+        receives_events:
+          type: boolean
+        reports_status:
+          type: boolean
+        can_manage:
+          type: boolean
     GithubAppManifestRequest:
       type: object
       properties:
@@ -19546,109 +19698,6 @@ components:
         input_name:
           type: string
         url:
-          type: string
-    InstallDeployKeyRequest:
-      type: object
-      required:
-      - outbound_integration
-      properties:
-        outbound_integration:
-          $ref: '#/components/schemas/IntegrationId'
-    InstallWebhookRequest:
-      type: object
-      required:
-      - inbound_integration
-      - outbound_integration
-      properties:
-        inbound_integration:
-          $ref: '#/components/schemas/IntegrationId'
-        outbound_integration:
-          $ref: '#/components/schemas/IntegrationId'
-    IntegrationId:
-      type: string
-      format: uuid
-    IntegrationResponse:
-      type: object
-      required:
-      - id
-      - project
-      - name
-      - display_name
-      - kind
-      - git_host_type
-      - has_secret
-      - has_access_token
-      - allowed_ips
-      - created_by
-      - created_at
-      - managed
-      properties:
-        id:
-          $ref: '#/components/schemas/IntegrationId'
-        project:
-          $ref: '#/components/schemas/ProjectId'
-        name:
-          type: string
-        display_name:
-          type: string
-        kind:
-          type: string
-        git_host_type:
-          type: string
-        endpoint_url:
-          type:
-          - string
-          - 'null'
-        has_secret:
-          type: boolean
-        has_access_token:
-          type: boolean
-        allowed_ips:
-          type: array
-          items:
-            type: string
-        installation_id:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        account_login:
-          type:
-          - string
-          - 'null'
-        created_by:
-          $ref: '#/components/schemas/UserId'
-        created_at:
-          type: string
-          format: date-time
-        managed:
-          type: boolean
-        generated_secret:
-          type:
-          - string
-          - 'null'
-        webhook_url:
-          type:
-          - string
-          - 'null'
-    IntegrationSummaryResponse:
-      type: object
-      required:
-      - id
-      - name
-      - display_name
-      - kind
-      - git_host_type
-      properties:
-        id:
-          $ref: '#/components/schemas/IntegrationId'
-        name:
-          type: string
-        display_name:
-          type: string
-        kind:
-          type: string
-        git_host_type:
           type: string
     InviteItem:
       type: object
@@ -20185,6 +20234,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ConcurrencyPolicy'
           - type: 'null'
+        sign_cache:
+          type:
+          - boolean
+          - 'null'
         wait_for_workers:
           type:
           - boolean
@@ -20989,7 +21042,7 @@ components:
       enum:
       - flake_lock
       - exec_tree
-    PatchIntegrationRequest:
+    PatchGitHostConnectionRequest:
       type: object
       properties:
         name:
@@ -21004,7 +21057,7 @@ components:
           type:
           - string
           - 'null'
-        endpoint_url:
+        base_url:
           type:
           - string
           - 'null'
@@ -21022,6 +21075,14 @@ components:
           - 'null'
           items:
             type: string
+        receives_events:
+          type:
+          - boolean
+          - 'null'
+        reports_status:
+          type:
+          - boolean
+          - 'null'
     PatchOperation:
       type: object
       required:
@@ -21131,6 +21192,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ConcurrencyPolicy'
           - type: 'null'
+        sign_cache:
+          type:
+          - boolean
+          - 'null'
         wait_for_workers:
           type:
           - boolean
@@ -21351,25 +21416,6 @@ components:
           type: integer
           format: int64
           minimum: 0
-    PendingUserDecisionsResponse:
-      type: object
-      required:
-      - invites
-      - subscription_requests
-      - team_requests
-      properties:
-        invites:
-          type: array
-          items:
-            $ref: '#/components/schemas/InviteItem'
-        subscription_requests:
-          type: array
-          items:
-            $ref: '#/components/schemas/SubscriptionRequestItem'
-        team_requests:
-          type: array
-          items:
-            $ref: '#/components/schemas/TeamGrantRequestInboxEntry'
     Permission:
       type: string
       enum:
@@ -21394,14 +21440,11 @@ components:
       required:
       - id
       - mutating
-      - permission_explanation
       properties:
         id:
           type: string
         mutating:
           type: boolean
-        permission_explanation:
-          type: string
     PersonAccessReason:
       type: object
       required:
@@ -21507,48 +21550,6 @@ components:
     ProjectId:
       type: string
       format: uuid
-    ProjectReadinessResponse:
-      type: object
-      required:
-      - ready
-      - workers
-      - cache
-      - repository
-      properties:
-        ready:
-          type: boolean
-        workers:
-          $ref: '#/components/schemas/ProjectReadinessWorkers'
-        cache:
-          $ref: '#/components/schemas/ProjectSubscriptionReadinessCache'
-        repository:
-          $ref: '#/components/schemas/GitAccessReadiness'
-    ProjectReadinessWorkers:
-      type: object
-      required:
-      - ready
-      - registered
-      - teams
-      - teams_granted_without_workers
-      - teams_you_can_grant
-      properties:
-        ready:
-          type: boolean
-        registered:
-          type: integer
-          minimum: 0
-        teams:
-          type: array
-          items:
-            $ref: '#/components/schemas/TeamReadinessEntry'
-        teams_granted_without_workers:
-          type: array
-          items:
-            $ref: '#/components/schemas/TeamReadinessEntry'
-        teams_you_can_grant:
-          type: array
-          items:
-            $ref: '#/components/schemas/TeamReadinessEntry'
     ProjectResponse:
       type: object
       required:
@@ -21648,18 +21649,6 @@ components:
         bytes:
           type: integer
           format: int64
-    ProjectSubscriptionReadinessCache:
-      type: object
-      required:
-      - ready
-      - subscriptions
-      properties:
-        ready:
-          type: boolean
-        subscriptions:
-          type: array
-          items:
-            $ref: '#/components/schemas/CacheSubscriptionItem'
     ProjectSummary:
       type: object
       required:
@@ -21720,23 +21709,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Permission'
-    ProjectTaskReadinessEntry:
-      type: object
-      required:
-      - name
-      - display_name
-      - status
-      properties:
-        name:
-          type: string
-        display_name:
-          type: string
-        status:
-          $ref: '#/components/schemas/TaskRepositoryFetchStatus'
-        error:
-          type:
-          - string
-          - 'null'
     ProjectWorkerEntry:
       allOf:
       - $ref: '#/components/schemas/WorkerConnection'
@@ -21963,14 +21935,21 @@ components:
     RegisterWorkerRequest:
       type: object
       required:
+      - worker_id
       - display_name
       properties:
+        worker_id:
+          type: string
         url:
           type:
           - string
           - 'null'
         display_name:
           type: string
+        token:
+          type:
+          - string
+          - 'null'
         enable_network:
           type: boolean
         enable_secrets:
@@ -21981,6 +21960,28 @@ components:
           type: boolean
         enable_build:
           type: boolean
+    RegisterWorkerResponse:
+      type: object
+      required:
+      - peer_id
+      properties:
+        peer_id:
+          $ref: '#/components/schemas/ProjectId'
+        token:
+          type:
+          - string
+          - 'null'
+    RegisteredTeamWorker:
+      type: object
+      required:
+      - team
+      properties:
+        team:
+          $ref: '#/components/schemas/TeamId'
+        token:
+          type:
+          - string
+          - 'null'
     RemoveMemberRequest:
       type: object
       required:
@@ -22039,40 +22040,6 @@ components:
         error:
           type:
           - string
-          - 'null'
-    RepositoryIntegration:
-      type: object
-      required:
-      - id
-      - name
-      - display_name
-      - kind
-      - git_host_type
-      - serves_repository
-      properties:
-        id:
-          $ref: '#/components/schemas/IntegrationId'
-        name:
-          type: string
-        display_name:
-          type: string
-        kind:
-          type: string
-        git_host_type:
-          type: string
-        serves_repository:
-          type: boolean
-        webhook_url:
-          type:
-          - string
-          - 'null'
-        has_secret:
-          type:
-          - boolean
-          - 'null'
-        has_access_token:
-          type:
-          - boolean
           - 'null'
     RequestKind:
       type: string
@@ -22665,43 +22632,6 @@ components:
         created_at:
           type: string
           format: date-time
-    StatusReport:
-      type: object
-      required:
-      - action_id
-      - integration_id
-      - active
-      properties:
-        action_id:
-          $ref: '#/components/schemas/TaskActionId'
-        integration_id:
-          $ref: '#/components/schemas/IntegrationId'
-        active:
-          type: boolean
-        last_delivery:
-          oneOf:
-          - $ref: '#/components/schemas/StatusReportDelivery'
-          - type: 'null'
-    StatusReportDelivery:
-      type: object
-      required:
-      - success
-      - delivered_at
-      properties:
-        success:
-          type: boolean
-        response_status:
-          type:
-          - integer
-          - 'null'
-          format: int32
-        error_message:
-          type:
-          - string
-          - 'null'
-        delivered_at:
-          type: string
-          format: date-time
     StorageMetricPoint:
       type: object
       required:
@@ -22727,35 +22657,6 @@ components:
           type: string
         created:
           type: boolean
-    SubscribableCache:
-      type: object
-      required:
-      - name
-      - display_name
-      - public
-      - needs_approval
-      - approvers
-      properties:
-        name:
-          type: string
-        display_name:
-          type: string
-        owner_team:
-          type:
-          - string
-          - 'null'
-        owner_team_display_name:
-          type:
-          - string
-          - 'null'
-        public:
-          type: boolean
-        needs_approval:
-          type: boolean
-        approvers:
-          type: array
-          items:
-            type: string
     SubscribeCacheRequest:
       type: object
       properties:
@@ -22766,18 +22667,12 @@ components:
     SubscriptionRequestItem:
       type: object
       required:
-      - cache
-      - cache_display_name
       - project
       - project_display_name
       - mode
       - requested_by
       - created_at
       properties:
-        cache:
-          type: string
-        cache_display_name:
-          type: string
         project:
           type: string
         project_display_name:
@@ -22833,6 +22728,35 @@ components:
       type: string
       format: uuid
     TaskActionId:
+      type: string
+      format: uuid
+    TaskCommitStatusPostAttempt:
+      type: object
+      required:
+      - id
+      - event
+      - success
+      - delivered_at
+      properties:
+        id:
+          $ref: '#/components/schemas/TaskCommitStatusPostAttemptId'
+        event:
+          type: string
+        success:
+          type: boolean
+        response_status:
+          type:
+          - integer
+          - 'null'
+          format: int32
+        error_message:
+          type:
+          - string
+          - 'null'
+        delivered_at:
+          type: string
+          format: date-time
+    TaskCommitStatusPostAttemptId:
       type: string
       format: uuid
     TaskDetailsResponse:
@@ -22977,18 +22901,23 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskMetricPoint'
-    TaskRepositoryFetchStatus:
-      type: string
-      enum:
-      - verified
-      - unchecked
-      - failing
+    TaskRepositoryConnectionAndCommitStatusPatchRequest:
+      type: object
+      properties:
+        git_host_connection:
+          oneOf:
+          - $ref: '#/components/schemas/GitHostConnectionId'
+          - type: 'null'
+        report_status:
+          type: boolean
     TaskRepositoryResponse:
       type: object
       required:
       - repository
       - uses_ssh
-      - integrations
+      - report_status
+      - status_posts
+      - available_connections
       - can_edit
       - can_manage_integrations
       properties:
@@ -23004,18 +22933,28 @@ components:
           oneOf:
           - $ref: '#/components/schemas/RepositoryFetchStatus'
           - type: 'null'
+        git_host_connection:
+          oneOf:
+          - $ref: '#/components/schemas/GitHostConnectionSummary'
+          - type: 'null'
+        webhook_url:
+          type:
+          - string
+          - 'null'
+        report_status:
+          type: boolean
         last_event:
           oneOf:
           - $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
           - type: 'null'
-        report_status:
-          oneOf:
-          - $ref: '#/components/schemas/StatusReport'
-          - type: 'null'
-        integrations:
+        status_posts:
           type: array
           items:
-            $ref: '#/components/schemas/RepositoryIntegration'
+            $ref: '#/components/schemas/TaskCommitStatusPostAttempt'
+        available_connections:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitHostConnectionSummary'
         can_edit:
           type: boolean
         can_manage_integrations:
@@ -23038,6 +22977,7 @@ components:
       - managed
       - keep_evaluations
       - concurrency
+      - sign_cache
       - wait_for_workers
       - retry_failed_builds
       - multi_node_evaluation
@@ -23090,6 +23030,8 @@ components:
           format: int32
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
+        sign_cache:
+          type: boolean
         wait_for_workers:
           type: boolean
         retry_failed_builds:
@@ -23314,18 +23256,6 @@ components:
           minimum: 0
         caller_is_admin:
           type: boolean
-    TeamGrantRequestInboxEntry:
-      allOf:
-      - $ref: '#/components/schemas/TeamRequestItem'
-      - type: object
-        required:
-        - team
-        - team_display_name
-        properties:
-          team:
-            type: string
-          team_display_name:
-            type: string
     TeamGrants:
       type: object
       required:
@@ -23405,20 +23335,6 @@ components:
           type: boolean
         workers:
           type: boolean
-    TeamReadinessEntry:
-      type: object
-      required:
-      - name
-      - display_name
-      - workers
-      properties:
-        name:
-          type: string
-        display_name:
-          type: string
-        workers:
-          type: integer
-          minimum: 0
     TeamRequestItem:
       type: object
       required:
@@ -23624,11 +23540,8 @@ components:
             - polling
       - type: object
         required:
-        - integration_id
         - type
         properties:
-          integration_id:
-            $ref: '#/components/schemas/IntegrationId'
           branches:
             type: array
             items:
@@ -23647,11 +23560,8 @@ components:
             - reporter_push
       - type: object
         required:
-        - integration_id
         - type
         properties:
-          integration_id:
-            $ref: '#/components/schemas/IntegrationId'
           branches:
             type: array
             items:
@@ -23681,22 +23591,6 @@ components:
             type: string
             enum:
             - time
-    TriggerIntegrationSummary:
-      type: object
-      required:
-      - id
-      - name
-      - display_name
-      - git_host_type
-      properties:
-        id:
-          $ref: '#/components/schemas/IntegrationId'
-        name:
-          type: string
-        display_name:
-          type: string
-        git_host_type:
-          type: string
     TriggerOut:
       type: object
       required:
@@ -23731,10 +23625,6 @@ components:
         updated_at:
           type: string
           format: date-time
-        integration:
-          oneOf:
-          - $ref: '#/components/schemas/TriggerIntegrationSummary'
-          - type: 'null'
     TriggerType:
       type: string
       enum:
@@ -23780,13 +23670,6 @@ components:
           type:
           - boolean
           - 'null'
-    UpdateCacheSubscriptionRequest:
-      type: object
-      required:
-      - sign_outputs
-      properties:
-        sign_outputs:
-          type: boolean
     UpdateFlakeInputOverrideRequest:
       type: object
       properties:
@@ -24559,30 +24442,6 @@ components:
           type: boolean
         managed:
           type: boolean
-    WorkerRegistrationResponse:
-      type: object
-      required:
-      - id
-      - name
-      - url
-      - peer_id
-      - token
-      - nixos_configuration
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        url:
-          type: string
-        peer_id:
-          type: string
-          description: Project ID or team ID that the worker names in its peers file. The peers line is `<peer_id>:<token>`.
-        token:
-          type: string
-          description: One-time token for the worker. The server can save only the hash and can't show the token again.
-        nixos_configuration:
-          type: string
     WorkerSamplePoint:
       type: object
       required:
@@ -24724,8 +24583,8 @@ tags:
   description: Per-task Actions (Send Mail, Send Web Request, Git Host Status Report)
 - name: git-host-webhooks
   description: Incoming Git host webhooks (external Git hosts -> Gradient push triggers)
-- name: integrations
-  description: Per-project named Git host integrations (inbound HMAC secrets + outbound API credentials)
+- name: git-host-connections
+  description: Connections to Git hosts belong to a project, a team, or an instance. Tasks select one of those connections to receive webhook events and report commit status.
 - name: admin
   description: Server-wide administrative endpoints. All routes require the caller to have the `superuser` flag.
 - name: scim
