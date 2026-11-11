@@ -513,7 +513,7 @@ in {
 
         clientSecretFile = lib.mkOption {
           type = lib.types.path;
-          description = "File for the client secret of the OAuth2 application. Register the application on the Git host with redirect URI `<serveUrl>/api/v1/integrations/oauth/callback`.";
+          description = "File for the client secret of an OAuth2 application. Register the application on the Git host with redirect URI `<serveUrl>/api/v1/git-host-connections/oauth/callback`.";
         };
       };
 

@@ -59,6 +59,10 @@ WHERE o.github_installation IS NULL AND i.github_installation IS NULL;
 UPDATE public.git_host_connection i
 SET reports_status = true,
     access_token = coalesce(i.access_token, o.access_token),
+    encrypted_refresh_token = CASE WHEN i.access_token IS NULL
+        THEN o.encrypted_refresh_token ELSE i.encrypted_refresh_token END,
+    access_token_expires_at = CASE WHEN i.access_token IS NULL
+        THEN o.access_token_expires_at ELSE i.access_token_expires_at END,
     base_url = coalesce(i.base_url, o.base_url)
 FROM connection_replacement r
 JOIN public.git_host_connection o ON o.id = r.old_id
@@ -180,10 +184,12 @@ DROP INDEX public.git_host_connection_project_name;
 ALTER TABLE public.git_host_connection DROP CONSTRAINT git_host_connection_one_owner;
 CREATE UNIQUE INDEX "idx-integration-project-kind-name" ON public.git_host_connection USING btree (project, kind, name);
 INSERT INTO public.git_host_connection
-    (id, project, name, display_name, kind, git_host_type, base_url, access_token, created_by,
-     created_at, managed, receives_events, reports_status)
+    (id, project, name, display_name, kind, git_host_type, base_url, access_token,
+     encrypted_refresh_token, access_token_expires_at, created_by, created_at, managed,
+     receives_events, reports_status)
 SELECT o.copy, c.project, c.name, c.display_name, 1, c.git_host_type, c.base_url, c.access_token,
-    c.created_by, c.created_at, c.managed, false, true
+    c.encrypted_refresh_token, c.access_token_expires_at, c.created_by, c.created_at, c.managed,
+    false, true
 FROM outbound_copy o JOIN public.git_host_connection c ON c.id = o.connection;
 
 INSERT INTO public.task_action

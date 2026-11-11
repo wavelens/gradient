@@ -6,7 +6,7 @@
 
 use clap::{Args, ValueEnum};
 use gradient_derive::config_group;
-use gradient_entity::integration::GitHostType;
+use gradient_entity::git_host_connection::GitHostType;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitHostSoftwareChoice {
@@ -33,6 +33,6 @@ pub struct GiteaOAuth2ApplicationArgs {
     pub git_host_type: GitHostSoftwareChoice,
     /// The client ID for the OAuth2 application.
     pub client_id: Option<String>,
-    /// Path to the file with the client secret for the OAuth2 application. Register an application on the Git host with redirect URI `<serve URL>/api/v1/integrations/oauth/callback`.
+    /// Path to the client secret file for the OAuth2 application. Register the application on the Git host with the redirect URI `<serve URL>/api/v1/git-host-connections/oauth/callback`.
     pub client_secret_file: Option<String>,
 }

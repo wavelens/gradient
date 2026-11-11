@@ -99,7 +99,7 @@ Add the deploy key from step **Access** under **Settings -> Deploy Keys** for re
 The administrator can register Gradient once as an OAuth2 application on a Gitea or Forgejo instance. Project members can then connect a Git host without pasting a token.
 
 1. Open the **Settings -> Applications -> OAuth2 Applications** of the user or organization on the Git host.
-2. Set the redirect URI to `https://gradient.example.com/api/v1/integrations/oauth/callback` and create a confidential client. Save the client secret to a file.
+2. Set the redirect URI to `https://gradient.example.com/api/v1/git-host-connections/oauth/callback` and create a confidential client. Save the client secret to a file.
 3. Configure Gradient on NixOS.
 
 ```nix
@@ -116,13 +116,13 @@ services.gradient.giteaApp = {
 
 Project members:
 
-1. Open **Integrations** in the project. Click **Connect with Forgejo (codeberg.org)**.
+1. Open **Git host connections** in the project. Click **Connect with Forgejo (codeberg.org)**.
 2. Enter a name and click **Continue**. Approve access on the Git host.
-3. Gradient set up a webhook receiver and a status reporter with this name. The browser went back to the integrations page.
+3. Gradient created a connection with this name. That connection can receive webhooks and report commit status. The browser returned to the connection page of the Git host.
 
 - Forgejo and Gitea don't add scopes to OAuth2 tokens. An OAuth2 token can access the full account that approved it. Approve the token with the bot account from Step 1.
-- Gradient can refresh the access token automatically. The status reporter can show **Automatic refresh of the token**. Enter a token in **Edit** to replace the OAuth2 token and end the refresh.
-- Gradient can install webhooks on the repositories of tasks that connect to a new integration. The authorizing account must have admin rights on each repository.
+- Gradient can refresh access tokens automatically. A connection can show **Automatic refresh of the token**. Enter a token in **Edit** to replace the OAuth2 token and end the refresh.
+- Gradient can link a new connection to project tasks on the same Git host that don't have a connection yet. Gradient can install webhooks on those repositories. The account for authorization must have admin rights on each repository.
 - A Gradient server can have at most one OAuth2 application, so only one Gitea or Forgejo instance can use this connection.
 
 ## Declarative Setup

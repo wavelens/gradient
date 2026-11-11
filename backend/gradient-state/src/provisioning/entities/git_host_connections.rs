@@ -134,6 +134,8 @@ impl<'a> StateApplicator<'a> {
                 active.base_url = Set(base_url);
                 active.secret = Set(encrypted_secret);
                 active.access_token = Set(encrypted_token);
+                active.encrypted_refresh_token = Set(None);
+                active.access_token_expires_at = Set(None);
                 active.receives_events = Set(state_connection.receives_events);
                 active.reports_status = Set(state_connection.reports_status);
                 active.github_installation_id = Set(github_installation_id);
@@ -153,6 +155,8 @@ impl<'a> StateApplicator<'a> {
                     secret: encrypted_secret,
                     base_url,
                     access_token: encrypted_token,
+                    encrypted_refresh_token: None,
+                    access_token_expires_at: None,
                     allowed_ips: None,
                     receives_events: state_connection.receives_events,
                     reports_status: state_connection.reports_status,

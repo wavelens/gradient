@@ -57,12 +57,17 @@ pub(crate) enum GitHostConnectionRefusal {
     ReportStatusNeedsConnection,
     #[error("{0}")]
     StatusTestNotPossible(String),
+    #[error("No Gitea or Forgejo OAuth2 application configured on this server")]
+    GiteaOAuth2ApplicationNotConfigured,
+    #[error("Connections to the Git host need a signed-in browser session.")]
+    GitHostOAuthConnectNeedsSignedInBrowserSession,
 }
 
 impl Refusal for GitHostConnectionRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::StatusTestNotPossible(_) => RefusalStatus::Conflict,
+            Self::GitHostOAuthConnectNeedsSignedInBrowserSession => RefusalStatus::Unauthorized,
             _ => RefusalStatus::BadRequest,
         }
     }

@@ -6,10 +6,10 @@
 
 //! The task can post commit statuses only with report_status on and status reporting enabled on the connection to the Git host. The task can omit statuses for input_update evaluations. The commit for an input_update evaluation is empty before the push of the pull request.
 
-use crate::actions::crypto::decrypt_secret_with_file;
 use crate::actions::git_host_status_for_event;
 use crate::actions::report::{build_ci_reports_from_payload, persist_evaluation_check_id};
 use crate::context::CiContext;
+use crate::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token;
 use anyhow::{Context, Result, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_entity::task_commit_status_post_attempt as post_attempt;
@@ -107,13 +107,13 @@ pub async fn build_commit_status_reporter_from_git_host_connection_row(
         return Ok(Arc::new(reporter));
     }
 
-    let token = match connection.access_token.as_deref() {
-        Some(enc) => Some(
-            decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, enc)
-                .map_err(|e| anyhow!("decrypt git host connection token: {}", e))?,
-        ),
-        None => None,
-    };
+    let token = refresh_and_get_usable_decrypted_access_token(
+        ctx.db.web_db.inner(),
+        &ctx.db.config,
+        &ctx.http,
+        connection,
+    )
+    .await?;
     provider.build_reporter(
         ctx.http.clone(),
         connection.base_url.as_deref(),

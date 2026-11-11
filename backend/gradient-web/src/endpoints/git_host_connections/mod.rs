@@ -8,6 +8,7 @@
 
 pub mod admin;
 pub mod project;
+pub mod project_gitea_oauth2_connection;
 mod refusal;
 pub mod team;
 
@@ -38,6 +39,7 @@ pub struct GitHostConnectionResponse {
     pub base_url: Option<String>,
     pub has_secret: bool,
     pub has_access_token: bool,
+    pub access_token_refreshes_automatically: bool,
     pub allowed_ips: Vec<String>,
     pub receives_events: bool,
     pub reports_status: bool,
@@ -211,6 +213,7 @@ pub(crate) async fn response(
         base_url: connection.base_url,
         has_secret: connection.secret.is_some(),
         has_access_token: connection.access_token.is_some(),
+        access_token_refreshes_automatically: connection.encrypted_refresh_token.is_some(),
         allowed_ips: connection.allowed_ips.unwrap_or_default(),
         receives_events: connection.receives_events,
         reports_status: connection.reports_status,
@@ -401,6 +404,8 @@ pub(crate) async fn create(
             .map(http_base_url)
             .transpose()?,
         access_token,
+        encrypted_refresh_token: None,
+        access_token_expires_at: None,
         allowed_ips: normalize_allowed_ips(body.allowed_ips)?.filter(|v| !v.is_empty()),
         receives_events: body.receives_events,
         reports_status: body.reports_status,
@@ -464,6 +469,8 @@ pub(crate) async fn patch(
         next.access_token = non_blank(Some(&token))
             .map(|t| encrypt(ci, t))
             .transpose()?;
+        next.encrypted_refresh_token = None;
+        next.access_token_expires_at = None;
     }
     if let Some(canon) = normalize_allowed_ips(body.allowed_ips)? {
         next.allowed_ips = (!canon.is_empty()).then_some(canon);

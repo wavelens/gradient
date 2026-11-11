@@ -119,7 +119,7 @@ mod tests {
         let secret = secret_file();
         let url = build_git_host_oauth_authorization_url(
             &app("https://codeberg.org", &secret),
-            "https://ci.example/api/v1/integrations/oauth/callback",
+            "https://ci.example/api/v1/git-host-connections/oauth/callback",
             "state-1",
             "challenge-1",
         )

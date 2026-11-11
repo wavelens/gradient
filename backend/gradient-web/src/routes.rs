@@ -177,6 +177,9 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     git_host_connections::project::list_project_git_host_connection_deliveries
                 ))
                 .routes(routes!(
+                    git_host_connections::project_gitea_oauth2_connection::redirect_signed_in_browser_to_git_host_for_project_oauth_approval
+                ))
+                .routes(routes!(
                     git_host_connections::team::list_team_git_host_connections,
                     git_host_connections::team::create_team_git_host_connection
                 ))
@@ -530,7 +533,7 @@ pub(crate) fn open_api() -> OpenApiRouter<Arc<ServerState>> {
             .routes(routes!(endpoints::get_config))
             .routes(routes!(admin::github_app::callback))
             .routes(routes!(
-                projects::project_gitea_oauth2_connection::get_git_host_oauth_callback
+                git_host_connections::project_gitea_oauth2_connection::get_git_host_oauth_callback
             )),
     ))
 }

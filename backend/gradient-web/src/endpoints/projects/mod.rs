@@ -5,7 +5,6 @@
  */
 
 pub mod management;
-pub mod project_gitea_oauth2_connection;
 pub mod readiness;
 mod refusal;
 pub mod secrets;

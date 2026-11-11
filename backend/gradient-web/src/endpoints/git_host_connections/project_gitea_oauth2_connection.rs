@@ -4,20 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::integrations::{
-    IntegrationResponse, IntegrationToCreate, SharedIntegrationCreationFields, WebhookBase,
-    create_project_integrations_in_transaction_with_available_names_and_encrypted_secrets,
-};
-use super::refusal::ProjectRefusal;
+use super::GitHostConnectionRefusal;
 use crate::access::has_permission;
 use crate::api_spec::ProjectPath;
 use crate::authorization::{
     cookie_value, random_url_safe, session_claims, sign_claims, verify_claims,
 };
 use crate::endpoints::auth::{csrf_clear_cookie, csrf_set_cookie};
-use crate::endpoints::tasks::integration_by_repository_host::url_host;
-use crate::error::{WebError, WebResult};
-use crate::names::IntegrationName;
+use crate::error::{WebError, WebResult, is_unique_violation};
+use crate::names::GitHostConnectionName;
 use crate::permissions::Permission;
 use crate::resource::Resource;
 use crate::scope::{ProjectScope, RequiresUnmanaged, can};
@@ -28,16 +23,18 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
-use gradient_ci::IntegrationKind;
-use gradient_ci::outbound_integration_access_token::access_token_expires_at_from_lifetime_seconds;
+use gradient_ci::actions::encrypt_secret_with_file;
+use gradient_ci::git_host_connection_token_refresh::access_token_expires_at_from_lifetime_seconds;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::git_host_connections::{self as connections, GitHostConnectionOwnerByDatabaseId};
 use gradient_git_host::gitea_oauth::{
     build_git_host_oauth_authorization_url, exchange_authorization_code_for_tokens,
 };
 use gradient_git_host::provision::{self, ForgeAccess};
 use gradient_types::*;
 use gradient_util::http::public_client;
+use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -63,9 +60,9 @@ struct SignedCookieClaims {
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct GiteaOAuth2ConnectQueryParameters {
-    /// Combined name of the webhook receiver and status reporter.
+    /// Name of a new connection to the Git host.
     #[param(value_type = String)]
-    pub name: IntegrationName,
+    pub name: GitHostConnectionName,
     /// Name to display in the UI. Default is `name`.
     #[serde(default)]
     pub display_name: Option<String>,
@@ -73,7 +70,7 @@ pub struct GiteaOAuth2ConnectQueryParameters {
 
 fn gitea_oauth2_redirect_uri(serve_url: &str) -> String {
     format!(
-        "{}/api/v1/integrations/oauth/callback",
+        "{}/api/v1/git-host-connections/oauth/callback",
         serve_url.trim_end_matches('/')
     )
 }
@@ -91,25 +88,23 @@ fn build_redirect_response_with_location_and_set_cookie(
         .map_err(Into::into)
 }
 
-async fn integration_name_taken(web_db: &WebDb, project: ProjectId, name: &str) -> WebResult<bool> {
-    for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
-        if gradient_db::integrations::by_name(web_db, project, kind, name)
-            .await?
-            .is_some()
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+async fn connection_name_taken(web_db: &WebDb, project: ProjectId, name: &str) -> WebResult<bool> {
+    Ok(connections::by_name(
+        web_db,
+        GitHostConnectionOwnerByDatabaseId::Project(project),
+        name,
+    )
+    .await?
+    .is_some())
 }
 
 #[utoipa::path(
     get,
-    path = "/projects/{project}/integrations/oauth/connect",
+    path = "/projects/{project}/git-host-connections/oauth/connect",
     operation_id = "connectGitHostWithOAuth",
-    tag = "integrations",
+    tag = "git-host-connections",
     summary = "Connect Gitea or Forgejo with OAuth2",
-    description = "Redirect the signed-in browser to a Gitea or Forgejo instance with a setup to authorize Gradient (HTTP 302). Use PKCE (S256). Set a short-lived signed `git_host_oauth_connect` cookie with the state, project and integration name. The callback can create a webhook receiver named `name` and a status reporter after approval. Gradient can refresh the access token for the status reporter automatically. The callback can also install a webhook on the repositories of tasks that connect to the new integration. API keys cannot call this endpoint.",
+    description = "Redirect a signed-in browser to a Gitea or Forgejo instance (HTTP 302). That instance can run Gradient authorization setup. Use PKCE (S256). Set a short-lived signed `git_host_oauth_connect` cookie with state, project and connection name. The callback can create a project connection named `name` after approval. The connection can receive events and report commit status. Gradient can refresh the access token of that connection automatically. The callback can also link that connection to project tasks that have no connection on the same Git host. The callback can install webhooks in those repositories. API keys can't call this endpoint.",
     params(ProjectPath, GiteaOAuth2ConnectQueryParameters),
     responses((status = FOUND, description = "Redirect to Git host"), WebError)
 )]
@@ -123,13 +118,13 @@ pub async fn redirect_signed_in_browser_to_git_host_for_project_oauth_approval(
         .config
         .gitea_app
         .as_ref()
-        .ok_or(ProjectRefusal::GiteaOAuth2ApplicationNotConfigured)?;
+        .ok_or(GitHostConnectionRefusal::GiteaOAuth2ApplicationNotConfigured)?;
     let session = session_claims(&state.jwt_secret, &headers)
         .filter(|claims| claims.id == user.id)
-        .ok_or(ProjectRefusal::GitHostOAuthConnectNeedsSignedInBrowserSession)?;
+        .ok_or(GitHostConnectionRefusal::GitHostOAuthConnectNeedsSignedInBrowserSession)?;
     let name = query.name.into_inner();
-    if integration_name_taken(&state.web_db, project.id, &name).await? {
-        return Err(WebError::already_exists(Resource::IntegrationName));
+    if connection_name_taken(&state.web_db, project.id, &name).await? {
+        return Err(WebError::already_exists(Resource::GitHostConnectionName));
     }
     let display_name = query
         .display_name
@@ -176,11 +171,11 @@ pub async fn redirect_signed_in_browser_to_git_host_for_project_oauth_approval(
 
 #[utoipa::path(
     get,
-    path = "/integrations/oauth/callback",
+    path = "/git-host-connections/oauth/callback",
     operation_id = "gitHostOAuthCallback",
-    tag = "integrations",
+    tag = "git-host-connections",
     summary = "Gitea or Forgejo OAuth2 Callback",
-    description = "Handle the redirect from the Git host. Start with validation of `state` against the `git_host_oauth_connect` cookie. Exchange the code for a token. Create the integration while the session that started the connection is still active. Redirect to the project integration page with `oauth_connected` and `webhooks_installed`, or with the `oauth_error` code.",
+    description = "Redirects from the Git host arrive here. Verify `state` against the `git_host_oauth_connect` cookie first. Exchange the code for a token. Create the connection while the session that started the flow is still valid. Then redirect to the connection page for the project's Git host with `oauth_connected` and `webhooks_installed`, or with the `oauth_error` code.",
     params(("code" = String, Query), ("state" = String, Query)),
     responses((status = FOUND, description = "Redirect to the frontend"), WebError)
 )]
@@ -222,7 +217,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
     let Some(claims) = claims else {
         return "/?oauth_error=expired".to_owned();
     };
-    let page = format!("/project/{}/integrations", claims.project_name);
+    let page = format!("/project/{}/git-host-connections", claims.project_name);
 
     let outcome: Result<usize, &'static str> = async {
         let app = config.gitea_app.as_ref().ok_or("failed")?;
@@ -259,7 +254,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
         if !allowed {
             return Err("forbidden");
         }
-        if integration_name_taken(web_db, claims.project_id, &claims.name)
+        if connection_name_taken(web_db, claims.project_id, &claims.name)
             .await
             .unwrap_or(true)
         {
@@ -267,7 +262,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
         }
 
         let failed = |e: &dyn std::fmt::Display| {
-            tracing::warn!(error = %e, "Failed to connect to Git host over OAuth2");
+            tracing::warn!(error = %e, "Failed to connect to Git host via OAuth2.");
             "failed"
         };
         let tokens = exchange_authorization_code_for_tokens(
@@ -280,53 +275,52 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
         .await
         .map_err(|e| failed(&format!("{e:#}")))?;
 
-        let created = create_project_integrations_in_transaction_with_available_names_and_encrypted_secrets(
-            web_db,
-            &config.secrets.crypt_file,
-            &WebhookBase {
-                serve_url: &config.server.serve_url,
-                project: &claims.project_name,
-            },
-            SharedIntegrationCreationFields {
-                project: claims.project_id,
-                name: claims.name.clone(),
-                display_name: claims.display_name.clone(),
-                git_host: app.git_host_type,
-                endpoint_url: Some(app.instance_base_url.clone()),
-                created_by: claims.user_id,
-            },
-            vec![
-                IntegrationToCreate {
-                    kind: IntegrationKind::Inbound,
-                    secret: None,
-                    access_token: None,
-                    refresh_token: None,
-                    access_token_expires_at: None,
-                    allowed_ips: None,
-                },
-                IntegrationToCreate {
-                    kind: IntegrationKind::Outbound,
-                    secret: None,
-                    access_token: Some(&tokens.access_token),
-                    refresh_token: tokens.refresh_token.as_deref(),
-                    access_token_expires_at: access_token_expires_at_from_lifetime_seconds(
-                        gradient_types::now(),
-                        tokens.expires_in,
-                    ),
-                    allowed_ips: None,
-                },
-            ],
-        )
-        .await
-        .map_err(|e| failed(&e))?;
-        let inbound = created.first().ok_or("failed")?;
+        let crypt_file = config.secrets.crypt_file.as_str();
+        let webhook_secret = super::new_webhook_secret();
+        let encrypt = |plain: &str| {
+            encrypt_secret_with_file(crypt_file, plain).map_err(|e| failed(&format!("{e:#}")))
+        };
+        let now = gradient_types::now();
+        let connection = MGitHostConnection {
+            id: GitHostConnectionId::now_v7(),
+            project: Some(claims.project_id),
+            owner_team: None,
+            name: claims.name.clone(),
+            display_name: claims.display_name.clone(),
+            git_host_type: app.git_host_type,
+            secret: Some(encrypt(&webhook_secret)?),
+            base_url: Some(app.instance_base_url.clone()),
+            access_token: Some(encrypt(&tokens.access_token)?),
+            encrypted_refresh_token: tokens.refresh_token.as_deref().map(encrypt).transpose()?,
+            access_token_expires_at: access_token_expires_at_from_lifetime_seconds(
+                now,
+                tokens.expires_in,
+            ),
+            allowed_ips: None,
+            receives_events: true,
+            reports_status: true,
+            github_installation_id: None,
+            account_login: None,
+            created_by: claims.user_id,
+            created_at: now,
+            managed: false,
+        };
+        let created = gradient_db::rows::insert::<EGitHostConnection, _>(web_db, connection)
+            .await
+            .map_err(|e| {
+                if is_unique_violation(&e) {
+                    "exists"
+                } else {
+                    failed(&e)
+                }
+            })?;
 
         Ok(
-            install_gradient_webhook_on_repositories_of_tasks_attached_to_new_integration(
+            install_gradient_webhooks_on_project_task_repositories_for_new_gitea_connection(
                 web_db,
-                app,
-                claims.project_id,
-                inbound,
+                &config.server.serve_url,
+                &created,
+                &webhook_secret,
                 &tokens.access_token,
             )
             .await,
@@ -343,43 +337,61 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
     }
 }
 
-async fn install_gradient_webhook_on_repositories_of_tasks_attached_to_new_integration(
+async fn install_gradient_webhooks_on_project_task_repositories_for_new_gitea_connection(
     web_db: &WebDb,
-    app: &GiteaOAuthConfig,
-    project: ProjectId,
-    inbound: &IntegrationResponse,
+    serve_url: &str,
+    connection: &MGitHostConnection,
+    webhook_secret: &str,
     access_token: &str,
 ) -> usize {
-    let (Some(secret), Some(webhook_url)) = (
-        inbound.generated_secret.as_deref(),
-        inbound.webhook_url.as_deref(),
+    let (Some(project), Some(base_url), Some(webhook_url)) = (
+        connection.project,
+        connection.base_url.as_deref(),
+        super::webhook_url(serve_url, connection),
     ) else {
         return 0;
     };
     let Ok(tasks) = gradient_db::tasks::of_project(project).all(web_db).await else {
         return 0;
     };
-    let app_host = url_host(&app.instance_base_url);
 
     let mut installed = 0;
-    for task in tasks.iter().filter(|t| {
-        !t.managed && url_host(&t.repository) == app_host
+    for task in tasks.into_iter().filter(|t| {
+        !t.managed
+            && t.git_host_connection.is_none()
+            && super::check_task_repository_url_can_use_git_host_connection(
+                &t.repository,
+                connection,
+            )
+            .is_ok()
     }) {
         let Some(repository) = provision::repository_path(&task.repository) else {
             continue;
         };
+        let task_id = task.id;
+        let mut active: ATask = task.into();
+        active.git_host_connection = Set(Some(connection.id));
+        if let Err(e) = gradient_db::tasks::update(web_db, active).await {
+            tracing::warn!(task = %task_id, error = %e, "Failed to associate the new connection with the task.");
+            continue;
+        }
         let access = ForgeAccess {
-            git_host: app.git_host_type,
-            endpoint_url: &app.instance_base_url,
+            git_host: connection.git_host_type,
+            endpoint_url: base_url,
             token: access_token,
             repository: &repository,
         };
-        match provision::install_webhook(public_client().clone(), &access, webhook_url, secret)
-            .await
+        match provision::install_webhook(
+            public_client().clone(),
+            &access,
+            &webhook_url,
+            webhook_secret,
+        )
+        .await
         {
             Ok(()) => installed += 1,
             Err(e) => {
-                tracing::warn!(task = %task.id, error = %e, "Failed to install the task webhook");
+                tracing::warn!(task = %task_id, error = %e, "Failed to install the task webhook");
             }
         }
     }

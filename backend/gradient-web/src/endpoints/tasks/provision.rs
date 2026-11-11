@@ -14,8 +14,9 @@ use crate::scope::{Requires, TaskScope, can};
 use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
+use gradient_ci::CiContext;
 use gradient_ci::actions::decrypt_secret_with_file;
-use gradient_ci::outbound_integration_access_token::refresh_and_get_usable_decrypted_access_token;
+use gradient_ci::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token;
 use gradient_core::ServerState;
 use gradient_git_host::provision::{self, ForgeAccess, ProvisionError};
 use gradient_sources::format_public_key;
@@ -75,14 +76,15 @@ impl Target {
         })
     }
 
-    fn token(&self, crypt_file: &str) -> WebResult<SecretString> {
-        decrypt(
-            crypt_file,
-            self.connection
-                .access_token
-                .as_deref()
-                .ok_or(TaskRefusal::ProvisionTokenMissing)?,
+    async fn token(&self, ci: &CiContext) -> WebResult<SecretString> {
+        refresh_and_get_usable_decrypted_access_token(
+            ci.db.web_db.inner(),
+            &ci.db.config,
+            &ci.http,
+            &self.connection,
         )
+        .await?
+        .ok_or_else(|| TaskRefusal::ProvisionTokenMissing.into())
     }
 
     fn access<'a>(&'a self, token: &'a SecretString) -> ForgeAccess<'a> {
@@ -125,7 +127,7 @@ pub async fn post_install_webhook(
             .as_deref()
             .ok_or(TaskRefusal::ProvisionSecretMissing)?,
     )?;
-    let token = target.token(&state.config.secrets.crypt_file)?;
+    let token = target.token(&state.ci()).await?;
 
     provision::install_webhook(
         public_client().clone(),
@@ -152,7 +154,7 @@ pub async fn post_install_deploy_key(
     scope: TaskScope<Requires<can::ManageIntegrations>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = Target::load(&scope).await?;
-    let token = target.token(&state.config.secrets.crypt_file)?;
+    let token = target.token(&state.ci()).await?;
     let public_key = format_public_key(scope.project.clone(), &state.config.server.serve_url);
     let title = public_key
         .rsplit(' ')
