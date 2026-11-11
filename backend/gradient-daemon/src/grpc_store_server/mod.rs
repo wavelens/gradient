@@ -20,6 +20,7 @@ pub mod proto {
 
 use crate::backend::Backend;
 use crate::server::{next_conn, serve_stream};
+use crate::store_features_beyond_nix_daemon_protocol::StoreFeaturesBeyondDaemonProtocol;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use harmonia_protocol::ProtocolVersion;
@@ -32,6 +33,7 @@ use harmonia_protocol::de::NixReader;
 use harmonia_protocol::log::{Field, LogMessage, ResultType};
 use harmonia_store_path::{StorePathHash, StorePathSet};
 use nix_worker_protocol_payload_serialization::{
+    parse_query_missing_target_string_to_derived_path,
     parse_store_path_and_basic_derivation_from_store_path_base_name_and_worker_protocol_bytes,
     parse_store_path_base_name_from_grpc_request,
     serialize_build_result_for_client_worker_protocol_version,
@@ -51,9 +53,10 @@ use tonic::{Extensions, Request, Response, Status, Streaming};
 use zstd_stream_compression::{ZstdStreamCompressor, ZstdStreamPieceDecompressor};
 
 const UNCOMPRESSED_NAR_BYTES_PER_FETCH_NARS_FRAME: usize = 256 * 1024;
+const UNCOMPRESSED_BUILD_LOG_BYTES_PER_GET_BUILD_LOG_CHUNK: usize = 256 * 1024;
 
 pub trait GrpcCallCredentialChecker: Send + Sync + 'static {
-    type Backend: Backend;
+    type Backend: Backend<Handler: HandshakeDaemonStore<Store: StoreFeaturesBeyondDaemonProtocol>>;
 
     fn check_call_credentials_and_return_store_backend(
         &self,
@@ -427,9 +430,32 @@ impl<C: GrpcCallCredentialChecker> NixRemote for AuthenticatedNixGrpcStoreServic
 
     async fn query_missing(
         &self,
-        _request: Request<QueryMissingRequest>,
+        request: Request<QueryMissingRequest>,
     ) -> Result<Response<QueryMissingReply>, Status> {
-        Err(Status::unimplemented("QueryMissing"))
+        let (metadata, extensions, message) = request.into_parts();
+        let mut store = self
+            .authenticate_grpc_call_and_return_nix_store(&metadata, &extensions)
+            .await?;
+        let targets = message
+            .targets
+            .iter()
+            .map(|target| parse_query_missing_target_string_to_derived_path(target))
+            .collect::<Result<Vec<_>, _>>()?;
+        let missing = finish_result_log_discarding_messages_and_turn_daemon_error_into_grpc_status(
+            store.query_missing(&targets),
+        )
+        .await?;
+        Ok(Response::new(QueryMissingReply {
+            will_build: missing.will_build.iter().map(ToString::to_string).collect(),
+            will_substitute: missing
+                .will_substitute
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            unknown: missing.unknown.iter().map(ToString::to_string).collect(),
+            download_size: missing.download_size,
+            nar_size: missing.nar_size,
+        }))
     }
 
     async fn store_info(
@@ -449,9 +475,27 @@ impl<C: GrpcCallCredentialChecker> NixRemote for AuthenticatedNixGrpcStoreServic
 
     async fn get_build_log(
         &self,
-        _request: Request<GetBuildLogRequest>,
+        request: Request<GetBuildLogRequest>,
     ) -> Result<Response<Self::GetBuildLogStream>, Status> {
-        Err(Status::unimplemented("GetBuildLog"))
+        let (metadata, extensions, message) = request.into_parts();
+        let mut store = self
+            .authenticate_grpc_call_and_return_nix_store(&metadata, &extensions)
+            .await?;
+        let drv_path = parse_store_path_base_name_from_grpc_request(&message.drv_path)?;
+        let log = store
+            .read_build_log(&drv_path)
+            .await
+            .map_err(nix_daemon_error_to_grpc_status)?
+            .ok_or_else(|| Status::not_found(format!("No build log for {drv_path}")))?;
+        Ok(Response::new(
+            async_stream::try_stream! {
+                let mut compressor = ZstdStreamCompressor::new()?;
+                for piece in log.chunks(UNCOMPRESSED_BUILD_LOG_BYTES_PER_GET_BUILD_LOG_CHUNK) {
+                    yield GetBuildLogChunk { data: compressor.compress(piece)? };
+                }
+            }
+            .boxed(),
+        ))
     }
 }
 
