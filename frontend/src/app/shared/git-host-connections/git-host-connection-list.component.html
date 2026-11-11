@@ -4,6 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+@let owner = gitHostConnectionOwner();
+@if (owner.type === 'project') {
+  <app-forgejo-oauth-connection [projectName]="owner.name" [access]="access()" [existingConnectionNames]="ownConnectionNames()" />
+}
+
 <gr-load-state [loading]="loading()" [error]="loadError()" loadingMessage="Loading connections for Git hosts..."
   errorTitle="Failed to load connections to Git hosts" (retry)="load()">
   <gr-settings-section title="Owned Connections" [card]="false">
@@ -135,6 +140,9 @@
     <input grInput id="connection-access-token" type="password" autocomplete="off" [ngModel]="form().access_token"
       (ngModelChange)="patchForm({ access_token: $event })"
       [placeholder]="editing()?.has_access_token ? 'Leave this field blank to keep the current token.' : ''" />
+    @if (editing()?.access_token_refreshes_automatically) {
+      <gr-badge data-testid="token-refreshes-badge">Automatic refresh of the token</gr-badge>
+    }
   </gr-form-field>
   @if (form().receives_events) {
     <gr-form-field label="Webhook secret" for="connection-secret" [invalid]="!!secretError()" [error]="secretError() ?? ''"

@@ -5,6 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import type { AccessState, GitHostConnectionOwner, GitHostConnectionResponse, GitHostConnectionSummary } from '@core/models';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
@@ -43,6 +44,7 @@ const full: GitHostConnectionResponse = {
   managed: false,
   has_secret: true,
   has_access_token: true,
+  access_token_refreshes_automatically: false,
   allowed_ips: [],
   webhook_url: 'https://ci.example.com/hooks/c1',
   created_by: 'u1',
@@ -56,6 +58,7 @@ function render(access: AccessState = writable, connections: GitHostConnectionSu
   TestBed.configureTestingModule({
     imports: [GitHostConnectionListComponent],
     providers: [
+      provideRouter([]),
       { provide: GitHostConnectionsApi, useValue: { list, listDeliveries: () => of([]), ...api } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
@@ -117,6 +120,29 @@ describe('GitHostConnectionListComponent', () => {
     component.patchForm({ display_name: 'Forgejo Prod', reports_status: false });
     component.save();
     expect(patch).toHaveBeenCalledWith(project, 'c1', { display_name: 'Forgejo Prod', reports_status: false });
+  });
+
+  it('marks a connection whose access token refreshes automatically', () => {
+    const get = vi.fn(() => of({ ...full, access_token_refreshes_automatically: true }));
+    const { fixture, component } = render(writable, [own], { get });
+    component.openEdit(own);
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog [data-testid="token-refreshes-badge"]')).not.toBeNull();
+  });
+
+  it('offers the OAuth2 connection only to a project', () => {
+    const { el } = render();
+    expect(el.querySelector('app-forgejo-oauth-connection')).not.toBeNull();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [GitHostConnectionListComponent],
+      providers: [provideRouter([]), { provide: GitHostConnectionsApi, useValue: { list: () => of([]) } }],
+    });
+    const team = TestBed.createComponent(GitHostConnectionListComponent);
+    team.componentRef.setInput('gitHostConnectionOwner', { type: 'team', name: 'platform' });
+    team.componentRef.setInput('access', writable);
+    team.detectChanges();
+    expect((team.nativeElement as HTMLElement).querySelector('app-forgejo-oauth-connection')).toBeNull();
   });
 
   it('removes a connection after the confirmation', () => {

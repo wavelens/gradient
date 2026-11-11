@@ -39,6 +39,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import { MANAGED_ITEM_DISABLED_REASON, ManagedDisableDirective } from '@shared/access/managed-disable.directive';
 import { IncomingDeliveriesComponent } from '@shared/git/incoming-deliveries.component';
+import { ForgejoOAuthConnectionComponent } from './forgejo-oauth-connection.component';
 import { SELF_HOSTED_GIT_HOSTS, gitHostLabel, webhookEvents } from '@shared/git/git-host';
 import { dialogFormChangesSinceOpen, fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 import { formatEntityLabel } from '@shared/ui';
@@ -92,6 +93,7 @@ function emptyForm(): ConnectionForm {
     SubmitDirective,
     ManagedDisableDirective,
     IncomingDeliveriesComponent,
+    ForgejoOAuthConnectionComponent,
   ],
   templateUrl: './git-host-connection-list.component.html',
   styleUrl: './git-host-connection-list.component.scss',
@@ -117,6 +119,7 @@ export class GitHostConnectionListComponent implements OnInit {
   ownConnections = computed(() =>
     this.connections().filter((c) => isSameGitHostConnectionOwner(c.owner, this.gitHostConnectionOwner())),
   );
+  ownConnectionNames = computed(() => this.ownConnections().map((c) => c.name));
   inheritedReadOnlyConnections = computed(() =>
     this.connections().filter((c) => !isSameGitHostConnectionOwner(c.owner, this.gitHostConnectionOwner())),
   );
