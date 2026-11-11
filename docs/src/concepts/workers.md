@@ -53,7 +53,7 @@ Workers in a single datacenter can share a zone label, `services.gradient.worker
 | Team worker | Under one [team](teams.md) | Every project granting the team's workers |
 | Local worker | On the server host, automatically | Every new project, as a worker of the state-declared team `server` |
 
-A worker can receive jobs only from projects that have a writable cache subscription. The rows list the workers that serve a project, cache subscriptions, and Git access on the **Readiness** card of the project page. Each row can show the modifications that its role can grant. Viewers see rows without buttons.
+Workers receive jobs only from projects with a writable cache subscription. The **Readiness** card on the project page can list the workers that serve that project, the cache subscriptions, and the Git access. Each row can show the changes that its role can grant. Viewers see rows without buttons. The Git access row can show tasks that can't clone the repository on the task's **Repository** page. [Git host connection](../guides/gitea.md#git-host-connections) and deploy keys are on this page.
 
 The server can generate a worker ID for each worker registration through the UI or CLI. The NixOS configuration and the peers line appear in the registration result one time only. See [Add a Remote Worker](../guides/remote-worker.md).
 
