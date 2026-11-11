@@ -9,9 +9,14 @@ export interface DisplayNameAndName {
   name: string;
 }
 
-export function formatEntityLabel(entity: DisplayNameAndName): string {
+export function getEntityDisplayNameOrName(entity: DisplayNameAndName): string {
+  return entity.display_name?.trim() || entity.name;
+}
+
+export function formatEntityLabel(entity: DisplayNameAndName, ownerTeam?: DisplayNameAndName | null): string {
   const displayName = entity.display_name?.trim();
-  return displayName && displayName !== entity.name ? `${displayName} (${entity.name})` : entity.name;
+  const label = displayName && displayName !== entity.name ? `${displayName} (${entity.name})` : entity.name;
+  return ownerTeam ? `${label} · ${getEntityDisplayNameOrName(ownerTeam)}` : label;
 }
 
 export function entityToPickerOption(entity: DisplayNameAndName, value: string = entity.name): { label: string; value: string } {

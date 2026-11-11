@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { IconComponent } from '@gradient/ui/ui';
 import { entityKindToIconName } from '../entity-icon';
-import { formatEntityLabel } from './entity-name';
+import { formatEntityLabel, getEntityDisplayNameOrName, type DisplayNameAndName } from './entity-name';
 
 @Component({
   selector: 'gr-entity-name',
@@ -21,8 +21,8 @@ import { formatEntityLabel } from './entity-name';
     @if (shownDisplayName() !== name()) {
       <span class="entity-name__slug">{{ name() }}</span>
     }
-    @if (ownerTeamDisplayName(); as owner) {
-      <span class="entity-name__owner">· {{ owner }}</span>
+    @if (ownerTeam(); as owner) {
+      <span class="entity-name__owner">· {{ getEntityDisplayNameOrName(owner) }}</span>
     }
   `,
   host: { '[attr.title]': 'label()' },
@@ -33,9 +33,10 @@ export class EntityNameComponent {
   kind = input<keyof typeof entityKindToIconName>();
   displayName = input<string | null>();
   name = input.required<string>();
-  ownerTeamDisplayName = input<string | null>();
+  ownerTeam = input<DisplayNameAndName | null>();
 
   protected readonly entityKindToIconName = entityKindToIconName;
   protected shownDisplayName = computed(() => this.displayName()?.trim() || this.name());
-  protected label = computed(() => formatEntityLabel({ display_name: this.displayName(), name: this.name() }));
+  protected readonly getEntityDisplayNameOrName = getEntityDisplayNameOrName;
+  protected label = computed(() => formatEntityLabel({ display_name: this.displayName(), name: this.name() }, this.ownerTeam()));
 }

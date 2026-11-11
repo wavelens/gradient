@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { UserService } from '@core/services/user.service';
-import { getDisplayNameWithOwnerTeam, loadSignedInUserAccessSummary } from './signed-in-user-access-summary';
+import { loadSignedInUserAccessSummary } from './signed-in-user-access-summary';
 
 function load(signedIn: boolean, request: () => unknown) {
   const getProjectsCachesAndTeamsCurrentUserCanReach = vi.fn(request);
@@ -36,15 +36,5 @@ describe('loadSignedInUserAccessSummary', () => {
 
   it('stays empty when the request fails', () => {
     expect(load(true, () => throwError(() => new Error('down'))).summary()).toBeNull();
-  });
-});
-
-describe('getDisplayNameWithOwnerTeam', () => {
-  it('appends the owner team display name', () => {
-    expect(getDisplayNameWithOwnerTeam('Acme', { name: 'infra', display_name: 'Infra' })).toBe('Acme · Infra');
-  });
-
-  it('keeps the name without an owner team', () => {
-    expect(getDisplayNameWithOwnerTeam('Acme', null)).toBe('Acme');
   });
 });

@@ -31,8 +31,9 @@ describe('gr-entity-name', () => {
   });
 
   it('names the owning team when given', () => {
-    const root = render({ displayName: 'Web Shop', name: 'shop', ownerTeamDisplayName: 'Platform' });
+    const root = render({ displayName: 'Web Shop', name: 'shop', ownerTeam: { name: 'platform', display_name: 'Platform' } });
     expect(root.querySelector('.entity-name__owner')?.textContent).toContain('Platform');
+    expect(root.getAttribute('title')).toBe('Web Shop (shop) · Platform');
   });
 });
 
@@ -42,6 +43,8 @@ describe('entity label helpers', () => {
   it('writes both names for text such as toasts and picker options', () => {
     expect(formatEntityLabel(cache)).toBe('MyCache (testcache)');
     expect(formatEntityLabel({ display_name: '', name: 'testcache' })).toBe('testcache');
+    expect(formatEntityLabel(cache, { name: 'infra', display_name: 'Infra' })).toBe('MyCache (testcache) · Infra');
+    expect(formatEntityLabel(cache, null)).toBe('MyCache (testcache)');
     expect(entityToPickerOption(cache)).toEqual({ label: 'MyCache (testcache)', value: 'testcache' });
     expect(entityToPickerOption(cache, 'id-1')).toEqual({ label: 'MyCache (testcache)', value: 'id-1' });
   });

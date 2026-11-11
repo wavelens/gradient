@@ -26,7 +26,7 @@ import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, merge } from 'rxjs';
 import { PHASE_SEVERITY } from '@shared/evaluation';
-import { PendingInvitationsBannerComponent, getDisplayNameWithOwnerTeam } from '@shared/access';
+import { PendingInvitationsBannerComponent } from '@shared/access';
 
 @Component({
   selector: 'app-project-list',
@@ -53,7 +53,6 @@ export class ProjectListComponent implements OnInit {
   protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   protected readonly phaseSeverity = PHASE_SEVERITY;
-  protected readonly getDisplayNameWithOwnerTeam = getDisplayNameWithOwnerTeam;
 
   private projectsService = inject(ProjectsService);
   protected authService = inject(AuthService);
