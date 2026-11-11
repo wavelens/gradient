@@ -499,7 +499,7 @@ fn is_retryable(err: &anyhow::Error) -> bool {
 
         e.as_database_error()
             .and_then(|d| d.code())
-            .is_some_and(|c| c == "40P01" || c == "40001")
+            .is_some_and(|c| c == "40P01" || c == "40001" || c == "25P02")
     })
 }
 
@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn a_deadlock_and_a_serialization_failure_retry_through_context() {
-        for code in ["40P01", "40001"] {
+        for code in ["40P01", "40001", "25P02"] {
             assert!(is_retryable(&coded(code).context("seed")), "{code}");
         }
     }
@@ -711,7 +711,6 @@ mod tests {
     #[test]
     fn anything_else_does_not_retry() {
         assert!(!is_retryable(&coded("23505")));
-        assert!(!is_retryable(&coded("25P02")));
         assert!(!is_retryable(&anyhow!("graph transaction exceeded 120s")));
     }
 
