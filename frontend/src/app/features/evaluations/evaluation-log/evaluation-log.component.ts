@@ -25,7 +25,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule, UrlTree } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { EMPTY, Observable, Subscription, firstValueFrom, forkJoin, merge } from 'rxjs';
+import { EMPTY, Observable, Subscription, firstValueFrom, forkJoin, merge, of } from 'rxjs';
 import { auditTime, catchError, filter, map, share, switchMap, tap } from 'rxjs/operators';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
@@ -80,6 +80,7 @@ import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsT
 import { saveResponse } from '@shared/download';
 
 const packageNameVisibleTrailingCharacterCount = 10;
+const emptyBuildPageForEvaluationOnly: PaginatedBuilds = { builds: [], total: 0, active_count: 0 };
 
 @Component({
   selector: 'app-evaluation-log',
@@ -539,6 +540,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private firstBuildPage(limit = this.PAGE_SIZE): Observable<PaginatedBuilds> {
+    if (this.evaluation()?.only_evaluate) return of(emptyBuildPageForEvaluationOnly);
     return this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined);
   }
 
@@ -1082,6 +1084,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   /// The pointer decides; keyboard focus only counts while the pointer is over neither region.
   private findSearchesBuilds(logOpen: boolean): boolean {
+    if (this.evaluation()?.only_evaluate) return false;
     if (!logOpen) return true;
     return this.pointerOver ? this.pointerOver === 'builds' : this.sidebarFocused;
   }

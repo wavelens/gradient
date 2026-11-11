@@ -250,12 +250,14 @@
                   @let execJob = selectedEvaluationLatestExecJobByEntryPointAttributePath().get(ep.eval);
                   <div class="entry-row pkg" [attr.data-phase]="phase" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
-                    <a class="entry-link" [routerLink]="execJob ? links.execJob(projectName, taskName, execJob.id) : links.evaluationLog(projectName, sel.id, { filter: ep.build_id })"
+                    <a class="entry-link" [routerLink]="execJob ? links.execJob(projectName, taskName, execJob.id) : links.evaluationLog(projectName, sel.id, { filter: sel.only_evaluate ? null : ep.build_id })"
                        [title]="ep.eval + ' - ' + ep.derivation_path + (ep.ifd ? ' (import from derivation: evaluation waited for this build)' : '')" [attr.aria-label]="row.label + (ep.ifd ? ' (import from derivation: evaluation waited for this build)' : '')"></a>
                     <gr-status-icon class="phase-swatch" [phase]="phase" [prioritized]="ep.prioritized" size="sm" />
                     <span class="pkg-name entry-name" [title]="row.label">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
-                    @if (!sel.only_evaluate) {
+                    @if (sel.only_evaluate) {
+                      <span class="pkg-deps">Evaluated</span>
+                    } @else {
                       @if (execJob) {
                         <span class="pkg-deps">{{ buildOutcomeLabel(ep.build_status) }}</span>
                       } @else {
