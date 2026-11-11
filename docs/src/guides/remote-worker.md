@@ -12,29 +12,21 @@ A remote worker is an extra machine that can evaluate and build for a project. I
 - A Mac with [nix-darwin](https://github.com/nix-darwin/nix-darwin) installed, or a NixOS machine with network access to the Gradient server
 - A project with a cache subscription, see [First Project](../get-started/first-project.md)
 
-## 1. Pick a Worker ID
-
-A worker ID is a UUID. Generate one on the worker machine.
-
-=== "NixOS"
-
-    ```sh
-    cat /proc/sys/kernel/random/uuid
-    ```
-
-=== "macOS"
-
-    ```sh
-    uuidgen | tr A-F a-f
-    ```
-
-## 2. Register the Worker
+## 1. Register the Worker
 
 === "UI"
 
-    In the project, go to **Settings -> Workers -> Register Worker**. Provide a name and the worker ID from step 1.
+Open **Settings -> Workers -> Register Worker** in the project. Enter a name. Select capabilities. The server can generate a worker ID and token.
 
-    The dialog then shows a **Peers file entry** once. Save that entry as a secret on the worker machine, for example at `/run/secrets/gradient-worker-peers`.
+    Both items appear once on the result screen - the NixOS configuration for the worker machine and the peers line. Save the peers line as a secret on the worker machine. Store the peers line in `/run/secrets/gradient-worker-peers`, for example.
+
+=== "CLI"
+
+    ```sh
+    gradient worker register --display-name builder-1
+    ```
+
+The same NixOS configuration and peers line come from the output of this command. Team admins register team workers with `gradient team worker register <TEAM> --display-name builder-1`.
 
 === "Declarative"
 
@@ -44,7 +36,7 @@ A worker ID is a UUID. Generate one on the worker machine.
     services.gradient.state = {
       projects.acme.id = "<project uuid>"; # (1)!
       workers.builder-1 = {
-        worker_id = "<worker id from step 1>";
+        worker_id = "<worker UUID, for example from cat /proc/sys/kernel/random/uuid>";
         projects = [ "acme" ];
         token_file = "/run/secrets/builder-1-token"; # (2)!
       };
@@ -56,7 +48,7 @@ A worker ID is a UUID. Generate one on the worker machine.
 
     On the worker machine, write the peers file entry as `<project uuid>:<token>`.
 
-## 3. Open the Server to Workers
+## 2. Open the Server to Workers
 
 Remote workers use a WebSocket at `/proto` to reach the server. The bundled nginx forwards `/proto` only when `proto.public` is enabled.
 
@@ -67,7 +59,9 @@ services.gradient.proto.public = true;
 
 Without this setting, the local worker can still connect on the loopback address.
 
-## 4. Configure the Machine
+## 3. Configure the Machine
+
+Paste the NixOS configuration from step 1. The configuration looks like this.
 
 === "NixOS"
 
@@ -114,7 +108,7 @@ Without this setting, the local worker can still connect on the loopback address
 - The connection to the server is visible in `/var/log/gradient-worker.log` on macOS.
 
 !!! tip "One Machine, Many Projects"
-    Register the same worker ID in each project. Give each project its own line in the peers file. To share a worker across a whole team, use a [team worker](../concepts/teams.md#team-workers) instead.
+    Each registration in the UI or CLI creates a new worker ID. To use one machine for several projects, register a [team worker](../concepts/teams.md#team-workers) and grant the team with its workers to each project. Alternatively, declare the worker with several projects in the server state configuration and give each project its own line in the peers file.
 
 ## macOS Workers
 

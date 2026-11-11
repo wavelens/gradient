@@ -21,7 +21,7 @@ Open **Settings** from the header.
 
 The theme choice (**System**, **Light**, **Dark**) lives in the browser, not in the account.
 
-Find **My Invites** in the header user menu. Pending invitations to projects, caches and teams show there. Accept or decline each invitation from that list.
+Find **Requests** in the user menu in the header. The badge and dashboard show the same count of items that need a user decision. The items include invitations to projects, caches, and teams. Requests to subscribe to caches that belong to the user appear in the list. Requests for team grants on teams that belong to the user also appear in the list. A user can accept, decline, approve, or reject each request in the list.
 
 ![API Keys](../assets/screenshots/api_keys.png)
 

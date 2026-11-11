@@ -60,18 +60,23 @@ A subscribed project both pushes build outputs to the cache and pulls packages f
 
 === "UI"
 
-    In the other project, go to **Settings -> Cache Subscriptions -> Add Cache**.
+    Go to **Settings -> Cache Subscriptions -> Add Cache** in the other project. Select the cache and a mode (**Read & Write**, **Read only**, or **Write only**). The list can show for each cache whether the cache can accept writes or which cache admin can approve the request.
 
-    - With the Admin role on both sides, the subscription activate at once.
-    - Any other subscription wait as a request, marked **Pending approval**. A cache admin can approve or deny requests under **Subscriptions** on the cache page.
+    - A subscription with write access to the cache can take effect at once.
+    - All other subscriptions wait as requests marked **Pending approval** that carry the cache administrator name. The cache administrator can approve or deny the request under **Subscriptions** on the cache page or at **Requests** in the header user menu. The administrator can lower the requested mode at approval time, for example Read & Write to Read only.
+
+    All subscription rows show a switch **Sign pushed paths with the cache key**. The paths from the project to the cache receive a signature from the server while the switch is on. In the CLI, choose the mode with `gradient project cache add <CACHE> --mode ReadOnly`.
 
 === "Declarative"
 
     ```nix
-    services.gradient.state.caches.main.projects = [ "acme" "widgets" ];
+    services.gradient.state.caches.main.projects = [
+      "acme"
+      { name = "widgets"; mode = "ReadOnly"; sign_outputs = false; }
+    ];
     ```
 
-    Declared subscriptions skip the approval step.
+    Declared subscriptions skip the approval step. The UI and API lock them. Change or remove them in the config. The default values are `ReadWrite` for `mode` and `true` for `sign_outputs`.
 
 ## 3. Invite Members
 
@@ -79,7 +84,7 @@ Roles on a cache belong to members of the cache itself. Project roles do not car
 
 === "UI"
 
-    On the cache page, open **Members -> Invite Member**. Enter a user name and a role, then pick **Send invitation**. The invited user accepts the invitation on the **My Invites** page in the user menu of the header. Cache access only begins after acceptance. Instance administrators and people adding a user who already has access through a team can pick **Add now** instead.
+    On the cache page, open **Members -> Invite Member**. Enter a user name and a role, then pick **Send invitation**. The invited user accepts the invitation on the **Requests** page in the user menu of the header. Cache access only begins after acceptance. Instance administrators and people adding a user who already has access through a team can pick **Add now** instead.
 
     - Invites expire after 7 days.
     - With [mail](../reference/configuration.md#email) configured, the invitee also gets an email with a link.

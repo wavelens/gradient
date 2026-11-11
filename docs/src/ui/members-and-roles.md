@@ -28,7 +28,7 @@ Direct roles give a person their role. Team grants apply only to people without 
 Use **Invite Member** to open a dialog with a username, a role, and a way to add the member.
 
 - **Add now** can apply the role right away. Instance admins always have this option. On projects and caches, everyone who can manage members can use this option for people who already have access through team grants or owner teams.
-- **Send invitation** can grant access only after acceptance of the invitation on the **My Invites** page in the header user menu. Invitations expire after 7 days. A person can hold only one pending invitation per project, cache or team.
+- **Send invitation** can grant access only after acceptance of the invitation on the **Requests** page in the header user menu. Invitations expire after 7 days. A person can hold only one pending invitation per project, cache or team.
 - The invited person can also receive the invitation link by email with [email](../reference/configuration.md#email) set.
 - Projects and caches [declared in Nix](../guides/manage-with-nix.md) get their members from the configuration only.
 

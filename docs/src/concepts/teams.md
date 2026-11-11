@@ -21,7 +21,7 @@ flowchart LR
 | Admin | Change settings, members, invitations, workers and grants. Approve requests. Delete the team |
 | Member | See the team page |
 
-- **Invitations**: Admins invite users by name. Users join when they accept an invitation at **My Invites** in the user menu in the header. Instance admins select **Add now** to add members without an invitation.
+- **Invitations**: Admins invite users by name. Users join when they accept an invitation at **Requests** in the user menu in the header. Instance admins select **Add now** to add members without an invitation.
 - **Last Admin**: Every team must have at least one Admin. Removing or demoting the last Admin is refused.
 - **Creation**: `permissions.createTeam` controls who can create teams. The creator is the first Admin.
 
@@ -54,7 +54,7 @@ Activation of the team's workers within an existing grant requires a team Admin.
 Register a team worker once in the **Workers** section of the team page. The worker can then take jobs from every project that grants access to the team's workers.
 
 - **Peers file**: one line per token, in the form `<team id>:<token>` or `*:<token>`. Details in the [peers file](../guides/remote-worker.md#peers-file).
-- **Caches**: projects without a [cache subscription](caches.md) do not accept team workers.
+- **Caches**: Projects without a writable [cache subscription](caches.md) don't accept team workers. The card for **Readiness** and `gradient project show` on the project page list the missing subscriptions.
 - **Removal**: when a grant, the team or the worker goes away, running jobs in the affected projects end.
 
 ## Owner Team

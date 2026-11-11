@@ -108,7 +108,7 @@ gradient account switch work
 | `gradient logged-in-user api-keys permissions` | - | List the permissions that an API key can grant. |
 | `gradient logged-in-user active-login-sessions list` | `--page <PAGE>`, `--per-page <PER_PAGE>` | List active login sessions |
 | `gradient logged-in-user active-login-sessions revoke <ID>` | - | Revoke the session and sign out of that device. |
-| `gradient logged-in-user invitations list` | - | List pending invitations to projects, caches and teams. |
+| `gradient logged-in-user invitations list` | - | List pending invitations to projects, caches and teams. Subscription requests and team grant requests appear in the `GET /user/requests` JSON output and on the **Requests** page. |
 | `gradient logged-in-user invitations accept <TOKEN>` | - | Accept the invitation |
 | `gradient logged-in-user invitations decline <TOKEN>` | - | Decline Invitation |
 | `gradient logged-in-user linked-external-login-accounts list` | - | List login providers and show whether an account links to them. |
@@ -132,7 +132,7 @@ gradient account switch work
 | `gradient project ssh show` | - | Print the public SSH key used for repository access |
 | `gradient project ssh recreate` | - | Generate a new SSH key pair and print the new public key |
 | `gradient project cache list` | - | Show all caches the project subscribes to |
-| `gradient project cache add <CACHE>` | - | Subscribe the project to a cache |
+| `gradient project cache add <CACHE>` | `--mode <MODE>` | Subscribe the project to a cache. Use `--mode` to choose ReadWrite, ReadOnly or WriteOnly. |
 | `gradient project cache remove <CACHE>` | - | End the project's subscription to a cache |
 | `gradient project secret list` | - | List secret names for the selected project. No values appear. |
 | `gradient project secret show <NAME>` | - | Show who last set a secret and when. |
@@ -182,7 +182,8 @@ gradient account switch work
 | `gradient task trigger test <TRIGGER>` | - | Fire the trigger now against the current head commit of the task. |
 | `gradient task trigger default <TRIGGER>` | - | Set the trigger to default. Manual evaluations use that branch. |
 
-- `project create`, `task create`, `cache create`, `team create` and `task evaluate` print the UUID of the new item. Pass `--json` to print `{"id", "name", "url"}` instead. `url` is the web page of the new item.
+- `project create`, `task create`, `task duplicate`, `cache create`, `team create` and `task evaluate` print the UUID of the new item. Pass `--json` to print `{"id", "name", "url"}` instead. `url` is the web page for new items.
+- `project show`, `project create`, and `task create` also list missing prerequisites in text mode. `Wait for a cache subscription before evaluation: gradient project cache add <cache>` is one example.
 
 ## Builds and Evaluations
 
@@ -257,7 +258,7 @@ gradient account switch work
 
 | Command | Options | Description |
 |---|---|---|
-| `gradient worker register --display-name <DISPLAY_NAME> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--token <TOKEN>` | Add a new worker to the selected project |
+| `gradient worker register --display-name <DISPLAY_NAME>` | `--url <URL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Register a worker in the chosen project. Generate a worker ID and a token on the server, then print a NixOS configuration and a peers line. |
 | `gradient worker list` | - | Show every worker in the selected project |
 | `gradient worker delete <WORKER_ID>` | `--yes` | Remove a worker from the selected project |
 | `gradient worker metrics <WORKER_ID>` | - | Print worker load samples, connections and dispatched jobs |
@@ -327,7 +328,7 @@ These commands act on the whole instance. They need a superuser account. AI agen
 | `gradient team grant-requests reject <TEAM> <REQUEST_ID>` | - | Reject a grant request |
 | `gradient team projects-and-caches <TEAM>` | - | Show the projects and caches that grant the team access |
 | `gradient team worker list <TEAM>` | - | Show the workers of a team |
-| `gradient team worker register <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--token <TOKEN>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Add a worker that builds for every project granting the team its workers |
+| `gradient team worker register <TEAM>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Add a worker that builds for every project granting the team its workers |
 | `gradient team worker edit <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--active <BOOL>`, `--draining <BOOL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Edit a team worker. Disabling it can abort running jobs. Use `--draining true` to let running jobs complete and to stop new job submission. |
 | `gradient team worker delete <TEAM> <WORKER_ID>` | `--yes` | Remove a team worker |
 | `gradient team worker missing-worker-capabilities <TEAM>` | `--projects <PROJECTS>` | Show what waiting evaluations need that no connected worker offers |
