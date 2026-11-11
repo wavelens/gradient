@@ -69,8 +69,8 @@ crate::sql! {
                    JOIN build_job b ON b.derivation = s.derivation \
                    JOIN evaluation e ON e.id = b.evaluation \
                    JOIN task t ON t.id = e.task \
-                   WHERE s.hash = o.hash AND (t.name = 'build-request' OR EXISTS (SELECT 1 FROM project_cache pc \
-                       WHERE pc.project = t.project AND pc.sign_outputs)))",
+                   WHERE s.hash = o.hash AND (t.name = 'build-request' OR t.project IN (SELECT pc.project \
+                       FROM project_cache pc WHERE pc.sign_outputs)))",
         params = [CachedPathHashes(64)];
 }
 
