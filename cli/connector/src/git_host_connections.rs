@@ -23,8 +23,13 @@ impl GitHostConnectionSetOwner {
     fn git_host_connections_path_prefix(&self) -> String {
         match self {
             Self::Instance => "admin/git-host-connections".to_owned(),
-            Self::Team(team) => format!("teams/{}/git-host-connections", encode_url_component(team)),
-            Self::Project(project) => format!("projects/{}/git-host-connections", encode_url_component(project)),
+            Self::Team(team) => {
+                format!("teams/{}/git-host-connections", encode_url_component(team))
+            }
+            Self::Project(project) => format!(
+                "projects/{}/git-host-connections",
+                encode_url_component(project)
+            ),
         }
     }
 }
@@ -107,7 +112,12 @@ impl GitHostConnections<'_> {
         owner: &GitHostConnectionSetOwner,
         id: &str,
     ) -> Result<GitHostConnectionResponse, ConnectorError> {
-        Self::send(self.request(Method::GET, owner, \&format!("/{}", encode_url_component(id)))?).await
+        Self::send(self.request(
+            Method::GET,
+            owner,
+            &format!("/{}", encode_url_component(id)),
+        )?)
+        .await
     }
 
     pub async fn update(
@@ -117,8 +127,12 @@ impl GitHostConnections<'_> {
         body: &PatchGitHostConnectionRequest,
     ) -> Result<GitHostConnectionResponse, ConnectorError> {
         Self::send(
-            self.request(Method::PATCH, owner, \&format!("/{}", encode_url_component(id)))?
-                .json(body),
+            self.request(
+                Method::PATCH,
+                owner,
+                &format!("/{}", encode_url_component(id)),
+            )?
+            .json(body),
         )
         .await
     }
@@ -128,7 +142,12 @@ impl GitHostConnections<'_> {
         owner: &GitHostConnectionSetOwner,
         id: &str,
     ) -> Result<bool, ConnectorError> {
-        Self::send(self.request(Method::DELETE, owner, \&format!("/{}", encode_url_component(id)))?).await
+        Self::send(self.request(
+            Method::DELETE,
+            owner,
+            &format!("/{}", encode_url_component(id)),
+        )?)
+        .await
     }
 
     pub async fn list_latest_webhook_deliveries_for_git_host_connection(
@@ -136,6 +155,11 @@ impl GitHostConnections<'_> {
         owner: &GitHostConnectionSetOwner,
         id: &str,
     ) -> Result<Vec<IncomingWebhookDeliveryResponse>, ConnectorError> {
-        Self::send(self.request(Method::GET, owner, \&format!("/{}/deliveries", encode_url_component(id)))?).await
+        Self::send(self.request(
+            Method::GET,
+            owner,
+            &format!("/{}/deliveries", encode_url_component(id)),
+        )?)
+        .await
     }
 }
