@@ -22,7 +22,7 @@ Completed exec jobs start evaluations and entry points.
 
 === "UI"
 
-Go to **Actions -> New Action** in the task. Select **Start Evaluation** as the type and choose the task and event `exec_job.completed`.
+    Go to **Actions -> New Action** in the task. Select **Start Evaluation** as the type and choose the task and event `exec_job.completed`.
 
 === "Declarative"
 
@@ -48,7 +48,7 @@ gradient-upload continue.json gradient/continue.json
 - Evaluations remain `Building` until the new entry points finish.
 - Attribute paths stay concrete, without `*` or `?`. Files hold at most 64 KiB.
 - Files from a failed attempt count for nothing. Errors fail the evaluation with `continue.json: <error>`.
-- `git_host_status_report` actions with exec events report one status per exec entry point.
+- Tasks with **Report commit status** enabled report one commit status for each entry point of the exec job.
 
 ## Verify Deployment
 

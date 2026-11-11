@@ -54,16 +54,16 @@ flowchart LR
 
 `open_from_patch` can open or update a pull request from a unified diff. The in-job endpoint and the `ExecTree` generator share the service.
 
-1. Find the active `open_pr` action of the task (`pull_request_integration`). No action: `NoIntegration`.
+1. Find the valid `open_pr` actions for the task (`pull_request_git_host_connection`). No action: `NoGitHostConnection`.
 2. Clone the start commit into a fresh checkout (`checkout_commit`, project SSH key).
 3. Apply the patch (`apply::patched_files`). Added and modified paths keep their new contents.
-4. Build the reporter of the integration.
+4. Build the reporter for the connection of the action to the Git host.
 5. Push the files onto the base branch with `upsert_branch`, one commit with the title as message.
 6. Call `open_or_update_pr`. Record the pull request on `exec_job_pull_request` for a job caller.
 
 | Error | Status | Message |
 |---|---|---|
-| `NoIntegration` | `409` | `the task has no open_pr action naming a Git host integration` |
+| `NoGitHostConnection` | `409` | `There is no open_pr action on the task to specify a connection to the Git host.` |
 | `NoCommit` | `409` | `the job's evaluation has no git commit to apply the patch to` |
 | `DeletesFile` | `422` | `the patch deletes <path>; deleting files is not supported` |
 | `DoesNotApply` | `422` | The `git2` reason |

@@ -55,7 +55,7 @@ Each project has three roles. The table below shows what each role allows.
 | Role | Can |
 |---|---|
 | Admin | Everything: settings, members, roles, project deletion |
-| Write | Tasks, triggers, actions, evaluations, integrations, workers, webhooks, cache subscriptions |
+| Write | Tasks, triggers, actions, evaluations, Git host connections, workers, webhooks, cache subscriptions |
 | View | View the project |
 
 Roles map to individual permissions. Each permission covers one area of the project.
@@ -65,7 +65,7 @@ Roles map to individual permissions. Each permission covers one area of the proj
 | `viewProject` | Seeing the project and its evaluations |
 | `manageProjectSettings`, `deleteProject` | Editing or deleting the project |
 | `manageMembers`, `manageRoles` | Inviting members, editing custom roles |
-| `manageIntegrations`, `manageWebhooks` | Git host integrations and webhooks |
+| `manageIntegrations`, `manageWebhooks` | Git host connections and webhooks for the project. Connection selections on a task need only `editTask`. |
 | `manageWorkers`, `manageSubscriptions` | Workers and cache subscriptions |
 | `manageSshKey` | Regenerate the SSH key |
 | `createTask`, `editTask` | Creating and editing tasks |

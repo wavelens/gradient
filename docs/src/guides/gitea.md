@@ -12,31 +12,33 @@ Pushes and pull requests trigger evaluations. Commit statuses appear back on the
 - A task with a repository URL pointing to the Gitea or Forgejo instance, see [First Project](../get-started/first-project.md)
 - Admin rights on the Gitea or Forgejo instance, or on the repository's owner, so a bot account can be created
 
-## Inbound and Outbound
+## Git Host Connections
 
-Gradient exchanges data with the Git host in two directions. Each direction is a separate integration of the project.
+A Git host connection can store credentials for one Git host. Each task can select one connection on its **Repository** page.
 
 ```mermaid
 flowchart LR
-    host["Gitea / Forgejo"] -- webhook --> inbound["Inbound integration"]
-    inbound --> trigger["Push (reporter) trigger"]
+    host["Gitea / Forgejo"] -- webhook --> connection["Git host connection"]
+    connection --> trigger["Push (reporter) trigger"]
     trigger --> eval["Evaluation"]
-    eval --> action["Git Status action"]
-    action --> outbound["Outbound integration"]
-    outbound -- "API token" --> host
+    eval -- "Report commit status" --> connection
+    connection -- "API token" --> host
 ```
 
-| | Inbound | Outbound |
-|---|---|---|
-| Direction | Git host -> Gradient | Gradient -> Git host |
-| Holds | Webhook secret, allowed source IPs | Endpoint URL, access token of a bot account |
-| Picked by | **Push (reporter)** and **Pull Request (reporter)** triggers | **Git Status** and **PR** actions |
-| Covers | Evaluations on push, pull request and release. `/gradient` comment commands | Commit statuses. Reactions to `/gradient` comments. Writer check of pull request authors. [Flake update](flake-updates.md) pull requests |
-| Without | Git host events never reach Gradient | No status on commits. `/gradient` comments ignored. All pull request authors count as non-writers |
+| Switch | Holds | Covers | When off |
+|---|---|---|---|
+| **Receives events** | Webhook secret, allowed source IPs | Evaluations on push, pull request and release. `/gradient` comment commands | Git host events never reach Gradient |
+| **Reports status** | Base URL, access token of a bot account | Commit statuses. Reactions to `/gradient` comments. Writer check of pull request authors. [Flake update](flake-updates.md) pull requests | No status on commits. `/gradient` comments ignored. All pull request authors count as non-writers |
 
-- The inbound integration can receive webhooks from all repositories of the project's tasks. Events match a task by the `owner/repo` part of the repository URL.
-- Outbound calls act as the token's account. Statuses and comments appear under that account's name.
-- Writer checks and comment reactions use the outbound integration of the task's **Git Status** action.
+| Owner | Created in | Used by |
+|---|---|---|
+| Project | **Project settings -> Git host connections** | Tasks of the project |
+| Team | Team settings, tab **Git host connections** (team admins) | Tasks of every project the team owns |
+| Instance | **Admin**, tab **Git hosts** (instance admins) | Tasks of every project |
+
+- Webhook URL `/api/v1/hooks/<connection-id>` can receive events for all tasks with that connection. Events map to tasks by the `owner/repo` part of the repository URL.
+- Calls to the Git host act as the token account. Statuses and comments appear under that account name.
+- The writer check and comment reactions use the Git host connection of the task.
 
 ## 1. Create a Bot Account
 
@@ -73,19 +75,15 @@ The token needs these scopes.
 
 ## 2. Connect the Repository
 
-1. Click **Connect repository** in the project. Enter the repository URL and follow the steps. Click **Create task**.
+1. Open **Project settings -> Git host connections** and add a connection. Use the team settings tab **Git host connections** instead to share it with every project of the team. Select Gitea or Forgejo, enter the base URL and paste the bot token. Keep **Receives events** on, turn on **Reports status** and save. Gradient shows the webhook URL and secret once.
 
-2. Open the task's **Settings -> Repository**. Click **Connect gitea.example.com** and select Gitea or Forgejo. Leave the base URL unchanged and paste the bot token. Click **Connect**.
+2. Click **Connect repository** in the project. Enter the repository URL. Follow the steps, then click **Create task**.
 
-3. Click **Add** for the recommended push and pull request triggers on the **Triggers** page. Add the **Git Status** action on the **Actions** page to report commit statuses.
+3. Open the **Settings -> Repository** page for the task. Select the connection in **Git host connection**, turn on **Report commit status** and save. Gradient can reject a connection when the host and the repository URL differ. **Test status report** can post a `pending` status to the latest evaluated commit.
 
-These steps apply to **Connect**.
+4. Add the recommended push trigger and pull request trigger on the Triggers page for the task.
 
-- Create a webhook receiver and status reporter for the Git host.
-- Use admin rights on the token to install a webhook and deploy key in the repository.
-- Add no trigger or action to the task. Later tasks show a push trigger and a pull request trigger as options in the last step of **Connect repository**.
-
-Gradient shows the webhook URL and secret once if the token lacks admin rights. Add them under **Settings -> Webhooks -> Add Webhook** on the Git host.
+The task **Repository** page can show the **Install webhook** and **Install deploy key** buttons for a token with admin rights. Add the webhook URL and secret in the Git host's **Settings -> Webhooks -> Add Webhook** for a token without admin rights.
 
 | Field | Value |
 |---|---|
@@ -94,9 +92,7 @@ Gradient shows the webhook URL and secret once if the token lacks admin rights. 
 | Secret | The secret |
 | Trigger on | Custom events: **Push**, **Pull Request**, **Issue Comment**, **Pull Request Comment**, **Pull Request Review**, **Release** |
 
-Add the deploy key from step **Access** under **Settings -> Deploy Keys** for a repository URL over SSH, then click **Test access**.
-
-Existing tasks keep the same settings under **Task settings -> Repository**. Tokens with admin permissions have the **Install webhook** button and the **Install deploy key** button.
+Add the deploy key from step **Access** under **Settings -> Deploy Keys** for repository URLs over SSH without **Install deploy key**. Then click **Test access**.
 
 ## OAuth2 Connection
 
@@ -132,56 +128,45 @@ Project members:
 ## Declarative Setup
 
 ```nix
-services.gradient.state.integrations = {
-  gitea-in = {
-    project = "acme";
-    kind = "inbound";
-    git_host_type = "gitea"; # (1)!
-    secret_file = "/run/secrets/gitea-webhook-secret"; # (2)!
-    created_by = "alice";
-  };
-  gitea-out = {
-    project = "acme";
-    kind = "outbound";
-    git_host_type = "gitea";
-    endpoint_url = "https://gitea.example.com"; # (3)!
-    access_token_file = "/run/secrets/gitea-token"; # (4)!
-    created_by = "alice";
-  };
+services.gradient.state.git_host_connections.gitea = {
+  owner = "project/acme"; # (1)!
+  git_host_type = "gitea"; # (2)!
+  secret_file = "/run/secrets/gitea-webhook-secret"; # (3)!
+  base_url = "https://gitea.example.com"; # (4)!
+  access_token_file = "/run/secrets/gitea-token"; # (5)!
+  reports_status = true;
+  created_by = "alice";
 };
 ```
 
-1.  `forgejo` for Forgejo.
-2.  Any random string, e.g. `openssl rand -hex 32`. Set the same value in the Git host webhook.
-3.  Base URL of the Git host, without `/api/v1`.
-4.  The bot's token from above, as the only content of the file.
+1.  `team/<name>` can share connections with all projects of the team. `instance` can share connections with all projects.
+2.  `forgejo` for Forgejo.
+3.  Any random string, e.g. `openssl rand -hex 32`. Set the same value in the Git host webhook.
+4.  Base URL of the Git host, without `/api/v1`.
+5.  The bot's token from above, as the only content of the file.
 
-The webhook URL is `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea-in` (`forgejo` instead of `gitea` for Forgejo).
+Connection pages show webhook URL `https://gradient.example.com/api/v1/hooks/<connection-id>`. Project connections also accept old URL `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea` (for Forgejo, `forgejo` instead of `gitea`).
 
-Declaratively defined tasks ship without a trigger or action. Add both to the task's `triggers` and `actions` lists.
+Declared tasks come with no trigger and no connection. Set both on each task.
 
 ```nix
 services.gradient.state.tasks.app = {
   project = "acme";
   repository = "https://gitea.example.com/acme/app.git";
   created_by = "alice";
+  git_host_connection = "gitea"; # (1)!
+  report_status = true; # (2)!
   triggers = [
-    { type = "reporter_push"; integration = "gitea-in"; } # (1)!
-    { type = "reporter_pull_request"; integration = "gitea-in"; } # (2)!
-  ];
-  actions = [
-    {
-      name = "report-status";
-      type = "git_host_status_report";
-      config.integration = "gitea-out"; # (3)!
-    }
+    { type = "reporter_push"; } # (3)!
+    { type = "reporter_pull_request"; } # (4)!
   ];
 };
 ```
 
-1.  The `integration` field at trigger level points to the inbound integration. Put branch and tag filters into `config`, see [Trigger Types](../reference/state.md#trigger-types).
-2.  Optional. Covers evaluations of pull requests. Fork pull requests stay pending until a maintainer gives approval.
-3.  The `config.integration` field points to the outbound integration.
+1.  The connection name, looked up in the project, then its owner team, then the instance.
+2.  Posts commit statuses through the connection.
+3.  Put branch and tag filters into `config`, see [Trigger Types](../reference/state.md#trigger-types).
+4.  Optional. Covers evaluations of pull requests. Fork pull requests stay pending until a maintainer gives approval.
 
 ## Verify Deployment
 
@@ -211,11 +196,11 @@ Only repository writers can send `/gradient` commands. Accepted commands receive
 
 | Symptom | Fix |
 |---|---|
-| `401` in the Git host's delivery log | The secret on the two sides differ. Re-enter the secret on both sides (**Edit -> Webhook Secret** in Gradient) |
-| `403 forbidden_source_ip` | Add the Git host's address to the integration's allowed source IPs |
-| `404` | The webhook URL contain a wrong project or integration name, or the inbound integration lack a secret |
-| `200`, but no evaluation | No task trigger use this integration, or no task repository URL match |
-| No status on the commit | The task lack a **Git Status** action, or the token lack `write:repository` |
+| `401` in the Git host's delivery log | The secrets on the two sides differ, or the connection has none. Re-enter the secret on both sides (**Edit -> Webhook Secret** on the connection in Gradient) |
+| `403 forbidden_source_ip` | Add the Git host's address to the connection's allowed source IPs |
+| `404` | The webhook URL names a wrong connection, or the connection has **Receives events** off |
+| `200`, but no evaluation | No task with a matching trigger uses this connection, or no task repository URL matches |
+| No status on the commit | **Report commit status** is off on the task's **Repository** page, or the token lacks `write:repository`. **Test status report** shows the Git host's answer |
 | 😕 on a maintainer's `/gradient` comment | The bot account lack admin access to the repository |
 
 ## Next Steps

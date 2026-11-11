@@ -32,7 +32,7 @@ Open **Settings** from the project page.
 | Section | Content | Actions |
 |---|---|---|
 | General | Name, display name, description, visibility | Edit. **Hide Build Requests task** removes the task holding `gradient build` evaluations from task lists. The evaluations themselves continue to run |
-| More Settings | Links to Workers, Cache Subscriptions, Integrations, Webhooks | Open each page |
+| More Settings | Links to Workers, Cache Subscriptions, Git host connections, Event notifications | Open each page |
 | SSH Key | Public key used for cloning the project's repositories | Copy and add it as a deploy key on the Git host |
 | Danger Zone | | **Regenerate Key** invalidates the old key immediately. **Delete Project** removes the project |
 

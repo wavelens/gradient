@@ -13,9 +13,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <div class="grid cards" markdown>
 
--   :material-source-branch: **[Git Host Integration](guides/github.md)**
+-   :material-source-branch: **[Git Host Connections](guides/github.md)**
 
-    Building on push and pull request from GitHub, Gitea / Forgejo and GitLab. Status checks sent back.
+    Gradient can build from pushes and pull requests on GitHub, Gitea / Forgejo and GitLab. Gradient can send commit status back.
 
 -   :material-console: **[Build Before Pushing](guides/build-before-push.md)**
 
@@ -64,7 +64,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | Remote building over SSH | Not available | Not available | [`ssh-ng://` store](https://wavelens.github.io/gradient/guides/build-over-ssh/) for `nixos-rebuild --build-host` and `nix copy` straight to the CI workers |
 | Private caches | One store for the whole instance | Free plan: 5 GB, filled quickly by full closures | Per-project caches with access control, on own S3 or disk storage |
 | Sign-in | Local accounts, LDAP, OIDC with roles for the whole instance | GitHub accounts | [OIDC](https://wavelens.github.io/gradient/guides/sso/) with provider groups mapped to roles per project, SCIM provisioning |
-| Integrations | Minimal JSON API | GitHub only | REST API, webhooks, Git Integrations and MCP server |
+| Integrations | Minimal JSON API | GitHub only | REST API, webhook, connections to Git hosts, MCP server |
 | Web UI | Server-rendered pages | GitHub job logs | Responsive UI with live log streaming |
 | Exec jobs | Not available | builtin | [Gradient Exec](exec/index.md) |
 | Stars | ![](https://img.shields.io/github/stars/NixOS/hydra?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=high) | - | ![](https://img.shields.io/github/stars/wavelens/gradient?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=low) |

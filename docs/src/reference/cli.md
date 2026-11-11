@@ -148,6 +148,12 @@ gradient account switch work
 | `gradient project pending-membership-invitation list` | - | List pending membership invitations for a project. |
 | `gradient project pending-membership-invitation revoke <USER>` | - | Cancel Pending Invitations for a User |
 | `gradient project webhook <VERB>` | see [Webhooks](#webhooks) | Manage webhooks for the selected project. See [Webhooks](#webhooks). |
+| `gradient project git-host-connection list` | `--owner <OWNER>` | List the owner's connections to Git hosts and the connections that the owner can use. |
+| `gradient project git-host-connection create` | `-n, --name <NAME>`, `--host-type <gitea\|forgejo\|gitlab\|github>`, `-d, --display-name <DISPLAY_NAME>`, `--base-url <URL>`, `--access-token <TOKEN>`, `--secret <SECRET>`, `--allowed-ips <IPS>`, `--receives-events <BOOL>`, `--reports-status <BOOL>` | Create a Git host connection. The Webhook URL and generated secret appear a single time. |
+| `gradient project git-host-connection show <CONNECTION>` | - | Show one connection to a Git host. |
+| `gradient project git-host-connection edit <CONNECTION>` | Flags of `create`, all optional | Edit the connection. Omitted flags keep their current values. Leave `--access-token`, `--base-url` or `--allowed-ips` empty to clear the value. |
+| `gradient project git-host-connection delete <CONNECTION>` | - | Delete a connection. Tasks that use the connection stop reporting commit status. |
+| `gradient project git-host-connection deliveries <CONNECTION>` | - | List the latest 50 webhook deliveries for the connection, newest first. |
 | `gradient task select <TASK>` | - | Choose the task that later commands target, within the selected project |
 | `gradient task show` | - | Display the selected task, its last evaluation and its builds |
 | `gradient task log` | - | Stream logs from the last evaluation of the selected task |
@@ -158,9 +164,11 @@ gradient account switch work
 | `gradient task delete` | `--yes` | Remove the selected task |
 | `gradient task evaluate` | - | Trigger a new evaluation of the selected task |
 | `gradient task transfer <PROJECT>` | - | Move the selected task to another project. |
-| `gradient task repository show` | - | Show the last event from the project's Git host, reports of commit status and integrations with the Git host. |
-| `gradient task repository install-deploy-key` | `--outbound-integration <INTEGRATION>` | Add the project SSH key as a read-only deploy key on the Git host. Defaults to the status reporter of the task |
-| `gradient task repository install-webhook` | `--inbound-integration <INTEGRATION>`, `--outbound-integration <INTEGRATION>` | Create a webhook on the Git host to send repository events to Gradient. Default: the project's webhook receiver for the host of the task repository. |
+| `gradient task repository show` | - | Show the task repository, its Git host connection, **Report commit status** settings, webhook URL, deploy key, last event, latest commit status post and connections that the task can use. |
+| `gradient task repository set-connection` | `--connection <NAME_OR_ID>`, `--no-connection`, `--report-status <BOOL>` | Select the connection to the Git host for a task and turn commit status reports on or off. `--no-connection` removes the connection from the task. Omitted flags keep the current values. |
+| `gradient task repository check-commit-status` | - | Post a pending test commit status on the last evaluated commit through the task connection. |
+| `gradient task repository install-deploy-key` | - | Add the project's SSH key as a read-only deploy key on the Git host through the task connection. |
+| `gradient task repository install-webhook` | - | Create a webhook on the Git host. The webhook can send repository events to the task's connection. |
 | `gradient task action list` | - | List actions of the selected task. |
 | `gradient task action show <ACTION>` | - | Print one action by name or UUID |
 | `gradient task action create --name <NAME> --config <JSON>` | `--events <EVENTS>`, `--inactive` | Create an action from JSON settings. Command output: the token for the new send_web_request action, one time only. |
@@ -182,8 +190,9 @@ gradient account switch work
 | `gradient task trigger test <TRIGGER>` | - | Fire the trigger now against the current head commit of the task. |
 | `gradient task trigger default <TRIGGER>` | - | Set the trigger to default. Manual evaluations use that branch. |
 
-- `project create`, `task create`, `task duplicate`, `cache create`, `team create` and `task evaluate` print the UUID of the new item. Pass `--json` to print `{"id", "name", "url"}` instead. `url` is the web page for new items.
-- `project show`, `project create`, and `task create` also list missing prerequisites in text mode. `Wait for a cache subscription before evaluation: gradient project cache add <cache>` is one example.
+- `project create`, `task create`, `task duplicate`, `cache create`, `team create`, and `task evaluate` print the UUID of the new item. Pass `--json` to print `{"id", "name", "url"}` instead. Find the web page of the new item at `url`.
+- `project show`, `project create`, and `task create` also list missing prerequisites in text mode. See `Wait for a cache subscription before evaluation: gradient project cache add <cache>` for an example.
+- Choose `instance`, `team/<name>`, or `project/<name>` for `--owner`. The default is the selected project. Use a connection name or UUID within that owner for `<CONNECTION>`. See [Git Host Connections](../guides/gitea.md#git-host-connections).
 
 ## Builds and Evaluations
 
@@ -224,7 +233,7 @@ gradient account switch work
 | `gradient pr open [PATH]...` | `--title <TITLE>`, `--body <FILE>`, `--branch <NAME>`, `--base <REF>` | Open or update a pull request from the working tree changes of the listed paths, all paths by default |
 
 - Start commit: `GRADIENT_COMMIT` inside an exec job, else the merge base of `HEAD` and `origin/<base>`.
-- The pull request can use the integration of the selected task's `open_pr` action, see [Open Pull Requests](../exec/pull-requests.md).
+- Pull requests use the connection to the Git host that the `open_pr` action on the selected task names. See [Open Pull Requests](../exec/pull-requests.md).
 
 ## Caches
 

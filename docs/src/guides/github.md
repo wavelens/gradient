@@ -15,7 +15,7 @@ A GitHub App links one Gradient instance to GitHub. With this connection in plac
 
 ## 1. Register the GitHub App
 
-Register the app once per instance. GitHub Enterprise users first enter their host address. Then open `https://gradient.example.com/admin/github-app`, click **Create on GitHub** and confirm the registration on GitHub.
+Register the App once for each instance. Open the **Git hosts** tab in **Admin** of Gradient. Users of GitHub Enterprise enter the host address first. Click **Create on GitHub** and confirm the registration on GitHub.
 
 Gradient now shows the **App ID**, the **private key** and the **webhook secret** one time only. Save the key and the secret as files on the server.
 
@@ -34,45 +34,39 @@ services.gradient.githubApp = {
 
 ## 3. Install the App
 
-Install the App from its GitHub page on the account that owns the repositories. Until an installation is linked, the **Integrations** page of a project links to the App page.
+Install the App from the GitHub page of the App on the account with the repository. Each installation is a connection to a Git host named `github-<account>` with the instance as owner. Find the connection on the **Git hosts** tab under **Admin**. All projects can use the connection. The connection can receive events and report status. Remove the installation on GitHub. The connection is gone.
 
-Gradient compares the granted repositories with task repository URLs. `https://`, SSH and `github:owner/repo` URLs all match. Gradient links each matching project to a `github-<account>` integration pair.
+## 4. Choose the Connection on the Task
 
-Gradient can request the App installation for the repository from GitHub at task creation or on a change to the repository URL. Gradient can then link that installation to the project. No triggers or actions for the task result from this link.
-
-## 4. Wire the Task
-
-A task links the two integrations: triggers use the inbound one, actions use the outbound one. Both carry the name `github-<account>`.
+Tasks map to one Git host connection each. Push triggers and pull request triggers fire for tasks on an event from their Git host connection. Commit statuses go through the same connection.
 
 === "UI"
 
-    The last step of **Connect repository** offers push triggers and pull request triggers for `github-<account>`. The task's **Triggers** page offers them too. Tick both in the wizard, or click **Add** on the **Triggers** page. Add the **Git Status** action on the **Actions** page for commit statuses.
+    Open the **Settings -> Repository** page of the task. Select `github-<account>` in **Git host connection**, turn on **Report commit status** and save. Users who can edit the task can make this choice. **Test status report** posts a `pending` status to the head commit of the last evaluation.
+
+    Add push triggers and pull request triggers on the **Triggers** page of the task.
+
+    The last step of **Connect repository** also offers the same triggers.
 
 === "Declarative"
 
-    Declared tasks receive no trigger or action automatically. Add both to the task's `triggers` and `actions` lists.
+    Declared tasks have no connection and no triggers by default. Configure a connection, then add both triggers to the task.
 
     ```nix
     services.gradient.state.tasks.app = {
       project = "acme";
       repository = "https://github.com/acme/app.git";
       created_by = "alice";
+      git_host_connection = "github-acme"; # (1)!
+      report_status = true;
       triggers = [
-        { type = "reporter_push"; integration = "github-acme"; } # (1)!
-        { type = "reporter_pull_request"; integration = "github-acme"; }
-      ];
-      actions = [
-        {
-          name = "report-status";
-          type = "git_host_status_report";
-          config.integration = "github-acme"; # (2)!
-        }
+        { type = "reporter_push"; }
+        { type = "reporter_pull_request"; }
       ];
     };
     ```
 
-    1.  The trigger-level `integration` field points at the inbound integration of the App installation.
-    2.  The `config.integration` field points at the outbound integration of the App installation.
+    1.  The connection that the App installation created for the `acme` account.
 
 ## Verify Deployment
 
@@ -119,8 +113,9 @@ GitHub can merge an entry after a passed check, or drop the entry after a failed
 | `403 superuser required` | The account lacks the superuser flag |
 | An approving review does not release a fork pull request | The App predates the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
 | Merge queue entries wait for the Gradient check without end | The App predates the `merge_group` event. Grant **Merge queues** read access and enable **Merge group** under the App's **Permissions & events** |
-| Pushes arrive but no evaluation starts | No task repository URL matches the pushed repository |
-| `403 forbidden_source_ip` | The integration's allowed source IPs do not cover GitHub's `hooks` ranges from `https://api.github.com/meta` |
+| Pushes arrive but no evaluation starts | No **Git host connection** on the task, no push trigger, or a repository URL that doesn't match the pushed repository |
+| No status on the commit | **Report commit status** is off on the task's **Repository** page |
+| `403 forbidden_source_ip` | The connection's allowed source IPs don't cover the GitHub `hooks` ranges from `https://api.github.com/meta` |
 
 ## Next Steps
 

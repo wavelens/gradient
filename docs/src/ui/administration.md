@@ -12,6 +12,7 @@ Superusers open **Admin** in the header. Operations and lists in this area affec
 | Overview | Pending jobs, connected and draining workers, free disk space, running maintenance tasks. Open each tile to view the list. | **Run Deep GC**, **Enable Draining** |
 | Workers | Registered workers each have a team or project, connection status, running jobs and drain status. | **Drain**, **Undrain** |
 | Storage | Free disk space, stored size for each cache, project and task, evaluations retained for each task and the items that the last deep GC deleted | **Run GC Now**, **Run Deep GC** |
+| Git hosts | GitHub App registrations and instance Git host connections. One connection for each GitHub App installation, plus the Gitea, Forgejo, GitLab connections added here. All projects can use them. | **Create on GitHub**, add, edit and delete connections |
 | Settings | All server options, their flags, environment variables, values and source. Secret values stay hidden. | None. Change the option in the NixOS module or environment, then restart the server. |
 
 ## Draining
@@ -32,7 +33,7 @@ Size values come from the cached path of each task's build. Page loads recalcula
 
 Open **Settings** for a task and use **Delete old evaluations** in **Danger Zone** to delete old evaluations. Running evaluations and the latest completed evaluation remain.
 
-**Event notifications** and **GitHub App** stay in the user menu for now.
+**Event notifications** stays in the user menu for the time being.
 
 ## Related
 

@@ -19,7 +19,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   https://gradient.example.com/api/v1/admin/state > state.nix
 ```
 
-The file `state.nix` will hold every user, project, task, cache, custom role, API key, worker and integration. Its shape is that of `services.gradient.state`. Built-in roles, the GitHub App's integrations and the internal `build-request` task are left out.
+All users, projects, tasks, caches, custom roles, API keys, workers and connections to Git hosts sit in file `state.nix`. The format is identical to `services.gradient.state`. Built-in roles and internal `build-request` tasks do not appear.
 
 ## 2. Fill In the Secrets
 
@@ -31,8 +31,8 @@ The export stores secrets in hashed or encrypted form. Every `*_file` field come
 | `projects.<name>.private_key_file` | SSH key for cloning | `ssh-keygen -t ed25519 -N "" -f key` |
 | `caches.<name>.signing_key_file` | Nix signing key, without the `<name>:` prefix | `nix-store --generate-binary-cache-key` |
 | `api_keys.<name>.key_file` | SHA-256 hex digest of the token, without `GRAD` | See [API Key Files](../concepts/declarative-state.md#api-key-files) |
-| `integrations.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
-| `integrations.<name>.access_token_file` | Git host access token | From the Git host |
+| `git_host_connections.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
+| `git_host_connections.<name>.access_token_file` | Git host access token | From the Git host |
 | `tasks.<name>.actions.*.config.token_file` | Web request token | `openssl rand -hex 32` |
 
 !!! tip "Superuser Through OIDC"

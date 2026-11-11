@@ -23,7 +23,7 @@ services.gradient.state = {
 | `api_keys` | attrs of submodule | `{ }` | API keys, one entry per key name. |
 | `caches` | attrs of submodule | `{ }` | Caches, one entry per cache name. |
 | `delete` | bool | `true` | Deletion of users, projects and caches absent from this declaration. |
-| `integrations` | attrs of submodule | `{ }` | Git host integrations, one entry per project name. |
+| `git_host_connections` | attrs of submodule | `{ }` | Connections to Git hosts. One entry per connection. |
 | `projects` | attrs of submodule | `{ }` | Projects, one entry per project name. |
 | `roles` | attrs of submodule | `{ }` | Custom roles, one entry per role name. |
 | `tasks` | attrs of submodule | `{ }` | Tasks, one entry per task name. |
@@ -73,12 +73,12 @@ services.gradient.state = {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `actions` | list of submodule | `[ ]` | The actions of this task: email notifications, web requests, Matrix and Slack messages, Git host status reports and pull request automation. |
+| `actions` | list of submodule | `[ ]` | Actions for this task are email notifications, web requests, Matrix and Slack messages and pull request automation. |
 | `actions.*.active` | bool | `true` | Whether this action is active. |
 | `actions.*.config` | attribute set | `{ }` | Configuration specific to the action type. |
 | `actions.*.events` | list of string | `[ ]` | Events this action subscribes to. |
 | `actions.*.name` | string | - | Action name, unique within the task. |
-| `actions.*.type` | one of `send_mail` `send_web_request` `send_matrix_message` `send_slack_message` `git_host_status_report` `open_pr` `start_evaluation` | - | The kind of action, which determines the expected `config`. |
+| `actions.*.type` | one of `send_mail` `send_web_request` `send_matrix_message` `send_slack_message` `open_pr` `start_evaluation` | - | The kind of action, which determines the expected `config`. |
 | `active` | bool | `true` | Whether this task is active. |
 | `concurrency` | one of `auto` `hard_abort` `soft_abort` `skip` `all` | `"auto"` | What happens when a new trigger event arrives while an evaluation of the same branch is still running, see [concurrency](../concepts/projects-and-tasks.md#concurrency). |
 | `created_by` | string | - | User name of the task's creator. |
@@ -88,37 +88,39 @@ services.gradient.state = {
 | `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, with one entry per input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |
+| `git_host_connection` | null or string | `null` | Name of the Git host connection for the task. A reference can check the task project first, then the owner team of the project, then the instance. The triggers for pushes and pull requests and `report_status` use this name. |
 | `keep_evaluations` | int | `30` | Count of finished evaluations to keep for metrics and history, regardless of result. Active evaluations don't block GC and don't count toward this number. The most recent finished evaluation stays, even a failed one. Remaining slots go to completed evaluations before failed or aborted ones. Set this number to at least 1 and at most `eval.maxKeep`. |
 | `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
 | `only_evaluate` | bool | `false` | Set to `true` to evaluate the task only. Evaluations end after evaluation. No build. No exec jobs run. |
 | `project` | string | - | Name of the project that owns this task. |
+| `report_status` | bool | `false` | Whether to post commit statuses for evaluation and build to the Git host. Requires `git_host_connection` with `reports_status = true`. |
 | `repository` | string | - | Git repository URL of the task. |
 | `retry_failed_builds` | bool | `true` | Whether a new evaluation of this task re-queues its permanently failed builds and their dependents. With `false`, they remain failed until a user retries the build or the evaluation. |
 | `wait_for_workers` | bool | `false` | Whether to wait for workers when an evaluation can require an architecture or system feature that no connected worker can offer for its builds. The server can abort that evaluation and show a warning about what is missing when this field is absent. Exec jobs that no connected worker can run have the same behavior. |
 | `triggers` | null or list of submodule | `null` | Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule. |
 | `triggers.*.active` | bool | `true` | Whether this trigger is active. |
 | `triggers.*.config` | attribute set | `{ }` | Configuration specific to the trigger type. |
-| `triggers.*.integration` | null or string | `null` | Name of an inbound integration in the same project that backs this trigger. |
 | `triggers.*.is_default` | bool | `false` | Whether the trigger is the default trigger of the task. The first trigger is the default when no trigger sets the flag. |
 | `triggers.*.type` | one of `polling` `reporter_push` `reporter_pull_request` `time` | - | The kind of trigger, which determines the expected `config` and how the trigger fires. |
 | `wildcard` | string | `"packages.x86_64-linux.**"` | Comma-separated Nix attribute paths to evaluate from the flake. A `*` segment matches any attribute name, `**` also matches a nested set below it, and `x86_64-*` matches part of a name. A pattern prefixed with `!` excludes matching paths. See [Evaluation Wildcards](wildcards.md). |
 
-## `integrations.<name>`
+## `git_host_connections.<name>`
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `access_token_file` | null or path | `null` | Path to a file with the API token for the Git host, required for outbound integrations. |
+| `access_token_file` | null or path | `null` | Path to a file with an API token for the git host. Needed to post commit statuses and create pull requests. |
 | `account_login` | null or string | `null` | GitHub login of the installation account. Used for naming only. |
-| `created_by` | string | - | Name of the user who created the integration. |
-| `display_name` | null or string | `null` | Human-readable name shown for the integration. |
-| `endpoint_url` | null or string | `null` | Base URL of the Git host API for outbound integrations, for example `https://gitea.example.com`. |
-| `git_host_type` | one of `gitea` `forgejo` `gitlab` `github` | - | Git host this integration connects to. |
-| `installation_id` | null or int | `null` | GitHub App installation ID. This number appears at the end of the installation URL. |
-| `kind` | one of `inbound` `outbound` | - | `inbound` integrations receive webhooks from the Git host, verified with HMAC. `outbound` integrations report CI status back to the Git host. |
-| `name` | string | attribute name | Integration name. Unique per project and kind. |
-| `project` | string | - | Project that owns this integration. |
-| `secret_file` | null or path | `null` | Path to a file with the HMAC signing secret, required for inbound integrations. |
+| `base_url` | null or string | `null` | Base URL for the Git host API (for example, `https://gitea.example.com`). |
+| `created_by` | string | - | Name of the user who created the connection. |
+| `display_name` | null or string | `null` | A human-readable name to display for the connection. |
+| `git_host_type` | one of `gitea` `forgejo` `gitlab` `github` | - | Type of Git host |
+| `installation_id` | null or int | `null` | The installation ID of the GitHub App. This number shows at the end of the installation URL. The field is required for `git_host_type = "github"` and allowed only with `owner = "instance"`. |
+| `name` | string | attribute name | Name of the connection. Unique per owner. |
+| `owner` | string | - | `instance`, `team/<name>` or `project/<name>`. All projects can use instance connections. A team's projects can use that team's connections. |
+| `receives_events` | bool | `true` | Whether the connection can receive webhooks from the Git host with HMAC verification. Triggers for push and pull requests need this. |
+| `reports_status` | bool | `false` | Whether the connection can post commit status to the Git host. Tasks that use `report_status` need the setting. |
+| `secret_file` | null or path | `null` | Path to the file with the secret for HMAC signatures on incoming webhooks. |
 
 ## `caches.<name>`
 
@@ -214,11 +216,11 @@ Each worker registration has the following options.
 
 ## Trigger Types
 
-| `type` | `integration` | `config` |
+| `type` | Connection | `config` |
 |---|---|---|
 | `polling` | - | `interval_secs` (minimum 10, default 300) and `branch` (default: the remote HEAD) |
-| `reporter_push` | Inbound integration | `branches`, `tags` (glob, an empty value can match all), `releases_only`, `include_flake_inputs` (default `false`: a push to the repository of a tracked flake input can start an input update, see [Pushes to Flake Inputs](../concepts/triggers.md#pushes-to-flake-inputs)) |
-| `reporter_pull_request` | Inbound integration | `branches`, `actions` (default `opened`, `synchronize`, `reopened`), `require_approval` (default `true`: pull requests from non-writers wait for a maintainer's approval) |
+| `reporter_push` | Task connection with `receives_events` | `branches`, `tags` (glob, an empty value can match all), `releases_only`, `include_flake_inputs` (default `false`: a push to the repository of a tracked flake input can start an input update, see [Pushes to Flake Inputs](../concepts/triggers.md#pushes-to-flake-inputs)) |
+| `reporter_pull_request` | Task connection with `receives_events` | `branches`, `actions` (default `opened`, `synchronize`, `reopened`), `require_approval` (default `true`: pull requests from non-writers wait for a maintainer's approval) |
 | `time` | - | `cron` is in UTC. Two forms exist. One form is 5 fields for `min hour dom mon dow` (seconds are `0`). The other form is 6 fields for `sec min hour dom mon dow`. An example is `"0 2 * * *"`. `branch` (default: remote HEAD). |
 
 Trigger rules, cron syntax and pull request commands are in [Triggers](../concepts/triggers.md).
@@ -233,8 +235,7 @@ Trigger rules, cron syntax and pull request commands are in [Triggers](../concep
 | `send_web_request` | Required | `url`, `token_file` |
 | `send_matrix_message` | Required | `homeserver`, `room_id`, `access_token_file` |
 | `send_slack_message` | Required | `webhook_url_file` |
-| `git_host_status_report` | Empty | `integration`: an outbound integration |
-| `open_pr` | Empty | `integration`, `generator`, `granularity`, `verify_gate`, `branch_pattern`, `title_template`, `body_template`, `update_existing`, see [Update Flake Inputs](../guides/flake-updates.md). `generator` is `flake_lock` (default) or `exec_tree` for the `gradient/tree.patch` output of an exec job |
+| `open_pr` | Empty | `git_host_connection`, `generator`, `granularity`, `verify_gate`, `branch_pattern`, `title_template`, `body_template`, `update_existing`, see [Update Flake Inputs](../guides/flake-updates.md). `generator` is `flake_lock` (default) or `exec_tree` for the `gradient/tree.patch` output of an exec job |
 | `start_evaluation` | Required | `task`: a task of the same project, evaluated at its head commit |
 
 Event names live in the [events reference](events.md).

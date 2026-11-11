@@ -10,7 +10,7 @@ Pull requests from the changes of an exec job, opened from inside the program or
 **Requirements:**
 
 - An exec app, see [Declare an Exec App](apps.md)
-- An outbound Git host integration, see [Connect GitHub](../guides/github.md), [Connect Gitea or Forgejo](../guides/gitea.md) or [Connect GitLab](../guides/gitlab.md)
+- Git host connection with an access token. See [Connect GitHub](../guides/github.md), [Connect Gitea or Forgejo](../guides/gitea.md), or [Connect GitLab](../guides/gitlab.md) for details.
 
 ## 1. Call Gradient from the Job { #job-token }
 
@@ -40,7 +40,7 @@ Attempts launch with a distinct job token. The `gradient` CLI inside the guest w
 | `gradient pr open` in the program | Many pull requests per job, each with chosen paths |
 | `exec_tree` PR action | One pull request with every change, without a CLI call |
 
-Both ways need an `open_pr` action naming the integration. Tasks without one answer `the task has no open_pr action naming a Git host integration`.
+Both ways need an `open_pr` action to name a Git host connection. Tasks without one return `There is no open_pr action on the task to specify a connection to the Git host.`.
 
 ## 3. Open from the Program
 
@@ -58,7 +58,7 @@ gradient pr open --title "flake: update inputs" --branch update/flake flake.lock
 
 === "UI"
 
-    On the task, go to **Actions -> New Action**. Select **PR** as the type, choose the **Outbound Integration** and set the **Generator** to **Exec Tree**.
+    Go to **Actions -> New Action** inside the task. Select **PR** as the type. Pick a value for **Git host connection**. Set **Generator** to **Exec Tree**.
 
 === "Declarative"
 
@@ -67,7 +67,7 @@ gradient pr open --title "flake: update inputs" --branch update/flake flake.lock
       name = "tree-pr";
       type = "open_pr";
       config = {
-        integration = "github-acme";
+        git_host_connection = "github-acme";
         generator = "exec_tree";
         branch_pattern = "update/{entry_point}"; # (1)!
       };

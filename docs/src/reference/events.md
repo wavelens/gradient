@@ -87,7 +87,7 @@ def verify(secret: str, body: bytes, header: str) -> bool:
 ## Firehose
 
 !!! warning
-    The firehose is for debugging only. Delivery is best-effort, per server process, and dropped on lag. Integrations are using webhooks.
+    Use the firehose for debugging only. Each server process can send the stream on a best-effort basis and drop events during lag. Other systems receive events through [webhooks](#webhooks).
 
 `GET /api/v1/metrics/events` (superuser) upgrades to a websocket. Every event, durable or not, flows through it as one JSON envelope per frame. The `?events=` parameter accepts comma-separated globs.
 

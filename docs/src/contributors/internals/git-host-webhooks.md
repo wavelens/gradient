@@ -26,13 +26,14 @@ sequenceDiagram
 | Route | Verification |
 |---|---|
 | `POST /api/v1/hooks/github` | `X-Hub-Signature-256` checked against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`. `503` until the App is fully configured |
-| `POST /api/v1/hooks/{git_host}/{project}/{integration_name}` | `gitea` / `forgejo`: HMAC from `X-Forgejo-Signature`, then `X-Gitea-Signature`. `gitlab`: `X-Gitlab-Token` compared in constant time. `github` answers `400` |
+| `POST /api/v1/hooks/{connection_id}` | Gitea / Forgejo / GitLab connections. UUID for each. `gitea` / `forgejo`: HMAC from `X-Forgejo-Signature`, then `X-Gitea-Signature`. `gitlab`: constant-time comparison of `X-Gitlab-Token`. GitHub App connections respond with `404`. |
+| `POST /api/v1/hooks/{git_host}/{project}/{connection_name}` | The alias for the project connection that `(project, name)` identifies. Values in the `git_host` segment select the payload format. Segment values equal to `github` return `400`. |
 
-- The generic route finds an integration by `(project, inbound, name)`, with no need for `git_host_type`.
-- A single inbound row can serve all three Git hosts.
-- The crypt file handles secret decryption on the server.
-- Requests from other sources fail `allowed_ips` with `403`.
-- GitHub `installation` / `installation_repositories` events upsert or clear `github_installation` and seed the `github-<login>` integration pair (`github-<installation_id>` when no login is present).
+- Route `/api/v1/hooks/{connection_id}` can use the connection's `git_host_type` for the payload format.
+- Connections with `receives_events` off and unknown connections return `404`.
+- The crypt file can decrypt secrets on the server.
+- Requests from other sources fail at `allowed_ips` with `403`.
+- GitHub `installation` / `installation_repositories` events create or update instance connection `github-<login>` with `upsert_github_app_installation_git_host_connection` (with `github-<installation_id>` if the name is in use). `deleted` events delete that connection.
 
 ## GitHub App Events
 

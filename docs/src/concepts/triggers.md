@@ -23,7 +23,7 @@ flowchart LR
 
 A task can have triggers in any combination. Use [declarative state reference](../reference/state.md#trigger-types) to list the options for each type. Use [concurrency table](projects-and-tasks.md#concurrency) to get the branch name of each evaluation.
 
-Integrations don't add triggers to a task. The task's **Triggers** page and the last step of **Connect repository** suggest push and pull request triggers. These suggestions appear for projects with a webhook receiver for the repository host. The suggested triggers start unchecked. `GET /projects/{project}/trigger-suggestions?repository=<URL>` returns the same suggestions.
+Git host connections do not add triggers to a task. The **Triggers** page of a task and the last step of **Connect repository** suggest push and pull request triggers. These suggestions appear when the project can use a Git host connection that can receive events and match the repository host. Suggested triggers start unchecked. The same suggestions come from `GET /projects/{project}/trigger-suggestions?repository=<URL>`.
 
 ## Polling
 
@@ -75,7 +75,7 @@ A push trigger with `include_flake_inputs` set can also start an input update on
 
 ## Push
 
-Triggers need inbound integration from the [GitHub](../guides/github.md), [Gitea or Forgejo](../guides/gitea.md), or [GitLab](../guides/gitlab.md) guide. A connection to a Git host can't add triggers. Add a push trigger on the **Triggers** page.
+Push triggers need a connection to a Git host that can receive events. Select that connection on the **Repository** page of the task. See the [GitHub](../guides/github.md), [Gitea or Forgejo](../guides/gitea.md), or [GitLab](../guides/gitlab.md) guides. Add a push trigger on the **Triggers** page.
 
 | Event | Fires when | Filter |
 |---|---|---|
@@ -99,7 +99,7 @@ Triggers need inbound integration from the [GitHub](../guides/github.md), [Gitea
 - **Ignored Events**: Pushes of tags and releases.
 - **Filters**: The `branches`, `tags`, and `releases_only` settings do not apply to these pushes.
 - **First Update**: Gradient can discover the input repositories during an update round. A push cannot start anything before the first update round of the task from polling, a cron schedule, or **Poll now**.
-- **Webhooks**: Deliver webhooks for input repositories to the same integration. Use a GitHub App installed on the fork, or a webhook on the fork.
+- **Webhooks**: Deliver webhooks for input repositories to the task's Git host connection. Use the GitHub App installed on the fork, or webhooks on the fork.
 - **Skipped Pushes**: Tasks skip the push with reason `input_update_not_configured` when they have no active **PR** action and no tracked input. Gradient can skip a push during an active update with reason `input_update_running`.
 
 ## Pull Request

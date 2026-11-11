@@ -9,7 +9,7 @@ Pull requests carry `flake.lock` bumps. Successful builds of the updated flake p
 
 **Requirements:**
 
-- A task with an outbound Git host integration, see [Connect GitHub](github.md), [Connect Gitea or Forgejo](gitea.md) or [Connect GitLab](gitlab.md)
+- See [Connect GitHub](github.md), [Connect Gitea or Forgejo](gitea.md), or [Connect GitLab](gitlab.md) for connection to a Git host with an access token.
 - A **Polling** or **Time (cron)** trigger, for the update interval
 
 ## 1. Track the Inputs
@@ -38,7 +38,7 @@ Supported input types: `github`, `gitlab` and `git`, including `git` over SSH wi
 
 === "UI"
 
-    On the task, go to **Actions -> New Action**. Select **PR** as the type and choose the **Outbound Integration**. Default settings work for most repositories.
+    Open [Actions] -> [New Action] in the task. Choose PR as the type. Select the connection for the Git host. Default settings work for most repositories.
 
 === "Declarative"
 
@@ -46,7 +46,7 @@ Supported input types: `github`, `gitlab` and `git`, including `git` over SSH wi
     services.gradient.state.tasks.web-app.actions = [{
       name = "flake-update";
       type = "open_pr";
-      config.integration = "github-acme";
+      config.git_host_connection = "github-acme";
     }];
     ```
 
@@ -77,7 +77,7 @@ flowchart LR
 
 ## Update in an Exec Job
 
-The update can run as a script in an [exec job](../exec/index.md). Any check can happen before the pull request. The PR action in Step 2 can handle the integration. Step 1 can stay unused.
+Updates can run as a script in [exec job](../exec/index.md). Optional checks can run before the pull request. The PR action from Step 2 can open the pull request through a connection to the Git host. Step 1 can stay unused.
 
 ```nix
 # flake.nix

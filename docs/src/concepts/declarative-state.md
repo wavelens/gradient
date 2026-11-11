@@ -20,7 +20,7 @@ flowchart LR
 | Users | Accounts with a password or OIDC-only login, plus superusers |
 | Projects | Member lists, an SSH key, workers, and cache subscriptions |
 | Tasks | Repository, wildcard, triggers, actions, and concurrency settings |
-| Integrations | Connections to a Git host for incoming events and outgoing status updates |
+| Connections to Git Hosts | Connections to a Git host for incoming events and outgoing status updates |
 | Caches | Signing key, upstream caches, and members |
 | Roles | Custom roles for projects and caches |
 | Teams | Members, OIDC and SCIM groups, and grants on projects and caches |
@@ -53,8 +53,8 @@ The Nix store never uses secret material. Each `*_file` option points to a path 
 | `caches.<name>.signing_key_file` | Nix signing key, base64 only | `nix-store --generate-binary-cache-key main main-key main-key.pub`, then `sed -i 's/^[^:]*://' main-key` |
 | `api_keys.<name>.key_file` | SHA-256 hex digest of the token, without `GRAD` | See [API Key Files](#api-key-files) |
 | `workers.<name>.token_file` | Worker registration token | `openssl rand -base64 48` |
-| `integrations.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
-| `integrations.<name>.access_token_file` | Git host access token | From the Git host |
+| `git_host_connections.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
+| `git_host_connections.<name>.access_token_file` | Git host access token | From the Git host |
 
 - Run `gradient hash` to enter the password twice and get the hash. Piping a password through `<<<` puts a trailing newline into the hash, and later sign-ins then fail.
 - Upload `acme-ssh-key.pub` to the Git host as the deploy key.

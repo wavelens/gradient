@@ -146,9 +146,9 @@ curl -s -X POST https://matrix.example.org/_matrix/client/v3/login \
 - Slack apps with **Incoming Webhooks** enabled issue one URL per channel, under **Add New Webhook to Workspace**.
 - The URL looks like `https://hooks.slack.com/services/T.../B.../...`.
 
-## Git Status
+## Commit Status
 
-The **Git Status** action can post one check per step to each commit and pull request. Setup instructions appear in the [Git host guides](github.md#4-wire-the-task).
+The **Report commit status** option on the **Repository** page of a task can post one check per step to commits and pull requests. The option can use the connection of the task to the Git host. Set the option in [Git host guides](github.md#4-choose-the-connection-on-the-task).
 
 | Check | State |
 |---|---|
@@ -158,7 +158,7 @@ The **Git Status** action can post one check per step to each commit and pull re
 
 An evaluation started with `/gradient run <wildcard>` reports as `gradient/<task>: Evaluation: <wildcard>` in addition to the default checks.
 
-**Test** verifies the repository access of the integration without posting a status.
+Use **Test status report** to post a `pending` status to the newest evaluated commit and show the response from the Git host.
 
 ## Verify Deployment
 
@@ -178,5 +178,5 @@ An evaluation started with `/gradient run <wildcard>` reports as `gradient/<task
 ## Next Steps
 
 - [Update Flake Inputs](flake-updates.md): automate pull requests that refresh `flake.lock`
-- [Connect GitHub](github.md): report commit statuses through the **Git Status** action
+- [Connect GitHub](github.md): Report commit status through the connection from the task to the Git host
 - [Projects and Tasks](../concepts/projects-and-tasks.md): how triggers and actions work together

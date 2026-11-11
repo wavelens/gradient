@@ -24,7 +24,7 @@ flowchart LR
 - **Workers**: Jobs from a project reach workers only when the worker flag on that project enable.
 - **Teams**: A granted [team](teams.md) bring its users with a role, its workers, or both.
 - **Cache Subscriptions**: Build outputs of a project go to every subscribed cache.
-- **Integrations**: Connections to GitHub, Gitea / Forgejo or GitLab handle incoming events and outgoing status.
+- **Git Host Connections**: Connections to GitHub, Gitea / Forgejo, or GitLab receive events and report commit status. A project can use its own connections, the connections of its owner team, and connections from the instance.
 
 ## Task
 
@@ -33,7 +33,8 @@ flowchart LR
 | Repository URL | Location of the flake, see [Repository URL](#repository-url) |
 | Evaluation Wildcard | Which flake outputs to build, see [wildcards](../reference/wildcards.md) |
 | [Triggers](triggers.md) | Start condition and branch of an evaluation: push, pull request, polling (every 300 s by default) or a cron schedule |
-| Actions | Follow-up steps: mail, web request, Git host status, flake update pull request |
+| Git Host Connection | A connection to a Git host for task events. This connection can report commit status when **Report commit status** is on. See [Connect GitHub](../guides/github.md#4-choose-the-connection-on-the-task). |
+| Actions | Follow-up steps: email, web request, Matrix or Slack message, flake update pull request |
 | Flake Input Overrides | Replace a flake input for every evaluation, e.g. a newer nixpkgs |
 | Keep Evaluations | Number of completed evaluations to keep. Default 30. Server option `eval.maxKeep` can set the upper limit for this value. The settings page can show that limit as **Instance limit**. **Delete old evaluations** in the task's **Danger Zone** can remove completed evaluations created before the specified date. |
 
