@@ -45,6 +45,10 @@ pub async fn team_worker_ids<C: ConnectionTrait>(
         .collect())
 }
 
+pub async fn all<C: ConnectionTrait>(db: &C) -> Result<Vec<MTeam>, DbErr> {
+    ETeam::find().all(db).await
+}
+
 pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MTeam>, DbErr> {
     ETeam::find().filter(CTeam::Name.eq(name)).one(db).await
 }

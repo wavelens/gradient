@@ -63,10 +63,10 @@ def status(method, path, token=None, code=200):
 def accept_invite(kind, scope, invitee_token):
     """Redeem the pending invitation for `scope` as the invitee.
 
-    The token travels in the invitation mail; `GET /user/invites` is the
+    The token travels in the invitation mail; `GET /user/requests` is the
     in-app equivalent, and either way redemption needs the invitee's session.
     """
-    invites = api("GET", "user/invites", token=invitee_token)
+    invites = api("GET", "user/requests", token=invitee_token)["invites"]
     invite = next(
         (i for i in invites if i["kind"] == kind and i["scope"] == scope), None
     )

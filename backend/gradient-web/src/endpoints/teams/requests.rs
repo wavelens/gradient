@@ -214,13 +214,36 @@ pub async fn get_team_grants(
 pub async fn get_team_requests(
     TeamScope { team, db, .. }: TeamScope<Admin>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamRequestItem>>>> {
-    let project_requests =
-        gradient_db::teams::requests::project_requests_of_team(&db.web_db, team.id).await?;
-    let cache_requests =
-        gradient_db::teams::requests::cache_requests_of_team(&db.web_db, team.id).await?;
+    let items = build_team_request_items_for_team_ids(&db.web_db, &[team.id])
+        .await?
+        .into_iter()
+        .map(|(_, item)| item)
+        .collect();
+    Ok(ok_json(items))
+}
+
+pub(crate) async fn build_team_request_items_for_team_ids(
+    db: &WebDb,
+    teams: &[TeamId],
+) -> WebResult<Vec<(TeamId, TeamRequestItem)>> {
+    let mut items = Vec::new();
+    for team in teams {
+        items.extend(
+            team_request_items(db, *team)
+                .await?
+                .into_iter()
+                .map(|item| (*team, item)),
+        );
+    }
+    Ok(items)
+}
+
+async fn team_request_items(db: &WebDb, team: TeamId) -> WebResult<Vec<TeamRequestItem>> {
+    let project_requests = gradient_db::teams::requests::project_requests_of_team(db, team).await?;
+    let cache_requests = gradient_db::teams::requests::cache_requests_of_team(db, team).await?;
 
     let projects = by_ids::<EProject, _>(
-        &db.web_db,
+        db,
         &project_requests
             .iter()
             .map(|r| r.project)
@@ -228,23 +251,19 @@ pub async fn get_team_requests(
     )
     .await?;
     let caches = by_ids::<ECache, _>(
-        &db.web_db,
+        db,
         &cache_requests.iter().map(|r| r.cache).collect::<Vec<_>>(),
     )
     .await?;
-    let project_roles = role_names(
-        &db.web_db,
-        project_requests.iter().filter_map(|r| r.role).collect(),
-    )
-    .await?;
-    let cache_roles =
-        cache_role_names(&db.web_db, cache_requests.iter().map(|r| r.role).collect()).await?;
+    let project_roles =
+        role_names(db, project_requests.iter().filter_map(|r| r.role).collect()).await?;
+    let cache_roles = cache_role_names(db, cache_requests.iter().map(|r| r.role).collect()).await?;
     let requester_ids: Vec<UserId> = project_requests
         .iter()
         .filter_map(|r| r.requested_by)
         .chain(cache_requests.iter().filter_map(|r| r.requested_by))
         .collect();
-    let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(&db.web_db, &requester_ids)
+    let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(db, &requester_ids)
         .await?
         .into_iter()
         .map(|(id, u)| (id, u.username))
@@ -275,7 +294,7 @@ pub async fn get_team_requests(
         .collect();
     items.sort_by_key(|item| std::cmp::Reverse(item.created_at));
 
-    Ok(ok_json(items))
+    Ok(items)
 }
 
 #[utoipa::path(

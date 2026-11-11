@@ -458,7 +458,7 @@ async fn project_pinned_view_key_cannot_reach_account_routes() {
         (Method::GET, "/api/v1/user/audit-log"),
         (Method::GET, "/api/v1/user/settings"),
         (Method::PATCH, "/api/v1/user/settings"),
-        (Method::GET, "/api/v1/user/invites"),
+        (Method::GET, "/api/v1/user/requests"),
         (Method::DELETE, "/api/v1/user"),
         (Method::POST, "/api/v1/auth/cli/authorize"),
     ];

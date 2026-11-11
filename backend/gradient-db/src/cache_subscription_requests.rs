@@ -32,6 +32,20 @@ pub async fn by_project_and_cache<C: ConnectionTrait>(
         .await
 }
 
+pub async fn of_caches<C: ConnectionTrait>(
+    db: &C,
+    caches: Vec<CacheId>,
+) -> Result<Vec<MCacheSubscriptionRequest>, DbErr> {
+    ECacheSubscriptionRequest::find()
+        .filter(CCacheSubscriptionRequest::Cache.is_in(caches))
+        .all(db)
+        .await
+}
+
+pub async fn all<C: ConnectionTrait>(db: &C) -> Result<Vec<MCacheSubscriptionRequest>, DbErr> {
+    ECacheSubscriptionRequest::find().all(db).await
+}
+
 pub async fn of_cache<C: ConnectionTrait>(
     db: &C,
     cache: CacheId,

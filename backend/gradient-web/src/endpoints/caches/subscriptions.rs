@@ -21,8 +21,8 @@ use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
-use gradient_db::DbContext;
 use gradient_db::lookup::by_ids;
+use gradient_db::{DbContext, WebDb};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
@@ -36,6 +36,8 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SubscriptionRequestItem {
+    pub cache: String,
+    pub cache_display_name: String,
     pub project: String,
     pub project_display_name: String,
     pub mode: CacheSubscriptionMode,
@@ -47,10 +49,13 @@ pub struct SubscriptionRequestItem {
 impl SubscriptionRequestItem {
     fn new(
         request: &MCacheSubscriptionRequest,
+        cache: &MCache,
         project: &MProject,
         requester: Option<&MUser>,
     ) -> Self {
         Self {
+            cache: cache.name.clone(),
+            cache_display_name: cache.display_name.clone(),
             project: project.name.clone(),
             project_display_name: project.display_name.clone(),
             mode: request.mode.clone(),
@@ -76,35 +81,42 @@ impl SubscriptionRequestItem {
 pub async fn get_cache_subscription_requests(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSubscriptions>>,
 ) -> WebResult<Json<BaseResponse<Vec<SubscriptionRequestItem>>>> {
-    let mut requests =
-        gradient_db::cache_subscription_requests::of_cache(&db.web_db, cache.id).await?;
+    Ok(ok_json(
+        subscription_request_items(&db.web_db, Some(vec![cache.id])).await?,
+    ))
+}
+
+pub(crate) async fn subscription_request_items(
+    db: &WebDb,
+    caches: Option<Vec<CacheId>>,
+) -> WebResult<Vec<SubscriptionRequestItem>> {
+    let mut requests = match caches {
+        Some(caches) => gradient_db::cache_subscription_requests::of_caches(db, caches).await?,
+        None => gradient_db::cache_subscription_requests::all(db).await?,
+    };
     requests.sort_by_key(|r| std::cmp::Reverse(r.created_at));
 
-    let projects: HashMap<ProjectId, MProject> = by_ids::<EProject, _>(
-        &db.web_db,
-        &requests.iter().map(|r| r.project).collect::<Vec<_>>(),
-    )
-    .await?;
-
+    let caches: HashMap<CacheId, MCache> =
+        by_ids::<ECache, _>(db, &requests.iter().map(|r| r.cache).collect::<Vec<_>>()).await?;
+    let projects: HashMap<ProjectId, MProject> =
+        by_ids::<EProject, _>(db, &requests.iter().map(|r| r.project).collect::<Vec<_>>()).await?;
     let requesters: HashMap<UserId, MUser> = by_ids::<EUser, _>(
-        &db.web_db,
+        db,
         &requests.iter().map(|r| r.requested_by).collect::<Vec<_>>(),
     )
     .await?;
 
-    let items: Vec<SubscriptionRequestItem> = requests
+    Ok(requests
         .iter()
         .filter_map(|r| {
-            let project = projects.get(&r.project)?;
             Some(SubscriptionRequestItem::new(
                 r,
-                project,
+                caches.get(&r.cache)?,
+                projects.get(&r.project)?,
                 requesters.get(&r.requested_by),
             ))
         })
-        .collect();
-
-    Ok(ok_json(items))
+        .collect())
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -392,7 +404,12 @@ mod tests {
 
     #[test]
     fn a_request_names_the_requester_by_username_and_display_name() {
-        let item = SubscriptionRequestItem::new(&request(), &rows::project(), Some(&rows::user()));
+        let item = SubscriptionRequestItem::new(
+            &request(),
+            &rows::cache(),
+            &rows::project(),
+            Some(&rows::user()),
+        );
         assert_eq!(item.requested_by, "testuser");
         assert_eq!(item.requested_by_display_name.as_deref(), Some("Test User"));
     }
@@ -400,7 +417,7 @@ mod tests {
     #[test]
     fn a_request_from_a_deleted_user_falls_back_to_the_user_id() {
         let request = request();
-        let item = SubscriptionRequestItem::new(&request, &rows::project(), None);
+        let item = SubscriptionRequestItem::new(&request, &rows::cache(), &rows::project(), None);
         assert_eq!(item.requested_by, request.requested_by.to_string());
         assert_eq!(item.requested_by_display_name, None);
     }

@@ -356,7 +356,7 @@ pub(crate) fn account_api() -> OpenApiRouter<Arc<ServerState>> {
                     user_ssh_keys::post_ssh_key
                 ))
                 .routes(routes!(user_ssh_keys::delete_ssh_key))
-                .routes(routes!(invites::get_user_invites))
+                .routes(routes!(invites::get_user_requests))
                 .routes(routes!(invites::post_accept_invite))
                 .routes(routes!(invites::post_decline_invite))
                 .routes(routes!(user::get_sessions))

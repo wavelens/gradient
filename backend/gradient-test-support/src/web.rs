@@ -26,11 +26,15 @@ struct Claims {
 }
 
 pub fn make_token(session_id: SessionId) -> String {
+    token_for_user(user_id(), session_id)
+}
+
+fn token_for_user(user: UserId, session_id: SessionId) -> String {
     let now = Utc::now();
     let claims = Claims {
         iat: now.timestamp(),
         exp: (now + Duration::hours(1)).timestamp(),
-        id: user_id(),
+        id: user,
         jti: session_id,
     };
     encode(
@@ -43,6 +47,10 @@ pub fn make_token(session_id: SessionId) -> String {
 
 pub fn bearer(session_id: SessionId) -> String {
     format!("Bearer {}", make_token(session_id))
+}
+
+pub fn bearer_for_user(user: UserId, session_id: SessionId) -> String {
+    format!("Bearer {}", token_for_user(user, session_id))
 }
 
 pub fn with_auth_as(db: MockDatabase, session_id: SessionId, actor: user::Model) -> MockDatabase {

@@ -5,6 +5,10 @@
  */
 
 use crate::audit::Audit;
+use crate::endpoints::caches::subscriptions::{
+    SubscriptionRequestItem, subscription_request_items,
+};
+use crate::endpoints::teams::requests::{TeamRequestItem, build_team_request_items_for_team_ids};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{ok_json, role_names};
 use crate::invite_policy::{
@@ -19,6 +23,7 @@ use gradient_db::WebDb;
 use gradient_db::lookup::by_ids;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
+use gradient_types::permissions::CachePermission;
 use gradient_types::*;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
@@ -44,37 +49,95 @@ pub struct InviteTokenRequest {
     pub token: String,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct PendingUserDecisionsResponse {
+    pub invites: Vec<InviteItem>,
+    pub subscription_requests: Vec<SubscriptionRequestItem>,
+    pub team_requests: Vec<TeamGrantRequestInboxEntry>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct TeamGrantRequestInboxEntry {
+    pub team: String,
+    pub team_display_name: String,
+    #[serde(flatten)]
+    pub request: TeamRequestItem,
+}
+
 #[utoipa::path(
     get,
-    path = "/user/invites",
-    operation_id = "listUserInvites",
+    path = "/user/requests",
+    operation_id = "listUserRequests",
     tag = "user",
-    summary = "List my pending invitations",
-    description = "Project and cache invitations addressed to the authenticated user,\nnewest first.",
-    responses((status = OK, description = "Pending invitations", body = Vec<InviteItem>), WebError)
+    summary = "My Pending Requests",
+    description = "All items that await a decision from the authenticated user appear newest first.\n\n- Invitations to the user\n- Subscription requests for caches where the user can use `manageCacheSubscriptions`\n- Grant requests to teams with the user as Admin\n\nSuperusers can view requests for every cache and team.",
+    responses((status = OK, description = "OK", body = PendingUserDecisionsResponse), WebError)
 )]
-pub async fn get_user_invites(
+pub async fn get_user_requests(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<Vec<InviteItem>>>> {
+) -> WebResult<Json<BaseResponse<PendingUserDecisionsResponse>>> {
+    let db = &state.web_db;
+    let caches = if user.superuser {
+        None
+    } else {
+        Some(
+            gradient_db::access::list_cache_ids_where_user_has_permission(
+                db,
+                user.id,
+                CachePermission::ManageCacheSubscriptions.bit(),
+            )
+            .await?,
+        )
+    };
+    let admin_teams: Vec<MTeam> = if user.superuser {
+        gradient_db::teams::all(db).await?
+    } else {
+        gradient_db::teams::members::teams_of_user(db, user.id)
+            .await?
+            .into_iter()
+            .filter(|(membership, _)| membership.role == TeamRole::Admin)
+            .filter_map(|(_, team)| team)
+            .collect()
+    };
+    let team_ids: Vec<TeamId> = admin_teams.iter().map(|t| t.id).collect();
+    let teams: HashMap<TeamId, MTeam> = admin_teams.into_iter().map(|t| (t.id, t)).collect();
+    let team_requests = build_team_request_items_for_team_ids(db, &team_ids)
+        .await?
+        .into_iter()
+        .filter_map(|(team, request)| {
+            let team = teams.get(&team)?;
+            Some(TeamGrantRequestInboxEntry {
+                team: team.name.clone(),
+                team_display_name: team.display_name.clone(),
+                request,
+            })
+        })
+        .collect();
+
+    Ok(ok_json(PendingUserDecisionsResponse {
+        invites: invite_items(db, &user).await?,
+        subscription_requests: subscription_request_items(db, caches).await?,
+        team_requests,
+    }))
+}
+
+async fn invite_items(db: &WebDb, user: &MUser) -> WebResult<Vec<InviteItem>> {
     let project_rows = gradient_db::invitations::of_user::<EProjectInvitation, _>(
-        &state.web_db,
+        db,
         CProjectInvitation::User,
         user.id,
     )
     .await?;
     let cache_rows = gradient_db::invitations::of_user::<ECacheInvitation, _>(
-        &state.web_db,
+        db,
         CCacheInvitation::User,
         user.id,
     )
     .await?;
-    let team_rows = gradient_db::invitations::of_user::<ETeamInvitation, _>(
-        &state.web_db,
-        CTeamInvitation::User,
-        user.id,
-    )
-    .await?;
+    let team_rows =
+        gradient_db::invitations::of_user::<ETeamInvitation, _>(db, CTeamInvitation::User, user.id)
+            .await?;
 
     let inviter_ids: Vec<UserId> = project_rows
         .iter()
@@ -82,37 +145,26 @@ pub async fn get_user_invites(
         .chain(cache_rows.iter().map(|r| r.invited_by))
         .chain(team_rows.iter().map(|r| r.invited_by))
         .collect();
-    let inviters: HashMap<UserId, MUser> = by_ids::<EUser, _>(&state.web_db, &inviter_ids).await?;
+    let inviters: HashMap<UserId, MUser> = by_ids::<EUser, _>(db, &inviter_ids).await?;
 
     let projects: HashMap<ProjectId, MProject> = by_ids::<EProject, _>(
-        &state.web_db,
+        db,
         &project_rows.iter().map(|r| r.project).collect::<Vec<_>>(),
     )
     .await?;
-    let caches: HashMap<CacheId, MCache> = by_ids::<ECache, _>(
-        &state.web_db,
-        &cache_rows.iter().map(|r| r.cache).collect::<Vec<_>>(),
-    )
-    .await?;
-    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(
-        &state.web_db,
-        &team_rows.iter().map(|r| r.team).collect::<Vec<_>>(),
-    )
-    .await?;
+    let caches: HashMap<CacheId, MCache> =
+        by_ids::<ECache, _>(db, &cache_rows.iter().map(|r| r.cache).collect::<Vec<_>>()).await?;
+    let teams: HashMap<TeamId, MTeam> =
+        by_ids::<ETeam, _>(db, &team_rows.iter().map(|r| r.team).collect::<Vec<_>>()).await?;
 
-    let project_roles = role_names(
-        &state.web_db,
-        project_rows.iter().map(|r| r.role).collect::<Vec<_>>(),
-    )
-    .await?;
-    let cache_roles: HashMap<RoleId, String> = by_ids::<ECacheRole, _>(
-        &state.web_db,
-        &cache_rows.iter().map(|r| r.role).collect::<Vec<_>>(),
-    )
-    .await?
-    .into_iter()
-    .map(|(id, r)| (id, r.name))
-    .collect();
+    let project_roles =
+        role_names(db, project_rows.iter().map(|r| r.role).collect::<Vec<_>>()).await?;
+    let cache_roles: HashMap<RoleId, String> =
+        by_ids::<ECacheRole, _>(db, &cache_rows.iter().map(|r| r.role).collect::<Vec<_>>())
+            .await?
+            .into_iter()
+            .map(|(id, r)| (id, r.name))
+            .collect();
 
     let role_name = |roles: &HashMap<RoleId, String>, role: RoleId| {
         roles
@@ -174,7 +226,7 @@ pub async fn get_user_invites(
         })
         .collect();
 
-    Ok(ok_json(merge_invites(items)))
+    Ok(merge_invites(items))
 }
 
 enum Invitation {
