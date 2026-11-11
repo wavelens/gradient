@@ -91,12 +91,11 @@ services.gradient.worker.exec.sops = {
 
 ## Worker Stop
 
-A worker can stop at any time. Disposable VMs follow the same rule. Jobs survive the stop.
+A worker can stop at any time. That includes a worker with disposable VMs. Jobs survive the stop.
 
-- Use the first `SIGTERM` to drain the worker. The server can send no new jobs after that.
-- The worker can complete running jobs and exit when no jobs remain.
-- Use a second `SIGTERM` or `SIGINT` to abort running jobs. The server can requeue those jobs for other workers.
-- The NixOS module can set `TimeoutStopSec = infinity`, so a restart can wait for running jobs. Shorten this value to cap the wait time. Systemd can force-kill the worker and the server can requeue that job.
+- `systemctl stop` and `systemctl restart` take effect immediately. Drain notices leave the worker for the server. The server won't send new jobs.
+- Running jobs end at a worker stop. Those jobs go back into the server queue for other workers.
+- exec jobs continue inside the guest under `exec.stopGuestsWithWorker = false` and resume after a restart of the worker.
 - An administrator can also drain one worker from **Administration > Workers** or `gradient administration worker drain <id>`. The worker can keep the connection and receive jobs again after **Undrain**.
 - A team admin can drain a worker from the team workers page or with `gradient team worker edit <TEAM> <WORKER_ID> --draining true`. Use **Deactivate** instead to abort running jobs immediately.
 

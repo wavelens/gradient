@@ -231,14 +231,12 @@ sequenceDiagram
     Note left of W: SIGTERM
     W->>S: JobFailed with Aborted (held cluster members)
     W->>S: Draining
-    W->>S: JobCompleted or JobFailed (running jobs)
-    Note left of W: second SIGTERM aborts all running jobs
+    Note left of W: aborting all running jobs
     W->>S: JobFailed with Canceled
     W-xS: close
 ```
 
-- A worker can release its cluster members on the first `SIGTERM`. The worker can send `Draining`, accept no new jobs and exit after all running jobs finish reporting.
-- A second `SIGTERM` or `SIGINT` can abort all running jobs.
+- Workers first release the cluster members that they hold. They then send `Draining` and abort all running jobs. Exec jobs keep running with `stopGuestsWithWorker = false` and resume after a restart.
 - Aborted jobs report `JobFailed { Canceled }` with their phase timeline. Failures during a stop all report as `Canceled`.
 - Workers wait up to 5 s for these reports.
 - Jobs without a report within the 5 s re-queue with the closed session, as for a lost worker.
