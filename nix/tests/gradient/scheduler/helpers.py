@@ -72,7 +72,12 @@ def wait_evaluation(eval_id, want, timeout=300):
             break
         server.sleep(1)
     print(sql(
-        "SELECT d.name, db.status FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
+        "SELECT d.name, db.status, db.wanted, db.probed, db.cache_available, db.blocking_deps, "
+        "db.missing_runtime_deps, d.walked, EXISTS (SELECT 1 FROM cached_path cp "
+        "WHERE cp.hash = d.hash AND cp.file_hash IS NOT NULL), db.fetchable, db.unneeded_outputs, "
+        "(SELECT count(*) FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash "
+        "WHERE o.derivation = d.id AND cp.file_hash IS NULL) FROM build_job bj "
+        "JOIN derivation_build db ON db.id = bj.derivation_build "
         f"JOIN derivation d ON d.id = db.derivation WHERE bj.evaluation = '{eval_id}' ORDER BY d.name"
     ))
     print(server.succeed("journalctl -u gradient-server --no-pager -n 120"))

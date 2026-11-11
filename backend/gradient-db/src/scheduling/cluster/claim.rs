@@ -279,7 +279,7 @@ mod tests {
                     "build:a",
                     ClaimGate::Build {
                         shared_build: DerivationBuildId::now_v7(),
-                        substitute: false,
+                        output_names_to_substitute: None,
                     },
                 ),
                 member(

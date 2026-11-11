@@ -352,13 +352,13 @@ pub(crate) mod test_ctx {
         db: &WorkerDb,
         assignment: gradient_entity::dispatched_job::Model,
         shared_build: gradient_types::ids::DerivationBuildId,
-        substitute: bool,
+        output_names_to_substitute: Option<Vec<String>>,
     ) -> bool {
         use gradient_db::scheduling::assignment_record::{ClaimGate, claim_assignment};
 
         let build = ClaimGate::Build {
             shared_build,
-            substitute,
+            output_names_to_substitute,
         };
         claim_assignment(db, assignment, build)
             .await

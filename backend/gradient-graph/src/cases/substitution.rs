@@ -587,3 +587,101 @@ async fn s13_a_producer_whose_unneeded_missing_output_becomes_needed_is_asked_ab
     case.zero_drift("step 3").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn s14_a_worker_claim_for_the_old_job_that_downloads_only_the_old_output_is_refused_after_the_later_needed_output_is_found_upstream_and_a_claim_downloading_both_outputs_succeeds_and_makes_the_build_ready()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on_outputs(B, &["out"])
+            .derivation(B)
+            .walked()
+            .job()
+            .drv_cached()
+            .output(B_OUT)
+            .named_output(B_OUT2, "dev")
+            .derivation(D)
+            .walked()
+            .entry_point("pkg.d")
+            .job()
+            .drv_cached()
+            .output(D_OUT)
+            .depends_on_outputs(B, &["dev"])
+            .derivation(C)
+            .walked()
+            .entry_point("pkg.c")
+            .job()
+            .drv_cached()
+            .output(C_OUT)
+            .depends_on(B),
+    )
+    .await;
+
+    upstream_holds(&case, &[(B_OUT, "b")]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.cache_available, b.unneeded_outputs),
+        (BuildStatus::Queued, true, vec!["dev".to_owned()]),
+        "after 1: sb(B) status, cache_available, unneeded_outputs"
+    );
+    case.zero_drift("step 1").await;
+
+    case.upstream_hits(&[(B_OUT2, narinfo(&[(B_OUT2, "b-dev")]))])
+        .await;
+    case.upstream_probed(&[D]).await;
+    case.requeue_needed_outputs().await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.cache_available, b.probed),
+        (BuildStatus::Queued, false, true),
+        "after 2: sb(B) status, cache_available, probed"
+    );
+    case.zero_drift("step 2").await;
+
+    case.upstream_hits(&[(C_OUT, narinfo(&[(C_OUT, "c")]))])
+        .await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.cache_available, b.unneeded_outputs),
+        (BuildStatus::Queued, true, Vec::<String>::new()),
+        "after 3: sb(B) status, cache_available, unneeded_outputs"
+    );
+    case.zero_drift("step 3").await;
+
+    let stale = case
+        .claim_substitute_build_with_output_names(e1, B, &["out"])
+        .await;
+
+    assert_eq!(stale, None, "after 4: the claim of the old job");
+    case.zero_drift("step 4").await;
+
+    substitute_b(&case, e1, &[(B_OUT, "b"), (B_OUT2, "b-dev")]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.fetchable),
+        (BuildStatus::Substituted, true),
+        "after 5: sb(B) status, fetchable"
+    );
+    let d = case.sb(D).await;
+    assert_eq!(
+        (d.status, d.blocking_deps),
+        (BuildStatus::Queued, 0),
+        "after 5: sb(D) status, blocking_deps"
+    );
+    case.zero_drift("step 5").await;
+    case.finish().await;
+}
