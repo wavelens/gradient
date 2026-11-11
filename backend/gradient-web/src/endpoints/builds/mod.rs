@@ -16,7 +16,7 @@ mod refusal;
 pub mod sbom;
 
 pub use self::actions::{post_build_abort, post_build_prioritize, post_build_retry};
-pub use self::attempts::get_build_attempts;
+pub use self::attempts::{BuildAttemptResponse, list_build_attempts};
 pub use self::closure::{
     ClosureEdge, ClosureGraph, ClosureNode, build_closure_graph, build_runtime_closure_graph,
     derivation_closure_reachable, get_build_closure, get_build_runtime_closure, get_eval_closure,
@@ -39,8 +39,11 @@ use crate::lookup::require;
 use crate::resource::Resource;
 use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
-use gradient_db::scheduling::build_attempt::latest_attempt_id;
+use gradient_db::scheduling::build_attempt::{
+    latest_attempt_id, load_build_attempts_with_worker_ids,
+};
 use gradient_types::*;
+use serde::Deserialize;
 
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
@@ -164,18 +167,26 @@ async fn reachable_projects_accessible(
     Ok(false)
 }
 
-pub(super) async fn build_attempt_id_for_log(
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct BuildLogAttemptQuery {
+    /// Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+    pub attempt: Option<u32>,
+}
+
+pub(super) async fn effective_log_id(
     db: &WebDb,
     shared_build: &MDerivationBuild,
-    requested: Option<BuildAttemptId>,
+    query: &BuildLogAttemptQuery,
 ) -> WebResult<Option<BuildAttemptId>> {
-    let Some(requested) = requested else {
+    let Some(number) = query.attempt else {
         return Ok(latest_attempt_id(db, shared_build.id).await?);
     };
 
-    by_id::<EBuildAttempt, _>(db, requested)
-        .await?
-        .filter(|attempt| attempt.derivation_build == shared_build.id)
-        .map(|attempt| Some(attempt.id))
-        .ok_or_else(|| WebError::not_found(Resource::Log))
+    let attempts = load_build_attempts_with_worker_ids(db, shared_build.id).await?;
+    let index = usize::try_from(number).ok().and_then(|n| n.checked_sub(1));
+    index
+        .and_then(|index| attempts.get(index))
+        .map(|(attempt, _)| Some(attempt.id))
+        .ok_or_else(|| WebError::not_found(Resource::BuildAttempt))
 }

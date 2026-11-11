@@ -53,9 +53,7 @@ pub use self::git_host::GitHostType;
 pub use self::ids::*;
 pub use self::input::*;
 pub use self::io::*;
-pub use self::log_api::{
-    BuildAttemptLogRow, LogChunkIndex, LogChunkMeta, LogSearchDone, LogSearchHit,
-};
+pub use self::log_api::{LogChunkIndex, LogChunkMeta, LogSearchDone, LogSearchHit};
 pub use self::nix_cache::*;
 pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, TriggerType};
 pub use self::waiting_reason::{EvalCapability, ExecUnmet, UnmetRequirement, WaitingReason};

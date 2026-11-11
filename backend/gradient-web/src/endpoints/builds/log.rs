@@ -26,13 +26,6 @@ use super::BuildAccessContext;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct BuildLogAttemptQuery {
-    /// The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
-    pub attempt: Option<BuildAttemptId>,
-}
-
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum BuildLogOutputFormat {
@@ -43,8 +36,6 @@ pub enum BuildLogOutputFormat {
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct BuildLogQuery {
-    /// The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
-    attempt: Option<BuildAttemptId>,
     format: Option<BuildLogOutputFormat>,
 }
 
@@ -54,8 +45,8 @@ pub struct BuildLogQuery {
     operation_id = "getBuildLog",
     tag = "builds",
     summary = "Get build log",
-    description = "Return the full build log. Return an empty string when no log is present yet. Use a query parameter, `format`, to choose `plain` (remove color codes) or `ansi` (keep color codes). Requests that specify `Accept: text/plain` get the raw text of the log. The default value is `plain`. Other requests get the log as a JSON string. The default value is `ansi`. Logs of failed builds end with `Full log: <url>`. That line is a link to the web page of this build. That line is a replacement for the `nix log` command from nix. That command can run only on the server.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
-    params(("build" = BuildJobId, Path), BuildLogQuery),
+    description = "Return the full build log. Return an empty string when no log is present yet. Use a query parameter, `format`, to choose `plain` (remove color codes) or `ansi` (keep color codes). Requests that specify `Accept: text/plain` get the raw text of the log. The default value is `plain`. Other requests get the log as a JSON string. The default value is `ansi`. Logs of failed builds end with `Full log: <url>`. That line is a link to the web page of this build. That line is a replacement for the `nix log` command from nix. That command can run only on the server.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\nThis endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
+    params(("build" = BuildJobId, Path), BuildLogQuery, super::BuildLogAttemptQuery),
     responses(
         (status = OK, description = "Build log", content(
             (String = "application/json"),
@@ -70,13 +61,12 @@ pub async fn get_build_log(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
     Query(query): Query<BuildLogQuery>,
+    Query(attempt): Query<super::BuildLogAttemptQuery>,
     headers: HeaderMap,
 ) -> WebResult<Response> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    let mut log = match super::build_attempt_id_for_log(&state.web_db, &ctx.shared_build, query.attempt)
-        .await?
-    {
+    let mut log = match super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await? {
         Some(key) => state.log_storage.read(key).await?,
         None => String::new(),
     };

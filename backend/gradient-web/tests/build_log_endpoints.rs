@@ -6,13 +6,14 @@
 
 use axum::http::StatusCode;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::ids::*;
 use gradient_fixtures::ids::{project_id, task_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{eval_at, public_project};
 use gradient_test_support::log_storage::{InMemoryLogStorage, ReadErrorLogStorage};
 use gradient_test_support::state::TestState;
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, MockDatabase};
 use serde_json::Value;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -29,20 +30,13 @@ fn evaluation_id() -> EvaluationId {
 fn attempt_id() -> BuildAttemptId {
     BuildAttemptId::new(Uuid::from_u128(0xc1))
 }
+fn retry_attempt_id() -> BuildAttemptId {
+    BuildAttemptId::new(Uuid::from_u128(0xc2))
+}
 
 const FAILED_NIX_LOG: &str = "\x1b[31;1merror:\x1b[0m builder failed\nFor full logs, run:\n  nix log /nix/store/abc-hello.drv\n";
 
-fn mock_database_connection_with_build_log_endpoint_rows(status: BuildStatus) -> DatabaseConnection {
-    mock_db_with_build_access_rows(status)
-        .append_query_results([vec![gradient_entity::build_attempt::Model {
-            id: attempt_id(),
-            derivation_build: shared_build_id(),
-            ..Default::default()
-        }]])
-        .into_connection()
-}
-
-fn mock_db_with_build_access_rows(status: BuildStatus) -> sea_orm::MockDatabase {
+fn mock_database_connection_with_build_access_check_rows(status: BuildStatus) -> MockDatabase {
     mock_db()
         .append_query_results([vec![gradient_entity::build_job::Model {
             id: build_job_id(),
@@ -64,63 +58,64 @@ fn mock_db_with_build_access_rows(status: BuildStatus) -> sea_orm::MockDatabase 
         .append_query_results([vec![public_project()]])
 }
 
-#[tokio::test]
-async fn the_attempts_list_names_the_worker_of_each_attempt() {
-    let retried = gradient_entity::build_attempt::Model {
-        id: BuildAttemptId::new(Uuid::from_u128(0xc2)),
-        derivation_build: shared_build_id(),
-        dispatched_job: Some(DispatchedJobId::new(Uuid::from_u128(0xd2))),
-        ..Default::default()
-    };
-    let first = gradient_entity::build_attempt::Model {
-        id: BuildAttemptId::new(Uuid::from_u128(0xc1)),
-        derivation_build: shared_build_id(),
-        outcome: gradient_entity::build_attempt::AttemptOutcome::Failed,
-        ..Default::default()
-    };
-    let job = gradient_entity::dispatched_job::Model {
-        id: DispatchedJobId::new(Uuid::from_u128(0xd2)),
-        worker_id: "worker-b".into(),
-        ..Default::default()
-    };
-    let db = mock_db_with_build_access_rows(BuildStatus::Completed)
-        .append_query_results([vec![(retried, Some(job)), (first, None)]])
-        .into_connection();
-
-    let response = TestState::new()
-        .web_db(db)
-        .server()
-        .get(&format!("/api/v1/builds/{}/attempts", build_job_id()))
-        .await;
-
-    response.assert_status_ok();
-    let attempts = &response.json::<serde_json::Value>()["message"];
-    assert_eq!(attempts[0]["worker"], "worker-b");
-    assert_eq!(attempts[1]["outcome"], "Failed");
-    assert!(attempts[1]["worker"].is_null());
-}
-
-#[tokio::test]
-async fn an_attempt_of_another_build_is_not_found() {
-    let db = mock_db_with_build_access_rows(BuildStatus::Completed)
+fn mock_database_connection_with_build_log_endpoint_rows(
+    status: BuildStatus,
+) -> DatabaseConnection {
+    mock_database_connection_with_build_access_check_rows(status)
         .append_query_results([vec![gradient_entity::build_attempt::Model {
-            id: BuildAttemptId::new(Uuid::from_u128(0xc9)),
-            derivation_build: DerivationBuildId::new(Uuid::from_u128(0xa9)),
+            id: attempt_id(),
+            derivation_build: shared_build_id(),
             ..Default::default()
         }]])
-        .into_connection();
+        .into_connection()
+}
 
-    let response = TestState::new()
-        .web_db(db)
+fn failed_and_retried_attempts() -> Vec<gradient_entity::build_attempt::Model> {
+    let at = |seconds: i64| {
+        chrono::DateTime::from_timestamp(1_800_000_000 + seconds, 0)
+            .expect("a valid timestamp")
+            .naive_utc()
+    };
+    vec![
+        gradient_entity::build_attempt::Model {
+            id: attempt_id(),
+            derivation_build: shared_build_id(),
+            outcome: AttemptOutcome::Failed,
+            reason: Some(AttemptFailureReason::BuilderNonzero),
+            build_started_at: Some(at(0)),
+            build_finished_at: Some(at(60)),
+            created_at: at(0),
+            ..Default::default()
+        },
+        gradient_entity::build_attempt::Model {
+            id: retry_attempt_id(),
+            derivation_build: shared_build_id(),
+            dispatched_job: Some(DispatchedJobId::new(Uuid::from_u128(0xd2))),
+            outcome: AttemptOutcome::Built,
+            build_started_at: Some(at(120)),
+            build_finished_at: Some(at(180)),
+            created_at: at(120),
+            ..Default::default()
+        },
+    ]
+}
+
+fn server_with_failed_and_retried_attempts(db: MockDatabase) -> axum_test::TestServer {
+    let logs = InMemoryLogStorage::new();
+    logs.seed(attempt_id(), "first try failed\n");
+    logs.seed(retry_attempt_id(), "second try built\n");
+    TestState::new()
+        .web_db(
+            db.append_query_results([failed_and_retried_attempts()])
+                .append_query_results([vec![gradient_entity::dispatched_job::Model {
+                    id: DispatchedJobId::new(Uuid::from_u128(0xd2)),
+                    worker_id: "worker-2".into(),
+                    ..Default::default()
+                }]])
+                .into_connection(),
+        )
+        .log_storage(Arc::new(logs))
         .server()
-        .get(&format!(
-            "/api/v1/builds/{}/log?attempt={}",
-            build_job_id(),
-            Uuid::from_u128(0xc9)
-        ))
-        .await;
-
-    assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
 }
 
 fn server_with_failed_build_log() -> axum_test::TestServer {
@@ -222,4 +217,86 @@ async fn log_of_a_successful_build_has_no_web_link() {
 
     res.assert_status_ok();
     assert_eq!(res.text(), "built\n");
+}
+
+#[tokio::test]
+async fn get_build_attempts_lists_both_attempts_oldest_first_with_outcome_and_worker_id() {
+    let res = server_with_failed_and_retried_attempts(
+        mock_database_connection_with_build_access_check_rows(BuildStatus::Completed),
+    )
+    .get(&format!("/api/v1/builds/{}/attempts", build_job_id()))
+    .await;
+
+    res.assert_status_ok();
+    let attempts: Value = res.json();
+    let summary: Vec<(u64, &str, Option<&str>, Option<&str>)> = attempts["message"]
+        .as_array()
+        .expect("a list of attempts")
+        .iter()
+        .map(|a| {
+            (
+                a["number"].as_u64().unwrap_or_default(),
+                a["outcome"].as_str().unwrap_or_default(),
+                a["reason"].as_str(),
+                a["worker"].as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (1, "Failed", Some("BuilderNonzero"), None),
+            (2, "Built", None, Some("worker-2")),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn get_build_log_returns_requested_attempt_log_and_latest_attempt_log_without_attempt_parameter()
+ {
+    let path = format!("/api/v1/builds/{}/log", build_job_id());
+
+    let first = server_with_failed_and_retried_attempts(
+        mock_database_connection_with_build_access_check_rows(BuildStatus::Completed),
+    )
+    .get(&format!("{path}?attempt=1"))
+    .add_header("accept", "text/plain")
+    .await;
+    let latest = TestState::new()
+        .web_db(
+            mock_database_connection_with_build_access_check_rows(BuildStatus::Completed)
+                .append_query_results([vec![failed_and_retried_attempts().remove(1)]])
+                .into_connection(),
+        )
+        .log_storage(Arc::new({
+            let logs = InMemoryLogStorage::new();
+            logs.seed(attempt_id(), "first try failed\n");
+            logs.seed(retry_attempt_id(), "second try built\n");
+            logs
+        }))
+        .server()
+        .get(&path)
+        .add_header("accept", "text/plain")
+        .await;
+
+    first.assert_status_ok();
+    latest.assert_status_ok();
+    assert_eq!(
+        (first.text(), latest.text()),
+        (
+            "first try failed\n".to_owned(),
+            "second try built\n".to_owned()
+        )
+    );
+}
+
+#[tokio::test]
+async fn get_build_log_with_missing_attempt_returns_404() {
+    let res = server_with_failed_and_retried_attempts(
+        mock_database_connection_with_build_access_check_rows(BuildStatus::Completed),
+    )
+    .get(&format!("/api/v1/builds/{}/log?attempt=3", build_job_id()))
+    .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
 }

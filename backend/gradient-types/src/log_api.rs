@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use chrono::NaiveDateTime;
-use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
-use gradient_entity::ids::BuildAttemptId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -32,31 +29,6 @@ pub struct LogSearchHit {
     pub chunk_index: u32,
     pub byte_offset: u64,
     pub preview: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct BuildAttemptLogRow {
-    pub id: BuildAttemptId,
-    pub outcome: AttemptOutcome,
-    pub reason: Option<AttemptFailureReason>,
-    pub worker: Option<String>,
-    pub started_at: Option<NaiveDateTime>,
-    pub finished_at: Option<NaiveDateTime>,
-    pub created_at: NaiveDateTime,
-}
-
-impl BuildAttemptLogRow {
-    pub fn new(attempt: gradient_entity::build_attempt::Model, worker: Option<String>) -> Self {
-        Self {
-            id: attempt.id,
-            outcome: attempt.outcome,
-            reason: attempt.reason,
-            worker,
-            started_at: attempt.build_started_at,
-            finished_at: attempt.build_finished_at,
-            created_at: attempt.created_at,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -21,8 +21,7 @@ use gradient_types::*;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use super::log::BuildLogAttemptQuery;
-use super::{BuildAccessContext, build_attempt_id_for_log};
+use super::BuildAccessContext;
 
 type ChunkRow = gradient_entity::build_log_chunk::Model;
 
@@ -53,7 +52,7 @@ async fn chunk_lines_text(
     tag = "builds",
     summary = "Get build log chunk index",
     description = "Returns the index of the zstd-compressed log chunks written when the build\nfinalized: total chunk/line/byte counts and per-chunk line/byte offsets.\n`total_chunks` is `0` for builds whose log has not been finalized yet (use the\nstreaming `POST /log` endpoint for in-progress builds).\n\n**Access:** Same as `GET /builds/{build}/log`.",
-    params(("build" = BuildJobId, Path), BuildLogAttemptQuery),
+    params(("build" = BuildJobId, Path), super::BuildLogAttemptQuery),
     responses((status = OK, description = "Chunk index", body = LogChunkIndex), WebError)
 )]
 pub async fn get_build_log_chunks(
@@ -61,13 +60,11 @@ pub async fn get_build_log_chunks(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
-    Query(attempt): Query<BuildLogAttemptQuery>,
+    Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> WebResult<Json<BaseResponse<LogChunkIndex>>> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    let rows = match build_attempt_id_for_log(&state.web_db, &ctx.shared_build, attempt.attempt)
-        .await?
-    {
+    let rows = match super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await? {
         Some(log_key) => gradient_db::build_log_chunks::of_attempt(&state.web_db, log_key).await?,
         None => vec![],
     };
@@ -108,7 +105,7 @@ pub async fn get_build_log_chunks(
     tag = "builds",
     summary = "Get a single decompressed log chunk",
     description = "Returns one chunk's plaintext (server-decompressed) with the active ANSI\ncolor state at the chunk boundary already prepended, so the chunk renders\ncorrectly standalone.\n\n**Access:** Same as `GET /builds/{build}/log`.",
-    params(("build" = BuildJobId, Path), ("index" = u32, Path), BuildLogAttemptQuery),
+    params(("build" = BuildJobId, Path), ("index" = u32, Path), super::BuildLogAttemptQuery),
     responses((status = OK, description = "Chunk plaintext", body = String, content_type = "text/plain"), WebError)
 )]
 pub async fn get_build_log_chunk(
@@ -116,11 +113,11 @@ pub async fn get_build_log_chunk(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((build_id, index)): Path<(BuildJobId, u32)>,
-    Query(attempt): Query<BuildLogAttemptQuery>,
+    Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> Result<Response, WebError> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = build_attempt_id_for_log(&state.web_db, &ctx.shared_build, attempt.attempt)
+    let log_key = super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::LogChunk))?;
 
@@ -176,7 +173,7 @@ fn parse_line_range(q: &LineRangeQuery) -> Result<(u64, Option<u64>), WebError> 
     tag = "builds",
     summary = "Get a build log line range",
     description = "Returns the plaintext for an inclusive 1-based logical line range, resolving\nthe covering chunk(s) server-side and prepending the correct color prefix for\nthe first line. Hand- and CLI-friendly; the frontend also uses this as its\nlazy fetch path.\n\n**Access:** Same as `GET /builds/{build}/log`.",
-    params(("build" = BuildJobId, Path), LineRangeQuery, BuildLogAttemptQuery),
+    params(("build" = BuildJobId, Path), LineRangeQuery, super::BuildLogAttemptQuery),
     responses((status = OK, description = "Line range plaintext", body = String, content_type = "text/plain"), WebError)
 )]
 pub async fn get_build_log_lines(
@@ -185,12 +182,11 @@ pub async fn get_build_log_lines(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
     Query(q): Query<LineRangeQuery>,
-    Query(attempt): Query<BuildLogAttemptQuery>,
+    Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> Result<Response, WebError> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    let Some(log_key) =
-        build_attempt_id_for_log(&state.web_db, &ctx.shared_build, attempt.attempt).await?
+    let Some(log_key) = super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await?
     else {
         return Ok((
             [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
@@ -264,7 +260,7 @@ pub struct LogSearchQuery {
     tag = "builds",
     summary = "Search a build log",
     description = "Streams NDJSON search hits in scan order as the server decompresses chunks,\nso first matches and a running count appear immediately. Each line is a\n`LogSearchHit`; the final frame is a `LogSearchDone` carrying `total_matches`.\nMatches are per-line substrings (no multi-line matches).\n\n**Access:** Same as `GET /builds/{build}/log`.",
-    params(("build" = BuildJobId, Path), LogSearchQuery, BuildLogAttemptQuery),
+    params(("build" = BuildJobId, Path), LogSearchQuery, super::BuildLogAttemptQuery),
     responses((status = OK, description = "NDJSON stream of search hits, terminated by a done frame", body = LogSearchHit, content_type = "application/x-ndjson"), WebError)
 )]
 pub async fn get_build_log_search(
@@ -273,12 +269,12 @@ pub async fn get_build_log_search(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
     Query(query): Query<LogSearchQuery>,
-    Query(attempt): Query<BuildLogAttemptQuery>,
+    Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> Result<Response, WebError> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let (log_key, rows) =
-        match build_attempt_id_for_log(&state.web_db, &ctx.shared_build, attempt.attempt).await? {
+        match super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await? {
             Some(key) => (
                 key,
                 gradient_db::build_log_chunks::of_attempt(&state.web_db, key).await?,

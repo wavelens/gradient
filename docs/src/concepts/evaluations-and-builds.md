@@ -26,9 +26,9 @@ flowchart LR
 | Waiting | No connected worker can make progress, e.g. no worker with the needed system or features. The evaluation resumes on its own. Builds needing a system or features absent from every connected worker abort the evaluation after 5 minutes with a warning. A task can opt into waiting for workers instead |
 | Completed | Every build succeeded |
 | Failed | The evaluation or at least one build failed |
-| Aborted | Stopped by hand or replaced by a newer evaluation |
+| Aborted | Stopped by hand, replaced by a newer evaluation, or stopped because no connected worker can build a required system. The card names the reason: who aborted it, or a link to the evaluation that replaced it |
 
-Evaluations skip every dependency subtree that previous evaluations recorded. Run **Reevaluate all inputs** from the task menu to walk the whole closure again. The result is a new evaluation.
+Evaluations skip every dependency subtree that an earlier evaluation recorded. Click **Run** on the task page and check **Walk all inputs** to walk the full closure again. The result is a new evaluation.
 
 Task option **Only Evaluate** (`only_evaluate`, off by default) can end each evaluation right after Evaluating. Such evaluations build nothing and start no exec jobs.
 
@@ -67,10 +67,12 @@ Builds belong to a derivation, not to an evaluation. Every evaluation that needs
 
 ## Abort and Retry
 
-- **Abort** on a running build can stop that build in the current evaluation. Dependent builds fail afterward. The evaluation can end with status Aborted. A later evaluation can run that build again.
-- **Retry** on a failed or aborted build queues the build again, together with the dependents that failed through it. This queueing happens inside the running evaluation.
-- **Retry** on a finished evaluation starts a new evaluation of the same commit. That new evaluation queues all failed builds again.
-- Both kinds of retry query the [upstream caches](caches.md#upstream-types) again. A worker can then substitute a build found there.
+- **Abort** on a running build can stop that build in the current evaluation. Dependent builds then fail. The evaluation can finish with status Aborted. A later evaluation can run that build again.
+- **Retry** on a failed or aborted build can put that build back in the queue, along with the dependent builds that failed through it. Build retry can only work while an evaluation is in progress.
+- Finished evaluations never change. Their status, duration and logs stay as they are. **Retry failed builds** on a finished evaluation, or **Failed builds only** in the **Run** dialog, can start a new evaluation of the same commit with kind Retry. That new evaluation can reuse completed builds and put failed builds back in the queue. The words "Retry of" on its card refer to the previous evaluation.
+- **Run again** in the evaluation menu can start a new evaluation of the same commit as a manual run by the user who clicked.
+- Each try to build a derivation is an attempt with its own log. Log pages have an attempt selector. Links to log lines point to that attempt. `GET /builds/{build}/attempts` can list attempts and `?attempt=N` on the log endpoint can read one of them. The CLI can receive `gradient builds log --attempt N`.
+- Both kinds of retry query [upstream caches](caches.md#upstream-types) again. The worker can then substitute the builds from that query.
 - A new evaluation can query the upstream caches again about a failed build, one hour after the last query.
 - A new evaluation can queue every failed build it needs again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
 

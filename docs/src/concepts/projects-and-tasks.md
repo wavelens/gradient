@@ -101,6 +101,8 @@ Evaluations of a pinned commit and `gradient build` requests belong to no branch
 | `skip` | Kept running | Kept running. The new event got dropped |
 | `all` | Kept running, with the new evaluation running alongside | Kept running |
 
+Evaluations of a branch that still wait for workers or a cache never block a newer commit. Trigger events abort that evaluation under any policy and start a new evaluation. One Waiting card is on the task. Aborted evaluations record the user who aborted them or the evaluation that replaced them as the reason.
+
 ## Related
 
 - [First Project](../get-started/first-project.md): set up a project with a task

@@ -221,6 +221,43 @@ pub async fn latest_attempt_id<C: ConnectionTrait>(
     Ok(latest_attempt(db, derivation_build).await?.map(|a| a.id))
 }
 
+pub async fn load_build_attempts_with_worker_ids<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+) -> Result<Vec<(Model, Option<String>)>, DbErr> {
+    let attempts = Entity::find()
+        .filter(Column::DerivationBuild.eq(derivation_build))
+        .order_by_asc(Column::CreatedAt)
+        .order_by_asc(Column::Id)
+        .all(db)
+        .await?;
+
+    let dispatched_jobs: Vec<DispatchedJobId> =
+        attempts.iter().filter_map(|a| a.dispatched_job).collect();
+    let workers: std::collections::HashMap<DispatchedJobId, String> = if dispatched_jobs.is_empty()
+    {
+        std::collections::HashMap::new()
+    } else {
+        gradient_entity::dispatched_job::Entity::find()
+            .filter(gradient_entity::dispatched_job::Column::Id.is_in(dispatched_jobs))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|job| (job.id, job.worker_id))
+            .collect()
+    };
+
+    Ok(attempts
+        .into_iter()
+        .map(|attempt| {
+            let worker = attempt
+                .dispatched_job
+                .and_then(|job| workers.get(&job).cloned());
+            (attempt, worker)
+        })
+        .collect())
+}
+
 pub async fn latest_attempt_worker<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -236,23 +273,6 @@ pub async fn latest_attempt_worker<C: ConnectionTrait>(
         .await?;
 
     Ok(worker.flatten())
-}
-
-pub async fn list_build_attempts_with_worker_id_newest_first<C: ConnectionTrait>(
-    db: &C,
-    derivation_build: DerivationBuildId,
-) -> Result<Vec<(Model, Option<String>)>, DbErr> {
-    let rows = Entity::find()
-        .filter(Column::DerivationBuild.eq(derivation_build))
-        .order_by_desc(Column::CreatedAt)
-        .find_also_related(gradient_entity::dispatched_job::Entity)
-        .all(db)
-        .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(attempt, job)| (attempt, job.map(|j| j.worker_id)))
-        .collect())
 }
 
 fn latest_attempt_id_subquery(derivation_build: DerivationBuildId) -> SelectStatement {

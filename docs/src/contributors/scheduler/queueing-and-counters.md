@@ -196,8 +196,7 @@ Rules for aborts:
 Rules for retries:
 
 - A retry of a `DependencyFailed` build can also retry each failed dependency below the build. The walk can only pass `DependencyFailed` dependencies.
-- A retry can reopen a `Failed` or `Aborted` evaluation past its evaluation phase. The evaluation go back to `Building` (`REOPEN_EVALUATION`) and can finish again.
-- Newer or still active evaluations of the same task keep the evaluation closed.
+- Retries never reopen a finished evaluation. Build retries for an evaluation in `Completed`, `Failed`, or `Aborted` receive `EvaluationFinished`. Evaluation retries create a new evaluation of kind `Retry` with `previous` set. The graph can reuse finished builds.
 - Retries wait until the worker confirmed the earlier abort. A late abort report can move a retried build back to `Aborted`.
 - The `Eval` and `Unstick` thaws of the [repair pass](repair-pass.md) skip the aborted build and everything above the build in the closure.
 - Retry thaws skip the deterministic-failure block. The user asked for the rebuild.
