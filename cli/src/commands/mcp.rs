@@ -130,6 +130,8 @@ pub struct BuildLogArgs {
     start: Option<u64>,
     /// Last log line to return, inclusive. The end of the log is the default.
     end: Option<u64>,
+    /// Read the log for this attempt instead of the latest attempt. Attempts start at 1 and count up in chronological order.
+    attempt: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -142,6 +144,8 @@ pub struct LogSearchArgs {
     case_sensitive: Option<bool>,
     /// Maximum number of hits to return. 100 is the default.
     limit: Option<usize>,
+    /// Read the log for this attempt instead of the latest attempt. Attempts start at 1 and count up in chronological order.
+    attempt: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -381,8 +385,16 @@ impl GradientMcp {
         let client = self.renew_session_token_and_get_api_client().await;
         let builds = client.builds();
         let log = match (args.start, args.end) {
-            (None, None) => builds.get_build_log_without_color_codes(&args.build).await,
-            _ => builds.log_lines(&args.build, start, args.end).await,
+            (None, None) => {
+                builds
+                    .get_build_log_without_color_codes(&args.build, args.attempt)
+                    .await
+            }
+            _ => {
+                builds
+                    .log_lines(&args.build, start, args.end, args.attempt)
+                    .await
+            }
         };
         Ok(to_log_result(log, start))
     }
@@ -402,6 +414,7 @@ impl GradientMcp {
                 &args.build,
                 &args.query,
                 args.case_sensitive.unwrap_or(false),
+                args.attempt,
             )
             .await
         {

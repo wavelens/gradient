@@ -1,5 +1,7 @@
 // Generated from docs/gradient-api.yaml by gradient-api-spec. Do not edit.
 
+export type AbortReason = "user" | "superseded" | "no_connected_worker_can_build_required_systems";
+
 export type AccessReason = "direct" | "team" | "owner" | "superuser";
 
 export type ActionConfig = {
@@ -194,6 +196,10 @@ export interface AssignedJobSchedulerReasoning {
 
 export type AttemptEndReason = "completed" | "failed" | "timeout" | "lost" | "aborted";
 
+export type AttemptFailureReason = "SubstituteUnavailable" | "Oom" | "DiskFull" | "Network" | "BuilderCrash" | "BuilderNonzero" | "WallClockTimeout" | "SilentTimeout" | "InputsUnavailable" | "WorkerLost" | "NotEnoughResources";
+
+export type AttemptOutcome = "Running" | "Built" | "Substituted" | "Failed" | "Aborted";
+
 export interface AttemptSummary {
   dispatched_job_id?: string | null;
   substitute: boolean;
@@ -339,6 +345,15 @@ export interface BoardWorker {
   ram_free_mb?: number | null;
   ram_total_mb?: number | null;
   exec?: ExecOffer | null;
+}
+
+export interface BuildAttemptResponse {
+  number: number;
+  outcome: AttemptOutcome;
+  reason?: AttemptFailureReason | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  worker?: string | null;
 }
 
 export interface BuildGraph {
@@ -643,6 +658,8 @@ export interface Commit {
   hash: number[];
   author?: UserId | null;
   author_name: string;
+  project?: ProjectId | null;
+  fetched_at?: string | null;
 }
 
 export type CommitId = string;
@@ -1064,6 +1081,15 @@ export interface EvaluateRequest {
   walk?: WalkMode | null;
 }
 
+export interface EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
+  abort_reason?: AbortReason | null;
+  aborted_by?: string | null;
+  superseded_by?: EvaluationId | null;
+  retry_of?: EvaluationId | null;
+  phase_started_at: EvaluationPhaseStartTimestamps;
+  expected_duration_ms?: number | null;
+}
+
 export interface EvaluationFailureSummary {
   compared_with?: ComparedEvaluation | null;
   packages: PackageCounts;
@@ -1088,6 +1114,13 @@ export interface EvaluationMessageResponse {
   entry_points: EntryPointId[];
 }
 
+export interface EvaluationPhaseStartTimestamps {
+  fetch?: string | null;
+  eval_flake?: string | null;
+  eval_derivation?: string | null;
+  building?: string | null;
+}
+
 export type EvaluationProgress = {
   inputs: InputFetch[];
   kind: "fetching";
@@ -1096,7 +1129,7 @@ export type EvaluationProgress = {
   kind: "evaluating";
 };
 
-export interface EvaluationResponse {
+export type EvaluationResponse = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration & {
   id: EvaluationId;
   task?: TaskId | null;
   project_name: string;
@@ -1122,11 +1155,11 @@ export interface EvaluationResponse {
   waiting_reason?: WaitingReason | null;
   progress?: EvaluationProgress | null;
   expected_thunks?: number | null;
-}
+};
 
 export type EvaluationStatus = "Queued" | "EvaluatingFlake" | "EvaluatingDerivation" | "Building" | "Waiting" | "Completed" | "Failed" | "Aborted" | "Fetching";
 
-export interface EvaluationSummary {
+export type EvaluationSummary = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration & {
   id: EvaluationId;
   commit: string;
   commit_message?: string | null;
@@ -1150,7 +1183,7 @@ export interface EvaluationSummary {
   progress?: EvaluationProgress | null;
   expected_thunks?: number | null;
   waiting_reason?: WaitingReason | null;
-}
+};
 
 export interface EvaluationTriggerSummary {
   id: TaskTriggerId;

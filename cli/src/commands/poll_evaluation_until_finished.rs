@@ -6,7 +6,7 @@
 
 use crate::output::{ExitKind, Output};
 use crate::tui::watch::eval_is_terminal;
-use connector::api::EvaluationResponse;
+use connector::api::{AbortReason, EvaluationResponse};
 use connector::{Client, ConnectorError};
 use std::time::Duration;
 use tokio::time::Instant;
@@ -57,6 +57,25 @@ pub async fn poll_evaluation_until_terminal(
     }
 }
 
+fn evaluation_status_line_note(eval: &EvaluationResponse) -> Option<String> {
+    match eval.abort_reason {
+        Some(AbortReason::User) => eval
+            .aborted_by
+            .as_ref()
+            .map(|user| format!("aborted by {user}")),
+        Some(AbortReason::Superseded) => eval.superseded_by.as_ref().map(|evaluation| {
+            format!("A newer push to the branch replaced this evaluation with {evaluation}")
+        }),
+        Some(AbortReason::NoConnectedWorkerCanBuildRequiredSystems) => {
+            Some("No connected worker can build the required system.".to_owned())
+        }
+        None if eval_is_terminal(eval.status) => None,
+        None => eval
+            .expected_duration_ms
+            .map(|ms| format!("about {} minutes on average", (ms + 59_999) / 60_000)),
+    }
+}
+
 pub async fn print_status_changes_and_exit(
     client: &Client,
     evaluation: &str,
@@ -72,8 +91,16 @@ pub async fn print_status_changes_and_exit(
                 "evaluation": eval.id,
                 "status": eval.status,
                 "error": eval.error,
+                "abort_reason": eval.abort_reason,
+                "aborted_by": eval.aborted_by,
+                "superseded_by": eval.superseded_by,
+                "expected_duration_ms": eval.expected_duration_ms,
             }));
-            out.human(format!("Evaluation {}: {}", eval.id, eval.status));
+            let line = format!("Evaluation {}: {}", eval.id, eval.status);
+            out.human(match evaluation_status_line_note(eval) {
+                Some(note) => format!("{line} ({note})"),
+                None => line,
+            });
         },
     )
     .await

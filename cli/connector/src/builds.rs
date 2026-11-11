@@ -9,6 +9,13 @@ use reqwest::Method;
 
 pub struct BuildsApi<'a>(pub(crate) &'a Client);
 
+fn attempt_query(attempt: Option<u32>) -> Vec<(&'static str, String)> {
+    attempt
+        .map(|attempt| ("attempt", attempt.to_string()))
+        .into_iter()
+        .collect()
+}
+
 impl BuildsApi<'_> {
     pub async fn get(&self, id: &str) -> Result<BuildWithOutputs, ConnectorError> {
         let req = http::request(
@@ -25,6 +32,7 @@ impl BuildsApi<'_> {
     pub async fn get_build_log_without_color_codes(
         &self,
         id: &str,
+        attempt: Option<u32>,
     ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
@@ -34,7 +42,8 @@ impl BuildsApi<'_> {
             &format!("builds/{id}/log"),
             true,
         )?
-        .query(&[("format", "plain")]);
+        .query(&[("format", "plain")])
+        .query(&attempt_query(attempt));
         http::decode(req.send().await?).await
     }
 
@@ -78,10 +87,14 @@ impl BuildsApi<'_> {
         id: &str,
         start: u64,
         end: Option<u64>,
+        attempt: Option<u32>,
     ) -> Result<String, ConnectorError> {
         let mut query = vec![("start".to_string(), start.to_string())];
         if let Some(e) = end {
             query.push(("end".to_string(), e.to_string()));
+        }
+        if let Some(attempt) = attempt {
+            query.push(("attempt".to_string(), attempt.to_string()));
         }
         let req = http::request(
             self.0.http(),
@@ -108,6 +121,7 @@ impl BuildsApi<'_> {
         id: &str,
         q: &str,
         case: bool,
+        attempt: Option<u32>,
     ) -> Result<impl Stream<Item = Result<serde_json::Value, ConnectorError>> + use<>, ConnectorError>
     {
         let req = http::request(
@@ -118,7 +132,8 @@ impl BuildsApi<'_> {
             &format!("builds/{}/log/search", encode_url_component(id)),
             true,
         )?
-        .query(&[("q", q), ("case", if case { "true" } else { "false" })]);
+        .query(&[("q", q), ("case", if case { "true" } else { "false" })])
+        .query(&attempt_query(attempt));
         http::json_lines(req.send().await?).await
     }
 

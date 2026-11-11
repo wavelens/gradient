@@ -2588,6 +2588,44 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/builds/{build}/attempts:
+    get:
+      tags:
+      - builds
+      summary: List build attempts
+      description: |-
+        Returns every attempt of the build, oldest first. `number` counts from 1 and is the value that the `attempt` parameter of the log endpoints takes. A build is shared between evaluations of the same derivation, so the list can contain attempts that another evaluation started. `worker` is the ID of the worker that ran the attempt. It is empty for an attempt that failed before a worker picked it up.
+
+        **Access:** is identical to `GET /builds/{build}/log`.
+      operationId: listBuildAttempts
+      parameters:
+      - name: build
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/BuildJobId'
+      responses:
+        '200':
+          description: Build Attempts
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BuildAttemptResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/builds/{build}/closure:
     get:
       tags:
@@ -2842,6 +2880,8 @@ paths:
         own, so the log of the most recent prior build of the same derivation is
         returned instead. The chunk/lines endpoints fall back the same way.
 
+        This endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.
+
         **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuildLog
       parameters:
@@ -2855,6 +2895,14 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/BuildLogOutputFormat'
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Build log
@@ -2931,6 +2979,14 @@ paths:
           type: integer
           format: int32
           minimum: 0
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Chunk plaintext
@@ -2962,6 +3018,14 @@ paths:
         required: true
         schema:
           $ref: '#/components/schemas/BuildJobId'
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Chunk index
@@ -3020,6 +3084,14 @@ paths:
         required: false
         schema:
           type: string
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Line range plaintext
@@ -3061,6 +3133,14 @@ paths:
         required: false
         schema:
           type: boolean
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: NDJSON stream of search hits, terminated by a done frame
@@ -3110,7 +3190,7 @@ paths:
       tags:
       - builds
       summary: Retry build
-      description: Queues a `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` build again, together with its dependents in the evaluation that failed only through it. A `DependencyFailed` build retries the failed builds below it. A reproducible builder failure is retried too. A retry reopens a `Failed` or `Aborted` evaluation that reached its build phase. Callers need the `triggerEvaluation` permission on the project. Answers 409 when the evaluation has completed or never reached its build phase, a newer or running evaluation of the task exists, the build has another status, no failed dependency is retryable, or its worker has not confirmed an earlier abort yet.
+      description: Requeue the `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` builds in a running evaluation. Include dependent builds in that evaluation that failed only because of the retried build. The `DependencyFailed` builds retry the failed builds underneath them. Reproducible builder failures also receive a retry. Retries add a build attempt each. Previous attempts and their logs stay readable through `GET /builds/{build}/attempts`. Finished evaluations don't change. Use `POST /evals/{evaluation}/retry` to start a new evaluation and rerun the failed builds. The caller must have `triggerEvaluation` permission on the project. Return 409 for a finished evaluation, a build in another status, no retryable failed dependencies, or a worker that hasn't acknowledged a previous cancel yet.
       operationId: retryBuild
       parameters:
       - name: build
@@ -6128,7 +6208,12 @@ paths:
       tags:
       - evaluations
       summary: Retry evaluation
-      description: Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.
+      description: |-
+        Start a new evaluation for the same commit without another fetch or evaluation. Put the UUID in `message`. Completed evaluations stay immutable. Status, duration and logs stay intact. Set `retry_of` to the completed evaluation.
+
+        The new evaluation can requeue every build from the completed evaluation that failed, timed out, was canceled, or failed because of dependencies. Reproducible builder failures go back in the queue too, regardless of the `retry_failed_builds` value on the task. Reuse every build that already succeeded.
+
+        Triggers don't run. Store the caller as `triggered_by`. The caller must have `triggerEvaluation` permission on the project. Return 409 during an active run of the evaluation or of another evaluation on its task.
       operationId: retryEvaluation
       parameters:
       - name: evaluation
@@ -14720,6 +14805,12 @@ paths:
       - scimBearer: []
 components:
   schemas:
+    AbortReason:
+      type: string
+      enum:
+      - user
+      - superseded
+      - no_connected_worker_can_build_required_systems
     AccessReason:
       type: string
       enum:
@@ -15294,6 +15385,28 @@ components:
       - timeout
       - lost
       - aborted
+    AttemptFailureReason:
+      type: string
+      enum:
+      - SubstituteUnavailable
+      - Oom
+      - DiskFull
+      - Network
+      - BuilderCrash
+      - BuilderNonzero
+      - WallClockTimeout
+      - SilentTimeout
+      - InputsUnavailable
+      - WorkerLost
+      - NotEnoughResources
+    AttemptOutcome:
+      type: string
+      enum:
+      - Running
+      - Built
+      - Substituted
+      - Failed
+      - Aborted
     AttemptSummary:
       type: object
       required:
@@ -15746,6 +15859,36 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ExecOffer'
           - type: 'null'
+    BuildAttemptResponse:
+      type: object
+      required:
+      - number
+      - outcome
+      properties:
+        number:
+          type: integer
+          format: int32
+          minimum: 0
+        outcome:
+          $ref: '#/components/schemas/AttemptOutcome'
+        reason:
+          oneOf:
+          - $ref: '#/components/schemas/AttemptFailureReason'
+          - type: 'null'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        worker:
+          type:
+          - string
+          - 'null'
     BuildGraph:
       type: object
       required:
@@ -16642,6 +16785,15 @@ components:
           - type: 'null'
         author_name:
           type: string
+        project:
+          oneOf:
+          - $ref: '#/components/schemas/ProjectId'
+          - type: 'null'
+        fetched_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     CommitId:
       type: string
       format: uuid
@@ -17812,6 +17964,35 @@ components:
           oneOf:
           - $ref: '#/components/schemas/WalkMode'
           - type: 'null'
+    EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration:
+      type: object
+      required:
+      - phase_started_at
+      properties:
+        abort_reason:
+          oneOf:
+          - $ref: '#/components/schemas/AbortReason'
+          - type: 'null'
+        aborted_by:
+          type:
+          - string
+          - 'null'
+        superseded_by:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationId'
+          - type: 'null'
+        retry_of:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationId'
+          - type: 'null'
+        phase_started_at:
+          $ref: '#/components/schemas/EvaluationPhaseStartTimestamps'
+        expected_duration_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
     EvaluationFailureSummary:
       type: object
       required:
@@ -17883,6 +18064,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EntryPointId'
+    EvaluationPhaseStartTimestamps:
+      type: object
+      properties:
+        fetch:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        eval_flake:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        eval_derivation:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        building:
+          type:
+          - string
+          - 'null'
+          format: date-time
     EvaluationProgress:
       oneOf:
       - type: object
@@ -17912,109 +18116,111 @@ components:
             enum:
             - evaluating
     EvaluationResponse:
-      type: object
-      required:
-      - id
-      - project_name
-      - repository
-      - commit
-      - wildcard
-      - status
-      - created_at
-      - updated_at
-      - error_count
-      - warning_count
-      - entry_points
-      - prioritized
-      properties:
-        id:
-          $ref: '#/components/schemas/EvaluationId'
-        task:
-          oneOf:
-          - $ref: '#/components/schemas/TaskId'
-          - type: 'null'
-        project_name:
-          type: string
-        task_name:
-          type:
-          - string
-          - 'null'
-        task_display_name:
-          type:
-          - string
-          - 'null'
-        repository:
-          type: string
-        commit:
-          type: string
-        wildcard:
-          type: string
-        status:
-          $ref: '#/components/schemas/EvaluationStatus'
-        previous:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationId'
-          - type: 'null'
-        next:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationId'
-          - type: 'null'
-        created_at:
-          type: string
-          format: date-time
-        started_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        finished_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        error_count:
-          type: integer
-          format: int64
-          minimum: 0
-        warning_count:
-          type: integer
-          format: int64
-          minimum: 0
-        error:
-          type:
-          - string
-          - 'null'
-        entry_points:
-          type: array
-          items:
-            $ref: '#/components/schemas/EntryPointBrief'
-        prioritized:
-          type: boolean
-        trigger:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationTriggerSummary'
-          - type: 'null'
-        triggered_by:
-          type:
-          - string
-          - 'null'
-        waiting_reason:
-          oneOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
-        progress:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationProgress'
-          - type: 'null'
-        expected_thunks:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
+      allOf:
+      - $ref: '#/components/schemas/EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration'
+      - type: object
+        required:
+        - id
+        - project_name
+        - repository
+        - commit
+        - wildcard
+        - status
+        - created_at
+        - updated_at
+        - error_count
+        - warning_count
+        - entry_points
+        - prioritized
+        properties:
+          id:
+            $ref: '#/components/schemas/EvaluationId'
+          task:
+            oneOf:
+            - $ref: '#/components/schemas/TaskId'
+            - type: 'null'
+          project_name:
+            type: string
+          task_name:
+            type:
+            - string
+            - 'null'
+          task_display_name:
+            type:
+            - string
+            - 'null'
+          repository:
+            type: string
+          commit:
+            type: string
+          wildcard:
+            type: string
+          status:
+            $ref: '#/components/schemas/EvaluationStatus'
+          previous:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationId'
+            - type: 'null'
+          next:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationId'
+            - type: 'null'
+          created_at:
+            type: string
+            format: date-time
+          started_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          finished_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+          error_count:
+            type: integer
+            format: int64
+            minimum: 0
+          warning_count:
+            type: integer
+            format: int64
+            minimum: 0
+          error:
+            type:
+            - string
+            - 'null'
+          entry_points:
+            type: array
+            items:
+              $ref: '#/components/schemas/EntryPointBrief'
+          prioritized:
+            type: boolean
+          trigger:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationTriggerSummary'
+            - type: 'null'
+          triggered_by:
+            type:
+            - string
+            - 'null'
+          waiting_reason:
+            oneOf:
+            - $ref: '#/components/schemas/WaitingReason'
+            - type: 'null'
+          progress:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationProgress'
+            - type: 'null'
+          expected_thunks:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            minimum: 0
     EvaluationStatus:
       type: string
       enum:
@@ -18028,100 +18234,102 @@ components:
       - Aborted
       - Fetching
     EvaluationSummary:
-      type: object
-      required:
-      - id
-      - commit
-      - status
-      - wildcard
-      - total_builds
-      - builds
-      - errors
-      - warnings
-      - prioritized
-      - only_evaluate
-      - created_at
-      - updated_at
-      properties:
-        id:
-          $ref: '#/components/schemas/EvaluationId'
-        commit:
-          type: string
-        commit_message:
-          type:
-          - string
-          - 'null'
-        status:
-          $ref: '#/components/schemas/EvaluationStatus'
-        wildcard:
-          type: string
-        trigger:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationTriggerSummary'
-          - type: 'null'
-        triggered_by:
-          type:
-          - string
-          - 'null'
-        pr_number:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        total_builds:
-          type: integer
-          format: int64
-        builds:
-          $ref: '#/components/schemas/BuildStatusCounts'
-        errors:
-          type: integer
-          format: int64
-        warnings:
-          type: integer
-          format: int64
-        dispatched_job:
-          oneOf:
-          - $ref: '#/components/schemas/DispatchedJobId'
-          - type: 'null'
-        cluster_job:
-          oneOf:
-          - $ref: '#/components/schemas/ClusterJobId'
-          - type: 'null'
-        prioritized:
-          type: boolean
-        only_evaluate:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-        started_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        finished_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        progress:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationProgress'
-          - type: 'null'
-        expected_thunks:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        waiting_reason:
-          oneOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
+      allOf:
+      - $ref: '#/components/schemas/EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration'
+      - type: object
+        required:
+        - id
+        - commit
+        - status
+        - wildcard
+        - total_builds
+        - builds
+        - errors
+        - warnings
+        - prioritized
+        - only_evaluate
+        - created_at
+        - updated_at
+        properties:
+          id:
+            $ref: '#/components/schemas/EvaluationId'
+          commit:
+            type: string
+          commit_message:
+            type:
+            - string
+            - 'null'
+          status:
+            $ref: '#/components/schemas/EvaluationStatus'
+          wildcard:
+            type: string
+          trigger:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationTriggerSummary'
+            - type: 'null'
+          triggered_by:
+            type:
+            - string
+            - 'null'
+          pr_number:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            minimum: 0
+          total_builds:
+            type: integer
+            format: int64
+          builds:
+            $ref: '#/components/schemas/BuildStatusCounts'
+          errors:
+            type: integer
+            format: int64
+          warnings:
+            type: integer
+            format: int64
+          dispatched_job:
+            oneOf:
+            - $ref: '#/components/schemas/DispatchedJobId'
+            - type: 'null'
+          cluster_job:
+            oneOf:
+            - $ref: '#/components/schemas/ClusterJobId'
+            - type: 'null'
+          prioritized:
+            type: boolean
+          only_evaluate:
+            type: boolean
+          created_at:
+            type: string
+            format: date-time
+          started_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          finished_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+          progress:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationProgress'
+            - type: 'null'
+          expected_thunks:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            minimum: 0
+          waiting_reason:
+            oneOf:
+            - $ref: '#/components/schemas/WaitingReason'
+            - type: 'null'
     EvaluationTriggerSummary:
       type: object
       required:

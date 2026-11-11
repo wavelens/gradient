@@ -475,7 +475,7 @@ fn eval_body(status: &str) -> Value {
         "error_count": 0, "expected_thunks": null, "finished_at": null, "next": null,
         "previous": null, "prioritized": false, "progress": null, "started_at": null,
         "task_display_name": null, "task_name": null, "trigger": null,
-        "triggered_by": null, "waiting_reason": null, "warning_count": 0
+        "triggered_by": null, "waiting_reason": null, "warning_count": 0, "phase_started_at": {}
     }})
 }
 

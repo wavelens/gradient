@@ -18,21 +18,29 @@ fn parse_lines(arg: &str) -> Option<(u64, Option<u64>)> {
     }
 }
 
-pub async fn handle_log(
-    id: &str,
-    interactive: bool,
-    lines: Option<String>,
-    search: Option<String>,
-    case: bool,
-    out: Output,
-) {
+pub struct BuildsLogCommandFlags {
+    pub interactive: bool,
+    pub lines: Option<String>,
+    pub search: Option<String>,
+    pub case: bool,
+    pub attempt: Option<u32>,
+}
+
+pub async fn handle_log(id: &str, flags: BuildsLogCommandFlags, out: Output) {
+    let BuildsLogCommandFlags {
+        interactive,
+        lines,
+        search,
+        case,
+        attempt,
+    } = flags;
     let client = client_from_config(out);
 
     if let Some(arg) = lines {
         let Some((start, end)) = parse_lines(&arg) else {
             out.err(ExitKind::Api, "invalid --lines range (use L120-L130)");
         };
-        match client.builds().log_lines(id, start, end).await {
+        match client.builds().log_lines(id, start, end, attempt).await {
             Ok(text) => {
                 if out.is_json() {
                     println!("{}", serde_json::json!({"error": false, "message": text}));
@@ -46,7 +54,7 @@ pub async fn handle_log(
     }
 
     if let Some(q) = search {
-        let stream = match client.builds().log_search(id, &q, case).await {
+        let stream = match client.builds().log_search(id, &q, case, attempt).await {
             Ok(s) => s,
             Err(e) => out.fail(e),
         };
@@ -77,6 +85,21 @@ pub async fn handle_log(
                 }
                 Err(e) => out.fail(e),
             }
+        }
+        return;
+    }
+
+    if attempt.is_some() {
+        match client
+            .builds()
+            .get_build_log_without_color_codes(id, attempt)
+            .await
+        {
+            Ok(text) if out.is_json() => {
+                println!("{}", serde_json::json!({"error": false, "message": text}))
+            }
+            Ok(text) => print!("{text}"),
+            Err(e) => out.fail(e),
         }
         return;
     }

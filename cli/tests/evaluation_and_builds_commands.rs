@@ -262,7 +262,8 @@ fn build_evaluation_response_json_with_status(status: &str) -> serde_json::Value
         "error": null, "entry_points": [], "error_count": 0, "expected_thunks": null,
         "finished_at": null, "next": null, "previous": null, "prioritized": false,
         "progress": null, "started_at": null, "task_display_name": null, "task_name": null,
-        "trigger": null, "triggered_by": null, "waiting_reason": null, "warning_count": 0
+        "trigger": null, "triggered_by": null, "waiting_reason": null, "warning_count": 0,
+        "phase_started_at": {}
     }})
 }
 
@@ -292,9 +293,80 @@ async fn evaluation_wait_exits_with_code_for_each_end_status_and_prints_status_j
         .code(code);
         assert_eq!(
             parse_gradient_json_stdout_as_json_value(&assert)["message"],
-            serde_json::json!({"evaluation": WAITED_EVALUATION, "status": status, "error": null})
+            serde_json::json!({
+                "evaluation": WAITED_EVALUATION, "status": status, "error": null,
+                "abort_reason": null, "aborted_by": null, "superseded_by": null,
+                "expected_duration_ms": null
+            })
         );
     }
+}
+
+#[tokio::test]
+async fn evaluation_wait_names_the_evaluation_that_replaced_an_aborted_one() {
+    let replacement = "970223d8-4c52-46d7-b8fd-0d0a900facb3";
+    let mut body = build_evaluation_response_json_with_status("Aborted");
+    body["message"]["abort_reason"] = "superseded".into();
+    body["message"]["superseded_by"] = replacement.into();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/evals/{WAITED_EVALUATION}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir_all(home.join("gradient")).unwrap();
+    fs::write(
+        home.join("gradient/config.toml"),
+        format!("Server = '{}'\nAuthToken = 'test-token'\n", server.uri()),
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("gradient")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &home)
+        .args(["evaluation", "wait", WAITED_EVALUATION])
+        .assert()
+        .code(4);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(
+        stdout.contains(&format!(
+            "Evaluation {WAITED_EVALUATION}: Aborted (A newer push to the branch replaced this evaluation with {replacement})"
+        )),
+        "{stdout}"
+    );
+}
+
+#[tokio::test]
+async fn builds_log_with_attempt_prints_the_log_of_that_attempt() {
+    let build = "01a05a38-3276-7252-bc05-c139d9c8a015";
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/builds/{build}/log")))
+        .and(query_param("format", "plain"))
+        .and(query_param("attempt", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"error": false, "message": "first try\n"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+
+    let assert = run_gradient_json_with_temp_home_for_wiremock_in_dir(
+        &server,
+        dir.path(),
+        &["builds", "log", build, "--attempt", "1"],
+    )
+    .success();
+    assert_eq!(
+        parse_gradient_json_stdout_as_json_value(&assert)["message"],
+        "first try\n"
+    );
 }
 
 #[tokio::test]

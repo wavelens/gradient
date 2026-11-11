@@ -38,8 +38,11 @@ pub enum Commands {
         /// Make `--search` case-sensitive.
         #[arg(long)]
         case: bool,
+        /// Read the log for this attempt instead of the latest attempt. Attempts start at 1 and count up in chronological order.
+        #[arg(long)]
+        attempt: Option<u32>,
     },
-    /// Queue a failed, timed-out, aborted or dependency-failed build again, together with the builds that failed only because of it
+    /// Re-queue builds in a running evaluation that failed, timed out, were canceled, or failed because of a dependency. Also re-queue builds that failed only because of those builds. Use `gradient evaluation retry` to start a new evaluation when an evaluation is complete.
     Retry {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
@@ -98,9 +101,20 @@ pub async fn handle(cmd: Commands, out: Output) {
             lines,
             search,
             case,
+            attempt,
         } => {
-            crate::commands::builds_log::handle_log(&id, interactive, lines, search, case, out)
-                .await
+            crate::commands::builds_log::handle_log(
+                &id,
+                crate::commands::builds_log::BuildsLogCommandFlags {
+                    interactive,
+                    lines,
+                    search,
+                    case,
+                    attempt,
+                },
+                out,
+            )
+            .await
         }
         Commands::Retry { id } => {
             print_server_action_message_or_exit(client.builds().retry(&id).await, out)
