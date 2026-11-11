@@ -19,7 +19,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
-import { buildBuildLogApiPath, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
+import { BuildLogStreamDecoder, buildBuildLogApiPath, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
 import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
