@@ -79,7 +79,11 @@ pub async fn post_evaluation(
     let ctx = load_abortable_evaluation(&state.web_db, &user, &api_key, evaluation_id).await?;
 
     match body.method {
-        EvaluationAction::Abort => scheduler.abort_evaluation(ctx.evaluation).await,
+        EvaluationAction::Abort => {
+            scheduler
+                .abort_evaluation(ctx.evaluation, Some(user.id))
+                .await
+        }
     }
 
     Ok(ok_json("Success".to_string()))
@@ -91,7 +95,7 @@ pub async fn post_evaluation(
     operation_id = "retryEvaluation",
     tag = "evals",
     summary = "Retry evaluation",
-    description = "Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.",
+    description = "Start a new evaluation for the same commit without another fetch or evaluation. Put the UUID in `message`. Completed evaluations stay immutable. Status, duration and logs stay intact. Set `retry_of` to the completed evaluation.\n\nThe new evaluation can requeue every build from the completed evaluation that failed, timed out, was canceled, or failed because of dependencies. Reproducible builder failures go back in the queue too, regardless of the `retry_failed_builds` value on the task. Reuse every build that already succeeded.\n\nTriggers don't run. Store the caller as `triggered_by`. The caller must have `triggerEvaluation` permission on the project. Return 409 during an active run of the evaluation or of another evaluation on its task.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "UUID of the new evaluation", body = String, content_type = "application/json"), WebError)
 )]

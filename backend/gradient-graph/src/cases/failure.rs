@@ -221,7 +221,15 @@ async fn f04_a_retry_thaws_the_shared_build_and_only_the_dependents_of_its_evalu
             .output(A2_OUT)
             .depends_on(B)
             .derivation(B)
-            .job(),
+            .job()
+            .derivation(Y)
+            .walked()
+            .entry_point("pkg.y")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(Y_OUT)
+            .build_status(BuildStatus::Queued),
     )
     .await;
 
@@ -239,50 +247,66 @@ async fn f04_a_retry_thaws_the_shared_build_and_only_the_dependents_of_its_evalu
             "after 1: sb({path})"
         );
     }
-    for evaluation in [e1, e2] {
-        assert_eq!(
-            case.evaluation(evaluation).await.status,
-            EvaluationStatus::Failed,
-            "after 1: evaluation({evaluation})"
-        );
-    }
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Failed,
+        "after 1: evaluation(E1)"
+    );
+    assert_eq!(
+        case.evaluation(e2).await.status,
+        EvaluationStatus::Building,
+        "after 1: evaluation(E2), Y is still Queued"
+    );
     case.zero_drift("step 1").await;
+    let (rows, version) = (case.rows().await, case.gv(e1).await);
 
-    case.retry_build(e2, B).await;
+    let report = case.retry_build(e1, B).await;
 
+    assert_eq!(
+        report.refusal,
+        Some(BuildRefusal::EvaluationFinished),
+        "after 2: RetryBuild(E1, B)"
+    );
+    assert_eq!(case.rows().await, rows, "after 2: nothing changes");
+    assert_eq!(case.gv(e1).await, version, "after 2: gv(E1)");
+    case.zero_drift("step 2").await;
+
+    let report = case.retry_build(e2, B).await;
+
+    assert_eq!(report.refusal, None, "after 3: RetryBuild(E2, B)");
     let b = case.sb(B).await;
     assert_eq!(
         (b.status, b.attempt, b.probed, b.wanted),
         (BuildStatus::Skipped, 0, false, false),
-        "after 2: sb(B)"
+        "after 3: sb(B)"
     );
     let a2 = case.sb(A2).await;
     assert_eq!(
         (a2.status, a2.attempt, a2.probed, a2.wanted),
         (BuildStatus::Created, 0, false, true),
-        "after 2: sb(A2)"
+        "after 3: sb(A2)"
     );
     assert_eq!(
         case.sb(A1).await.status,
         BuildStatus::DependencyFailed,
-        "after 2: sb(A1)"
+        "after 3: sb(A1)"
     );
     assert_eq!(
         case.evaluation(e1).await.status,
         EvaluationStatus::Failed,
-        "after 2: evaluation(E1)"
+        "after 3: evaluation(E1)"
     );
     assert_eq!(
         case.evaluation(e2).await.status,
         EvaluationStatus::Building,
-        "after 2: evaluation(E2)"
+        "after 3: evaluation(E2)"
     );
     assert_eq!(
         case.counters(e2).await,
-        [2, 1, 0, 0, 0],
-        "after 2: counters(E2)"
+        [3, 2, 0, 1, 0],
+        "after 3: counters(E2)"
     );
-    case.zero_drift("step 2").await;
+    case.zero_drift("step 3").await;
     case.finish().await;
 }
 
@@ -477,7 +501,15 @@ async fn f07_retrying_a_dependency_failed_build_retries_the_failed_dependencies_
     let case = Case::start(
         shape()
             .evaluation(e1)
-            .evaluation_status(EvaluationStatus::Failed)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(X)
+            .walked()
+            .entry_point("pkg.x")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(X_OUT)
+            .build_status(BuildStatus::Queued)
             .derivation(A)
             .walked()
             .entry_point("pkg.a")
@@ -567,7 +599,7 @@ async fn f07_retrying_a_dependency_failed_build_retries_the_failed_dependencies_
     );
     assert_eq!(
         case.counters(e1).await,
-        [6, 1, 1, 0, 0],
+        [7, 2, 1, 1, 0],
         "after 1: counters(E1)"
     );
     case.zero_drift("step 1").await;
@@ -612,7 +644,7 @@ async fn f08_retry_build_is_refused_outside_the_four_failed_statuses() {
 }
 
 #[tokio::test]
-async fn f09_a_retry_is_refused_while_a_newer_evaluation_of_the_task_exists() {
+async fn f09_a_build_retry_never_reopens_a_finished_evaluation() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = Case::start(
         shape()
@@ -640,7 +672,7 @@ async fn f09_a_retry_is_refused_while_a_newer_evaluation_of_the_task_exists() {
 
     assert_eq!(
         report.refusal,
-        Some(BuildRefusal::NewerEvaluation),
+        Some(BuildRefusal::EvaluationFinished),
         "after 1: RetryBuild(E1, A)"
     );
     let a = case.sb(A).await;

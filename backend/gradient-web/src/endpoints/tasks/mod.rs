@@ -29,6 +29,7 @@ pub use self::management::{
 pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_task_metrics};
 
 use crate::endpoints::evals::task_run_history::HistoryBar;
+use crate::endpoints::evals::types::EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration;
 use crate::permissions::{Permission, PermissionMask, mask_grants, mask_to_vec};
 use gradient_types::ids::*;
 
@@ -280,6 +281,8 @@ pub struct EvaluationSummary {
     pub expected_thunks: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_reason: Option<WaitingReason>,
+    #[serde(flatten)]
+    pub history: EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -495,6 +498,7 @@ mod summary_tests {
             expected_thunks: progress.as_ref().map(|_| 450),
             progress,
             waiting_reason: None,
+            history: Default::default(),
         })
         .unwrap()
     }

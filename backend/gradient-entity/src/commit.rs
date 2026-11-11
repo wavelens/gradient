@@ -7,7 +7,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CommitId, UserId};
+use crate::ids::{CommitId, ProjectId, UserId};
 
 #[derive(
     Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize, utoipa::ToSchema,
@@ -21,6 +21,8 @@ pub struct Model {
     pub hash: Vec<u8>,
     pub author: Option<UserId>,
     pub author_name: String,
+    pub project: Option<ProjectId>,
+    pub fetched_at: Option<chrono::NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

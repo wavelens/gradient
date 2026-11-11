@@ -6,11 +6,8 @@
 
 use super::abort::{abort_shared_builds, wanted_by_other_evaluations, wanting_evaluations};
 use super::emit_transition_effects;
-use super::eval_finalize::check_evaluation_done;
-use super::evaluation_status::reopen_evaluation;
 use crate::DbContext;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
@@ -25,8 +22,6 @@ pub enum BuildRefusal {
     NeededByOtherEvaluation,
     #[error("The worker has not confirmed the abort yet, try again shortly")]
     WorkerStillStopping,
-    #[error("A newer evaluation of the task replaced this evaluation")]
-    NewerEvaluation,
     #[error("No failed dependency of this build is retryable")]
     NoFailedDependency,
 }
@@ -100,14 +95,9 @@ pub async fn retry_evaluation_build(
     evaluation: &MEvaluation,
     shared_build: &MDerivationBuild,
 ) -> Result<Result<(), BuildRefusal>, DbErr> {
-    let reopens = evaluation.status.is_terminal();
-    let open = !reopens || reopenable(evaluation);
+    let open = !evaluation.status.is_terminal();
     if let Err(refusal) = check(open, shared_build, &BuildStatus::REQUEUEABLE) {
         return Ok(Err(refusal));
-    }
-
-    if reopens && !reopen_evaluation(ctx, evaluation).await? {
-        return Ok(Err(BuildRefusal::NewerEvaluation));
     }
 
     let db = &ctx.worker_db;
@@ -132,18 +122,10 @@ pub async fn retry_evaluation_build(
     emit_transition_effects(ctx, &settled).await?;
 
     if retried.is_empty() {
-        if reopens {
-            check_evaluation_done(ctx, evaluation.id).await?;
-        }
         return Ok(Err(BuildRefusal::NoFailedDependency));
     }
 
     Ok(Ok(()))
-}
-
-fn reopenable(evaluation: &MEvaluation) -> bool {
-    EvaluationStatus::REOPENABLE.contains(&evaluation.status)
-        && evaluation.building_started_at.is_some()
 }
 
 fn check(
@@ -194,8 +176,8 @@ async fn mark_aborted(
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
-    use gradient_fixtures::mock::{mock_db, raw_statements, statements};
-    use sea_orm::MockExecResult;
+    use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_fixtures::mock::{mock_db, statements};
 
     fn evaluation(status: EvaluationStatus) -> MEvaluation {
         MEvaluation {
@@ -212,18 +194,6 @@ mod tests {
             status,
             ..Default::default()
         }
-    }
-
-    #[test]
-    fn only_a_failed_or_aborted_evaluation_past_its_evaluation_reopens() {
-        let built = |status| MEvaluation {
-            building_started_at: Some(gradient_types::now()),
-            ..evaluation(status)
-        };
-        assert!(reopenable(&built(EvaluationStatus::Failed)));
-        assert!(reopenable(&built(EvaluationStatus::Aborted)));
-        assert!(!reopenable(&built(EvaluationStatus::Completed)));
-        assert!(!reopenable(&evaluation(EvaluationStatus::Aborted)));
     }
 
     #[test]
@@ -247,29 +217,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_newer_evaluation_of_the_task_keeps_a_failed_evaluation_closed() {
-        let failed = MEvaluation {
-            building_started_at: Some(gradient_types::now()),
-            ..evaluation(EvaluationStatus::Failed)
-        };
-        let build = shared_build(BuildStatus::DependencyFailed);
-        let db = mock_db()
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .into_connection();
-        let (ctx, pool) = ctx(db).await;
+    async fn a_build_retry_leaves_a_finished_evaluation_untouched() {
+        for status in [EvaluationStatus::Failed, EvaluationStatus::Aborted] {
+            let finished = MEvaluation {
+                building_started_at: Some(gradient_types::now()),
+                finished_at: Some(gradient_types::now()),
+                ..evaluation(status)
+            };
+            let build = shared_build(BuildStatus::FailedPermanent);
+            let (ctx, pool) = ctx(mock_db().into_connection()).await;
 
-        let outcome = retry_evaluation_build(&ctx, &failed, &build)
-            .await
-            .expect("the reopen runs");
-        drop(ctx);
+            let outcome = retry_evaluation_build(&ctx, &finished, &build)
+                .await
+                .expect("the check runs");
+            drop(ctx);
 
-        assert_eq!(outcome, Err(BuildRefusal::NewerEvaluation));
-        let log = raw_statements(pool.into_transaction_log());
-        assert_eq!(log.len(), 1, "nothing but the reopen runs: {log:?}");
-        assert!(log[0].sql.starts_with("UPDATE evaluation e"), "{log:?}");
+            assert_eq!(outcome, Err(BuildRefusal::EvaluationFinished));
+            let log = statements(pool.into_transaction_log());
+            assert!(log.is_empty(), "nothing is written: {log:?}");
+        }
     }
 
     #[tokio::test]

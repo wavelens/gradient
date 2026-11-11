@@ -47,6 +47,7 @@ async fn skips_when_same_commit_as_last_eval() {
             prev_commit_id,
             EvaluationStatus::Completed,
         )]])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(prev_commit_id, same_hash.clone())]])
         .into_connection();
 
@@ -71,6 +72,7 @@ async fn time_trigger_bypasses_same_commit_check() {
     let trig = TaskTriggerId::now_v7();
 
     let db = mock_db()
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_eval(
@@ -150,6 +152,7 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
 
     let db = mock_db()
         .append_query_results([vec![running_eval.clone()]])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(running_commit_id, same_hash.clone())]])
         .into_connection();
 
@@ -208,16 +211,14 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
 
     let ApplyOutcome::Created {
         evaluation,
-        aborted_evaluation,
-        hard_abort,
+        aborted_evaluations,
     } = res
     else {
         panic!("expected Created, got {res:?}");
     };
     assert_eq!(evaluation.id, new_eval_id);
     assert!(evaluation.concurrent, "new eval must carry concurrent=true");
-    assert_eq!(aborted_evaluation, None);
-    assert!(!hard_abort);
+    assert!(aborted_evaluations.is_empty());
 }
 
 #[tokio::test]
@@ -257,6 +258,7 @@ async fn manual_bypasses_same_commit_check() {
     let trig = TaskTriggerId::now_v7();
 
     let db = mock_db()
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_eval(
@@ -345,15 +347,17 @@ async fn hard_abort_populates_aborted_fields() {
 
     let ApplyOutcome::Created {
         evaluation,
-        aborted_evaluation,
-        hard_abort,
+        aborted_evaluations,
     } = res
     else {
         panic!("expected Created, got {res:?}");
     };
     assert_eq!(evaluation.id, new_eval_id);
-    assert_eq!(aborted_evaluation, Some(running_eval_id));
-    assert!(hard_abort, "the caller must abort the eval's shared builds");
+    assert_eq!(
+        aborted_evaluations,
+        [(running_eval_id, true)],
+        "the caller must abort the eval's shared builds"
+    );
 }
 
 #[tokio::test]
@@ -634,6 +638,7 @@ async fn a_trigger_not_honoring_the_skip_marker_still_creates_the_evaluation() {
     let trig = TaskTriggerId::now_v7();
 
     let db = mock_db()
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_eval(

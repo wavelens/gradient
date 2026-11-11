@@ -8,6 +8,9 @@ use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
 use super::new_evaluation::link_to_previous;
 use crate::abort::{AbortKind, abort_evaluation};
+use gradient_db::status::{
+    EvaluationAbortReasonWithUserIdAndReplacementId, stamp_superseded_by_on_aborted_evaluations,
+};
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -25,7 +28,13 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
 ) -> Result<MEvaluation, TriggerError> {
     // The single-active-per-branch unique index is rejecting a second active row. The stuck
     // evaluation must leave the active set before the insert.
-    abort_evaluation(db, stuck.id, AbortKind::Soft).await?;
+    abort_evaluation(
+        db,
+        stuck.id,
+        AbortKind::Soft,
+        EvaluationAbortReasonWithUserIdAndReplacementId::superseded(None),
+    )
+    .await?;
 
     let now = gradient_types::now();
     let new_eval_id = EvaluationId::now_v7();
@@ -50,6 +59,7 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
 
     let new_eval = aevaluation.insert(db).await?;
     link_to_previous(db, &new_eval).await?;
+    stamp_superseded_by_on_aborted_evaluations(db, &[stuck.id], new_eval.id).await?;
 
     snapshot_flake_input_overrides(db, task.id, new_eval.id).await?;
 

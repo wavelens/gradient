@@ -9,22 +9,104 @@ use super::logging::{PhaseSubjectKind, insert_evaluation_message, record_phase_e
 use crate::DbContext;
 use crate::sql::StatusWrite;
 use chrono::NaiveDateTime;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{AbortReason, EvaluationStatus};
 use gradient_entity::transition::Transition;
 use gradient_types::*;
+use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, UpdateMany};
 use tracing::{debug, warn};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvaluationAbortReasonWithUserIdAndReplacementId {
+    pub reason: AbortReason,
+    pub aborted_by: Option<UserId>,
+    pub superseded_by: Option<EvaluationId>,
+}
+
+impl EvaluationAbortReasonWithUserIdAndReplacementId {
+    pub fn by_user(aborted_by: Option<UserId>) -> Self {
+        Self {
+            reason: AbortReason::User,
+            aborted_by,
+            superseded_by: None,
+        }
+    }
+
+    pub fn superseded(superseded_by: Option<EvaluationId>) -> Self {
+        Self {
+            reason: AbortReason::Superseded,
+            aborted_by: None,
+            superseded_by,
+        }
+    }
+
+    pub fn because(reason: AbortReason) -> Self {
+        Self {
+            reason,
+            aborted_by: None,
+            superseded_by: None,
+        }
+    }
+
+    pub fn columns(self, update: UpdateMany<EEvaluation>) -> UpdateMany<EEvaluation> {
+        update
+            .col_expr(CEvaluation::AbortReason, Expr::value(self.reason))
+            .col_expr(CEvaluation::AbortedBy, Expr::value(self.aborted_by))
+            .col_expr(CEvaluation::SupersededBy, Expr::value(self.superseded_by))
+    }
+}
+
+pub async fn stamp_superseded_by_on_aborted_evaluations<C: ConnectionTrait>(
+    db: &C,
+    aborted: &[EvaluationId],
+    newer: EvaluationId,
+) -> Result<(), DbErr> {
+    if aborted.is_empty() {
+        return Ok(());
+    }
+
+    EEvaluation::update_many()
+        .col_expr(CEvaluation::SupersededBy, Expr::value(newer))
+        .filter(CEvaluation::Id.is_in(aborted.iter().copied()))
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Aborted))
+        .filter(CEvaluation::AbortReason.eq(AbortReason::Superseded))
+        .filter(CEvaluation::SupersededBy.is_null())
+        .exec(db)
+        .await?;
+    Ok(())
+}
 
 pub async fn update_evaluation_status(
     ctx: &DbContext,
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> Result<MEvaluation, DbErr> {
+    update_status_with(ctx, evaluation, status, |update| update).await
+}
+
+pub async fn mark_evaluation_aborted(
+    ctx: &DbContext,
+    evaluation: MEvaluation,
+    abort: EvaluationAbortReasonWithUserIdAndReplacementId,
+) -> Result<MEvaluation, DbErr> {
+    update_status_with(ctx, evaluation, EvaluationStatus::Aborted, |update| {
+        abort.columns(update)
+    })
+    .await
+}
+
+async fn update_status_with(
+    ctx: &DbContext,
+    evaluation: MEvaluation,
+    status: EvaluationStatus,
+    extra_columns: impl FnOnce(UpdateMany<EEvaluation>) -> UpdateMany<EEvaluation>,
+) -> Result<MEvaluation, DbErr> {
     // All build transitions embed this future, so we box the future. The size of the unboxed future can overflow the stack in debug builds.
     match Box::pin(update_evaluation_status_only_if_changed(
         ctx,
         &evaluation,
         status,
+        extra_columns,
     ))
     .await?
     {
@@ -47,6 +129,7 @@ async fn update_evaluation_status_only_if_changed(
     ctx: &DbContext,
     evaluation: &MEvaluation,
     status: EvaluationStatus,
+    extra_columns: impl FnOnce(UpdateMany<EEvaluation>) -> UpdateMany<EEvaluation>,
 ) -> Result<Option<MEvaluation>, DbErr> {
     if evaluation.status != status && !status.sources().contains(&evaluation.status) {
         warn!(evaluation_id = %evaluation.id, from = ?evaluation.status, to = ?status, "Skipping invalid evaluation status transition");
@@ -91,7 +174,7 @@ async fn update_evaluation_status_only_if_changed(
         );
     }
 
-    let updated = update
+    let updated = extra_columns(update)
         .filter(CEvaluation::Id.eq(evaluation.id))
         .filter(CEvaluation::Status.is_in(sources_in_the_row(status)))
         .exec(&ctx.worker_db)
@@ -146,15 +229,8 @@ fn sources_in_the_row(status: EvaluationStatus) -> Vec<EvaluationStatus> {
     status.sources().iter().copied().chain(refresh).collect()
 }
 
-fn reopen_evaluation_sql() -> String {
-    reopen_sql(EvaluationStatus::REOPEN)
-}
-
 fn reopen_evaluation_for_exec_job_sql() -> String {
-    reopen_sql(EvaluationStatus::REOPEN_FOR_EXEC_JOB)
-}
-
-fn reopen_sql(reopen: Transition<EvaluationStatus>) -> String {
+    let reopen = EvaluationStatus::REOPEN_FOR_EXEC_JOB;
     format!(
         "UPDATE evaluation e \
          SET status = {building}, finished_at = NULL, waiting_reason = NULL, \
@@ -171,34 +247,18 @@ fn reopen_sql(reopen: Transition<EvaluationStatus>) -> String {
 }
 
 crate::sql_fn! {
-    REOPEN_EVALUATION = reopen_evaluation_sql,
-        params = [EvaluationId],
-        status_write = StatusWrite::evaluation(EvaluationStatus::REOPEN);
-
     REOPEN_EVALUATION_FOR_EXEC_JOB = reopen_evaluation_for_exec_job_sql,
         params = [EvaluationId],
         status_write = StatusWrite::evaluation(EvaluationStatus::REOPEN_FOR_EXEC_JOB);
-}
-
-pub async fn reopen_evaluation(ctx: &DbContext, evaluation: &MEvaluation) -> Result<bool, DbErr> {
-    reopen_with(ctx, evaluation, &REOPEN_EVALUATION).await
 }
 
 pub async fn reopen_evaluation_for_exec_job(
     ctx: &DbContext,
     evaluation: &MEvaluation,
 ) -> Result<bool, DbErr> {
-    reopen_with(ctx, evaluation, &REOPEN_EVALUATION_FOR_EXEC_JOB).await
-}
-
-async fn reopen_with(
-    ctx: &DbContext,
-    evaluation: &MEvaluation,
-    query: &crate::sql::Query,
-) -> Result<bool, DbErr> {
     let reopened = ctx
         .worker_db
-        .execute_raw(query.bind([evaluation.id.into_inner().into()]))
+        .execute_raw(REOPEN_EVALUATION_FOR_EXEC_JOB.bind([evaluation.id.into_inner().into()]))
         .await?;
     if reopened.rows_affected() == 0 {
         return Ok(false);
@@ -263,6 +323,7 @@ pub async fn update_evaluation_status_with_error(
         ctx,
         &evaluation,
         status,
+        |update| update,
     ))
     .await?
     else {

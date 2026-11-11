@@ -37,7 +37,7 @@ pub async fn expected_thunks<C: ConnectionTrait>(
     ))
 }
 
-fn median(mut values: Vec<u64>) -> Option<u64> {
+pub(super) fn median(mut values: Vec<u64>) -> Option<u64> {
     values.sort_unstable();
     let mid = values.len() / 2;
     match values.len() {

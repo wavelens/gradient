@@ -219,7 +219,15 @@ async fn p04_a_hit_turns_a_failed_build_into_a_passthrough_that_queues_after_its
     let case = Case::start(
         shape()
             .evaluation(e1)
-            .evaluation_status(EvaluationStatus::Failed)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(C)
+            .walked()
+            .entry_point("pkg.c")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(C_OUT)
+            .build_status(BuildStatus::Queued)
             .derivation(A)
             .walked()
             .entry_point("pkg.a")
@@ -266,17 +274,11 @@ async fn p04_a_hit_turns_a_failed_build_into_a_passthrough_that_queues_after_its
 
     let job = case.job(e1, A).await.expect("after 2: build_job(E1,A)");
     assert!(!job.aborted, "after 2: build_job(E1,A).aborted: {job:?}");
-    let evaluation = case.evaluation(e1).await.status;
-    assert_eq!(
-        evaluation,
-        EvaluationStatus::Building,
-        "after 2: evaluation(E1).status"
-    );
 
     let b = case.sb(B).await.status;
     assert_eq!(b, BuildStatus::Skipped, "after 2: sb(B).status");
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [2, 1, 0, 1, 0], "after 2: counters(E1)");
+    assert_eq!(counters, [3, 2, 0, 2, 0], "after 2: counters(E1)");
     case.zero_drift("step 2").await;
     case.finish().await;
 }

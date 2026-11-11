@@ -16,6 +16,7 @@ pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
         EvaluationKind::InputUpdate => "input_update",
         EvaluationKind::DrvRecovery => "drv_recovery",
         EvaluationKind::Ssh => "ssh",
+        EvaluationKind::Retry => "retry",
     }
 }
 

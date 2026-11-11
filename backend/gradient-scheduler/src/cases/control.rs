@@ -131,7 +131,7 @@ impl SchedulerCase {
 
     pub async fn abort_evaluation(&self, evaluation: EvaluationId) {
         let row = self.evaluation(evaluation).await;
-        self.scheduler.abort_evaluation(row).await;
+        self.scheduler.abort_evaluation(row, None).await;
         self.settled().await;
     }
 
@@ -309,14 +309,15 @@ impl SchedulerCase {
             .await
             .expect("the trigger applies");
         if let ApplyOutcome::Created {
-            aborted_evaluation: Some(aborted),
-            hard_abort,
+            aborted_evaluations,
             ..
         } = &outcome
         {
-            self.scheduler
-                .stop_aborted_evaluation(*aborted, *hard_abort)
-                .await;
+            for (aborted, hard_abort) in aborted_evaluations {
+                self.scheduler
+                    .stop_aborted_evaluation(*aborted, *hard_abort)
+                    .await;
+            }
         }
         self.settled().await;
         outcome

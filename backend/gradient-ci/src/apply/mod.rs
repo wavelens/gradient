@@ -26,10 +26,9 @@ pub use gates::{
 pub enum ApplyOutcome {
     Created {
         evaluation: MEvaluation,
-        /// The caller must call `Scheduler::stop_aborted_evaluation` for this evaluation to purge
-        /// its `JobTracker` entries.
-        aborted_evaluation: Option<EvaluationId>,
-        hard_abort: bool,
+        /// The caller must call `Scheduler::stop_aborted_evaluation` for each evaluation to purge
+        /// its `JobTracker` entries, passing the hard-abort flag paired with it.
+        aborted_evaluations: Vec<(EvaluationId, bool)>,
     },
     SkippedSameCommit,
     SkippedConcurrency,
@@ -76,16 +75,36 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         return Ok(ApplyOutcome::SkippedByCommitMessage);
     }
 
-    let in_flight =
+    let mut in_flight =
         gradient_db::evaluations::branch::in_flight_on_branch(db, task.id, &input.branch).await?;
 
-    if dedup::skip_for_same_commit(db, task, &input, in_flight.as_ref()).await? {
+    let newest =
+        gradient_db::evaluations::branch::newest_on_branch(db, task.id, &input.branch).await?;
+
+    if dedup::skip_for_same_commit(db, &input, in_flight.as_ref(), newest.as_ref()).await? {
         return Ok(ApplyOutcome::SkippedSameCommit);
+    }
+
+    let replaceable_waiting =
+        concurrency::find_newest_waiting_evaluation_that_newer_trigger_can_replace(newest.as_ref());
+    if replaceable_waiting.is_some() && in_flight.as_ref().map(|e| e.id) == replaceable_waiting {
+        in_flight = None;
     }
 
     let Some(decision) = concurrency::resolve_concurrency(db, task, in_flight).await? else {
         return Ok(ApplyOutcome::SkippedConcurrency);
     };
+    let mut aborted_evaluations: Vec<(EvaluationId, bool)> = Vec::new();
+    if let Some(waiting) = replaceable_waiting
+        && concurrency::abort_superseded_waiting_evaluation(db, waiting).await?
+    {
+        aborted_evaluations.push((waiting, true));
+    }
+    aborted_evaluations.extend(
+        decision
+            .aborted_evaluation
+            .map(|id| (id, decision.hard_abort)),
+    );
 
     let eval = match trigger_evaluation(
         db,
@@ -109,12 +128,14 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         Err(e) => return Err(e.into()),
     };
 
+    let aborted: Vec<EvaluationId> = aborted_evaluations.iter().map(|(id, _)| *id).collect();
+    gradient_db::status::stamp_superseded_by_on_aborted_evaluations(db, &aborted, eval.id).await?;
+
     let eval = gates::run_gates(db, eval, input.gate_approval.as_ref(), task.project).await?;
 
     Ok(ApplyOutcome::Created {
         evaluation: eval,
-        aborted_evaluation: decision.aborted_evaluation,
-        hard_abort: decision.hard_abort,
+        aborted_evaluations,
     })
 }
 

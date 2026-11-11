@@ -29,8 +29,10 @@ pub use evaluation_build::{
 };
 pub use evaluation_message::{EvaluationFailure, EvaluationWarning};
 pub use evaluation_status::{
-    change_evaluation_status, evaluation_change, reopen_evaluation, reopen_evaluation_for_exec_job,
-    update_evaluation_status, update_evaluation_status_with_error,
+    EvaluationAbortReasonWithUserIdAndReplacementId, change_evaluation_status, evaluation_change,
+    mark_evaluation_aborted, reopen_evaluation_for_exec_job,
+    stamp_superseded_by_on_aborted_evaluations, update_evaluation_status,
+    update_evaluation_status_with_error,
 };
 pub use logging::{
     PhaseSubjectKind, enqueue_log_finalize, finalize_build_log, insert_worker_message,

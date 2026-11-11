@@ -295,6 +295,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
             hash: source.commit_hash,
             author: Some(user.id),
             author_name: user.name.clone(),
+            ..Default::default()
         },
     )
     .await?;

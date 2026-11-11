@@ -7,6 +7,7 @@
 use gradient_ci::{AbortKind, abort_evaluation};
 use gradient_db::evaluations::branch::active_on_branch;
 use gradient_db::lookup::by_id;
+use gradient_db::status::EvaluationAbortReasonWithUserIdAndReplacementId;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::Transition;
 use gradient_types::branch_key::NO_BRANCH;
@@ -72,7 +73,9 @@ impl Scheduler {
 
         let active = active_on_branch(db, task_id, &newer.branch).await?;
         for older in superseded_by(&newer, task.concurrency, &active) {
-            if abort_evaluation(db, older, AbortKind::Hard).await? {
+            let replaced =
+                EvaluationAbortReasonWithUserIdAndReplacementId::superseded(Some(evaluation));
+            if abort_evaluation(db, older, AbortKind::Hard, replaced).await? {
                 info!(evaluation_id = %older, newer = %evaluation, "aborting an evaluation a newer evaluation of its branch supersedes");
                 self.stop_aborted_evaluation(older, true).await;
             }

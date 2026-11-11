@@ -7,7 +7,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_db::status::{BuildRefusal, EvaluationWarning, update_evaluation_status};
+use gradient_db::status::{
+    BuildRefusal, EvaluationAbortReasonWithUserIdAndReplacementId, EvaluationWarning,
+    mark_evaluation_aborted,
+};
+use gradient_entity::evaluation::AbortReason;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::Transition;
 use gradient_types::*;
@@ -31,10 +35,14 @@ impl Scheduler {
     /// The abort button must not wait on the graph writer's queue. Only the shared builds the
     /// database abort moved are stopped. Shared builds still wanted by another evaluation keep
     /// running.
-    pub async fn abort_evaluation(self: &Arc<Self>, evaluation: MEvaluation) {
+    pub async fn abort_evaluation(
+        self: &Arc<Self>,
+        evaluation: MEvaluation,
+        aborted_by: Option<UserId>,
+    ) {
         let evaluation_id = evaluation.id;
-        let marked =
-            update_evaluation_status(&self.db, evaluation, EvaluationStatus::Aborted).await;
+        let abort = EvaluationAbortReasonWithUserIdAndReplacementId::by_user(aborted_by);
+        let marked = mark_evaluation_aborted(&self.db, evaluation, abort).await;
         if !aborted(evaluation_id, marked) {
             return;
         }
@@ -157,9 +165,10 @@ impl Scheduler {
 
     pub(crate) async fn abort_unbuildable_evaluation(&self, unbuildable: Unbuildable) {
         let evaluation_id = unbuildable.evaluation.id;
-        let marked =
-            update_evaluation_status(&self.db, unbuildable.evaluation, EvaluationStatus::Aborted)
-                .await;
+        let abort = EvaluationAbortReasonWithUserIdAndReplacementId::because(
+            AbortReason::NoConnectedWorkerCanBuildRequiredSystems,
+        );
+        let marked = mark_evaluation_aborted(&self.db, unbuildable.evaluation, abort).await;
         if !aborted(evaluation_id, marked) {
             return;
         }

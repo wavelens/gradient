@@ -10,7 +10,7 @@ use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
 use super::new_evaluation::{ensure_no_active_evaluation, link_to_previous};
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -52,12 +52,12 @@ where
         wildcard: prev_eval.wildcard.clone(),
         branch: prev_eval.branch.clone(),
         status: initial_status,
+        kind: EvaluationKind::Retry,
         previous: Some(prev_eval.id),
         created_at: now,
         updated_at: now,
         flake_source: prev_eval.flake_source.clone(),
         only_evaluate: prev_eval.only_evaluate,
-        trigger: prev_eval.trigger,
         started_by: Some(started_by),
         building_started_at: Some(now),
         finished_at: (initial_status == EvaluationStatus::Completed).then_some(now),

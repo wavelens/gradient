@@ -9,7 +9,9 @@
 //! `AbortKind::Hard`. The in-flight builds keep running and fill the cache after `AbortKind::Soft`.
 
 use gradient_db::lookup::by_id;
-use gradient_db::status::change_evaluation_status;
+use gradient_db::status::{
+    EvaluationAbortReasonWithUserIdAndReplacementId, change_evaluation_status,
+};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
@@ -26,6 +28,7 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
     db: &C,
     eval_id: EvaluationId,
     kind: AbortKind,
+    abort: EvaluationAbortReasonWithUserIdAndReplacementId,
 ) -> Result<bool, sea_orm::DbErr> {
     let Some(eval) = by_id::<EEvaluation, _>(db, eval_id).await? else {
         return Ok(false);
@@ -35,12 +38,14 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
     }
 
     let finished = |update: sea_orm::UpdateMany<EEvaluation>| {
-        update
-            .col_expr(CEvaluation::FinishedAt, Expr::value(now()))
-            .col_expr(
-                CEvaluation::WaitingReason,
-                Expr::value(None::<serde_json::Value>),
-            )
+        abort.columns(
+            update
+                .col_expr(CEvaluation::FinishedAt, Expr::value(now()))
+                .col_expr(
+                    CEvaluation::WaitingReason,
+                    Expr::value(None::<serde_json::Value>),
+                ),
+        )
     };
     if change_evaluation_status(db, eval_id, EvaluationStatus::ABORT, finished)
         .await?
@@ -59,6 +64,10 @@ mod tests {
     use gradient_fixtures::mock::mock_db;
     use sea_orm::MockExecResult;
 
+    fn superseded() -> EvaluationAbortReasonWithUserIdAndReplacementId {
+        EvaluationAbortReasonWithUserIdAndReplacementId::superseded(None)
+    }
+
     fn make_eval(status: EvaluationStatus) -> gradient_entity::evaluation::Model {
         gradient_entity::evaluation::Model {
             id: EvaluationId::now_v7(),
@@ -75,7 +84,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![eval.clone()]])
             .into_connection();
-        let aborted = abort_evaluation(&db, eval.id, AbortKind::Hard)
+        let aborted = abort_evaluation(&db, eval.id, AbortKind::Hard, superseded())
             .await
             .unwrap();
         assert!(!aborted, "a terminal evaluation is left alone");
@@ -92,7 +101,7 @@ mod tests {
                 rows_affected: 1,
             }])
             .into_connection();
-        let aborted = abort_evaluation(&db, eval.id, AbortKind::Soft)
+        let aborted = abort_evaluation(&db, eval.id, AbortKind::Soft, superseded())
             .await
             .unwrap();
         assert!(aborted, "an active evaluation is marked aborted");

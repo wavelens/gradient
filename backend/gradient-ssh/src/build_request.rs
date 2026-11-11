@@ -246,6 +246,7 @@ async fn create_evaluation(
         hash: vec![0; 20],
         author: Some(session.user.id),
         author_name: session.user.name.clone(),
+        ..Default::default()
     }
     .into_active_model()
     .insert(&tx)

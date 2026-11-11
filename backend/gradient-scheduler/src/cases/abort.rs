@@ -12,10 +12,11 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{AbortReason, EvaluationStatus};
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_entity::ids::{CacheId, CacheUpstreamId, EvaluationId};
 use gradient_entity::project_cache::CacheSubscriptionMode;
+use gradient_entity::user;
 use gradient_fixtures::shape::shape;
 use gradient_graph::NarCommit;
 use gradient_pool::session_port::SessionSignal;
@@ -915,9 +916,20 @@ async fn a11_aborting_queued_pending_build_fails_dependents_and_ends_evaluation_
 }
 
 #[tokio::test]
-async fn a12_a_retry_is_refused_while_the_aborted_job_is_active_and_reopens_after_confirmation() {
+async fn a12_retry_of_build_aborted_in_running_evaluation_is_refused_until_worker_confirms_abort_and_accepted_after_confirmation()
+ {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
+    let case = SchedulerCase::start(
+        shape()
+            .one(e1, A, A_OUT)
+            .derivation(B)
+            .walked()
+            .drv_cached()
+            .entry_point(&attr_of(B))
+            .job()
+            .output(B_OUT),
+    )
+    .await;
     case.connect(W1, w_all(), &[]).await;
     let a = case.key(A).await;
 
@@ -936,8 +948,8 @@ async fn a12_a_retry_is_refused_while_the_aborted_job_is_active_and_reopens_afte
     assert_eq!(case.abort_build(e1, A).await, Ok(()), "after 2: result");
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Aborted,
-        "after 2: evaluation(E1).status"
+        EvaluationStatus::Building,
+        "after 2: evaluation(E1).status, B is still Created"
     );
     assert_eq!(
         case.sb(A).await.status,
@@ -977,13 +989,8 @@ async fn a12_a_retry_is_refused_while_the_aborted_job_is_active_and_reopens_afte
         "after 5: build_job(E1, A).aborted"
     );
     assert_eq!(
-        case.evaluation(e1).await.status,
-        EvaluationStatus::Building,
-        "after 5: evaluation(E1).status"
-    );
-    assert_eq!(
         case.counters(e1).await,
-        [1, 1, 0, 0, 0],
+        [2, 2, 0, 0, 0],
         "after 5: counters(E1)"
     );
     case.check("step 5").await;
@@ -1054,7 +1061,12 @@ async fn a13_a_retry_clears_probed_so_the_build_waits_for_a_new_probe_answer() {
                 AttemptOutcome::Failed,
                 Some(AttemptFailureReason::BuilderNonzero),
             )
-            .evaluation_status(EvaluationStatus::Failed)
+            .derivation(B)
+            .walked()
+            .drv_cached()
+            .entry_point(&attr_of(B))
+            .job()
+            .output(B_OUT)
             .into_cache(CacheId::now_v7())
             .upstream(
                 CacheUpstreamId::now_v7(),
@@ -1074,11 +1086,6 @@ async fn a13_a_retry_clears_probed_so_the_build_waits_for_a_new_probe_answer() {
         (build.status, build.probed, build.attempt),
         (BuildStatus::Created, false, 0),
         "after 1: sb(A) {{status, probed, attempt}}"
-    );
-    assert_eq!(
-        case.evaluation(e1).await.status,
-        EvaluationStatus::Building,
-        "after 1: evaluation(E1).status"
     );
     assert!(!case.pending(&a).await, "after 1: pending(build:A)");
     case.check("step 1").await;
@@ -1567,6 +1574,41 @@ async fn a20_aborting_one_of_two_evaluations_sharing_a_passthrough_keeps_the_sub
         "after 3: derivation_metric(A)"
     );
     case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a21_aborting_an_evaluation_as_a_user_records_the_user_and_reason() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1)).await;
+    let [owner] = case
+        .db
+        .rows::<user::Entity>()
+        .await
+        .try_into()
+        .expect("one user");
+
+    let row = case.evaluation(e1).await;
+    case.scheduler.abort_evaluation(row, Some(owner.id)).await;
+    case.settled().await;
+    let evaluation = case.evaluation(e1).await;
+    assert_eq!(
+        (
+            evaluation.status,
+            evaluation.abort_reason,
+            evaluation.aborted_by,
+            evaluation.superseded_by
+        ),
+        (
+            EvaluationStatus::Aborted,
+            Some(AbortReason::User),
+            Some(owner.id),
+            None
+        ),
+        "after 1: evaluation(E1)"
+    );
+    case.check("step 1").await;
 
     case.finish().await;
 }

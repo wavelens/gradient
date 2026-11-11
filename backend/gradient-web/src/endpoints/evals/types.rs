@@ -5,8 +5,11 @@
  */
 
 use crate::endpoints::tasks::EvaluationTriggerSummary;
+use gradient_entity::evaluation::{AbortReason, EvaluationKind};
 use gradient_types::ids::*;
-use gradient_types::{EvaluationProgress, MEntryPoint, MEvaluationMessage, WaitingReason};
+use gradient_types::{
+    EvaluationProgress, MEntryPoint, MEvaluation, MEvaluationMessage, WaitingReason,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
@@ -82,6 +85,51 @@ pub struct EvaluationResponse {
     pub progress: Option<EvaluationProgress>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_thunks: Option<u64>,
+    #[serde(flatten)]
+    pub history: EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, utoipa::ToSchema)]
+pub struct EvaluationPhaseStartTimestamps {
+    pub fetch: Option<chrono::NaiveDateTime>,
+    pub eval_flake: Option<chrono::NaiveDateTime>,
+    pub eval_derivation: Option<chrono::NaiveDateTime>,
+    pub building: Option<chrono::NaiveDateTime>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, utoipa::ToSchema)]
+pub struct EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
+    pub abort_reason: Option<AbortReason>,
+    pub aborted_by: Option<String>,
+    pub superseded_by: Option<EvaluationId>,
+    pub retry_of: Option<EvaluationId>,
+    pub phase_started_at: EvaluationPhaseStartTimestamps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_duration_ms: Option<u64>,
+}
+
+impl EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
+    pub fn new(
+        evaluation: &MEvaluation,
+        aborted_by: Option<String>,
+        expected_duration_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            abort_reason: evaluation.abort_reason,
+            aborted_by,
+            superseded_by: evaluation.superseded_by,
+            retry_of: evaluation
+                .previous
+                .filter(|_| evaluation.kind == EvaluationKind::Retry),
+            phase_started_at: EvaluationPhaseStartTimestamps {
+                fetch: evaluation.fetch_started_at,
+                eval_flake: evaluation.eval_flake_started_at,
+                eval_derivation: evaluation.eval_drv_started_at,
+                building: evaluation.building_started_at,
+            },
+            expected_duration_ms: expected_duration_ms.filter(|_| evaluation.status.is_active()),
+        }
+    }
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -158,6 +206,7 @@ mod tests {
             waiting_reason: None,
             expected_thunks: progress.as_ref().map(|_| 450),
             progress,
+            history: Default::default(),
         })
         .unwrap()
     }
@@ -185,5 +234,46 @@ mod tests {
             EvaluationAction::Abort
         );
         assert!(parse(serde_json::json!({ "method": "abrot" })).is_err());
+    }
+
+    #[test]
+    fn evaluation_history_fields_name_retry_carry_abort_reason_and_replacement_and_drop_expected_duration_after_finish()
+     {
+        use gradient_entity::evaluation::EvaluationStatus;
+
+        let (previous, newer) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let retry = MEvaluation {
+            kind: EvaluationKind::Retry,
+            previous: Some(previous),
+            status: EvaluationStatus::Building,
+            ..Default::default()
+        };
+        let running = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+            &retry,
+            None,
+            Some(600_000),
+        );
+        assert_eq!(running.retry_of, Some(previous));
+        assert_eq!(running.expected_duration_ms, Some(600_000));
+
+        let replaced = MEvaluation {
+            previous: Some(previous),
+            status: EvaluationStatus::Aborted,
+            abort_reason: Some(AbortReason::Superseded),
+            superseded_by: Some(newer),
+            ..Default::default()
+        };
+        let body = serde_json::to_value(
+            EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+                &replaced,
+                None,
+                Some(600_000),
+            ),
+        )
+        .unwrap();
+        assert_eq!(body["abort_reason"], "superseded");
+        assert_eq!(body["superseded_by"], serde_json::json!(newer));
+        assert!(body["retry_of"].is_null());
+        assert!(body.get("expected_duration_ms").is_none());
     }
 }

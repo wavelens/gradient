@@ -7,6 +7,7 @@
 pub mod branch;
 pub mod counters;
 pub mod draining;
+pub mod expected_duration;
 pub mod expected_thunks;
 pub mod failed_attributes;
 pub mod flake_input_overrides;

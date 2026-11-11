@@ -72,7 +72,7 @@ pub async fn post_board_job_abort(
     let evaluation = require::<EEvaluation>(&state.web_db, job.evaluation_id).await?;
     let running = !evaluation.status.is_terminal();
     match job_abort(&job, running) {
-        Some(JobAbort::Evaluation) => scheduler.abort_evaluation(evaluation).await,
+        Some(JobAbort::Evaluation) => scheduler.abort_evaluation(evaluation, Some(user.id)).await,
         Some(JobAbort::Build(shared_build)) => {
             scheduler.abort_build(evaluation.id, shared_build).await??
         }

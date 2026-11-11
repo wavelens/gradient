@@ -44,6 +44,7 @@ pub fn build_request_commit() -> commit::Model {
         hash: vec![0; 20],
         author: Some(user_id()),
         author_name: "Test User".into(),
+        ..Default::default()
     }
 }
 

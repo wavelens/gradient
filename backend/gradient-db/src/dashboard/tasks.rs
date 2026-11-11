@@ -15,6 +15,9 @@ use sea_orm::{ConnectionTrait, DbErr, QueryResult, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Ranks for the latest evaluation come from the first run of that commit. Manual re-runs of an old commit leave the branch head on the dashboard card unchanged.
+const HEAD_WINDOW: u32 = 50;
+
 fn terminal() -> String {
     crate::sql::status::eval_in(&EvaluationStatus::TERMINAL)
 }
@@ -32,9 +35,12 @@ fn task_facts_sql() -> String {
             l.created_at AS latest_created_at, l.waiting_reason AS latest_waiting_reason, pv.id AS previous_id, \
             coalesce(a.recent_14d, 0) AS recent_14d, sp.speed_ms \
         FROM viewer_tasks v JOIN task t ON t.id = v.id JOIN project p ON p.id = t.project \
-        LEFT JOIN LATERAL (SELECT e.id, e.status, e.commit, e.created_at, e.waiting_reason FROM evaluation e \
-            LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" WHERE e.task = t.id AND {NON_PR} \
-            ORDER BY e.created_at DESC LIMIT 1) l ON true \
+        LEFT JOIN LATERAL (SELECT r.id, r.status, r.commit, r.created_at, r.waiting_reason \
+            FROM (SELECT e.id, e.status, e.commit, e.created_at, e.waiting_reason FROM evaluation e \
+                LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" WHERE e.task = t.id AND {NON_PR} \
+                ORDER BY e.created_at DESC LIMIT {HEAD_WINDOW}) r \
+            ORDER BY (SELECT min(f.created_at) FROM evaluation f WHERE f.task = t.id AND f.commit = r.commit) DESC, \
+                r.created_at DESC LIMIT 1) l ON true \
         LEFT JOIN commit c ON c.id = l.commit \
         LEFT JOIN LATERAL (SELECT e.id FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = t.id AND {NON_PR} AND e.status IN ({term}) AND e.created_at < l.created_at \
@@ -246,4 +252,80 @@ pub async fn histories<C: ConnectionTrait>(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
+
+    #[tokio::test]
+    async fn task_card_latest_evaluation_stays_on_newest_commit_after_older_commit_rerun() {
+        let (old, head, rerun) = (
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+        );
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(old)
+            .evaluation_status(EvaluationStatus::Failed)
+            .evaluation(head)
+            .same_task_as(old)
+            .evaluation_status(EvaluationStatus::Completed)
+            .evaluation(rerun)
+            .same_task_as(old)
+            .evaluation_status(EvaluationStatus::Failed)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        for (evaluation, hours_ago) in [(old, 2), (head, 1)] {
+            EEvaluation::update_many()
+                .col_expr(
+                    CEvaluation::CreatedAt,
+                    Expr::cust(format!("created_at - interval '{hours_ago} hour'")),
+                )
+                .filter(CEvaluation::Id.eq(evaluation))
+                .exec(&conn)
+                .await
+                .expect("the evaluation is moved back");
+        }
+        let old_commit = db
+            .find::<EEvaluation>(old)
+            .await
+            .expect("the old run")
+            .commit;
+        EEvaluation::update_many()
+            .col_expr(CEvaluation::Commit, Expr::value(old_commit))
+            .filter(CEvaluation::Id.eq(rerun))
+            .exec(&conn)
+            .await
+            .expect("the rerun points at the old commit");
+        let project = db.rows::<EProject>().await[0].id;
+        crate::rows::insert::<ERole, _>(&conn, gradient_fixtures::rows::admin_role())
+            .await
+            .expect("the role is written");
+        let member = crate::rows::insert::<EProjectUser, _>(
+            &conn,
+            MProjectUser {
+                project,
+                ..gradient_fixtures::rows::project_member(
+                    gradient_types::consts::BASE_ROLE_ADMIN_ID,
+                )
+            },
+        )
+        .await
+        .expect("the member is written");
+
+        let rows = task_facts(&conn, member.user)
+            .await
+            .expect("the task query runs");
+
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.latest.as_ref().map(|latest| latest.id))
+                .collect::<Vec<_>>(),
+            [Some(head)]
+        );
+        db.finish().await;
+    }
 }

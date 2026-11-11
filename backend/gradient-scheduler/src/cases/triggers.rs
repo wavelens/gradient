@@ -7,7 +7,7 @@
 use gradient_ci::ApplyOutcome;
 use gradient_db::deliveries::trigger_fire::TriggerFire;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::{self, EvaluationKind, EvaluationStatus};
+use gradient_entity::evaluation::{self, AbortReason, EvaluationKind, EvaluationStatus};
 use gradient_entity::ids::{CacheId, EvaluationId, TaskTriggerId};
 use gradient_entity::pending_delivery::{self, PendingDeliveryKind};
 use gradient_entity::task::ConcurrencyPolicy;
@@ -15,6 +15,7 @@ use gradient_entity::task_trigger::TriggerType;
 use gradient_entity::{commit, task};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
+use gradient_types::WaitingReason;
 use gradient_types::branch_key;
 use gradient_wire::types::{BuildFailureKind, JobKind};
 
@@ -858,10 +859,19 @@ async fn t16_auto_aborts_the_older_evaluation_once_the_new_one_builds() {
         EvaluationStatus::Building,
         "after 3: evaluation(E2).status"
     );
+    let superseded = case.evaluation(e1).await;
     assert_eq!(
-        case.evaluation(e1).await.status,
-        EvaluationStatus::Aborted,
-        "after 3: evaluation(E1).status"
+        (
+            superseded.status,
+            superseded.abort_reason,
+            superseded.superseded_by
+        ),
+        (
+            EvaluationStatus::Aborted,
+            Some(AbortReason::Superseded),
+            Some(e2)
+        ),
+        "after 3: evaluation(E1)"
     );
     let signals = case.signals(W1);
     for key in [eval_key(e1), a] {
@@ -1023,9 +1033,9 @@ async fn t18_hard_abort_leaves_the_evaluation_of_another_pull_request_running() 
         matches!(
             outcome,
             ApplyOutcome::Created {
-                aborted_evaluation: None,
+                ref aborted_evaluations,
                 ..
-            }
+            } if aborted_evaluations.is_empty()
         ),
         "after 1: the trigger creates an evaluation and aborts none, got {outcome:?}"
     );
@@ -1167,9 +1177,9 @@ async fn t20_a_poll_of_the_default_branch_and_a_push_to_it_abort_each_other() {
         matches!(
             outcome,
             ApplyOutcome::Created {
-                aborted_evaluation: Some(aborted),
+                ref aborted_evaluations,
                 ..
-            } if aborted == e1.id
+            } if aborted_evaluations.iter().map(|(id, _)| *id).collect::<Vec<_>>() == [e1.id]
         ),
         "after 2: the push aborts E1, got {outcome:?}"
     );
@@ -1250,6 +1260,92 @@ async fn t22_a_poll_onto_a_head_commit_asking_to_skip_creates_no_evaluation() {
     case.check("step 1").await;
 
     case.finish().await;
+}
+
+#[tokio::test]
+async fn t23_a_new_commit_replaces_the_waiting_evaluation_of_its_branch() {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let main = branch_key::branch("main");
+    let case =
+        SchedulerCase::start(waiting_no_cache_evaluation_with_push_trigger(e0, t1, &main)).await;
+
+    let outcome = case.apply_trigger(t1, &main, &[2u8; 20]).await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let [e1] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert!(
+        matches!(
+            outcome,
+            ApplyOutcome::Created {
+                ref aborted_evaluations,
+                ..
+            } if aborted_evaluations.iter().map(|(id, _)| *id).collect::<Vec<_>>() == [e0]
+        ),
+        "after 1: the trigger aborts E0, got {outcome:?}"
+    );
+    let replaced = case.evaluation(e0).await;
+    assert_eq!(
+        (
+            replaced.status,
+            replaced.abort_reason,
+            replaced.superseded_by
+        ),
+        (
+            EvaluationStatus::Aborted,
+            Some(AbortReason::Superseded),
+            Some(e1.id)
+        ),
+        "after 1: evaluation(E0)"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t24_a_new_commit_on_another_branch_keeps_the_waiting_evaluation() {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let case = SchedulerCase::start(waiting_no_cache_evaluation_with_push_trigger(
+        e0,
+        t1,
+        &branch_key::branch("main"),
+    ))
+    .await;
+
+    case.apply_trigger(t1, &branch_key::branch("feature"), &[2u8; 20])
+        .await;
+    let waiting = case.evaluation(e0).await;
+    assert_eq!(
+        (waiting.status, waiting.abort_reason, waiting.superseded_by),
+        (EvaluationStatus::Waiting, None, None),
+        "after 1: evaluation(E0)"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+fn waiting_no_cache_evaluation_with_push_trigger(
+    e0: EvaluationId,
+    t1: TaskTriggerId,
+    branch: &str,
+) -> Shape {
+    shape()
+        .evaluation(e0)
+        .evaluation_status(EvaluationStatus::Waiting)
+        .evaluation_option(|e| e.waiting_reason = Some(WaitingReason::NoCache.to_json()))
+        .branch(branch)
+        .last_evaluation(e0)
+        .task_option(|t| t.concurrency = ConcurrencyPolicy::All)
+        .trigger(
+            t1,
+            TriggerType::ReporterPush,
+            serde_json::json!({}),
+            true,
+            None,
+        )
+        .worker_registration("w-reg")
 }
 
 fn due_polling(e0: EvaluationId, t1: TaskTriggerId, repo: &GitRepo) -> Shape {

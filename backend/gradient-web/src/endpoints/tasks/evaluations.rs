@@ -14,6 +14,7 @@ use crate::access::{Caller, caller_project_mask, can_view_project};
 use crate::api_spec::{Binary, TaskPath};
 use crate::audit::Audit;
 use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::endpoints::evals::types::EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration;
 use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
@@ -81,7 +82,11 @@ pub(super) async fn evaluations_to_summaries(
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
     let commits: HashMap<CommitId, MCommit> = by_ids::<ECommit, _>(db, &commit_ids).await?;
 
-    let user_ids: Vec<UserId> = evaluations.iter().filter_map(|e| e.started_by).collect();
+    let user_ids: Vec<UserId> = evaluations
+        .iter()
+        .flat_map(|e| [e.started_by, e.aborted_by])
+        .flatten()
+        .collect();
     let user_names: HashMap<UserId, String> = by_ids::<EUser, _>(db, &user_ids)
         .await?
         .into_iter()
@@ -109,6 +114,24 @@ pub(super) async fn evaluations_to_summaries(
         Some(task) => gradient_db::evaluations::expected_thunks::expected_thunks(db, task).await?,
         None => None,
     };
+
+    let mut expected_durations: HashMap<(TaskId, String), Option<u64>> = HashMap::new();
+    for evaluation in evaluations.iter().filter(|e| e.status.is_active()) {
+        let Some(task) = evaluation.task else {
+            continue;
+        };
+        let key = (task, evaluation.branch.clone());
+        if expected_durations.contains_key(&key) {
+            continue;
+        }
+        let median = gradient_db::evaluations::expected_duration::get_median_duration_ms_of_last_ten_completed_evaluations_for_task_on_branch_excluding_retries(
+            db,
+            task,
+            &evaluation.branch,
+        )
+        .await?;
+        expected_durations.insert(key, median);
+    }
 
     let mut out = Vec::with_capacity(evaluations.len());
     for evaluation in evaluations {
@@ -154,6 +177,19 @@ pub(super) async fn evaluations_to_summaries(
             })
             .and_then(|n| n.as_u64());
 
+        let history = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+            &evaluation,
+            evaluation
+                .aborted_by
+                .and_then(|uid| user_names.get(&uid).cloned()),
+            evaluation.task.and_then(|task| {
+                expected_durations
+                    .get(&(task, evaluation.branch.clone()))
+                    .copied()
+                    .flatten()
+            }),
+        );
+
         out.push(EvaluationSummary {
             id: evaluation.id,
             commit: commit_hash,
@@ -189,6 +225,7 @@ pub(super) async fn evaluations_to_summaries(
                 evaluation.status,
                 evaluation.waiting_reason.as_ref(),
             ),
+            history,
         });
     }
     Ok(out)

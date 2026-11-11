@@ -24,6 +24,7 @@ fn commit_row() -> commit::Model {
         hash: vec![0x11; 20],
         author: None,
         author_name: "Tester".into(),
+        ..Default::default()
     }
 }
 
@@ -162,7 +163,11 @@ async fn attr_filter_matches_queued_evaluation() {
             ),
         ]])
         .append_query_results([vec![commit_row()]]);
-    let server = make_test_server(with_summary_rollups(db).into_connection());
+    let server = make_test_server(
+        with_summary_rollups(db)
+            .append_query_results([Vec::<commit::Model>::new()])
+            .into_connection(),
+    );
 
     let res = server
         .get(&format!(

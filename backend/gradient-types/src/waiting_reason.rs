@@ -167,6 +167,17 @@ impl WaitingReason {
         }
     }
 
+    pub fn can_be_replaced_by_newer_trigger(&self) -> bool {
+        matches!(
+            self,
+            Self::Workers { .. }
+                | Self::EvalWorkers { .. }
+                | Self::ExecWorkers { .. }
+                | Self::NoCache
+                | Self::CacheStorageFull
+        )
+    }
+
     pub fn workers(
         unmet: Vec<UnmetRequirement>,
         connected_workers: u32,

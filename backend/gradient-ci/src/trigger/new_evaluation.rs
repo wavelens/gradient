@@ -82,16 +82,21 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
 
     let now = gradient_types::now();
 
-    let acommit = MCommit {
-        id: CommitId::now_v7(),
-        message: commit_message.unwrap_or_default(),
-        hash: commit_hash,
-        author_name: author_name.unwrap_or_default(),
-        ..Default::default()
-    }
-    .into_active_model();
-
-    let commit = acommit.insert(db).await?;
+    let message = commit_message.unwrap_or_default();
+    let commit =
+        gradient_db::commits::insert_or_update_commit_row_keep_existing_message_if_new_empty(
+            db,
+            MCommit {
+                id: CommitId::now_v7(),
+                fetched_at: (!message.is_empty()).then_some(now),
+                message,
+                hash: commit_hash,
+                author_name: author_name.unwrap_or_default(),
+                project: Some(task.project),
+                ..Default::default()
+            },
+        )
+        .await?;
 
     let aevaluation = MEvaluation {
         id: EvaluationId::now_v7(),

@@ -21,8 +21,9 @@ use std::time::Instant;
 
 use super::shared_build_reuse_after_evaluation_abort::is_build_continued_after_aborted_evaluation_finished;
 use super::types::{
-    BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
-    PaginatedBuilds,
+    BuildItem, BuildsQuery, EntryPointBrief,
+    EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration, EvaluationMessageResponse,
+    EvaluationResponse, PaginatedBuilds,
 };
 use super::{EvalAccessContext, live_progress, live_progress_status};
 use crate::endpoints::tasks::EvaluationTriggerSummary;
@@ -110,6 +111,24 @@ pub async fn get_evaluation(
         Some(uid) => by_id::<EUser, _>(&state.web_db, uid).await?.map(|u| u.name),
         None => None,
     };
+    let aborted_by = match evaluation.aborted_by {
+        Some(uid) => by_id::<EUser, _>(&state.web_db, uid).await?.map(|u| u.name),
+        None => None,
+    };
+    let expected_duration_ms = match evaluation.task.filter(|_| evaluation.status.is_active()) {
+        Some(task) => gradient_db::evaluations::expected_duration::get_median_duration_ms_of_last_ten_completed_evaluations_for_task_on_branch_excluding_retries(
+            &state.web_db,
+            task,
+            &evaluation.branch,
+        )
+        .await?,
+        None => None,
+    };
+    let history = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+        &evaluation,
+        aborted_by,
+        expected_duration_ms,
+    );
 
     let trigger = if let Some(trigger_id) = evaluation.trigger {
         by_id::<ETaskTrigger, _>(&state.web_db, trigger_id)
@@ -170,6 +189,7 @@ pub async fn get_evaluation(
             waiting_reason,
             progress,
             expected_thunks,
+            history,
         },
     };
 

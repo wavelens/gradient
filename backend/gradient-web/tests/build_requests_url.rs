@@ -75,6 +75,7 @@ async fn queues_an_evaluation_against_the_remote_url() {
             hash: vec![0x9c; 20],
             author: Some(user_id()),
             author_name: user().name,
+            ..Default::default()
         }]])
         .append_query_results([vec![gradient_entity::evaluation::Model {
             id: evaluation,

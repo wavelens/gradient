@@ -15,7 +15,7 @@ use gradient_fixtures::shape::{Shape, shape};
 use super::{
     A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, BD, BD_OUT, C, C_OUT, Case, D, D_OUT, F, F_OUT, F1,
     F1_OUT, G, G_OUT, G1, G1_OUT, H, H_OUT, H1, H1_OUT, H2, H2_OUT, O, O_OUT, R, R_OUT, S, S_OUT,
-    assert_only_unstored_outputs, chain, drv, nar, narinfo, pass, with_attr, with_output,
+    X, X_OUT, assert_only_unstored_outputs, chain, drv, nar, narinfo, pass, with_attr, with_output,
     with_references,
 };
 use crate::messages::{Demotion, Transition};
@@ -515,7 +515,19 @@ async fn d07_a_completed_evaluation_still_wants_the_rebuild_of_its_entry_point_o
 #[tokio::test]
 async fn d08_an_aborted_entry_point_wants_nothing_until_a_retry_and_a_new_probe_answer() {
     let e1 = EvaluationId::now_v7();
-    let case = Case::start(chain(e1).evaluation_status(EvaluationStatus::Building)).await;
+    let case = Case::start(
+        chain(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(X)
+            .walked()
+            .entry_point("pkg.x")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(X_OUT)
+            .build_status(BuildStatus::Queued),
+    )
+    .await;
 
     case.abort_build(e1, A).await;
 
@@ -533,14 +545,14 @@ async fn d08_an_aborted_entry_point_wants_nothing_until_a_retry_and_a_new_probe_
         (BuildStatus::Skipped, false, 0),
         "after 1: sb(B) is Skipped, wanted false, attempt 0"
     );
-    let verdict = case.evaluation(e1).await.status;
+    let status = case.evaluation(e1).await.status;
     assert_eq!(
-        verdict,
-        EvaluationStatus::Aborted,
-        "after 1: evaluation(E1).status"
+        status,
+        EvaluationStatus::Building,
+        "after 1: evaluation(E1).status, X is still Queued"
     );
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [2, 0, 1, 0, 0], "after 1: counters(E1)");
+    assert_eq!(counters, [3, 1, 1, 1, 0], "after 1: counters(E1)");
     case.zero_drift("step 1").await;
 
     case.retry_build(e1, A).await;
@@ -555,14 +567,8 @@ async fn d08_an_aborted_entry_point_wants_nothing_until_a_retry_and_a_new_probe_
     assert_eq!(aborted, Some(false), "after 2: build_job(E1, A).aborted");
     let skipped = case.status(B).await;
     assert_eq!(skipped, BuildStatus::Skipped, "after 2: sb(B).status");
-    let reopened = case.evaluation(e1).await.status;
-    assert_eq!(
-        reopened,
-        EvaluationStatus::Building,
-        "after 2: evaluation(E1).status"
-    );
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [2, 1, 0, 0, 0], "after 2: counters(E1)");
+    assert_eq!(counters, [3, 2, 0, 1, 0], "after 2: counters(E1)");
     case.zero_drift("step 2").await;
 
     case.upstream_probed(&[A]).await;
@@ -576,7 +582,7 @@ async fn d08_an_aborted_entry_point_wants_nothing_until_a_retry_and_a_new_probe_
         "after 3: sb(B) is Queued, wanted true"
     );
     let counters = case.counters(e1).await;
-    assert_eq!(counters, [2, 2, 0, 1, 0], "after 3: counters(E1)");
+    assert_eq!(counters, [3, 3, 0, 2, 0], "after 3: counters(E1)");
     case.zero_drift("step 3").await;
     case.finish().await;
 }

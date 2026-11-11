@@ -125,14 +125,7 @@ impl EvaluationStatus {
         }
     }
 
-    pub const REOPENABLE: [Self; 2] = [Self::Failed, Self::Aborted];
-
     pub const EVALUATING: [Self; 2] = [Self::EvaluatingFlake, Self::EvaluatingDerivation];
-
-    pub const REOPEN: Transition<Self> = Transition {
-        from: &Self::REOPENABLE,
-        to: Self::Building,
-    };
 
     pub const REOPENABLE_FOR_EXEC_JOB: [Self; 3] = [Self::Failed, Self::Aborted, Self::Completed];
 
@@ -243,10 +236,11 @@ mod status_tests {
             (EvaluationKind::InputUpdate, 1),
             (EvaluationKind::DrvRecovery, 2),
             (EvaluationKind::Ssh, 3),
+            (EvaluationKind::Retry, 4),
         ] {
             assert_eq!(i32::from(kind), n);
         }
-        assert_eq!(EvaluationKind::iter().count(), 4);
+        assert_eq!(EvaluationKind::iter().count(), 5);
     }
 
     #[test]
@@ -299,6 +293,34 @@ pub enum EvaluationKind {
     DrvRecovery = 2,
     #[sea_orm(num_value = 3)]
     Ssh = 3,
+    #[sea_orm(num_value = 4)]
+    Retry = 4,
+}
+
+#[repr(i32)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+    utoipa::ToSchema,
+)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+#[serde(rename_all = "snake_case")]
+pub enum AbortReason {
+    #[sea_orm(num_value = 0)]
+    User = 0,
+    #[sea_orm(num_value = 1)]
+    Superseded = 1,
+    #[sea_orm(num_value = 2)]
+    NoConnectedWorkerCanBuildRequiredSystems = 2,
 }
 
 #[repr(i32)]
@@ -390,6 +412,9 @@ pub struct Model {
     pub only_evaluate: bool,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub run_options: Option<RunOptions>,
+    pub abort_reason: Option<AbortReason>,
+    pub aborted_by: Option<UserId>,
+    pub superseded_by: Option<EvaluationId>,
 }
 
 #[derive(

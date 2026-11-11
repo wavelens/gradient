@@ -12,8 +12,8 @@ use gradient_fixtures::shape::shape;
 use gradient_wire::types::BuildFailureKind;
 
 use super::{
-    A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, Case, X, X_OUT, drv, drv_nar, nar, narinfo,
-    with_attr, with_output, with_references,
+    A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, Case, X, X_OUT, Y, Y_OUT, drv, drv_nar, nar,
+    narinfo, with_attr, with_output, with_references,
 };
 use crate::messages::{Demotion, GcRequest, NarCommit, Transition};
 
@@ -130,11 +130,19 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
 
     case.zero_drift("step 5").await;
 
-    case.walk(case.tasked(e2, vec![x_above_a()]).await).await;
+    let y_alone = with_attr(with_output(drv(Y, &[]), Y_OUT), "pkg.y");
+    case.walk(case.tasked(e2, vec![x_above_a(), y_alone]).await)
+        .await;
     case.transition(Transition::EvalStreamCompleted { evaluation: e2 })
         .await;
+    case.upstream_probed(&[Y]).await;
+    case.commit_nar(NarCommit {
+        targets: caches_of_e2,
+        ..drv_nar(Y)
+    })
+    .await;
 
-    for path in [X, A, B] {
+    for path in [X, A, B, Y] {
         let job = case.job(e2, path).await;
         assert!(job.is_some(), "after 6: build_job(E2, {path})");
     }
@@ -144,8 +152,10 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
         EvaluationStatus::Building,
         "after 6: evaluation(E2)"
     );
+    let status = case.sb(Y).await.status;
+    assert_eq!(status, BuildStatus::Queued, "after 6: sb(Y)");
     let counters = case.counters(e2).await;
-    assert_eq!(counters, [3, 3, 0, 0, 1], "after 6: counters(E2)");
+    assert_eq!(counters, [4, 4, 0, 1, 1], "after 6: counters(E2)");
     case.zero_drift("step 6").await;
 
     case.commit_nar(NarCommit {
@@ -169,7 +179,7 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     let counters = [case.counters(e1).await, case.counters(e2).await];
     assert_eq!(
         counters,
-        [[3, 2, 0, 1, 0]; 2],
+        [[3, 2, 0, 1, 0], [4, 3, 0, 2, 0]],
         "after 7: counters(E1), counters(E2)"
     );
     case.zero_drift("step 7").await;
@@ -188,8 +198,8 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     ];
     assert_eq!(
         verdicts,
-        [EvaluationStatus::Failed; 2],
-        "after 8: evaluation(E1), evaluation(E2)"
+        [EvaluationStatus::Failed, EvaluationStatus::Building],
+        "after 8: evaluation(E1), evaluation(E2), Y is still Queued"
     );
     case.zero_drift("step 8").await;
 
@@ -237,8 +247,16 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     })
     .await;
     case.build_completed(X).await;
+    case.build_started(Y).await;
+    case.commit_nar(NarCommit {
+        targets: caches_of_e2,
+        ..with_references(nar(Y_OUT, "y"), &[(Y_OUT, "y")])
+    })
+    .await;
+    case.build_completed(Y).await;
 
     assert!(case.sb(X).await.fetchable, "after 11: sb(X) fetchable");
+    assert!(case.sb(Y).await.fetchable, "after 11: sb(Y) fetchable");
     let verdicts = [
         case.evaluation_status(e1).await,
         case.evaluation_status(e2).await,
@@ -260,14 +278,14 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     let gone = case.db.find::<evaluation::Entity>(e1).await;
     assert_eq!(gone, None, "after 12: no evaluation(E1)");
     let named = case.jobs(e2).await.len();
-    assert_eq!(named, 3, "after 12: E2 adopts nothing and still names B");
+    assert_eq!(named, 4, "after 12: E2 adopts nothing and still names B");
     assert_eq!(
         collected.deleted_derivations,
         [],
         "after 12: an empty list deletes nothing"
     );
     let derivations = case.db.rows::<derivation::Entity>().await.len();
-    assert_eq!(derivations, 3, "after 12: every derivation is still there");
+    assert_eq!(derivations, 4, "after 12: every derivation is still there");
     let b = case.sb(B).await;
     assert!(b.fetchable, "after 12: B keeps its rows: {b:?}");
     let stored = case.output_stored(B, "out").await;

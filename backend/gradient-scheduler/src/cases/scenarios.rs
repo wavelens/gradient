@@ -6,6 +6,7 @@
 
 use std::collections::BTreeSet;
 
+use gradient_db::status::BuildRefusal;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::cache_upstream::CacheUpstreamKind;
@@ -243,7 +244,8 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
 }
 
 #[tokio::test]
-async fn z02_two_evaluations_share_a_leaf_and_a_retry_reopens_the_aborted_one() {
+async fn z02_aborted_evaluation_retry_is_refused_while_shared_leaf_finishes_for_the_second_evaluation()
+ {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(
         shape()
@@ -341,52 +343,27 @@ async fn z02_two_evaluations_share_a_leaf_and_a_retry_reopens_the_aborted_one() 
     );
     case.check("step 4").await;
 
+    let (sb_a, job, evaluation) = (
+        case.sb(A).await,
+        case.job(e1, A).await,
+        case.evaluation(e1).await,
+    );
+
     let retried = case.retry_build(e1, A).await;
-    assert_eq!(retried, Ok(()), "after 5: retry_build(E1, A)");
-    let sb_a = case.sb(A).await;
     assert_eq!(
-        (sb_a.status, sb_a.probed, sb_a.wanted, sb_a.attempt),
-        (BuildStatus::Created, false, true, 0),
-        "after 5: sb(A)"
+        retried,
+        Err(BuildRefusal::EvaluationFinished),
+        "after 5: retry_build(E1, A)"
     );
+    assert_eq!(case.sb(A).await, sb_a, "after 5: sb(A)");
     assert_eq!(
-        case.evaluation(e1).await.status,
-        EvaluationStatus::Building,
-        "after 5: evaluation(E1).status"
+        case.evaluation(e1).await,
+        evaluation,
+        "after 5: evaluation(E1)"
     );
-    let job = case.job(e1, A).await.expect("after 5: build_job(E1, A)");
-    assert!(!job.aborted, "after 5: build_job(E1, A).aborted");
+    assert_eq!(case.job(e1, A).await, job, "after 5: build_job(E1, A)");
+    assert!(!case.pending(&a).await, "after 5: pending(build:A)");
     case.check("step 5").await;
-
-    case.probe_round(&[A]).await;
-    let sb_a = case.sb(A).await;
-    assert_eq!(
-        (sb_a.status, sb_a.probed),
-        (BuildStatus::Queued, true),
-        "after 5b: sb(A)"
-    );
-    case.check("step 5b").await;
-
-    case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
-    let a3 = requested_build(&case, W1, &a, "after 6").await;
-    let commit = NarCommit {
-        targets: case.project_caches(e1).await,
-        ..with_references(output_nar(A, A_OUT), &[(B_OUT, "b")])
-    };
-    build_and_complete(&case, W1, &a, a3, commit, 10).await;
-    assert_eq!(
-        case.sb(A).await.status,
-        BuildStatus::Completed,
-        "after 6: sb(A).status"
-    );
-    assert_eq!(
-        case.evaluation(e1).await.status,
-        EvaluationStatus::Completed,
-        "after 6: evaluation(E1).status"
-    );
-    case.check("step 6").await;
 
     case.finish().await;
 }

@@ -469,10 +469,9 @@ async fn apply_and_record(
     match apply_result {
         Ok(ApplyOutcome::Created {
             evaluation: eval,
-            aborted_evaluation,
-            hard_abort,
+            aborted_evaluations,
         }) => {
-            if let Some(aborted_id) = aborted_evaluation {
+            for (aborted_id, hard_abort) in aborted_evaluations {
                 scheduler
                     .stop_aborted_evaluation(aborted_id, hard_abort)
                     .await;

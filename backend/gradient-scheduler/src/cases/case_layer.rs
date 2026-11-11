@@ -75,7 +75,7 @@ async fn a_case_finishes_while_an_abort_still_runs() {
         .find::<evaluation::Entity>(e)
         .await
         .expect("the evaluation row");
-    case.scheduler.abort_evaluation(evaluation).await;
+    case.scheduler.abort_evaluation(evaluation, None).await;
     case.settled().await;
 
     assert_eq!(

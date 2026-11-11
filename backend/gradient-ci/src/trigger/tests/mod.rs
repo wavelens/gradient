@@ -213,7 +213,7 @@ async fn restart_with_all_cached_inserts_completed_eval() {
 }
 
 #[tokio::test]
-async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() {
+async fn restart_with_one_failed_inserts_a_manual_retry_eval_and_inherits_the_names() {
     let task = make_task();
     let prev_eval_id = EvaluationId::now_v7();
     let trigger = TaskTriggerId::now_v7();
@@ -270,7 +270,12 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
     let log = raw_statements(db.into_transaction_log());
     assert_eq!(
         find_evaluation_insert_value_for_column(&log, "trigger"),
-        sea_orm::Value::Uuid(Some(trigger.into_inner()))
+        sea_orm::Value::Uuid(None),
+        "a retry is a manual run, not another run of the trigger"
+    );
+    assert_eq!(
+        find_evaluation_insert_value_for_column(&log, "kind"),
+        sea_orm::Value::Int(Some(i32::from(evaluation::EvaluationKind::Retry)))
     );
     assert_eq!(
         find_evaluation_insert_value_for_column(&log, "started_by"),

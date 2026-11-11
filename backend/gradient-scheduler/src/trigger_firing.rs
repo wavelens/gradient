@@ -230,7 +230,9 @@ async fn apply_to_task(
     cfg: &TriggerConfig,
     head: BranchHead,
 ) {
-    let (msg, author) = commit_metadata(&scheduler.db, task, &head.commit).await;
+    let metadata = commit_metadata(&scheduler.db, task, &head.commit).await;
+    let missing_metadata = metadata.is_none();
+    let (msg, author) = metadata.unwrap_or_default();
     let outcome = apply_trigger(
         &scheduler.db.worker_db,
         task,
@@ -238,7 +240,7 @@ async fn apply_to_task(
             trigger_id: Some(trig.id),
             trigger_type: cfg.trigger_type(),
             branch: head.branch,
-            commit_hash: head.commit,
+            commit_hash: head.commit.clone(),
             commit_message: Some(msg),
             author_name: Some(author),
             manual: false,
@@ -256,13 +258,20 @@ async fn apply_to_task(
     match outcome {
         Ok(ApplyOutcome::Created {
             evaluation,
-            aborted_evaluation,
-            hard_abort,
+            aborted_evaluations,
         }) => {
-            if let Some(aborted_id) = aborted_evaluation {
+            for (aborted_id, hard_abort) in aborted_evaluations {
                 scheduler
                     .stop_aborted_evaluation(aborted_id, hard_abort)
                     .await;
+            }
+            if missing_metadata {
+                fill_commit_row_message_author_and_fetched_at_from_git(
+                    &scheduler.db,
+                    task.clone(),
+                    evaluation.commit,
+                    head.commit,
+                );
             }
             info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %evaluation.id, "trigger created evaluation");
             scheduler.db.record_evaluation_created(&evaluation).await;
@@ -280,21 +289,40 @@ async fn commit_metadata(
     sources: &DbContext,
     task: &MTask,
     commit_hash: &[u8],
-) -> (String, String) {
-    match tokio::time::timeout(
+) -> Option<(String, String)> {
+    tokio::time::timeout(
         HEAD_RESOLVE_BUDGET,
         get_commit_info(sources, task, commit_hash),
     )
     .await
-    {
-        Ok(Ok(commit)) => (commit.message, commit.author_name),
-        _ => gradient_db::commits::latest_with_message(&sources.worker_db, commit_hash.to_vec())
+    .ok()?
+    .ok()
+    .map(|commit| (commit.message, commit.author_name))
+}
+
+fn fill_commit_row_message_author_and_fetched_at_from_git(
+    sources: &DbContext,
+    task: MTask,
+    commit: CommitId,
+    commit_hash: Vec<u8>,
+) {
+    let sources_for_task = sources.clone();
+    sources.shutdown.spawn(async move {
+        let filled = match get_commit_info(&sources_for_task, &task, &commit_hash).await {
+            Ok(info) => gradient_db::commits::fill_message_from_git(
+                &sources_for_task.worker_db,
+                commit,
+                info.message,
+                info.author_name,
+            )
             .await
-            .ok()
-            .flatten()
-            .map(|commit| (commit.message, commit.author_name))
-            .unwrap_or_default(),
-    }
+            .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(error) = filled {
+            warn!(%error, %commit, task = %task.name, "failed to complete commit message from git");
+        }
+    });
 }
 
 async fn resolve_head<F, T, E>(resolve: F, task: &str) -> Result<T, String>
