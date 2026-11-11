@@ -38,6 +38,7 @@ fn scan_deletable_path_hashes_sql() -> String {
          WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = cp.hash)
            AND (EXISTS (SELECT 1 FROM cached_path_signature s
                         WHERE s.cached_path = cp.id
+                          AND s.pinned_at IS NULL
                           AND coalesce(s.last_fetched_at, s.created_at) < $1)
                 OR (cp.created_at < $1
                     AND NOT EXISTS (SELECT 1 FROM cached_path_signature s

@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CacheId, CachedPathId, CachedPathSignatureId};
+use crate::ids::{CacheId, CachedPathId, CachedPathSignatureId, UserId};
 
 /// `signature` is the raw 64-byte Ed25519 signature. The narinfo wire form `<key-name>:<base64>` is
 /// rebuilt at read time from `cache.name` and the deployment's `serve_url`.
@@ -25,6 +25,8 @@ pub struct Model {
     #[sea_orm(default_value = "0")]
     pub fetch_count: i64,
     pub created_at: NaiveDateTime,
+    pub pinned_at: Option<NaiveDateTime>,
+    pub pinned_by_user_id: Option<UserId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

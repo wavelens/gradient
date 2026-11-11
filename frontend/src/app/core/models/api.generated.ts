@@ -542,6 +542,10 @@ export interface CacheTotals {
 
 export type CacheUpstreamId = string;
 
+export interface CachedPathPinStateChangeCount {
+  pin_state_changed_path_count: number;
+}
+
 export interface CatalogEntry {
   name: string;
   durable: boolean;
@@ -1909,6 +1913,8 @@ export interface NarDetail {
   last_fetched_at?: string | null;
   fetch_count: number;
   signed: boolean;
+  pinned_at?: string | null;
+  pinned_by_username?: string | null;
 }
 
 export interface NarList {
@@ -1932,6 +1938,8 @@ export interface NarSummary {
   file_size?: number | null;
   created_at: string;
   last_fetched_at?: string | null;
+  pinned_at?: string | null;
+  pinned_by_username?: string | null;
 }
 
 export interface NarUploadForm {

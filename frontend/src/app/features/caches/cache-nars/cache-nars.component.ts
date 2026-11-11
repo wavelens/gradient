@@ -13,12 +13,14 @@ import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import {
+  BadgeComponent,
   ButtonComponent,
   CardGridComponent,
   IconComponent,
   InputDirective,
   LoadStateComponent,
   PageLayoutComponent,
+  SelectButtonComponent,
   SkeletonComponent,
   StatCardComponent,
   TableComponent,
@@ -26,6 +28,7 @@ import {
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
+import { CacheNarsPinScopeDialogComponent } from './cache-nars-pin-scope-dialog.component';
 import { formatBytes, formatCount, RelativeTimePipe } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
 import { NarSummary, NarStats, Paginated } from '@core/models';
@@ -33,6 +36,13 @@ import { links } from '@shared/routing';
 
 type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
 type SortOrder = 'asc' | 'desc';
+type PackagePinFilter = 'all' | 'pinned' | 'unpinned';
+
+function convertPinnedQueryValueToFilter(value: string | null): PackagePinFilter {
+  if (value === 'true') return 'pinned';
+  if (value === 'false') return 'unpinned';
+  return 'all';
+}
 
 @Component({
   selector: 'app-cache-nars',
@@ -47,6 +57,9 @@ type SortOrder = 'asc' | 'desc';
     SkeletonComponent,
     WritableDirective,
     CacheNarsDetailDrawerComponent,
+    CacheNarsPinScopeDialogComponent,
+    BadgeComponent,
+    SelectButtonComponent,
     IconComponent,
     PageLayoutComponent,
     LoadStateComponent,
@@ -77,6 +90,12 @@ export class CacheNarsComponent implements OnInit {
   private filter = computed(() => parseNarSearch(this.search()));
   sort = signal<SortKey>('created_at');
   order = signal<SortOrder>('desc');
+  pinnedStateFilter = signal<PackagePinFilter>('all');
+  readonly pinnedStateFilterOptions: { label: string; value: PackagePinFilter }[] = [
+    { label: 'All', value: 'all' },
+    { label: 'Pinned', value: 'pinned' },
+    { label: 'Unpinned', value: 'unpinned' },
+  ];
   page = signal(1);
   perPage = signal(50);
 
@@ -89,6 +108,7 @@ export class CacheNarsComponent implements OnInit {
   loadError = signal<unknown>(null);
 
   selected = signal<NarSummary | null>(null);
+  pinDialogPackageRow = signal<NarSummary | null>(null);
 
   totalPages = computed(() => {
     const pp = this.perPage();
@@ -101,7 +121,8 @@ export class CacheNarsComponent implements OnInit {
       const hash = q.get('hash') || undefined;
       const pkg = q.get('package') || undefined;
       this.search.set(narSearchText({ hash, package: pkg }));
-      this.hasSearchFilterFromUrl.set(!!(hash || pkg));
+      this.pinnedStateFilter.set(convertPinnedQueryValueToFilter(q.get('pinned')));
+      this.hasSearchFilterFromUrl.set(!!(hash || pkg) || this.pinnedStateFilter() !== 'all');
       this.sort.set((q.get('sort') as SortKey) ?? 'created_at');
       this.order.set((q.get('order') as SortOrder) ?? 'desc');
       const p = Number(q.get('page') ?? 1);
@@ -116,6 +137,7 @@ export class CacheNarsComponent implements OnInit {
     this.loadError.set(null);
     this.cachesService.getCacheNars(this.cacheName, {
       ...this.filter(),
+      pinned: this.pinnedStateFilter() === 'all' ? undefined : this.pinnedStateFilter() === 'pinned',
       sort: this.sort(),
       order: this.order(),
       page: this.page(),
@@ -151,6 +173,7 @@ export class CacheNarsComponent implements OnInit {
       queryParams: {
         hash: this.filter().hash ?? null,
         package: this.filter().package ?? null,
+        pinned: this.pinnedStateFilter() === 'all' ? null : this.pinnedStateFilter() === 'pinned',
         sort: this.sort(),
         order: this.order(),
         page: 1,
@@ -161,6 +184,7 @@ export class CacheNarsComponent implements OnInit {
 
   reset(): void {
     this.search.set('');
+    this.pinnedStateFilter.set('all');
     this.sort.set('created_at');
     this.order.set('desc');
     this.router.navigate([], { relativeTo: this.route, queryParams: {} });
@@ -200,13 +224,24 @@ export class CacheNarsComponent implements OnInit {
     this.selected.set(null);
   }
 
+  setPinFilterAndApplyFiltersToUrl(value: PackagePinFilter): void {
+    this.pinnedStateFilter.set(value);
+    this.applyFilters();
+  }
+
+  openPinDialog(row: NarSummary): void {
+    this.pinDialogPackageRow.set(row);
+  }
+
   askDelete(row: NarSummary): void {
+    const pinnedPackageDeleteExtraSentence = row.pinned_at ? ' Pinned package. Delete this package to clear the pin too.' : '';
     this.confirm
       .confirm({
         title: 'Delete package',
         target: `${row.package} (${row.hash})`,
         consequence:
-          "Other caches can still contain this package. Then the system can remove only this cache's signature. If other caches contain no copy, the system can delete the package completely.",
+          "Other caches can still contain this package. Then the system can remove only this cache's signature. If other caches contain no copy, the system can delete the package completely." +
+          pinnedPackageDeleteExtraSentence,
         confirmLabel: 'Delete',
         failure: 'Failed to delete package.',
         action: () => this.cachesService.deleteCacheNar(this.cacheName, row.hash),

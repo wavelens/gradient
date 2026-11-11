@@ -7,14 +7,20 @@
 use std::collections::BTreeSet;
 
 use chrono::{Duration, NaiveDateTime};
+use gradient_db::cached_paths::{
+    clear_cache_claim_pin_for_cached_path_hashes,
+    set_claim_pin_timestamp_and_user_for_cached_path_hashes,
+};
 use gradient_db::caches::capacity::cache_used_bytes;
 use gradient_db::maintenance::gc::scan_deletable_path_hashes;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{self, AttemptOutcome};
+use gradient_entity::cache;
 use gradient_entity::derivation_build;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{CacheId, EvaluationId};
 use gradient_fixtures::shape::shape;
+use sea_orm::EntityTrait;
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, Case, D, F, F_OUT, N, N_OUT, O, O_OUT, O2, O2_OUT, X, X_OUT, Y,
@@ -619,6 +625,90 @@ async fn c12_unused_claim_deleted_shared_path_kept_until_last_claim() {
     assert!(
         stored(&case, B_OUT).await,
         "after 2: cached_path(B_OUT) present"
+    );
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn c13_pinned_claim_keeps_shared_path_until_unpinned_then_gc_retires_path() {
+    let (e1, c1, c2) = (EvaluationId::now_v7(), CacheId::now_v7(), CacheId::now_v7());
+    let case = Case::start(
+        chain_done(e1)
+            .derivation(O)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(O_OUT)
+            .build_status(BuildStatus::Completed)
+            .cached_output(O)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .into_cache(c2)
+            .keyed(Case::key()),
+    )
+    .await;
+    let fetched_at = t0() + Duration::hours(1);
+    case.insert_cache_claim(O_OUT, c1, None, None).await;
+    case.insert_cache_claim(O_OUT, c2, None, Some(fetched_at))
+        .await;
+    let owner = cache::Entity::find_by_id(c1)
+        .one(&case.ctx.worker_db)
+        .await
+        .expect("the cache reads")
+        .expect("cache C1 exists")
+        .created_by;
+    let pinned = set_claim_pin_timestamp_and_user_for_cached_path_hashes(
+        &case.ctx.worker_db,
+        c1,
+        owner,
+        &[O_OUT.to_owned()],
+    )
+    .await
+    .expect("the pin is written");
+    assert_eq!(pinned, 1, "pin: changed claims");
+
+    let report = gc_unused_cache_claims(&case, fetched_at + Duration::hours(1)).await;
+
+    let expected = GcReport {
+        deleted_claim_row_count: 1,
+        ..Default::default()
+    };
+    assert_eq!(report, expected, "after 1: report");
+    let claim = case.signature(O_OUT, c1).await;
+    assert_eq!(
+        claim.and_then(|claim| claim.pinned_by_user_id),
+        Some(owner),
+        "after 1: pinned claim(O_OUT, C1)"
+    );
+    assert_eq!(
+        case.signature(O_OUT, c2).await,
+        None,
+        "after 1: claim(O_OUT, C2)"
+    );
+    assert!(
+        stored(&case, O_OUT).await,
+        "after 1: cached_path(O_OUT) present"
+    );
+    case.zero_drift("step 1").await;
+
+    let unpinned =
+        clear_cache_claim_pin_for_cached_path_hashes(&case.ctx.worker_db, c1, &[O_OUT.to_owned()])
+            .await
+            .expect("the pin is cleared");
+    assert_eq!(unpinned, 1, "unpin: changed claims");
+
+    let report = gc_unused_cache_claims(&case, fetched_at + Duration::hours(1)).await;
+
+    let expected = GcReport {
+        retired: vec![O_OUT.to_owned()],
+        deleted_claim_row_count: 1,
+        ..Default::default()
+    };
+    assert_eq!(report, expected, "after 2: report");
+    assert!(
+        !stored(&case, O_OUT).await,
+        "after 2: cached_path(O_OUT) retired"
     );
     case.zero_drift("step 2").await;
     case.finish().await;

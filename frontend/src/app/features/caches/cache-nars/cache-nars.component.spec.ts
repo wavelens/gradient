@@ -166,6 +166,23 @@ describe('CacheNarsComponent delete', () => {
   });
 });
 
+describe('CacheNarsComponent pinning', () => {
+  it('show pin badge with pinned username on pinned rows only', () => {
+    const items = [NAR, { ...NAR, hash: 'def456', pinned_at: '2026-10-06T10:00:00', pinned_by_username: 'alice' }];
+    const { root } = render(() => of({ ...PAGE, items, total: 2 }));
+    const badges = root.querySelectorAll('[data-testid="pinned-badge"]');
+    expect(badges).toHaveLength(1);
+    expect(badges[0].textContent).toContain('alice');
+  });
+
+  it('request only pinned packages with pinned=true in URL', () => {
+    const { fixture, query } = render(() => of(PAGE));
+    query.next(convertToParamMap({ pinned: 'true' }));
+    fixture.detectChanges();
+    expect(TestBed.inject(CachesService).getCacheNars).toHaveBeenLastCalledWith('main', expect.objectContaining({ pinned: true }));
+  });
+});
+
 describe('CacheNarsComponent paging', () => {
   it('moves to the last page that has rows when the requested page is past the end', () => {
     const { fixture, query } = render(() => of({ ...PAGE, items: [], total: 60, page: 3 }));

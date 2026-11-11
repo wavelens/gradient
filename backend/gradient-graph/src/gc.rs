@@ -78,6 +78,7 @@ gradient_db::sql_fn! {
 gradient_db::sql! {
     GC_DELETE_STALE_CLAIMS = "DELETE FROM cached_path_signature s USING cached_path cp \
              WHERE s.cached_path = cp.id AND cp.hash = ANY($1::text[]) \
+               AND s.pinned_at IS NULL \
                AND coalesce(s.last_fetched_at, s.created_at) < $2",
         params = [CachedPathHashes(64), Now],
         tier = Sweep;

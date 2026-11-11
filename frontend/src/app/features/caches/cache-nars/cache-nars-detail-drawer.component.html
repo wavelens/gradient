@@ -36,6 +36,14 @@
           {{ d.signed ? 'Signed' : 'Unsigned' }}
         </gr-badge>
       </gr-field-row>
+      <gr-field-row label="Pinned">
+        @if (d.pinned_at) {
+          <gr-badge severity="info">Pinned</gr-badge>
+          {{ d.pinned_by_username ?? 'unknown user' }}, {{ d.pinned_at | serverDate }}
+        } @else {
+          <span class="text-secondary">Not pinned</span>
+        }
+      </gr-field-row>
       <div class="references-row">
         <span class="references-label">References ({{ d.references.length }})</span>
         @if (d.references.length === 0) {

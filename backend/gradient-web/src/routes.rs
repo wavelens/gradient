@@ -270,6 +270,10 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 ))
                 .routes(routes!(caches::nars::delete))
                 .routes(routes!(
+                    caches::nars::pin,
+                    caches::nars::remove_cache_nar_pin
+                ))
+                .routes(routes!(
                     caches::management::post_cache_active,
                     caches::management::delete_cache_active
                 ))

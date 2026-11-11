@@ -21,6 +21,7 @@ import {
   UpstreamTestResponse,
   NarSummary,
   NarDetail,
+  CachedPathPinStateChangeCount,
   NarStats,
   PendingInvitationItem,
   SubscriptionRequestItem,
@@ -42,6 +43,7 @@ export interface NarListQuery {
   package?: string;
   sort?: string;
   order?: string;
+  pinned?: boolean;
   page?: number;
   per_page?: number;
 }
@@ -155,6 +157,19 @@ export class CachesService {
 
   deleteCacheNar(cache: string, hash: string): Observable<void> {
     return this.api.delete<void>(`caches/${cache}/nars/${hash}`);
+  }
+
+  pinCacheNar(cache: string, hash: string, includeReferencedPaths: boolean): Observable<CachedPathPinStateChangeCount> {
+    return this.api.post<CachedPathPinStateChangeCount>(
+      `caches/${cache}/nars/${hash}/pin?include_referenced_paths=${includeReferencedPaths}`,
+      {},
+    );
+  }
+
+  unpinCacheNar(cache: string, hash: string, includeReferencedPaths: boolean): Observable<CachedPathPinStateChangeCount> {
+    return this.api.delete<CachedPathPinStateChangeCount>(
+      `caches/${cache}/nars/${hash}/pin?include_referenced_paths=${includeReferencedPaths}`,
+    );
   }
 
   getInvitations(cache: string): Observable<PendingInvitationItem[]> {

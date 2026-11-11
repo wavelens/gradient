@@ -26,6 +26,9 @@ pub enum Commands {
         sort: Option<String>,
         #[arg(long, value_parser = ["asc", "desc"])]
         order: Option<String>,
+        /// List only pinned (true) NARs or unpinned (false) NARs
+        #[arg(long)]
+        pinned: Option<bool>,
         #[arg(long)]
         page: Option<u32>,
         #[arg(long = "per-page")]
@@ -48,6 +51,24 @@ pub enum Commands {
         #[arg(short = 'y', long)]
         yes: bool,
     },
+    /// Pin a NAR to the cache so garbage collection can retain it
+    Pin {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        cache: String,
+        hash: String,
+        /// Apply to all paths that the NAR references transitively as well.
+        #[arg(long)]
+        include_referenced_paths: bool,
+    },
+    /// Unpin a NAR from the cache
+    Unpin {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        cache: String,
+        hash: String,
+        /// Apply to all paths that the NAR references transitively as well.
+        #[arg(long)]
+        include_referenced_paths: bool,
+    },
     /// Aggregate stats for a cache's NARs
     Stats {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -63,6 +84,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             package,
             sort,
             order,
+            pinned,
             page,
             per_page,
             interactive,
@@ -73,6 +95,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 package,
                 sort,
                 order,
+                pinned,
                 page,
                 per_page,
             };
@@ -90,12 +113,18 @@ pub async fn handle(cmd: Commands, out: Output) {
                         for item in &res.items {
                             let lf = item.last_fetched_at.as_deref().unwrap_or("never");
                             let short = &item.hash[..item.hash.len().min(16)];
+                            let pinned = match (&item.pinned_at, &item.pinned_by_username) {
+                                (Some(_), Some(user)) => format!("  pinned_by={user}"),
+                                (Some(_), None) => "  pinned".to_owned(),
+                                (None, _) => String::new(),
+                            };
                             out.human(format!(
-                                "{}  {}  size={}  last_fetched={}",
+                                "{}  {}  size={}  last_fetched={}{}",
                                 short,
                                 item.package,
                                 item.nar_size.unwrap_or(0),
                                 lf,
+                                pinned,
                             ));
                         }
                         let pages = if res.per_page <= 0 {
@@ -129,6 +158,52 @@ pub async fn handle(cmd: Commands, out: Output) {
                     if let Some(t) = d.last_fetched_at {
                         out.human(format!("last_fetched_at: {}", t));
                     }
+                    if let Some(t) = d.pinned_at {
+                        out.human(format!("pinned_at:   {}", t));
+                    }
+                    if let Some(user) = d.pinned_by_username {
+                        out.human(format!("pinned_by:   {}", user));
+                    }
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::Pin {
+            cache,
+            hash,
+            include_referenced_paths,
+        } => {
+            let client = client_from_config(out);
+            match client
+                .caches()
+                .nar_pin(&cache, &hash, include_referenced_paths)
+                .await
+            {
+                Ok(r) => {
+                    out.ok(&r);
+                    let count = r.pin_state_changed_path_count;
+                    out.human(format!("Pinned {count} paths."));
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::Unpin {
+            cache,
+            hash,
+            include_referenced_paths,
+        } => {
+            let client = client_from_config(out);
+            match client
+                .caches()
+                .nar_unpin_with_include_referenced_paths(&cache, &hash, include_referenced_paths)
+                .await
+            {
+                Ok(r) => {
+                    out.ok(&r);
+                    let count = r.pin_state_changed_path_count;
+                    out.human(format!("Unpinned {count} paths."));
                 }
                 Err(e) => out.fail(e),
             }

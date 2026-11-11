@@ -58,4 +58,6 @@ async fn list_returns_signed_nar_for_cache() {
     assert_eq!(items.len(), 1, "expected one item, got {items:?}");
     assert_eq!(items[0]["hash"], FIXTURE_PATH_HASH);
     assert_eq!(items[0]["package"], "hello");
+    assert_eq!(items[0]["pinned_by_username"], "alice");
+    assert!(items[0]["pinned_at"].is_string());
 }

@@ -246,9 +246,11 @@ gradient account switch work
 | `gradient cache show <NAME>` | - | Print the public key of a cache |
 | `gradient cache rotate-key <NAME>` | - | Replace the cache signing key and print the new public key. Store paths keep the old signature until the next rotation. |
 | `gradient cache install-netrc --server <SERVER> --cache <CACHE>` | `--server <SERVER>`, `--token <TOKEN>`, `--cache <CACHE>`, `--netrc-file <NETRC_FILE>` | Write a netrc entry for a cache from an existing API key. The server is not contacted. Run as root to write `/etc/nix/netrc` |
-| `gradient cache nar list <CACHE>` | `--hash <HASH>`, `--package <PACKAGE>`, `--sort <SORT>`, `--order <ORDER>`, `--page <PAGE>`, `--per-page <PER_PAGE>`, `--interactive` | List the NARs stored in a cache |
+| `gradient cache nar list <CACHE>` | `--hash <HASH>`, `--package <PACKAGE>`, `--sort <SORT>`, `--order <ORDER>`, `--pinned <PINNED>`, `--page <PAGE>`, `--per-page <PER_PAGE>`, `--interactive` | List the NARs stored in a cache |
 | `gradient cache nar show <CACHE> <HASH>` | - | Print the full metadata of one NAR |
 | `gradient cache nar delete <CACHE> <HASH>` | `--yes` | Remove a NAR from a cache |
+| `gradient cache nar pin <CACHE> <HASH>` | `--include-referenced-paths` | Pin a NAR so garbage collection for the cache can keep it regardless of `gc.narTtlHours` or retained evaluations and `--include-referenced-paths` can also pin all paths in this NAR if they exist in the cache |
+| `gradient cache nar unpin <CACHE> <HASH>` | `--include-referenced-paths` | Remove a pin from a NAR. Use `--include-referenced-paths` to unpin all paths in its closure too |
 | `gradient cache nar stats <CACHE>` | - | Print aggregate statistics over all NARs in a cache |
 | `gradient cache upload <CACHE> [PATHS]...` | `--nar-file <NAR_FILE>`, `--narinfo <NARINFO>`, `--no-closure` | Upload one or more NARs to a cache |
 | `gradient cache enable <NAME>` | - | Enable a cache that was disabled. |

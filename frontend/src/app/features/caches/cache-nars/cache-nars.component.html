@@ -31,6 +31,17 @@
       placeholder="Store path, hash or package name"
       class="w-full"
     />
+    <gr-select-button
+      ariaLabel="Pin state"
+      [options]="pinnedStateFilterOptions"
+      optionLabel="label"
+      optionValue="value"
+      [allowEmpty]="false"
+      [ngModel]="pinnedStateFilter()"
+      (ngModelChange)="setPinFilterAndApplyFiltersToUrl($event)"
+      [ngModelOptions]="{ standalone: true }"
+      data-testid="pin-filter"
+    />
     <button grButton severity="secondary" type="submit" label="Search" icon="search"></button>
     <button grButton type="button" label="Reset" icon="restart_alt" severity="secondary" (click)="reset()"></button>
   </form>
@@ -74,6 +85,7 @@
               }
             </button>
           </th>
+          <th>Pinned</th>
           <th><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -84,6 +96,7 @@
             <td><code class="mono"><gr-skeleton width="32ch" /></code></td>
             <td class="size-col"><gr-skeleton width="6ch" /></td>
             <td class="size-col"><gr-skeleton width="6ch" /></td>
+            <td><gr-skeleton width="7ch" /></td>
             <td><gr-skeleton width="7ch" /></td>
             <td><gr-skeleton width="7ch" /></td>
             <td class="nar-actions"><gr-skeleton /><gr-skeleton /></td>
@@ -97,8 +110,26 @@
             <td class="size-col">{{ formatBytes(row.file_size) }}</td>
             <td class="text-secondary">{{ row.created_at | relativeTime }}</td>
             <td class="text-secondary">{{ row.last_fetched_at | relativeTime }}</td>
+            <td class="pinned-col">
+              @if (row.pinned_at) {
+                <gr-badge severity="info" data-testid="pinned-badge">
+                  <gr-icon name="push_pin" size="sm" />
+                  {{ row.pinned_by_username ?? 'Pinned' }}
+                </gr-badge>
+              }
+            </td>
             <td class="nar-actions" (click)="$event.stopPropagation()">
               <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
+              <button
+                *appWritable="access()"
+                grButton
+                [icon]="row.pinned_at ? 'keep_off' : 'push_pin'"
+                severity="secondary"
+                [text]="true"
+                (click)="openPinDialog(row)"
+                [title]="row.pinned_at ? 'Unpin' : 'Pin'"
+                data-testid="pin-button"
+              ></button>
               <button
                 *appWritable="access()"
                 grButton
@@ -135,4 +166,11 @@
   [cacheName]="cacheName"
   [summary]="selected()"
   (closed)="closeDrawer()"
+/>
+
+<app-cache-nars-pin-scope-dialog
+  [cacheName]="cacheName"
+  [row]="pinDialogPackageRow()"
+  (changed)="refresh()"
+  (closed)="pinDialogPackageRow.set(null)"
 />
