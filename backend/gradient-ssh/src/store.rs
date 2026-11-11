@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::read_log::read_log;
 use crate::session::Session;
 use crate::store_paths::{StoredPathInfo, original, stored, stored_hash};
+use bytes::Bytes;
 use futures::{Stream, StreamExt as _};
 use gradient_daemon::backend::{Backend, ConnInfo};
 use gradient_daemon::journal::Journal;
+use gradient_daemon::store_features_beyond_nix_daemon_protocol::StoreFeaturesBeyondDaemonProtocol;
 use gradient_db::cache_paths::{ServedPath, served_hashes, served_path};
-use gradient_types::StorePathMapper;
+use gradient_types::{OriginalStorePath, StorePathMapper};
 use gradient_util::nix_hash::normalize_nar_hash;
 use harmonia_protocol::daemon::wire::types2::{
     BuildMode, BuildResult, KeyedBuildResult, QueryMissingResult,
@@ -55,10 +58,7 @@ impl Backend for SshBackend {
     }
 
     fn handler(self: &Arc<Self>, _conn: ConnInfo) -> CacheStore {
-        CacheStore {
-            mapper: self.session.mapper.clone(),
-            session: self.session.clone(),
-        }
+        new_cache_store_for_session(Arc::clone(&self.session))
     }
 
     fn control(
@@ -73,6 +73,13 @@ impl Backend for SshBackend {
 pub struct CacheStore {
     session: Arc<Session>,
     mapper: StorePathMapper,
+}
+
+pub(crate) fn new_cache_store_for_session(session: Arc<Session>) -> CacheStore {
+    CacheStore {
+        mapper: session.mapper.clone(),
+        session,
+    }
 }
 
 const CONCURRENT_COMMITS: usize = 8;
@@ -415,6 +422,16 @@ impl DaemonStore for CacheStore {
 
     fn shutdown(&mut self) -> impl Future<Output = DaemonResult<()>> + Send + '_ {
         ready(Ok(()))
+    }
+}
+
+impl StoreFeaturesBeyondDaemonProtocol for CacheStore {
+    async fn read_build_log(&mut self, drv_path: &StorePath) -> DaemonResult<Option<Bytes>> {
+        let path = OriginalStorePath::parse(&drv_path.to_string()).map_err(err)?;
+        read_log(&self.session, path)
+            .await
+            .map(|log| log.map(Bytes::from))
+            .map_err(err)
     }
 }
 
