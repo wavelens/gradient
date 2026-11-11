@@ -62,7 +62,9 @@ async fn mount_teams_and_expect_project_create(server: &MockServer, teams: Value
     Mock::given(method("PUT"))
         .and(path("/api/v1/projects"))
         .and(body_json(body))
-        .respond_with(ok(json!("created-id")))
+        .respond_with(ok(
+            json!({"id": "created-id", "name": "p", "url": "https://gradient.example/project/p"}),
+        ))
         .expect(1)
         .mount(server)
         .await;
@@ -94,7 +96,7 @@ async fn project_create_without_team_sends_users_only_team_as_owner_team() {
         ],
     )
     .success()
-    .stdout(predicate::str::contains("\"owner_team\":\"ops\""));
+    .stdout(predicate::str::contains("\"id\":\"created-id\""));
 }
 
 #[tokio::test]

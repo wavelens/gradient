@@ -88,10 +88,18 @@ async fn mount_push_and_pull_request_suggestions(
         .await;
 }
 
+fn created_task_response_body(name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": TASK_ID,
+        "name": name,
+        "url": format!("https://gradient.example/project/proj/task/{name}"),
+    })
+}
+
 async fn mount_task_create(server: &MockServer, expected_calls: u64) {
     Mock::given(method("PUT"))
         .and(path("/api/v1/tasks/proj"))
-        .respond_with(ok(serde_json::json!(TASK_ID)))
+        .respond_with(ok(created_task_response_body("nightly")))
         .expect(expected_calls)
         .mount(server)
         .await;
@@ -205,13 +213,13 @@ async fn test_task_duplicate_posts_the_new_names_and_branch() {
         .and(body_json(serde_json::json!({
             "name": "nightly-release", "display_name": "Nightly release", "branch": "release"
         })))
-        .respond_with(ok(serde_json::json!(TASK_ID)))
+        .respond_with(ok(created_task_response_body("nightly-release")))
         .expect(1)
         .mount(&server)
         .await;
 
     let home = home_with(&server);
-    run_gradient_json_with_temp_home(
+    let output = run_gradient_json_with_temp_home(
         &home,
         &[
             "task",
@@ -224,7 +232,13 @@ async fn test_task_duplicate_posts_the_new_names_and_branch() {
             "release",
         ],
     )
-    .success();
+    .success()
+    .get_output()
+    .stdout
+    .clone();
+    let envelope: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(envelope["message"]["id"], TASK_ID);
+    assert_eq!(envelope["message"]["name"], "nightly-release");
 }
 
 #[tokio::test]

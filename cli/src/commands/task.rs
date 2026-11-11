@@ -681,9 +681,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                 )
                 .await
             {
-                Ok(id) => {
-                    out.ok(&serde_json::json!({"created": true, "id": id, "task": name}));
-                    out.human(format!("Task duplicated as {name}."));
+                Ok(created) => {
+                    out.ok(&created);
+                    out.progress(format!("Task duplicated as {name}."));
+                    out.human(created.id);
                 }
                 Err(e) => out.fail(e),
             }

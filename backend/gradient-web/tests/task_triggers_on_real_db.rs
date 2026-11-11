@@ -135,6 +135,10 @@ async fn creating_a_task_with_triggers_stores_exactly_those_triggers() {
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].exec_enabled);
     assert_eq!(
+        res.json::<Value>()["message"]["id"],
+        tasks[0].id.to_string()
+    );
+    assert_eq!(
         configs(&s.db.rows::<task_trigger::Entity>().await),
         vec![
             (
@@ -333,11 +337,15 @@ async fn duplicating_a_task_copies_settings_triggers_and_actions_onto_the_new_br
         .await;
 
     res.assert_status_ok();
-    let copy_id: TaskId = res.json::<Value>()["message"]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap();
+    let created = res.json::<Value>()["message"].clone();
+    assert_eq!(created["name"], "test-task-release");
+    assert!(
+        created["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/project/test-project/task/test-task-release")
+    );
+    let copy_id: TaskId = created["id"].as_str().unwrap().parse().unwrap();
     let copy = s.db.find::<task::Entity>(copy_id).await.unwrap();
     assert_eq!(copy.name, "test-task-release");
     assert!(copy.exec_enabled && copy.wait_for_workers);
