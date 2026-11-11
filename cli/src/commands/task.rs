@@ -128,23 +128,26 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskRepositoryCommands {
-    /// Show repositories, status reports, and integrations for a project.
+    /// Show the repository for the selected task, the connection to the Git host, commit status reports, and the latest webhook events.
     Show,
+    /// Select the connection to the Git host for the selected task and turn commit status reports on or off. Flags not specified keep current values.
+    SetConnection {
+        /// Connection name or UUID from the connections available in `gradient task repository show`
+        #[arg(long, conflicts_with = "no_connection")]
+        connection: Option<String>,
+        /// Remove the connection between the task and the Git host. Commit status reports stop.
+        #[arg(long)]
+        no_connection: bool,
+        /// Post commit status for task evaluation: true or false
+        #[arg(long)]
+        report_status: Option<bool>,
+    },
+    /// Post a pending test commit status to the commit of the latest evaluation.
+    CheckCommitStatus,
     /// Add the SSH key of the project as a read-only deploy key to the repository on the Git host
-    InstallDeployKey {
-        /// Specify the integration for status reports by name or UUID. Gradient can call the Git host with an access token. Default: this task's status reporter.
-        #[arg(long)]
-        outbound_integration: Option<String>,
-    },
+    InstallDeployKey,
     /// Create a webhook on the Git host to send repository events to Gradient.
-    InstallWebhook {
-        /// Webhook integration (name or UUID) that can receive events. The default is the webhook receiver for this task's repository.
-        #[arg(long)]
-        inbound_integration: Option<String>,
-        /// Specify the integration for status reports by name or UUID. Gradient can call the Git host with an access token. Default: this task's status reporter.
-        #[arg(long)]
-        outbound_integration: Option<String>,
-    },
+    InstallWebhook,
 }
 
 #[derive(Subcommand, Debug)]
@@ -379,7 +382,7 @@ async fn build_optional_task_create_trigger_configs(
                         out.err(
                             ExitKind::Usage,
                             format!(
-                                "This project doesn't have a webhook receiver for {repository}. Add one on the Integrations page of the project. Then try again."
+                                "No connection in this project can receive events from the Git host for {repository}. Add a connection in `gradient project git-host-connection create --receives-events true`. Then try again."
                             ),
                         )
                     });

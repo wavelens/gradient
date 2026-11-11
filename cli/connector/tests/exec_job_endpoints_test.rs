@@ -107,7 +107,7 @@ async fn connector_exec_job_pull_requests_decode_test() {
                 "url": "https://github.com/o/r/pull/5",
                 "branch": "gradient/fix",
                 "number": 5,
-                "integration": "github",
+                "git_host_connection": "00000000-0000-0000-0000-000000006110",
                 "created_at": "2026-11-09T00:00:00Z"
             }]))),
         )
@@ -125,6 +125,10 @@ async fn connector_exec_job_pull_requests_decode_test() {
         .await
         .unwrap();
     assert_eq!(pull_requests[0].number, 5);
+    assert_eq!(
+        pull_requests[0].git_host_connection.to_string(),
+        "00000000-0000-0000-0000-000000006110"
+    );
 }
 
 #[tokio::test]

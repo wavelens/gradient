@@ -222,7 +222,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         "#{} {} ({}): {}",
                         pull_request.number,
                         pull_request.branch,
-                        pull_request.integration,
+                        pull_request.git_host_connection,
                         pull_request.url
                     ));
                 }

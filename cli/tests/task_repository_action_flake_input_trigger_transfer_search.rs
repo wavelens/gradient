@@ -15,8 +15,6 @@ use tempfile::TempDir;
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const INBOUND: &str = "00000000-0000-0000-0000-000000000001";
-const OUTBOUND: &str = "00000000-0000-0000-0000-000000000002";
 const ACTION: &str = "00000000-0000-0000-0000-000000000003";
 const OVERRIDE: &str = "00000000-0000-0000-0000-000000000007";
 const TRIGGER: &str = "00000000-0000-0000-0000-000000000008";
@@ -135,8 +133,8 @@ async fn test_task_create_sends_branch_cron_and_suggested_push_trigger_in_one_re
     mount_push_and_pull_request_suggestions(
         &server,
         serde_json::json!([
-            {"type": "reporter_push", "integration_id": INBOUND},
-            {"type": "reporter_pull_request", "integration_id": INBOUND}
+            {"type": "reporter_push", "include_flake_inputs": true},
+            {"type": "reporter_pull_request"}
         ]),
     )
     .await;
@@ -162,7 +160,7 @@ async fn test_task_create_sends_branch_cron_and_suggested_push_trigger_in_one_re
     assert_eq!(triggers[0]["cron"], "0 3 * * *");
     assert_eq!(triggers[0]["branch"], "release");
     assert_eq!(triggers[1]["type"], "reporter_push");
-    assert_eq!(triggers[1]["integration_id"], INBOUND);
+    assert_eq!(triggers[1]["include_flake_inputs"], true);
     assert_eq!(triggers[1]["branches"], serde_json::json!(["release"]));
 }
 
@@ -227,38 +225,6 @@ async fn test_task_duplicate_posts_the_new_names_and_branch() {
         ],
     )
     .success();
-}
-
-#[tokio::test]
-async fn test_task_repository_install_webhook_defaults_to_the_receiver_serving_the_repository() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/tasks/proj/nightly/repository"))
-        .respond_with(ok(serde_json::json!({
-            "repository": REPOSITORY, "uses_ssh": false,
-            "report_status": {"action_id": ACTION, "integration_id": OUTBOUND, "active": true},
-            "integrations": [{
-                "id": INBOUND, "name": "forgejo-hooks", "display_name": "Forgejo hooks",
-                "kind": "inbound", "git_host_type": "forgejo", "serves_repository": true
-            }],
-            "can_edit": true, "can_manage_integrations": true
-        })))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path(
-            "/api/v1/tasks/proj/nightly/repository/install-webhook",
-        ))
-        .and(body_json(serde_json::json!({
-            "inbound_integration": INBOUND, "outbound_integration": OUTBOUND
-        })))
-        .respond_with(ok(serde_json::json!("org/repo")))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let home = home_with(&server);
-    run_gradient_json_with_temp_home(&home, &["task", "repository", "install-webhook"]).success();
 }
 
 #[tokio::test]

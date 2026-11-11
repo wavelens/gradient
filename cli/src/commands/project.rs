@@ -5,6 +5,9 @@
  */
 
 use crate::commands::completion;
+use crate::commands::git_host_connection::{
+    GitHostConnectionSubcommands, run_git_host_connection_subcommand,
+};
 use crate::commands::user_access::access_reasons_to_comma_separated_text;
 use crate::commands::webhook::{
     NoWebhookOwnerArguments, WebhookSubcommands, run_webhook_subcommand,
@@ -23,6 +26,7 @@ use connector::api::{
     PatchProjectGrantRequest, PatchProjectRequest, PutProjectSecretRequest, RemoveMemberRequest,
     RevokeInvitationRequest, SubscribeCacheRequest, SubscriptionStatus, TaskRepositoryFetchStatus,
 };
+use connector::git_host_connections::GitHostConnectionSetOwner;
 use connector::webhooks::WebhookResource;
 use connector::{Client, ConnectorError};
 use std::io::{self, IsTerminal, Read};
@@ -114,6 +118,14 @@ pub enum Commands {
     Webhook {
         #[command(subcommand)]
         cmd: WebhookSubcommands<NoWebhookOwnerArguments>,
+    },
+    /// Manage connections to Git hosts for the selected project, its team, or the instance.
+    GitHostConnection {
+        /// Connection owner: `instance`, `team/<name>` or `project/<name>`. Default: the selected project.
+        #[arg(long, global = true)]
+        owner: Option<GitHostConnectionSetOwner>,
+        #[command(subcommand)]
+        cmd: GitHostConnectionSubcommands,
     },
 }
 
@@ -598,6 +610,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                 out,
             )
             .await
+        }
+
+        Commands::GitHostConnection { owner, cmd } => {
+            let owner =
+                owner.unwrap_or_else(|| GitHostConnectionSetOwner::Project(selected_project(out)));
+            run_git_host_connection_subcommand(cmd, owner, out).await
         }
 
         Commands::Secret { cmd } => {

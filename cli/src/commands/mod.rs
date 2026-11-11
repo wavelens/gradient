@@ -26,6 +26,7 @@ pub mod eval;
 pub mod evaluation;
 pub mod exec_job_commands;
 pub mod generate;
+pub mod git_host_connection;
 pub mod live_events;
 pub mod logged_in_user_account_group_commands;
 pub mod logs;

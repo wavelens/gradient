@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::git_host_connection::{
+    print_git_host_connection_line, print_incoming_webhook_delivery_line,
+};
 use crate::commands::task::{
     FlakeInputCommands, TaskActionCommands, TaskRepositoryCommands, TaskTriggerCommands,
 };
@@ -12,8 +15,9 @@ use crate::output::{Color, ExitKind, Output};
 use connector::Client;
 use connector::api::{
     ActionConfig, CreateActionRequest, CreateFlakeInputOverrideRequest, CreateTriggerRequest,
-    FlakeInputOverrideId, InstallDeployKeyRequest, InstallWebhookRequest, IntegrationId,
-    TaskActionId, TaskRepositoryResponse, TriggerConfig, UpdateActionRequest, UpdateTriggerRequest,
+    FlakeInputOverrideId, GitHostConnectionSummary, TaskActionId, TaskCommitStatusPostAttempt,
+    TaskRepositoryConnectionAndCommitStatusPatchRequest, TaskRepositoryResponse, TriggerConfig,
+    UpdateActionRequest, UpdateTriggerRequest,
 };
 use serde::de::DeserializeOwned;
 
@@ -26,23 +30,21 @@ fn parse_json_configuration_from_command_line<T: DeserializeOwned>(config: &str,
     })
 }
 
-fn integration_uuid_from_uuid_or_name_using_task_repository_integrations(
+fn find_git_host_connection_by_name_or_uuid<'a>(
     reference: &str,
-    repository: &TaskRepositoryResponse,
+    repository: &'a TaskRepositoryResponse,
     out: Output,
-) -> IntegrationId {
-    if let Ok(id) = reference.parse() {
-        return id;
-    }
+) -> &'a GitHostConnectionSummary {
     repository
-        .integrations
+        .available_connections
         .iter()
-        .find(|integration| integration.name == reference)
-        .map(|integration| integration.id.clone())
+        .find(|connection| connection.name == reference || connection.id.to_string() == reference)
         .unwrap_or_else(|| {
             out.err(
                 ExitKind::Usage,
-                format!("This project has no integration named '{reference}'."),
+                format!(
+                    "This task has no available connection to the Git host named '{reference}'."
+                ),
             )
         })
 }
@@ -103,145 +105,136 @@ async fn find_override_uuid_by_input_name_or_uuid(
         })
 }
 
-fn print_repository(repository: &TaskRepositoryResponse, out: Output) {
-    let integration_name = |id: &IntegrationId| {
-        repository
-            .integrations
-            .iter()
-            .find(|integration| &integration.id == id)
-            .map_or_else(|| id.to_string(), |integration| integration.name.clone())
-    };
-    let state = |active: bool| if active { "on" } else { "off" };
+fn print_commit_status_post_attempt_line(out: Output, attempt: &TaskCommitStatusPostAttempt) {
+    let result = if attempt.success { "ok" } else { "failed" };
+    let status = attempt
+        .response_status
+        .map_or("-".to_owned(), |status| status.to_string());
+    let error = attempt
+        .error_message
+        .as_deref()
+        .map(|error| format!(": {error}"))
+        .unwrap_or_default();
+    out.human(format!(
+        "{} {} {result} {status}{error}",
+        attempt.delivered_at, attempt.event
+    ));
+}
 
+fn print_repository(repository: &TaskRepositoryResponse, out: Output) {
     out.human(format!("Repository: {}", repository.repository));
-    if let Some(report) = &repository.report_status {
-        out.human(format!(
-            "Status Report: {} ({})",
-            state(report.active),
-            integration_name(&report.integration_id),
-        ));
+    match &repository.git_host_connection {
+        Some(connection) => {
+            out.human("Connection");
+            print_git_host_connection_line(out, connection);
+        }
+        None => out.human("Connection: none"),
+    }
+    let state = if repository.report_status {
+        "on"
+    } else {
+        "off"
+    };
+    out.human(format!("Commit status report: {state}"));
+    if let Some(url) = &repository.webhook_url {
+        out.human(format!("Webhook URL: {url}"));
     }
     if let Some(deploy_key) = &repository.deploy_key {
         out.human(format!("Deploy key: {deploy_key}"));
     }
-    if !repository.integrations.is_empty() {
-        out.human("Integration:");
-        for integration in &repository.integrations {
-            out.human(format!(
-                "  {} ({}, {}): {}",
-                integration.name, integration.kind, integration.git_host_type, integration.id
-            ));
-        }
+    if let Some(event) = &repository.last_event {
+        out.human("Last Webhook event");
+        print_incoming_webhook_delivery_line(out, event);
+    }
+    if !repository.status_posts.is_empty() {
+        out.human("Commit Status Posting");
+        repository
+            .status_posts
+            .iter()
+            .for_each(|attempt| print_commit_status_post_attempt_line(out, attempt));
+    }
+    if !repository.available_connections.is_empty() {
+        out.human("Available Connections");
+        repository
+            .available_connections
+            .iter()
+            .for_each(|connection| print_git_host_connection_line(out, connection));
     }
 }
 
 pub async fn handle_task_repository_subcommand(cmd: TaskRepositoryCommands, out: Output) {
     let (project, task) = selected_task(out);
     let client = client_from_config(out);
-    let repository = client
-        .task_repository()
-        .get(&project, &task)
-        .await
-        .unwrap_or_else(|e| out.fail(e));
+    let api = client.task_repository();
+    let current = || async {
+        api.get(&project, &task)
+            .await
+            .unwrap_or_else(|e| out.fail(e))
+    };
 
     match cmd {
         TaskRepositoryCommands::Show => {
+            let repository = current().await;
             out.ok(&repository);
             print_repository(&repository, out);
         }
 
-        TaskRepositoryCommands::InstallDeployKey {
-            outbound_integration,
+        TaskRepositoryCommands::SetConnection {
+            connection,
+            no_connection,
+            report_status,
         } => {
-            let outbound_integration = outbound_integration
-                .map(|reference| {
-                    integration_uuid_from_uuid_or_name_using_task_repository_integrations(
-                        &reference,
-                        &repository,
-                        out,
-                    )
-                })
-                .or_else(|| {
-                    repository
-                        .report_status
-                        .as_ref()
-                        .map(|report| report.integration_id.clone())
-                })
-                .unwrap_or_else(|| {
-                    out.err(
-                        ExitKind::Usage,
-                        "This task doesn't report commit status. Set `--outbound-integration`.",
-                    )
-                });
-
-            let path = client
-                .task_repository()
-                .add_project_ssh_public_key_as_read_only_deploy_key(
+            let repository = current().await;
+            let chosen = match connection {
+                _ if no_connection => None,
+                Some(reference) => Some(find_git_host_connection_by_name_or_uuid(
+                    &reference,
+                    &repository,
+                    out,
+                )),
+                None => repository.git_host_connection.as_ref(),
+            };
+            let report_status = report_status.unwrap_or(
+                repository.report_status
+                    && chosen.is_some_and(|connection| connection.reports_status),
+            );
+            let saved = api
+                .set_task_repository_git_host_connection_and_commit_status_reporting(
                     &project,
                     &task,
-                    &InstallDeployKeyRequest {
-                        outbound_integration,
+                    &TaskRepositoryConnectionAndCommitStatusPatchRequest {
+                        git_host_connection: chosen.map(|connection| connection.id.clone()),
+                        report_status: Some(report_status),
                     },
                 )
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&saved);
+            out.human("Saved the connection to the Git host for this task.");
+            print_repository(&saved, out);
+        }
+
+        TaskRepositoryCommands::CheckCommitStatus => {
+            let attempt = api
+                .post_pending_test_commit_status_to_last_evaluated_commit(&project, &task)
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&attempt);
+            print_commit_status_post_attempt_line(out, &attempt);
+        }
+
+        TaskRepositoryCommands::InstallDeployKey => {
+            let path = api
+                .add_project_ssh_public_key_as_read_only_deploy_key(&project, &task)
                 .await
                 .unwrap_or_else(|e| out.fail(e));
             out.ok(&serde_json::json!({"installed": true, "repository": path}));
             out.human(format!("Installed deploy key at {path}."));
         }
 
-        TaskRepositoryCommands::InstallWebhook {
-            inbound_integration,
-            outbound_integration,
-        } => {
-            let resolve = |reference: String| {
-                integration_uuid_from_uuid_or_name_using_task_repository_integrations(
-                    &reference,
-                    &repository,
-                    out,
-                )
-            };
-            let inbound_integration = inbound_integration
-                .map(resolve)
-                .or_else(|| {
-                    repository
-                        .integrations
-                        .iter()
-                        .find(|integration| {
-                            integration.kind == "inbound" && integration.serves_repository
-                        })
-                        .map(|integration| integration.id.clone())
-                })
-                .unwrap_or_else(|| {
-                    out.err(
-                        ExitKind::Usage,
-                        "No webhook receivers exist for this repository. Specify `--inbound-integration`.",
-                    )
-                });
-            let outbound_integration = outbound_integration
-                .map(resolve)
-                .or_else(|| {
-                    repository
-                        .report_status
-                        .as_ref()
-                        .map(|report| report.integration_id.clone())
-                })
-                .unwrap_or_else(|| {
-                    out.err(
-                        ExitKind::Usage,
-                        "This task doesn't report commit status. Set `--outbound-integration`.",
-                    )
-                });
-
-            let path = client
-                .task_repository()
-                .create_repository_webhook(
-                    &project,
-                    &task,
-                    &InstallWebhookRequest {
-                        inbound_integration,
-                        outbound_integration,
-                    },
-                )
+        TaskRepositoryCommands::InstallWebhook => {
+            let path = api
+                .create_repository_webhook(&project, &task)
                 .await
                 .unwrap_or_else(|e| out.fail(e));
             out.ok(&serde_json::json!({"installed": true, "repository": path}));

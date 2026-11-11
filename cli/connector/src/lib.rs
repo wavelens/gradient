@@ -13,7 +13,7 @@ pub mod commits;
 pub mod evals;
 pub mod exec_jobs;
 pub mod flake_inputs;
-pub mod integrations;
+pub mod git_host_connections;
 pub mod projects;
 pub mod pull_requests;
 pub mod search;
@@ -95,8 +95,8 @@ impl Client {
     pub fn exec_jobs(&self) -> exec_jobs::ExecJobsApi<'_> {
         exec_jobs::ExecJobsApi(self)
     }
-    pub fn integrations(&self) -> integrations::IntegrationsApi<'_> {
-        integrations::IntegrationsApi(self)
+    pub fn git_host_connections(&self) -> git_host_connections::GitHostConnections<'_> {
+        git_host_connections::GitHostConnections(self)
     }
     pub fn projects(&self) -> projects::ProjectsApi<'_> {
         projects::ProjectsApi(self)

@@ -17,7 +17,8 @@ async fn all_accessors_compile() {
     let _ = client.caches();
     let _ = client.commits();
     let _ = client.evals();
-    let _ = client.integrations();
+    let _ = client.git_host_connections();
+    let _ = client.task_repository();
     let _ = client.projects();
     let _ = client.tasks();
     let _ = client.server();
