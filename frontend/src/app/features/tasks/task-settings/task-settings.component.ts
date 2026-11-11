@@ -332,11 +332,11 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     this.copyRequestInFlight.set(true);
     this.duplicateTaskDialogErrorMessage.set(null);
     this.tasksService.duplicateTask(this.projectName, this.taskName, { name, display_name: display_name.trim(), branch }).subscribe({
-      next: () => {
+      next: (copy) => {
         this.copyRequestInFlight.set(false);
         this.showCopyTaskToBranchDialog.set(false);
         this.notify.success('Task duplicated');
-        this.router.navigateByUrl(links.task(this.projectName, name));
+        this.router.navigateByUrl(links.task(this.projectName, copy.name));
       },
       error: (error: unknown) => {
         this.duplicateTaskDialogErrorMessage.set(apiErrorMessage(error, "Couldn't duplicate the task."));

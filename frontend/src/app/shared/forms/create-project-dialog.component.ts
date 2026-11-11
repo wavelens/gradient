@@ -110,11 +110,11 @@ export class CreateProjectDialogComponent {
     this.creating.set(true);
     this.error.set(null);
     this.projects.createProject({ ...this.project, owner_team: this.ownerTeamSelect()?.ownerTeamNameToSend() ?? null }).subscribe({
-      next: () => {
+      next: (project) => {
         this.creating.set(false);
         this.visible.set(false);
         this.notify.success('Project created');
-        this.created.emit(this.project.name);
+        this.created.emit(project.name);
       },
       error: (error: unknown) => {
         this.error.set(apiErrorMessage(error, 'Failed to create project.'));

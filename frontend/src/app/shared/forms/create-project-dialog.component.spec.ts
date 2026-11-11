@@ -73,19 +73,19 @@ async function setup(createProject: () => unknown, options: { teams?: TeamSummar
 
 describe('CreateProjectDialogComponent', () => {
   it('creates the project, closes, confirms with a toast and reports its name', async () => {
-    const createProject = vi.fn(() => of('id'));
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme-ci', url: '' }));
     const { host, type, submit } = await setup(createProject);
     const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
     await type('#project-display-name', 'Acme');
     await submit();
     expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'acme', display_name: 'Acme', public: false, owner_team: null }));
     expect(success).toHaveBeenCalledWith('Project created');
-    expect(host.created).toEqual(['acme']);
+    expect(host.created).toEqual(['acme-ci']);
     expect(host.visible).toBe(false);
   });
 
   it('names the missing fields when Create is clicked on an empty form', async () => {
-    const createProject = vi.fn(() => of('id'));
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
     const { host, submit } = await setup(createProject);
     await submit();
     expect(createProject).not.toHaveBeenCalled();
@@ -135,7 +135,7 @@ describe('CreateProjectDialogComponent', () => {
   });
 
   it('preselects the only team of the user as owner team', async () => {
-    const createProject = vi.fn(() => of('id'));
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
     const { type, submit, ownerTeamField } = await setup(createProject, { teams: [INFRA] });
     expect(ownerTeamField()?.textContent).toContain('Infra (infra)');
     await type('#project-display-name', 'Acme');
@@ -144,7 +144,7 @@ describe('CreateProjectDialogComponent', () => {
   });
 
   it('leaves the owner team empty when the user belongs to several teams', async () => {
-    const createProject = vi.fn(() => of('id'));
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
     const { type, submit, ownerTeamField } = await setup(createProject, { teams: [INFRA, WEB] });
     expect(ownerTeamField()?.textContent).toContain('No team');
     await type('#project-display-name', 'Acme');
@@ -153,7 +153,7 @@ describe('CreateProjectDialogComponent', () => {
   });
 
   it('preselects the team of the team page, even without membership', async () => {
-    const createProject = vi.fn(() => of('id'));
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
     const { type, submit, ownerTeamField } = await setup(createProject, { teams: [WEB], preselected: { name: 'infra', display_name: 'Infra' } });
     expect(ownerTeamField()?.textContent).toContain('Infra');
     await type('#project-display-name', 'Acme');
@@ -162,7 +162,7 @@ describe('CreateProjectDialogComponent', () => {
   });
 
   it('sends no owner team after picking No team', async () => {
-    const createProject = vi.fn(() => of('id'));
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
     const { type, submit, pickOwnerTeam } = await setup(createProject, { teams: [INFRA] });
     await pickOwnerTeam('No team');
     await type('#project-display-name', 'Acme');

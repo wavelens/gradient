@@ -396,7 +396,7 @@ describe('TaskSettingsComponent - duplicate task', () => {
 
   it('copies the task onto the chosen branch and opens the copy', () => {
     const fixture = setup(admin);
-    const duplicateTask = vi.fn(() => of('new-id'));
+    const duplicateTask = vi.fn(() => of({ id: 'new-id', name: 'demo-release', url: '' }));
     (TestBed.inject(TasksService) as unknown as Record<string, unknown>)['duplicateTask'] = duplicateTask;
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     const component = fixture.componentInstance;

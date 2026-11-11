@@ -120,8 +120,8 @@ export class TasksService {
     return this.api.post<string>(`projects/${project}/repository-check`, body);
   }
 
-  duplicateTask(project: string, task: string, body: DuplicateTaskRequest): Observable<string> {
-    return this.api.post<string>(`tasks/${project}/${task}/duplicate`, body);
+  duplicateTask(project: string, task: string, body: DuplicateTaskRequest): Observable<CreatedEntityResponse> {
+    return this.api.post<CreatedEntityResponse>(`tasks/${project}/${task}/duplicate`, body);
   }
 
   updateTaskRepositoryConnection(
