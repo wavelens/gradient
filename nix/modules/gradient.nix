@@ -518,7 +518,7 @@ in {
       };
 
       ssh = {
-        enable = lib.mkEnableOption "the Nix daemon over SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`";
+        enable = lib.mkEnableOption "Nix daemon via SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`, plus gRPC on web port for same `grpc://` store of nix-grpc-store (project API key in `token-file`)";
 
         hostKeyFile = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
@@ -780,6 +780,16 @@ in {
               proxy_read_timeout 1d;
             '';
 
+            "~ ^/nix\\.remote\\.(NixRemote|Scheduler)/" = lib.mkIf cfg.ssh.enable {
+              extraConfig = ''
+                grpc_pass grpc://${cfg.listenAddr}:${toString cfg.port};
+                grpc_set_header X-Forwarded-For $remote_addr;
+                grpc_read_timeout 1d;
+                grpc_send_timeout 1d;
+                client_max_body_size 0;
+              '';
+            };
+
             "/cache/" = serverLocation ''
               client_max_body_size ${toString proxyMaxBodyBytes};
               proxy_buffering off;
@@ -806,6 +816,11 @@ in {
             handle /cache/* {
               reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
             }
+            ${lib.optionalString cfg.ssh.enable ''
+              handle /nix.remote.* {
+                reverse_proxy h2c://${cfg.listenAddr}:${toString cfg.port}
+              }
+            ''}
             ${lib.optionalString (cfg.proto.discoverable && cfg.proto.public) ''
               handle /proto {
                 reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}

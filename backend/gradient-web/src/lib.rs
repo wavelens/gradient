@@ -11,6 +11,7 @@ pub mod access;
 pub mod api_spec;
 pub mod api_typescript;
 pub mod audit;
+mod authenticated_nix_grpc_store_routes;
 pub mod authorization;
 pub(crate) mod client_ip;
 pub mod endpoints;
@@ -431,6 +432,12 @@ pub fn create_router_with_scheduler(
                 100,
             )?));
         app = app.nest("/scim/v2", scim_routes);
+    }
+
+    if state.config.ssh.enable {
+        app = authenticated_nix_grpc_store_routes::add_grpc_nix_store_service_routes_to_router(
+            app, &state, scheduler,
+        );
     }
 
     Ok(app

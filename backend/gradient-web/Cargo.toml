@@ -37,6 +37,8 @@ gradient-proto = { workspace = true }
 gradient-scheduler = { workspace = true }
 gradient-entity = { workspace = true }
 gradient-report = { workspace = true }
+gradient-daemon = { workspace = true }
+gradient-ssh = { workspace = true }
 
 anyhow        = { workspace = true }
 async-stream  = { workspace = true }
@@ -66,6 +68,7 @@ tempfile      = { workspace = true }
 thiserror     = { workspace = true }
 tokio         = { workspace = true, features = ["process", "signal", "macros"] }
 tokio-util    = { workspace = true, features = ["io"] }
+tonic         = { workspace = true }
 tracing       = { workspace = true }
 url           = { workspace = true }
 utoipa        = { workspace = true, features = ["axum_extras"] }
@@ -73,7 +76,7 @@ utoipa-axum   = { workspace = true }
 uuid          = { workspace = true }
 zstd          = { workspace = true }
 
-axum                 = { workspace = true, features = ["multipart", "http1", "json", "tokio", "matched-path", "query", "form", "original-uri"] }
+axum                 = { workspace = true, features = ["multipart", "http1", "http2", "json", "tokio", "matched-path", "query", "form", "original-uri"] }
 axum_typed_multipart = { workspace = true }
 axum-streams         = { workspace = true }
 email_address        = { workspace = true }
@@ -96,6 +99,7 @@ hmac              = { workspace = true }
 gradient-fixtures = { workspace = true }
 gradient-test-support = { workspace = true }
 tokio-test   = { workspace = true }
+tonic        = { workspace = true, features = ["transport"] }
 tokio-tungstenite = { workspace = true }
 tower        = { workspace = true }
 tracing-subscriber = { workspace = true }

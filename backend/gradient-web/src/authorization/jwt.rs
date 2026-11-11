@@ -52,7 +52,7 @@ pub fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .find_map(|part| part.strip_prefix(name)?.strip_prefix('='))
 }
 
-pub(super) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let mut parts = headers
         .get(header::AUTHORIZATION)?
         .to_str()
