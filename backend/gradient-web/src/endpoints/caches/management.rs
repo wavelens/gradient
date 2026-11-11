@@ -5,7 +5,7 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::access::{effective_cache_role_and_mask, has_cache_permission};
+use crate::access::{AccessRefusal, effective_cache_role_and_mask, has_cache_permission};
 use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
@@ -18,7 +18,6 @@ use crate::names::{CacheDisplayName, CacheName};
 use crate::permissions::{
     CachePermission, Permission, cache_mask_grants, cache_mask_to_vec, mask_grants,
 };
-use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -420,7 +419,10 @@ pub async fn patch_cache(
             )
             .await?
             {
-                return Err(SharedRefusal::MissingPermission.into());
+                return Err(AccessRefusal::MissingCachePermission(
+                    CachePermission::ManageCacheMembers,
+                )
+                .into());
             }
             Some(match owner_team.as_deref() {
                 Some(name) => Some(

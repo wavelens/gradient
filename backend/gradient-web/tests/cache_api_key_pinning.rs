@@ -200,6 +200,10 @@ async fn create_cache_pinned_key_cannot_exceed_member_mask() {
         .await;
 
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        res.json::<serde_json::Value>()["missing_permissions"],
+        serde_json::json!(["writeStore"])
+    );
 }
 
 #[tokio::test]

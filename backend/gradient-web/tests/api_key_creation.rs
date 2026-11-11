@@ -42,6 +42,10 @@ async fn project_pinned_key_cannot_grant_a_permission_the_owner_lacks() {
         .await;
 
     res.assert_status(StatusCode::FORBIDDEN);
+    assert_eq!(
+        res.json::<Value>()["missing_permissions"],
+        json!(["deleteProject"])
+    );
 }
 
 #[tokio::test]

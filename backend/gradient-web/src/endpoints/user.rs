@@ -16,9 +16,9 @@ use crate::json_body::JsonBody;
 use crate::lookup::require;
 use crate::names::UserDisplayName;
 use crate::permissions::{
-    Permission, PermissionEntry, PermissionMask, available_cache_permissions,
-    available_permissions, available_server_permissions, cache_mask_to_wire, mask_grants,
-    mask_to_vec, mask_with_view_project_permission, parse_cache_permission_list,
+    CachePermission, Permission, PermissionEntry, PermissionMask, available_cache_permissions,
+    available_permissions, available_server_permissions, cache_mask_to_vec, cache_mask_to_wire,
+    mask_grants, mask_to_vec, mask_with_view_project_permission, parse_cache_permission_list,
     parse_permission_list, server_wide_mask,
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
@@ -64,9 +64,9 @@ enum UserRefusal {
     #[error("Set API key expiry to at least 1 day.")]
     ApiKeyExpiryShorterThanOneDay,
     #[error("API key cannot grant cache permissions you do not hold.")]
-    GrantUnheldCachePermissions,
+    GrantUnheldCachePermissions(Vec<CachePermission>),
     #[error("API key cannot grant project permissions that the owner does not have.")]
-    GrantUnheldProjectPermissions,
+    GrantUnheldProjectPermissions(Vec<Permission>),
     #[error("Only keys that aren't pinned to a project can call `createProject`.")]
     ServerWidePermissionOnPinnedKey,
     #[error(
@@ -84,8 +84,8 @@ impl Refusal for UserRefusal {
             | Self::PasswordConfirmationInvalid
             | Self::UsernameConfirmationRequired
             | Self::UsernameConfirmationMismatch
-            | Self::GrantUnheldCachePermissions
-            | Self::GrantUnheldProjectPermissions
+            | Self::GrantUnheldCachePermissions(_)
+            | Self::GrantUnheldProjectPermissions(_)
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
             | Self::ServerWidePermissionOnPinnedKey
@@ -93,6 +93,18 @@ impl Refusal for UserRefusal {
             | Self::NoPermissionsSelected
             | Self::ApiKeyExpiryShorterThanOneDay
             | Self::InvalidVersion { .. } => RefusalStatus::BadRequest,
+        }
+    }
+
+    fn missing_permission_wire_names(&self) -> Vec<&'static str> {
+        match self {
+            Self::GrantUnheldCachePermissions(permissions) => {
+                permissions.iter().map(|p| p.as_wire_name()).collect()
+            }
+            Self::GrantUnheldProjectPermissions(permissions) => {
+                permissions.iter().map(|p| p.as_wire_name()).collect()
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -571,7 +583,9 @@ async fn held_cache_permissions(
     }
     let granted = caller_cache_mask(db, Caller::User(user), cache_id, None).await?;
     if mask & !granted != 0 {
-        return Err(UserRefusal::GrantUnheldCachePermissions.into());
+        return Err(
+            UserRefusal::GrantUnheldCachePermissions(cache_mask_to_vec(mask & !granted)).into(),
+        );
     }
     Ok(mask)
 }
@@ -595,7 +609,10 @@ async fn reject_api_key_permissions_not_held_by_owner(
         Some(project) => {
             let granted = caller_project_mask(db, Caller::User(user), project, None).await?;
             if mask & !granted != 0 {
-                return Err(UserRefusal::GrantUnheldProjectPermissions.into());
+                return Err(UserRefusal::GrantUnheldProjectPermissions(mask_to_vec(
+                    mask & !granted,
+                ))
+                .into());
             }
             Ok(mask)
         }

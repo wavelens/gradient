@@ -213,6 +213,29 @@ async fn api_key_without_create_project_permission_cache_pinned_key_and_project_
 }
 
 #[tokio::test]
+async fn unpinned_api_key_without_create_project_permission_cannot_create_project_and_403_body_lists_create_project_missing_permission()
+ {
+    let raw = "m".repeat(64);
+    let db = with_key(mock_db(), &key_row(&raw, admin_mask(), None));
+    let res = make_test_server(db.into_connection())
+        .put("/api/v1/projects")
+        .add_header("authorization", bearer_key(&raw))
+        .json(&json!({
+            "name": "new-project",
+            "display_name": "New",
+            "description": "",
+        }))
+        .await;
+    res.assert_status(StatusCode::FORBIDDEN);
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["missing_permissions"],
+        json!(["createProject"]),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn unpinned_api_key_with_create_project_permission_creates_project() {
     let raw = "l".repeat(64);
     let key = key_row(

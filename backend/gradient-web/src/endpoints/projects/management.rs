@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, caller_project_mask, has_permission, key_limited_project_mask};
+use crate::access::{
+    AccessRefusal, Caller, caller_project_mask, has_permission, key_limited_project_mask,
+};
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
@@ -304,7 +306,11 @@ pub async fn put(
     if let Some(key) = api_key.as_ref()
         && !key.may_create_projects()
     {
-        return Err(SharedRefusal::MissingPermission.into());
+        return Err(if key.project.is_none() && key.cache_pin.is_none() {
+            AccessRefusal::MissingServerWidePermission(Permission::CreateProject).into()
+        } else {
+            SharedRefusal::MissingPermission.into()
+        });
     }
     require_create_permission(state.config.permissions.create_project, &user)?;
 
@@ -539,7 +545,9 @@ pub async fn patch_project(
             )
             .await?
             {
-                return Err(SharedRefusal::MissingPermission.into());
+                return Err(
+                    AccessRefusal::MissingProjectPermission(Permission::ManageMembers).into(),
+                );
             }
             Some(match owner_team.as_deref() {
                 Some(name) => Some(

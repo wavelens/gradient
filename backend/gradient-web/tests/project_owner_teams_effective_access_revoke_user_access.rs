@@ -7,7 +7,7 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_entity::team_user::TeamRole;
-use gradient_entity::{project, project_user, team, team_user, user};
+use gradient_entity::{api, project, project_user, team, team_user, user};
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::rows;
 use gradient_test_support::state::TestState;
@@ -15,6 +15,8 @@ use gradient_test_support::web::bearer;
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use gradient_types::ids::*;
+use gradient_types::permissions::{Permission, mask_from};
+use gradient_web::authorization::hash_api_key;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelBehavior, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -151,6 +153,44 @@ async fn create_project_with_owner_team_caller_not_member_is_forbidden_and_write
         .assert_status(StatusCode::FORBIDDEN);
 
     assert!(instance.db.rows::<project::Entity>().await.is_empty());
+    instance.db.finish().await;
+}
+
+#[tokio::test]
+async fn project_admin_api_key_with_only_view_project_and_manage_project_settings_changing_project_owner_team_is_forbidden_and_lists_missing_manage_members()
+ {
+    let instance = instance_with_team_writing_on_its_projects(true).await;
+    create_team_project(&instance).await.assert_status_ok();
+    let raw = "o".repeat(64);
+    insert(
+        &instance.db,
+        api::Model {
+            id: ApiId::now_v7(),
+            owned_by: rows::user().id,
+            name: "settings".into(),
+            key: hash_api_key(&raw),
+            permission: mask_from(&[Permission::ViewProject, Permission::ManageProjectSettings]),
+            last_used_at: gradient_fixtures::test_date(),
+            created_at: gradient_fixtures::test_date(),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let res = instance
+        .server
+        .patch("/api/v1/projects/team-project")
+        .add_header("authorization", format!("Bearer GRAD{raw}"))
+        .json(&json!({ "owner_team": instance.team.name }))
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+    let body: Value = res.json();
+    assert_eq!(
+        body["missing_permissions"],
+        json!(["manageMembers"]),
+        "{body}"
+    );
     instance.db.finish().await;
 }
 

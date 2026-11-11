@@ -36,6 +36,8 @@ pub(crate) enum AccessRefusal {
     KeyPinnedToDifferentCache,
     #[error("Requests to this project need the \"{}\" permission.", .0.permission_label())]
     MissingProjectPermission(Permission),
+    #[error("Requests to this endpoint need the \"{}\" permission.", .0.permission_label())]
+    MissingServerWidePermission(Permission),
     #[error("Requests to this cache need the \"{}\" permission.", .0.permission_label())]
     MissingCachePermission(CachePermission),
     #[error(
@@ -52,7 +54,8 @@ impl Refusal for AccessRefusal {
 
     fn missing_permission_wire_names(&self) -> Vec<&'static str> {
         match self {
-            Self::MissingProjectPermission(permission) => vec![permission.as_wire_name()],
+            Self::MissingProjectPermission(permission)
+            | Self::MissingServerWidePermission(permission) => vec![permission.as_wire_name()],
             Self::MissingCachePermission(permission) => vec![permission.as_wire_name()],
             Self::MissingUpstreamCacheStorePermissions(permissions) => {
                 permissions.iter().map(|p| p.as_wire_name()).collect()
