@@ -17,6 +17,7 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ApiError } from '@core/services/api.service';
 import { MessageService } from '@gradient/ui/ui';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
+import { clockTime } from '@shared/text';
 import { ExecJobPageComponent } from './exec-job-page.component';
 
 vi.mock('@xterm/xterm', () => ({
@@ -485,6 +486,40 @@ describe('ExecJobPageComponent', () => {
     expect(fixture.componentInstance.formattedProgramRunTime()).toBe('77 ms');
   });
 
+  const retried = (): ExecJobResponse => ({
+    ...job('completed'),
+    attempts: [
+      { number: 1, worker: 'w1', started_at: '2026-01-01T15:12:00', program_started_at: '2026-01-01T15:12:10', ended_at: '2026-01-01T15:13:00', end_reason: 'lost' },
+      { number: 2, worker: 'w1', started_at: '2026-01-01T15:18:00', program_started_at: '2026-01-01T15:18:10', ended_at: '2026-01-01T15:19:00', end_reason: 'completed' },
+    ],
+  });
+
+  it('offers each attempt of a retried job and reads the log of the picked one', () => {
+    const { fixture, logAfter, navigate } = setup('completed', SSH, {}, retried());
+    const page = fixture.componentInstance;
+    expect(page.attemptDropdownOptions().map((option) => option.label)).toEqual([
+      `Attempt 1 · worker lost ${clockTime('2026-01-01T15:13:00')}`,
+      `Attempt 2 · completed ${clockTime('2026-01-01T15:19:00')}`,
+    ]);
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).not.toBeNull();
+    expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, 2, 0);
+    page.selectAttemptAndReloadLog(1);
+    expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { attempt: 1 } }));
+    expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, 1, 0);
+    expect(page.pickedOrHighestNumberedAttemptForSelectedNode()?.number).toBe(1);
+  });
+
+  it('opens the attempt from the URL and times its program run', () => {
+    const { fixture, logAfter } = setup('completed', SSH, { attempt: '1' }, retried());
+    expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, 1, 0);
+    expect(fixture.componentInstance.formattedProgramRunTime()).toBe('50.0 s');
+  });
+
+  it('hides the attempt selector for a job with one attempt', () => {
+    const { fixture } = setup('completed');
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).toBeNull();
+  });
+
   it('leaves out the job link while the job has no assignment to show', () => {
     const { fixture } = setup('queued');
     expect(showJobLink(fixture.nativeElement)).toBeUndefined();
@@ -693,7 +728,7 @@ describe('ExecJobPageComponent', () => {
       nodeItem(fixture.nativeElement, 1)?.click();
       fixture.detectChanges();
       expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, undefined, 1);
-      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: 1 } }));
+      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: 1, attempt: null } }));
       expect(nodeItem(fixture.nativeElement, 1)?.classList).toContain('selected');
     });
 
@@ -701,7 +736,7 @@ describe('ExecJobPageComponent', () => {
       const { fixture, logAfter, navigate } = setup('completed', SSH, { node: '99' }, twoNodeJob('completed'));
       expect(logAfter).toHaveBeenCalledTimes(1);
       expect(logAfter).toHaveBeenCalledWith('j1', undefined, 1, 0);
-      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: null } }));
+      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: null, attempt: null } }));
       expect((fixture.nativeElement as HTMLElement).textContent).toContain('apps.x86_64-linux.train');
       expect(nodeItem(fixture.nativeElement, 0)?.classList).toContain('selected');
     });

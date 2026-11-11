@@ -161,6 +161,13 @@
         <div class="info-bar-left">
           <div class="info-metric">
             <gr-eval-status-badge [status]="ev.status" [waitingReason]="ev.waiting_reason" [prioritized]="ev.prioritized" />
+            @if (abortedEvaluationExplanationWithReplacementIdForHeaderEvaluation(); as abort) {
+              @if (abort.replacementId) {
+                <a class="abort-reason" [routerLink]="links.evaluationLog(projectName, abort.replacementId)">{{ abort.text }}</a>
+              } @else {
+                <span class="abort-reason">{{ abort.text }}</span>
+              }
+            }
           </div>
           @if (ev.started_at) {
             <div class="info-metric">
@@ -216,34 +223,6 @@
                                [subjectLabel]="job.entry_point" [subjectLink]="links.execJob(projectName, task, job.id)"
                                [busy]="execJobStartingId() === job.id" (start)="runWaitingExecJob(job)" />
           }
-        }
-        @if (selectedSection() !== 'messages' && selectedBuildAttempts().length > 1) {
-          <gr-table class="build-attempts">
-            <thead>
-              <tr>
-                <th>Attempt</th>
-                <th>Result</th>
-                <th>Worker</th>
-                <th>Start</th>
-                <th class="num">Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (attempt of selectedBuildAttempts(); track attempt.id; let i = $index, count = $count) {
-                @let shown = (selectedAttemptId() ?? selectedBuildAttempts()[0].id) === attempt.id;
-                <tr class="is-clickable" [class.is-selected]="shown" (click)="selectAttemptLog(attempt)">
-                  <td>
-                    <button type="button" class="build-attempt-link" [attr.aria-pressed]="shown">#{{ count - i }}</button>
-                    @if (i === 0) { <gr-badge severity="info">Latest</gr-badge> }
-                  </td>
-                  <td>{{ buildAttemptOutcomeText(attempt) }}</td>
-                  <td class="mono">{{ attempt.worker ?? '-' }}</td>
-                  <td>{{ attempt.started_at ?? attempt.created_at | serverDate }}</td>
-                  <td class="num mono">{{ formatBuildAttemptDurationText(attempt) }}</td>
-                </tr>
-              }
-            </tbody>
-          </gr-table>
         }
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">
@@ -333,7 +312,8 @@
         } @else if (downloadProgress(); as p) {
           <gr-build-progress class="download-panel" [progress]="p" />
         } @else {
-          <gr-log-viewer [lines]="logLines()" [serverLog]="serverLog()" [marker]="rateLimitMarker" [shortcuts]="false">
+          <gr-log-viewer [lines]="logLines()" [serverLog]="serverLog()" [marker]="rateLimitMarker" [shortcuts]="false"
+                         [logLineNumberLinkUrlTree]="buildEvaluationLogLineShareLink">
             <code logTitle class="log-header-title" [title]="selectedBuild()?.name ?? ''">
               @if (selectedBuild(); as build) {
                 @if (build.entry_points.length) {
@@ -342,6 +322,10 @@
                 {{ buildDisplayName(build.name) }}
               }
             </code>
+            @if (attemptDropdownOptions().length > 1) {
+              <gr-select logTitle class="log-attempt-select" ariaLabel="Attempt" [options]="attemptDropdownOptions()"
+                         [ngModel]="attemptNumberForLogOnScreenOrNull()" (ngModelChange)="selectAttempt($event)" />
+            }
             @if (transferProgress(); as p) {
               <gr-build-progress [progress]="p" [compact]="true" />
             }

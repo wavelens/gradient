@@ -18,7 +18,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, UrlTree } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
@@ -82,6 +82,7 @@ export class LogViewerComponent implements OnDestroy {
   serverLog = input<ServerLog | null>(null);
   marker = input<LogMarker>(() => null);
   shortcuts = input(true);
+  logLineNumberLinkUrlTree = input<((line: number) => UrlTree) | null>(null);
 
   @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
 
@@ -306,7 +307,10 @@ export class LogViewerComponent implements OnDestroy {
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
-    const url = `${window.location.origin}${window.location.pathname}${window.location.search}#L${line}`;
+    const link = this.logLineNumberLinkUrlTree();
+    const url = link
+      ? `${window.location.origin}${this.router.serializeUrl(link(line))}`
+      : `${window.location.origin}${window.location.pathname}${window.location.search}#L${line}`;
     void this.notify.copyToClipboard(url, 'link');
   }
 

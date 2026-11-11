@@ -9,13 +9,13 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
+  BuildAttemptResponse,
   BuildProduct,
   EvaluationResponse,
   EvaluationFailureSummary,
   EvaluationMessageResponse,
   PaginatedBuilds,
   BuildWithOutputs,
-  BuildAttemptLogRow,
   BuildGraph,
   ClosureGraph,
 } from '@core/models';
@@ -66,6 +66,10 @@ export class EvaluationsService {
     return this.api.get<BuildWithOutputs>(`builds/${buildId}`);
   }
 
+  getBuildAttempts(buildId: string): Observable<BuildAttemptResponse[]> {
+    return this.api.get<BuildAttemptResponse[]>(`builds/${buildId}/attempts`);
+  }
+
   downloadBuildSbom(buildId: string): Observable<HttpResponse<Blob>> {
     return this.api.getBlob(`builds/${buildId}/sbom`);
   }
@@ -84,10 +88,6 @@ export class EvaluationsService {
 
   getBuildLog(buildId: string): Observable<string> {
     return this.api.get<string>(`builds/${buildId}/log?format=plain`);
-  }
-
-  getBuildAttempts(buildId: string): Observable<BuildAttemptLogRow[]> {
-    return this.api.get<BuildAttemptLogRow[]>(`builds/${buildId}/attempts`);
   }
 
   getBuildGraph(buildId: string): Observable<BuildGraph> {

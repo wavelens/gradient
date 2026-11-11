@@ -19,11 +19,11 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
-import { BuildLogStreamDecoder, buildAttemptLogQueryParam, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
-import { buildAttemptOutcomeText, formatBuildAttemptDurationText } from './build-attempts';
+import { buildBuildLogApiPath, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
 import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterModule, UrlTree } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { EMPTY, Observable, Subscription, firstValueFrom, forkJoin, merge } from 'rxjs';
 import { auditTime, catchError, filter, map, share, switchMap, tap } from 'rxjs/operators';
@@ -41,7 +41,7 @@ import { BuildOrigin, CopyMenuService, links } from '@shared/routing';
 import { CurrentTimeSignal, formatDuration, packageNameFromDerivationPath, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
-  BuildAttemptLogRow,
+  BuildAttemptResponse,
   BuildProgress,
   EvaluationResponse,
   TaskDetailsResponse,
@@ -72,11 +72,11 @@ import {
   MessageBannerComponent,
   MessageService,
   DrawerDirective,
+  SelectComponent,
   SkeletonComponent,
-  TableComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildOutcomeLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildOutcomeLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, formatAttemptDropdownLabel, getAbortedEvaluationExplanationWithReplacementId, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { saveResponse } from '@shared/download';
 
 const packageNameVisibleTrailingCharacterCount = 10;
@@ -84,7 +84,7 @@ const packageNameVisibleTrailingCharacterCount = 10;
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadMoreComponent,LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, TableComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
+  imports: [CommonModule, FormsModule, SelectComponent, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadMoreComponent,LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -134,10 +134,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   builds = signal<BuildItem[]>([]);
   messages = signal<(EvaluationMessageResponse & { renderedHtml: SafeHtml; sourceLabel: string | null })[]>([]);
   selectedBuildId = signal<string | null>(null);
-  selectedBuildAttempts = signal<BuildAttemptLogRow[]>([]);
-  selectedAttemptId = signal<string | null>(null);
-  protected readonly buildAttemptOutcomeText = buildAttemptOutcomeText;
-  protected readonly formatBuildAttemptDurationText = formatBuildAttemptDurationText;
   selectedSection = signal<'messages' | null>(null);
   buildsOpen = signal(false);
   logLineCount = signal(0);
@@ -188,6 +184,24 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   selectedBuild = computed(() =>
     this.builds().find(b => b.id === this.selectedBuildId()) ?? null
   );
+
+  selectedBuildAttempts = signal<BuildAttemptResponse[]>([]);
+  selectedAttemptNumberOrNull = signal<number | null>(null);
+  private initialAttemptNumber: number | null = null;
+  attemptDropdownOptions = computed(() => this.selectedBuildAttempts().map((attempt) => ({
+    label: formatAttemptDropdownLabel(attempt.number, attempt.outcome, attempt.finished_at ?? attempt.started_at),
+    value: attempt.number,
+  })));
+  attemptNumberForLogOnScreenOrNull = computed(() =>
+    this.selectedAttemptNumberOrNull() ?? this.selectedBuildAttempts().reduce<number | null>((latest, a) => Math.max(latest ?? 0, a.number), null),
+  );
+  buildEvaluationLogLineShareLink = (line: number): UrlTree =>
+    links.buildLine(this.projectName, this.evaluationId, this.selectedBuildId() ?? '', this.attemptNumberForLogOnScreenOrNull(), line);
+
+  abortedEvaluationExplanationWithReplacementIdForHeaderEvaluation = computed(() => {
+    const evaluation = this.evaluation();
+    return evaluation ? getAbortedEvaluationExplanationWithReplacementId(evaluation) : null;
+  });
 
   limitingBuildDisplayName = computed(() => {
     const id = this.scopeBuildId();
@@ -309,9 +323,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
     const query = this.route.snapshot.queryParamMap;
-    this.scopeBuildId.set(query.get('package'));
+    this.scopeBuildId.set(query.get('filter'));
     this.initialShowEval = query.get('eval') !== null;
-    this.initialBuildId = this.initialShowEval ? null : query.get('build') ?? query.get('package');
+    this.initialBuildId = this.initialShowEval ? null : query.get('build') ?? query.get('filter');
+    const attempt = Number(query.get('attempt'));
+    this.initialAttemptNumber = Number.isInteger(attempt) && attempt > 0 ? attempt : null;
     const resolved = this.route.snapshot.data?.['evaluationAccess'] as EvaluationWithOptionalTask | undefined;
     if (!resolved) return this.loadEvaluation();
     this.setEvaluationAndStartLiveUpdates(resolved.evaluation);
@@ -696,7 +712,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.resetLogState();
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { build: null, eval: 1 },
+      queryParams: { build: null, attempt: null, eval: 1 },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
@@ -706,7 +722,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.scopeBuildId.set(null);
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { package: null },
+      queryParams: { filter: null },
       queryParamsHandling: 'merge',
       preserveFragment: true,
       replaceUrl: true,
@@ -789,12 +805,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const keepLineLinkUntilBuildLogShown = this.logLineCount() === 0;
     this.resetLogState();
     this.selectedBuildAttempts.set([]);
-    this.selectedAttemptId.set(null);
     this.selectedBuildId.set(build.id);
+    this.selectedAttemptNumberOrNull.set(this.initialAttemptNumber);
+    this.initialAttemptNumber = null;
 
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { build: build.id, eval: null },
+      queryParams: { build: build.id, attempt: this.selectedAttemptNumberOrNull(), eval: null },
       queryParamsHandling: 'merge',
       preserveFragment: keepLineLinkUntilBuildLogShown,
       replaceUrl: true,
@@ -803,6 +820,38 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.logLoading.set(true);
     this.fetchInitialLogs(build.id);
     this.loadFailedDependencies(build);
+  }
+
+  private loadAttempts(buildId: string): void {
+    this.evalService.getBuildAttempts(buildId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (attempts) => {
+        if (this.selectedBuildId() === buildId) this.selectedBuildAttempts.set(attempts);
+      },
+      error: () => {},
+    });
+  }
+
+  selectAttempt(attempt: number): void {
+    const buildId = this.selectedBuildId();
+    if (!buildId || attempt === this.attemptNumberForLogOnScreenOrNull()) return;
+    this.selectedAttemptNumberOrNull.set(attempt);
+    this.stopActiveStream();
+    this.buildIdWithEndedLogStream.set(null);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { attempt },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+    this.logLoading.set(true);
+    void this.fetchInitialLogs(buildId);
+  }
+
+  private isLatestAttemptSelected(): boolean {
+    const picked = this.selectedAttemptNumberOrNull();
+    if (picked === null) return true;
+    const attempts = this.selectedBuildAttempts();
+    return attempts.length > 0 && attempts.every((attempt) => attempt.number <= picked);
   }
 
   private loadFailedDependencies(build: BuildItem): void {
@@ -825,48 +874,28 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     void this.fetchInitialLogs(buildId);
   }
 
-  private fetchSelectedBuildAttempts(buildId: string): void {
-    this.evalService.getBuildAttempts(buildId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (attempts) => {
-        if (this.selectedBuildId() === buildId) this.selectedBuildAttempts.set(attempts);
-      },
-      error: () => {},
-    });
-  }
-
-  selectAttemptLog(attempt: BuildAttemptLogRow): void {
-    const buildId = this.selectedBuildId();
-    const attemptId = attempt.id === this.selectedBuildAttempts()[0]?.id ? null : attempt.id;
-    if (!buildId || attemptId === this.selectedAttemptId()) return;
-
-    this.stopActiveStream();
-    this.buildIdWithEndedLogStream.set(null);
-    this.selectedAttemptId.set(attemptId);
-    this.logLoading.set(true);
-    void this.fetchInitialLogs(buildId);
-  }
-
   private async fetchInitialLogs(buildId: string): Promise<void> {
     this.resetLogState();
-    const attemptId = this.selectedAttemptId();
-    const isStale = () => this.selectedBuildId() !== buildId || this.selectedAttemptId() !== attemptId;
-    if (attemptId === null) this.fetchSelectedBuildAttempts(buildId);
+    const attempt = this.selectedAttemptNumberOrNull();
+    const isStale = () => this.selectedBuildId() !== buildId || this.selectedAttemptNumberOrNull() !== attempt;
+    this.loadAttempts(buildId);
 
+    const latest = this.isLatestAttemptSelected();
     const selected = this.builds().find(b => b.id === buildId);
-    if (attemptId === null && selected && ['Queued', 'Building'].includes(selected.status)) {
+    if (latest && selected && ['Queued', 'Building'].includes(selected.status)) {
       void this.startLogStream(buildId);
       this.watchProgress(buildId);
       return;
     }
 
-    const terminal = attemptId !== null || (selected && selected.status !== 'Created');
-    if (terminal && (await this.fetchChunkedLog(buildId, attemptId))) {
+    const terminal = !latest || (selected && selected.status !== 'Created');
+    if (terminal && (await this.fetchChunkedLog(buildId, attempt))) {
       if (!isStale()) this.logLoading.set(false);
       return;
     }
 
     try {
-      const data = await (await fetchBuildLogResponseWithCookiesOrThrow(`builds/${buildId}/log${buildAttemptLogQueryParam(attemptId)}`)).json();
+      const data = await (await fetchBuildLogResponseWithCookiesOrThrow(buildBuildLogApiPath(buildId, attempt))).json();
       if (!isStale() && !data.error && typeof data.message === 'string' && data.message !== '') {
         const lines = splitLogLines(data.message);
         this.logLines.set(lines);
@@ -1008,18 +1037,18 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.logPaused.set(false);
   }
 
-  private async fetchChunkedLog(buildId: string, attemptId: string | null): Promise<boolean> {
+  private async fetchChunkedLog(buildId: string, attempt: number | null): Promise<boolean> {
     let index: LogChunkIndex;
     try {
-      const data = await (await fetchBuildLogResponseWithCookiesOrThrow(`builds/${buildId}/log/chunks${buildAttemptLogQueryParam(attemptId)}`)).json();
+      const data = await (await fetchBuildLogResponseWithCookiesOrThrow(buildBuildLogApiPath(buildId, attempt, '/chunks'))).json();
       index = data.message as LogChunkIndex;
     } catch {
       return false;
     }
     if (!index || index.total_chunks === 0 || index.total_lines === 0) return false;
-    if (this.selectedBuildId() !== buildId || this.selectedAttemptId() !== attemptId) return true;
+    if (this.selectedBuildId() !== buildId || this.selectedAttemptNumberOrNull() !== attempt) return true;
 
-    this.serverLog.set(buildLog(buildId, attemptId, index.total_lines));
+    this.serverLog.set(buildLog(buildId, index.total_lines, attempt));
     this.logLineCount.set(index.total_lines);
     return true;
   }

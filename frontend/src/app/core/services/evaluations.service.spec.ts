@@ -51,6 +51,14 @@ describe('EvaluationsService actions', () => {
     expect(result).toBe('line 1\n');
   });
 
+  it('lists the attempts of a build', () => {
+    let result: unknown;
+    service.getBuildAttempts('b1').subscribe((r) => (result = r));
+    const attempts = [{ number: 1, outcome: 'Failed' }, { number: 2, outcome: 'Built' }];
+    httpMock.expectOne(`${environment.apiUrl}/builds/b1/attempts`).flush({ error: false, message: attempts });
+    expect(result).toEqual(attempts);
+  });
+
   it('prioritizes a build with a bodyless POST', () => {
     let result: string | undefined;
     service.prioritizeBuild('01a05a38-3276-7252-bc05-c139d9c8a015').subscribe((r) => (result = r));

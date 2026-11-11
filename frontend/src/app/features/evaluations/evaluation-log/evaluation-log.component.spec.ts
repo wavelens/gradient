@@ -20,9 +20,10 @@ import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
 import { CopyMenuService } from '@shared/routing';
-import { UserInfoResponse, BuildAttemptLogRow, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
+import { UserInfoResponse, BuildAttemptResponse, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
+import { clockTime } from '@shared/text';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
   return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false, ifd: false, entry_points: [] };
@@ -777,28 +778,6 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.logLoading()).toBe(false);
     });
 
-    it('opens the log of an earlier attempt and returns to the latest one', async () => {
-      const { cmp } = setup();
-      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: chunkIndex }) });
-      vi.stubGlobal('fetch', fetchMock);
-      const attempt = (id: string, outcome: BuildAttemptLogRow['outcome']): BuildAttemptLogRow =>
-        ({ id, outcome, reason: null, worker: null, started_at: null, finished_at: null, created_at: '2026-01-01T00:00:00' });
-      const [latest, earlier] = [attempt('a2', 'Built'), attempt('a1', 'Failed')];
-      cmp.builds.set([build('b1', 'hash-hello.drv', 'Completed')]);
-      cmp.selectedBuildId.set('b1');
-      cmp.selectedBuildAttempts.set([latest, earlier]);
-
-      cmp.selectAttemptLog(earlier);
-      await vi.waitFor(() => expect(cmp.logLoading()).toBe(false));
-      expect(cmp.selectedAttemptId()).toBe('a1');
-      expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining('builds/b1/log/chunks?attempt=a1'), expect.anything());
-
-      cmp.selectAttemptLog(latest);
-      await vi.waitFor(() => expect(cmp.logLoading()).toBe(false));
-      expect(cmp.selectedAttemptId()).toBeNull();
-      expect(fetchMock).toHaveBeenLastCalledWith(expect.stringMatching(/builds\/b1\/log\/chunks$/), expect.anything());
-    });
-
     it('keeps the #L line link in the URL for the first log only', () => {
       const { cmp } = setup();
       vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
@@ -874,7 +853,14 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    function setupScoped(query: Record<string, string>, buildEvaluation: Observable<string> = of('eval-1'), listed: BuildItem[] = [], evaluationStatus = 'Completed') {
+    function setupScoped(
+      query: Record<string, string>,
+      buildEvaluation: Observable<string> = of('eval-1'),
+      listed: BuildItem[] = [],
+      evaluationStatus = 'Completed',
+      extra: { attempts?: BuildAttemptResponse[]; evaluation?: Partial<EvaluationResponse> } = {},
+    ) {
+      const getBuildAttempts = vi.fn((_build: string) => of(extra.attempts ?? []));
       const getBuild = vi.fn((id: string) => buildEvaluation.pipe(map((evaluation) => ({
         id, evaluation, status: 'Completed', derivation_path: `hash-${id}.drv`,
         architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: false, ifd: false, created_at: '', updated_at: '',
@@ -893,20 +879,92 @@ describe('EvaluationLogComponent', () => {
             },
           } },
           { provide: EvaluationsService, useValue: {
-            getEvaluation: () => of({ id: 'eval-1', status: evaluationStatus, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
+            getEvaluation: () => of({ id: 'eval-1', status: evaluationStatus, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null, ...extra.evaluation }),
             getBuild,
             getBuilds,
             getEvaluationMessages: () => of([]),
-            getBuildAttempts: () => of([]),
+            getBuildAttempts,
           } },
         ],
       });
       const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      const fetchLog = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
       const fixture = TestBed.createComponent(EvaluationLogComponent);
       fixture.componentInstance.ngOnInit();
-      return { cmp: fixture.componentInstance, fixture, getBuild, getBuilds, navigate };
+      return { cmp: fixture.componentInstance, fixture, getBuild, getBuilds, getBuildAttempts, navigate, fetchLog };
     }
+
+    const attempt = (number: number, outcome: BuildAttemptResponse['outcome'], finished_at: string): BuildAttemptResponse =>
+      ({ number, outcome, started_at: finished_at, finished_at, worker: null, reason: null });
+    const requestedPaths = (fetchLog: { mock: { calls: unknown[][] } }) => fetchLog.mock.calls.map(([url]) => String(url));
+
+    it('loads the attempts of the linked build and offers a selector only for more than one', () => {
+      const { cmp, fixture, getBuildAttempts } = setupScoped({ build: 'b1' }, of('eval-1'), [], 'Completed', {
+        attempts: [attempt(1, 'Failed', '2026-01-01T15:13:00'), attempt(2, 'Built', '2026-01-01T15:19:00')],
+      });
+      cmp.logLoading.set(false);
+      fixture.detectChanges();
+      expect(getBuildAttempts).toHaveBeenCalledWith('b1');
+      expect(cmp.attemptDropdownOptions().map((option) => option.label)).toEqual([
+        `Attempt 1 · failed ${clockTime('2026-01-01T15:13:00')}`,
+        `Attempt 2 · built ${clockTime('2026-01-01T15:19:00')}`,
+      ]);
+      expect(cmp.attemptNumberForLogOnScreenOrNull()).toBe(2);
+      expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).not.toBeNull();
+      cmp.selectedBuildAttempts.set([attempt(1, 'Built', '2026-01-01T15:13:00')]);
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).toBeNull();
+      fixture.destroy();
+    });
+
+    it('asks the log and its chunks for the picked attempt and puts it in the URL', async () => {
+      const { cmp, fixture, navigate, fetchLog } = setupScoped({ build: 'b1' }, of('eval-1'), [], 'Completed', {
+        attempts: [attempt(1, 'Failed', '2026-01-01T15:13:00'), attempt(2, 'Built', '2026-01-01T15:19:00')],
+      });
+      fetchLog.mockClear();
+      cmp.selectAttempt(1);
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { attempt: 1 } }));
+      const paths = requestedPaths(fetchLog);
+      expect(paths.some((url) => url.endsWith('/builds/b1/log/chunks?attempt=1'))).toBe(true);
+      expect(paths.some((url) => url.endsWith('/builds/b1/log?attempt=1'))).toBe(true);
+      fixture.destroy();
+    });
+
+    it('opens the attempt from the URL and links lines to it without the sidebar filter', async () => {
+      const { cmp, fixture, fetchLog } = setupScoped({ filter: 'pkg', build: 'b1', attempt: '1' }, of('eval-1'), [], 'Completed', {
+        attempts: [attempt(1, 'Failed', '2026-01-01T15:13:00'), attempt(2, 'Built', '2026-01-01T15:19:00')],
+      });
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(requestedPaths(fetchLog).some((url) => url.endsWith('/builds/b1/log/chunks?attempt=1'))).toBe(true);
+      expect(String(cmp.buildEvaluationLogLineShareLink(12))).toBe('/project/proj/log/eval-1?build=b1&attempt=1#L12');
+      fixture.destroy();
+    });
+
+    it('links the line of the latest attempt when none is picked', () => {
+      const { cmp, fixture } = setupScoped({ filter: 'pkg', build: 'b1' }, of('eval-1'), [], 'Completed', {
+        attempts: [attempt(1, 'Failed', '2026-01-01T15:13:00'), attempt(2, 'Built', '2026-01-01T15:19:00')],
+      });
+      expect(String(cmp.buildEvaluationLogLineShareLink(3))).toBe('/project/proj/log/eval-1?build=b1&attempt=2#L3');
+      fixture.destroy();
+    });
+
+    it('names the user who aborted the evaluation in the header', () => {
+      const finished = '2026-01-01T16:31:00';
+      const { fixture } = setupScoped({}, of('eval-1'), [], 'Aborted', { evaluation: { abort_reason: 'user', aborted_by: 'dave', finished_at: finished } });
+      fixture.detectChanges();
+      const label = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .abort-reason');
+      expect(label?.textContent?.trim()).toBe(`Aborted by dave at ${clockTime(finished)}`);
+      fixture.destroy();
+    });
+
+    it('links the newer evaluation that replaced an aborted one from the header', () => {
+      const { fixture } = setupScoped({}, of('eval-1'), [], 'Aborted', { evaluation: { abort_reason: 'superseded', superseded_by: 'eval-2' } });
+      fixture.detectChanges();
+      const label = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('.info-bar a.abort-reason');
+      expect(label?.getAttribute('href')).toBe('/project/proj/log/eval-2');
+      fixture.destroy();
+    });
 
     it('opens the evaluation messages of an aborted evaluation without a failed or running build', () => {
       const aborted = { id: 'b1', status: 'Aborted', name: 'hello', derivation_path: 'hash-b1.drv', architecture: 'x86_64-linux', prioritized: false } as unknown as BuildItem;
@@ -934,7 +992,7 @@ describe('EvaluationLogComponent', () => {
     });
 
     it('restores the picked dependency inside the package scope', () => {
-      const { cmp, fixture, getBuild, getBuilds } = setupScoped({ package: 'pkg', build: 'dep' });
+      const { cmp, fixture, getBuild, getBuilds } = setupScoped({ filter: 'pkg', build: 'dep' });
       expect(getBuild).toHaveBeenCalledWith('dep');
       expect(getBuilds.mock.calls[0][3]).toBe('pkg');
       expect(cmp.selectedBuildId()).toBe('dep');
@@ -942,7 +1000,7 @@ describe('EvaluationLogComponent', () => {
     });
 
     it('names the linked build in the log header inside another package scope', () => {
-      const { cmp, fixture } = setupScoped({ package: 'depfail', build: 'fail' });
+      const { cmp, fixture } = setupScoped({ filter: 'depfail', build: 'fail' });
       cmp.logLoading.set(false);
       fixture.detectChanges();
       const title = (fixture.nativeElement as HTMLElement).querySelector('.log-header-title');
@@ -950,26 +1008,26 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    it('keeps the package in the URL when a dependency is picked', () => {
-      const { cmp, fixture, navigate } = setupScoped({ package: 'pkg' });
+    it('keeps the filter in the URL when a dependency is picked', () => {
+      const { cmp, fixture, navigate } = setupScoped({ filter: 'pkg' });
       expect(cmp.selectedBuildId()).toBe('pkg');
       const dep = { ...cmp.builds()[0], id: 'dep' };
       cmp.selectBuild(dep, true);
       expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
-        queryParams: { build: 'dep', eval: null },
+        queryParams: { build: 'dep', attempt: null, eval: null },
         queryParamsHandling: 'merge',
       }));
       fixture.destroy();
     });
 
     it('names the package and lists every build after Show All Builds', () => {
-      const { fixture, getBuilds, navigate } = setupScoped({ package: 'pkg' });
+      const { fixture, getBuilds, navigate } = setupScoped({ filter: 'pkg' });
       fixture.detectChanges();
       const host = fixture.nativeElement as HTMLElement;
       expect(host.querySelector('.build-limit-label')?.textContent).toContain('Builds for pkg');
       host.querySelector<HTMLButtonElement>('.build-limit button')!.click();
       fixture.detectChanges();
-      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { package: null } }));
+      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { filter: null } }));
       expect(getBuilds.mock.lastCall?.[3]).toBeUndefined();
       expect(host.querySelector('.build-limit')).toBeNull();
       fixture.destroy();

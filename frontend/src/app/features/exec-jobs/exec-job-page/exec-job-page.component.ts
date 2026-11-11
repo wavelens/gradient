@@ -20,6 +20,7 @@ import {
   MessageBannerComponent,
   DrawerDirective,
   SelectButtonComponent,
+  SelectComponent,
   TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent, WaitingNoticeComponent } from '@shared/ui';
@@ -31,7 +32,7 @@ import { refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible } from '
 import { ApiError } from '@core/services/api.service';
 import { WritableDirective, AccessService } from '@shared/access';
 import { formatDuration, plural, RelativeTimePipe, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { buildAttemptEndReasonLabel, evaluationPhase, execJobPhase, waitingAccessFrom } from '@shared/evaluation';
+import { buildAttemptEndReasonLabel, evaluationPhase, execJobPhase, formatAttemptDropdownLabel, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { composeTitle } from '@core/title/gradient-title-strategy';
@@ -59,14 +60,18 @@ const TERMINAL_PATHS: Record<TerminalMode, (node: number) => string> = {
   shell: (node) => `shell?node=${node}`,
 };
 
+function getAttemptsForNode(job: ExecJobResponse, node: number): ExecJobAttemptView[] {
+  return node === 0 ? job.attempts : job.node_jobs.find((n) => n.node === node)?.attempts ?? [];
+}
+
 function latestAttemptNumber(job: ExecJobResponse, node: number): number | undefined {
-  const attempts = node === 0 ? job.attempts : job.node_jobs.find((n) => n.node === node)?.attempts ?? [];
+  const attempts = getAttemptsForNode(job, node);
   return attempts.length === 0 ? undefined : Math.max(...attempts.map((a) => a.number));
 }
 
-function nodeFromQuery(value: string | null | undefined): number {
-  const node = Number(value);
-  return Number.isInteger(node) && node > 0 ? node : 0;
+function parsePositiveIntegerQueryParam(value: string | null | undefined): number | null {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 const LOG_VIEW = { label: 'Log', value: 'log', icon: 'article' } as const;
@@ -80,7 +85,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   imports: [
     RouterModule, FormsModule, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MessageBannerComponent,
-    SelectButtonComponent, TabSwitchComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
+    SelectButtonComponent, SelectComponent, TabSwitchComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
     LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
     ServerTimestampToLocalDateTimePipe,
   ],
@@ -200,11 +205,27 @@ export class ExecJobPageComponent implements OnInit {
     const endReason = this.highestNumberedAttempt()?.end_reason;
     return job.status === 'failed' && endReason ? buildAttemptEndReasonLabel(endReason) : getExecJobStatusBadgeLabel(job);
   });
+  selectedAttemptNumber = signal<number | null>(null);
+  pickedOrHighestNumberedAttemptForSelectedNode = computed(() => {
+    const job = this.job();
+    if (!job || isExecJobWaitingToStart(job.status)) return null;
+    const attempts = getAttemptsForNode(job, this.node());
+    const picked = attempts.find((a) => a.number === this.selectedAttemptNumber());
+    return picked ?? attempts.reduce<ExecJobAttemptView | null>((latest, a) => (!latest || a.number > latest.number ? a : latest), null);
+  });
+  attemptDropdownOptions = computed(() => {
+    const job = this.job();
+    return (job ? getAttemptsForNode(job, this.node()) : []).map((attempt) => ({
+      label: formatAttemptDropdownLabel(attempt.number, attempt.end_reason ? buildAttemptEndReasonLabel(attempt.end_reason) : 'running', attempt.ended_at ?? attempt.started_at),
+      value: attempt.number,
+    }));
+  });
   formattedProgramRunTime = computed(() => {
-    const attempt = this.highestNumberedAttempt();
+    const attempt = this.pickedOrHighestNumberedAttemptForSelectedNode();
     if (!attempt?.program_started_at) return '';
     if (!attempt.ended_at) return formatDuration(Math.max(0, this.now() - serverTime(attempt.program_started_at).getTime()));
-    const programPhase = this.job()?.timeline.filter((phase) => phase.phase === 'program').at(-1);
+    const isLatestAttempt = this.node() === 0 && attempt.number === latestAttemptNumber(this.job()!, 0);
+    const programPhase = isLatestAttempt ? this.job()?.timeline.filter((phase) => phase.phase === 'program').at(-1) : undefined;
     return formatDuration(programPhase
       ? programPhase.end_ms - programPhase.start_ms
       : serverTime(attempt.ended_at).getTime() - serverTime(attempt.program_started_at).getTime());
@@ -233,7 +254,20 @@ export class ExecJobPageComponent implements OnInit {
     const view = this.route.snapshot.queryParamMap?.get('view');
     this.wantsTerminal = view === 'terminal';
     if (view === INFO_VIEW.value || view === TIMELINE_VIEW.value) this.view.set(view);
-    this.node.set(nodeFromQuery(this.route.snapshot.queryParamMap?.get('node')));
+    this.node.set(parsePositiveIntegerQueryParam(this.route.snapshot.queryParamMap?.get('node')) ?? 0);
+    this.selectedAttemptNumber.set(parsePositiveIntegerQueryParam(this.route.snapshot.queryParamMap?.get('attempt')));
+    this.watch();
+  }
+
+  selectAttemptAndReloadLog(attempt: number): void {
+    if (attempt === this.pickedOrHighestNumberedAttemptForSelectedNode()?.number) return;
+    this.selectedAttemptNumber.set(attempt);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { attempt },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
     this.watch();
   }
 
@@ -246,9 +280,10 @@ export class ExecJobPageComponent implements OnInit {
 
   private setSelectedNodeIndexAndUrl(node: number): void {
     this.node.set(node);
+    this.selectedAttemptNumber.set(null);
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { node: node === 0 ? null : node },
+      queryParams: { node: node === 0 ? null : node, attempt: null },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
@@ -265,7 +300,7 @@ export class ExecJobPageComponent implements OnInit {
           if (this.node() !== 0 && !job.node_jobs.some((n) => n.node === this.node())) this.setSelectedNodeIndexAndUrl(0);
           if (isExecJobWaitingToStart(job.status)) return of({ job, pullRequests, log: null });
           const node = this.node();
-          const attempt = latestAttemptNumber(job, node);
+          const attempt = this.selectedAttemptNumber() ?? latestAttemptNumber(job, node);
           const source = `${node}:${attempt ?? ''}`;
           const offset = source === this.logSource ? this.logBytes : undefined;
           return this.execJobs.logAfter(this.jobId, offset, attempt, node).pipe(map((chunk) => ({ job, pullRequests, log: { source, chunk } })));

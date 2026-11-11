@@ -32,29 +32,32 @@ export async function fetchBuildLogResponseWithCookiesOrThrow(
   return res;
 }
 
-export function buildAttemptLogQueryParam(attemptId: string | null, params: Record<string, string> = {}): string {
-  const query = new URLSearchParams(params);
-  if (attemptId) query.set('attempt', attemptId);
-  const text = query.toString();
-  return text ? `?${text}` : '';
+export function buildBuildLogApiPath(
+  buildId: string,
+  attempt: number | null,
+  endpoint = '',
+  query: Record<string, string | number> = {},
+): string {
+  const params = new URLSearchParams(Object.entries(query).map(([name, value]) => [name, String(value)]));
+  if (attempt !== null) params.set('attempt', String(attempt));
+  const search = params.toString();
+  return `builds/${buildId}/log${endpoint}${search ? `?${search}` : ''}`;
 }
 
-async function fetchLines(buildId: string, attemptId: string | null, start: number, end: number): Promise<string[]> {
-  const res = await fetchBuildLogResponseWithCookiesOrThrow(
-    `builds/${buildId}/log/lines${buildAttemptLogQueryParam(attemptId, { start: `${start}`, end: `${end}` })}`,
-  );
+async function fetchLines(buildId: string, attempt: number | null, start: number, end: number): Promise<string[]> {
+  const res = await fetchBuildLogResponseWithCookiesOrThrow(buildBuildLogApiPath(buildId, attempt, '/lines', { start, end }));
   return splitLogLines(await res.text());
 }
 
 async function searchLog(
   buildId: string,
-  attemptId: string | null,
+  attempt: number | null,
   query: string,
   onHits: (hits: LogSearchHit[]) => void,
   isStale: () => boolean,
 ): Promise<number> {
   const res = await fetch(
-    `${environment.apiUrl}/builds/${buildId}/log/search${buildAttemptLogQueryParam(attemptId, { q: query })}`,
+    `${environment.apiUrl}/${buildBuildLogApiPath(buildId, attempt, '/search', { q: query })}`,
     { method: 'GET', credentials: 'include' },
   );
   if (!res.ok || !res.body) return 0;
@@ -111,10 +114,10 @@ export class BuildLogStreamDecoder {
   }
 }
 
-export function buildLog(buildId: string, attemptId: string | null, total: number): ServerLog {
+export function buildLog(buildId: string, total: number, attempt: number | null = null): ServerLog {
   return {
     total,
-    lines: (start, end) => fetchLines(buildId, attemptId, start, end),
-    search: (query, onHits, isStale) => searchLog(buildId, attemptId, query, onHits, isStale),
+    lines: (start, end) => fetchLines(buildId, attempt, start, end),
+    search: (query, onHits, isStale) => searchLog(buildId, attempt, query, onHits, isStale),
   };
 }

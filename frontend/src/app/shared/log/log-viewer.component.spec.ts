@@ -415,6 +415,16 @@ describe('LogViewerComponent', () => {
     expect(failure).toHaveBeenCalledWith("Couldn't copy link", expect.any(Error));
   });
 
+  it('copies the line link the page builds instead of the current address', async () => {
+    const router = () => TestBed.inject(Router);
+    const { fixture } = setup({ logLineNumberLinkUrlTree: (line: number) => router().parseUrl(`/project/p/log/e?build=b&attempt=2#L${line}`) });
+    await show(fixture, ['a', 'b']);
+    vi.spyOn(router(), 'navigate').mockResolvedValue(true);
+    const copy = vi.spyOn(TestBed.inject(NotifyService), 'copyToClipboard').mockResolvedValue(undefined);
+    (fixture.nativeElement.querySelectorAll('.log-gutter')[1] as HTMLElement).click();
+    expect(copy).toHaveBeenCalledWith(`${window.location.origin}/project/p/log/e?build=b&attempt=2#L2`, 'link');
+  });
+
   it('tints every line that starts with the Nix error prefix, also behind color codes', async () => {
     const { fixture } = setup();
     await show(fixture, ['building', '\u001b[31;1merror:\u001b[0m builder failed', '  error: nested', 'no error: here']);

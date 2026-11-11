@@ -26,13 +26,13 @@ export interface BuildOrigin {
 
 type Query = Record<string, string | number | null | undefined>;
 
-function url(path: readonly string[], query: Query = {}): UrlTree {
+function url(path: readonly string[], query: Query = {}, fragment: string | null = null): UrlTree {
   const queryParams: Params = Object.fromEntries(
     Object.entries(query).filter(([, value]) => value !== null && value !== undefined && value !== ''),
   );
   const children: Record<string, UrlSegmentGroup> = {};
   if (path.length) children[PRIMARY_OUTLET] = new UrlSegmentGroup(path.map((segment) => new UrlSegment(segment, {})), {});
-  return new UrlTree(new UrlSegmentGroup([], children), queryParams);
+  return new UrlTree(new UrlSegmentGroup([], children), queryParams, fragment);
 }
 
 function origin(from: BuildOrigin): Query {
@@ -81,8 +81,10 @@ export const links = {
       view: options.terminal ? 'terminal' : null,
     }),
 
-  evaluationLog: (project: string, evaluation: string, options: { build?: string | null; package?: string | null; messages?: boolean } = {}) =>
-    url(['project', project, 'log', evaluation], { build: options.build, package: options.package, eval: options.messages ? 1 : null }),
+  evaluationLog: (project: string, evaluation: string, options: { build?: string | null; filter?: string | null; messages?: boolean } = {}) =>
+    url(['project', project, 'log', evaluation], { build: options.build, filter: options.filter, eval: options.messages ? 1 : null }),
+  buildLine: (project: string, evaluation: string, build: string, attempt: number | null, line: number) =>
+    url(['project', project, 'log', evaluation], { build, attempt }, `L${line}`),
   evaluationSummary: (project: string, evaluation: string) => url(['project', project, 'summary', evaluation]),
   artefacts: (project: string, build: string, from: BuildOrigin = {}) =>
     url(['project', project, 'artefacts', build], origin(from)),

@@ -5,6 +5,7 @@
  */
 
 import type { AttemptEndReason } from '@core/models';
+import { clockTime } from '@shared/text';
 
 const ATTEMPT_END_REASON_LABEL: Record<AttemptEndReason, string> = {
   completed: 'Completed',
@@ -16,4 +17,8 @@ const ATTEMPT_END_REASON_LABEL: Record<AttemptEndReason, string> = {
 
 export function buildAttemptEndReasonLabel(reason: string): string {
   return ATTEMPT_END_REASON_LABEL[reason as AttemptEndReason] ?? reason;
+}
+
+export function formatAttemptDropdownLabel(number: number, outcome: string, at?: string | null): string {
+  return `Attempt ${number} · ${outcome.toLowerCase()}${at ? ` ${clockTime(at)}` : ''}`;
 }

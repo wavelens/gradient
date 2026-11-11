@@ -116,7 +116,7 @@
               <span class="metric-value retries-left">{{ plural(job.retries_left, 'retry', 'retries') }} left</span>
             }
           </div>
-          @let attempt = highestNumberedAttempt();
+          @let attempt = pickedOrHighestNumberedAttemptForSelectedNode();
           @let laterAttempt = attempt && attempt.number > 1 ? attempt.number : null;
           @if (formattedProgramRunTime(); as programRun) {
             <div class="info-metric">
@@ -217,6 +217,10 @@
         } @else {
           <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker">
             <span logTitle class="log-header-title">Log</span>
+            @if (attemptDropdownOptions().length > 1) {
+              <gr-select logTitle class="log-attempt-select" ariaLabel="Attempt" [options]="attemptDropdownOptions()"
+                         [ngModel]="pickedOrHighestNumberedAttemptForSelectedNode()?.number" (ngModelChange)="selectAttemptAndReloadLog($event)" />
+            }
           </gr-log-viewer>
         }
       </div>

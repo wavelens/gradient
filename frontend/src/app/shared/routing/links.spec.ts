@@ -50,6 +50,7 @@ const every: UrlTree[] = [
   links.entryPointMetrics('p', 't', 'packages.x86_64-linux.hello'),
   links.execJob('p', 't', 'j', { node: 1, terminal: true }),
   links.evaluationLog('p', 'e', { build: 'b' }),
+  links.buildLine('p', 'e', 'b', 2, 5),
   links.evaluationSummary('p', 'e'),
   links.artefacts('p', 'b', { task: 't', evaluation: 'e' }),
   links.dependencyGraph('p', 'b'),
@@ -101,8 +102,13 @@ describe('links', () => {
     expect(String(links.task('p', 't', 'e1'))).toBe('/project/p/task/t?eval=e1');
     expect(String(links.task('p', 't', null))).toBe('/project/p/task/t');
     expect(String(links.evaluationLog('p', 'e1', { build: 'b1' }))).toBe('/project/p/log/e1?build=b1');
-    expect(String(links.evaluationLog('p', 'e1', { package: 'b1' }))).toBe('/project/p/log/e1?package=b1');
+    expect(String(links.evaluationLog('p', 'e1', { filter: 'b1' }))).toBe('/project/p/log/e1?filter=b1');
     expect(String(links.evaluationLog('p', 'e1', { messages: true }))).toBe('/project/p/log/e1?eval=1');
+  });
+
+  it('links a build log line by build, attempt and line, without the sidebar filter', () => {
+    expect(String(links.buildLine('p', 'e1', 'b1', 2, 40))).toBe('/project/p/log/e1?build=b1&attempt=2#L40');
+    expect(String(links.buildLine('p', 'e1', 'b1', null, 7))).toBe('/project/p/log/e1?build=b1#L7');
   });
 
   it('opens a pending build on its own page, not on the first build of its evaluation', () => {
