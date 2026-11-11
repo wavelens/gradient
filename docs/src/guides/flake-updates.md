@@ -62,7 +62,7 @@ Supported input types: `github`, `gitlab` and `git`, including `git` over SSH wi
 ## Update Run
 
 - A trigger fire and a **Fire Now** click start the update evaluation alone.
-- Click **Start Evaluation** to start the update evaluation in parallel with normal evaluation.
+- Click **Run** to start an update evaluation alongside the normal evaluation.
 - Only a Push trigger with `include_flake_inputs` can start update evaluation on a push to the repository of a tracked input. See [Pushes to Flake Inputs](../concepts/triggers.md#pushes-to-flake-inputs).
 
 ```mermaid
@@ -109,7 +109,7 @@ done
 
 ## Verify Deployment
 
-- The task's **Start Evaluation** can run a second evaluation of the update.
+- Use the **Run** button on the task to run a second evaluation of the update.
 - Pull request bodies carry the old revision and the new revision of each input.
 
 ## Next Steps

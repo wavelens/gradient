@@ -35,7 +35,7 @@ import {
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatDuration, plural } from '@shared/text';
-import { PHASE_COLOR, PHASE_SEVERITY, buildDuration, buildPhase, buildStatusLabel, type StatusPhase } from '@shared/evaluation';
+import { PHASE_COLOR, PHASE_SEVERITY, buildDuration, buildPhase, buildOutcomeLabel, type StatusPhase } from '@shared/evaluation';
 import { longestPathDepths } from './dependency-depths';
 import { observeElementResizeUntilDestroyed } from '../observe-element-resize-until-destroyed';
 import { BuildGraph, BuildStatus, DependencyEdge, DependencyGraphNode } from '@core/models';
@@ -584,7 +584,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   protected readonly plural = plural;
 
   statusLabel(status?: string | null): string {
-    return status ? buildStatusLabel(status as BuildStatus) : 'No build';
+    return status ? buildOutcomeLabel(status as BuildStatus) : 'No build';
   }
 
   private calcDuration(node: LayoutNode): string {
@@ -606,7 +606,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const labelsByColor = new Map<string, string[]>();
     for (const status of ['Created', 'Queued', 'Building', 'Completed', 'Substituted', 'FailedPermanent', 'FailedTransient', 'FailedTimeout', 'Aborted', 'DependencyFailed', 'Skipped'] as const) {
       const color = PHASE_COLOR[buildPhase(status)];
-      labelsByColor.set(color, [...(labelsByColor.get(color) ?? []), buildStatusLabel(status)]);
+      labelsByColor.set(color, [...(labelsByColor.get(color) ?? []), buildOutcomeLabel(status)]);
     }
     return [...labelsByColor].map(([color, labels]) => ({ color, label: labels.join(', ') }));
   })();

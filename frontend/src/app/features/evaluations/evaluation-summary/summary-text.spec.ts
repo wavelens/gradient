@@ -33,7 +33,7 @@ const failure = (over: Partial<FailedBuildSummary>): FailedBuildSummary => ({
 
 describe('evaluation summary text', () => {
   it('counts failed and dependency failed packages, and attributes that failed to evaluate on their own', () => {
-    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), 'Failed')).toBe('15 of 20 packages built · 2 failed · 3 blocked · 1 attribute failed to evaluate');
+    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), 'Failed')).toBe('15 of 20 packages built · 2 failed · 3 skipped · 1 attribute failed to evaluate');
     expect(headline(summary({ built: 20 }, 2), 'Failed')).toBe('2 attributes failed to evaluate');
   });
 
@@ -55,9 +55,9 @@ describe('evaluation summary text', () => {
   it('splits the headline counts into failed, blocked, built and unbuilt tiles, labelled by count', () => {
     const tiles = (s: EvaluationFailureSummary, status: EvaluationStatus = 'Completed') =>
       getEvaluationSummaryCountTiles(s, status).map((t) => `${t.label} ${t.value}`);
-    expect(tiles(summary({ built: 1, failed: 1, blocked: 1, unfinished: 1 }, 2))).toEqual(['Failed package 1', 'Blocked package 1', 'Built package 1', 'Aborted package 1']);
-    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Failed packages 0', 'Blocked packages 0', 'Built packages 5', 'Aborted packages 15']);
-    expect(tiles(summary({ built: 5, unfinished: 15 }), 'Building')).toEqual(['Failed packages 0', 'Blocked packages 0', 'Built packages 5', 'Remaining packages 15']);
+    expect(tiles(summary({ built: 1, failed: 1, blocked: 1, unfinished: 1 }, 2))).toEqual(['Failed package 1', 'Skipped package 1', 'Built package 1', 'Aborted package 1']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Failed packages 0', 'Skipped packages 0', 'Built packages 5', 'Aborted packages 15']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }), 'Building')).toEqual(['Failed packages 0', 'Skipped packages 0', 'Built packages 5', 'Remaining packages 15']);
     expect(tiles(summary({ built: 5 }), 'Waiting')).toEqual([]);
   });
 
@@ -94,8 +94,8 @@ describe('evaluation summary text', () => {
   it('names the first blocked packages and counts the rest', () => {
     const blocked = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
 
-    expect(blockedLine(failure({ blocked, blocked_total: 30 }))).toBe('Blocks 30 packages: a, b, c, d, e and 25 more');
-    expect(blockedLine(failure({ blocked: ['curl'], blocked_total: 1 }))).toBe('Blocks 1 package: curl');
+    expect(blockedLine(failure({ blocked, blocked_total: 30 }))).toBe('Skipped 30 packages: a, b, c, d, e and 25 more');
+    expect(blockedLine(failure({ blocked: ['curl'], blocked_total: 1 }))).toBe('Skipped 1 package: curl');
     expect(blockedLine(failure({}))).toBe('');
   });
 

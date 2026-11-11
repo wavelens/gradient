@@ -122,7 +122,7 @@
                   @let nameParts = splitNameHeadAndTail(buildDisplayName(build.name));
                   <span class="build-name"><span class="build-name-head">{{ nameParts.head }}</span><span class="build-name-tail">{{ nameParts.tail }}</span></span>
                   @if (build.ifd) { <gr-badge severity="info">IFD</gr-badge> }
-                  @let statusLabel = buildStatusLabel(getBuildRowDisplayStatus(build));
+                  @let statusLabel = buildOutcomeLabel(getBuildRowDisplayStatus(build));
                   @if (statusLabel !== group.label) { <span class="build-status-label">{{ statusLabel }}</span> }
                   @if (getBuildElapsed(build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="getBuildRowDisplayStatus(build) === 'Building'">{{ getBuildElapsed(build) }}</span>
@@ -318,7 +318,7 @@
         } @else if (selectedBuild()?.status === 'DependencyFailed' && !logLineCount()) {
           <div class="queued-hint dependency-failed-hint">
             <gr-icon name="link_off" size="xl" />
-            <span class="queued-title">{{ buildStatusLabel('DependencyFailed') }}</span>
+            <span class="queued-title">{{ buildOutcomeLabel('DependencyFailed') }}</span>
             <span class="queued-sub">This build did not run because a dependency failed. Open the failed dependency to see why.</span>
             <div class="dependency-failed-actions">
               @for (dep of failedDependencies(); track dep.id) {

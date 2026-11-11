@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { buildDuration, evaluationDuration, isRunningEvaluationStatus } from './duration';
+import { buildDuration, evaluationDuration, getEstimatedEvaluationRemainingMilliseconds, isRunningEvaluationStatus } from './duration';
 
 describe('isRunningEvaluationStatus', () => {
   it('returns true for in-flight statuses', () => {
@@ -62,5 +62,25 @@ describe('buildDuration', () => {
 
   it('is unknown for a build that has not started', () => {
     expect(buildDuration({ status: 'Queued', build_time_ms: null, build_started_at: null }, now)).toBeNull();
+  });
+});
+
+describe('getEstimatedEvaluationRemainingMilliseconds', () => {
+  const now = Date.UTC(2026, 4, 20, 12, 4, 0);
+  const running = { status: 'Building' as const, expected_duration_ms: 600_000, phase_started_at: { fetch: '2026-05-20T12:00:00Z' } };
+
+  it('subtracts the time since the fetch started from the expected duration', () => {
+    expect(getEstimatedEvaluationRemainingMilliseconds(running, now)).toBe(360_000);
+  });
+
+  it('measures from the build start when the fetch time is unknown', () => {
+    expect(getEstimatedEvaluationRemainingMilliseconds({ ...running, phase_started_at: { building: '2026-05-20T12:02:00Z' } }, now)).toBe(480_000);
+  });
+
+  it('is unknown without an estimate, a start, a running status, or once past the estimate', () => {
+    expect(getEstimatedEvaluationRemainingMilliseconds({ ...running, expected_duration_ms: null }, now)).toBeNull();
+    expect(getEstimatedEvaluationRemainingMilliseconds({ ...running, phase_started_at: {} }, now)).toBeNull();
+    expect(getEstimatedEvaluationRemainingMilliseconds({ ...running, status: 'Completed' }, now)).toBeNull();
+    expect(getEstimatedEvaluationRemainingMilliseconds(running, now + 3_600_000)).toBeNull();
   });
 });

@@ -14,7 +14,6 @@ const RETRYABLE_BUILD_STATUSES: ReadonlySet<string> = new Set<BuildStatus>([
   'Aborted',
   'DependencyFailed',
 ]);
-const REOPENABLE_EVALUATION_STATUSES: ReadonlySet<EvaluationStatus> = new Set<EvaluationStatus>(['Failed', 'Aborted']);
 
 const BUILD_OUTPUT_STATUSES: ReadonlySet<string> = new Set<BuildStatus>(['Completed', 'Substituted']);
 const BUILD_STATUSES_WITHOUT_LOG: ReadonlySet<string> = new Set<BuildStatus>(['Created', 'Queued']);
@@ -34,7 +33,7 @@ export function getArtefactsMenuItemDisabledReason(buildStatus: string, hasArtef
 
 export function getDownloadLogMenuItemDisabledReason(buildStatus: string): string | null {
   if (BUILD_STATUSES_WITHOUT_LOG.has(buildStatus)) return 'Logs are available after build start.';
-  return buildStatus === 'DependencyFailed' ? "This build didn't run because a dependency failed." : null;
+  return buildStatus === 'DependencyFailed' ? 'Skipped - a dependency failed, so this build has no log.' : null;
 }
 
 export function showJobMenuItemDisabledReason(job: unknown, signedIn: boolean, subject: 'build' | 'evaluation'): string | null {
@@ -50,12 +49,6 @@ export function canAbortBuild(evaluationStatus: EvaluationStatus, buildStatus: s
   return isRunningEvaluationStatus(evaluationStatus) && isPendingBuildStatus(buildStatus);
 }
 
-export function canRetryBuild(
-  evaluation: { status: EvaluationStatus; replaced: boolean },
-  buildStatus: string,
-): boolean {
-  const open = isRunningEvaluationStatus(evaluation.status)
-    || (REOPENABLE_EVALUATION_STATUSES.has(evaluation.status) && !evaluation.replaced);
-
-  return open && RETRYABLE_BUILD_STATUSES.has(buildStatus);
+export function canRetryBuild(evaluationStatus: EvaluationStatus, buildStatus: string): boolean {
+  return isRunningEvaluationStatus(evaluationStatus) && RETRYABLE_BUILD_STATUSES.has(buildStatus);
 }

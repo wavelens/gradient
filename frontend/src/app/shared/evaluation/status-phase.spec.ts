@@ -6,7 +6,7 @@
 
 import type { BuildStatus, EvaluationStatus, ExecJobStatus } from '@core/models';
 import {
-  abortedWithoutBuildsTitle, buildPhase, entryPointPhase, entryPointPhaseWithExecJob, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
+  abortedWithoutBuildsTitle, buildOutcomeLabel, buildPhase, entryPointPhase, entryPointPhaseWithExecJob, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
   PHASE_COLOR, PHASE_SEVERITY, phaseInFinishedEvaluation, type StatusPhase,
 } from './status-phase';
 
@@ -56,10 +56,17 @@ describe('buildPhase', () => {
     ['FailedTransient', 'failure'],
     ['FailedTimeout', 'failure'],
     ['Aborted', 'aborted'],
-    ['DependencyFailed', 'failure'],
+    ['DependencyFailed', 'aborted'],
     ['Skipped', 'aborted'],
   ])('maps %s to %s', (status, phase) => {
     expect(buildPhase(status)).toBe(phase);
+  });
+});
+
+describe('buildOutcomeLabel', () => {
+  it('names a build skipped because a dependency failed', () => {
+    expect(buildOutcomeLabel('DependencyFailed')).toBe('Skipped: Dependency failure');
+    expect(buildOutcomeLabel('FailedPermanent')).toBe('Failed');
   });
 });
 
@@ -98,7 +105,7 @@ describe('entryPointPhase', () => {
     ['Building', 0, 'running'],
     ['Completed', 1, 'success'],
     ['FailedPermanent', 1, 'failure'],
-    ['DependencyFailed', 1, 'failure'],
+    ['DependencyFailed', 1, 'aborted'],
   ])('maps %s with %i building deps to %s', (build_status, building, phase) => {
     expect(entryPointPhase({ build_status, deps: deps(building) })).toBe(phase);
   });

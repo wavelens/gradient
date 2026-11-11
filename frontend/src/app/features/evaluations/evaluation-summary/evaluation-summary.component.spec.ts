@@ -97,7 +97,7 @@ describe('EvaluationSummaryComponent', () => {
   it('opens with the verdict and splits the failures by the compared evaluation', () => {
     const fixture = setup(SUMMARY);
 
-    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('16 of 20 packages built · 1 failed · 2 blocked · 1 attribute failed to evaluate');
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('16 of 20 packages built · 1 failed · 2 skipped · 1 attribute failed to evaluate');
     expect(sections(fixture)).toEqual(['Newly failing 1', 'Still failing 1', 'Failed to evaluate 1', 'Fixed 1']);
     expect(text(fixture)).toContain('2 new failures and 1 fix since the previous evaluation at aaaaaaaa');
     expect((fixture.nativeElement as HTMLElement).querySelector('.compared a')?.getAttribute('href')).toBe('/project/testproject/summary/e1');
@@ -163,7 +163,7 @@ describe('EvaluationSummaryComponent', () => {
     const link = (fixture.nativeElement as HTMLElement).querySelector('a.row-link');
 
     expect(link?.getAttribute('href')).toBe('/project/testproject/log/e2?build=b1');
-    expect(text(fixture)).toContain('Blocks 2 packages: curl, git');
+    expect(text(fixture)).toContain('Skipped 2 packages: curl, git');
   });
 
   it('lists the failures as a single group without an evaluation to compare with', () => {

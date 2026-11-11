@@ -82,6 +82,7 @@ function evalSummary(
     started_at: null,
     finished_at: null,
     updated_at: '2026-01-01T00:01:00',
+    phase_started_at: {},
     ...extra,
   };
 }
@@ -370,7 +371,7 @@ describe('TaskDetailComponent - loading', () => {
     const badge = root.querySelector<HTMLAnchorElement>('a.inactive-badge');
     expect(badge?.textContent).toContain('Inactive');
     expect(badge?.getAttribute('href')).toBe('/project/acme/task/demo/settings');
-    expect(findByText(root, 'Start Evaluation')?.hasAttribute('disabled')).toBe(false);
+    expect(findByText(root, 'Run')?.hasAttribute('disabled')).toBe(false);
   });
 
   it('names the branches of the task so two tasks on one repository can be told apart', () => {
@@ -417,36 +418,36 @@ describe('TaskDetailComponent - loading', () => {
 });
 
 describe('TaskDetailComponent - access gating', () => {
-  it('hides Start Evaluation / Retry / Abort when canTrigger is false', () => {
+  it('hides Run / Retry failed builds / Abort when canTrigger is false', () => {
     const { fixture } = setup(
       { managed: false, canEdit: false, canTrigger: false },
       { primaryStatus: 'Completed', primary: failedBuilds },
     );
-    expect(findByText(fixture.nativeElement, 'start evaluation')).toBeNull();
-    expect(menuLabels(fixture)).not.toContain('Retry');
+    expect(findByText(fixture.nativeElement, 'run')).toBeNull();
+    expect(menuLabels(fixture)).not.toContain('Retry failed builds');
     expect(findByText(fixture.nativeElement, 'abort')).toBeNull();
   });
 
-  it('keeps Start Evaluation / Retry enabled on state-managed tasks', () => {
+  it('keeps Run / Retry failed builds enabled on state-managed tasks', () => {
     const { fixture } = setup(
       { managed: true, canEdit: true, canTrigger: true },
       { primaryStatus: 'Completed', primary: failedBuilds },
     );
-    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
+    const startBtn = findByText(fixture.nativeElement, 'run') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(false);
-    expect(menuLabels(fixture)).toContain('Retry');
+    expect(menuLabels(fixture)).toContain('Retry failed builds');
   });
 
-  it('shows Start / Retry to a caller with TriggerEvaluation but not EditTask', () => {
+  it('shows Run / Retry failed builds to a caller with TriggerEvaluation but not EditTask', () => {
     const { fixture } = setup(
       { managed: false, canEdit: false, canTrigger: true },
       { primaryStatus: 'Completed', primary: failedBuilds },
     );
-    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
+    const startBtn = findByText(fixture.nativeElement, 'run') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(false);
-    expect(menuLabels(fixture)).toContain('Retry');
+    expect(menuLabels(fixture)).toContain('Retry failed builds');
   });
 });
 
@@ -454,7 +455,7 @@ describe('TaskDetailComponent evaluation menu', () => {
   const trigger = { managed: false, canEdit: true, canTrigger: true };
 
   const retryItem = (fixture: ComponentFixture<TaskDetailComponent>) =>
-    fixture.componentInstance.evalMenuModel().find(i => i.label === 'Retry');
+    fixture.componentInstance.evalMenuModel().find(i => i.label === 'Retry failed builds');
 
   const panelActions = (fixture: ComponentFixture<TaskDetailComponent>) =>
     Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.panel-actions > a, .panel-actions > button'));
@@ -471,7 +472,7 @@ describe('TaskDetailComponent evaluation menu', () => {
   it('shows retry in place of abort once a failed evaluation stopped and runs it', () => {
     const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
     const spy = vi.spyOn(evaluationsService, 'retryEvaluation');
-    expect(actionLabels(fixture)).toEqual(['Logs', 'Summary', 'Retry', 'More']);
+    expect(actionLabels(fixture)).toEqual(['Logs', 'Summary', 'Retry failed builds', 'More']);
     panelActions(fixture)[2].click();
     expect(spy).toHaveBeenCalledWith('e1');
   });
@@ -479,7 +480,7 @@ describe('TaskDetailComponent evaluation menu', () => {
   it('keeps logs, summary and retry out of the dots menu', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    for (const label of ['Logs', 'Summary', 'Retry']) expect(labels).not.toContain(label);
+    for (const label of ['Logs', 'Summary', 'Retry failed builds']) expect(labels).not.toContain(label);
   });
 
   it('retries the selected evaluation from the menu, then refreshes', () => {
@@ -498,17 +499,17 @@ describe('TaskDetailComponent evaluation menu', () => {
 
   it('offers no retry while the evaluation is still active', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Building', primary: failedBuilds });
-    expect(menuLabels(fixture)).not.toContain('Retry');
+    expect(menuLabels(fixture)).not.toContain('Retry failed builds');
   });
 
   it('offers no retry when nothing failed', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
-    expect(menuLabels(fixture)).not.toContain('Retry');
+    expect(menuLabels(fixture)).not.toContain('Retry failed builds');
   });
 
   it('offers no retry to an anonymous visitor', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds }, 'anonymous');
-    expect(menuLabels(fixture)).not.toContain('Retry');
+    expect(menuLabels(fixture)).not.toContain('Retry failed builds');
   });
 
   it('retries an older finished evaluation by its id', () => {
@@ -539,11 +540,95 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(notify.failure).toHaveBeenCalledWith('Failed to retry evaluation', error);
   });
 
-  it('starts a full reevaluation from the menu', () => {
+  describe('Run dialog', () => {
+    const radioLabels = () =>
+      Array.from(document.querySelectorAll<HTMLInputElement>('input[name="run-scope"]'))
+        .map((input) => ({ value: input.value, disabled: input.disabled, text: input.parentElement?.textContent?.replace(/\s+/g, ' ').trim() }));
+
+    it('opens from the header Run button with the latest commit chosen and no input walk', () => {
+      const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
+      const comp = fixture.componentInstance;
+      comp.runScopeChoice.set('this-commit');
+      comp.walkAllInputsChecked.set(true);
+      findByText(fixture.nativeElement, 'run')!.click();
+      fixture.detectChanges();
+      expect(comp.runDialogOpen()).toBe(true);
+      expect(comp.runScopeChoice()).toBe('latest-commit');
+      expect(comp.walkAllInputsChecked()).toBe(false);
+      expect(radioLabels()).toEqual([
+        { value: 'latest-commit', disabled: false, text: 'Latest commit on the default branch' },
+        { value: 'this-commit', disabled: false, text: 'This commit abc1234d' },
+      ]);
+    });
+
+    it('names the only branch of the task in the latest commit choice', () => {
+      const { fixture } = setup(trigger, { task: { branches: ['main'] } });
+      expect(fixture.componentInstance.runDialogStartBranchLabel()).toBe('Latest commit on main');
+    });
+
+    it('offers failed builds only for a finished evaluation with failed builds', () => {
+      const { fixture } = setup(trigger, { primaryStatus: 'Failed', primary: failedBuilds });
+      fixture.componentInstance.openRunDialogWithDefaultChoices();
+      fixture.detectChanges();
+      expect(radioLabels().map((radio) => radio.value)).toEqual(['latest-commit', 'this-commit', 'failed-builds']);
+    });
+
+    it('starts the latest commit, with a full input walk when ticked and opens the new evaluation', () => {
+      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+      const start = vi.spyOn(tasksService, 'startEvaluation').mockReturnValue(of({ id: 'e2', name: 'acme/demo', url: '' }));
+      const comp = fixture.componentInstance;
+      comp.openRunDialogWithDefaultChoices();
+      comp.walkAllInputsChecked.set(true);
+      comp.startEvaluationOrRetryFailedBuildsFromRunDialog();
+      expect(start).toHaveBeenCalledWith('acme', 'demo', { walk: 'full' });
+      expect(comp.runDialogOpen()).toBe(false);
+      expect(comp.selectedId()).toBe('e2');
+    });
+
+    it('starts the commit of the selected evaluation', () => {
+      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+      const start = vi.spyOn(tasksService, 'startEvaluation');
+      const comp = fixture.componentInstance;
+      comp.openRunDialogWithDefaultChoices();
+      comp.runScopeChoice.set('this-commit');
+      comp.startEvaluationOrRetryFailedBuildsFromRunDialog();
+      expect(start).toHaveBeenCalledWith('acme', 'demo', { commit: 'abc1234def5678' });
+    });
+
+    it('retries only the failed builds of the selected evaluation', () => {
+      const { fixture, tasksService, evaluationsService } = setup(trigger, { primaryStatus: 'Failed', primary: failedBuilds });
+      const start = vi.spyOn(tasksService, 'startEvaluation');
+      const retry = vi.spyOn(evaluationsService, 'retryEvaluation').mockReturnValue(of('e3'));
+      const comp = fixture.componentInstance;
+      comp.openRunDialogWithDefaultChoices();
+      comp.runScopeChoice.set('failed-builds');
+      comp.startEvaluationOrRetryFailedBuildsFromRunDialog();
+      expect(retry).toHaveBeenCalledWith('e1');
+      expect(start).not.toHaveBeenCalled();
+      expect(comp.selectedId()).toBe('e3');
+    });
+
+    it('keeps the dialog open with the server reason when the start is refused', () => {
+      const { fixture, notify } = setup(trigger, {
+        primaryStatus: 'Completed',
+        startEvaluation: () => throwError(() => new ApiError('Task is inactive', 409)),
+      });
+      const comp = fixture.componentInstance;
+      comp.openRunDialogWithDefaultChoices();
+      comp.startEvaluationOrRetryFailedBuildsFromRunDialog();
+      expect(comp.runDialogOpen()).toBe(true);
+      expect(comp.runDialogStartRequestInFlight()).toBe(false);
+      expect(comp.runStartFailureReason()).toBe("Couldn't start evaluation: Task is inactive");
+      expect(notify.failure).not.toHaveBeenCalled();
+    });
+  });
+
+  it('runs the commit of the selected evaluation again from both menus', () => {
     const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
-    const spy = vi.spyOn(tasksService, 'startEvaluation');
-    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs')!.command!();
-    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'full');
+    const start = vi.spyOn(tasksService, 'startEvaluation');
+    expect(fixture.componentInstance.panelMenuModel().map(i => i.label)).toContain('Run again');
+    fixture.componentInstance.evalMenuModel().find(i => i.label === 'Run again')!.command!();
+    expect(start).toHaveBeenCalledWith('acme', 'demo', { commit: 'abc1234def5678' });
   });
 
   describe('selecting the started evaluation', () => {
@@ -604,13 +689,14 @@ describe('TaskDetailComponent evaluation menu', () => {
     });
   });
 
-  it('holds the full reevaluation while an evaluation is queued', () => {
+  it('holds Run again while an evaluation is queued', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Queued' });
-    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs')?.disabledReason).toBe('The latest evaluation has not started yet.');
+    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Run again')?.disabledReason).toBe('The latest evaluation has not started yet.');
   });
 
-  it('offers no full reevaluation without trigger access', () => {
+  it('offers no Run again and no input walk without trigger access', () => {
     const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false }, { primaryStatus: 'Completed' });
+    expect(menuLabels(fixture)).not.toContain('Run again');
     expect(menuLabels(fixture)).not.toContain('Reevaluate all inputs');
   });
 
@@ -664,27 +750,25 @@ describe('TaskDetailComponent evaluation menu', () => {
 });
 
 describe('TaskDetailComponent - in-progress state (#452)', () => {
-  it('disables Start Evaluation while the latest evaluation is queued', () => {
+  it('disables Run while the latest evaluation is queued', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Queued' });
-    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
+    const startBtn = findByText(fixture.nativeElement, 'run') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(fixture.componentInstance.startDisabledReason()).toBe('The latest evaluation has not started yet.');
-    const reevaluate = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs');
-    expect(reevaluate?.disabledReason).toBe('The latest evaluation has not started yet.');
   });
 
-  it('names the wait reason of the latest evaluation as the reason Start Evaluation is blocked', () => {
+  it('names the wait reason of the latest evaluation as the reason Run is blocked', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
       { primaryStatus: 'Waiting', primary: { waiting_reason: { kind: 'no_cache' } } });
-    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement;
+    const startBtn = findByText(fixture.nativeElement, 'run') as HTMLButtonElement;
     const reason = (fixture.nativeElement as HTMLElement).querySelector(`#${startBtn.getAttribute('aria-describedby')}`);
     expect(reason?.textContent).toBe('The latest evaluation has not started yet: No writable cache.');
   });
 
-  it('enables Start Evaluation while the latest evaluation runs', () => {
+  it('enables Run while the latest evaluation runs', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Fetching' });
-    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
+    const startBtn = findByText(fixture.nativeElement, 'run') as HTMLButtonElement | null;
     expect(startBtn!.disabled).toBe(false);
   });
 
@@ -694,11 +778,34 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     expect(badge).toBeTruthy();
   });
 
-  it('counts built, failed, blocked and aborted builds against one total in the header', () => {
+  it('counts built, failed, skipped and aborted builds against one total in the header', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
       { primaryStatus: 'Failed', primary: { builds: { ...zeroCounts(), completed: 1, failed: 1, dependency_failed: 1, aborted: 1, substituted: 2 } } });
     const counter = (fixture.nativeElement as HTMLElement).querySelector('.bar-line > span')?.textContent?.replace(/\s+/g, ' ').trim();
-    expect(counter).toBe('1 of 4 built · 1 failed · 1 blocked · 1 aborted');
+    expect(counter).toBe('1 of 4 built · 1 failed · 1 skipped · 1 aborted');
+  });
+
+  it('shows the time left and a filled bar from the expected duration of a running evaluation', () => {
+    vi.useFakeTimers({ now: new Date('2026-01-01T00:04:00Z'), toFake: ['Date'] });
+    try {
+      const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+        primaryStatus: 'Building',
+        primary: { started_at: '2026-01-01T00:00:00', phase_started_at: { fetch: '2026-01-01T00:00:00Z' }, expected_duration_ms: 10 * 60_000 },
+      });
+      const progress = (fixture.nativeElement as HTMLElement).querySelector('.running-evaluation-progress-and-time-left');
+      expect(progress?.textContent?.trim()).toBe('About 6 min left');
+      expect(progress?.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('40');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides the time left once a running evaluation is past its expected duration', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'Building',
+      primary: { started_at: '2026-01-01T00:00:00', phase_started_at: { fetch: '2026-01-01T00:00:00Z' }, expected_duration_ms: 60_000 },
+    });
+    expect((fixture.nativeElement as HTMLElement).querySelector('.running-evaluation-progress-and-time-left')).toBeNull();
   });
 
   it('draws the shared build of an aborted evaluation as aborted, not as building stripes', () => {
@@ -1186,6 +1293,59 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.selected()?.id).toBe(component.evaluations()[1].id);
   });
 
+  it('keeps the newest evaluation selected when a live refresh lists a newer one and offers it as a pill', () => {
+    const trigger = { managed: false, canEdit: true, canTrigger: true };
+    const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+    const component = fixture.componentInstance;
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.new-run-started-pill')).toBeNull();
+    vi.spyOn(tasksService, 'getTask').mockReturnValue(of({
+      ...taskFor(trigger, [], 'Completed'),
+      last_evaluations: [evalSummary('e2', 'Queued', { commit_message: 'Bump flake inputs' }), ...component.evaluations()],
+    }));
+    component.loadTaskData();
+    fixture.detectChanges();
+    expect(component.selected()?.id).toBe('e1');
+    const pill = root.querySelector<HTMLButtonElement>('.new-run-started-pill')!;
+    expect(pill.textContent?.trim()).toBe('New run started: Bump flake inputs');
+    pill.click();
+    fixture.detectChanges();
+    expect(component.selected()?.id).toBe('e2');
+    expect(root.querySelector('.new-run-started-pill')).toBeNull();
+  });
+
+  it('labels a retry and a manual re-run of a commit on its tab and in the panel', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'Completed',
+      primary: { retry_of: 'e0' },
+      extraEvals: [evalSummary('e9', 'Completed'), evalSummary('e0', 'Failed', { trigger: { id: 't', type: 'polling' as const } })],
+    });
+    const component = fixture.componentInstance;
+    const root = fixture.nativeElement as HTMLElement;
+    const labels = Array.from(root.querySelectorAll('.eval-card .evaluation-origin')).map((label) => label.textContent?.trim());
+    expect(labels).toEqual(['Retry of abc1234d', 'Re-run of abc1234d']);
+    const panelLink = root.querySelector<HTMLAnchorElement>('.panel-title .sub a.evaluation-origin');
+    expect(panelLink?.getAttribute('href')).toBe('/project/acme/task/demo?eval=e0');
+    expect(component.retryOrRerunLabelByEvaluationId().get('e0')).toBeNull();
+  });
+
+  it('names who aborted an evaluation and links a replaced evaluation to its replacement', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'Aborted',
+      primary: { abort_reason: 'superseded', superseded_by: 'e2', finished_at: '2026-01-01T00:05:00' },
+      extraEvals: [evalSummary('e0', 'Aborted', { abort_reason: 'user', aborted_by: 'dave', finished_at: '2026-01-01T16:31:00' })],
+    });
+    const component = fixture.componentInstance;
+    const root = fixture.nativeElement as HTMLElement;
+    const replaced = root.querySelector<HTMLAnchorElement>('.panel-title a.abort-reason');
+    expect(replaced?.textContent?.trim()).toMatch(/^New push: .+ replaced this evaluation$/);
+    expect(replaced?.getAttribute('href')).toBe('/project/acme/task/demo?eval=e2');
+    component.select(component.evaluations()[1]);
+    fixture.detectChanges();
+    expect(root.querySelector('.panel-title span.abort-reason')?.textContent?.trim()).toMatch(/^Aborted by dave at /);
+    expect(root.querySelector('#evaluation-tab-e0 gr-status-icon')?.getAttribute('aria-label')).toMatch(/^Aborted by dave at /);
+  });
+
   it('persists an explicit selection in the eval query param', () => {
     const e2 = evalSummary('e2', 'Completed');
     const { fixture } = setup(
@@ -1276,7 +1436,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
     const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Copy', 'Prioritize', 'Reevaluate all inputs', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Copy', 'Run again', 'Prioritize', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -1753,14 +1913,10 @@ describe('TaskDetailComponent entry point abort and retry', () => {
     expect(spy).toHaveBeenCalledWith('b-hello');
   });
 
-  it('retries a failed entry point of the latest evaluation after it finished', () => {
-    const { fixture } = setup(edit, { primaryStatus: 'Failed' });
-    expect(pkgLabels(fixture, entryPoint('FailedPermanent'))).toContain('Retry');
-  });
-
-  it('offers no retry in a finished evaluation replaced by a newer evaluation', () => {
-    const { fixture } = setup(edit, { extraEvals: [evalSummary('e2', 'Failed')] });
-    expect(pkgLabels(fixture, entryPoint('FailedPermanent'), 'e2')).not.toContain('Retry');
+  it('offers no single build retry once the evaluation finished, leaving Retry failed builds as the way', () => {
+    const { fixture } = setup(edit, { primaryStatus: 'Failed', primary: failedBuilds });
+    expect(pkgLabels(fixture, entryPoint('FailedPermanent'))).not.toContain('Retry');
+    expect(menuLabels(fixture)).toContain('Retry failed builds');
   });
 
   it('offers neither abort nor retry without edit access', () => {

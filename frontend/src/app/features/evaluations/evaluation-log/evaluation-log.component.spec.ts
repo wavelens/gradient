@@ -411,7 +411,7 @@ describe('EvaluationLogComponent', () => {
     it('says why the log download waits while the build is still queued or never ran', () => {
       const { cmp } = setup();
       expect(open(cmp, target({ status: 'Queued' })).get('Download Log')!.disabledReason).toBe('Logs are available after build start.');
-      expect(open(cmp, target({ status: 'DependencyFailed' })).get('Download Log')!.disabledReason).toBe("This build didn't run because a dependency failed.");
+      expect(open(cmp, target({ status: 'DependencyFailed' })).get('Download Log')!.disabledReason).toBe('Skipped - a dependency failed, so this build has no log.');
     });
 
     it('says why the sbom waits until the build has outputs', () => {
@@ -606,20 +606,13 @@ describe('EvaluationLogComponent', () => {
         expect(open(cmp, target({ status: 'FailedPermanent' })).has('Retry')).toBe(false);
       });
 
-      it('keeps retry but not abort once the evaluation failed or was aborted', () => {
+      it('hides abort and single build retry once the evaluation failed or was aborted', () => {
         const { cmp } = setup();
         for (const status of ['Failed', 'Aborted'] as const) {
           inEvaluation(cmp, status);
           expect(open(cmp, target({ status: 'Queued' })).has('Abort')).toBe(false);
-          expect(open(cmp, target({ status: 'DependencyFailed' })).has('Retry')).toBe(true);
+          expect(open(cmp, target({ status: 'DependencyFailed' })).has('Retry')).toBe(false);
         }
-      });
-
-      it('hides retry in a failed evaluation a newer evaluation replaced', () => {
-        const { cmp } = setup();
-        inEvaluation(cmp, 'Failed');
-        cmp.evaluation.update(evaluation => ({ ...evaluation!, next: 'eval-2' }));
-        expect(open(cmp, target({ status: 'FailedPermanent' })).has('Retry')).toBe(false);
       });
 
       it('hides retry in a completed evaluation', () => {
@@ -649,11 +642,11 @@ describe('EvaluationLogComponent', () => {
         expect(abort).not.toHaveBeenCalled();
       });
 
-      it('retries a build of a failed evaluation, then follows the reopened evaluation live', () => {
+      it('retries a build of a running evaluation, then follows the evaluation live', () => {
         const { cmp } = setup();
         const retry = vi.spyOn(TestBed.inject(EvaluationsService), 'retryBuild').mockReturnValue(of('Success'));
         const follow = vi.spyOn(cmp, 'startLiveUpdates').mockImplementation(() => {});
-        inEvaluation(cmp, 'Failed');
+        inEvaluation(cmp, 'Building');
         const reload = reloadedAs(cmp, 'Building');
         open(cmp, target({ status: 'Aborted' })).get('Retry')!.command!();
         expect(retry).toHaveBeenCalledWith('b1');

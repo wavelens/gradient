@@ -36,6 +36,19 @@ export function evaluationDuration(evaluation: EvaluationTimes, nowMs: number): 
   return Math.max(0, end - serverTime(evaluation.started_at).getTime());
 }
 
+interface ExpectedEvaluationTimes {
+  status: EvaluationStatus;
+  expected_duration_ms?: number | null;
+  phase_started_at: { fetch?: string | null; building?: string | null };
+}
+
+export function getEstimatedEvaluationRemainingMilliseconds(evaluation: ExpectedEvaluationTimes, nowMs: number): number | null {
+  const started = evaluation.phase_started_at.fetch ?? evaluation.phase_started_at.building;
+  if (!evaluation.expected_duration_ms || !started || !isRunningEvaluationStatus(evaluation.status)) return null;
+  const left = evaluation.expected_duration_ms - (nowMs - serverTime(started).getTime());
+  return left > 0 ? left : null;
+}
+
 interface BuildTimes {
   status: string;
   build_time_ms?: number | null;

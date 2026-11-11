@@ -71,7 +71,7 @@ The Gradient server and all workers check the host key of the Git host for repos
 
 ## 5. Start an Evaluation
 
-Press **Start Evaluation** on the task page. Gradient will then scan the flake and locate every derivation that fit the wildcard. All those builds go to the worker.
+Press **Run** on the task page to start the latest commit. Gradient can scan the flake and identify every derivation that matches the wildcard. All those builds go to workers.
 
 ## Verify Deployment
 

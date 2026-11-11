@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Start Evaluation uses the default trigger.">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Evaluations from the &quot;Run&quot; button use the default trigger.">
   @if (triggers().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -52,7 +52,7 @@
                 <div class="trigger-summary">{{ configSummary(trigger) }}</div>
                 <div class="trigger-meta text-secondary">
                   @if (trigger.is_default) {
-                    <gr-badge severity="info" grTooltip="Start Evaluation uses this trigger">Default</gr-badge>
+                    <gr-badge severity="info" grTooltip="Trigger for the Run button">Default</gr-badge>
                   }
                   @if (!trigger.active) {
                     <gr-badge severity="neutral">Inactive</gr-badge>

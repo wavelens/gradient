@@ -6,7 +6,7 @@
 
 import type { BuildStatus, EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
-import { buildStatusLabel, getBuildCountTextPieces, isEvaluationNotStartedStatus, isRunningEvaluationStatus, removeNixErrorInternalsFromEvaluationMessage } from '@shared/evaluation';
+import { buildOutcomeLabel, getBuildCountTextPieces, isEvaluationNotStartedStatus, isRunningEvaluationStatus, removeNixErrorInternalsFromEvaluationMessage } from '@shared/evaluation';
 import { removeAnsiEscapeSequences } from '@shared/log';
 import { plural } from '@shared/text';
 
@@ -26,7 +26,7 @@ export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary
   if (isEvaluationNotStartedStatus(status) || total === 0) return [];
   return [
     countTile(failed, 'Failed package', 'Failed packages'),
-    countTile(blocked, 'Blocked package', 'Blocked packages'),
+    countTile(blocked, 'Skipped package', 'Skipped packages'),
     countTile(built, 'Built package', 'Built packages'),
     isRunningEvaluationStatus(status)
       ? countTile(unfinished, 'Remaining package', 'Remaining packages')
@@ -43,7 +43,7 @@ export function headline(summary: EvaluationFailureSummary, status: EvaluationSt
   const failedAttributes = summary.failed_attributes.length;
   const parts = [
     ...(status === 'Aborted' ? ['Aborted'] : []),
-    ...(built < total ? getBuildCountTextPieces({ built, total, failed, blocked, aborted: unfinished }, 'package').map((piece) => piece.text) : []),
+    ...(built < total ? getBuildCountTextPieces({ built, total, failed, skipped: blocked, aborted: unfinished }, 'package').map((piece) => piece.text) : []),
     ...(failedAttributes > 0 ? [`${plural(failedAttributes, 'attribute')} failed to evaluate`] : []),
   ];
   if (parts.length) return parts.join(' · ');
@@ -54,9 +54,9 @@ export function headline(summary: EvaluationFailureSummary, status: EvaluationSt
 
 // A timeout or a lost worker is a fault of the CI, not of the package.
 export function failureKind(status: BuildStatus): { label: string; severity: BadgeSeverity } {
-  if (status === 'FailedTimeout' || status === 'FailedTransient') return { label: buildStatusLabel(status), severity: 'warning' };
+  if (status === 'FailedTimeout' || status === 'FailedTransient') return { label: buildOutcomeLabel(status), severity: 'warning' };
 
-  return { label: buildStatusLabel('FailedPermanent'), severity: 'danger' };
+  return { label: buildOutcomeLabel('FailedPermanent'), severity: 'danger' };
 }
 
 export function failureTitle(failure: FailedBuildSummary): string {
@@ -73,7 +73,7 @@ export function blockedLine(failure: FailedBuildSummary): string {
   const unnamed = failure.blocked_total - named.length;
   const names = named.join(', ') + (unnamed > 0 ? ` and ${unnamed} more` : '');
 
-  return `Blocks ${plural(failure.blocked_total, 'package')}: ${names}`;
+  return `Skipped ${plural(failure.blocked_total, 'package')}: ${names}`;
 }
 
 export function firstLine(message: string): string {

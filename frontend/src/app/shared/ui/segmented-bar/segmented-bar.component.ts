@@ -8,15 +8,15 @@ import { ChangeDetectionStrategy, Component, computed, input, signal } from '@an
 import { BuildStatusCounts } from '@core/models';
 import { injectOnScreen } from '@gradient/ui/ui';
 
-export type SegmentTone = 'completed' | 'failed' | 'aborted' | 'building' | 'queued';
+export type SegmentTone = 'completed' | 'failed' | 'skipped' | 'aborted' | 'building' | 'queued';
 export interface BarSegment { tone: SegmentTone; pct: number; }
 interface CountSegment extends BarSegment { label: string; }
 interface Tip { text: string; x: number; }
 
-const ORDER: SegmentTone[] = ['completed', 'failed', 'aborted', 'building', 'queued'];
+const ORDER: SegmentTone[] = ['completed', 'failed', 'skipped', 'aborted', 'building', 'queued'];
 
 function countSegments(counts: BuildStatusCounts): CountSegment[] {
-  const c: Record<SegmentTone, number> = { ...counts, aborted: counts.aborted + counts.dependency_failed };
+  const c: Record<SegmentTone, number> = { ...counts, skipped: counts.dependency_failed };
   const total = ORDER.reduce((sum, tone) => sum + c[tone], 0);
   if (total === 0) {
     return counts.substituted > 0 ? [{ tone: 'completed', pct: 100, label: `${counts.substituted} substituted` }] : [];
@@ -24,7 +24,7 @@ function countSegments(counts: BuildStatusCounts): CountSegment[] {
   return ORDER.map(tone => ({
     tone,
     pct: (c[tone] / total) * 100,
-    label: tone === 'aborted' && counts.dependency_failed > 0 ? `${counts.aborted} aborted, ${counts.dependency_failed} blocked` : `${c[tone]} ${tone}`,
+    label: `${c[tone]} ${tone}`,
   }));
 }
 

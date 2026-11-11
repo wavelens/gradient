@@ -5,7 +5,7 @@
  */
 
 import type { InputFetchState, InputFetch } from '@core/models';
-import { inputFetchLabel, inputFetchRatio, phaseProgress, thunkProgress } from './progress';
+import { getRunningEvaluationProgress, inputFetchLabel, inputFetchRatio, phaseProgress, thunkProgress } from './progress';
 
 const row = (state: InputFetchState, downloaded_bytes: number, expected_bytes: number): InputFetch =>
   ({ name: 'nixpkgs', state, downloaded_bytes, expected_bytes });
@@ -65,5 +65,21 @@ describe('inputFetch', () => {
   it('shows only the final amount once an input is done', () => {
     expect(inputFetchLabel(row('Done', 2048, 2048))).toBe('2.0 KiB');
     expect(inputFetchLabel(row('Queued', 0, 2048))).toBe('');
+  });
+});
+
+describe('getRunningEvaluationProgress', () => {
+  const now = Date.UTC(2026, 4, 20, 12, 4, 0);
+  const running = { status: 'Building' as const, expected_duration_ms: 600_000, phase_started_at: { fetch: '2026-05-20T12:00:00Z' } };
+
+  it('fills the bar with the elapsed share and names the minutes left', () => {
+    const progress = getRunningEvaluationProgress(running, now);
+    expect(progress?.label).toBe('About 6 min left');
+    expect(progress?.percent).toBe(40);
+    expect(progress?.segments).toEqual([{ tone: 'building', pct: 40 }, { tone: 'queued', pct: 60 }]);
+  });
+
+  it('hides once the evaluation runs past the estimate', () => {
+    expect(getRunningEvaluationProgress(running, now + 600_000)).toBeNull();
   });
 });

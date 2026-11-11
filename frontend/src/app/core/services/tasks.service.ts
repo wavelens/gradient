@@ -18,7 +18,7 @@ import {
   TaskDetailsResponse,
   PaginatedEntryPoints,
   EvaluationSummary,
-  WalkMode,
+  EvaluateRequest,
   TaskMetricsResponse,
   EntryPointMetricsResponse,
   MakeTaskRequest,
@@ -89,8 +89,8 @@ export class TasksService {
     return this.api.get<EvaluationSummary[]>(`tasks/${project}/${task}/evaluations${q}`);
   }
 
-  startEvaluation(project: string, task: string, walk: WalkMode = 'pruned'): Observable<CreatedEntityResponse> {
-    const body = walk === 'pruned' ? undefined : { walk };
+  startEvaluation(project: string, task: string, request: EvaluateRequest = {}): Observable<CreatedEntityResponse> {
+    const body = request.commit || request.walk === 'full' ? request : undefined;
     return this.api.post<CreatedEntityResponse>(`tasks/${project}/${task}/evaluate`, body);
   }
 

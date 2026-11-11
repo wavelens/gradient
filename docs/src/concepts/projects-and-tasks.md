@@ -56,7 +56,7 @@ flowchart LR
 
 ## Default Trigger
 
-Exactly one trigger per task is the default trigger. The "Start Evaluation" button and the API start fire the default trigger.
+Exactly one trigger per task is the default trigger. The "Run" button and the API start the default trigger.
 
 - **Branch**: The branch that a polling trigger or cron trigger can set, or the first push branch or pull request branch without glob characters. Otherwise, the remote default branch.
 - **Inactive**: An inactive default trigger can still fire on a manual start, but never on its own.

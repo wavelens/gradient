@@ -29,16 +29,18 @@ describe('SegmentedBarComponent', () => {
     expect(widths()).toEqual([
       ['seg seg-completed', '37.5%'],
       ['seg seg-failed', '12.5%'],
+      ['seg seg-skipped', '0%'],
       ['seg seg-aborted', '50%'],
       ['seg seg-building', '0%'],
       ['seg seg-queued', '0%'],
     ]);
   });
 
-  it('names aborted and blocked builds apart in the gray segment hint', () => {
-    fixture.componentRef.setInput('counts', counts({ completed: 1, aborted: 2, dependency_failed: 1 }));
+  it('draws builds skipped after a failed dependency apart from failed and aborted builds', () => {
+    fixture.componentRef.setInput('counts', counts({ completed: 1, failed: 1, aborted: 1, dependency_failed: 1 }));
     fixture.detectChanges();
-    expect(fixture.componentInstance.shown().find((s) => s.tone === 'aborted')?.label).toBe('2 aborted, 1 blocked');
+    const labels = Object.fromEntries(fixture.componentInstance.shown().map((s) => [s.tone, s.label]));
+    expect(labels).toEqual(expect.objectContaining({ failed: '1 failed', skipped: '1 skipped', aborted: '1 aborted' }));
   });
 
   /// An endless animation on a segment without width cannot leave the main thread,

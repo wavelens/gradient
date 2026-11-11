@@ -56,13 +56,15 @@ import {
   BuildStatusCounts,
   EvaluationSummary,
   EvaluationProgress,
-  WalkMode,
+  EvaluateRequest,
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, buildStatusLabel, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase, nextPollText } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, buildOutcomeLabel, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, evaluationRetryOrRerunLabel, getAbortedEvaluationExplanationWithReplacementId, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getRunningEvaluationProgress, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type AbortedEvaluationExplanation, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase, nextPollText } from '@shared/evaluation';
 
 const NO_EVALUATION_SELECTED = 'No evaluation selected.';
+
+type RunDialogStartChoice = 'latest-commit' | 'this-commit' | 'failed-builds';
 
 @Component({
   selector: 'app-task-detail',
@@ -125,8 +127,15 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   protected readonly staggeredRows = TaskDetailComponent.ENTRY_POINTS_PAGE;
   private barCountsByEntryPoint = new WeakMap<EntryPointSummary, BuildStatusCounts>();
   private entryPointsAppending = false;
+  // Fix the latest evaluation on first load. Live updates don't move the selection. Show newer evaluations as a pill instead.
   selectedId = signal<string | null>(null);
+  private newestEvaluationIdAtSelection = signal<string | null>(null);
   starting = signal(false);
+  runDialogOpen = signal(false);
+  runScopeChoice = signal<RunDialogStartChoice>('latest-commit');
+  walkAllInputsChecked = signal(false);
+  runDialogStartRequestInFlight = signal(false);
+  runStartFailureReason = signal<string | null>(null);
   starred = signal(false);
   aborting = signal(false);
   liveConnectionOpen = signal<boolean | null>(null);
@@ -210,6 +219,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   ), { initialValue: false });
 
   latestEvaluation = computed<EvaluationSummary | null>(() => this.evaluations()[0] ?? null);
+  newestUnselectedEvaluationAfterSelection = computed<EvaluationSummary | null>(() => {
+    const latest = this.latestEvaluation();
+    if (!latest || latest.id === this.selected()?.id || latest.id === this.newestEvaluationIdAtSelection()) return null;
+    return latest;
+  });
+  retryOrRerunLabelByEvaluationId = computed(() => {
+    const list = this.evaluations();
+    return new Map(list.map((evaluation, index) => [evaluation.id, evaluationRetryOrRerunLabel(evaluation, list.slice(index + 1))]));
+  });
+  selectedRunningEvaluationProgressAndTimeLeft = computed(() => {
+    const selected = this.selected();
+    return selected ? getRunningEvaluationProgress(selected, this.tick()) : null;
+  });
   evaluationInProgress = computed(() => {
     const e = this.latestEvaluation();
     return !!e && isRunningEvaluationStatus(e.status);
@@ -224,6 +246,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const task = this.task();
     if (!task || this.evaluationInProgress() || this.latestEvaluationNotStarted()) return null;
     return nextPollText(task.next_polling_trigger_check_at, this.tick());
+  });
+
+  runDialogStartBranchLabel = computed(() => {
+    const branches = this.task()?.branches ?? [];
+    return branches.length === 1 && branches[0] ? `Latest commit on ${branches[0]}` : 'Latest commit on the default branch';
   });
 
   activeTriggerBranchLabels = computed(() => (this.task()?.branches ?? []).map((branch) => branch ?? 'Default branch'));
@@ -299,8 +326,14 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const sig = this.taskSignature(task);
     if (sig !== this.taskSig) {
       this.taskSig = sig;
+      this.keepEvaluationsDroppedFromNewestInOlderEvaluations(task.last_evaluations);
       this.task.set(task);
       this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
+    }
+    const newest = task.last_evaluations[0]?.id;
+    if (newest && !this.newestEvaluationIdAtSelection()) {
+      this.newestEvaluationIdAtSelection.set(newest);
+      if (!this.selectedId()) this.selectedId.set(newest);
     }
     // The entry-point page walks the graph for stale histograms; on live pings
     // throttle it so a running evaluation's rapid status stream doesn't
@@ -313,6 +346,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     } else {
       this.entryPointsReloadTimer ??= setTimeout(() => this.loadEntryPoints(this.selected()?.id), wait);
     }
+  }
+
+  private keepEvaluationsDroppedFromNewestInOlderEvaluations(newest: EvaluationSummary[]): void {
+    const kept = new Set(newest.map(e => e.id));
+    const dropped = (this.task()?.last_evaluations ?? []).filter(e => !kept.has(e.id));
+    if (dropped.length) this.olderEvaluations.update(older => [...dropped, ...older]);
   }
 
   private getEvaluationStatusKey(evaluation: EvaluationSummary | null | undefined): string {
@@ -344,6 +383,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   private showEvaluation(id: string): void {
     this.selectedId.set(id);
+    this.newestEvaluationIdAtSelection.set(this.latestEvaluation()?.id ?? null);
     this.crumbs.rememberEvaluation(this.projectName, this.taskName, id);
     this.loadEntryPoints(this.selected()?.id);
   }
@@ -450,10 +490,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  startEvaluation(walk: WalkMode = 'pruned'): void {
+  startEvaluation(request: EvaluateRequest = {}): void {
     if (this.starting()) return;
     this.starting.set(true);
-    this.tasksService.startEvaluation(this.projectName, this.taskName, walk).pipe(
+    this.tasksService.startEvaluation(this.projectName, this.taskName, request).pipe(
       switchMap((evaluation) => {
         this.selectEvaluation(evaluation.id);
         return this.requestTaskDetailsIfNoNewerRequestApplied().pipe(catchError(() => of(null)));
@@ -462,6 +502,33 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (task) => task && this.applyTask(task, true),
       error: (error: unknown) => this.notify.failure('Failed to start evaluation', error),
+    });
+  }
+
+  openRunDialogWithDefaultChoices(): void {
+    this.runScopeChoice.set('latest-commit');
+    this.walkAllInputsChecked.set(false);
+    this.runStartFailureReason.set(null);
+    this.runDialogOpen.set(true);
+  }
+
+  startEvaluationOrRetryFailedBuildsFromRunDialog(): void {
+    const selected = this.selected();
+    const choice = this.runScopeChoice();
+    if (this.runDialogStartRequestInFlight() || (choice !== 'latest-commit' && !selected)) return;
+    const walk: EvaluateRequest = this.walkAllInputsChecked() ? { walk: 'full' } : {};
+    const request$: Observable<string> = choice === 'failed-builds'
+      ? this.evaluationsService.retryEvaluation(selected!.id)
+      : this.tasksService.startEvaluation(this.projectName, this.taskName,
+          choice === 'this-commit' ? { ...walk, commit: selected!.commit } : walk).pipe(map((evaluation) => evaluation.id));
+    this.runDialogStartRequestInFlight.set(true);
+    this.runStartFailureReason.set(null);
+    request$.pipe(finalize(() => this.runDialogStartRequestInFlight.set(false))).subscribe({
+      next: (id) => {
+        this.runDialogOpen.set(false);
+        this.openNewEvaluation(id);
+      },
+      error: (error: unknown) => this.runStartFailureReason.set(`Couldn't start evaluation: ${apiErrorMessage(error, 'no response from the server')}`),
     });
   }
 
@@ -681,7 +748,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   entryPointGroups = computed(() => groupEntryPoints(this.entryPoints(), this.matchingFailedAttributes()));
 
   protected readonly evaluationPhase = evaluationPhase;
-  protected readonly buildStatusLabel = buildStatusLabel;
+  protected readonly buildOutcomeLabel = buildOutcomeLabel;
   protected readonly inputFetchPhase = inputFetchPhase;
 
   protected packagePhase(evaluation: EvaluationSummary, entry: EntryPointSummary): StatusPhase {
@@ -696,10 +763,21 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const selected = this.selected();
     if (!selected || !this.canRetryEvaluation(selected)) return null;
     return {
-      label: 'Retry', icon: 'replay',
+      label: 'Retry failed builds', icon: 'replay',
       disabled: this.starting(),
       disabledReason: this.evaluationInProgress() ? 'An evaluation of this task is in progress.' : null,
       command: () => this.retryEvaluation(selected),
+    };
+  });
+
+  runEvaluationAgainMenuItem = computed<MenuItem | null>(() => {
+    const selected = this.selected();
+    if (!selected?.commit || !this.canTrigger()) return null;
+    return {
+      label: 'Run again', icon: 'play_arrow',
+      disabled: this.starting(),
+      disabledReason: this.startDisabledReason(),
+      command: () => this.startEvaluation({ commit: selected.commit }),
     };
   });
 
@@ -738,13 +816,18 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       })
     : []);
 
-  panelMenuModel = computed<MenuItem[]>(() => [...this.evaluationLinkItems(), ...this.evaluationActionItems()]);
+  panelMenuModel = computed<MenuItem[]>(() => {
+    const runAgain = this.runEvaluationAgainMenuItem();
+    return [...this.evaluationLinkItems(), ...(runAgain ? [runAgain] : []), ...this.evaluationActionItems()];
+  });
 
   evalMenuModel = computed<MenuItem[]>(() => {
+    const runAgain = this.runEvaluationAgainMenuItem();
     const retry = this.retryEvaluationItem();
     return [
       ...this.evaluationPageItems(),
       ...this.evaluationLinkItems(),
+      ...(runAgain ? [runAgain] : []),
       ...(retry ? [retry] : []),
       ...this.evaluationActionItems(),
     ];
@@ -759,12 +842,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
              command: () => this.runAction(this.evaluationsService.prioritizeEvaluation(selected.id),
                'Evaluation prioritized', 'Failed to prioritize evaluation') }]
-        : []),
-      ...(this.canTrigger()
-        ? [{ label: 'Reevaluate all inputs', icon: 'account_tree',
-             disabled: this.starting(),
-             disabledReason: this.startDisabledReason(),
-             command: () => this.startEvaluation('full') }]
         : []),
       ...(this.authService.isAuthenticated()
         ? [{ label: 'Diagnostic report', icon: 'bug_report', disabledReason: selected ? null : NO_EVALUATION_SELECTED,
@@ -794,8 +871,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private canRetryEntryPoint(ep: EntryPointSummary, evaluation: EvaluationSummary): boolean {
-    const replaced = this.latestEvaluation()?.id !== evaluation.id;
-    return this.canTrigger() && canRetryBuild({ status: evaluation.status, replaced }, ep.build_status);
+    return this.canTrigger() && canRetryBuild(evaluation.status, ep.build_status);
+  }
+
+  protected getAbortedEvaluationExplanationWithReplacementIdFromLoadedCommitList(evaluation: EvaluationSummary): AbortedEvaluationExplanation | null {
+    const replacementCommit = this.evaluations().find((other) => other.id === evaluation.superseded_by)?.commit;
+    return getAbortedEvaluationExplanationWithReplacementId(evaluation, replacementCommit);
   }
 
   private canRetryEvaluation(evaluation: EvaluationSummary): boolean {

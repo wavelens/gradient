@@ -21,8 +21,8 @@ export class AccessService {
     return s.managed || !s.canEdit;
   }
 
-  /// Returns an `AccessState` projected onto trigger-action permissions
-  /// (Start Evaluation, Retry, Abort). `canEdit` is replaced
+  /// Return `AccessState` projected onto permissions for trigger actions
+  /// (run, retry a failed build, abort). Callers receive `canEdit` replaced
   /// by `canTrigger` and `managed` is forced to `false` - trigger actions
   /// don't mutate config, so the managed flag must not disable them. Pass the
   /// result to `*appWritable` / `[appManagedDisable]` to gate trigger buttons

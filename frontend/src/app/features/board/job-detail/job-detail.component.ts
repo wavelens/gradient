@@ -48,7 +48,7 @@ import {
   buildAbortTargetLine,
   buildAttemptEndReasonLabel,
   buildPhase,
-  buildStatusLabel,
+  buildOutcomeLabel,
   evaluationAbortTarget,
   waitingAccessFrom,
   type StatusPhase,
@@ -624,7 +624,7 @@ export class BoardJobDetailComponent implements OnInit {
   jobStatusBadge = computed<{ phase: StatusPhase; label: string }>(() => {
     const j = this.job();
     const b = this.shownJobBuild();
-    if (j && b && b.id === j.build_id) return { phase: buildPhase(b.status), label: buildStatusLabel(b.status) };
+    if (j && b && b.id === j.build_id) return { phase: buildPhase(b.status), label: buildOutcomeLabel(b.status) };
     if (j?.passed_over) return { phase: 'aborted', label: 'Passed over' };
     if (!j?.finished_at) return { phase: 'running', label: 'Running' };
     return JOB_OUTCOME_BADGES[j.outcome ?? ''] ?? { phase: 'success', label: 'Finished' };

@@ -76,7 +76,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildStatusLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildOutcomeLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { saveResponse } from '@shared/download';
 
 const packageNameVisibleTrailingCharacterCount = 10;
@@ -419,16 +419,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     skipped: 6,
   };
 
-  /// The sidebar sections follow display order. Failed and Blocked builds come right after Building. Sections get their label from buildStatusLabel. Rows for a status other than the section label show their own status label, for example a timed out build under Failed. Statuses this list doesn't recognize map to `Other`. All builds appear in the list.
+  /// The sidebar sections follow display order. Failed and skipped builds come right after Building. Sections get their label from buildOutcomeLabel. Rows for a status other than the section label show their own status label, for example a timed out build under Failed. Statuses this list doesn't recognize map to `Other`. All builds appear in the list.
   private readonly buildGroups: { key: string; label: string; members: string[]; phase: StatusPhase }[] = [
-    { key: 'building', label: buildStatusLabel('Building'), members: ['building'], phase: 'running' },
-    { key: 'failed', label: buildStatusLabel('FailedPermanent'), members: ['failed'], phase: 'failure' },
-    { key: 'dependencyfailed', label: buildStatusLabel('DependencyFailed'), members: ['dependencyfailed'], phase: 'failure' },
-    { key: 'aborted', label: buildStatusLabel('Aborted'), members: ['aborted'], phase: 'aborted' },
-    { key: 'queued', label: buildStatusLabel('Queued'), members: ['queued'], phase: 'queued' },
-    { key: 'completed', label: buildStatusLabel('Completed'), members: ['completed'], phase: 'success' },
-    { key: 'substituted', label: buildStatusLabel('Substituted'), members: ['substituted'], phase: 'success' },
-    { key: 'skipped', label: buildStatusLabel('Skipped'), members: ['skipped'], phase: 'aborted' },
+    { key: 'building', label: buildOutcomeLabel('Building'), members: ['building'], phase: 'running' },
+    { key: 'failed', label: buildOutcomeLabel('FailedPermanent'), members: ['failed'], phase: 'failure' },
+    { key: 'dependencyfailed', label: buildOutcomeLabel('DependencyFailed'), members: ['dependencyfailed'], phase: 'aborted' },
+    { key: 'aborted', label: buildOutcomeLabel('Aborted'), members: ['aborted'], phase: 'aborted' },
+    { key: 'queued', label: buildOutcomeLabel('Queued'), members: ['queued'], phase: 'queued' },
+    { key: 'completed', label: buildOutcomeLabel('Completed'), members: ['completed'], phase: 'success' },
+    { key: 'substituted', label: buildOutcomeLabel('Substituted'), members: ['substituted'], phase: 'success' },
+    { key: 'skipped', label: buildOutcomeLabel('Skipped'), members: ['skipped'], phase: 'aborted' },
     { key: 'other', label: 'Other', members: [], phase: 'aborted' },
   ];
 
@@ -1172,7 +1172,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   canRetry(build: BuildItem): boolean {
     const evaluation = this.evaluation();
     return this.triggerAccess().canEdit && !!evaluation
-      && canRetryBuild({ status: evaluation.status, replaced: !!evaluation.next }, build.status);
+      && canRetryBuild(evaluation.status, build.status);
   }
 
   prioritizeBuild(build: BuildItem): void {
@@ -1283,7 +1283,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return { head: name.slice(0, cut), tail: name.slice(cut) };
   }
 
-  protected readonly buildStatusLabel = buildStatusLabel;
+  protected readonly buildOutcomeLabel = buildOutcomeLabel;
   protected readonly abortedWithoutBuildsTitle = abortedWithoutBuildsTitle;
 
   getBuildElapsed(build: BuildItem): string {

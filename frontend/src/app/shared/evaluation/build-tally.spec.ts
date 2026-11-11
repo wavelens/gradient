@@ -14,11 +14,11 @@ const counts = (c: Partial<BuildStatusCounts>): BuildStatusCounts => ({
 describe('buildTally', () => {
   it('counts every build to build against one total and leaves substituted builds to the overall count', () => {
     expect(buildTally(counts({ completed: 500, failed: 34, building: 6, queued: 1110, substituted: 5400, aborted: 100, dependency_failed: 7 }), 'Building'))
-      .toEqual(expect.objectContaining({ built: 500, total: 1757, overall: 7157, failed: 34, blocked: 7, aborted: 100 }));
+      .toEqual(expect.objectContaining({ built: 500, total: 1757, overall: 7157, failed: 34, skipped: 7, aborted: 100 }));
   });
 
   it('falls back to the substituted builds when nothing had to be built, matching the full bar', () => {
-    expect(buildTally(counts({ substituted: 20 }), 'Completed')).toEqual(expect.objectContaining({ built: 20, total: 20, overall: 20, failed: 0, blocked: 0, aborted: 0 }));
+    expect(buildTally(counts({ substituted: 20 }), 'Completed')).toEqual(expect.objectContaining({ built: 20, total: 20, overall: 20, failed: 0, skipped: 0, aborted: 0 }));
   });
 
   it('counts the unfinished builds of a finished evaluation as aborted, without building stripes', () => {
@@ -29,12 +29,12 @@ describe('buildTally', () => {
 });
 
 describe('getBuildCountTextPieces', () => {
-  it('never counts a failed or blocked build as built and leaves out empty parts', () => {
+  it('never counts a failed or skipped build as built and leaves out empty parts', () => {
     const pieces = getBuildCountTextPieces(buildTally(counts({ completed: 1, failed: 1, dependency_failed: 1 }), 'Failed'));
-    expect(pieces.map((piece) => piece.text)).toEqual(['1 of 3 built', '1 failed', '1 blocked']);
+    expect(pieces.map((piece) => piece.text)).toEqual(['1 of 3 built', '1 failed', '1 skipped']);
   });
 
   it('names the unit when one is given', () => {
-    expect(getBuildCountTextPieces({ built: 1, total: 1, failed: 0, blocked: 0, aborted: 0 }, 'package')[0].text).toBe('1 of 1 package built');
+    expect(getBuildCountTextPieces({ built: 1, total: 1, failed: 0, skipped: 0, aborted: 0 }, 'package')[0].text).toBe('1 of 1 package built');
   });
 });

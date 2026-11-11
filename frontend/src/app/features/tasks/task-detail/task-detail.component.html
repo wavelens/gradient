@@ -26,8 +26,8 @@
     </div>
     <div class="head-actions phone-icon-buttons">
       @if (authService.isAuthenticated()) {
-        <button *appWritable="triggerAccess()" grButton label="Start Evaluation" icon="play_arrow"
-                (click)="startEvaluation()" [loading]="starting()"
+        <button *appWritable="triggerAccess()" grButton label="Run" icon="play_arrow"
+                (click)="openRunDialogWithDefaultChoices()" [loading]="starting()"
                 [disabledReason]="startDisabledReason()"></button>
         @if (proj.name !== 'build-request' && canOpenSettings()) {
           <a grButton label="Settings" icon="settings" severity="secondary"
@@ -80,6 +80,12 @@
     <gr-message-banner class="pad" type="warning">Evaluation not found. Showing the latest evaluation.</gr-message-banner>
   }
 
+  @if (newestUnselectedEvaluationAfterSelection(); as newer) {
+    <div class="pad">
+      <button type="button" class="new-run-started-pill" (click)="select(newer)">New run started: {{ evalTitle(newer) }}</button>
+    </div>
+  }
+
   @if (evaluations().length > 0) {
     <div class="strip-row">
       <button grButton class="strip-arrow strip-arrow--start" icon="chevron_left" severity="secondary" size="small" tabindex="-1"
@@ -90,16 +96,18 @@
         <div class="eval-strip" role="tablist" aria-label="Evaluation" (keydown)="onEvaluationTabListKeydown($event)">
           @for (e of evaluations(); track e.id) {
             @let isSelected = selected()?.id === e.id;
+            @let abortExplanation = getAbortedEvaluationExplanationWithReplacementIdFromLoadedCommitList(e);
             <button type="button" role="tab" class="eval-card" [id]="'evaluation-tab-' + e.id"
                     [attr.aria-selected]="isSelected" aria-controls="evaluation-detail-panel" [tabindex]="isSelected ? 0 : -1"
                     [attr.data-phase]="evaluationPhase(e.status, e.waiting_reason)" [class.selected]="isSelected" (click)="select(e)"
                     (contextmenu)="select(e); evalMenu.openAt($event)">
               <span class="l1">
-                <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status, e.waiting_reason)" [prioritized]="e.prioritized" size="sm" />
+                <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status, e.waiting_reason)" [prioritized]="e.prioritized" size="sm"
+                                [grTooltip]="abortExplanation?.text ?? ''" [label]="abortExplanation?.text" />
                 <span class="ev-title" [class.mono]="!e.commit_message" [title]="getCommitMessageAndShortHashTooltip(e)">{{ evalTitle(e) }}</span>
               </span>
               <span class="l2">
-                <time [attr.datetime]="e.started_at ?? e.created_at">{{ monthDayClockTime(e.started_at ?? e.created_at) }}</time><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span>
+                <time [attr.datetime]="e.started_at ?? e.created_at">{{ monthDayClockTime(e.started_at ?? e.created_at) }}</time><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span>@if (retryOrRerunLabelByEvaluationId().get(e.id); as origin) {<span class="evaluation-origin">{{ origin }}</span>}
               </span>
             </button>
           }
@@ -139,6 +147,13 @@
                 @if (getWaitingReasonTitleForEvaluationWithNonWaitingStatus(sel); as waitingTitle) {
                   <span class="waiting-reason"><gr-icon name="pause_circle" size="sm" /> {{ waitingTitle }}</span>
                 }
+                @if (getAbortedEvaluationExplanationWithReplacementIdFromLoadedCommitList(sel); as abort) {
+                  @if (abort.replacementId) {
+                    <a class="abort-reason" [routerLink]="links.task(projectName, taskName, abort.replacementId)">{{ abort.text }}</a>
+                  } @else {
+                    <span class="abort-reason">{{ abort.text }}</span>
+                  }
+                }
               </div>
               <div class="sub">
                 @if (sel.commit_message) {
@@ -149,6 +164,13 @@
                   }
                 }
                 {{ triggerLabel(sel) }} ·
+                @if (retryOrRerunLabelByEvaluationId().get(sel.id); as origin) {
+                  @if (sel.retry_of) {
+                    <a class="evaluation-origin" [routerLink]="links.task(projectName, taskName, sel.retry_of)">{{ origin }}</a> ·
+                  } @else {
+                    <span class="evaluation-origin">{{ origin }}</span> ·
+                  }
+                }
                 @if (sel.started_at) {
                   started <time [attr.datetime]="sel.started_at">{{ monthDayClockTime(sel.started_at) }}</time>
                 } @else {
@@ -165,6 +187,13 @@
                   <gr-segmented-bar class="eval-bar" [counts]="tally.counts" />
                   <span [title]="buildCountTitle(tally)">@for (piece of getBuildCountTextPieces(tally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
                 }
+              }
+              @if (selectedRunningEvaluationProgressAndTimeLeft(); as progress) {
+                <span class="running-evaluation-progress-and-time-left">
+                  <gr-segmented-bar [segments]="progress.segments" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                                    [attr.aria-valuenow]="progress.percent" [attr.aria-valuetext]="progress.label" />
+                  {{ progress.label }}
+                </span>
               }
               @if (sel.started_at) {
                 <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
@@ -191,7 +220,7 @@
                       severity="danger" [loading]="aborting()" [disabled]="aborting()"
                       (click)="requestAbort($event, sel)"></button>
             } @else if (retryEvaluationItem(); as retry) {
-              <button grButton size="small" label="Retry" icon="replay" severity="secondary"
+              <button grButton size="small" label="Retry failed builds" icon="replay" severity="secondary"
                       [disabled]="retry.disabled" [disabledReason]="retry.disabledReason" (click)="retry.command?.()"></button>
             }
             <button grButton size="small" icon="more_vert" severity="secondary"
@@ -228,7 +257,7 @@
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
                     @if (!sel.only_evaluate) {
                       @if (execJob) {
-                        <span class="pkg-deps">{{ buildStatusLabel(ep.build_status) }}</span>
+                        <span class="pkg-deps">{{ buildOutcomeLabel(ep.build_status) }}</span>
                       } @else {
                         <gr-segmented-bar class="pkg-bar" [counts]="depTally.counts" />
                         <span class="pkg-deps" [title]="buildCountTitle(depTally)">@for (piece of getBuildCountTextPieces(depTally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
@@ -320,6 +349,50 @@
         [message]="access().canTrigger ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'" />
     </div>
   }
+
+  <gr-dialog
+    header="Run"
+    [visible]="runDialogOpen()"
+    (visibleChange)="!$event && runDialogOpen.set(false)"
+    [error]="runStartFailureReason()"
+    [busy]="runDialogStartRequestInFlight()"
+    width="460px"
+  >
+    @let runSelected = selected();
+    @let failedBuildsRetry = retryEvaluationItem();
+    <fieldset class="gr-vertical-radio-button-fieldset">
+      <legend>Commit to evaluate</legend>
+      <label>
+        <input type="radio" name="run-scope" value="latest-commit" [checked]="runScopeChoice() === 'latest-commit'"
+               (change)="runScopeChoice.set('latest-commit')" />
+        {{ runDialogStartBranchLabel() }}
+      </label>
+      @if (runSelected?.commit) {
+        <label>
+          <input type="radio" name="run-scope" value="this-commit" [checked]="runScopeChoice() === 'this-commit'"
+                 (change)="runScopeChoice.set('this-commit')" />
+          This commit <span class="mono">{{ commitLabel(runSelected!.commit) }}</span>
+        </label>
+      }
+      @if (failedBuildsRetry) {
+        <label>
+          <input type="radio" name="run-scope" value="failed-builds" [checked]="runScopeChoice() === 'failed-builds'"
+                 [disabled]="!!failedBuildsRetry.disabled || !!failedBuildsRetry.disabledReason" (change)="runScopeChoice.set('failed-builds')" />
+          Failed builds only
+        </label>
+        <p class="gr-form-aside">New evaluations of this commit reuse completed builds and rebuild failed builds.</p>
+      }
+    </fieldset>
+    <gr-checkbox label="Walk all inputs"
+                 [ngModel]="walkAllInputsChecked()" (ngModelChange)="walkAllInputsChecked.set($event)"
+                 [disabled]="runScopeChoice() === 'failed-builds'"
+                 grTooltip="Evaluate all dependencies again, including dependencies that an earlier evaluation already recorded."></gr-checkbox>
+    <div grDialogFooter>
+      <button grButton label="Cancel" severity="secondary" [disabled]="runDialogStartRequestInFlight()" (click)="runDialogOpen.set(false)"></button>
+      <button grButton label="Run" icon="play_arrow" [loading]="runDialogStartRequestInFlight()"
+              [disabled]="runDialogStartRequestInFlight()" (click)="startEvaluationOrRetryFailedBuildsFromRunDialog()"></button>
+    </div>
+  </gr-dialog>
 
   <gr-dialog
     header="Diagnostic report"

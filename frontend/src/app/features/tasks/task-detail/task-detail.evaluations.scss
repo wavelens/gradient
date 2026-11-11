@@ -265,10 +265,43 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   flex-wrap: wrap;
 
   .tally-built { color: var(--gr-text-primary); font-weight: 600; }
-  .tally-blocked, .tally-aborted { color: var(--gr-text-muted); }
+  .tally-skipped, .tally-aborted { color: var(--gr-text-muted); }
   .tally-failed { color: var(--gr-status-danger-text); font-weight: 600; }
   .eval-only { display: inline-flex; align-items: center; gap: $spacing-xs; color: var(--gr-text-secondary); }
   .dur { display: inline-flex; align-items: center; gap: $spacing-xs; gr-icon { color: var(--gr-text-muted); } }
+  .running-evaluation-progress-and-time-left {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+
+    gr-segmented-bar { width: 120px; --segbar-h: 6px; }
+  }
+}
+
+.panel-title .abort-reason {
+  color: var(--gr-text-muted);
+  font-size: $font-size-xs;
+  white-space: nowrap;
+}
+a.abort-reason, a.evaluation-origin {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.new-run-started-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  border: 1px solid var(--gr-border);
+  border-radius: 999px;
+  background: var(--gr-surface-raised);
+  color: var(--gr-text-primary);
+  font: inherit;
+  font-size: $font-size-xs;
+  cursor: pointer;
+
+  &:hover, &:focus-visible { border-color: var(--gr-accent); }
 }
 
 .eval-bar { width: 460px; max-width: 50vw; --segbar-h: 9px; }

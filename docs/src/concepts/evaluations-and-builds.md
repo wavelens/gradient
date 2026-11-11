@@ -61,7 +61,7 @@ Builds belong to a derivation, not to an evaluation. Every evaluation that needs
 | Completed | The build succeeded |
 | Substituted | No build ran. The outputs already exist in a cache or an upstream cache |
 | Failed | The builder failed or timed out. Infrastructure errors such as out of memory, a full disk or a network problem get retried first |
-| Dependency Failed | The build never started because a dependency failed |
+| Dependency Failed | The build never started because a dependency failed. The web UI shows it as "Skipped: Dependency failure" |
 | Aborted | Cancelled by hand or together with the evaluation |
 | Skipped | An unneeded build-time dependency whose outputs already sit in a cache |
 

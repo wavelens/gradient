@@ -72,9 +72,9 @@ export function buildPhase(status: BuildStatus): StatusPhase {
     case 'Substituted': return 'success';
     case 'FailedPermanent':
     case 'FailedTransient':
-    case 'FailedTimeout':
-    case 'DependencyFailed': return 'failure';
+    case 'FailedTimeout': return 'failure';
     case 'Aborted':
+    case 'DependencyFailed':
     case 'Skipped': return 'aborted';
   }
 }
@@ -89,11 +89,11 @@ const BUILD_STATUS_LABEL: Record<BuildStatus, string> = {
   FailedTransient: 'Worker fault',
   FailedTimeout: 'Timed out',
   Aborted: 'Aborted',
-  DependencyFailed: 'Blocked',
+  DependencyFailed: 'Skipped: Dependency failure',
   Skipped: 'Skipped',
 };
 
-export function buildStatusLabel(status: string): string {
+export function buildOutcomeLabel(status: string): string {
   return BUILD_STATUS_LABEL[status as BuildStatus] ?? status;
 }
 

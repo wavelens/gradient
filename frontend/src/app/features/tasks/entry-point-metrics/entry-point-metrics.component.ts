@@ -17,7 +17,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { formatDependencyCount, metricSeriesChartColorTokenNames } from '../common-chart-style';
 import { formatBytes, formatDuration, monthDayClockTime } from '@shared/text';
-import { buildPhase, buildStatusLabel, getClosureMenuItemDisabledReason } from '@shared/evaluation';
+import { buildPhase, buildOutcomeLabel, getClosureMenuItemDisabledReason } from '@shared/evaluation';
 import { BuildStatus, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
 import { links } from '@shared/routing';
 import { getEntryPointShortName } from '../task-detail/entry-point-groups';
@@ -111,6 +111,6 @@ export class EntryPointMetricsComponent implements OnInit {
     for (const p of this.points()) counts.set(p.build_status, (counts.get(p.build_status) ?? 0) + 1);
     return [...counts]
       .sort(([, a], [, b]) => b - a)
-      .map(([status, count]) => ({ status, count, label: buildStatusLabel(status), phase: buildPhase(status) }));
+      .map(([status, count]) => ({ status, count, label: buildOutcomeLabel(status), phase: buildPhase(status) }));
   });
 }

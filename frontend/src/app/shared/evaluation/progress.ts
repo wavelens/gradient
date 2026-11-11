@@ -8,6 +8,7 @@ import type { EvaluationStatus, EvaluationProgress, InputFetch } from '@core/mod
 import { formatBytes, formatCount } from '@shared/text';
 import type { BarSegment } from '../ui/segmented-bar/segmented-bar.component';
 import { ratioSegments } from '../ui/segmented-bar/ratio-segments';
+import { getEstimatedEvaluationRemainingMilliseconds } from './duration';
 
 export interface ThunkProgress {
   segments: BarSegment[];
@@ -40,6 +41,21 @@ export function thunkProgress(
     segments: ratioSegments(progress.thunks, total),
     percent: total ? Math.round((progress.thunks / total) * 100) : null,
     label: thunkAmount(progress.thunks, total),
+  };
+}
+
+export function getRunningEvaluationProgress(
+  evaluation: Parameters<typeof getEstimatedEvaluationRemainingMilliseconds>[0],
+  nowMs: number,
+): { segments: BarSegment[]; percent: number; label: string } | null {
+  const left = getEstimatedEvaluationRemainingMilliseconds(evaluation, nowMs);
+  const expected = evaluation.expected_duration_ms;
+  if (left === null || !expected) return null;
+  const elapsed = expected - left;
+  return {
+    segments: ratioSegments(elapsed, expected),
+    percent: Math.round((elapsed / expected) * 100),
+    label: `About ${Math.max(1, Math.round(left / 60_000))} min left`,
   };
 }
 

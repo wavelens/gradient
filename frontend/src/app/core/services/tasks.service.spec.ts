@@ -94,7 +94,12 @@ describe('TasksService.startEvaluation', () => {
   });
 
   it('asks for a full rewalk', () => {
-    expect(bodyFor(() => service.startEvaluation('p', 't', 'full').subscribe()))
+    expect(bodyFor(() => service.startEvaluation('p', 't', { walk: 'full' }).subscribe()))
       .toEqual({ walk: 'full' });
+  });
+
+  it('runs a given commit', () => {
+    expect(bodyFor(() => service.startEvaluation('p', 't', { commit: 'abc123' }).subscribe()))
+      .toEqual({ commit: 'abc123' });
   });
 });

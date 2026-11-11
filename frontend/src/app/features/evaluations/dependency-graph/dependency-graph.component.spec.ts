@@ -88,7 +88,7 @@ describe('DependencyGraphComponent live updates', () => {
     expect(header).toContain('2 builds');
     expect(header).toContain('1 link');
     expect(header).not.toContain('links');
-    expect(text).toContain('Blocked');
+    expect(text).toContain('Skipped: Dependency failure');
     expect(text).not.toContain('FailedPermanent');
     fixture.destroy();
   });

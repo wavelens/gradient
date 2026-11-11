@@ -24,19 +24,21 @@ describe('build actions', () => {
   });
 
   it('retries a failed build inside a running evaluation', () => {
-    const running = { status: 'Building', replaced: false } as const;
-    expect(canRetryBuild(running, 'FailedPermanent')).toBe(true);
-    expect(canRetryBuild(running, 'DependencyFailed')).toBe(true);
-    expect(canRetryBuild(running, 'Aborted')).toBe(true);
-    expect(canRetryBuild(running, 'Building')).toBe(false);
-    expect(canRetryBuild(running, 'Completed')).toBe(false);
+    expect(canRetryBuild('Building', 'FailedPermanent')).toBe(true);
+    expect(canRetryBuild('Building', 'DependencyFailed')).toBe(true);
+    expect(canRetryBuild('Building', 'Aborted')).toBe(true);
+    expect(canRetryBuild('Building', 'Building')).toBe(false);
+    expect(canRetryBuild('Building', 'Completed')).toBe(false);
   });
 
-  it('retries a failed build of a finished evaluation only while no newer evaluation replaced it', () => {
-    expect(canRetryBuild({ status: 'Failed', replaced: false }, 'FailedTimeout')).toBe(true);
-    expect(canRetryBuild({ status: 'Aborted', replaced: false }, 'Aborted')).toBe(true);
-    expect(canRetryBuild({ status: 'Failed', replaced: true }, 'FailedTimeout')).toBe(false);
-    expect(canRetryBuild({ status: 'Completed', replaced: false }, 'Aborted')).toBe(false);
+  it('never retries a single build of a finished evaluation', () => {
+    expect(canRetryBuild('Failed', 'FailedTimeout')).toBe(false);
+    expect(canRetryBuild('Aborted', 'Aborted')).toBe(false);
+    expect(canRetryBuild('Completed', 'Aborted')).toBe(false);
+  });
+
+  it('explains that a skipped build has no log', () => {
+    expect(getDownloadLogMenuItemDisabledReason('DependencyFailed')).toBe('Skipped - a dependency failed, so this build has no log.');
   });
 
   it('gives a reason for every build menu item it disables and none for a usable one', () => {

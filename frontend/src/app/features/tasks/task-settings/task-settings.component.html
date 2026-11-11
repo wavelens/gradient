@@ -157,7 +157,7 @@
   <gr-settings-section title="Status">
     <gr-row>
       {{ proj.active ? 'Task is Active' : 'Task is Inactive' }}
-      <span slot="meta">{{ proj.active ? 'Triggers start an evaluation.' : "Triggers don't start an evaluation. Start Evaluation can still start one." }}</span>
+      <span slot="meta">{{ proj.active ? 'Triggers start an evaluation.' : "Triggers don't start an evaluation. The Run button can still start an evaluation." }}</span>
       <button
         slot="actions"
         *appWritable="access()"

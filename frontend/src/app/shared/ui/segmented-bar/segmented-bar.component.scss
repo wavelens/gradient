@@ -36,6 +36,7 @@
 .seg-empty { width: 100%; background: var(--gr-surface-hover); }
 .seg-completed { background: var(--gr-graph-success); }
 .seg-failed { background: var(--gr-graph-danger); }
+.seg-skipped { background: var(--gr-text-muted); }
 .seg-aborted { background: var(--gr-text-secondary); }
 .seg-building { background: var(--gr-graph-running); }
 .seg-pulsing { animation: seg-pulse 1.8s ease-in-out infinite; }
