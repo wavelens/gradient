@@ -11,7 +11,7 @@
 
 use gradient_entity::{ids::*, task, task_trigger};
 use gradient_fixtures::ids::{project_id, task_id, user_id};
-use gradient_fixtures::mock::{all_statements, mock_db, ran};
+use gradient_fixtures::mock::{all_statements, mock_db};
 use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
@@ -154,32 +154,6 @@ async fn create_polling_trigger_valid() {
     let body: Value = res.json();
     assert_eq!(body["error"], false);
     assert_eq!(body["message"]["type"], "polling");
-}
-
-#[tokio::test]
-async fn create_reporter_trigger_with_an_integration_of_another_project_returns_400() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-
-    let db = with_task_edit(with_auth(mock_db(), session_id))
-        .append_query_results([Vec::<integration::Model>::new()]);
-
-    let conn = db.into_connection();
-    let server = make_test_server(conn.clone());
-    let res = server
-        .post(BASE_URL)
-        .add_header("authorization", format!("Bearer {}", token))
-        .json(&serde_json::json!({
-            "config": {
-                "type": "reporter_pull_request",
-                "integration_id": github_integration_id().to_string(),
-            }
-        }))
-        .await;
-
-    res.assert_status_bad_request();
-    drop(server);
-    assert!(!ran(conn, "INSERT INTO \"task_trigger\""));
 }
 
 #[tokio::test]

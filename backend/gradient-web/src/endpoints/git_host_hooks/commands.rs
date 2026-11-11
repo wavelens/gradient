@@ -460,8 +460,11 @@ pub(super) async fn load_active_pull_request_tasks_for_event_repository(
     owner: &str,
     repo: &str,
 ) -> Result<Vec<TaskId>, sea_orm::DbErr> {
-    let task_ids =
-        gradient_db::triggers::active_pull_request_task_ids_using_git_host_connection(db, connection_id).await?;
+    let task_ids = gradient_db::triggers::active_pull_request_task_ids_using_git_host_connection(
+        db,
+        connection_id,
+    )
+    .await?;
     let tasks = gradient_db::lookup::by_ids::<ETask, _>(db, &task_ids).await?;
     Ok(filter_task_ids_by_repository_url_owner_and_name(
         task_ids, &tasks, owner, repo,

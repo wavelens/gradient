@@ -417,7 +417,7 @@ pub async fn patch_project_team(
     let grant = gradient_db::teams::grants::project_grant(&state.web_db, team.id, project.id)
         .await?
         .or_not_found(Resource::TeamGrant)?;
-    if grant.managed {
+    if grant.grant_source == TeamGrantSource::State {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::TeamGrant).into());
     }
 
@@ -528,7 +528,10 @@ pub async fn delete_project_team(
     if project.managed {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Project).into());
     }
-    if grant.as_ref().is_some_and(|grant| grant.managed) {
+    if grant
+        .as_ref()
+        .is_some_and(|grant| grant.grant_source == TeamGrantSource::State)
+    {
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::TeamGrant).into());
     }
 
@@ -718,7 +721,7 @@ pub async fn patch_cache_team(
     let grant = gradient_db::teams::grants::cache_grant(&db.web_db, team.id, cache.id)
         .await?
         .or_not_found(Resource::TeamGrant)?;
-    if grant.managed {
+    if grant.grant_source == TeamGrantSource::State {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::TeamGrant).into());
     }
     let role = cache_role(&db.web_db, cache.id, &body.role).await?;
@@ -792,7 +795,10 @@ pub async fn delete_cache_team(
     if cache.managed {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Cache).into());
     }
-    if grant.as_ref().is_some_and(|grant| grant.managed) {
+    if grant
+        .as_ref()
+        .is_some_and(|grant| grant.grant_source == TeamGrantSource::State)
+    {
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::TeamGrant).into());
     }
 

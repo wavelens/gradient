@@ -176,7 +176,6 @@ impl Scheduler {
         reclaims_jobs: bool,
     ) -> Result<Registered> {
         let reports = self.workers.reports(worker_id);
-        let port = Arc::clone(&session);
         let registration = Registration {
             worker: worker_id.to_owned(),
             capabilities,

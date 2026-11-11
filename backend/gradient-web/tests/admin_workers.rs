@@ -119,8 +119,12 @@ async fn admin_area(superuser: bool) -> AdminArea {
         .build();
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.spawn_core(None).await.expect("scheduler core");
-    let router =
-        gradient_web::create_router_with_scheduler(state, scheduler).expect("router builds");
+    let router = gradient_web::create_router_with_scheduler(
+        state,
+        scheduler,
+        gradient_proto::SessionsHandle::new(),
+    )
+    .expect("router builds");
     AdminArea {
         db,
         server: TestServer::new(router),
