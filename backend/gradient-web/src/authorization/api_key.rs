@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::permissions::{Permission, PermissionMask, mask_from, mask_grants};
+use crate::permissions::{Permission, PermissionMask, admin_mask, mask_grants};
 use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 use gradient_types::ids::CacheId;
 use gradient_types::{
@@ -21,10 +21,9 @@ pub struct ApiKeyContext {
 
 impl ApiKeyContext {
     pub fn has_full_account_access(&self) -> bool {
-        let every_permission = mask_from(Permission::ALL);
         self.project.is_none()
             && self.cache_pin.is_none()
-            && self.mask & every_permission == every_permission
+            && self.mask & admin_mask() == admin_mask()
     }
 
     pub fn may_create_projects(&self) -> bool {
@@ -167,6 +166,7 @@ impl DecodedRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::permissions::mask_from;
 
     fn superuser() -> MUser {
         MUser {
@@ -217,7 +217,15 @@ mod tests {
             ..full_key()
         };
 
+        let api_key_with_all_project_permissions_but_no_create_project = ApiKeyContext {
+            mask: admin_mask(),
+            ..full_key()
+        };
+
         assert!(full_key().has_full_account_access());
+        assert!(
+            api_key_with_all_project_permissions_but_no_create_project.has_full_account_access()
+        );
         assert!(!cache_pinned.has_full_account_access());
         assert!(!view_only.has_full_account_access());
     }
