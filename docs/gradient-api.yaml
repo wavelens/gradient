@@ -2780,6 +2780,44 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/builds/{build}/attempts:
+    get:
+      tags:
+      - builds
+      summary: List build attempts
+      description: |-
+        Returns every attempt of the build, oldest first. `number` counts from 1 and is the value that the `attempt` parameter of the log endpoints takes. A build is shared between evaluations of the same derivation, so the list can contain attempts that another evaluation started. `worker` is the ID of the worker that ran the attempt. It is empty for an attempt that failed before a worker picked it up.
+
+        **Access:** is identical to `GET /builds/{build}/log`.
+      operationId: listBuildAttempts
+      parameters:
+      - name: build
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/BuildJobId'
+      responses:
+        '200':
+          description: Build Attempts
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BuildAttemptResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/builds/{build}/closure:
     get:
       tags:
@@ -3034,6 +3072,8 @@ paths:
         own, so the log of the most recent prior build of the same derivation is
         returned instead. The chunk/lines endpoints fall back the same way.
 
+        This endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.
+
         **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuildLog
       parameters:
@@ -3047,6 +3087,14 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/BuildLogOutputFormat'
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Build log
@@ -3123,6 +3171,14 @@ paths:
           type: integer
           format: int32
           minimum: 0
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Chunk plaintext
@@ -3154,6 +3210,14 @@ paths:
         required: true
         schema:
           $ref: '#/components/schemas/BuildJobId'
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Chunk index
@@ -3212,6 +3276,14 @@ paths:
         required: false
         schema:
           type: string
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Line range plaintext
@@ -3253,6 +3325,14 @@ paths:
         required: false
         schema:
           type: boolean
+      - name: attempt
+        in: query
+        description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: NDJSON stream of search hits, terminated by a done frame
@@ -3302,7 +3382,7 @@ paths:
       tags:
       - builds
       summary: Retry build
-      description: Queues a `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` build again, together with its dependents in the evaluation that failed only through it. A `DependencyFailed` build retries the failed builds below it. A reproducible builder failure is retried too. A retry reopens a `Failed` or `Aborted` evaluation that reached its build phase. Callers need the `triggerEvaluation` permission on the project. Answers 409 when the evaluation has completed or never reached its build phase, a newer or running evaluation of the task exists, the build has another status, no failed dependency is retryable, or its worker has not confirmed an earlier abort yet.
+      description: Requeue the `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` builds in a running evaluation. Include dependent builds in that evaluation that failed only because of the retried build. The `DependencyFailed` builds retry the failed builds underneath them. Reproducible builder failures also receive a retry. Retries add a build attempt each. Previous attempts and their logs stay readable through `GET /builds/{build}/attempts`. Finished evaluations don't change. Use `POST /evals/{evaluation}/retry` to start a new evaluation and rerun the failed builds. The caller must have `triggerEvaluation` permission on the project. Return 409 for a finished evaluation, a build in another status, no retryable failed dependencies, or a worker that hasn't acknowledged a previous cancel yet.
       operationId: retryBuild
       parameters:
       - name: build
@@ -4823,10 +4903,7 @@ paths:
       tags:
       - caches
       summary: Approve a subscription request
-      description: |-
-        Turns the pending request into a real subscription, using the mode the
-        project asked for, and re-queues any evaluation parked for want of a
-        cache. Requires `manageCacheSubscriptions`.
+      description: Convert pending requests into actual subscriptions. Requeue evaluations with no cache. Subscriptions take the mode from the project request. The optional body `mode` can lower access, for example from read-write to read-only. The body cannot grant more access. Provide `manageCacheSubscriptions`. The endpoint can also work with caches from the server configuration.
       operationId: approveCacheSubscriptionRequest
       parameters:
       - name: cache
@@ -4839,6 +4916,13 @@ paths:
         required: true
         schema:
           type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: '#/components/schemas/ApproveSubscriptionRequest'
+              - type: 'null'
       responses:
         '200':
           description: Subscription approved
@@ -6316,7 +6400,12 @@ paths:
       tags:
       - evaluations
       summary: Retry evaluation
-      description: Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.
+      description: |-
+        Start a new evaluation for the same commit without another fetch or evaluation. Put the UUID in `message`. Completed evaluations stay immutable. Status, duration and logs stay intact. Set `retry_of` to the completed evaluation.
+
+        The new evaluation can requeue every build from the completed evaluation that failed, timed out, was canceled, or failed because of dependencies. Reproducible builder failures go back in the queue too, regardless of the `retry_failed_builds` value on the task. Reuse every build that already succeeded.
+
+        Triggers don't run. Store the caller as `triggered_by`. The caller must have `triggerEvaluation` permission on the project. Return 409 during an active run of the evaluation or of another evaluation on its task.
       operationId: retryEvaluation
       parameters:
       - name: evaluation
@@ -7970,6 +8059,38 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/readiness:
+    get:
+      tags:
+      - projects
+      summary: Project Readiness
+      description: Show what this project needs before an evaluation run. These items include workers that can run evaluations, a cache subscription with write access, and repository access for each task. Only callers with `manageWorkers` can view the list of teams that the caller can grant with workers. Only callers with `editTask` can view repository errors.
+      operationId: getProjectReadiness
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ProjectReadinessResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/repository-check:
     post:
       tags:
@@ -8447,6 +8568,40 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/subscribable-caches:
+    get:
+      tags:
+      - projects
+      summary: List caches for the subscribe dialog
+      description: The subscription dialog can offer only the caches that the caller can select, in display-name order. Set `needs_approval` to true when the caller cannot approve subscriptions. `approvers` can then list the users who can approve subscriptions, the holders of `manageCacheSubscriptions`. Caches with an existing project subscription, or caches with pending requests, do not appear. Requests to this endpoint need `manageSubscriptions` on the project.
+      operationId: listSubscribableCaches
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Cache That Projects Can Subscribe To
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SubscribableCache'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/subscribe:
     get:
       tags:
@@ -8557,6 +8712,48 @@ paths:
       responses:
         '200':
           description: Unsubscribed, or subscription request cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    patch:
+      tags:
+      - projects
+      summary: Change a cache subscription
+      description: Turn signing of store paths that the project pushed on or off with this cache key. Projects need the `manageSubscriptions` permission. This endpoint can't change subscriptions from server settings.
+      operationId: updateProjectCacheSubscription
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCacheSubscriptionRequest'
+        required: true
+      responses:
+        '200':
+          description: Saved subscriptions
           content:
             application/json:
               schema:
@@ -9311,10 +9508,7 @@ paths:
       tags:
       - workers
       summary: Register a worker under a project
-      description: |-
-        Registers a worker ID under this project as a peer. Returns a one-time
-        plaintext token that the worker operator must add to their worker config.
-        The token is shown only once - it cannot be retrieved later.
+      description: Register a new worker under this project. A worker ID and a one-time token come from the server. Response data include a NixOS configuration for the worker machine. The token is visible only once.
       operationId: registerProjectWorker
       parameters:
       - name: project
@@ -9342,7 +9536,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/RegisterWorkerResponse'
+                    $ref: '#/components/schemas/WorkerRegistrationResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -12836,7 +13030,7 @@ paths:
       tags:
       - teams
       summary: Register team worker
-      description: Needs Admin in the team. The worker answers the server challenge with `<team id>:<token>` or `*:<token>` in its peers file. `token` is returned only when the server generated it.
+      description: Requests need admin permissions for the team. The server can generate a worker ID and a one-time token, then send back NixOS configuration for the worker machine. The worker can answer the challenge from the server with `<team id>:<token>` in the peer file.
       operationId: registerTeamWorker
       parameters:
       - name: team
@@ -12864,7 +13058,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/RegisteredTeamWorker'
+                    $ref: '#/components/schemas/WorkerRegistrationResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -13177,36 +13371,6 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/user/invites:
-    get:
-      tags:
-      - user
-      summary: List my pending invitations
-      description: |-
-        Project and cache invitations addressed to the authenticated user,
-        newest first.
-      operationId: listUserInvites
-      responses:
-        '200':
-          description: Pending invitations
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/InviteItem'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
   /api/v1/user/invites/accept:
     post:
       tags:
@@ -13497,6 +13661,39 @@ paths:
                     type: boolean
                   message:
                     type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/user/requests:
+    get:
+      tags:
+      - user
+      summary: My Pending Requests
+      description: |-
+        All items that await a decision from the authenticated user appear newest first.
+
+        - Invitations to the user
+        - Subscription requests for caches where the user can use `manageCacheSubscriptions`
+        - Grant requests to teams with the user as Admin
+
+        Superusers can view requests for every cache and team.
+      operationId: listUserRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/PendingUserDecisionsResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -15024,6 +15221,12 @@ paths:
       - scimBearer: []
 components:
   schemas:
+    AbortReason:
+      type: string
+      enum:
+      - user
+      - superseded
+      - no_connected_worker_can_build_required_systems
     AccessReason:
       type: string
       enum:
@@ -15512,6 +15715,13 @@ components:
             $ref: '#/components/schemas/ApiKeyVisibleProjectOrCacheWithPermissions'
         create_project:
           type: boolean
+    ApproveSubscriptionRequest:
+      type: object
+      properties:
+        mode:
+          oneOf:
+          - $ref: '#/components/schemas/CacheSubscriptionMode'
+          - type: 'null'
     ArtefactTree:
       type: object
       required:
@@ -15580,6 +15790,28 @@ components:
       - timeout
       - lost
       - aborted
+    AttemptFailureReason:
+      type: string
+      enum:
+      - SubstituteUnavailable
+      - Oom
+      - DiskFull
+      - Network
+      - BuilderCrash
+      - BuilderNonzero
+      - WallClockTimeout
+      - SilentTimeout
+      - InputsUnavailable
+      - WorkerLost
+      - NotEnoughResources
+    AttemptOutcome:
+      type: string
+      enum:
+      - Running
+      - Built
+      - Substituted
+      - Failed
+      - Aborted
     AttemptSummary:
       type: object
       required:
@@ -16032,6 +16264,36 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ExecOffer'
           - type: 'null'
+    BuildAttemptResponse:
+      type: object
+      required:
+      - number
+      - outcome
+      properties:
+        number:
+          type: integer
+          format: int32
+          minimum: 0
+        outcome:
+          $ref: '#/components/schemas/AttemptOutcome'
+        reason:
+          oneOf:
+          - $ref: '#/components/schemas/AttemptFailureReason'
+          - type: 'null'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        worker:
+          type:
+          - string
+          - 'null'
     BuildGraph:
       type: object
       required:
@@ -16561,6 +16823,9 @@ components:
       - display_name
       - mode
       - status
+      - managed
+      - sign_outputs
+      - approvers
       properties:
         id:
           $ref: '#/components/schemas/CacheId'
@@ -16572,6 +16837,15 @@ components:
           $ref: '#/components/schemas/CacheSubscriptionMode'
         status:
           $ref: '#/components/schemas/SubscriptionStatus'
+        managed:
+          type: boolean
+        sign_outputs:
+          type: boolean
+        approvers:
+          type: array
+          items:
+            type: string
+          description: Usernames of the users that can approve a pending request. Empty for an active subscription.
     CacheSubscriptionMode:
       type: string
       enum:
@@ -16916,6 +17190,15 @@ components:
           - type: 'null'
         author_name:
           type: string
+        project:
+          oneOf:
+          - $ref: '#/components/schemas/ProjectId'
+          - type: 'null'
+        fetched_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     CommitId:
       type: string
       format: uuid
@@ -18028,6 +18311,11 @@ components:
           type: string
         message:
           type: string
+        missing_permissions:
+          type: array
+          items:
+            type: string
+          description: Wire names of the permissions that the signed-in caller does not have for this request (for example, `readStore`). Only 401 and 403 responses to authenticated callers include this field. The names match the values of `permissions` on the API key.
     EvalCapability:
       type: string
       enum:
@@ -18050,6 +18338,35 @@ components:
           oneOf:
           - $ref: '#/components/schemas/WalkMode'
           - type: 'null'
+    EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration:
+      type: object
+      required:
+      - phase_started_at
+      properties:
+        abort_reason:
+          oneOf:
+          - $ref: '#/components/schemas/AbortReason'
+          - type: 'null'
+        aborted_by:
+          type:
+          - string
+          - 'null'
+        superseded_by:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationId'
+          - type: 'null'
+        retry_of:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationId'
+          - type: 'null'
+        phase_started_at:
+          $ref: '#/components/schemas/EvaluationPhaseStartTimestamps'
+        expected_duration_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
     EvaluationFailureSummary:
       type: object
       required:
@@ -18121,6 +18438,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EntryPointId'
+    EvaluationPhaseStartTimestamps:
+      type: object
+      properties:
+        fetch:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        eval_flake:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        eval_derivation:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        building:
+          type:
+          - string
+          - 'null'
+          format: date-time
     EvaluationProgress:
       oneOf:
       - type: object
@@ -18150,109 +18490,111 @@ components:
             enum:
             - evaluating
     EvaluationResponse:
-      type: object
-      required:
-      - id
-      - project_name
-      - repository
-      - commit
-      - wildcard
-      - status
-      - created_at
-      - updated_at
-      - error_count
-      - warning_count
-      - entry_points
-      - prioritized
-      properties:
-        id:
-          $ref: '#/components/schemas/EvaluationId'
-        task:
-          oneOf:
-          - $ref: '#/components/schemas/TaskId'
-          - type: 'null'
-        project_name:
-          type: string
-        task_name:
-          type:
-          - string
-          - 'null'
-        task_display_name:
-          type:
-          - string
-          - 'null'
-        repository:
-          type: string
-        commit:
-          type: string
-        wildcard:
-          type: string
-        status:
-          $ref: '#/components/schemas/EvaluationStatus'
-        previous:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationId'
-          - type: 'null'
-        next:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationId'
-          - type: 'null'
-        created_at:
-          type: string
-          format: date-time
-        started_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        finished_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        error_count:
-          type: integer
-          format: int64
-          minimum: 0
-        warning_count:
-          type: integer
-          format: int64
-          minimum: 0
-        error:
-          type:
-          - string
-          - 'null'
-        entry_points:
-          type: array
-          items:
-            $ref: '#/components/schemas/EntryPointBrief'
-        prioritized:
-          type: boolean
-        trigger:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationTriggerSummary'
-          - type: 'null'
-        triggered_by:
-          type:
-          - string
-          - 'null'
-        waiting_reason:
-          oneOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
-        progress:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationProgress'
-          - type: 'null'
-        expected_thunks:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
+      allOf:
+      - $ref: '#/components/schemas/EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration'
+      - type: object
+        required:
+        - id
+        - project_name
+        - repository
+        - commit
+        - wildcard
+        - status
+        - created_at
+        - updated_at
+        - error_count
+        - warning_count
+        - entry_points
+        - prioritized
+        properties:
+          id:
+            $ref: '#/components/schemas/EvaluationId'
+          task:
+            oneOf:
+            - $ref: '#/components/schemas/TaskId'
+            - type: 'null'
+          project_name:
+            type: string
+          task_name:
+            type:
+            - string
+            - 'null'
+          task_display_name:
+            type:
+            - string
+            - 'null'
+          repository:
+            type: string
+          commit:
+            type: string
+          wildcard:
+            type: string
+          status:
+            $ref: '#/components/schemas/EvaluationStatus'
+          previous:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationId'
+            - type: 'null'
+          next:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationId'
+            - type: 'null'
+          created_at:
+            type: string
+            format: date-time
+          started_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          finished_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+          error_count:
+            type: integer
+            format: int64
+            minimum: 0
+          warning_count:
+            type: integer
+            format: int64
+            minimum: 0
+          error:
+            type:
+            - string
+            - 'null'
+          entry_points:
+            type: array
+            items:
+              $ref: '#/components/schemas/EntryPointBrief'
+          prioritized:
+            type: boolean
+          trigger:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationTriggerSummary'
+            - type: 'null'
+          triggered_by:
+            type:
+            - string
+            - 'null'
+          waiting_reason:
+            oneOf:
+            - $ref: '#/components/schemas/WaitingReason'
+            - type: 'null'
+          progress:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationProgress'
+            - type: 'null'
+          expected_thunks:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            minimum: 0
     EvaluationStatus:
       type: string
       enum:
@@ -18266,100 +18608,102 @@ components:
       - Aborted
       - Fetching
     EvaluationSummary:
-      type: object
-      required:
-      - id
-      - commit
-      - status
-      - wildcard
-      - total_builds
-      - builds
-      - errors
-      - warnings
-      - prioritized
-      - only_evaluate
-      - created_at
-      - updated_at
-      properties:
-        id:
-          $ref: '#/components/schemas/EvaluationId'
-        commit:
-          type: string
-        commit_message:
-          type:
-          - string
-          - 'null'
-        status:
-          $ref: '#/components/schemas/EvaluationStatus'
-        wildcard:
-          type: string
-        trigger:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationTriggerSummary'
-          - type: 'null'
-        triggered_by:
-          type:
-          - string
-          - 'null'
-        pr_number:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        total_builds:
-          type: integer
-          format: int64
-        builds:
-          $ref: '#/components/schemas/BuildStatusCounts'
-        errors:
-          type: integer
-          format: int64
-        warnings:
-          type: integer
-          format: int64
-        dispatched_job:
-          oneOf:
-          - $ref: '#/components/schemas/DispatchedJobId'
-          - type: 'null'
-        cluster_job:
-          oneOf:
-          - $ref: '#/components/schemas/ClusterJobId'
-          - type: 'null'
-        prioritized:
-          type: boolean
-        only_evaluate:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-        started_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        finished_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        progress:
-          oneOf:
-          - $ref: '#/components/schemas/EvaluationProgress'
-          - type: 'null'
-        expected_thunks:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          minimum: 0
-        waiting_reason:
-          oneOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
+      allOf:
+      - $ref: '#/components/schemas/EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration'
+      - type: object
+        required:
+        - id
+        - commit
+        - status
+        - wildcard
+        - total_builds
+        - builds
+        - errors
+        - warnings
+        - prioritized
+        - only_evaluate
+        - created_at
+        - updated_at
+        properties:
+          id:
+            $ref: '#/components/schemas/EvaluationId'
+          commit:
+            type: string
+          commit_message:
+            type:
+            - string
+            - 'null'
+          status:
+            $ref: '#/components/schemas/EvaluationStatus'
+          wildcard:
+            type: string
+          trigger:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationTriggerSummary'
+            - type: 'null'
+          triggered_by:
+            type:
+            - string
+            - 'null'
+          pr_number:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            minimum: 0
+          total_builds:
+            type: integer
+            format: int64
+          builds:
+            $ref: '#/components/schemas/BuildStatusCounts'
+          errors:
+            type: integer
+            format: int64
+          warnings:
+            type: integer
+            format: int64
+          dispatched_job:
+            oneOf:
+            - $ref: '#/components/schemas/DispatchedJobId'
+            - type: 'null'
+          cluster_job:
+            oneOf:
+            - $ref: '#/components/schemas/ClusterJobId'
+            - type: 'null'
+          prioritized:
+            type: boolean
+          only_evaluate:
+            type: boolean
+          created_at:
+            type: string
+            format: date-time
+          started_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          finished_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+          progress:
+            oneOf:
+            - $ref: '#/components/schemas/EvaluationProgress'
+            - type: 'null'
+          expected_thunks:
+            type:
+            - integer
+            - 'null'
+            format: int64
+            minimum: 0
+          waiting_reason:
+            oneOf:
+            - $ref: '#/components/schemas/WaitingReason'
+            - type: 'null'
     EvaluationTriggerSummary:
       type: object
       required:
@@ -19221,6 +19565,18 @@ components:
             $ref: '#/components/schemas/ConnectedLoginProvider'
         managed:
           type: boolean
+    GitAccessReadiness:
+      type: object
+      required:
+      - status
+      - tasks
+      properties:
+        status:
+          $ref: '#/components/schemas/TaskRepositoryFetchStatus'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectTaskReadinessEntry'
     GitHostConnectionId:
       type: string
       format: uuid
@@ -20234,10 +20590,6 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ConcurrencyPolicy'
           - type: 'null'
-        sign_cache:
-          type:
-          - boolean
-          - 'null'
         wait_for_workers:
           type:
           - boolean
@@ -21192,10 +21544,6 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ConcurrencyPolicy'
           - type: 'null'
-        sign_cache:
-          type:
-          - boolean
-          - 'null'
         wait_for_workers:
           type:
           - boolean
@@ -21416,6 +21764,25 @@ components:
           type: integer
           format: int64
           minimum: 0
+    PendingUserDecisionsResponse:
+      type: object
+      required:
+      - invites
+      - subscription_requests
+      - team_requests
+      properties:
+        invites:
+          type: array
+          items:
+            $ref: '#/components/schemas/InviteItem'
+        subscription_requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubscriptionRequestItem'
+        team_requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGrantRequestInboxEntry'
     Permission:
       type: string
       enum:
@@ -21440,11 +21807,14 @@ components:
       required:
       - id
       - mutating
+      - permission_explanation
       properties:
         id:
           type: string
         mutating:
           type: boolean
+        permission_explanation:
+          type: string
     PersonAccessReason:
       type: object
       required:
@@ -21550,6 +21920,48 @@ components:
     ProjectId:
       type: string
       format: uuid
+    ProjectReadinessResponse:
+      type: object
+      required:
+      - ready
+      - workers
+      - cache
+      - repository
+      properties:
+        ready:
+          type: boolean
+        workers:
+          $ref: '#/components/schemas/ProjectReadinessWorkers'
+        cache:
+          $ref: '#/components/schemas/ProjectSubscriptionReadinessCache'
+        repository:
+          $ref: '#/components/schemas/GitAccessReadiness'
+    ProjectReadinessWorkers:
+      type: object
+      required:
+      - ready
+      - registered
+      - teams
+      - teams_granted_without_workers
+      - teams_you_can_grant
+      properties:
+        ready:
+          type: boolean
+        registered:
+          type: integer
+          minimum: 0
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamReadinessEntry'
+        teams_granted_without_workers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamReadinessEntry'
+        teams_you_can_grant:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamReadinessEntry'
     ProjectResponse:
       type: object
       required:
@@ -21649,6 +22061,18 @@ components:
         bytes:
           type: integer
           format: int64
+    ProjectSubscriptionReadinessCache:
+      type: object
+      required:
+      - ready
+      - subscriptions
+      properties:
+        ready:
+          type: boolean
+        subscriptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CacheSubscriptionItem'
     ProjectSummary:
       type: object
       required:
@@ -21709,6 +22133,23 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Permission'
+    ProjectTaskReadinessEntry:
+      type: object
+      required:
+      - name
+      - display_name
+      - status
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskRepositoryFetchStatus'
+        error:
+          type:
+          - string
+          - 'null'
     ProjectWorkerEntry:
       allOf:
       - $ref: '#/components/schemas/WorkerConnection'
@@ -21935,21 +22376,14 @@ components:
     RegisterWorkerRequest:
       type: object
       required:
-      - worker_id
       - display_name
       properties:
-        worker_id:
-          type: string
         url:
           type:
           - string
           - 'null'
         display_name:
           type: string
-        token:
-          type:
-          - string
-          - 'null'
         enable_network:
           type: boolean
         enable_secrets:
@@ -21960,28 +22394,6 @@ components:
           type: boolean
         enable_build:
           type: boolean
-    RegisterWorkerResponse:
-      type: object
-      required:
-      - peer_id
-      properties:
-        peer_id:
-          $ref: '#/components/schemas/ProjectId'
-        token:
-          type:
-          - string
-          - 'null'
-    RegisteredTeamWorker:
-      type: object
-      required:
-      - team
-      properties:
-        team:
-          $ref: '#/components/schemas/TeamId'
-        token:
-          type:
-          - string
-          - 'null'
     RemoveMemberRequest:
       type: object
       required:
@@ -22657,6 +23069,35 @@ components:
           type: string
         created:
           type: boolean
+    SubscribableCache:
+      type: object
+      required:
+      - name
+      - display_name
+      - public
+      - needs_approval
+      - approvers
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        owner_team:
+          type:
+          - string
+          - 'null'
+        owner_team_display_name:
+          type:
+          - string
+          - 'null'
+        public:
+          type: boolean
+        needs_approval:
+          type: boolean
+        approvers:
+          type: array
+          items:
+            type: string
     SubscribeCacheRequest:
       type: object
       properties:
@@ -22667,12 +23108,18 @@ components:
     SubscriptionRequestItem:
       type: object
       required:
+      - cache
+      - cache_display_name
       - project
       - project_display_name
       - mode
       - requested_by
       - created_at
       properties:
+        cache:
+          type: string
+        cache_display_name:
+          type: string
         project:
           type: string
         project_display_name:
@@ -22910,6 +23357,12 @@ components:
           - type: 'null'
         report_status:
           type: boolean
+    TaskRepositoryFetchStatus:
+      type: string
+      enum:
+      - verified
+      - unchecked
+      - failing
     TaskRepositoryResponse:
       type: object
       required:
@@ -22977,7 +23430,6 @@ components:
       - managed
       - keep_evaluations
       - concurrency
-      - sign_cache
       - wait_for_workers
       - retry_failed_builds
       - multi_node_evaluation
@@ -23030,8 +23482,6 @@ components:
           format: int32
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
-        sign_cache:
-          type: boolean
         wait_for_workers:
           type: boolean
         retry_failed_builds:
@@ -23256,6 +23706,18 @@ components:
           minimum: 0
         caller_is_admin:
           type: boolean
+    TeamGrantRequestInboxEntry:
+      allOf:
+      - $ref: '#/components/schemas/TeamRequestItem'
+      - type: object
+        required:
+        - team
+        - team_display_name
+        properties:
+          team:
+            type: string
+          team_display_name:
+            type: string
     TeamGrants:
       type: object
       required:
@@ -23335,6 +23797,20 @@ components:
           type: boolean
         workers:
           type: boolean
+    TeamReadinessEntry:
+      type: object
+      required:
+      - name
+      - display_name
+      - workers
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        workers:
+          type: integer
+          minimum: 0
     TeamRequestItem:
       type: object
       required:
@@ -23670,6 +24146,13 @@ components:
           type:
           - boolean
           - 'null'
+    UpdateCacheSubscriptionRequest:
+      type: object
+      required:
+      - sign_outputs
+      properties:
+        sign_outputs:
+          type: boolean
     UpdateFlakeInputOverrideRequest:
       type: object
       properties:
@@ -24442,6 +24925,30 @@ components:
           type: boolean
         managed:
           type: boolean
+    WorkerRegistrationResponse:
+      type: object
+      required:
+      - id
+      - name
+      - url
+      - peer_id
+      - token
+      - nixos_configuration
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        peer_id:
+          type: string
+          description: Project ID or team ID that the worker names in its peers file. The peers line is `<peer_id>:<token>`.
+        token:
+          type: string
+          description: One-time token for the worker. The server can save only the hash and can't show the token again.
+        nixos_configuration:
+          type: string
     WorkerSamplePoint:
       type: object
       required:

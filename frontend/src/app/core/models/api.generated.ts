@@ -1,5 +1,7 @@
 // Generated from docs/gradient-api.yaml by gradient-api-spec. Do not edit.
 
+export type AbortReason = "user" | "superseded" | "no_connected_worker_can_build_required_systems";
+
 export type AccessReason = "direct" | "team" | "owner" | "superuser";
 
 export type ActionConfig = {
@@ -161,6 +163,10 @@ export interface ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
   create_project: boolean;
 }
 
+export interface ApproveSubscriptionRequest {
+  mode?: CacheSubscriptionMode | null;
+}
+
 export interface ArtefactTree {
   evaluation: EvaluationId;
   created_at: string;
@@ -186,6 +192,10 @@ export interface AssignedJobSchedulerReasoning {
 }
 
 export type AttemptEndReason = "completed" | "failed" | "timeout" | "lost" | "aborted";
+
+export type AttemptFailureReason = "SubstituteUnavailable" | "Oom" | "DiskFull" | "Network" | "BuilderCrash" | "BuilderNonzero" | "WallClockTimeout" | "SilentTimeout" | "InputsUnavailable" | "WorkerLost" | "NotEnoughResources";
+
+export type AttemptOutcome = "Running" | "Built" | "Substituted" | "Failed" | "Aborted";
 
 export interface AttemptSummary {
   dispatched_job_id?: string | null;
@@ -332,6 +342,15 @@ export interface BoardWorker {
   ram_free_mb?: number | null;
   ram_total_mb?: number | null;
   exec?: ExecOffer | null;
+}
+
+export interface BuildAttemptResponse {
+  number: number;
+  outcome: AttemptOutcome;
+  reason?: AttemptFailureReason | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  worker?: string | null;
 }
 
 export interface BuildGraph {
@@ -506,6 +525,9 @@ export interface CacheSubscriptionItem {
   display_name: string;
   mode: CacheSubscriptionMode;
   status: SubscriptionStatus;
+  managed: boolean;
+  sign_outputs: boolean;
+  approvers: string[];
 }
 
 export type CacheSubscriptionMode = "ReadWrite" | "ReadOnly" | "WriteOnly";
@@ -633,6 +655,8 @@ export interface Commit {
   hash: number[];
   author?: UserId | null;
   author_name: string;
+  project?: ProjectId | null;
+  fetched_at?: string | null;
 }
 
 export type CommitId = string;
@@ -1031,6 +1055,7 @@ export interface ErrorResponseBody {
   error: boolean;
   code: string;
   message: string;
+  missing_permissions?: string[];
 }
 
 export type EvalCapability = "network" | "secrets" | "eval" | "exec";
@@ -1039,6 +1064,15 @@ export interface EvaluateRequest {
   commit?: string | null;
   attr?: string | null;
   walk?: WalkMode | null;
+}
+
+export interface EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
+  abort_reason?: AbortReason | null;
+  aborted_by?: string | null;
+  superseded_by?: EvaluationId | null;
+  retry_of?: EvaluationId | null;
+  phase_started_at: EvaluationPhaseStartTimestamps;
+  expected_duration_ms?: number | null;
 }
 
 export interface EvaluationFailureSummary {
@@ -1065,6 +1099,13 @@ export interface EvaluationMessageResponse {
   entry_points: EntryPointId[];
 }
 
+export interface EvaluationPhaseStartTimestamps {
+  fetch?: string | null;
+  eval_flake?: string | null;
+  eval_derivation?: string | null;
+  building?: string | null;
+}
+
 export type EvaluationProgress = {
   inputs: InputFetch[];
   kind: "fetching";
@@ -1073,7 +1114,7 @@ export type EvaluationProgress = {
   kind: "evaluating";
 };
 
-export interface EvaluationResponse {
+export type EvaluationResponse = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration & {
   id: EvaluationId;
   task?: TaskId | null;
   project_name: string;
@@ -1099,11 +1140,11 @@ export interface EvaluationResponse {
   waiting_reason?: WaitingReason | null;
   progress?: EvaluationProgress | null;
   expected_thunks?: number | null;
-}
+};
 
 export type EvaluationStatus = "Queued" | "EvaluatingFlake" | "EvaluatingDerivation" | "Building" | "Waiting" | "Completed" | "Failed" | "Aborted" | "Fetching";
 
-export interface EvaluationSummary {
+export type EvaluationSummary = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration & {
   id: EvaluationId;
   commit: string;
   commit_message?: string | null;
@@ -1127,7 +1168,7 @@ export interface EvaluationSummary {
   progress?: EvaluationProgress | null;
   expected_thunks?: number | null;
   waiting_reason?: WaitingReason | null;
-}
+};
 
 export interface EvaluationTriggerSummary {
   id: TaskTriggerId;
@@ -1397,6 +1438,11 @@ export interface GetUserSettingsResponse {
   has_password: boolean;
   login_providers: ConnectedLoginProvider[];
   managed: boolean;
+}
+
+export interface GitAccessReadiness {
+  status: TaskRepositoryFetchStatus;
+  tasks: ProjectTaskReadinessEntry[];
 }
 
 export type GitHostConnectionId = string;
@@ -1753,7 +1799,6 @@ export interface MakeTaskRequest {
   repository: string;
   wildcard: string;
   concurrency?: ConcurrencyPolicy | null;
-  sign_cache?: boolean | null;
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
@@ -2081,7 +2126,6 @@ export interface PatchTaskRequest {
   wildcard?: string | null;
   keep_evaluations?: number | null;
   concurrency?: ConcurrencyPolicy | null;
-  sign_cache?: boolean | null;
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
@@ -2153,11 +2197,18 @@ export interface PendingJobsResponse {
   other_pending: number;
 }
 
+export interface PendingUserDecisionsResponse {
+  invites: InviteItem[];
+  subscription_requests: SubscriptionRequestItem[];
+  team_requests: TeamGrantRequestInboxEntry[];
+}
+
 export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks" | "createProject";
 
 export interface PermissionEntry {
   id: string;
   mutating: boolean;
+  permission_explanation: string;
 }
 
 export interface PersonAccessReason {
@@ -2198,6 +2249,21 @@ export interface ProductArtefact {
 
 export type ProjectId = string;
 
+export interface ProjectReadinessResponse {
+  ready: boolean;
+  workers: ProjectReadinessWorkers;
+  cache: ProjectSubscriptionReadinessCache;
+  repository: GitAccessReadiness;
+}
+
+export interface ProjectReadinessWorkers {
+  ready: boolean;
+  registered: number;
+  teams: TeamReadinessEntry[];
+  teams_granted_without_workers: TeamReadinessEntry[];
+  teams_you_can_grant: TeamReadinessEntry[];
+}
+
 export interface ProjectResponse {
   id: ProjectId;
   name: string;
@@ -2234,6 +2300,11 @@ export interface ProjectStoredBytes {
   bytes: number;
 }
 
+export interface ProjectSubscriptionReadinessCache {
+  ready: boolean;
+  subscriptions: CacheSubscriptionItem[];
+}
+
 export interface ProjectSummary {
   id: ProjectId;
   name: string;
@@ -2251,6 +2322,13 @@ export interface ProjectSummary {
   waiting_evaluations: number;
   role?: string | null;
   permissions: Permission[];
+}
+
+export interface ProjectTaskReadinessEntry {
+  name: string;
+  display_name: string;
+  status: TaskRepositoryFetchStatus;
+  error?: string | null;
 }
 
 export type ProjectWorkerEntry = WorkerConnection & {
@@ -2337,25 +2415,13 @@ export interface RailTask {
 }
 
 export interface RegisterWorkerRequest {
-  worker_id: string;
   url?: string | null;
   display_name: string;
-  token?: string | null;
   enable_network?: boolean;
   enable_secrets?: boolean;
   enable_exec?: boolean;
   enable_eval?: boolean;
   enable_build?: boolean;
-}
-
-export interface RegisterWorkerResponse {
-  peer_id: ProjectId;
-  token?: string | null;
-}
-
-export interface RegisteredTeamWorker {
-  team: TeamId;
-  token?: string | null;
 }
 
 export interface RemoveMemberRequest {
@@ -2612,11 +2678,23 @@ export interface StoredNar {
   created: boolean;
 }
 
+export interface SubscribableCache {
+  name: string;
+  display_name: string;
+  owner_team?: string | null;
+  owner_team_display_name?: string | null;
+  public: boolean;
+  needs_approval: boolean;
+  approvers: string[];
+}
+
 export interface SubscribeCacheRequest {
   mode?: CacheSubscriptionMode | null;
 }
 
 export interface SubscriptionRequestItem {
+  cache: string;
+  cache_display_name: string;
   project: string;
   project_display_name: string;
   mode: CacheSubscriptionMode;
@@ -2698,6 +2776,8 @@ export interface TaskRepositoryConnectionAndCommitStatusPatchRequest {
   report_status?: boolean;
 }
 
+export type TaskRepositoryFetchStatus = "verified" | "unchecked" | "failing";
+
 export interface TaskRepositoryResponse {
   repository: string;
   uses_ssh: boolean;
@@ -2731,7 +2811,6 @@ export interface TaskResponse {
   managed: boolean;
   keep_evaluations: number;
   concurrency: ConcurrencyPolicy;
-  sign_cache: boolean;
   wait_for_workers: boolean;
   retry_failed_builds: boolean;
   multi_node_evaluation: boolean;
@@ -2811,6 +2890,11 @@ export interface TeamGrantPickerRow {
   caller_is_admin: boolean;
 }
 
+export type TeamGrantRequestInboxEntry = TeamRequestItem & {
+  team: string;
+  team_display_name: string;
+};
+
 export interface TeamGrants {
   projects: TeamProjectGrant[];
   caches: TeamCacheGrant[];
@@ -2843,6 +2927,12 @@ export interface TeamProjectGrant {
   role?: string | null;
   users: boolean;
   workers: boolean;
+}
+
+export interface TeamReadinessEntry {
+  name: string;
+  display_name: string;
+  workers: number;
 }
 
 export interface TeamRequestItem {
@@ -2957,6 +3047,10 @@ export interface UpdateActionRequest {
   config?: ActionConfig | null;
   events?: string[] | null;
   active?: boolean | null;
+}
+
+export interface UpdateCacheSubscriptionRequest {
+  sign_outputs: boolean;
 }
 
 export interface UpdateFlakeInputOverrideRequest {
@@ -3218,6 +3312,15 @@ export interface WorkerProjectRegistration {
   display_name: string;
   active: boolean;
   managed: boolean;
+}
+
+export interface WorkerRegistrationResponse {
+  id: string;
+  name: string;
+  url: string;
+  peer_id: string;
+  token: string;
+  nixos_configuration: string;
 }
 
 export interface WorkerSamplePoint {
