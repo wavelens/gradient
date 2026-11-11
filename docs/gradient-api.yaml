@@ -18678,6 +18678,7 @@ components:
         - repository
         - commit
         - wildcard
+        - only_evaluate
         - status
         - created_at
         - updated_at
@@ -18708,6 +18709,8 @@ components:
             type: string
           wildcard:
             type: string
+          only_evaluate:
+            type: boolean
           status:
             $ref: '#/components/schemas/EvaluationStatus'
           previous:

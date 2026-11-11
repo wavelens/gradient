@@ -265,7 +265,7 @@ fn build_evaluation_response_json_with_status(status: &str) -> serde_json::Value
         "finished_at": null, "next": null, "previous": null, "prioritized": false,
         "progress": null, "started_at": null, "task_display_name": null, "task_name": null,
         "trigger": null, "triggered_by": null, "waiting_reason": null, "warning_count": 0,
-        "phase_started_at": {}
+        "phase_started_at": {}, "only_evaluate": false
     }})
 }
 
