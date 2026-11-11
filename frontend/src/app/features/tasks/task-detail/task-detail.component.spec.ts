@@ -1065,6 +1065,9 @@ describe('TaskDetailComponent - evaluation selection', () => {
 
     expect(root.querySelector('.entry-row.pkg')?.getAttribute('data-phase')).toBe('success');
     expect(root.querySelector('.pkg-bar')).toBeNull();
+    expect(root.querySelector('.pkg-time')).toBeNull();
+    expect(root.querySelector('.entry-row.pkg .pkg-deps')?.textContent?.trim()).toBe('Evaluated');
+    expect(root.querySelector('.pkg a.entry-link')?.getAttribute('href')).toBe('/project/acme/log/e1');
     expect(root.querySelector('.eval-bar')).toBeNull();
     expect(root.querySelector('.eval-only')?.textContent).toContain('Evaluation only');
   });

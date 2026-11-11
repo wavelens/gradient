@@ -60,7 +60,7 @@
 
       <gr-menu #buildMenu [model]="buildMenuModel()" />
 
-      @if (scopeBuildId()) {
+      @if (scopeBuildId() && !ev.only_evaluate) {
         <div class="build-limit">
           <span class="build-limit-label">Builds for {{ limitingBuildDisplayName() ?? 'this package' }}</span>
           <button grButton severity="secondary" size="small" label="Show All Builds" (click)="removeBuildLimit()"></button>
@@ -276,7 +276,7 @@
           } @else if (hasLoadedFirstBuildPage() && builds().length === 0) {
             <div class="select-build-hint">
               <gr-icon [name]="ev.status === 'Aborted' ? 'cancel' : 'inventory_2'" class="hint-icon" size="xl" />
-              <span class="hint-text">{{ ev.status === 'Aborted' ? abortedWithoutBuildsTitle(ev.started_at) : isRunning() ? 'Nothing built yet' : 'No builds' }}</span>
+              <span class="hint-text">{{ ev.status === 'Aborted' ? abortedWithoutBuildsTitle(ev.started_at) : ev.only_evaluate ? 'Evaluation only - other tasks do the build' : isRunning() ? 'Nothing built yet' : 'No builds' }}</span>
             </div>
           } @else {
             <div class="select-build-hint">

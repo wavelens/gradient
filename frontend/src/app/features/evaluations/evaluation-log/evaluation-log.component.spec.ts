@@ -1098,6 +1098,19 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
+    it('lists no builds of an evaluate-only evaluation and never asks for them', () => {
+      const getBuilds = vi.fn(() => of({ builds: [build('ifd', 'hash-ifd.drv')], total: 1, active_count: 0 }));
+      const fixture = setupEvaluationLogPageFixture([], getBuilds, { status: 'Completed', only_evaluate: true });
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(getBuilds).not.toHaveBeenCalled();
+      expect(root.querySelector('.builds-list')).toBeNull();
+      expect(root.querySelector('.log-area')?.textContent).toContain('Evaluation only - other tasks do the build');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true }));
+      expect(fixture.componentInstance.sidebarSearchOpen()).toBe(false);
+      fixture.destroy();
+    });
+
     it('shows a failed log request as an error with retry, not as an empty log', async () => {
       const fixture = setupEvaluationLogPageFixture([build('bad', 'hash-openssl.drv', 'Building')]);
       vi.mocked(globalThis.fetch).mockResolvedValue(new Response('{"message":"log store is down"}', { status: 500 }));
