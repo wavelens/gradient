@@ -80,7 +80,8 @@ fn connection(id: &str, generated_secret: Option<&str>) -> Value {
     json!({
         "id": id, "owner": project_owner(), "name": "forgejo", "display_name": "Forgejo",
         "git_host_type": "forgejo", "base_url": "https://git.example.com", "has_secret": true,
-        "has_access_token": true, "allowed_ips": [], "receives_events": true,
+        "has_access_token": true, "access_token_refreshes_automatically": false,
+        "allowed_ips": [], "receives_events": true,
         "reports_status": true, "created_by": USER, "created_at": "2026-11-11T00:00:00Z",
         "managed": false, "webhook_url": "https://gradient.example/api/v1/hooks/forgejo",
         "generated_secret": generated_secret

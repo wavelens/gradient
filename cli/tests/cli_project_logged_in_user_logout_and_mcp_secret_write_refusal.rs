@@ -288,13 +288,7 @@ async fn mcp_refuses_secret_writes_even_with_flags_before_the_subcommand() {
             "netrc"
         ]),
         json!(["cache", "upload", "prod", "--nar-file", "secret.nar"]),
-        json!([
-            "worker",
-            "register",
-            "00000000-0000-0000-0000-000000000002",
-            "--display-name",
-            "w"
-        ]),
+        json!(["worker", "register", "--display-name", "w"]),
     ] {
         run_gradient_with_temp_home_stdin_and_args(&home, &build_mcp_stdin_json_rpc_frames_for_initialize_initialized_and_run_gradient_command_call(args), &["mcp", "--control"])
             .success()
