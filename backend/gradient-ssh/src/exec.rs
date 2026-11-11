@@ -6,12 +6,14 @@
 
 use crate::build_log::PlainLog;
 use crate::commands::Command;
-use crate::read_log::read_log;
 use crate::roots::Roots;
 use crate::session::Session;
-use crate::store::SshBackend;
+use crate::store::{SshBackend, new_cache_store_for_session};
 use crate::store_paths::{original_text, stored_full};
+use bytes::Bytes;
+use gradient_daemon::store_features_beyond_nix_daemon_protocol::StoreFeaturesBeyondDaemonProtocol as _;
 use harmonia_protocol::log::LogMessage;
+use harmonia_store_path::{StoreDir, StorePath};
 use russh::ChannelId;
 use russh::server::{Handle, Msg};
 use russh::{Channel, ChannelStream};
@@ -71,7 +73,7 @@ impl Output {
         self.print(format!("{text}\n")).await;
     }
 
-    async fn print(&self, text: String) {
+    async fn print(&self, text: impl Into<Bytes>) {
         let _ = self.handle.data(self.id, text).await;
     }
 
@@ -146,14 +148,30 @@ pub async fn run(
         Command::Build { derivations } => {
             realise(&output, &session, &roots, &derivations, None).await
         }
-        Command::ReadLog { path } => print_log(&output, &session, &path).await,
+        Command::ReadLog { path } => print_log(&output, session, &path).await,
     };
 
     output.finish(status).await;
 }
 
-async fn print_log(output: &Output, session: &Session, path: &str) -> u32 {
-    match read_log(session, path).await {
+fn top_level_store_path_from_command_line_path(path: &str) -> anyhow::Result<StorePath> {
+    let base = StoreDir::default()
+        .strip_prefix(path)?
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    StorePath::from_base_path(base).map_err(|e| anyhow::anyhow!("{base}: {e}"))
+}
+
+async fn print_log(output: &Output, session: Arc<Session>, path: &str) -> u32 {
+    let log = match top_level_store_path_from_command_line_path(path) {
+        Ok(drv_path) => new_cache_store_for_session(session)
+            .read_build_log(&drv_path)
+            .await
+            .map_err(anyhow::Error::from),
+        Err(error) => Err(error),
+    };
+    match log {
         Ok(Some(log)) => {
             output.print(log).await;
             0

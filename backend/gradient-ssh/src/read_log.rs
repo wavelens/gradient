@@ -9,8 +9,11 @@ use gradient_core::build_logs::{BuildLog, find_build_log};
 use gradient_db::cache_paths::served_path;
 use gradient_types::OriginalStorePath;
 
-pub async fn read_log(session: &Session, path: &str) -> anyhow::Result<Option<String>> {
-    let Some(drv) = derivation_of(session, OriginalStorePath::parse(path)?).await? else {
+pub async fn read_log(
+    session: &Session,
+    path: OriginalStorePath,
+) -> anyhow::Result<Option<String>> {
+    let Some(drv) = derivation_of(session, path).await? else {
         return Ok(None);
     };
 
