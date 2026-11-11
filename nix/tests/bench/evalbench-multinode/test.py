@@ -322,7 +322,7 @@ def measure(token, task):
     psql("SELECT pg_stat_statements_reset();")
     server.succeed(f": > {POSTGRES_LOG}")
     load_before = {node.name: cpu_seconds(node) for node in [server] + WORKER_NODES}
-    eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})
+    eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})["id"]
     label = f"{task}-{workers}"
     captured = {}
     try:

@@ -57,7 +57,7 @@ def publish(spec):
 
 
 def evaluate(spec):
-    return api("POST", f"/tasks/project/{repo_of(spec)}/evaluate", {})
+    return api("POST", f"/tasks/project/{repo_of(spec)}/evaluate", {})["id"]
 
 
 def wait_evaluation(eval_id, want, timeout=300):

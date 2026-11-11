@@ -47,7 +47,7 @@ def create_personal_project(machine, base, token, repo):
          "repository": repo, "wildcard": "packages.*.*"})
     started = request(machine, base, "POST", "tasks/personal/packages/evaluate", token)
     if started.get("error") is False:
-        return started["message"]
+        return started["message"]["id"]
     assert started.get("message") == "Evaluation already in progress", started
     return api(machine, base, "GET", "tasks/personal/packages/evaluations?limit=1", token)[0]["id"]
 

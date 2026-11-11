@@ -84,7 +84,7 @@ def evaluate(run, cold, instrumented):
         start_wait_sampler()
 
     started = time.monotonic()
-    eval_id = api("POST", "tasks/project/task/evaluate", token, body={})
+    eval_id = api("POST", "tasks/project/task/evaluate", token, body={})["id"]
     wait_for_status(token, eval_id, EVALUATED, timeout=900)
     evaluated_s = time.monotonic() - started
 

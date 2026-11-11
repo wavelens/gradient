@@ -154,7 +154,7 @@ api("DELETE", "user/keys", token=token, body=json.dumps({"name": "ci-key"}))
 # ── Phase 3: projects (direct + CLI) ─────────────────────────────────────
 banner("Phase 3: projects")
 project_id = api("PUT", "projects", token=token, body=json.dumps({
-    "name": "myproject", "display_name": "My Project", "description": "desc"}))
+    "name": "myproject", "display_name": "My Project", "description": "desc"}))["id"]
 api("PUT", "projects", token=token, expect_error=True, body=json.dumps({
     "name": "myproject", "display_name": "Dup", "description": "d"}))  # duplicate name
 assert api("GET", "projects/myproject", token=token)["id"] == project_id
@@ -224,7 +224,7 @@ machine.succeed(f"{CLI} project select myproject")
 banner("Phase 4: tasks")
 proj_id = api("PUT", "tasks/myproject", token=token, body=json.dumps({
     "name": "mytask", "display_name": "My Task", "description": "d",
-    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))
+    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))["id"]
 api("PUT", "tasks/myproject", token=token, expect_error=True, body=json.dumps({
     "name": "mytask", "display_name": "Dup", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # duplicate name
@@ -292,18 +292,17 @@ api("GET", "tasks/myproject/transferme", token=token, expect_error=True)  # gone
 
 # ── Phase 5: workers (direct + CLI) ───────────────────────────────────────────
 banner("Phase 5: workers")
-api_worker = "b0000000-0000-4000-8000-000000000001"
 reg = api("POST", "projects/myproject/workers", token=token, body=json.dumps({
-    "worker_id": api_worker, "display_name": "api-worker"}))
+    "display_name": "api-worker"}))
 assert reg.get("token") and len(reg["token"]) == 64, reg
+api_worker = reg["id"]
 assert any(w["worker_id"] == api_worker
            for w in api("GET", "projects/myproject/workers", token=token))
 api("PATCH", f"projects/myproject/workers/{api_worker}", token=token,
     body=json.dumps({"display_name": "api-worker-2"}))
 api("DELETE", f"projects/myproject/workers/{api_worker}", token=token)
 
-cli_worker = "c0000000-0000-4000-8000-000000000002"
-cli(f"worker register {cli_worker} --display-name cli-worker")
+cli_worker = json.loads(cli("worker register --display-name cli-worker"))["message"]["id"]
 assert any(w["worker_id"] == cli_worker
            for w in api("GET", "projects/myproject/workers", token=token))
 cli("worker list")
@@ -618,7 +617,8 @@ assert api("POST", "projects/teamproject/teams", token=sa_token, body=json.dumps
     "team": "runtimeteam", "role": "View", "users": True, "workers": False,
 })) == "Team granted"
 assert api("POST", "teams/runtimeteam/members", token=sa_token,
-           body=json.dumps({"user": "statemember", "role": "member"})) == "User added"
+           body=json.dumps({"user": "statemember", "role": "member",
+                            "add_as_member_immediately": True})) == "User added"
 
 # The project is private: only the team grant lets statemember read it.
 api("GET", "projects/teamproject", token=member_token)
