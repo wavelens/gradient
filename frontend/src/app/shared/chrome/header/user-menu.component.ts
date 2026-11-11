@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, output, viewChild } from '@angular/core';
 import { MenuComponent, MenuItem } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { WhatsNewService } from '@core/whats-new/whats-new.service';
 import { links } from '@shared/routing';
 
@@ -21,7 +21,7 @@ import { links } from '@shared/routing';
 export class UserMenuComponent {
   private auth = inject(AuthService);
   private whatsNew = inject(WhatsNewService);
-  private invites = inject(PendingInvitesService);
+  private pending = inject(PendingUserDecisionsService);
   private menu = viewChild.required(MenuComponent);
 
   readonly isOpen = computed(() => this.menu().isOpen());
@@ -29,7 +29,7 @@ export class UserMenuComponent {
 
   protected items = computed<MenuItem[]>(() => ([
     { label: 'Settings', icon: 'settings', routerLink: links.settings('profile') },
-    { label: this.invites.count() ? `Invitations (${this.invites.count()})` : 'Invitations', icon: 'mail', routerLink: links.settings('invites') },
+    { label: this.pending.count() ? `Requests (${this.pending.count()})` : 'Requests', icon: 'mail', routerLink: links.settings('invites') },
     ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
     ...(this.auth.user()?.superuser
       ? [

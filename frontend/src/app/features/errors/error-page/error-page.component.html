@@ -20,7 +20,7 @@
         <a grButton [routerLink]="links.login(from)" label="Sign In"></a>
       }
       @if (denied(); as view) {
-        @let invited = !!user() && invites.count() > 0;
+        @let invited = !!user() && pending.invites().length > 0;
         @if (invited) {
           <a grButton [routerLink]="links.settings('invites')" label="Review Invitations"></a>
         }

@@ -6,7 +6,7 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { Router, provideRouter } from '@angular/router';
 import { By } from '@angular/platform-browser';
 import { CreateProjectDialogComponent } from '@shared/forms';
@@ -31,7 +31,7 @@ function render(
     providers: [
       provideRouter([]),
       { provide: TeamsService, useValue: { list: () => of([]) } },
-      { provide: PendingInvitesService, useValue: { count: signal(invitationCount), all: signal([...Array(invitationCount).fill({ kind: 'project' }), { kind: 'cache' }]) } },
+      { provide: PendingUserDecisionsService, useValue: { count: signal(invitationCount), invites: signal([...Array(invitationCount).fill({ kind: 'project' }), { kind: 'cache' }]) } },
       { provide: AuthService, useValue: { isAuthenticated: () => signedIn, user: () => (signedIn ? { superuser: false } : null) } },
       { provide: ConfigService, useValue: { publicListing: true, createProject: 'everyone', canCreate: () => true } },
       {

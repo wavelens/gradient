@@ -6,7 +6,12 @@
 
 <div class="page">
   <h1 class="sr-only">Dashboard</h1>
-  <app-pending-invitations-banner />
+  @if (pending.count(); as count) {
+    <gr-message-banner class="pending-requests" type="info" icon="mail">
+      {{ plural(count, 'request') }} {{ count === 1 ? 'needs' : 'need' }} a decision
+      <a [routerLink]="links.settings('invites')">View requests</a>
+    </gr-message-banner>
+  }
   @if (failedDashboardSectionComponents().length) {
     <gr-message-banner type="error">
       Couldn't load {{ failedSectionNamesForErrorBanner() }}.

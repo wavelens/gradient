@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" title="Invitations" subtitle="Projects, caches and teams waiting for your answer">
+<gr-page-layout width="settings" title="Requests" subtitle="Invitations and access requests that need a decision">
   <app-settings-nav slot="banner" />
   @if (joined().length) {
     <gr-row-list class="joined">
@@ -20,46 +20,129 @@
     </gr-row-list>
   }
   <gr-load-state
-    [loading]="loading()"
+    [loading]="loading() && pending.count() === 0"
     [error]="loadError()"
-    [empty]="invites().length === 0 && joined().length === 0"
-    loadingMessage="Loading invitations..."
-    errorTitle="Failed to load invitations"
+    [empty]="pending.count() === 0 && joined().length === 0"
+    loadingMessage="Loading requests..."
+    errorTitle="Failed to load requests"
     emptyIcon="mail"
-    emptyTitle="No pending invitations"
-    emptyMessage="Invitations to projects, caches and teams appear here."
+    emptyTitle="No pending requests"
+    emptyMessage="Invitations to projects, caches and teams appear here, along with requests that need approval."
     (retry)="load()"
   >
-    <gr-row-list>
-      @for (invite of invites(); track invite.token) {
-        <gr-row>
-          {{ invite.scope_display_name }}
-          <gr-badge severity="info">{{ invite.kind }}</gr-badge>
-          <span slot="meta">
-            Role {{ getInviteRoleDisplayText(invite) }} ·
-            Invited by {{ invite.invited_by_display_name ?? invite.invited_by }} ·
-            Expires {{ invite.expires_at | serverDate }}
-          </span>
-          <button
-            slot="actions"
-            grButton
-            label="Accept"
-            icon="check"
-            [disabled]="pendingToken() === invite.token"
-            [loading]="pendingToken() === invite.token"
-            (click)="accept(invite.token)"
-          ></button>
-          <button
-            slot="actions"
-            grButton
-            label="Decline"
-            icon="close"
-            severity="secondary"
-            [disabled]="pendingToken() === invite.token"
-            (click)="decline(invite)"
-          ></button>
-        </gr-row>
-      }
-    </gr-row-list>
+    @if (invites().length) {
+      <gr-settings-section class="invites" title="Invitations" [card]="false">
+        <gr-row-list>
+          @for (invite of invites(); track invite.token) {
+            <gr-row [icon]="entityKindToIconName[invite.kind]">
+              <gr-entity-name [displayName]="invite.scope_display_name" [name]="invite.scope" />
+              <gr-badge severity="info">{{ invite.kind }}</gr-badge>
+              <span slot="meta">
+                Role {{ getInviteRoleDisplayText(invite) }} ·
+                Invited by {{ invite.invited_by_display_name ?? invite.invited_by }} ·
+                Expires {{ invite.expires_at | serverDate }}
+              </span>
+              <button
+                slot="actions"
+                grButton
+                label="Accept"
+                icon="check"
+                [disabled]="pendingToken() === invite.token"
+                [loading]="pendingToken() === invite.token"
+                (click)="accept(invite.token)"
+              ></button>
+              <button
+                slot="actions"
+                grButton
+                label="Decline"
+                icon="close"
+                severity="secondary"
+                [disabled]="pendingToken() === invite.token"
+                (click)="decline(invite)"
+              ></button>
+            </gr-row>
+          }
+        </gr-row-list>
+      </gr-settings-section>
+    }
+    @if (cachedSubscriptionRequestsOnPage().length) {
+      <gr-settings-section class="subscription-requests" title="Subscription Requests for a Cache" [card]="false">
+        <gr-row-list>
+          @for (request of cachedSubscriptionRequestsOnPage(); track getCacheSubscriptionRequestRowKey(request)) {
+            <gr-row [icon]="entityKindToIconName.cache">
+              <a [routerLink]="links.project(request.project)"><gr-entity-name [displayName]="request.project_display_name" [name]="request.project" /></a>
+              asks to use
+              <a [routerLink]="links.cache(request.cache)"><gr-entity-name [displayName]="request.cache_display_name" [name]="request.cache" /></a>
+              <gr-badge severity="neutral">{{ modeLabel(request.mode) }}</gr-badge>
+              <span slot="meta">
+                Requested by {{ request.requested_by_display_name ?? request.requested_by }} ·
+                {{ request.created_at | serverDate }}
+              </span>
+              <button
+                slot="actions"
+                grButton
+                severity="secondary"
+                label="Approve"
+                icon="check"
+                [loading]="requestKeyWithDecisionInProgress() === getCacheSubscriptionRequestRowKey(request)"
+                [disabled]="requestKeyWithDecisionInProgress() !== null"
+                (click)="approveSubscriptionRequestAndRemoveRow(request)"
+              ></button>
+              <button
+                slot="actions"
+                grButton
+                severity="danger"
+                label="Deny"
+                icon="close"
+                [disabled]="requestKeyWithDecisionInProgress() !== null"
+                (click)="confirmAndDenyCacheSubscriptionRequest(request)"
+              ></button>
+            </gr-row>
+          }
+        </gr-row-list>
+      </gr-settings-section>
+    }
+    @if (teamGrantRequestsOnPage().length) {
+      <gr-settings-section class="team-requests" title="Requests for Team Grants" [card]="false">
+        <gr-row-list>
+          @for (request of teamGrantRequestsOnPage(); track request.id) {
+            <gr-row [icon]="entityKindToIconName.team">
+              Access Request from
+              <a [routerLink]="getTeamGrantRequestTargetLink(request)"><gr-entity-name [kind]="request.kind" [displayName]="request.display_name" [name]="request.target" /></a>
+              to
+              <a [routerLink]="links.team(request.team)"><gr-entity-name [displayName]="request.team_display_name" [name]="request.team" /></a>
+              <span slot="meta">
+                @if (getTeamGrantRequestRoleAndWorkerText(request); as grant) {
+                  {{ grant }} ·
+                }
+                @if (request.requested_by) {
+                  Requested by {{ request.requested_by }} ·
+                }
+                {{ request.created_at | serverDate }}
+              </span>
+              <button
+                slot="actions"
+                grButton
+                severity="secondary"
+                label="Approve"
+                icon="check"
+                [loading]="requestKeyWithDecisionInProgress() === request.id"
+                [disabled]="requestKeyWithDecisionInProgress() !== null"
+                (click)="approveTeamGrantRequestAndRemoveRow(request)"
+              ></button>
+              <button
+                slot="actions"
+                grButton
+                severity="danger"
+                label="Deny"
+                icon="close"
+                [disabled]="requestKeyWithDecisionInProgress() !== null"
+                (click)="confirmAndDenyTeamGrantRequestAndRemoveItsRow(request)"
+              ></button>
+            </gr-row>
+          }
+        </gr-row-list>
+      </gr-settings-section>
+    }
   </gr-load-state>
 </gr-page-layout>

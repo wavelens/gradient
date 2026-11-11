@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MessageBannerComponent } from '@gradient/ui/ui';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import type { InviteKind } from '@core/models';
 import { links } from '@shared/routing';
 import { plural } from '@shared/text';
@@ -19,7 +19,7 @@ import { plural } from '@shared/text';
   template: `
     @if (count(); as count) {
       <gr-message-banner type="info" icon="mail">
-        {{ plural(count, kind() ? 'pending ' + kind() + ' invitation' : 'pending invitation') }}
+        {{ plural(count, 'pending ' + kind() + ' invitation') }}
         <a [routerLink]="links.settings('invites')">Review invitations</a>
       </gr-message-banner>
     }
@@ -28,12 +28,9 @@ import { plural } from '@shared/text';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class PendingInvitationsBannerComponent {
-  private invites = inject(PendingInvitesService);
-  readonly kind = input<InviteKind | null>(null);
-  protected readonly count = computed(() => {
-    const kind = this.kind();
-    return kind ? this.invites.all().filter((invite) => invite.kind === kind).length : this.invites.count();
-  });
+  private pending = inject(PendingUserDecisionsService);
+  readonly kind = input.required<InviteKind>();
+  protected readonly count = computed(() => this.pending.invites().filter((invite) => invite.kind === this.kind()).length);
   protected readonly links = links;
   protected readonly plural = plural;
 }

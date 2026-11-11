@@ -14,7 +14,9 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { RELEASE_NOTES_SOURCE } from '@core/whats-new/whats-new.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
+import { UserService } from '@core/services/user.service';
+import { of } from 'rxjs';
 
 const logout = vi.fn(() => ({ subscribe: () => undefined }));
 
@@ -123,25 +125,29 @@ describe('AppHeaderComponent - user menu', () => {
     expect(root.querySelector('.user-menu-trigger')?.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('folds the user name, settings, invites and logout into one dropdown', async () => {
+  it('folds the user name, settings, requests and logout into one dropdown', async () => {
     const { root, items } = await openMenu();
     expect(root.querySelector('.header-user')?.textContent).toContain('Alice');
     expect(root.querySelector('.header-user a, .header-user .logout-btn')).toBeNull();
     expect(items.map((item) => item.textContent?.trim())).toEqual([
       expect.stringContaining('Settings'),
-      expect.stringContaining('Invitations'),
+      expect.stringContaining('Requests'),
       expect.stringContaining('Log out'),
     ]);
   });
 
-  it('counts pending invitations on the Invitations menu item', async () => {
-    TestBed.overrideProvider(PendingInvitesService, { useValue: { count: () => 2 } });
+  it('counts invitations, cache subscription requests and team grant requests on the Requests menu item', async () => {
+    TestBed.overrideProvider(UserService, {
+      useValue: {
+        getRequestsAwaitingUserDecision: () => of({ invites: [{}], subscription_requests: [{}, {}], team_requests: [{}] }),
+      },
+    });
     const { items } = await openMenu();
-    expect(items.map((item) => item.textContent?.trim())).toContainEqual(expect.stringContaining('Invitations (2)'));
+    expect(items.map((item) => item.textContent?.trim())).toContainEqual(expect.stringContaining('Requests (4)'));
   });
 
-  it('names the menu button by its visible text and leaves the invitation count to the dashboard banner', () => {
-    TestBed.overrideProvider(PendingInvitesService, { useValue: { count: () => 3 } });
+  it('names the menu button by its visible text and leaves the request count to the dashboard banner', () => {
+    TestBed.overrideProvider(PendingUserDecisionsService, { useValue: { count: () => 3 } });
     const trigger = (setup(false, true).nativeElement as HTMLElement).querySelector('.user-menu-trigger') as HTMLElement;
     expect(trigger.hasAttribute('aria-label')).toBe(false);
     expect(trigger.querySelector('gr-badge')).toBeNull();

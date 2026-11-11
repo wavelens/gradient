@@ -10,7 +10,7 @@ import { Observable, of, throwError } from 'rxjs';
 import type { UserAccessSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { ConfigService } from '@core/services/config.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { UserService } from '@core/services/user.service';
 import { SettingsAccessComponent } from './settings-access.component';
 
@@ -42,7 +42,7 @@ function render(load: () => Observable<UserAccessSummary>) {
       provideRouter([]),
       { provide: UserService, useValue: { getProjectsCachesAndTeamsCurrentUserCanReach: getAccess } },
       { provide: ConfigService, useValue: { sshEnabled: false } },
-      { provide: PendingInvitesService, useValue: { count: () => 0 } },
+      { provide: PendingUserDecisionsService, useValue: { count: () => 0 } },
     ],
   });
   const fixture = TestBed.createComponent(SettingsAccessComponent);

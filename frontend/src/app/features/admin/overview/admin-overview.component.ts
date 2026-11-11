@@ -11,6 +11,7 @@ import { ButtonComponent, LoadStateComponent, TableComponent } from '@gradient/u
 import { AdminService } from '@core/services/admin.service';
 import { BoardService } from '@core/services/board.service';
 import { NotifyService } from '@core/services/notify.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -62,6 +63,9 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
         <div class="tile">
           <span class="label">Running Maintenance</span><span>{{ adminMaintenanceTaskPendingOrRunningCount() }}</span>
         </div>
+        <a class="tile" [routerLink]="links.settings('invites')">
+          <span class="label">Pending Requests</span><span>{{ pending.count() }}</span>
+        </a>
       </div>
 
       <h2>Maintenance</h2>
@@ -108,6 +112,7 @@ export class AdminStatusTilesWithMaintenanceActionsComponent implements OnInit {
   private board = inject(BoardService);
   private confirm = inject(ConfirmService);
   private notify = inject(NotifyService);
+  protected readonly pending = inject(PendingUserDecisionsService);
 
   protected readonly links = links;
   protected readonly bytes = formatBytes;
@@ -153,6 +158,7 @@ export class AdminStatusTilesWithMaintenanceActionsComponent implements OnInit {
       workers: this.admin.listWorkers(),
       storage: this.admin.getDiskAndStorageUsageByCacheProjectAndTask(),
       pendingJobs: this.board.getPendingJobs(),
+      requests: this.pending.fetchAndStorePendingDecisions(),
     }).subscribe({
       next: (overview) => {
         this.health.set(overview.health);

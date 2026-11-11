@@ -32,7 +32,7 @@ function setup(opts: {
     imports: [CacheListComponent],
     providers: [
       provideRouter([]),
-      { provide: UserService, useValue: { getProjectsCachesAndTeamsCurrentUserCanReach: () => of(opts.accessSummary ?? null), getInvites: () => of([]) } },
+      { provide: UserService, useValue: { getProjectsCachesAndTeamsCurrentUserCanReach: () => of(opts.accessSummary ?? null), getRequestsAwaitingUserDecision: () => of({ invites: [], subscription_requests: [], team_requests: [] }) } },
       { provide: CachesService, useValue: { getCaches, getPublicCaches } },
       { provide: ConfigService, useValue: { publicListing: true, createCache: 'everyone', canCreate: () => true } },
       { provide: AuthService, useValue: { isAuthenticated: () => opts.authenticated, user: () => null } },

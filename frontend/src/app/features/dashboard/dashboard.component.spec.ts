@@ -13,13 +13,13 @@ import { signal } from '@angular/core';
 import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 
 type RailStub = { projects: unknown[]; caches: unknown[] };
 
 let service: Record<'rail' | 'stats' | 'tasks' | 'activity', Mock>;
 
-function render(rail: RailStub | Observable<RailStub>, pendingInvites = 0) {
+function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0) {
   service = {
     rail: vi.fn(() => (rail instanceof Observable ? rail : of(rail))),
     stats: vi.fn(() => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { online: 0, busy_pct: 0 }, queue_wait_p50_ms: 0 })),
@@ -30,7 +30,7 @@ function render(rail: RailStub | Observable<RailStub>, pendingInvites = 0) {
     imports: [DashboardComponent],
     providers: [
       provideRouter([]),
-      { provide: PendingInvitesService, useValue: { count: () => pendingInvites } },
+      { provide: PendingUserDecisionsService, useValue: { count: () => pendingRequests } },
       { provide: StarsService, useValue: { set: () => of(true), changed$: NEVER } },
       { provide: DashboardService, useValue: service },
       { provide: AuthService, useValue: { user: signal(null) } },
@@ -80,11 +80,16 @@ describe('DashboardComponent', () => {
     expect(root.querySelector('gr-loading-spinner')).toBeNull();
   });
 
-  it('points an invited user to the pending invitations', () => {
+  it('counts every request waiting for the user and links to the Requests page', () => {
     const root = render({ projects: [], caches: [] }, 2);
-    const banner = root.querySelector('app-pending-invitations-banner gr-message-banner');
-    expect(banner?.textContent).toContain('2 pending invitations');
+    const banner = root.querySelector('.pending-requests');
+    expect(banner?.textContent?.replace(/\s+/g, ' ')).toContain('2 requests need a decision');
     expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/settings/invites');
+  });
+
+  it('uses the singular for one waiting request', () => {
+    const root = render({ projects: [], caches: [] }, 1);
+    expect(root.querySelector('.pending-requests')?.textContent?.replace(/\s+/g, ' ')).toContain('1 request needs a decision');
   });
 
   it('reloads stats, tasks, activity and rail while the tab stays open', () => {
@@ -129,7 +134,7 @@ describe('DashboardComponent', () => {
     expect(service.stats).toHaveBeenCalledTimes(1);
   });
 
-  it('shows no invitation banner without pending invitations', () => {
-    expect(render({ projects: [], caches: [] }).querySelector('app-pending-invitations-banner gr-message-banner')).toBeNull();
+  it('shows no requests banner without pending requests', () => {
+    expect(render({ projects: [], caches: [] }).querySelector('.pending-requests')).toBeNull();
   });
 });

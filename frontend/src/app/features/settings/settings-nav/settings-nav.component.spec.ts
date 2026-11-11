@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { ConfigService } from '@core/services/config.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { SettingsNavComponent } from './settings-nav.component';
 
 function render(sshEnabled: boolean, pending = 0) {
@@ -16,7 +16,7 @@ function render(sshEnabled: boolean, pending = 0) {
     providers: [
       provideRouter([]),
       { provide: ConfigService, useValue: { sshEnabled } },
-      { provide: PendingInvitesService, useValue: { count: () => pending } },
+      { provide: PendingUserDecisionsService, useValue: { count: () => pending } },
     ],
   });
   const fixture = TestBed.createComponent(SettingsNavComponent);
@@ -25,13 +25,13 @@ function render(sshEnabled: boolean, pending = 0) {
 }
 
 describe('SettingsNavComponent', () => {
-  it('links every settings page to its siblings and counts pending invites', () => {
+  it('links every settings page to its siblings and counts pending requests', () => {
     expect(render(true, 2)).toEqual([
       ['Profile', '/settings/profile'],
       ['API Keys', '/settings/keys'],
       ['SSH Keys', '/settings/ssh-keys'],
       ['Sessions', '/settings/sessions'],
-      ['Invitations (2)', '/settings/invites'],
+      ['Requests (2)', '/settings/invites'],
       ['Access', '/settings/access'],
     ]);
   });

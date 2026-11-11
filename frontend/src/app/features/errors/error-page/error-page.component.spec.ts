@@ -9,7 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { ErrorPageComponent } from './error-page.component';
 
 function render(
@@ -17,6 +17,7 @@ function render(
   query: Record<string, string>,
   user: { username: string; superuser?: boolean } | null,
   pendingInvites = 0,
+  otherPendingRequests = 0,
 ) {
   const logout = vi.fn(() => of(null));
   const refreshInvites = vi.fn();
@@ -25,7 +26,7 @@ function render(
     providers: [
       provideRouter([]),
       { provide: AuthService, useValue: { user: signal(user), logout } },
-      { provide: PendingInvitesService, useValue: { count: () => pendingInvites, refresh: refreshInvites } },
+      { provide: PendingUserDecisionsService, useValue: { invites: () => Array.from({ length: pendingInvites }), count: () => pendingInvites + otherPendingRequests, refresh: refreshInvites } },
       { provide: ActivatedRoute, useValue: { snapshot: { data: { code }, queryParamMap: convertToParamMap(query) } } },
     ],
   });
@@ -62,6 +63,11 @@ describe('ErrorPageComponent', () => {
     const { links } = render(404, DENIED, { username: 'carol' }, 2);
     expect(links.map((l) => l.text)).toEqual(['Review Invitations', 'Back to Caches', 'Switch Account']);
     expect(links[0].href).toBe('/settings/invites');
+  });
+
+  it('leaves out Review Invitations when only approval requests wait, since they grant no access', () => {
+    const { links } = render(404, DENIED, { username: 'carol' }, 0, 3);
+    expect(links.map((l) => l.text)).not.toContain('Review Invitations');
   });
 
   it('explains admin-only pages instead of redirecting', () => {

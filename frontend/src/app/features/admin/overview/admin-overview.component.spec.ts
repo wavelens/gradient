@@ -11,6 +11,8 @@ import { AdminStatusTilesWithMaintenanceActionsComponent } from './admin-overvie
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
 import { NotifyService } from '@core/services/notify.service';
+import { AuthService } from '@core/services/auth.service';
+import { UserService } from '@core/services/user.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { AdminStorageResponse, AdminTaskDto, AdminWorkerListEntry, BoardHealth, PendingJobsResponse } from '@core/models';
 
@@ -40,6 +42,13 @@ const WORKERS: AdminWorkerListEntry[] = [
 ];
 
 const STORAGE: AdminStorageResponse = { disk_total_bytes: 4096, disk_free_bytes: 2048, caches: [], projects: [], tasks: [] };
+const REQUEST_PROVIDERS = [
+  { provide: AuthService, useValue: { isAuthenticated: () => false } },
+  {
+    provide: UserService,
+    useValue: { getRequestsAwaitingUserDecision: () => of({ invites: [{}], subscription_requests: [{}, {}], team_requests: [{}] }) },
+  },
+];
 const PENDING = { jobs: [{}, {}], other_pending: 3 } as unknown as PendingJobsResponse;
 
 let confirm: ReturnType<typeof vi.fn>;
@@ -57,6 +66,7 @@ function setup(
     imports: [AdminStatusTilesWithMaintenanceActionsComponent],
     providers: [
       provideRouter([]),
+      ...REQUEST_PROVIDERS,
       { provide: BoardService, useValue: { getHealth: () => of(health), getPendingJobs: () => of(PENDING) } },
       { provide: ConfirmService, useValue: { confirm } },
       {
@@ -113,6 +123,12 @@ describe('AdminStatusTilesWithMaintenanceActionsComponent', () => {
       const fixture = setup(HEALTH, undefined, true, [TASK, { ...TASK, id: 't2', status: 'completed' }, { ...TASK, id: 't3', status: 'pending' }]);
       expect(tile(fixture, 'Running Maintenance').textContent).toContain('2');
     });
+
+    it('counts every request waiting for a decision and links to the Requests page', () => {
+      const requests = tile(setup(), 'Pending Requests');
+      expect(requests.textContent).toContain('4');
+      expect(requests.getAttribute('href')).toBe('/settings/invites');
+    });
   });
 
   it('reports a failed load and loads again on Try Again', () => {
@@ -121,6 +137,7 @@ describe('AdminStatusTilesWithMaintenanceActionsComponent', () => {
       imports: [AdminStatusTilesWithMaintenanceActionsComponent],
       providers: [
         provideRouter([]),
+        ...REQUEST_PROVIDERS,
         { provide: BoardService, useValue: { getHealth: () => of(HEALTH), getPendingJobs: () => of(PENDING) } },
         {
           provide: AdminService,
@@ -234,6 +251,7 @@ describe('AdminStatusTilesWithMaintenanceActionsComponent - admin tasks', () => 
       imports: [AdminStatusTilesWithMaintenanceActionsComponent],
       providers: [
         provideRouter([]),
+        ...REQUEST_PROVIDERS,
         { provide: BoardService, useValue: { getHealth: () => of(HEALTH), getPendingJobs: () => of(PENDING) } },
         {
           provide: AdminService,

@@ -14,7 +14,7 @@ import {
   SessionInfo,
   Paginated,
   AuditLogEntry,
-  InviteItem,
+  PendingUserDecisionsResponse,
   PatchUserSettingsRequest,
   DeleteUserRequest,
   CreateApiKeyRequest,
@@ -99,8 +99,8 @@ export class UserService {
     return this.api.post<string>(`user/keys/${id}/revoke`, {});
   }
 
-  getInvites(): Observable<InviteItem[]> {
-    return this.api.get<InviteItem[]>('user/invites');
+  getRequestsAwaitingUserDecision(): Observable<PendingUserDecisionsResponse> {
+    return this.api.get<PendingUserDecisionsResponse>('user/requests');
   }
 
   acceptInvite(token: string): Observable<string> {

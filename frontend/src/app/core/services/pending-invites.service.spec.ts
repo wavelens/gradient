@@ -8,29 +8,48 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { of } from 'rxjs';
 import { AuthService } from './auth.service';
-import { PendingInvitesService } from './pending-invites.service';
+import { PendingUserDecisionsService } from './pending-invites.service';
 import { UserService } from './user.service';
 
-describe('PendingInvitesService', () => {
-  it('loads the invites once someone signs in and forgets them on sign out', () => {
-    const signedIn = signal(false);
-    const getInvites = vi.fn(() => of([{ token: 't1' }, { token: 't2' }]));
-    TestBed.configureTestingModule({
-      providers: [
-        { provide: AuthService, useValue: { isAuthenticated: signedIn } },
-        { provide: UserService, useValue: { getInvites } },
-      ],
-    });
-    const invites = TestBed.inject(PendingInvitesService);
+const DECISIONS = {
+  invites: [{ token: 't1' }],
+  subscription_requests: [{ cache: 'main', project: 'shop' }, { cache: 'main', project: 'docs' }],
+  team_requests: [{ id: 'r1' }],
+};
+
+function setup() {
+  const signedIn = signal(false);
+  const getRequestsAwaitingUserDecision = vi.fn(() => of(DECISIONS));
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: AuthService, useValue: { isAuthenticated: signedIn } },
+      { provide: UserService, useValue: { getRequestsAwaitingUserDecision } },
+    ],
+  });
+  return { signedIn, getRequestsAwaitingUserDecision, decisions: TestBed.inject(PendingUserDecisionsService) };
+}
+
+describe('PendingUserDecisionsService', () => {
+  it('counts every request kind once someone signs in and forgets them on sign out', () => {
+    const { signedIn, getRequestsAwaitingUserDecision, decisions } = setup();
     TestBed.tick();
-    expect(getInvites).not.toHaveBeenCalled();
+    expect(getRequestsAwaitingUserDecision).not.toHaveBeenCalled();
 
     signedIn.set(true);
     TestBed.tick();
-    expect(invites.count()).toBe(2);
+    expect(decisions.count()).toBe(4);
+    expect(decisions.invites().length).toBe(1);
 
     signedIn.set(false);
     TestBed.tick();
-    expect(invites.count()).toBe(0);
+    expect(decisions.count()).toBe(0);
+  });
+
+  it('lowers the count when a handled request is removed', () => {
+    const { signedIn, decisions } = setup();
+    signedIn.set(true);
+    TestBed.tick();
+    decisions.removeHandledItemsFromPendingDecisions((all) => ({ ...all, team_requests: [] }));
+    expect(decisions.count()).toBe(3);
   });
 });

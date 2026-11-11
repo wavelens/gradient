@@ -503,10 +503,10 @@ export const routes: Routes = [
       },
       {
         path: 'settings/invites',
-        title: 'Invitations',
+        title: 'Requests',
         loadComponent: () =>
           import('./features/settings/invites/invites.component').then(
-            (m) => m.InvitesComponent
+            (m) => m.RequestsPageComponent
           ),
       },
       {

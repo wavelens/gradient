@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { LinkTabsComponent, type LinkTab } from '@gradient/ui/ui';
 import { ConfigService } from '@core/services/config.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { links } from '@shared/routing';
 
 @Component({
@@ -19,16 +19,16 @@ import { links } from '@shared/routing';
 })
 export class SettingsNavComponent {
   private config = inject(ConfigService);
-  private invites = inject(PendingInvitesService);
+  private pending = inject(PendingUserDecisionsService);
 
   protected tabs = computed<LinkTab[]>(() => {
-    const pending = this.invites.count();
+    const count = this.pending.count();
     return [
       { label: 'Profile', link: links.settings('profile') },
       { label: 'API Keys', link: links.settings('keys') },
       ...(this.config.sshEnabled ? [{ label: 'SSH Keys', link: links.settings('ssh-keys') }] : []),
       { label: 'Sessions', link: links.settings('sessions') },
-      { label: pending ? `Invitations (${pending})` : 'Invitations', link: links.settings('invites') },
+      { label: count ? `Requests (${count})` : 'Requests', link: links.settings('invites') },
       { label: 'Access', link: links.settings('access') },
     ];
   });

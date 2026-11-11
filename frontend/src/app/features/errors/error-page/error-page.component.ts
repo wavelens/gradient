@@ -9,7 +9,7 @@ import { Location } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { DeniedKind } from '@core/routing/access-denied';
 import { getInAppReturnPathIfNotErrorPage, links } from '@shared/routing';
 
@@ -119,7 +119,7 @@ export class ErrorPageComponent {
   private location = inject(Location);
   private readonly cameFromApp = !!this.router.currentNavigation()?.previousNavigation;
   private auth = inject(AuthService);
-  protected invites = inject(PendingInvitesService);
+  protected pending = inject(PendingUserDecisionsService);
 
   private query = this.route.snapshot.queryParamMap;
   protected readonly from = this.safeFrom();
@@ -153,7 +153,7 @@ export class ErrorPageComponent {
   );
 
   constructor() {
-    if (this.denied() && this.user()) this.invites.refresh();
+    if (this.denied() && this.user()) this.pending.refresh();
   }
 
   retry(): void {

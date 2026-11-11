@@ -4,11 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal, viewChild } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { EMPTY } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ButtonComponent, MessageBannerComponent } from '@gradient/ui/ui';
-import { PendingInvitationsBannerComponent } from '@shared/access';
+import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
+import { links } from '@shared/routing';
+import { plural } from '@shared/text';
 import { DashboardStatsComponent } from './stats/dashboard-stats.component';
 import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.component';
 import { DashboardActivityComponent } from './activity/dashboard-activity.component';
@@ -21,7 +24,7 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
   imports: [
     ButtonComponent,
     MessageBannerComponent,
-    PendingInvitationsBannerComponent,
+    RouterLink,
     DashboardStatsComponent,
     DashboardTaskTableComponent,
     DashboardActivityComponent,
@@ -35,6 +38,9 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
 export class DashboardComponent {
   // null until the rail answers; the router blocks load alongside it and give way if it reports first steps.
   newUser = signal<boolean | null>(null);
+  protected readonly pending = inject(PendingUserDecisionsService);
+  protected readonly links = links;
+  protected readonly plural = plural;
 
   private stats = viewChild(DashboardStatsComponent);
   private tasks = viewChild(DashboardTaskTableComponent);
