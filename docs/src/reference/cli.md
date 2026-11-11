@@ -249,7 +249,7 @@ gradient account switch work
 | `gradient cache nar list <CACHE>` | `--hash <HASH>`, `--package <PACKAGE>`, `--sort <SORT>`, `--order <ORDER>`, `--pinned <PINNED>`, `--page <PAGE>`, `--per-page <PER_PAGE>`, `--interactive` | List the NARs stored in a cache |
 | `gradient cache nar show <CACHE> <HASH>` | - | Print the full metadata of one NAR |
 | `gradient cache nar delete <CACHE> <HASH>` | `--yes` | Remove a NAR from a cache |
-| `gradient cache nar pin <CACHE> <HASH>` | `--include-referenced-paths` | Pin a NAR so garbage collection for the cache can keep it regardless of `gc.narTtlHours` or retained evaluations and `--include-referenced-paths` can also pin all paths in this NAR if they exist in the cache |
+| `gradient cache nar pin <CACHE> <HASH>` | `--include-referenced-paths` | Pin that NAR. Garbage collection for the cache can then keep that NAR regardless of `gc.narTtlHours` or retained evaluations. Specify `--include-referenced-paths` to also pin every path in this cache that the NAR transitively references |
 | `gradient cache nar unpin <CACHE> <HASH>` | `--include-referenced-paths` | Remove a pin from a NAR. Use `--include-referenced-paths` to unpin all paths in its closure too |
 | `gradient cache nar stats <CACHE>` | - | Print aggregate statistics over all NARs in a cache |
 | `gradient cache upload <CACHE> [PATHS]...` | `--nar-file <NAR_FILE>`, `--narinfo <NARINFO>`, `--no-closure` | Upload one or more NARs to a cache |
