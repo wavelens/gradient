@@ -109,7 +109,7 @@ hmac            = { version = "0.13", default-features = false }
 percent-encoding = { version = "2.3", default-features = false, features = ["std"] }
 rand_core       = { version = "0.10", default-features = false }
 sha2            = { version = "0.11", default-features = false }
-ssh-key         = { version = "0.6", default-features = false, features = ["ed25519", "rand_core", "std"] }
+ssh-key         = { version = "0.6", default-features = false, features = ["ecdsa", "ed25519", "rand_core", "std"] }
 aes-gcm         = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 age             = { version = "0.11", default-features = false, features = ["armor", "ssh"] }
 bech32          = { version = "0.9", default-features = false, features = ["std"] }
