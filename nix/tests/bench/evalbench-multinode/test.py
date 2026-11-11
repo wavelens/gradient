@@ -104,7 +104,6 @@ def keep_nixpkgs():
 
 
 def reset_workers():
-    epoch = server.succeed("date +%s").strip()
     for node in WORKER_NODES:
         node.systemctl("stop gradient-worker.service")
         node.succeed("rm -rf /var/lib/gradient-worker/eval-cache /var/lib/gradient-worker/www/.cache/nix /tmp/gc.done")
@@ -112,8 +111,8 @@ def reset_workers():
     for node in WORKER_NODES:
         node.wait_until_succeeds("test -e /tmp/gc.done", timeout=timedelta(seconds=600))
         print(node.succeed("grep -v \"^deleting '\" /tmp/gc.log || true"))
+        epoch = node.succeed("date +%s").strip()
         node.systemctl("start gradient-worker.service")
-    for node in WORKER_NODES:
         node.wait_until_succeeds(
             f"journalctl -u gradient-worker --since=@{epoch} --no-pager | grep -q 'handshake successful'",
             timeout=timedelta(seconds=180),
