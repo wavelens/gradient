@@ -6,6 +6,7 @@
 
 use crate::gateway_user::parse_login;
 use crate::session::{Session, SshHandles};
+use crate::store::SshBackend;
 use gradient_db::lookup::by_id;
 use gradient_types::permissions::PermissionMask;
 use gradient_types::*;
@@ -140,6 +141,40 @@ async fn find_user_project_permission_mask_and_caches_by_ssh_key_fingerprint_and
         permissions,
         caches,
     }))
+}
+
+pub async fn open_project_store_backend_for_api_key(
+    handles: SshHandles,
+    user: UserId,
+    project: ProjectId,
+    key_mask: PermissionMask,
+    cache_pin: Option<CacheId>,
+) -> anyhow::Result<Option<Arc<SshBackend>>> {
+    let Some(user) = by_id::<EUser, _>(&handles.db.web_db, user)
+        .await?
+        .filter(|u| u.active)
+    else {
+        return Ok(None);
+    };
+
+    let Some(project) = by_id::<EProject, _>(&handles.db.web_db, project).await? else {
+        return Ok(None);
+    };
+
+    let Some(permissions) =
+        gradient_db::access::project_permission_mask(&handles.db.web_db, project.id, user.id)
+            .await?
+    else {
+        return Ok(None);
+    };
+
+    let caches = gradient_db::cache_paths::project_read_caches(&handles.db.web_db, project.id)
+        .await?
+        .into_iter()
+        .filter(|cache| cache_pin.is_none_or(|pinned| pinned == *cache))
+        .collect();
+    let session = Session::open(handles, user, project, permissions & key_mask, caches).await?;
+    Ok(Some(Arc::new(SshBackend::new(Arc::new(session)))))
 }
 
 #[cfg(test)]

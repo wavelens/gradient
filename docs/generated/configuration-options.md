@@ -307,7 +307,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `ssh.enable` | bool | `false` | `GRADIENT_SSH_ENABLE` | Whether to enable the Nix daemon over SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`. |
+| `ssh.enable` | bool | `false` | `GRADIENT_SSH_ENABLE` | Whether to enable Nix daemon via SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`, plus gRPC on web port for same `grpc://` store of nix-grpc-store (project API key in `token-file`). |
 | `ssh.hostKeyFile` | null or path | `null` | `GRADIENT_SSH_HOST_KEY_FILE` | File containing the OpenSSH private host key. Set it to `null` to generate an ed25519 key in `baseDir` on first start. |
 | `ssh.listenAddresses` | list of string | `[ "::" ]` | `GRADIENT_SSH_LISTEN_ADDRESSES` | IP addresses for the SSH server to listen on. IPv6 addresses also accept IPv4 clients. The default `::` thus means listening on every address of both families. |
 | `ssh.openFirewall` | bool | `false` | - | Whether to enable the SSH port in the firewall. |
