@@ -136,7 +136,7 @@ describe('RequestsPageComponent - loading', () => {
     const getRequests = vi.fn().mockReturnValueOnce(throwError(() => new Error('database is down'))).mockReturnValue(of(decisions({ invites: [projectInvite] })));
     const { fixture } = setup([], null, getRequests);
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.textContent).toContain('Failed to load requests');
+    expect(root.textContent).toContain("Couldn't load requests");
     expect(root.textContent).not.toContain('No pending requests');
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
     fixture.detectChanges();

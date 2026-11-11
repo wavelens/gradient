@@ -113,7 +113,7 @@ export class RequestsPageComponent implements OnInit {
       },
       error: (err: unknown) => {
         this.pendingToken.set(null);
-        this.notify.failure('Failed to accept invitation', err);
+        this.notify.failure("Couldn't accept invitation", err);
       },
     });
   }
@@ -137,7 +137,7 @@ export class RequestsPageComponent implements OnInit {
         target: invite.scope_display_name,
         consequence: 'Joining later needs a new invitation.',
         confirmLabel: 'Decline',
-        failure: 'Failed to decline the invitation.',
+        failure: "Couldn't decline the invitation",
         action: () => this.userService.declineInvite(invite.token),
       })
       .subscribe(() => {
@@ -160,7 +160,7 @@ export class RequestsPageComponent implements OnInit {
       },
       error: (err: unknown) => {
         this.requestKeyWithDecisionInProgress.set(null);
-        this.notify.failure('Failed to approve subscription request', err);
+        this.notify.failure("Couldn't approve subscription request", err);
       },
     });
   }
@@ -218,7 +218,7 @@ export class RequestsPageComponent implements OnInit {
         target: `Access Request from ${target} to ${team}`,
         consequence: 'Delete the request. Team members receive no grant.',
         confirmLabel: 'Deny',
-        failure: "Failed to deny the team's grant request",
+        failure: "Couldn't decline grant request for the team",
         action: () => this.teams.denyRequest(request.team, request.id),
       })
       .subscribe(() => {
