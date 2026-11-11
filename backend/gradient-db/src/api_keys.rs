@@ -87,75 +87,30 @@ mod tests {
     use gradient_fixtures::{rows, test_date};
     use gradient_migration::{Migrator, MigratorTrait};
     use gradient_types::permissions::{
-        CachePermission, Permission, PermissionMask, cache_mask_from, cache_mask_to_vec, mask_from,
-        mask_to_vec,
+        CachePermission, Permission, PermissionMask, cache_mask_from, mask_from,
     };
     use sea_orm_migration::SchemaManager;
 
-    fn key(name: &str, permission: PermissionMask, cache: Option<CacheId>) -> MApi {
-        MApi {
-            id: ApiId::now_v7(),
-            owned_by: rows::user().id,
-            name: name.into(),
-            key: name.into(),
-            permission,
-            cache,
-            last_used_at: test_date(),
-            created_at: test_date(),
-            ..Default::default()
+    const VIEW_AND_READ_STORE: &str =
+        "m20261130_000000_add_view_and_read_store_bits_to_existing_api_keys";
+    const VIEW_PROJECT: &str =
+        "m20261202_000000_add_view_project_permission_bit_to_existing_api_keys_not_pinned_to_cache";
+
+    async fn run_migrations(conn: &sea_orm::DatabaseConnection, names: &[&str]) {
+        for name in names {
+            Migrator::migrations()
+                .into_iter()
+                .find(|m| m.name() == *name)
+                .expect("the migration is registered")
+                .up(&SchemaManager::new(conn))
+                .await
+                .expect("the migration runs");
         }
     }
 
     #[tokio::test]
-    async fn migration_adds_view_project_permission_to_non_cache_api_keys_and_keeps_cache_pinned_permission_mask_unchanged()
+    async fn running_m20261130_and_m20261202_migrations_in_both_orders_and_twice_gives_same_api_key_permission_bitmasks()
      {
-        let db = TestDatabase::create().await;
-        let conn = db.connection();
-        crate::rows::insert::<EUser, _>(&conn, rows::user())
-            .await
-            .expect("the owner is written");
-        let cache = crate::rows::insert::<ECache, _>(&conn, rows::cache())
-            .await
-            .expect("the cache is written");
-        let deploy = mask_from(&[Permission::TriggerEvaluation]);
-        let upload = cache_mask_from(&[CachePermission::WriteStore]);
-        let project_key = crate::rows::insert::<EApi, _>(&conn, key("deploy", deploy, None))
-            .await
-            .expect("the project key is written");
-        let cache_key =
-            crate::rows::insert::<EApi, _>(&conn, key("upload", upload, Some(cache.id)))
-                .await
-                .expect("the cache key is written");
-
-        Migrator::migrations()
-            .into_iter()
-            .find(|m| {
-                m.name()
-                    == "m20261202_000000_add_view_project_permission_bit_to_existing_api_keys_not_pinned_to_cache"
-            })
-            .expect("the migration is registered")
-            .up(&SchemaManager::new(&conn))
-            .await
-            .expect("the migration runs");
-
-        let project_key = db
-            .find::<EApi>(project_key.id)
-            .await
-            .expect("the project key exists");
-        let cache_key = db
-            .find::<EApi>(cache_key.id)
-            .await
-            .expect("the cache key exists");
-        assert_eq!(
-            project_key.permission,
-            deploy | Permission::ViewProject.bit()
-        );
-        assert_eq!(cache_key.permission, upload);
-        db.finish().await;
-    }
-
-    #[tokio::test]
-    async fn migration_adds_missing_api_key_permission_bits_to_existing_api_keys() {
         let db = TestDatabase::create().await;
         let conn = db.connection();
         let owner = crate::rows::insert::<EUser, _>(&conn, rows::user())
@@ -164,74 +119,66 @@ mod tests {
         let cache = crate::rows::insert::<ECache, _>(&conn, rows::cache())
             .await
             .expect("the cache is written");
-        let key = |name: &str, permission: i64, cache: Option<CacheId>, managed: bool| MApi {
-            id: ApiId::now_v7(),
-            owned_by: owner.id,
-            name: name.into(),
-            key: name.into(),
-            last_used_at: test_date(),
-            created_at: test_date(),
-            managed,
-            permission,
-            cache,
-            ..Default::default()
-        };
-        let push = key(
-            "push",
-            cache_mask_from(&[CachePermission::WriteStore]),
-            Some(cache.id),
-            false,
-        );
-        let deploy = key(
-            "deploy",
-            mask_from(&[Permission::TriggerEvaluation]),
-            None,
-            false,
-        );
-        let declared = key(
-            "declared",
-            mask_from(&[Permission::TriggerEvaluation]),
-            None,
-            true,
-        );
-        for row in [&push, &deploy, &declared] {
-            crate::rows::insert::<EApi, _>(&conn, row.clone())
+        let upload = cache_mask_from(&[CachePermission::WriteStore]);
+        let deploy = mask_from(&[Permission::TriggerEvaluation]);
+        let viewing_deploy = mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]);
+        let cases: [(PermissionMask, Option<CacheId>, bool, PermissionMask); 4] = [
+            (
+                upload,
+                Some(cache.id),
+                false,
+                cache_mask_from(&[
+                    CachePermission::ViewCache,
+                    CachePermission::ReadStore,
+                    CachePermission::WriteStore,
+                ]),
+            ),
+            (deploy, None, false, viewing_deploy),
+            (viewing_deploy, None, false, viewing_deploy),
+            (deploy, None, true, deploy),
+        ];
+        let orders: [&[&str]; 3] = [
+            &[VIEW_AND_READ_STORE, VIEW_PROJECT],
+            &[VIEW_PROJECT, VIEW_AND_READ_STORE],
+            &[
+                VIEW_AND_READ_STORE,
+                VIEW_PROJECT,
+                VIEW_AND_READ_STORE,
+                VIEW_PROJECT,
+            ],
+        ];
+
+        let mut expected: Vec<(ApiId, PermissionMask)> = Vec::new();
+        for (run, order) in orders.iter().enumerate() {
+            for (index, (permission, cache, managed, want)) in cases.iter().enumerate() {
+                let name = format!("key-{run}-{index}");
+                let row = crate::rows::insert::<EApi, _>(
+                    &conn,
+                    MApi {
+                        id: ApiId::now_v7(),
+                        owned_by: owner.id,
+                        name: name.clone(),
+                        key: name,
+                        last_used_at: test_date(),
+                        created_at: test_date(),
+                        managed: *managed,
+                        permission: *permission,
+                        cache: *cache,
+                        ..Default::default()
+                    },
+                )
                 .await
                 .expect("the key is written");
-        }
+                expected.push((row.id, *want));
+            }
 
-        let migration = Migrator::migrations()
-            .into_iter()
-            .find(|m| {
-                m.name() == "m20261130_000000_add_view_and_read_store_bits_to_existing_api_keys"
-            })
-            .expect("the migration is registered");
-        for _ in 0..2 {
-            migration
-                .up(&SchemaManager::new(&conn))
-                .await
-                .expect("the migration runs");
-        }
+            run_migrations(&conn, order).await;
 
-        let permission_of = async |row: &MApi| {
-            db.find::<EApi>(row.id)
-                .await
-                .expect("the key exists")
-                .permission
-        };
-        assert_eq!(
-            cache_mask_to_vec(permission_of(&push).await),
-            [
-                CachePermission::ViewCache,
-                CachePermission::ReadStore,
-                CachePermission::WriteStore
-            ]
-        );
-        assert_eq!(
-            mask_to_vec(permission_of(&deploy).await),
-            [Permission::ViewProject, Permission::TriggerEvaluation]
-        );
-        assert_eq!(permission_of(&declared).await, declared.permission);
+            for (id, want) in &expected {
+                let stored = db.find::<EApi>(*id).await.expect("the key exists");
+                assert_eq!(stored.permission, *want, "{} after {order:?}", stored.name);
+            }
+        }
         db.finish().await;
     }
 }

@@ -8,7 +8,7 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
 /// Bit 0: the view bit on all keys. A key with a cache pin: view cache. Any other key: view project. Bit 1: read store only on a key with a cache pin. Any other key: manage project settings, so these keys never get this bit. Permissions for state-managed keys come from the declaration of server state.
-const UP: &str = "UPDATE public.api SET permission = permission | 3 \
+pub(crate) const UP: &str = "UPDATE public.api SET permission = permission | 3 \
         WHERE cache IS NOT NULL AND NOT managed AND permission & 3 <> 3; \
     UPDATE public.api SET permission = permission | 1 \
         WHERE cache IS NULL AND NOT managed AND permission & 1 = 0;";
