@@ -1129,6 +1129,7 @@ export type EvaluationResponse = EvaluationAbortReplacementRetryPhaseStartsAndEx
   repository: string;
   commit: string;
   wildcard: string;
+  only_evaluate: boolean;
   status: EvaluationStatus;
   previous?: EvaluationId | null;
   next?: EvaluationId | null;

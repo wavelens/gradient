@@ -172,6 +172,7 @@ pub async fn get_evaluation(
                 .outbound_if_store_path(&evaluation.repository),
             commit: commit_hash,
             wildcard: evaluation.wildcard,
+            only_evaluate: evaluation.only_evaluate,
             status: evaluation.status,
             previous: evaluation.previous,
             next: evaluation.next,
