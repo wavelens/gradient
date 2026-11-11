@@ -166,6 +166,7 @@ impl FromRef<Arc<ServerState>> for WebSocketCredentialRecheckDependencies {
 
 pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+    scheduler.start();
     create_router_with_scheduler(state, scheduler, gradient_proto::SessionsHandle::new())
 }
 
