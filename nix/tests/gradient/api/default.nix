@@ -154,20 +154,20 @@ in {
                 members = [ { user = "stateadmin"; role = "Admin"; } { user = "statemember"; } ];
               };
 
-              integrations = {
-                state-inbound = {
-                  project = "stateproject";
-                  kind = "inbound";
+              git_host_connections = {
+                state-events = {
+                  owner = "project/stateproject";
                   git_host_type = "gitea";
                   secret_file = toString stateIntSecret;
                   created_by = "stateadmin";
                 };
-                state-outbound = {
-                  project = "stateproject";
-                  kind = "outbound";
+                state-status = {
+                  owner = "team/stateteam";
                   git_host_type = "gitea";
-                  endpoint_url = "https://gitea.example.com";
+                  base_url = "https://gitea.example.com";
                   access_token_file = toString stateIntSecret;
+                  receives_events = false;
+                  reports_status = true;
                   created_by = "stateadmin";
                 };
               };

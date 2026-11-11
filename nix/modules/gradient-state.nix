@@ -398,7 +398,6 @@
             }
             {
               type = "reporter_push";
-              integration = "acme-prod-inbound";
               config = { branches = [ "main" "release/*" ]; };
             }
             {
@@ -453,15 +452,10 @@
               };
             }
             {
-              name = "report-status";
-              type = "git_host_status_report";
-              config = { integration = "gitea-prod"; };
-            }
-            {
               name = "flake-lock-pr";
               type = "open_pr";
               config = {
-                integration = "gitea-prod";
+                git_host_connection = "gitea-prod";
                 generator = "flake_lock";
                 granularity = "per_input";
                 verify_gate = "build";
@@ -480,11 +474,25 @@
           ]
         '';
         description = ''
-          Task actions: email notifications, web requests, Matrix and Slack messages, Git host status
-          reports, pull request automation and evaluations of other tasks. Actions missing on the next state apply are removed,
-          matched by `name`.
+          Task actions include email notifications, web requests, Matrix and Slack messages, pull request automation and evaluation of other tasks. Actions that don't exist at the next state application receive removal. `name` can match those actions.
 
           Keep the secret files of an action (`token_file`, `access_token_file`, `webhook_url_file`) at the path for systemd credentials, `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_<project>_<task>_<action>_<field>`.
+        '';
+      };
+
+      git_host_connection = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          The name of the Git host connection for a task. Push and pull request webhooks arrive at this connection. The connection can report commit status. Gradient can search for that name in the task project, then in the team that owns the project, then in the instance. The `reporter_push` and `reporter_pull_request` triggers need a connection with `receives_events = true`. GitHub App connections use the name `github` or `github-<account>`. Use `null` to leave the task without a connection.
+        '';
+      };
+
+      report_status = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Gradient can report the commit status for each evaluation to the Git host. A `git_host_connection` with `reports_status = true` is necessary.
         '';
       };
 
@@ -495,43 +503,49 @@
     };
   });
 
-  integrationType = types.submodule ({ config, name, ... }: {
+  gitHostConnectionType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Integration name, unique per project and kind.";
+        description = "Connection name. Unique for each owner.";
       };
 
       display_name = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Display name of the integration. Set to `null` to use `name`.";
+        description = "Display name for the connection. Set the value to `null` to use `name`.";
       };
 
-      project = mkOption {
+      owner = mkOption {
         type = types.str;
-        description = "Name of the project owning the integration.";
-      };
-
-      kind = mkOption {
-        type = types.enum [ "inbound" "outbound" ];
+        example = "team/acme";
         description = ''
-          Direction of the integration: `inbound` for HMAC-verified webhooks from the Git host,
-          `outbound` for CI status reports to the Git host.
+          Connection owner: `instance`, `team/<name>` or `project/<name>`. Tasks use a connection from their project, from the team for that project, or from the instance. Project connections take precedence over team connections with the same name. Team connections take precedence over instance connections with the same name.
         '';
       };
 
       git_host_type = mkOption {
         type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
         description = ''
-          Target Git host of this integration. Display metadata only for inbound integrations. One inbound row covers Gitea, Forgejo and GitLab through the Git host
-          segment of the webhook URL.
+          Git host of the connection. `owner = "instance"` and `installation_id` replace a secret, token and base URL for `github`. Installations of the GitHub App create such a connection automatically. Declared connections with the same installation merge into that connection.
+        '';
+      };
 
-          `github` requires `installation_id` instead of a secret, token or endpoint and
-          provisions the linked GitHub App installation. Installing the App on the project
-          also creates GitHub rows, and a declared one is merged additively.
+      receives_events = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Whether the connection can receive push and pull request webhooks from the Git host `/api/v1/hooks/<connection-id>`.
+        '';
+      };
+
+      reports_status = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether a task with `report_status` can report commit status through a connection. Set `base_url` and `access_token_file` together with that option on hosts other than GitHub.
         '';
       };
 
@@ -539,8 +553,7 @@
         type = types.nullOr types.int;
         default = null;
         description = ''
-          GitHub App installation ID, the trailing number of the installation URL. Required for
-          `git_host_type = "github"`, ignored otherwise.
+          The installation ID of a GitHub App. This value is the number at the end of the installation URL. Set this value for `git_host_type = "github"` connections. Other Git hosts reject this value.
         '';
       };
 
@@ -554,17 +567,15 @@
         type = types.nullOr types.path;
         default = null;
         description = ''
-          File containing the HMAC signing secret of an inbound integration. Loaded as a systemd
-          credential and stored encrypted. Outbound integrations ignore it.
+          A file with the HMAC signing secret for webhooks from the Git host. Gradient loads this file as a systemd credential and stores the secret in encrypted form.
         '';
       };
 
-      endpoint_url = mkOption {
+      base_url = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Base URL of the Git host API for outbound integrations, such as
-          `https://gitea.example.com`. Inbound integrations ignore it.
+          Base URL of the Git host API, such as `https://gitea.example.com`, for commit status reports and pull requests.
         '';
       };
 
@@ -572,15 +583,13 @@
         type = types.nullOr types.path;
         default = null;
         description = ''
-          File containing the Git host API token of an outbound integration. Loaded as a systemd
-          credential and stored encrypted. GitHub integrations do not use it and take their
-          credentials from {option}`services.gradient.githubApp`.
+          File for a Git host API token. Commit status reports and pull requests use this token. Gradient can load this file as a systemd credential and save the file in encrypted form. GitHub connections get their credentials from {option}`services.gradient.githubApp` instead.
         '';
       };
 
       created_by = mkOption {
         type = types.str;
-        description = "User name of the integration's creator.";
+        description = "The username of the user who created the connection.";
       };
     };
   });
@@ -591,17 +600,6 @@
         type = types.enum [ "polling" "reporter_push" "reporter_pull_request" "time" ];
         description = ''
           Trigger kind, determining the expected `config` and the firing behavior of the trigger.
-        '';
-      };
-
-      integration = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        description = ''
-          Name of an inbound integration in the same project backing this trigger. Required for
-          `reporter_push` and `reporter_pull_request`, ignored for `polling` and `time`. It must
-          name an integration in {option}`services.gradient.state.integrations` or a GitHub App
-          installation of the project.
         '';
       };
 
@@ -618,8 +616,7 @@
             least 10 seconds, and `branch` defaults to the remote HEAD.
           - `reporter_push` takes
             `{ branches = [ "main" "release/*" ]; tags = [ ]; releases_only = false; include_flake_inputs = false; }`.
-            `include_flake_inputs = true` can also start updates of flake inputs for a task on a
-            report of a push from the integration to the repository of a tracked flake input. Use
+            The task's Git host connection can receive a push report for a repo of a tracked flake input. That report can also make `include_flake_inputs = true` start an update of the task's flake inputs. Use
             the branch for that input as the push target, or the default branch of the repository
             for an input with no branch.
           - `reporter_pull_request` takes
@@ -670,7 +667,6 @@
         type = types.enum [
           "send_mail"
           "send_web_request"
-          "git_host_status_report"
           "open_pr"
           "send_matrix_message"
           "send_slack_message"
@@ -688,10 +684,7 @@
       events = mkOption {
         type = types.listOf types.str;
         default = [];
-        description = ''
-          Events the action subscribes to. It must be empty for `git_host_status_report`, whose
-          events are derived from build state.
-        '';
+        description = "Events that the action can subscribe to.";
       };
 
       config = mkOption {
@@ -712,12 +705,9 @@
           - `send_slack_message` takes
             `{ webhook_url_file = "/etc/gradient/secrets/<name>-slack"; }`, the file holding the
             incoming webhook URL.
-          - `git_host_status_report` takes `{ integration = "gitea-prod"; }`, naming an
-            outbound integration in the same project.
           - `open_pr` opens a pull request on the Git host with the result of a generator.
             It takes the following fields.
-            - `integration` (string) names an outbound integration in the same project, as
-              for `git_host_status_report`.
+            - `git_host_connection` (string) names the Git host connection that opens the pull request. Gradient looks it up like the task's `git_host_connection`.
             - `generator` (string, default `"flake_lock"`) chooses the change generator.
               `flake_lock` updates {file}`flake.lock`. `exec_tree` opens the
               {file}`gradient/tree.patch` output of an exec job once the job completes, with
@@ -1287,39 +1277,38 @@
         description = "Tasks to create, one entry per name.";
       };
 
-      integrations = mkOption {
-        type = types.attrsOf integrationType;
+      git_host_connections = mkOption {
+        type = types.attrsOf gitHostConnectionType;
         default = { };
         example = literalExpression ''
           {
-            acme-prod-inbound = {
-              project = "acme-corp";
-              kind = "inbound";
+            gitea-prod = {
+              owner = "team/acme";
               git_host_type = "gitea";
-              secret_file = "/etc/gradient/secrets/acme-inbound-hmac";
-              created_by = "alice";
-            };
-            acme-status-reports = {
-              project = "acme-corp";
-              kind = "outbound";
-              git_host_type = "gitea";
-              endpoint_url = "https://gitea.example.com";
+              secret_file = "/etc/gradient/secrets/acme-gitea-hmac";
+              base_url = "https://gitea.example.com";
               access_token_file = "/etc/gradient/secrets/acme-gitea-token";
+              reports_status = true;
               created_by = "alice";
             };
-            acme-github-out = {
-              project = "acme-corp";
-              kind = "outbound";
+            acme-gitlab = {
+              owner = "project/acme-corp";
+              git_host_type = "gitlab";
+              secret_file = "/etc/gradient/secrets/acme-gitlab-hmac";
+              created_by = "alice";
+            };
+            github-acme-corp = {
+              owner = "instance";
               git_host_type = "github";
               installation_id = 12345678;
               account_login = "acme-corp";
+              reports_status = true;
               created_by = "alice";
             };
           }
         '';
         description = ''
-          Git host integrations per project, one entry per name. Secrets of inbound and tokens of
-          outbound integrations are read as systemd credentials and stored encrypted.
+          Git host connections. One entry per label. Gradient can read the secret and token from systemd credentials `gradient_git_host_connection_<label>_secret` and `gradient_git_host_connection_<label>_token`, then encrypt and store both.
         '';
       };
 
@@ -1458,27 +1447,11 @@ in
       }) p.flake_input_overrides
     ) config.services.gradient.state.tasks);
     invalid = filter (b: !b.valid) bad;
-
-    badActions = flatten (mapAttrsToList (pName: p:
-      map (a: {
-        task = pName;
-        action = a.name;
-        valid = !(a.type == "git_host_status_report" && a.events != []);
-      }) p.actions
-    ) config.services.gradient.state.tasks);
-
-    invalidActions = filter (b: !b.valid) badActions;
   in map (b: {
     assertion = false;
     message = ''
       services.gradient.state.tasks.${b.task}.flake_input_overrides.${b.input}: \
-      exactly one of `url` (string) or `keep_url = true` must be set.
+      Set either `url` (string) or `keep_url = true`, not both.
     '';
-  }) invalid ++ map (b: {
-    assertion = false;
-    message = ''
-      services.gradient.state.tasks.${b.task}.actions.${b.action}: \
-      git_host_status_report actions cannot declare custom `events`.
-    '';
-  }) invalidActions;
+  }) invalid;
 }

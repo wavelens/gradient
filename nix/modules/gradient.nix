@@ -71,13 +71,7 @@
     '' + extraConfig;
   };
 
-  augmentedIntegrations = lib.mapAttrs (_: int: builtins.removeAttrs int [ "forge_type" ] // {
-    has_secret_file = int.secret_file != null;
-    has_access_token_file = int.access_token_file != null;
-  }) cfg.state.integrations;
-
   stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" (builtins.removeAttrs cfg.state [ "validate" "delete" ] // {
-    integrations = augmentedIntegrations;
     caches = lib.mapAttrs (_: cache: builtins.removeAttrs cache [ "upstreams" ]) cfg.state.caches;
   });
 
@@ -100,14 +94,12 @@
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
   workerTokenFiles = lib.mapAttrsToList (_: worker: "gradient_worker_${worker.worker_id}_token:${worker.token_file}") cfg.state.workers;
-  integrationSecretFiles = lib.concatLists (lib.mapAttrsToList (_: int:
-    lib.optional (int.secret_file != null)
-      "gradient_integration_${int.project}_${int.kind}_${int.name}_secret:${int.secret_file}"
-  ) cfg.state.integrations);
-  integrationTokenFiles = lib.concatLists (lib.mapAttrsToList (_: int:
-    lib.optional (int.access_token_file != null)
-      "gradient_integration_${int.project}_${int.kind}_${int.name}_token:${int.access_token_file}"
-  ) cfg.state.integrations);
+  gitHostConnectionLoadCredentialEntries = lib.concatLists (lib.mapAttrsToList (label: connection:
+    lib.optional (connection.secret_file != null)
+      "gradient_git_host_connection_${label}_secret:${connection.secret_file}"
+    ++ lib.optional (connection.access_token_file != null)
+      "gradient_git_host_connection_${label}_token:${connection.access_token_file}"
+  ) cfg.state.git_host_connections);
   localWorker = cfg.worker.enable && cfg.localWorker;
 
   identityHash = builtins.hashString "sha256" "gradient-local-worker:${config.networking.hostName}";
@@ -686,7 +678,7 @@ in {
             ++ lib.optional (cfg.metrics.tokenFile != null)
               "gradient_metrics_token:${cfg.metrics.tokenFile}"
             ++ userPasswordFiles ++ projectPrivateKeyFiles ++ projectSecretFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
-              ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
+              ++ workerTokenFiles ++ gitHostConnectionLoadCredentialEntries
               ++ actionSecretFiles;
           };
 

@@ -647,9 +647,12 @@ assert any(g["team"] == "runtimeteam" and not g["pending"]
 api("DELETE", "teams/runtimeteam", token=sa_token)
 assert not any(g["team"] == "runtimeteam" for g in api("GET", "projects/teamproject/teams", token=sa_token))
 
-# Both integration kinds applied.
-ints = {(i["name"], i["kind"]) for i in api("GET", "projects/stateproject/integrations", token=sa_token)}
-assert ("state-inbound", "inbound") in ints and ("state-outbound", "outbound") in ints, ints
+project_connections = {c["name"]: c for c in api("GET", "projects/stateproject/git-host-connections", token=sa_token)}
+assert project_connections["state-events"]["receives_events"], project_connections
+assert project_connections["state-events"]["owner"] == {"type": "project", "name": "stateproject"}, project_connections
+team_connections = {c["name"]: c for c in api("GET", "teams/stateteam/git-host-connections", token=sa_token)}
+assert team_connections["state-status"]["reports_status"], team_connections
+assert not team_connections["state-status"]["receives_events"], team_connections
 
 # API key applied: the bearer `GRAD<raw>` authorizes, and its `viewProject`-only
 # mask is enforced (a settings mutation is rejected).
