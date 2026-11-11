@@ -10,6 +10,8 @@ import { of, throwError } from 'rxjs';
 import { Router } from '@angular/router';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { TeamsService } from '@core/services/teams.service';
+import type { ProjectReadinessResponse } from '@core/models';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { TriggersService } from '@core/services/triggers.service';
 import { ConfigService } from '@core/services/config.service';
@@ -19,6 +21,12 @@ import { ConnectRepositoryComponent, buildTaskCreationTriggersFromWizardChoices 
 const inbound = { id: 'in-1', name: 'forgejo', display_name: 'forgejo.example.com', kind: 'inbound', git_host_type: 'forgejo' };
 const pushSuggestion = { type: 'reporter_push' as const, integration_id: 'in-1' };
 const pullRequestSuggestion = { type: 'reporter_pull_request' as const, integration_id: 'in-1' };
+const MISSING_CACHE: ProjectReadinessResponse = {
+  ready: false,
+  workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+  cache: { ready: false, subscriptions: [] },
+  repository: { status: 'unchecked', tasks: [] },
+};
 
 function render(query: Record<string, string>, tasks: object, projects: object = {}, permissions: string[] = ['createTask', 'editTask'], suggestions: unknown[] = [pushSuggestion, pullRequestSuggestion]) {
   const data = { projectAccess: { project: { managed: false, permissions } } };
@@ -31,7 +39,8 @@ function render(query: Record<string, string>, tasks: object, projects: object =
         useValue: { data: of(data), snapshot: { data, paramMap: convertToParamMap({ project: 'acme' }), queryParamMap: convertToParamMap(query) } },
       },
       { provide: TasksService, useValue: { checkTaskNameAvailable: () => of(true), ...tasks } },
-      { provide: ProjectsService, useValue: { getSubscribedCaches: () => of([]), getProject: () => of({ display_name: 'Acme' }), getSSHKey: () => of('ssh-ed25519 AAAA'), ...projects } },
+      { provide: ProjectsService, useValue: { getProjectReadiness: () => of(MISSING_CACHE), getProject: () => of({ display_name: 'Acme' }), getSSHKey: () => of('ssh-ed25519 AAAA'), ...projects } },
+      { provide: TeamsService, useValue: {} },
       { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of([inbound]) } },
       { provide: ConfigService, useValue: { execEnabled: false } },
       { provide: TriggersService, useValue: { getSuggestedPushAndPullRequestTriggerConfigs: vi.fn(() => of(suggestions)) } },
@@ -168,34 +177,20 @@ describe('ConnectRepositoryComponent', () => {
     expect(fixture.componentInstance.step()).toBe('repository');
   });
 
-  it('warns about a missing cache before the task exists, since creating it starts the first evaluation', () => {
-    const el = render({}, {}).nativeElement as HTMLElement;
-    expect(el.querySelector('[data-testid="no-cache-banner"]')).not.toBeNull();
-  });
-
-  it('shows no cache warning when the project has an active cache', () => {
-    const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'active' }]) });
-    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="no-cache-banner"]')).toBeNull();
-  });
-
-  it('keeps the cache warning when the only active cache is read-only', () => {
-    const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'active', mode: 'ReadOnly' }]) });
-    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="no-cache-banner"]')).not.toBeNull();
-  });
-
-  it('names a pending subscription request instead of asking for a new cache', () => {
-    const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'pending', mode: 'ReadWrite' }]) });
-    const banner = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="no-cache-banner"]');
-    expect(banner?.textContent).toContain('Subscription request pending');
-    expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/caches');
+  it('shows the project readiness before the task exists, since creating it starts the first evaluation', () => {
+    const getProjectReadiness = vi.fn(() => of(MISSING_CACHE));
+    const el = render({}, {}, { getProjectReadiness }).nativeElement as HTMLElement;
+    expect(getProjectReadiness).toHaveBeenCalledWith('acme');
+    expect(el.querySelector('[data-testid="readiness-cache"]')?.textContent).toContain('None writable');
+    expect(el.querySelector('[data-testid="no-cache-banner"]')).toBeNull();
   });
 
   it('shows the no-access state instead of the form to a role that cannot create tasks, without a request', () => {
-    const getSubscribedCaches = vi.fn(() => of([]));
-    const el = render({}, {}, { getSubscribedCaches }, ['viewProject']).nativeElement as HTMLElement;
+    const getProjectReadiness = vi.fn(() => of(MISSING_CACHE));
+    const el = render({}, {}, { getProjectReadiness }, ['viewProject']).nativeElement as HTMLElement;
     expect(el.querySelector('#connect-repo')).toBeNull();
     expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the members with Write or Admin on this project can view this.');
-    expect(getSubscribedCaches).not.toHaveBeenCalled();
+    expect(getProjectReadiness).not.toHaveBeenCalled();
   });
 
   it('tells a visitor of a public project who can connect a repository, without permission names', () => {

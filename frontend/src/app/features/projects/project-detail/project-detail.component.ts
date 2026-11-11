@@ -20,10 +20,10 @@ import {
   LoadStateComponent,
   NavCardComponent,
   PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, StarButtonComponent, EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
+import { EvalStatusBadgeComponent, StarButtonComponent, EntityNameComponent, ProjectReadinessCardComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { CacheSubscriptionItem, StarTarget, ProjectResponse, TaskResponse } from '@core/models';
-import { ProjectNoActiveWritableCacheSubscriptionWarningComponent } from '../project-no-active-writable-cache-subscription-warning.component';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
 import { canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
@@ -50,7 +50,8 @@ import { EvaluationHistoryComponent } from '@features/dashboard/evaluation-histo
     PageLayoutComponent,
     StarButtonComponent,
     BadgeComponent,
-    ProjectNoActiveWritableCacheSubscriptionWarningComponent,
+    ProjectReadinessCardComponent,
+    SettingsSectionComponent,
     EvaluationHistoryComponent,
   ],
   templateUrl: './project-detail.component.html',
@@ -61,6 +62,7 @@ export class ProjectDetailComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
+  protected readonly isViewerProjectMember = isViewerProjectMember;
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);
   private tasksService = inject(TasksService);

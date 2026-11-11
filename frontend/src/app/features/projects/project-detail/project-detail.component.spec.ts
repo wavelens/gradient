@@ -5,8 +5,9 @@
  */
 
 import { EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
-import type { CacheSubscriptionItem, ProjectResponse } from '@core/models';
+import type { CacheSubscriptionItem, ProjectReadinessResponse, ProjectResponse } from '@core/models';
 import { ProjectsService } from '@core/services/projects.service';
+import { TeamsService } from '@core/services/teams.service';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { NEVER, Observable, of, throwError } from 'rxjs';
@@ -18,6 +19,12 @@ import { By } from '@angular/platform-browser';
 import { StarButtonComponent } from '@shared/ui';
 
 const NO_TASKS = { items: [], total: 0, page: 1 };
+const MISSING_CACHE: ProjectReadinessResponse = {
+  ready: false,
+  workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+  cache: { ready: false, subscriptions: [] },
+  repository: { status: 'unchecked', tasks: [] },
+};
 
 function render(
   authenticated: boolean,
@@ -29,6 +36,7 @@ function render(
   const starred = vi.fn(() => of(true));
   const tasks = vi.fn(getTasks);
   const getSubscribedCaches = vi.fn(() => of(subscribedCaches));
+  const getProjectReadiness = vi.fn(() => of(MISSING_CACHE));
   TestBed.configureTestingModule({
     imports: [ProjectDetailComponent],
     providers: [
@@ -45,19 +53,20 @@ function render(
       { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => (authenticated ? { superuser } : null) } },
       { provide: TasksService, useValue: { getTasks: tasks } },
       { provide: StarsService, useValue: { starred, set: () => of(true) } },
-      { provide: ProjectsService, useValue: { getSubscribedCaches, getProject: () => NEVER } },
+      { provide: ProjectsService, useValue: { getSubscribedCaches, getProjectReadiness, getProject: () => NEVER } },
+      { provide: TeamsService, useValue: {} },
     ],
   });
   const fixture = TestBed.createComponent(ProjectDetailComponent);
   fixture.detectChanges();
-  return { root: fixture.nativeElement as HTMLElement, starred, tasks, fixture, getSubscribedCaches };
+  return { root: fixture.nativeElement as HTMLElement, starred, tasks, fixture, getSubscribedCaches, getProjectReadiness };
 }
 
 describe('ProjectDetailComponent subscribed caches', () => {
   const caches: CacheSubscriptionItem[] = [
-    { id: 'c1', name: 'main', display_name: 'Main', mode: 'ReadWrite', status: 'active' },
-    { id: 'c2', name: 'research', display_name: 'Research', mode: 'ReadOnly', status: 'active' },
-    { id: 'c3', name: 'waiting', display_name: 'Waiting', mode: 'ReadOnly', status: 'pending' },
+    { id: 'c1', name: 'main', display_name: 'Main', mode: 'ReadWrite', status: 'active', managed: false, sign_outputs: true, approvers: [] },
+    { id: 'c2', name: 'research', display_name: 'Research', mode: 'ReadOnly', status: 'active', managed: false, sign_outputs: true, approvers: [] },
+    { id: 'c3', name: 'waiting', display_name: 'Waiting', mode: 'ReadOnly', status: 'pending', managed: false, sign_outputs: true, approvers: [] },
   ];
 
   it('names the active caches in the header and links to the cache subscriptions', () => {
@@ -67,28 +76,30 @@ describe('ProjectDetailComponent subscribed caches', () => {
     expect(line.getAttribute('href')).toBe('/project/acme/caches');
   });
 
-  it('asks nothing for a visitor without a role and shows no cache line', () => {
-    const { root, getSubscribedCaches } = render(false, undefined, { role: null, permissions: [] }, caches);
+  it('asks nothing for a visitor without a role and shows neither cache line nor readiness', () => {
+    const { root, getSubscribedCaches, getProjectReadiness } = render(false, undefined, { role: null, permissions: [] }, caches);
     expect(getSubscribedCaches).not.toHaveBeenCalled();
+    expect(getProjectReadiness).not.toHaveBeenCalled();
     expect(root.querySelector('a[slot="meta"]')).toBeNull();
+    expect(root.querySelector('gr-project-readiness-card')).toBeNull();
+  });
+});
+
+describe('ProjectDetailComponent readiness', () => {
+  it('shows members the readiness card, also while the project has no tasks', () => {
+    const { root, getProjectReadiness } = render(true);
+    expect(getProjectReadiness).toHaveBeenCalledWith('acme');
+    expect(root.querySelector('gr-settings-section h2')?.textContent).toBe('Readiness');
+    expect(root.querySelector('[data-testid="readiness-cache"]')?.textContent).toContain('None writable');
+    expect(root.querySelector('gr-load-state gr-empty-state')?.textContent).toContain('Connect a repository');
     expect(root.querySelector('[data-testid="no-cache-banner"]')).toBeNull();
   });
 
-  it('says why evaluations wait only while no active cache accepts writes', () => {
-    expect(render(true, undefined, undefined, caches).root.querySelector('[data-testid="no-cache-banner"]')).toBeNull();
+  it('offers the cache fix only to members with the permission for it', () => {
+    const subscribeLink = (root: HTMLElement) => root.querySelector('[data-testid="readiness-cache"] a[grButton]');
+    expect(subscribeLink(render(true).root)?.getAttribute('href')).toBe('/project/acme/caches');
     TestBed.resetTestingModule();
-    const banner = render(true, undefined, undefined, caches.slice(1)).root.querySelector('[data-testid="no-cache-banner"]');
-    expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/caches');
-    expect(banner?.textContent).toContain('No writable cache');
-    expect(banner?.querySelector('a')?.textContent?.trim()).toBe('Add a cache');
-  });
-
-  it('names a pending writable subscription request instead of a missing cache', () => {
-    const pending: CacheSubscriptionItem = { id: 'c4', name: 'shared', display_name: 'Shared', mode: 'ReadWrite', status: 'pending' };
-    const banner = render(true, undefined, undefined, [...caches.slice(1), pending]).root.querySelector('[data-testid="no-cache-banner"]');
-    expect(banner?.textContent).toContain('Subscription request pending');
-    expect(banner?.textContent).not.toContain('No writable cache');
-    expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/caches');
+    expect(subscribeLink(render(true, undefined, { role: 'View', permissions: ['viewProject'] }).root)).toBeNull();
   });
 });
 
@@ -98,7 +109,7 @@ describe('ProjectDetailComponent task cards', () => {
     const { root } = render(true, () => of({ items: [task('on', true), task('off', false)], total: 2, page: 1 }));
     const metas = Array.from(root.querySelectorAll('gr-nav-card')).map((card) => card.querySelector('[slot="meta"]')?.textContent?.trim());
     expect(metas).toEqual(['', 'Inactive']);
-    expect(root.querySelector('gr-badge .badge')?.classList).toContain('is-neutral');
+    expect(root.querySelector('gr-nav-card gr-badge .badge')?.classList).toContain('is-neutral');
   });
 
   it('titles each card with the display name and the slug', () => {

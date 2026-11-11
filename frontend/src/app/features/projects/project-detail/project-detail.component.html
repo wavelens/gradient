@@ -24,7 +24,11 @@
       <gr-star-button labeled [target]="starTarget" [starredItemDisplayName]="project.display_name" [(starred)]="starred" />
     }
   </div>
-  <app-project-no-active-writable-cache-subscription-warning [projectName]="projectName" [caches]="cacheSubscriptions()" />
+  @if (isViewerProjectMember(project)) {
+    <gr-settings-section title="Readiness">
+      <gr-project-readiness-card [project]="projectName" [projectPermissions]="project.permissions" [projectSettingsAreManagedByServer]="project.managed" />
+    </gr-settings-section>
+  }
   <gr-load-state
     [loading]="tasks.loading()"
     [error]="tasks.error()"

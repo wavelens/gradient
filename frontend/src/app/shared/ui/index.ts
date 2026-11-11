@@ -25,5 +25,6 @@ export * from './star-button/star-button.component';
 export * from './status-icon/status-icon.component';
 export * from './thunk-progress/thunk-progress.component';
 export * from './permission-picker/permission-picker.component';
+export * from './project-readiness/project-readiness-card.component';
 export * from './waiting-notice/waiting-notice.component';
 export * from './worker-drain/worker-drain';

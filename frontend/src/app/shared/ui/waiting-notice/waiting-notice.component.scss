@@ -26,6 +26,11 @@
   color: var(--gr-text-secondary);
 }
 
+.waiting-readiness {
+  margin-top: $spacing-sm;
+  text-align: left;
+}
+
 .waiting-next {
   display: flex;
   flex-wrap: wrap;

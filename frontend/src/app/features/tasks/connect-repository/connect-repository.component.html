@@ -20,12 +20,8 @@
     @switch (step()) {
       @case ('repository') {
         <gr-settings-section title="Repository">
-          <app-project-no-active-writable-cache-subscription-warning [projectName]="projectName" [caches]="caches()" />
-          @if (missingCache()) {
-            <div class="gr-form-actions">
-              <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
-            </div>
-          }
+          <gr-project-readiness-card [project]="projectName" [projectPermissions]="project()?.permissions ?? []" [projectSettingsAreManagedByServer]="!!project()?.managed" />
+          <gr-divider />
           <gr-form-field label="Repository URL" for="connect-repo" required hint="URL of the Git repository to evaluate"
             [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
             <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path, git://host/path" />

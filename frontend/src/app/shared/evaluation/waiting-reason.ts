@@ -11,6 +11,7 @@ import { links } from '@shared/routing';
 import { plural } from '@shared/text';
 
 export interface WaitingAccess {
+  projectPermissions: readonly Permission[];
   manageWorkers: boolean;
   manageSubscriptions: boolean;
   trigger: boolean;
@@ -19,6 +20,7 @@ export interface WaitingAccess {
 
 export function waitingAccessFrom(permissions: readonly Permission[], trigger: boolean, superuser: boolean): WaitingAccess {
   return {
+    projectPermissions: permissions,
     manageWorkers: permissions.includes('manageWorkers'),
     manageSubscriptions: permissions.includes('manageSubscriptions'),
     trigger,
@@ -36,6 +38,7 @@ export interface WaitingExplanation {
   requirements: string[];
   action: WaitingAction | null;
   hint: string | null;
+  showProjectReadinessRows?: boolean;
 }
 
 const EVAL_WORKER_WAIT_TITLE: Record<Extract<WaitingReason, { kind: 'eval_workers' }>['capability'], string> = {
@@ -91,6 +94,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
     allowed ? { action, hint: null } : { action: null, hint };
   const forWorkerAdmin = (action: WaitingAction, hint: string) => step(access.manageWorkers, action, hint);
   const forSubscriptionAdmin = (action: WaitingAction, hint: string) => step(access.manageSubscriptions, action, hint);
+  const viewerIsProjectMember = access.projectPermissions.length > 0;
 
   switch (reason?.kind) {
     case undefined:
@@ -109,6 +113,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
           : `${plural(reason.connected_workers, 'connected worker')} (${architectures}) can't build this evaluation.`,
         requirements: reason.unmet.map(unmetRequirementLabel),
         ...forWorkerAdmin(workerAction(project), ASK_FOR_WORKER),
+        showProjectReadinessRows: viewerIsProjectMember && reason.connected_workers === 0,
       };
     }
     case 'eval_workers': {
@@ -125,6 +130,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
           : `${reason.connected_workers} ${reason.connected_workers === 1 ? 'worker is' : 'workers are'} connected, but none can ${work}.`,
         requirements: [],
         ...forWorkerAdmin(workerAction(project), ASK_FOR_WORKER),
+        showProjectReadinessRows: viewerIsProjectMember && reason.connected_workers === 0,
       };
     }
     case 'approval':
@@ -141,6 +147,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
         detail: 'A cache is necessary to store build results. Subscribe this project to a cache before the evaluation can run.',
         requirements: [],
         ...forSubscriptionAdmin(cachesAction(project, 'Add a cache'), 'Ask a project admin to subscribe this project to a cache.'),
+        showProjectReadinessRows: viewerIsProjectMember,
       };
     case 'cache_storage_full':
       return {

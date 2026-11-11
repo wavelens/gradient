@@ -10,11 +10,12 @@ import { RouterLink, type UrlTree } from '@angular/router';
 import { ButtonComponent, EmptyStateComponent, MessageBannerComponent } from '@gradient/ui/ui';
 import type { WaitingReason } from '@core/models';
 import { type WaitingAccess, explainWaiting } from '@shared/evaluation';
+import { ProjectReadinessCardComponent } from '../project-readiness/project-readiness-card.component';
 
 @Component({
   selector: 'gr-waiting-notice',
   standalone: true,
-  imports: [NgTemplateOutlet, RouterLink, ButtonComponent, EmptyStateComponent, MessageBannerComponent],
+  imports: [NgTemplateOutlet, RouterLink, ButtonComponent, EmptyStateComponent, MessageBannerComponent, ProjectReadinessCardComponent],
   template: `
     @let e = explanation();
     @if (banner()) {
@@ -36,9 +37,13 @@ import { type WaitingAccess, explainWaiting } from '@shared/evaluation';
           @for (requirement of e.requirements; track requirement) { <li>{{ requirement }}</li> }
         </ul>
       }
-      @if (e.action || pendingJobLink()) {
+      @if (e.showProjectReadinessRows) {
+        <gr-project-readiness-card class="waiting-readiness" [project]="project()" [projectPermissions]="access().projectPermissions" />
+      }
+      @let nextStepActionButton = e.showProjectReadinessRows ? null : e.action;
+      @if (nextStepActionButton || pendingJobLink()) {
         <div class="waiting-next">
-          @if (e.action; as action) {
+          @if (nextStepActionButton; as action) {
             @if (action.kind === 'link') {
               <a grButton size="small" [label]="action.label" [icon]="action.icon" [routerLink]="action.link"></a>
             } @else {

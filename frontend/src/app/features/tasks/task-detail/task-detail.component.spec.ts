@@ -22,10 +22,17 @@ import { LiveEvent, LiveService } from '@core/services/live.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
-import { BuildStatusCounts, EntryPointSummary, EvaluationSummary, TaskDetailsResponse } from '@core/models';
+import { BuildStatusCounts, EntryPointSummary, EvaluationSummary, ProjectReadinessResponse, TaskDetailsResponse } from '@core/models';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { monthDayClockTime } from '@shared/text';
 import { CopyMenuService } from '@shared/routing';
+
+const projectReadinessResponseWithNoRegisteredWorker: ProjectReadinessResponse = {
+  ready: false,
+  workers: { ready: false, registered: 0, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+  cache: { ready: true, subscriptions: [] },
+  repository: { status: 'verified', tasks: [] },
+};
 
 function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0 };
@@ -194,7 +201,10 @@ function setup(
       { provide: ActivatedRoute, useValue: activatedRouteStub(access, query, resolvedTask(access, serviceOverrides)) },
       { provide: TasksService, useValue: tasksService },
       { provide: EvaluationsService, useValue: evaluationsService },
-      { provide: ProjectsService, useValue: { getProject: serviceOverrides.getProject ?? (() => of({ display_name: 'Acme' })) } },
+      { provide: ProjectsService, useValue: {
+        getProject: serviceOverrides.getProject ?? (() => of({ display_name: 'Acme' })),
+        getProjectReadiness: () => of(projectReadinessResponseWithNoRegisteredWorker),
+      } },
       { provide: AuthService, useValue: {
         isAuthenticated: () => visitor !== 'anonymous',
         user: () => (visitor === 'anonymous' ? null : { superuser: visitor === 'superuser' }),

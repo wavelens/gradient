@@ -7,9 +7,9 @@
 import type { WaitingReason } from '@core/models';
 import { type WaitingAccess, explainWaiting, waitingReasonText } from './waiting-reason';
 
-const ADMIN: WaitingAccess = { manageWorkers: true, manageSubscriptions: true, trigger: true, superuser: false };
-const VIEWER: WaitingAccess = { manageWorkers: false, manageSubscriptions: false, trigger: false, superuser: false };
-const SUPERUSER: WaitingAccess = { manageWorkers: true, manageSubscriptions: true, trigger: true, superuser: true };
+const ADMIN: WaitingAccess = { projectPermissions: ['viewProject', 'manageWorkers', 'manageSubscriptions'], manageWorkers: true, manageSubscriptions: true, trigger: true, superuser: false };
+const VIEWER: WaitingAccess = { projectPermissions: ['viewProject'], manageWorkers: false, manageSubscriptions: false, trigger: false, superuser: false };
+const SUPERUSER: WaitingAccess = { projectPermissions: [], manageWorkers: false, manageSubscriptions: false, trigger: true, superuser: true };
 
 function linkOf(reason: WaitingReason | null, access: WaitingAccess): string | null {
   const action = explainWaiting(reason, 'acme', access).action;
@@ -17,28 +17,45 @@ function linkOf(reason: WaitingReason | null, access: WaitingAccess): string | n
 }
 
 describe('explainWaiting', () => {
-  it('sends a project admin to the cache subscriptions when no cache is configured', () => {
-    const explained = explainWaiting({ kind: 'no_cache' }, 'acme', ADMIN);
-    expect(explained.title).toBe('No writable cache');
-    expect(explained.action).toEqual(expect.objectContaining({ kind: 'link', label: 'Add a cache' }));
-    expect(linkOf({ kind: 'no_cache' }, ADMIN)).toBe('/project/acme/caches');
-    expect(explained.hint).toBeNull();
+  it('marks the project readiness rows for a member and keeps the action for views without them', () => {
+    const reasons: [WaitingReason, string][] = [
+      [{ kind: 'no_cache' }, '/project/acme/caches'],
+      [{ kind: 'workers', unmet: [], connected_workers: 0, available_architectures: [] }, '/project/acme/workers'],
+      [{ kind: 'eval_workers', capability: 'network', connected_workers: 0 }, '/project/acme/workers'],
+    ];
+    for (const [reason, link] of reasons) {
+      const explained = explainWaiting(reason, 'acme', ADMIN);
+      expect(explained.showProjectReadinessRows).toBe(true);
+      expect(linkOf(reason, ADMIN)).toBe(link);
+      expect(explained.hint).toBeNull();
+    }
+    expect(explainWaiting({ kind: 'no_cache' }, 'acme', ADMIN).title).toBe('No writable cache');
   });
 
-  it('tells a viewer whom to ask instead of offering a page they cannot use', () => {
+  it('keeps the hint whom to ask next to the readiness rows for a viewer', () => {
     const explained = explainWaiting({ kind: 'no_cache' }, 'acme', VIEWER);
+    expect(explained.showProjectReadinessRows).toBe(true);
     expect(explained.action).toBeNull();
     expect(explained.hint).toBe('Ask a project admin to subscribe this project to a cache.');
   });
 
-  it('sends a project admin to register a worker for every missing worker kind', () => {
-    const reasons: WaitingReason[] = [
-      { kind: 'workers', unmet: [], connected_workers: 0, available_architectures: [] },
-      { kind: 'eval_workers', capability: 'network', connected_workers: 0 },
-      { kind: 'exec_workers', unmet: { labels: [], devices: [], mounts: ['data'], nodes: 0, custom_image: false }, connected_workers: 0, matching_workers: 0 },
-    ];
-    for (const reason of reasons) expect(linkOf(reason, ADMIN)).toBe('/project/acme/workers');
+  it('shows no readiness rows to a visitor outside the project, who cannot load them', () => {
+    const explained = explainWaiting({ kind: 'no_cache' }, 'acme', SUPERUSER);
+    expect(explained.showProjectReadinessRows).toBeFalsy();
+    expect(explained.hint).toBe('Ask a project admin to subscribe this project to a cache.');
+  });
+
+  it('keeps Register worker without readiness rows when connected workers lack a capability', () => {
+    const explained = explainWaiting({ kind: 'eval_workers', capability: 'secrets', connected_workers: 1 }, 'acme', ADMIN);
+    expect(explained.showProjectReadinessRows).toBeFalsy();
+    expect(linkOf({ kind: 'eval_workers', capability: 'secrets', connected_workers: 1 }, ADMIN)).toBe('/project/acme/workers');
+  });
+
+  it('sends a project admin to register a worker for a missing exec worker or an unknown reason', () => {
+    const reason: WaitingReason = { kind: 'exec_workers', unmet: { labels: [], devices: [], mounts: ['data'], nodes: 0, custom_image: false }, connected_workers: 0, matching_workers: 0 };
+    expect(linkOf(reason, ADMIN)).toBe('/project/acme/workers');
     expect(linkOf(null, ADMIN)).toBe('/project/acme/workers');
+    expect(explainWaiting(reason, 'acme', ADMIN).showProjectReadinessRows).toBeFalsy();
   });
 
   it('asks to add a label to a connected worker instead of registering a new one', () => {

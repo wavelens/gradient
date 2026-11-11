@@ -15,6 +15,7 @@ import {
   ButtonComponent,
   CheckboxComponent,
   CopyFieldComponent,
+  DividerComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
@@ -23,8 +24,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { CacheSubscriptionItem, IntegrationSummaryResponse, TriggerConfig } from '@core/models';
-import { ProjectNoActiveWritableCacheSubscriptionWarningComponent, hasActiveCacheSubscriptionWithWriteAccess } from '@features/projects/project-no-active-writable-cache-subscription-warning.component';
+import { IntegrationSummaryResponse, TriggerConfig } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TriggersService } from '@core/services/triggers.service';
@@ -35,7 +35,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NameFieldsComponent, fieldChecks, firstFieldError, injectRevealFirstInvalid, nameAvailability } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, ProjectReadinessCardComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { slugify } from '@shared/text';
 
@@ -83,11 +83,12 @@ export function buildTaskCreationTriggersFromWizardChoices(choices: {
   standalone: true,
   imports: [
     FormsModule,
-    ProjectNoActiveWritableCacheSubscriptionWarningComponent,
+    ProjectReadinessCardComponent,
     RouterLink,
     ButtonComponent,
     CheckboxComponent,
     CopyFieldComponent,
+    DividerComponent,
     FormFieldComponent,
     InputDirective,
     LoadStateComponent,
@@ -114,7 +115,7 @@ export class ConnectRepositoryComponent implements OnInit {
   private notify = inject(NotifyService);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private revealFirstInvalid = injectRevealFirstInvalid();
-  private project = injectProject();
+  protected project = injectProject();
   protected readonly config = inject(ConfigService);
 
   readonly steps = STEPS;
@@ -134,7 +135,6 @@ export class ConnectRepositoryComponent implements OnInit {
   attempted = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
-  caches = signal<CacheSubscriptionItem[] | null>(null);
 
   deployKey = signal<string | null>(null);
   testing = signal(false);
@@ -167,8 +167,6 @@ export class ConnectRepositoryComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') ?? '';
-    if (!this.access().canEdit) return;
-    this.loadCaches();
   }
 
   repositoryChanged(url: string): void {
@@ -269,17 +267,5 @@ export class ConnectRepositoryComponent implements OnInit {
           this.createError.set(apiErrorMessage(error, "Couldn't create task"));
         },
       });
-  }
-
-  loadCaches(): void {
-    this.projects.getSubscribedCaches(this.projectName).subscribe({
-      next: (caches) => this.caches.set(caches),
-      error: () => this.caches.set(null),
-    });
-  }
-
-  missingCache(): boolean {
-    const list = this.caches();
-    return list !== null && !hasActiveCacheSubscriptionWithWriteAccess(list);
   }
 }

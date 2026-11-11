@@ -16,8 +16,16 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
-import { BoardExecJob, PendingJobSummary } from '@core/models';
+import { ProjectsService } from '@core/services/projects.service';
+import { BoardExecJob, PendingJobSummary, ProjectReadinessResponse } from '@core/models';
 import { formatDuration } from '@shared/text';
+
+const projectReadinessWithoutWritableCacheSubscription: ProjectReadinessResponse = {
+  ready: false,
+  workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+  cache: { ready: false, subscriptions: [] },
+  repository: { status: 'verified', tasks: [] },
+};
 
 const DETAIL: AssignedJobDetail = {
   id: 'job-1',
@@ -177,6 +185,7 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1', pending = false)
       },
       { provide: EvaluationsService, useValue: { getBuild: () => EMPTY } },
       { provide: ExecJobsService, useValue: { abort: () => EMPTY } },
+      { provide: ProjectsService, useValue: { getProjectReadiness: () => of(projectReadinessWithoutWritableCacheSubscription) } },
       { provide: AuthService, useValue: { user: () => ({ superuser: true }) } },
     ],
   });
