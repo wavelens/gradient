@@ -35,7 +35,7 @@ macro_rules! cache_readable {
 use gradient_types::UserId;
 use sea_orm::Value;
 
-const NON_PR: &str = "tt.trigger_type IS DISTINCT FROM 2";
+use crate::evaluations::current_evaluation::NON_PR;
 
 mod rail;
 mod search;

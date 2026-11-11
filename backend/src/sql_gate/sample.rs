@@ -63,6 +63,9 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
             "SELECT array_agg(id) AS v FROM (SELECT id FROM cache ORDER BY id LIMIT $1) s"
         }
         Param::TaskId => "SELECT id AS v FROM task ORDER BY id LIMIT 1",
+        Param::TaskIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM task ORDER BY id LIMIT $1) s"
+        }
         Param::TaskActionId => "SELECT id AS v FROM task_action ORDER BY id LIMIT 1",
         Param::GitHostConnectionId => "SELECT id AS v FROM git_host_connection ORDER BY id LIMIT 1",
         Param::CommitPrefixLow => {
@@ -110,7 +113,8 @@ fn shape(param: &Param) -> Option<Shape> {
         | Param::SharedBuildIds(n)
         | Param::EvaluationIds(n)
         | Param::EntryPointIds(n)
-        | Param::CacheIds(n) => Shape::Uuids(*n),
+        | Param::CacheIds(n)
+        | Param::TaskIds(n) => Shape::Uuids(*n),
         Param::DerivationHash
         | Param::CachedPathHash
         | Param::CommitPrefixLow

@@ -27,6 +27,7 @@ pub enum Param {
     CacheId,
     CacheIds(usize),
     TaskId,
+    TaskIds(usize),
     TaskActionId,
     GitHostConnectionId,
     CommitPrefixLow,
