@@ -11,7 +11,7 @@ The dashboard opens after sign-in. It lists every task that needs attention acro
 
 | Area | Content | Actions |
 |---|---|---|
-| Requests | A line such as "2 requests waiting for you" when invitations, cache subscription requests or team grant requests wait for your decision | Open the **Requests** page |
+| Requests | A line such as "2 requests need a decision" when invitations, cache subscription requests or team grant requests wait for your decision | Open the **Requests** page |
 | Stats | CPU time, builds, cache size, busy workers and queue wait across the visible projects | |
 | Filter | **Starred**, **All** and **Failing**, each with a count. **Starred** is the default, and hidden while no task is starred | Switch the task list. The choice stays in the URL |
 | Task list | The top 10 tasks: latest commit, recent evaluations as bars, entry points ok/total, change in failures, speed | Open a task from the row, an evaluation from a bar. Page through every task with **Show all** |
