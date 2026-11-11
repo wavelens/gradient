@@ -285,7 +285,7 @@ pub async fn finish_latest_attempt<C: ConnectionTrait>(
             .into(),
         )
         .filter(Column::Id.in_subquery(latest_attempt_id_subquery(derivation_build)))
-        .filter(Column::Outcome.eq(AttemptOutcome::Running))
+        .filter(Column::Outcome.is_not_in([AttemptOutcome::Built, AttemptOutcome::Substituted]))
         .exec(db)
         .await?;
 
