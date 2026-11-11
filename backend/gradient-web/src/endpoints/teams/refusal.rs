@@ -20,8 +20,6 @@ pub(crate) enum TeamRefusal {
     InvalidNewProjectRole,
     #[error("member is managed by server state")]
     MemberManagedByState,
-    #[error("the worker id is already registered")]
-    WorkerIdRegistered,
 }
 
 impl Refusal for TeamRefusal {
@@ -32,7 +30,7 @@ impl Refusal for TeamRefusal {
             | Self::RoleRequiredForUsers
             | Self::InvalidNewProjectRole => RefusalStatus::BadRequest,
             Self::WorkersNeedTeamAdmin => RefusalStatus::Forbidden,
-            Self::MemberManagedByState | Self::WorkerIdRegistered => RefusalStatus::Conflict,
+            Self::MemberManagedByState => RefusalStatus::Conflict,
         }
     }
 }

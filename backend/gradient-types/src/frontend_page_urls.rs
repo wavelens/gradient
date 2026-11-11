@@ -14,6 +14,10 @@ pub fn project(frontend_url: &str, project: &str) -> String {
     format!("{}/project/{project}", base(frontend_url))
 }
 
+pub fn project_workers_page_url(frontend_url: &str, project: &str) -> String {
+    format!("{}/project/{project}/workers", base(frontend_url))
+}
+
 pub fn task(frontend_url: &str, project: &str, task: &str) -> String {
     format!("{}/project/{project}/task/{task}", base(frontend_url))
 }
@@ -51,6 +55,10 @@ mod tests {
         let base = "https://ci.example/";
         assert_eq!(project(base, "p"), "https://ci.example/project/p");
         assert_eq!(task(base, "p", "t"), "https://ci.example/project/p/task/t");
+        assert_eq!(
+            project_workers_page_url(base, "p"),
+            "https://ci.example/project/p/workers"
+        );
         assert_eq!(
             build_log(base, "p", "e", "b"),
             "https://ci.example/project/p/log/e?build=b"

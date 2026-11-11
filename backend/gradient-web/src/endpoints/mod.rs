@@ -42,6 +42,7 @@ pub mod teams;
 pub mod user;
 pub mod user_ssh_keys;
 pub mod webhooks;
+pub mod worker_setup;
 pub mod worker_tokens;
 
 use crate::error::{WebError, WebResult};

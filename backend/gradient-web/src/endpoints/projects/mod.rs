@@ -7,6 +7,7 @@
 pub mod integrations;
 pub mod management;
 pub mod project_gitea_oauth2_connection;
+pub mod readiness;
 mod refusal;
 pub mod secrets;
 pub mod settings;
@@ -30,7 +31,7 @@ pub use self::settings::{
 };
 pub use self::ssh::{get_project_ssh, post_project_ssh};
 pub use self::workers::{
-    PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, RegisterWorkerResponse,
-    WorkerLiveInfo, WorkerTestResponse, delete_project_worker, get_project_worker_metrics,
-    get_project_workers, patch_project_worker, post_project_worker, post_project_worker_test,
+    PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, WorkerLiveInfo,
+    WorkerTestResponse, delete_project_worker, get_project_worker_metrics, get_project_workers,
+    patch_project_worker, post_project_worker, post_project_worker_test,
 };

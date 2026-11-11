@@ -36,12 +36,6 @@ pub(crate) enum ProjectRefusal {
     DeclaredInServerStateConfiguration,
     #[error("Project not subscribed to Cache")]
     NotSubscribedToCache,
-    #[error("the worker id belongs to a team worker")]
-    WorkerIdBelongsToTeamWorker,
-    #[error("Worker is already registered in this project")]
-    WorkerIdRegistered,
-    #[error("the worker id belongs to a team worker or a Gradient.CI connection")]
-    WorkerIdBelongsToOtherConnection,
     #[error("team workers are managed on the team page")]
     TeamWorkerManagedOnTeamPage,
     #[error("A project can't drain a worker. Drain it in the team or admin area.")]
@@ -93,9 +87,6 @@ impl Refusal for ProjectRefusal {
             | Self::GiteaOAuth2ApplicationNotConfigured => RefusalStatus::BadRequest,
             Self::GitHostOAuthConnectNeedsSignedInBrowserSession => RefusalStatus::Unauthorized,
             Self::IntegrationNameTaken { .. }
-            | Self::WorkerIdBelongsToTeamWorker
-            | Self::WorkerIdRegistered
-            | Self::WorkerIdBelongsToOtherConnection
             | Self::TeamWorkerManagedOnTeamPage
             | Self::ProjectWorkerPageCannotDrainWorkerOnSharedMachine
             | Self::DeclaredInServerStateConfiguration

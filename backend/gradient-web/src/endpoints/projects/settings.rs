@@ -137,18 +137,24 @@ pub async fn delete_project_public(
 pub async fn get_project_subscribe(
     ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
-    let project_caches =
-        gradient_db::projects::caches::subscriptions_of(&db.web_db, project.id).await?;
+    Ok(ok_json(
+        cache_subscription_items(&db.web_db, project.id).await?,
+    ))
+}
 
-    let pending =
-        gradient_db::cache_subscription_requests::of_project(&db.web_db, project.id).await?;
+pub(crate) async fn cache_subscription_items(
+    db: &WebDb,
+    project: ProjectId,
+) -> WebResult<Vec<CacheSubscriptionItem>> {
+    let project_caches = gradient_db::projects::caches::subscriptions_of(db, project).await?;
+    let pending = gradient_db::cache_subscription_requests::of_project(db, project).await?;
 
     let cache_ids: Vec<CacheId> = project_caches
         .iter()
         .map(|oc| oc.cache)
         .chain(pending.iter().map(|r| r.cache))
         .collect();
-    let caches: HashMap<CacheId, MCache> = by_ids::<ECache, _>(&db.web_db, &cache_ids).await?;
+    let caches: HashMap<CacheId, MCache> = by_ids::<ECache, _>(db, &cache_ids).await?;
 
     let mut subscribed: Vec<CacheSubscriptionItem> = project_caches
         .into_iter()
@@ -178,11 +184,11 @@ pub async fn get_project_subscribe(
             status: SubscriptionStatus::Pending,
             managed: false,
             sign_outputs: true,
-            approvers: subscription_approvers(&db.web_db, cache.id).await?,
+            approvers: subscription_approvers(db, cache.id).await?,
         });
     }
 
-    Ok(ok_json(subscribed))
+    Ok(subscribed)
 }
 
 #[utoipa::path(

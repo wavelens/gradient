@@ -88,8 +88,6 @@ pub enum SharedRefusal {
     NoPendingInvitation,
     #[error("Cannot remove the last Admin from the {0}.")]
     LastAdmin(Resource),
-    #[error("worker_id must be a valid UUID")]
-    InvalidWorkerId,
     #[error("worker is managed by server state")]
     WorkerManagedByState,
     #[error("{0} must not be empty")]
@@ -132,7 +130,6 @@ impl Refusal for SharedRefusal {
             | Self::RoleGrantedToTeam
             | Self::NotAMember(_)
             | Self::NoPendingInvitation
-            | Self::InvalidWorkerId
             | Self::EmptyField(_)
             | Self::InvalidAllowedIp { .. }
             | Self::RepositoryStateFetchFailed => RefusalStatus::BadRequest,

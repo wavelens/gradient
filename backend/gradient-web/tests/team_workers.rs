@@ -47,8 +47,6 @@ async fn an_admin_of_a_state_managed_team_registers_a_worker_and_sees_its_token_
     let db = db
         .append_query_results([vec![managed_team]])
         .append_query_results([vec![team_member(TeamRole::Admin)]])
-        .append_query_results([Vec::<worker_registration::Model>::new()])
-        .append_query_results([Vec::<team_worker::Model>::new()])
         .append_query_results([vec![team_worker_row()]])
         .append_query_results([Vec::<team_project::Model>::new()])
         .append_exec_results([exec_ok()]);

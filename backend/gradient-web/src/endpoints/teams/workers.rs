@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::refusal::TeamRefusal;
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::admin::workers::start_or_cancel_worker_admin_drain;
@@ -12,6 +11,7 @@ use crate::endpoints::projects::workers::{
     PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, WorkerLiveInfo,
     encrypt_for_dialing, live_workers, patch_edits_managed_fields, worker_connection,
 };
+use crate::endpoints::worker_setup::WorkerRegistrationResponse;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
@@ -31,7 +31,6 @@ use sea_orm::ActiveValue::Set;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct TeamWorkerEntry {
@@ -84,13 +83,6 @@ impl TeamWorkerEntry {
 
 fn team_worker_live(live: &HashMap<String, WorkerInfo>, worker_id: &str) -> Option<WorkerLiveInfo> {
     live.get(worker_id).map(WorkerLiveInfo::from)
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct RegisteredTeamWorker {
-    pub team: TeamId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
 }
 
 pub async fn reauth_team_workers(scheduler: &Scheduler, workers: &[String]) {
@@ -174,10 +166,10 @@ pub async fn get_team_workers(
     operation_id = "registerTeamWorker",
     tag = "teams",
     summary = "Register team worker",
-    description = "Needs Admin in the team. The worker answers the server challenge with `<team id>:<token>` or `*:<token>` in its peers file. `token` is returned only when the server generated it.",
+    description = "Requests need admin permissions for the team. The server can generate a worker ID and a one-time token, then send back NixOS configuration for the worker machine. The worker can answer the challenge from the server with `<team id>:<token>` in the peer file.",
     params(TeamPath),
     request_body = RegisterWorkerRequest,
-    responses((status = OK, description = "OK", body = RegisteredTeamWorker), WebError)
+    responses((status = OK, description = "OK", body = WorkerRegistrationResponse), WebError)
 )]
 pub async fn post_team_worker(
     TeamScope { team, user, .. }: TeamScope<Admin>,
@@ -185,18 +177,16 @@ pub async fn post_team_worker(
     audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
-) -> WebResult<Json<BaseResponse<RegisteredTeamWorker>>> {
-    let worker_id = Uuid::parse_str(&body.worker_id)
-        .map_err(|_| SharedRefusal::InvalidWorkerId)?
-        .to_string();
-    let registered = gradient_db::worker_registrations::by_worker_id(&state.web_db, &worker_id)
-        .await?
-        .is_some();
-    if registered || gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
-        return Err(TeamRefusal::WorkerIdRegistered.into());
-    }
-
-    let (token, return_token) = crate::endpoints::worker_tokens::issue(body.token)?;
+) -> WebResult<Json<BaseResponse<WorkerRegistrationResponse>>> {
+    let token = crate::endpoints::worker_tokens::issue();
+    let registration = WorkerRegistrationResponse::new(
+        &state.config.server.serve_url,
+        &body,
+        frontend_page_urls::team(&state.config.server.frontend_url, &team.name),
+        team.id,
+        token.clone(),
+    );
+    let worker_id = registration.id.clone();
     let token_encrypted = encrypt_for_dialing(
         &state.config.secrets.crypt_file,
         body.url.as_deref(),
@@ -225,8 +215,7 @@ pub async fn post_team_worker(
             created_at: gradient_types::now(),
         },
     )
-    .await
-    .map_err(|e| WebError::from_unique_violation(e, TeamRefusal::WorkerIdRegistered))?;
+    .await?;
 
     scheduler.request_reauth(&worker_id).await;
     for project in granted_projects(&state.web_db, team.id).await? {
@@ -243,10 +232,7 @@ pub async fn post_team_worker(
         )
         .await;
 
-    Ok(ok_json(RegisteredTeamWorker {
-        team: team.id,
-        token: return_token.then_some(token),
-    }))
+    Ok(ok_json(registration))
 }
 
 #[utoipa::path(

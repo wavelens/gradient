@@ -22,6 +22,7 @@ use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
+use gradient_types::frontend_page_urls;
 use gradient_types::ids::*;
 use gradient_types::permissions::Permission;
 use gradient_types::{BaseResponse, MTeam, MTeamWorker};
@@ -29,9 +30,9 @@ use gradient_wire::types::GradientCapabilities;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use uuid::Uuid;
 
 use super::refusal::ProjectRefusal;
+use crate::endpoints::worker_setup::WorkerRegistrationResponse;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
@@ -43,10 +44,8 @@ fn default_true() -> bool {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct RegisterWorkerRequest {
-    pub worker_id: String,
     pub url: Option<String>,
     pub display_name: String,
-    pub token: Option<String>,
     #[serde(default = "default_true")]
     pub enable_network: bool,
     #[serde(default = "default_true")]
@@ -57,13 +56,6 @@ pub struct RegisterWorkerRequest {
     pub enable_eval: bool,
     #[serde(default = "default_true")]
     pub enable_build: bool,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct RegisterWorkerResponse {
-    pub peer_id: ProjectId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -251,10 +243,10 @@ pub(crate) async fn reauth_project_workers(db: &WebDb, scheduler: &Scheduler, pr
     operation_id = "registerProjectWorker",
     tag = "workers",
     summary = "Register a worker under a project",
-    description = "Registers a worker ID under this project as a peer. Returns a one-time\nplaintext token that the worker operator must add to their worker config.\nThe token is shown only once - it cannot be retrieved later.",
+    description = "Register a new worker under this project. A worker ID and a one-time token come from the server. Response data include a NixOS configuration for the worker machine. The token is visible only once.",
     params(ProjectPath),
     request_body = RegisterWorkerRequest,
-    responses((status = OK, description = "Worker registered", body = RegisterWorkerResponse), WebError)
+    responses((status = OK, description = "Worker registered", body = WorkerRegistrationResponse), WebError)
 )]
 pub async fn post_project_worker(
     ProjectScope { project, user, .. }: ProjectScope<Requires<can::ManageWorkers>>,
@@ -262,13 +254,7 @@ pub async fn post_project_worker(
     audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
-) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
-    let worker_uuid =
-        Uuid::parse_str(&body.worker_id).map_err(|_| SharedRefusal::InvalidWorkerId)?;
-    let worker_id_str = worker_uuid.to_string();
-    if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id_str).await? {
-        return Err(ProjectRefusal::WorkerIdBelongsToTeamWorker.into());
-    }
+) -> WebResult<Json<BaseResponse<WorkerRegistrationResponse>>> {
     if let Some(url) = body.url.as_deref().filter(|u| !u.trim().is_empty()) {
         gradient_util::http_validation::validate_worker_websocket_url(
             url,
@@ -277,10 +263,20 @@ pub async fn post_project_worker(
         .map_err(|e| ProjectRefusal::InvalidWorkerUrl {
             reason: e.to_string(),
         })?;
-        ensure_dialable_worker_id(&state.web_db, &worker_id_str).await?;
     }
 
-    let (token, return_token) = crate::endpoints::worker_tokens::issue(body.token)?;
+    let token = crate::endpoints::worker_tokens::issue();
+    let registration = WorkerRegistrationResponse::new(
+        &state.config.server.serve_url,
+        &body,
+        frontend_page_urls::project_workers_page_url(
+            &state.config.server.frontend_url,
+            &project.name,
+        ),
+        project.id,
+        token.clone(),
+    );
+    let worker_id_str = registration.id.clone();
 
     let token_hash = password_auth::generate_hash(&token);
     let token_encrypted = encrypt_for_dialing(
@@ -311,8 +307,7 @@ pub async fn post_project_worker(
             ..Default::default()
         },
     )
-    .await
-    .map_err(|e| WebError::from_unique_violation(e, ProjectRefusal::WorkerIdRegistered))?;
+    .await?;
 
     scheduler.request_reauth(&worker_id_str).await;
 
@@ -331,22 +326,7 @@ pub async fn post_project_worker(
             serde_json::json!({ "worker_id": worker_id_str, "display_name": display_name }),
         )
         .await;
-    Ok(ok_json(RegisterWorkerResponse {
-        peer_id: project.id,
-        token: if return_token { Some(token) } else { None },
-    }))
-}
-
-async fn ensure_dialable_worker_id(db: &WebDb, worker_id: &str) -> WebResult<()> {
-    let team_worker = gradient_db::teams::workers::is_team_worker(db, worker_id).await?;
-
-    let gradient_ci =
-        gradient_db::worker_registrations::is_gradient_ci_worker(db, worker_id).await?;
-    if team_worker || gradient_ci {
-        return Err(ProjectRefusal::WorkerIdBelongsToOtherConnection.into());
-    }
-
-    Ok(())
+    Ok(ok_json(registration))
 }
 
 /// Open-mode workers (`authorized_peers == None`) are matching any project. Restricted workers are
