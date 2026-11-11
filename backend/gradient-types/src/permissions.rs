@@ -110,12 +110,12 @@ impl Permission {
             Permission::ManageMembers => "Invite and remove members and change roles.",
             Permission::ManageRoles => "Create, edit and delete custom roles.",
             Permission::ManageIntegrations => {
-                "Add or edit a project's connection to a Git host and install webhooks and deploy keys."
+                "Manage connections for Git hosts, webhooks, and deploy keys."
             }
             Permission::ManageActions => "Set actions to run on task events.",
             Permission::ManageWorkers => "Register, enable and disable project workers.",
             Permission::ManageSubscriptions => {
-                "Subscribe a project to the cache, change the mode and output signing, or remove the subscription."
+                "Subscribe to a cache, set mode and signing, or unsubscribe."
             }
             Permission::ManageSshKey => "Update the project SSH key for repository clones.",
             Permission::CreateTask => "Add a new task to the project.",
