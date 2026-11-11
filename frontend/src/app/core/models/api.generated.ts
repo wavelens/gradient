@@ -164,6 +164,10 @@ export interface ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
   create_project: boolean;
 }
 
+export interface ApproveSubscriptionRequest {
+  mode?: CacheSubscriptionMode | null;
+}
+
 export interface ArtefactTree {
   evaluation: EvaluationId;
   created_at: string;
@@ -509,6 +513,9 @@ export interface CacheSubscriptionItem {
   display_name: string;
   mode: CacheSubscriptionMode;
   status: SubscriptionStatus;
+  managed: boolean;
+  sign_outputs: boolean;
+  approvers: string[];
 }
 
 export type CacheSubscriptionMode = "ReadWrite" | "ReadOnly" | "WriteOnly";
@@ -1415,6 +1422,11 @@ export interface GetUserSettingsResponse {
   managed: boolean;
 }
 
+export interface GitAccessReadiness {
+  status: TaskRepositoryFetchStatus;
+  tasks: ProjectTaskReadinessEntry[];
+}
+
 export interface GithubAppManifestRequest {
   host?: string | null;
 }
@@ -1763,7 +1775,6 @@ export interface MakeTaskRequest {
   repository: string;
   wildcard: string;
   concurrency?: ConcurrencyPolicy | null;
-  sign_cache?: boolean | null;
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
@@ -2089,7 +2100,6 @@ export interface PatchTaskRequest {
   wildcard?: string | null;
   keep_evaluations?: number | null;
   concurrency?: ConcurrencyPolicy | null;
-  sign_cache?: boolean | null;
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
@@ -2161,6 +2171,12 @@ export interface PendingJobsResponse {
   other_pending: number;
 }
 
+export interface PendingUserDecisionsResponse {
+  invites: InviteItem[];
+  subscription_requests: SubscriptionRequestItem[];
+  team_requests: TeamGrantRequestInboxEntry[];
+}
+
 export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks" | "createProject";
 
 export interface PermissionEntry {
@@ -2207,6 +2223,21 @@ export interface ProductArtefact {
 
 export type ProjectId = string;
 
+export interface ProjectReadinessResponse {
+  ready: boolean;
+  workers: ProjectReadinessWorkers;
+  cache: ProjectSubscriptionReadinessCache;
+  repository: GitAccessReadiness;
+}
+
+export interface ProjectReadinessWorkers {
+  ready: boolean;
+  registered: number;
+  teams: TeamReadinessEntry[];
+  teams_granted_without_workers: TeamReadinessEntry[];
+  teams_you_can_grant: TeamReadinessEntry[];
+}
+
 export interface ProjectResponse {
   id: ProjectId;
   name: string;
@@ -2243,6 +2274,11 @@ export interface ProjectStoredBytes {
   bytes: number;
 }
 
+export interface ProjectSubscriptionReadinessCache {
+  ready: boolean;
+  subscriptions: CacheSubscriptionItem[];
+}
+
 export interface ProjectSummary {
   id: ProjectId;
   name: string;
@@ -2260,6 +2296,13 @@ export interface ProjectSummary {
   waiting_evaluations: number;
   role?: string | null;
   permissions: Permission[];
+}
+
+export interface ProjectTaskReadinessEntry {
+  name: string;
+  display_name: string;
+  status: TaskRepositoryFetchStatus;
+  error?: string | null;
 }
 
 export type ProjectWorkerEntry = WorkerConnection & {
@@ -2346,25 +2389,13 @@ export interface RailTask {
 }
 
 export interface RegisterWorkerRequest {
-  worker_id: string;
   url?: string | null;
   display_name: string;
-  token?: string | null;
   enable_network?: boolean;
   enable_secrets?: boolean;
   enable_exec?: boolean;
   enable_eval?: boolean;
   enable_build?: boolean;
-}
-
-export interface RegisterWorkerResponse {
-  peer_id: ProjectId;
-  token?: string | null;
-}
-
-export interface RegisteredTeamWorker {
-  team: TeamId;
-  token?: string | null;
 }
 
 export interface RemoveMemberRequest {
@@ -2647,11 +2678,23 @@ export interface StoredNar {
   created: boolean;
 }
 
+export interface SubscribableCache {
+  name: string;
+  display_name: string;
+  owner_team?: string | null;
+  owner_team_display_name?: string | null;
+  public: boolean;
+  needs_approval: boolean;
+  approvers: string[];
+}
+
 export interface SubscribeCacheRequest {
   mode?: CacheSubscriptionMode | null;
 }
 
 export interface SubscriptionRequestItem {
+  cache: string;
+  cache_display_name: string;
   project: string;
   project_display_name: string;
   mode: CacheSubscriptionMode;
@@ -2717,6 +2760,8 @@ export interface TaskMetricsResponse {
   points: TaskMetricPoint[];
 }
 
+export type TaskRepositoryFetchStatus = "verified" | "unchecked" | "failing";
+
 export interface TaskRepositoryResponse {
   repository: string;
   uses_ssh: boolean;
@@ -2747,7 +2792,6 @@ export interface TaskResponse {
   managed: boolean;
   keep_evaluations: number;
   concurrency: ConcurrencyPolicy;
-  sign_cache: boolean;
   wait_for_workers: boolean;
   retry_failed_builds: boolean;
   multi_node_evaluation: boolean;
@@ -2827,6 +2871,11 @@ export interface TeamGrantPickerRow {
   caller_is_admin: boolean;
 }
 
+export type TeamGrantRequestInboxEntry = TeamRequestItem & {
+  team: string;
+  team_display_name: string;
+};
+
 export interface TeamGrants {
   projects: TeamProjectGrant[];
   caches: TeamCacheGrant[];
@@ -2859,6 +2908,12 @@ export interface TeamProjectGrant {
   role?: string | null;
   users: boolean;
   workers: boolean;
+}
+
+export interface TeamReadinessEntry {
+  name: string;
+  display_name: string;
+  workers: number;
 }
 
 export interface TeamRequestItem {
@@ -2983,6 +3038,10 @@ export interface UpdateActionRequest {
   config?: ActionConfig | null;
   events?: string[] | null;
   active?: boolean | null;
+}
+
+export interface UpdateCacheSubscriptionRequest {
+  sign_outputs: boolean;
 }
 
 export interface UpdateFlakeInputOverrideRequest {
@@ -3244,6 +3303,15 @@ export interface WorkerProjectRegistration {
   display_name: string;
   active: boolean;
   managed: boolean;
+}
+
+export interface WorkerRegistrationResponse {
+  id: string;
+  name: string;
+  url: string;
+  peer_id: string;
+  token: string;
+  nixos_configuration: string;
 }
 
 export interface WorkerSamplePoint {

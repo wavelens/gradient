@@ -4631,10 +4631,7 @@ paths:
       tags:
       - caches
       summary: Approve a subscription request
-      description: |-
-        Turns the pending request into a real subscription, using the mode the
-        project asked for, and re-queues any evaluation parked for want of a
-        cache. Requires `manageCacheSubscriptions`.
+      description: Convert pending requests into actual subscriptions. Requeue evaluations with no cache. Subscriptions take the mode from the project request. The optional body `mode` can lower access, for example from read-write to read-only. The body cannot grant more access. Provide `manageCacheSubscriptions`. The endpoint can also work with caches from the server configuration.
       operationId: approveCacheSubscriptionRequest
       parameters:
       - name: cache
@@ -4647,6 +4644,13 @@ paths:
         required: true
         schema:
           type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: '#/components/schemas/ApproveSubscriptionRequest'
+              - type: 'null'
       responses:
         '200':
           description: Subscription approved
@@ -7845,6 +7849,38 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/readiness:
+    get:
+      tags:
+      - projects
+      summary: Project Readiness
+      description: Show what this project needs before an evaluation run. These items include workers that can run evaluations, a cache subscription with write access, and repository access for each task. Only callers with `manageWorkers` can view the list of teams that the caller can grant with workers. Only callers with `editTask` can view repository errors.
+      operationId: getProjectReadiness
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ProjectReadinessResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/repository-check:
     post:
       tags:
@@ -8322,6 +8358,40 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/subscribable-caches:
+    get:
+      tags:
+      - projects
+      summary: List caches for the subscribe dialog
+      description: The subscription dialog can offer only the caches that the caller can select, in display-name order. Set `needs_approval` to true when the caller cannot approve subscriptions. `approvers` can then list the users who can approve subscriptions, the holders of `manageCacheSubscriptions`. Caches with an existing project subscription, or caches with pending requests, do not appear. Requests to this endpoint need `manageSubscriptions` on the project.
+      operationId: listSubscribableCaches
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Cache That Projects Can Subscribe To
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SubscribableCache'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/subscribe:
     get:
       tags:
@@ -8432,6 +8502,48 @@ paths:
       responses:
         '200':
           description: Unsubscribed, or subscription request cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    patch:
+      tags:
+      - projects
+      summary: Change a cache subscription
+      description: Turn signing of store paths that the project pushed on or off with this cache key. Projects need the `manageSubscriptions` permission. This endpoint can't change subscriptions from server settings.
+      operationId: updateProjectCacheSubscription
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCacheSubscriptionRequest'
+        required: true
+      responses:
+        '200':
+          description: Saved subscriptions
           content:
             application/json:
               schema:
@@ -9186,10 +9298,7 @@ paths:
       tags:
       - workers
       summary: Register a worker under a project
-      description: |-
-        Registers a worker ID under this project as a peer. Returns a one-time
-        plaintext token that the worker operator must add to their worker config.
-        The token is shown only once - it cannot be retrieved later.
+      description: Register a new worker under this project. A worker ID and a one-time token come from the server. Response data include a NixOS configuration for the worker machine. The token is visible only once.
       operationId: registerProjectWorker
       parameters:
       - name: project
@@ -9217,7 +9326,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/RegisterWorkerResponse'
+                    $ref: '#/components/schemas/WorkerRegistrationResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -12420,7 +12529,7 @@ paths:
       tags:
       - teams
       summary: Register team worker
-      description: Needs Admin in the team. The worker answers the server challenge with `<team id>:<token>` or `*:<token>` in its peers file. `token` is returned only when the server generated it.
+      description: Requests need admin permissions for the team. The server can generate a worker ID and a one-time token, then send back NixOS configuration for the worker machine. The worker can answer the challenge from the server with `<team id>:<token>` in the peer file.
       operationId: registerTeamWorker
       parameters:
       - name: team
@@ -12448,7 +12557,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/RegisteredTeamWorker'
+                    $ref: '#/components/schemas/WorkerRegistrationResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -12761,36 +12870,6 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
-  /api/v1/user/invites:
-    get:
-      tags:
-      - user
-      summary: List my pending invitations
-      description: |-
-        Project and cache invitations addressed to the authenticated user,
-        newest first.
-      operationId: listUserInvites
-      responses:
-        '200':
-          description: Pending invitations
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/InviteItem'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
   /api/v1/user/invites/accept:
     post:
       tags:
@@ -13081,6 +13160,39 @@ paths:
                     type: boolean
                   message:
                     type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/user/requests:
+    get:
+      tags:
+      - user
+      summary: My Pending Requests
+      description: |-
+        All items that await a decision from the authenticated user appear newest first.
+
+        - Invitations to the user
+        - Subscription requests for caches where the user can use `manageCacheSubscriptions`
+        - Grant requests to teams with the user as Admin
+
+        Superusers can view requests for every cache and team.
+      operationId: listUserRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/PendingUserDecisionsResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -15107,6 +15219,13 @@ components:
             $ref: '#/components/schemas/ApiKeyVisibleProjectOrCacheWithPermissions'
         create_project:
           type: boolean
+    ApproveSubscriptionRequest:
+      type: object
+      properties:
+        mode:
+          oneOf:
+          - $ref: '#/components/schemas/CacheSubscriptionMode'
+          - type: 'null'
     ArtefactTree:
       type: object
       required:
@@ -16156,6 +16275,9 @@ components:
       - display_name
       - mode
       - status
+      - managed
+      - sign_outputs
+      - approvers
       properties:
         id:
           $ref: '#/components/schemas/CacheId'
@@ -16167,6 +16289,15 @@ components:
           $ref: '#/components/schemas/CacheSubscriptionMode'
         status:
           $ref: '#/components/schemas/SubscriptionStatus'
+        managed:
+          type: boolean
+        sign_outputs:
+          type: boolean
+        approvers:
+          type: array
+          items:
+            type: string
+          description: Usernames of the users that can approve a pending request. Empty for an active subscription.
     CacheSubscriptionMode:
       type: string
       enum:
@@ -18852,6 +18983,18 @@ components:
             $ref: '#/components/schemas/ConnectedLoginProvider'
         managed:
           type: boolean
+    GitAccessReadiness:
+      type: object
+      required:
+      - status
+      - tasks
+      properties:
+        status:
+          $ref: '#/components/schemas/TaskRepositoryFetchStatus'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectTaskReadinessEntry'
     GithubAppManifestRequest:
       type: object
       properties:
@@ -19834,10 +19977,6 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ConcurrencyPolicy'
           - type: 'null'
-        sign_cache:
-          type:
-          - boolean
-          - 'null'
         wait_for_workers:
           type:
           - boolean
@@ -20784,10 +20923,6 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ConcurrencyPolicy'
           - type: 'null'
-        sign_cache:
-          type:
-          - boolean
-          - 'null'
         wait_for_workers:
           type:
           - boolean
@@ -21008,6 +21143,25 @@ components:
           type: integer
           format: int64
           minimum: 0
+    PendingUserDecisionsResponse:
+      type: object
+      required:
+      - invites
+      - subscription_requests
+      - team_requests
+      properties:
+        invites:
+          type: array
+          items:
+            $ref: '#/components/schemas/InviteItem'
+        subscription_requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubscriptionRequestItem'
+        team_requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGrantRequestInboxEntry'
     Permission:
       type: string
       enum:
@@ -21145,6 +21299,48 @@ components:
     ProjectId:
       type: string
       format: uuid
+    ProjectReadinessResponse:
+      type: object
+      required:
+      - ready
+      - workers
+      - cache
+      - repository
+      properties:
+        ready:
+          type: boolean
+        workers:
+          $ref: '#/components/schemas/ProjectReadinessWorkers'
+        cache:
+          $ref: '#/components/schemas/ProjectSubscriptionReadinessCache'
+        repository:
+          $ref: '#/components/schemas/GitAccessReadiness'
+    ProjectReadinessWorkers:
+      type: object
+      required:
+      - ready
+      - registered
+      - teams
+      - teams_granted_without_workers
+      - teams_you_can_grant
+      properties:
+        ready:
+          type: boolean
+        registered:
+          type: integer
+          minimum: 0
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamReadinessEntry'
+        teams_granted_without_workers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamReadinessEntry'
+        teams_you_can_grant:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamReadinessEntry'
     ProjectResponse:
       type: object
       required:
@@ -21244,6 +21440,18 @@ components:
         bytes:
           type: integer
           format: int64
+    ProjectSubscriptionReadinessCache:
+      type: object
+      required:
+      - ready
+      - subscriptions
+      properties:
+        ready:
+          type: boolean
+        subscriptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CacheSubscriptionItem'
     ProjectSummary:
       type: object
       required:
@@ -21304,6 +21512,23 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Permission'
+    ProjectTaskReadinessEntry:
+      type: object
+      required:
+      - name
+      - display_name
+      - status
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskRepositoryFetchStatus'
+        error:
+          type:
+          - string
+          - 'null'
     ProjectWorkerEntry:
       allOf:
       - $ref: '#/components/schemas/WorkerConnection'
@@ -21530,21 +21755,14 @@ components:
     RegisterWorkerRequest:
       type: object
       required:
-      - worker_id
       - display_name
       properties:
-        worker_id:
-          type: string
         url:
           type:
           - string
           - 'null'
         display_name:
           type: string
-        token:
-          type:
-          - string
-          - 'null'
         enable_network:
           type: boolean
         enable_secrets:
@@ -21555,28 +21773,6 @@ components:
           type: boolean
         enable_build:
           type: boolean
-    RegisterWorkerResponse:
-      type: object
-      required:
-      - peer_id
-      properties:
-        peer_id:
-          $ref: '#/components/schemas/ProjectId'
-        token:
-          type:
-          - string
-          - 'null'
-    RegisteredTeamWorker:
-      type: object
-      required:
-      - team
-      properties:
-        team:
-          $ref: '#/components/schemas/TeamId'
-        token:
-          type:
-          - string
-          - 'null'
     RemoveMemberRequest:
       type: object
       required:
@@ -22323,6 +22519,35 @@ components:
           type: string
         created:
           type: boolean
+    SubscribableCache:
+      type: object
+      required:
+      - name
+      - display_name
+      - public
+      - needs_approval
+      - approvers
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        owner_team:
+          type:
+          - string
+          - 'null'
+        owner_team_display_name:
+          type:
+          - string
+          - 'null'
+        public:
+          type: boolean
+        needs_approval:
+          type: boolean
+        approvers:
+          type: array
+          items:
+            type: string
     SubscribeCacheRequest:
       type: object
       properties:
@@ -22333,12 +22558,18 @@ components:
     SubscriptionRequestItem:
       type: object
       required:
+      - cache
+      - cache_display_name
       - project
       - project_display_name
       - mode
       - requested_by
       - created_at
       properties:
+        cache:
+          type: string
+        cache_display_name:
+          type: string
         project:
           type: string
         project_display_name:
@@ -22538,6 +22769,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskMetricPoint'
+    TaskRepositoryFetchStatus:
+      type: string
+      enum:
+      - verified
+      - unchecked
+      - failing
     TaskRepositoryResponse:
       type: object
       required:
@@ -22593,7 +22830,6 @@ components:
       - managed
       - keep_evaluations
       - concurrency
-      - sign_cache
       - wait_for_workers
       - retry_failed_builds
       - multi_node_evaluation
@@ -22646,8 +22882,6 @@ components:
           format: int32
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
-        sign_cache:
-          type: boolean
         wait_for_workers:
           type: boolean
         retry_failed_builds:
@@ -22872,6 +23106,18 @@ components:
           minimum: 0
         caller_is_admin:
           type: boolean
+    TeamGrantRequestInboxEntry:
+      allOf:
+      - $ref: '#/components/schemas/TeamRequestItem'
+      - type: object
+        required:
+        - team
+        - team_display_name
+        properties:
+          team:
+            type: string
+          team_display_name:
+            type: string
     TeamGrants:
       type: object
       required:
@@ -22951,6 +23197,20 @@ components:
           type: boolean
         workers:
           type: boolean
+    TeamReadinessEntry:
+      type: object
+      required:
+      - name
+      - display_name
+      - workers
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        workers:
+          type: integer
+          minimum: 0
     TeamRequestItem:
       type: object
       required:
@@ -23312,6 +23572,13 @@ components:
           type:
           - boolean
           - 'null'
+    UpdateCacheSubscriptionRequest:
+      type: object
+      required:
+      - sign_outputs
+      properties:
+        sign_outputs:
+          type: boolean
     UpdateFlakeInputOverrideRequest:
       type: object
       properties:
@@ -24084,6 +24351,30 @@ components:
           type: boolean
         managed:
           type: boolean
+    WorkerRegistrationResponse:
+      type: object
+      required:
+      - id
+      - name
+      - url
+      - peer_id
+      - token
+      - nixos_configuration
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        peer_id:
+          type: string
+          description: Project ID or team ID that the worker names in its peers file. The peers line is `<peer_id>:<token>`.
+        token:
+          type: string
+          description: One-time token for the worker. The server can save only the hash and can't show the token again.
+        nixos_configuration:
+          type: string
     WorkerSamplePoint:
       type: object
       required:
