@@ -10,7 +10,8 @@ use harmonia_protocol::de::{NixRead as _, NixReader};
 use harmonia_protocol::ser::{NixSerialize, NixWrite as _, NixWriter};
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
 use harmonia_store_derivation::derivation::BasicDerivation;
-use harmonia_store_path::StorePath;
+use harmonia_store_derivation::derived_path::DerivedPath;
+use harmonia_store_path::{StoreDir, StorePath};
 use std::io::Cursor;
 use tokio::io::AsyncWriteExt as _;
 use tonic::Status;
@@ -23,6 +24,14 @@ pub fn unpack_protocol_version(packed: u32) -> ProtocolVersion {
 pub fn parse_store_path_base_name_from_grpc_request(base_name: &str) -> Result<StorePath, Status> {
     StorePath::from_base_path(base_name)
         .map_err(|e| Status::invalid_argument(format!("{base_name}: {e}")))
+}
+
+pub fn parse_query_missing_target_string_to_derived_path(
+    target: &str,
+) -> Result<DerivedPath, Status> {
+    StoreDir::default()
+        .parse::<DerivedPath>(target)
+        .map_err(|e| Status::invalid_argument(e.to_string()))
 }
 
 async fn serialize_value_to_nix_worker_protocol_bytes_at_version<T>(

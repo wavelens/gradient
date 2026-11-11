@@ -10,10 +10,13 @@ use super::zstd_stream_compression::{ZstdStreamCompressor, ZstdStreamPieceDecomp
 use super::*;
 use crate::backend::ConnInfo;
 use crate::journal::Journal;
+use bytes::Bytes;
 use harmonia_protocol::daemon::FutureResultExt as _;
+use harmonia_protocol::daemon::wire::types2::QueryMissingResult;
 use harmonia_protocol::daemon::wire::{CLIENT_MAGIC, SERVER_MAGIC};
 use harmonia_protocol::de::NixRead as _;
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
+use harmonia_store_derivation::derived_path::{DerivedPath, SingleDerivedPath};
 use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_path_info::NarHash;
 use std::io::Cursor;
@@ -33,6 +36,15 @@ fn fake_store_known_store_path_nar_bytes() -> Vec<u8> {
         .cycle()
         .take(UNCOMPRESSED_NAR_BYTES_PER_FETCH_NARS_FRAME + 1000)
         .collect()
+}
+
+fn fake_store_known_build_log_drv_store_path() -> StorePath {
+    StorePath::from_base_path("vvpfrjjb83gs895v1881287a9pzy94nw-hello.drv").expect("store path")
+}
+
+fn fake_store_known_derivation_build_log_bytes() -> Vec<u8> {
+    b"building '/nix/store/vvpfrjjb83gs895v1881287a9pzy94nw-hello.drv'\n"
+        .repeat(UNCOMPRESSED_BUILD_LOG_BYTES_PER_GET_BUILD_LOG_CHUNK / 16)
 }
 
 fn known_store_path_info() -> UnkeyedValidPathInfo {
@@ -105,8 +117,43 @@ impl DaemonStore for TestStoreWithOneStorePathAndNar {
         ready(Ok((known.hash() == hash).then_some(known))).empty_logs()
     }
 
+    fn query_missing<'a>(
+        &'a mut self,
+        paths: &'a [DerivedPath],
+    ) -> impl ResultLog<Output = DaemonResult<QueryMissingResult>> + Send + 'a {
+        let known = fake_store_known_store_path();
+        let mut missing = QueryMissingResult {
+            will_build: StorePathSet::new(),
+            will_substitute: StorePathSet::new(),
+            unknown: StorePathSet::new(),
+            download_size: 0,
+            nar_size: 0,
+        };
+        for path in paths {
+            match path {
+                DerivedPath::Built { drv_path, .. } => {
+                    if let SingleDerivedPath::Opaque(drv) = drv_path.as_ref() {
+                        missing.will_build.insert(drv.clone());
+                    }
+                }
+                DerivedPath::Opaque(path) if *path != known => {
+                    missing.unknown.insert(path.clone());
+                }
+                DerivedPath::Opaque(_) => {}
+            }
+        }
+        ready(Ok(missing)).empty_logs()
+    }
+
     fn shutdown(&mut self) -> impl Future<Output = DaemonResult<()>> + Send + '_ {
         ready(Ok(()))
+    }
+}
+
+impl StoreFeaturesBeyondDaemonProtocol for TestStoreWithOneStorePathAndNar {
+    async fn read_build_log(&mut self, drv_path: &StorePath) -> DaemonResult<Option<Bytes>> {
+        Ok((*drv_path == fake_store_known_build_log_drv_store_path())
+            .then(|| Bytes::from(fake_store_known_derivation_build_log_bytes())))
     }
 }
 
@@ -359,4 +406,70 @@ async fn test_connect_rpc_tunnels_nix_worker_protocol_and_returns_daemon_magic()
         received.extend(decompressor.decompress(&reply.data).expect("decompress"));
     }
     assert_eq!(received[..8], SERVER_MAGIC.to_le_bytes());
+}
+
+#[tokio::test]
+async fn get_build_log_streams_zstd_chunks_that_decompress_to_build_log() {
+    let (_server, channel) = start_nix_store_server_on_random_port_and_connect().await;
+    let mut client = NixRemoteClient::new(channel);
+    let mut chunks = client
+        .get_build_log(wrap_message_in_request_with_accepted_bearer_token(
+            GetBuildLogRequest {
+                drv_path: fake_store_known_build_log_drv_store_path().to_string(),
+            },
+        ))
+        .await
+        .expect("build log")
+        .into_inner();
+    let mut decompressor = ZstdStreamPieceDecompressor::new().expect("decompressor");
+    let mut log = Vec::new();
+    let mut received_chunks = 0;
+    while let Some(chunk) = chunks.message().await.expect("chunk") {
+        received_chunks += 1;
+        log.extend(decompressor.decompress(&chunk.data).expect("decompress"));
+    }
+    assert!(received_chunks > 1);
+    assert_eq!(log, fake_store_known_derivation_build_log_bytes());
+}
+
+#[tokio::test]
+async fn get_build_log_for_derivation_without_build_log_returns_not_found() {
+    let (_server, channel) = start_nix_store_server_on_random_port_and_connect().await;
+    let mut client = NixRemoteClient::new(channel);
+    let status = client
+        .get_build_log(wrap_message_in_request_with_accepted_bearer_token(
+            GetBuildLogRequest {
+                drv_path: "r0c60rjpjk8apx4c92k9453cj7wcaq0k-unknown.drv".into(),
+            },
+        ))
+        .await
+        .expect_err("not found");
+    assert_eq!(status.code(), Code::NotFound);
+}
+
+#[tokio::test]
+async fn query_missing_reports_derivation_targets_as_will_build_and_unknown_store_paths_as_unknown_by_base_name()
+ {
+    let (_server, channel) = start_nix_store_server_on_random_port_and_connect().await;
+    let mut client = NixRemoteClient::new(channel);
+    let drv = fake_store_known_build_log_drv_store_path().to_string();
+    let reply = client
+        .query_missing(wrap_message_in_request_with_accepted_bearer_token(
+            QueryMissingRequest {
+                targets: vec![
+                    format!("/nix/store/{drv}^out"),
+                    format!("/nix/store/{}", fake_store_known_store_path()),
+                    "/nix/store/r0c60rjpjk8apx4c92k9453cj7wcaq0k-unknown".into(),
+                ],
+            },
+        ))
+        .await
+        .expect("query missing")
+        .into_inner();
+    assert_eq!(reply.will_build, vec![drv]);
+    assert!(reply.will_substitute.is_empty());
+    assert_eq!(
+        reply.unknown,
+        vec!["r0c60rjpjk8apx4c92k9453cj7wcaq0k-unknown".to_owned()]
+    );
 }
