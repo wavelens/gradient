@@ -26,6 +26,7 @@ const unmanagedKey: ApiKeyInfo = {
   name: 'CI key',
   managed: false,
   permissions: ['viewProject'],
+  cache_permissions: [],
   project: null,
   created_at: '2026-01-01T00:00:00',
   last_used_at: null,
@@ -39,6 +40,7 @@ const managedKey: ApiKeyInfo = {
   name: 'Nix key',
   managed: true,
   permissions: ['viewProject'],
+  cache_permissions: [],
   project: null,
   created_at: '2026-01-01T00:00:00',
   last_used_at: null,
@@ -177,7 +179,7 @@ describe('ApiKeysComponent - allowed sources', () => {
 
     component.formAllowedIps = '10.0.0.0/8\n 2001:db8::/32 ';
     component.saveKey();
-    expect(createApiKey).toHaveBeenCalledWith('deploy', null, ['viewProject'], null, null, ['10.0.0.0/8', '2001:db8::/32']);
+    expect(createApiKey).toHaveBeenCalledWith('deploy', null, ['viewProject'], [], null, null, ['10.0.0.0/8', '2001:db8::/32']);
   });
 });
 
@@ -282,7 +284,7 @@ describe('ApiKeysComponent - field checks', () => {
     expect(component.getPermissionIdsUserCanGrantForKeyBeingEdited()).toEqual(['viewProject']);
   });
 
-  it('offers Create project only for Any project and drops it when the scope changes', () => {
+  it('offers Create project only for Any and drops it when the scope changes', () => {
     const fixture = setup([], {
       getApiKeyPermissions: () => of({
         available_permissions: [{ id: 'viewProject', mutating: false }],
@@ -329,14 +331,14 @@ describe('ApiKeysComponent - field checks', () => {
     const { fixture, component, createApiKey, field } = openCreate();
     component.formScope = 'cache';
     component.onScopeChange();
-    component.formPermissions = { readCache: true };
+    component.cachePermissionCheckedById = { readCache: true };
     component.saveKey();
     fixture.detectChanges();
     expect(field('key-cache')).toContain('Select a cache.');
     expect(createApiKey).not.toHaveBeenCalled();
   });
 
-  it('keeps the ticked permissions between Any project and Project and pre-ticks read for a cache', () => {
+  it('keeps the ticked permissions between scopes and pre-ticks read for a cache', () => {
     const { component } = openCreate();
     component.availablePermissions.set([{ id: 'viewProject', mutating: false, permission_explanation: '' }, { id: 'editTask', mutating: true, permission_explanation: '' }]);
     component.availableCachePermissions.set([{ id: 'viewCache', mutating: false, permission_explanation: '' }, { id: 'readStore', mutating: false, permission_explanation: '' }, { id: 'writeStore', mutating: true, permission_explanation: '' }]);
@@ -346,10 +348,45 @@ describe('ApiKeysComponent - field checks', () => {
     expect(component.formPermissions).toEqual({ viewProject: true, editTask: true });
     component.formScope = 'cache';
     component.onScopeChange();
-    expect(component.formPermissions).toEqual({ viewCache: true, readStore: true, writeStore: false });
-    component.formScope = 'none';
+    expect(component.cachePermissionCheckedById).toEqual({ viewCache: true, readStore: true, writeStore: false });
+    component.formScope = 'unrestrictedScope';
     component.onScopeChange();
-    expect(component.formPermissions).toEqual({ viewProject: true, editTask: false });
+    expect(component.formPermissions).toEqual({ viewProject: true, editTask: true });
+    expect(component.cachePermissionCheckedById).toEqual({ viewCache: true, readStore: true, writeStore: false });
+  });
+
+  it('Any scope shows project, cache and server-wide permission lists', () => {
+    const fixture = setup([], {
+      getApiKeyPermissions: () => of({
+        available_permissions: [{ id: 'viewProject', mutating: false }],
+        availableCache: [{ id: 'readStore', mutating: false }],
+        server_wide_permissions: [{ id: 'createProject', mutating: true }],
+      }),
+    });
+    fixture.componentInstance.openCreateDialog();
+    fixture.detectChanges();
+    const listText = (testId: string) => document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
+    expect(fixture.componentInstance.scopeOptions.find((option) => option.value === 'unrestrictedScope')?.label).toBe('Any');
+    expect(listText('key-project-permissions')).toContain('View project');
+    expect(listText('key-project-permissions')).toContain('Create project');
+    expect(listText('key-cache-permissions')).toContain('Read cache');
+  });
+
+  it('create with Any sends permissions and cache_permissions', () => {
+    const { component, createApiKey } = openCreate();
+    component.cachePermissionCheckedById = { readCache: true };
+    component.saveKey();
+    expect(createApiKey).toHaveBeenCalledWith('deploy', null, ['viewProject'], ['readCache'], null, null, []);
+  });
+
+  it('cache scope sends only cache_permissions', () => {
+    const { component, createApiKey } = openCreate();
+    component.formScope = 'cache';
+    component.onScopeChange();
+    component.formCache = 'main';
+    component.cachePermissionCheckedById = { readCache: true };
+    component.saveKey();
+    expect(createApiKey).toHaveBeenCalledWith('deploy', null, [], ['readCache'], null, 'main', []);
   });
 
   it('forgets the refused Create when the scope changes', () => {
@@ -367,7 +404,7 @@ describe('ApiKeysComponent - field checks', () => {
   it('creates the key on Enter in the name field', () => {
     const { createApiKey } = openCreate();
     document.querySelector('#key-name')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
-    expect(createApiKey).toHaveBeenCalledWith('deploy', null, ['viewProject'], null, null, []);
+    expect(createApiKey).toHaveBeenCalledWith('deploy', null, ['viewProject'], [], null, null, []);
   });
 });
 
@@ -383,7 +420,7 @@ describe('ApiKeysComponent - edits', () => {
   });
 
   it('shows the cache and cache permissions of a cache-scoped key and keeps them on save', () => {
-    const cacheKey: ApiKeyInfo = { ...unmanagedKey, cache: 'nix-cache', permissions: ['viewCache', 'readStore'] };
+    const cacheKey: ApiKeyInfo = { ...unmanagedKey, cache: 'nix-cache', permissions: [], cache_permissions: ['viewCache', 'readStore'] };
     const updateApiKey = vi.fn(() => of(cacheKey));
     const fixture = setup([cacheKey], { updateApiKey });
     const component = fixture.componentInstance;
@@ -395,11 +432,26 @@ describe('ApiKeysComponent - edits', () => {
     component.openEditDialog(cacheKey);
     expect(component.formScope).toBe('cache');
     expect(component.formCache).toBe('nix-cache');
-    expect(component.scopeChoices().map((option) => option.value)).toEqual(['cache']);
-    expect(component.formPermissions).toEqual({ viewCache: true, readStore: true, writeStore: false });
-    component.formPermissions = { ...component.formPermissions, writeStore: true };
+    expect(component.cachePermissionCheckedById).toEqual({ viewCache: true, readStore: true, writeStore: false });
+    component.cachePermissionCheckedById = { ...component.cachePermissionCheckedById, writeStore: true };
     component.saveKey();
-    expect(updateApiKey).toHaveBeenCalledWith('k1', { permissions: ['viewCache', 'readStore', 'writeStore'] });
+    expect(updateApiKey).toHaveBeenCalledWith('k1', { cache_permissions: ['viewCache', 'readStore', 'writeStore'] });
+  });
+
+  it('editing an Any key preselects both lists', () => {
+    const anyKey: ApiKeyInfo = { ...unmanagedKey, permissions: ['viewProject', 'editTask'], cache_permissions: ['readStore'] };
+    const updateApiKey = vi.fn(() => of(anyKey));
+    const fixture = setup([anyKey], { updateApiKey });
+    const component = fixture.componentInstance;
+    component.availablePermissions.set([{ id: 'viewProject', mutating: false, permission_explanation: '' }, { id: 'editTask', mutating: true, permission_explanation: '' }]);
+    component.availableCachePermissions.set([{ id: 'readStore', mutating: false, permission_explanation: '' }, { id: 'writeStore', mutating: true, permission_explanation: '' }]);
+    component.openEditDialog(anyKey);
+    expect(component.formScope).toBe('unrestrictedScope');
+    expect(component.formPermissions).toEqual({ viewProject: true, editTask: true });
+    expect(component.cachePermissionCheckedById).toEqual({ readStore: true, writeStore: false });
+    component.cachePermissionCheckedById = { readStore: true, writeStore: true };
+    component.saveKey();
+    expect(updateApiKey).toHaveBeenCalledWith('k1', { cache_permissions: ['readStore', 'writeStore'] });
   });
 
   it('closes without a request when nothing changed', () => {
@@ -544,7 +596,7 @@ describe('ApiKeysComponent - cache scope', () => {
     expect(component.formScope).toBe('cache');
     expect(component.formCache).toBe('main');
     expect(component.cacheOptions().map((option) => option.value)).toContain('main');
-    expect(component.formPermissions).toEqual({ viewCache: true, readStore: true });
+    expect(component.cachePermissionCheckedById).toEqual({ viewCache: true, readStore: true });
     expect(component.formChanges.changed()).toBe(false);
   });
 
@@ -556,7 +608,7 @@ describe('ApiKeysComponent - cache scope', () => {
     component.formName = 'laptop';
     component.saveKey();
     fixture.detectChanges();
-    expect(createApiKey).toHaveBeenCalledWith('laptop', null, ['viewCache', 'readStore'], null, 'main', []);
+    expect(createApiKey).toHaveBeenCalledWith('laptop', null, [], ['viewCache', 'readStore'], null, 'main', []);
     expect(getCache).toHaveBeenCalledWith('main');
     expect(component.cacheClientSetupTexts()).toEqual({
       netrcCredentialsLine: 'machine ci.example.com login gradient password secret-key',

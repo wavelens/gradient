@@ -25,7 +25,7 @@ nix.settings = {
 
 The one key can cover every path, even paths pulled through from an [upstream cache](../concepts/caches.md#pull-through). Gradient will verify these paths against the upstream cache's key. Gradient is then signing them again with the cache's own key.
 
-Public caches need nothing else. Private caches need a netrc file for the Nix daemon. Store the API key in the netrc file. Create a key in **Settings -> API Keys**. Choose the cache scope and select Read store as the permission. A project-scoped key can read only the caches with a subscription from its own project. A key with Any scope and Read store can read every cache with the user as a member.
+Public caches need nothing else. Private caches need a netrc file for the Nix daemon. Store the API key in the netrc file. Create a key in **Settings -> API Keys**. Choose the cache scope and select Read cache as the permission. A project-scoped key can read only the caches with a subscription from its own project. A key with Any scope and Read cache can read every cache with the user as a member.
 
 Use **Create key for this cache** on the cache page to open a key dialog with the cache scope and cache prefilled. Create a key. The netrc line, the nix.conf line, and the `install-netrc` command show the key filled in.
 
