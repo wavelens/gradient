@@ -67,7 +67,7 @@ Open the project page and select **Connect repository**. Fill in the two fields 
 !!! tip "Private Repositories"
     Each project ships with an SSH key, listed under **Settings -> SSH Key**. Add the public key as a deploy key on the Git host to access private repositories.
 
-The Gradient server and all workers check the host key of the Git host for repository URLs that use SSH. The server and all workers accept only the keys that `/etc/ssh/ssh_known_hosts` or `~/.ssh/known_hosts` list for the service user. Use `programs.ssh.knownHosts` to add a Git host on NixOS.
+Gradient can trust the host key of the Git server on the first SSH fetch for a project. Gradient can store that key per project. The server and all workers accept only that key on later fetches. Gradient can stop the fetch with a "host key changed" error when the fetched key and the saved key differ. Open **Settings -> Host Keys for Git** to check the fingerprint. Click **Check New Key** to trust the new key. Gradient doesn't read the `known_hosts` file.
 
 ## 5. Start an Evaluation
 

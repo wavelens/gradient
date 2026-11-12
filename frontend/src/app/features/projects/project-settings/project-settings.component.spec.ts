@@ -15,7 +15,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { EVERY_PERMISSION, projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState } from '@core/models/access.model';
 import type { Permission } from '@core/models';
-import { ProjectResponse } from '@core/models';
+import { GitSshHostKeyResponse, ProjectResponse } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 
@@ -65,6 +65,7 @@ function setup(access: AccessState, permissions?: Permission[], fields: Partial<
         useValue: {
           getProject: () => of(projectFor(access)),
           getSSHKey: () => of('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEd25519 acme'),
+          listSSHHostKeys: () => of([]),
         },
       },
       { provide: NotifyService, useValue: notify },
@@ -349,5 +350,28 @@ describe('ProjectSettingsComponent - confirmed actions', () => {
     Object.assign(TestBed.inject(ProjectsService), { generateSSHKey });
     findByText(fixture.nativeElement, 'regenerate key')!.click();
     expect(generateSSHKey).not.toHaveBeenCalled();
+  });
+
+  it('confirming a changed host key scans and saves the scanned key', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    const changedKey: GitSshHostKeyResponse = {
+      id: 'k1',
+      host: 'git.example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      fingerprint: 'SHA256:old',
+      public_key: 'ssh-ed25519 AAAA',
+      learned_at: '2026-01-01T00:00:00',
+      changed_at: '2026-02-01T00:00:00',
+    };
+    const saveHostKey = vi.fn(() => of(undefined));
+    Object.assign(TestBed.inject(ProjectsService), {
+      scanSavedHostKey: vi.fn(() => of({ public_key: 'ssh-ed25519 AAAB', fingerprint: 'SHA256:new' })),
+      saveHostKey,
+    });
+    fixture.componentInstance.scanHostConfirmFingerprintAndSave(changedKey);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ consequence: expect.stringContaining('SHA256:new') }));
+    expect(saveHostKey).toHaveBeenCalledWith('acme', { host: 'git.example.com', port: 22, public_key: 'ssh-ed25519 AAAB' });
   });
 });

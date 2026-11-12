@@ -18,6 +18,9 @@ import {
   SubscribableCache,
   ProjectResponse,
   MakeProjectRequest,
+  GitSshHostKeyResponse,
+  SaveHostKeyRequestBody,
+  ScannedHostKey,
   PatchProjectRequest,
   CreateRoleRequest,
   PatchRoleRequest,
@@ -122,6 +125,22 @@ export class ProjectsService {
 
   generateSSHKey(project: string): Observable<string> {
     return this.api.post<string>(`projects/${project}/ssh`);
+  }
+
+  listSSHHostKeys(project: string): Observable<GitSshHostKeyResponse[]> {
+    return this.api.get<GitSshHostKeyResponse[]>(`projects/${project}/ssh/host-keys`);
+  }
+
+  scanSavedHostKey(project: string, id: string): Observable<ScannedHostKey> {
+    return this.api.post<ScannedHostKey>(`projects/${project}/ssh/host-keys/${id}/scan`);
+  }
+
+  saveHostKey(project: string, body: SaveHostKeyRequestBody): Observable<GitSshHostKeyResponse> {
+    return this.api.put<GitSshHostKeyResponse>(`projects/${project}/ssh/host-keys`, body);
+  }
+
+  deleteSavedHostKey(project: string, id: string): Observable<boolean> {
+    return this.api.delete<boolean>(`projects/${project}/ssh/host-keys/${id}`);
   }
 
   checkProjectNameAvailable(name: string): Observable<boolean> {
