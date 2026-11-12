@@ -34,6 +34,16 @@ use super::build_metrics::{
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
 
+fn build_local_nix_daemon_client_options(build_cores: Option<NonZeroU32>) -> ClientOptions {
+    let mut opts = ClientOptions::default();
+    opts.verbose_build = Verbosity::Talkative;
+    opts.verbosity = Verbosity::Notice;
+    opts.use_substitutes = false;
+    opts.build_cores = build_cores.map_or(0, NonZeroU32::get);
+    opts.other_settings.insert("builders".into(), "".into());
+    opts
+}
+
 pub(super) struct ParsedDerivation {
     drv: gradient_derivation::Derivation,
     request: [DerivedPath; 1],
@@ -89,11 +99,7 @@ impl ParsedDerivation {
             "asking nix-daemon to build derivation"
         );
 
-        let mut opts = ClientOptions::default();
-        opts.verbose_build = Verbosity::Talkative;
-        opts.verbosity = Verbosity::Notice;
-        opts.use_substitutes = false;
-        opts.build_cores = build_cores.map_or(0, NonZeroU32::get);
+        let opts = build_local_nix_daemon_client_options(build_cores);
 
         guard
             .execute(|client| async move { client.set_options(&opts).await })
@@ -592,6 +598,17 @@ mod tests {
             text: text.into(),
             activity_type,
         })
+    }
+
+    #[test]
+    fn daemon_options_for_build_set_builders_to_empty_string() {
+        let opts = build_local_nix_daemon_client_options(NonZeroU32::new(4));
+        assert_eq!(
+            opts.other_settings.get("builders"),
+            Some(&harmonia_protocol::types::DaemonString::new())
+        );
+        assert_eq!(opts.build_cores, 4);
+        assert!(!opts.use_substitutes);
     }
 
     #[test]
