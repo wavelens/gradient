@@ -57,8 +57,13 @@ impl Scheduler {
             }
         };
 
+        let fetch_key = if parsed.needs_secrets && !parsed.store_path_pins_content {
+            format!("{}/{}", job.project_id, parsed.fetch_key)
+        } else {
+            parsed.fetch_key
+        };
         self.input_waits.register(NewInputWait {
-            fetch_key: parsed.fetch_key,
+            fetch_key,
             request,
             project: job.project_id,
             needs_secrets: parsed.needs_secrets,

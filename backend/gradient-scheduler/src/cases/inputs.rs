@@ -21,6 +21,7 @@ const W3: &str = "w3";
 const W4: &str = "w4";
 
 const SSH_REQUEST: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.invalid/input.git","rev":"abc"},"storePath":"/nix/store/aaaa-input"}"#;
+const SSH_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.invalid/input.git","ref":"main"}}"#;
 const FETCHED: &str = r#"{"storePath":"/nix/store/aaaa-input"}"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +90,42 @@ async fn i02_two_evaluations_share_one_fetch() {
     );
     assert_eq!(case.input_waits(), 0, "after 2: no input wait left");
     case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn two_projects_fetching_one_unpinned_ssh_input_get_separate_fetches() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
+    evaluating(&case, W1, e1).await;
+    evaluating(&case, W2, e2).await;
+    case.connect(W3, w_fetch(), &[]).await;
+    case.connect(W4, w_fetch(), &[]).await;
+
+    case.input_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        SSH_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH,
+    )
+    .await;
+    case.input_request(
+        W2,
+        &eval_key(e2),
+        "r2",
+        SSH_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH,
+    )
+    .await;
+    let mut projects = fetches_of(&case, &[W1, W2, W3, W4])
+        .into_iter()
+        .map(|fetch| fetch.project)
+        .collect::<Vec<_>>();
+    let mut expected = vec![case.db.project_of(e1).await, case.db.project_of(e2).await];
+    projects.sort();
+    expected.sort();
+    assert_eq!(projects, expected, "after 1: one FetchInput per project");
+    case.check("step 1").await;
 
     case.finish().await;
 }

@@ -11,6 +11,7 @@ use serde_json::Value;
 pub struct InputRequest {
     pub fetch_key: String,
     pub needs_secrets: bool,
+    pub store_path_pins_content: bool,
 }
 
 impl InputRequest {
@@ -25,17 +26,16 @@ impl InputRequest {
             return Err("an input request without arguments".to_owned());
         }
 
-        let fetch_key = json["storePath"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                sorted(&serde_json::json!({ "builtin": builtin, "args": args })).to_string()
-            });
+        let store_path = json["storePath"].as_str();
+        let fetch_key = store_path.map(str::to_owned).unwrap_or_else(|| {
+            sorted(&serde_json::json!({ "builtin": builtin, "args": args })).to_string()
+        });
         Ok(Self {
             fetch_key,
             needs_secrets: args["url"]
                 .as_str()
                 .is_some_and(check_repository_url_is_ssh),
+            store_path_pins_content: store_path.is_some(),
         })
     }
 }
@@ -81,5 +81,26 @@ mod tests {
         assert_eq!(request.fetch_key, "/nix/store/aaaa-source");
         assert!(!request.needs_secrets);
         assert!(InputRequest::parse(r#"{"builtin":"fetchTree"}"#).is_err());
+    }
+
+    #[test]
+    fn a_request_with_a_store_path_pins_its_content() {
+        let request = InputRequest::parse(
+            r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.com/r"},"storePath":"/nix/store/aaaa-source"}"#,
+        )
+        .unwrap();
+
+        assert!(request.store_path_pins_content);
+    }
+
+    #[test]
+    fn a_git_ssh_request_without_store_path_is_unpinned() {
+        let request = InputRequest::parse(
+            r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.com/r","ref":"main"}}"#,
+        )
+        .unwrap();
+
+        assert!(request.needs_secrets);
+        assert!(!request.store_path_pins_content);
     }
 }
