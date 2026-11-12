@@ -1498,6 +1498,17 @@ export interface GitHostConnectionSummary {
   can_manage: boolean;
 }
 
+export interface GitSshHostKeyResponse {
+  id: ProjectSshHostKeyId;
+  host: string;
+  port: number;
+  algorithm: string;
+  fingerprint: string;
+  public_key: string;
+  learned_at: string;
+  changed_at?: string | null;
+}
+
 export interface GiteaOAuthAppConfig {
   git_host_type: string;
   instance_base_url: string;
@@ -2315,6 +2326,8 @@ export interface ProjectSecretSummary {
   managed: boolean;
 }
 
+export type ProjectSshHostKeyId = string;
+
 export interface ProjectStoredBytes {
   project: BoardProject;
   packages: number;
@@ -2547,6 +2560,17 @@ export interface RunOptions {
   labels?: string[] | null;
   timeout_secs?: number | null;
   ports?: number[];
+}
+
+export interface SaveHostKeyRequestBody {
+  host: string;
+  port: number;
+  public_key: string;
+}
+
+export interface ScannedHostKey {
+  public_key: string;
+  fingerprint: string;
 }
 
 export interface ScimErrorBody {

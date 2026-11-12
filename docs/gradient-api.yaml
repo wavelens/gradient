@@ -8740,6 +8740,143 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/ssh/host-keys:
+    get:
+      tags:
+      - projects
+      summary: List Git host keys
+      description: List the host key for SSH on each git server that this project can trust. Gradient can store the key of a host on first connection. Gradient can reject the connection on a key change.
+      operationId: listProjectGitSshHostKeys
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Saved host keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitSshHostKeyResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - projects
+      summary: Save host keys for Git
+      description: Save the host key for a host and port. Replace the previous key and clear the changed mark. Accept only Ed25519 and ECDSA keys. Grant the `manageSshKey` permission (`manageSshKey`) for the project.
+      operationId: saveProjectSshHostKey
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveHostKeyRequestBody'
+        required: true
+      responses:
+        '200':
+          description: Host keys saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitSshHostKeyResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/ssh/host-keys/{host_key}:
+    delete:
+      tags:
+      - projects
+      summary: Delete a Git host key.
+      description: Delete a saved host key. Later connections to that host store the key again. Grant the `manageSshKey` permission in the project.
+      operationId: deleteProjectSshHostKey
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: host_key
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Host key deleted
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/ssh/host-keys/{host_key}/scan:
+    post:
+      tags:
+      - projects
+      summary: Read the current host key
+      description: Grant the `manageSshKey` permission on the project. Connect to the host for the saved key and return the key that the host can offer now, along with its fingerprint. The request does not save a key. Compare the fingerprint with the one that the Git server can publish. Run this comparison before saving a key.
+      operationId: scanProjectSshHostKey
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: host_key
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current host keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ScannedHostKey'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/subscribable-caches:
     get:
       tags:
@@ -19896,6 +20033,39 @@ components:
           type: boolean
         can_manage:
           type: boolean
+    GitSshHostKeyResponse:
+      type: object
+      required:
+      - id
+      - host
+      - port
+      - algorithm
+      - fingerprint
+      - public_key
+      - learned_at
+      properties:
+        id:
+          $ref: '#/components/schemas/ProjectSshHostKeyId'
+        host:
+          type: string
+        port:
+          type: integer
+          format: int32
+          minimum: 0
+        algorithm:
+          type: string
+        fingerprint:
+          type: string
+        public_key:
+          type: string
+        learned_at:
+          type: string
+          format: date-time
+        changed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     GiteaOAuthAppConfig:
       type: object
       required:
@@ -22277,6 +22447,9 @@ components:
           - 'null'
         managed:
           type: boolean
+    ProjectSshHostKeyId:
+      type: string
+      format: uuid
     ProjectStoredBytes:
       type: object
       required:
@@ -22905,6 +23078,31 @@ components:
             type: integer
             format: int32
             minimum: 0
+    SaveHostKeyRequestBody:
+      type: object
+      required:
+      - host
+      - port
+      - public_key
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+          format: int32
+          minimum: 0
+        public_key:
+          type: string
+    ScannedHostKey:
+      type: object
+      required:
+      - public_key
+      - fingerprint
+      properties:
+        public_key:
+          type: string
+        fingerprint:
+          type: string
     ScimErrorBody:
       type: object
       required:

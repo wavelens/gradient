@@ -138,6 +138,16 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     projects::ssh::get_project_ssh,
                     projects::ssh::post_project_ssh
                 ))
+                .routes(routes!(
+                    projects::project_git_ssh_host_keys::list_project_git_ssh_host_keys,
+                    projects::project_git_ssh_host_keys::save_project_ssh_host_key_and_clear_changed_flag
+                ))
+                .routes(routes!(
+                    projects::project_git_ssh_host_keys::connect_to_saved_host_and_get_current_key_with_fingerprint
+                ))
+                .routes(routes!(
+                    projects::project_git_ssh_host_keys::delete_project_ssh_host_key_by_id
+                ))
                 .routes(routes!(projects::secrets::list_project_secrets))
                 .routes(routes!(
                     projects::secrets::get_project_secret,
