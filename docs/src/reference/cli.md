@@ -101,8 +101,8 @@ gradient account switch work
 | `gradient logged-in-user ssh-public-keys add <NAME> [PUBLIC_KEY]` | `--file <FILE>` | Add an SSH public key. Provide the key inline or use `--file`. |
 | `gradient logged-in-user ssh-public-keys delete <ID>` | - | Delete SSH key |
 | `gradient logged-in-user api-keys list` | - | Show a list of API keys. |
-| `gradient logged-in-user api-keys create <NAME>` | `--permission <PERMISSION>`, `--expires-in-days <DAYS>`, `--api-key-project <PROJECT>`, `--cache <CACHE>`, `--allowed-ip <IP>` | Create an API key and output it once. |
-| `gradient logged-in-user api-keys edit <KEY>` | `--name <NAME>`, `--permission <PERMISSION>`, `--api-key-project <PROJECT>`, `--allowed-ip <IP>` | Change an API key. The specified permissions or IP addresses replace the current ones. |
+| `gradient logged-in-user api-keys create <NAME>` | `--permission <PERMISSION>`, `--cache-permission <PERMISSION>`, `--expires-in-days <DAYS>`, `--api-key-project <PROJECT>`, `--cache <CACHE>`, `--allowed-ip <IP>` | Create an API key and output it once. |
+| `gradient logged-in-user api-keys edit <KEY>` | `--name <NAME>`, `--permission <PERMISSION>`, `--cache-permission <PERMISSION>`, `--api-key-project <PROJECT>`, `--cache <CACHE>`, `--allowed-ip <IP>` | Change an API key. The specified permissions, cache permissions, or IP addresses replace the current ones. |
 | `gradient logged-in-user api-keys revoke <KEY>` | - | Revoke an API key. The API key can remain in the list for the audit trail. |
 | `gradient logged-in-user api-keys delete <KEY>` | - | Delete API Key |
 | `gradient logged-in-user api-keys permissions` | - | List the permissions that an API key can grant. |
