@@ -6,7 +6,7 @@
 
 mod git_protocol;
 
-use super::ssh::with_private_key;
+use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, run_with_ssh_credentials};
 use super::url::git_transport_url;
 use crate::SourceError;
 use git_protocol::list_refs_git_protocol;
@@ -27,22 +27,22 @@ pub(in crate::git) struct AdvertisedRef {
 
 pub(in crate::git) fn ls_remote_head(
     url: &str,
-    private_key: Option<&str>,
+    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
     branch: Option<&str>,
 ) -> Result<BranchHead, SourceError> {
-    branch_head(&list_remote_refs(url, private_key)?, branch)
+    branch_head(&list_remote_refs(url, ssh)?, branch)
 }
 
 pub(in crate::git) fn list_remote_refs(
     url: &str,
-    private_key: Option<&str>,
+    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
 ) -> Result<Vec<AdvertisedRef>, SourceError> {
     let url = git_transport_url(url);
-    if url.starts_with("git://") && private_key.is_none() {
+    if url.starts_with("git://") && ssh.is_none() {
         return list_refs_git_protocol(url);
     }
 
-    with_private_key(private_key, || list_refs_libgit2(url))
+    run_with_ssh_credentials(ssh, || list_refs_libgit2(url))
 }
 
 fn list_refs_libgit2(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {

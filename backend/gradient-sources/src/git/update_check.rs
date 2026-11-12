@@ -80,16 +80,11 @@ impl TaskGitContext<'_> {
         let url = self.task.repository.clone();
         let private_key = self.private_key.clone();
 
-        tokio::task::spawn_blocking(move || {
-            select(&list_remote_refs(
-                &url,
-                private_key.as_ref().map(SecretString::expose),
-            )?)
-        })
-        .await
-        .map_err(|e| SourceError::GitExecution {
-            error: e.to_string(),
-        })?
+        tokio::task::spawn_blocking(move || select(&list_remote_refs(&url, private_key.as_ref())?))
+            .await
+            .map_err(|e| SourceError::GitExecution {
+                error: e.to_string(),
+            })?
     }
 
     async fn commit_hash(&self, evaluation: &MEvaluation) -> Result<Option<Vec<u8>>, SourceError> {

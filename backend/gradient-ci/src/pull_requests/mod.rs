@@ -194,7 +194,14 @@ async fn files_of_patch(
         let checkout = gradient_sources::checkout_commit(
             &repository,
             &start_commit,
-            ssh_key.as_ref().map(SecretString::expose),
+            ssh_key
+                .map(|key| {
+                    gradient_sources::SshGitPrivateKeyKnownHostsAndObservations::new(
+                        key,
+                        Vec::new(),
+                    )
+                })
+                .as_ref(),
         )
         .map_err(|e| PullRequestError::DoesNotApply(format!("{e:#}")))?;
         patched_files(checkout.path(), &patch)

@@ -6,10 +6,11 @@
 
 #![allow(clippy::disallowed_methods, reason = "test SSH server")]
 
-use super::KNOWN_HOSTS_FILE_PATHS;
+use super::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
 use crate::git::commit_info::{fetch_commit, head_refspec};
 use crate::git::remote::ls_remote_head;
-use russh::keys::{PrivateKey, PublicKey};
+use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
+use russh::keys::{Algorithm, EcdsaCurve, PrivateKey, PublicKey};
 use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session};
 use russh::{Channel, ChannelId, MethodKind, MethodSet};
 use ssh_key::LineEnding;
@@ -101,12 +102,10 @@ async fn run_in_shell(channel: Channel<Msg>, handle: Handle, command: String) {
     let _ = handle.close(id).await;
 }
 
-async fn serve_git_over_ssh(client_key: PublicKey) -> (u16, PublicKey) {
-    let host_key = decode(&ed25519_pem());
-    let host_public_key = host_key.public_key().clone();
+async fn serve_git_over_ssh(client_key: PublicKey, host_keys: Vec<PrivateKey>) -> u16 {
     let config = Arc::new(russh::server::Config {
         methods: MethodSet::from(&[MethodKind::PublicKey][..]),
-        keys: vec![host_key],
+        keys: host_keys,
         preferred: gradient_util::ssh::ALGORITHMS,
         ..Default::default()
     });
@@ -128,7 +127,22 @@ async fn serve_git_over_ssh(client_key: PublicKey) -> (u16, PublicKey) {
         }
     });
 
-    (port, host_public_key)
+    port
+}
+
+fn generate_random_ssh_host_private_key(algorithm: Algorithm) -> PrivateKey {
+    PrivateKey::random(&mut rand::rng(), algorithm).unwrap()
+}
+
+fn make_saved_git_server_ssh_host_key_for_local_test_server(
+    port: u16,
+    key: &PrivateKey,
+) -> GitServerSshHostKey {
+    GitServerSshHostKey {
+        host: "127.0.0.1".into(),
+        port,
+        public_key: key.public_key().to_openssh().unwrap(),
+    }
 }
 
 fn commit(repo: &git2::Repository, message: &str) -> git2::Oid {
@@ -142,42 +156,193 @@ fn commit(repo: &git2::Repository, message: &str) -> git2::Oid {
         .unwrap()
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_repository_is_listed_and_fetched_over_ssh_with_the_project_key() {
+fn create_temp_git_repository_with_two_commits_on_main() -> (tempfile::TempDir, git2::Oid) {
     let dir = tempfile::TempDir::new().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     repo.set_head("refs/heads/main").unwrap();
     commit(&repo, "first");
     let tip = commit(&repo, "second");
+    (dir, tip)
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_is_listed_and_fetched_over_ssh_with_the_project_key() {
+    let (dir, tip) = create_temp_git_repository_with_two_commits_on_main();
     let client_pem = ed25519_pem();
-    let (port, host_key) = serve_git_over_ssh(decode(&client_pem).public_key().clone()).await;
-    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
-    let known_hosts = dir.path().join("known_hosts");
-    std::fs::write(
-        &known_hosts,
-        format!("[127.0.0.1]:{port} {}\n", host_key.to_openssh().unwrap()),
+    let host_key = generate_random_ssh_host_private_key(Algorithm::Ed25519);
+    let port = serve_git_over_ssh(
+        decode(&client_pem).public_key().clone(),
+        vec![host_key.clone()],
     )
-    .unwrap();
+    .await;
+    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let saved = vec![make_saved_git_server_ssh_host_key_for_local_test_server(
+        port, &host_key,
+    )];
+    let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(client_pem.into(), saved.clone());
+    let foreign = SshGitPrivateKeyKnownHostsAndObservations::new(ed25519_pem().into(), saved);
 
-    let (unknown_host, head, fetched, wrong_key) = tokio::task::spawn_blocking(move || {
-        KNOWN_HOSTS_FILE_PATHS.set(Vec::new());
-        let unknown_host = ls_remote_head(&ssh_url, Some(&client_pem), None);
-        KNOWN_HOSTS_FILE_PATHS.set(vec![known_hosts]);
-        (
-            unknown_host,
-            ls_remote_head(&ssh_url, Some(&client_pem), None),
-            fetch_commit(&ssh_url, Some(&client_pem), &head_refspec(None)),
-            ls_remote_head(&ssh_url, Some(&ed25519_pem()), None),
-        )
+    let (head, fetched, wrong_key) = tokio::task::spawn_blocking({
+        let ssh = ssh.clone();
+        move || {
+            (
+                ls_remote_head(&ssh_url, Some(&ssh), None),
+                fetch_commit(&ssh_url, Some(&ssh), &head_refspec(None)),
+                ls_remote_head(&ssh_url, Some(&foreign), None),
+            )
+        }
     })
     .await
     .unwrap();
 
-    assert!(unknown_host.is_err());
     let head = head.unwrap();
     assert_eq!(head.branch, "refs/heads/main");
     assert_eq!(head.commit, tip.as_bytes());
     assert_eq!(fetched.unwrap().hash, tip.as_bytes());
     assert!(wrong_key.is_err());
+    assert!(ssh.observations().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_host_is_accepted_and_reported_as_learned() {
+    let (dir, _) = create_temp_git_repository_with_two_commits_on_main();
+    let client_pem = ed25519_pem();
+    let host_key = generate_random_ssh_host_private_key(Algorithm::Ed25519);
+    let port = serve_git_over_ssh(
+        decode(&client_pem).public_key().clone(),
+        vec![host_key.clone()],
+    )
+    .await;
+    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(client_pem.into(), Vec::new());
+
+    let head = tokio::task::spawn_blocking({
+        let ssh = ssh.clone();
+        move || ls_remote_head(&ssh_url, Some(&ssh), None)
+    })
+    .await
+    .unwrap();
+
+    assert!(head.is_ok(), "{:?}", head.err());
+    assert_eq!(
+        ssh.observations(),
+        vec![GitSshHostKeyObservation::UnknownHostKeyAcceptedForSaving {
+            key: make_saved_git_server_ssh_host_key_for_local_test_server(port, &host_key),
+        }]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_host_key_is_accepted_silently() {
+    let (dir, tip) = create_temp_git_repository_with_two_commits_on_main();
+    let client_pem = ed25519_pem();
+    let host_key = generate_random_ssh_host_private_key(Algorithm::Ed25519);
+    let port = serve_git_over_ssh(
+        decode(&client_pem).public_key().clone(),
+        vec![host_key.clone()],
+    )
+    .await;
+    let ssh_url = format!("ssh://git@LocalHost:{port}{}", dir.path().display());
+    let saved = GitServerSshHostKey {
+        host: "localhost".into(),
+        ..make_saved_git_server_ssh_host_key_for_local_test_server(port, &host_key)
+    };
+    let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(client_pem.into(), vec![saved]);
+
+    let (head, fetched) = tokio::task::spawn_blocking({
+        let ssh = ssh.clone();
+        move || {
+            (
+                ls_remote_head(&ssh_url, Some(&ssh), None),
+                fetch_commit(&ssh_url, Some(&ssh), &head_refspec(None)),
+            )
+        }
+    })
+    .await
+    .unwrap();
+
+    assert!(head.is_ok(), "{:?}", head.err());
+    assert_eq!(fetched.unwrap().hash, tip.as_bytes());
+    assert!(ssh.observations().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_different_host_key_is_refused_and_reported_as_changed() {
+    let (dir, _) = create_temp_git_repository_with_two_commits_on_main();
+    let client_pem = ed25519_pem();
+    let host_key = generate_random_ssh_host_private_key(Algorithm::Ed25519);
+    let port = serve_git_over_ssh(decode(&client_pem).public_key().clone(), vec![host_key]).await;
+    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(
+        client_pem.into(),
+        vec![make_saved_git_server_ssh_host_key_for_local_test_server(
+            port,
+            &generate_random_ssh_host_private_key(Algorithm::Ed25519),
+        )],
+    );
+
+    let head = tokio::task::spawn_blocking({
+        let ssh = ssh.clone();
+        move || ls_remote_head(&ssh_url, Some(&ssh), None)
+    })
+    .await
+    .unwrap();
+
+    let error = head.err().unwrap().to_string();
+    assert!(error.contains("changed"), "{error}");
+    assert_eq!(
+        ssh.observations(),
+        vec![GitSshHostKeyObservation::HostKeyMismatchConnectionRefused {
+            host: "127.0.0.1".into(),
+            port,
+        }]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_ecdsa_key_still_matches_when_the_host_also_offers_ed25519() {
+    let (dir, _) = create_temp_git_repository_with_two_commits_on_main();
+    let client_pem = ed25519_pem();
+    let ecdsa = generate_random_ssh_host_private_key(Algorithm::Ecdsa {
+        curve: EcdsaCurve::NistP256,
+    });
+    let port = serve_git_over_ssh(
+        decode(&client_pem).public_key().clone(),
+        vec![
+            generate_random_ssh_host_private_key(Algorithm::Ed25519),
+            ecdsa.clone(),
+        ],
+    )
+    .await;
+    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(
+        client_pem.into(),
+        vec![make_saved_git_server_ssh_host_key_for_local_test_server(
+            port, &ecdsa,
+        )],
+    );
+
+    let head = tokio::task::spawn_blocking({
+        let ssh = ssh.clone();
+        move || ls_remote_head(&ssh_url, Some(&ssh), None)
+    })
+    .await
+    .unwrap();
+
+    assert!(head.is_ok(), "{:?}", head.err());
+    assert!(ssh.observations().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_presented_host_key_can_be_fetched_without_a_saved_one() {
+    let host_key = generate_random_ssh_host_private_key(Algorithm::Ed25519);
+    let port = serve_git_over_ssh(
+        decode(&ed25519_pem()).public_key().clone(),
+        vec![host_key.clone()],
+    )
+    .await;
+
+    let presented = fetch_ssh_host_key("127.0.0.1", port).await.unwrap();
+
+    assert_eq!(presented, host_key.public_key().to_openssh().unwrap());
 }

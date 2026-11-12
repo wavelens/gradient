@@ -13,7 +13,7 @@ use sea_orm::EntityTrait;
 pub(super) struct TaskGitContext<'a> {
     pub(super) ctx: &'a DbContext,
     pub(super) task: &'a MTask,
-    pub(super) private_key: Option<SecretString>,
+    pub(super) private_key: Option<super::ssh::SshGitPrivateKeyKnownHostsAndObservations>,
 }
 
 impl<'a> TaskGitContext<'a> {
@@ -32,7 +32,10 @@ impl<'a> TaskGitContext<'a> {
                 project,
                 &ctx.config.server.serve_url,
             )?;
-            Some(private_key)
+            Some(super::ssh::SshGitPrivateKeyKnownHostsAndObservations::new(
+                private_key,
+                Vec::new(),
+            ))
         } else {
             None
         };

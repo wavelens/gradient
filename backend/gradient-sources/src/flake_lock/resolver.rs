@@ -6,7 +6,6 @@
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use gradient_types::SecretString;
 use gradient_wire::traits::InputProgressSink;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -39,7 +38,7 @@ pub struct HttpRevisionResolver {
     client: reqwest::Client,
     github_token: Option<String>,
     gitlab_token: Option<String>,
-    ssh_key: Option<SecretString>,
+    ssh_key: Option<crate::git::SshGitPrivateKeyKnownHostsAndObservations>,
 }
 
 impl std::fmt::Debug for HttpRevisionResolver {
@@ -73,7 +72,10 @@ impl HttpRevisionResolver {
         self
     }
 
-    pub fn with_ssh_key(mut self, key: Option<SecretString>) -> Self {
+    pub fn with_ssh_key(
+        mut self,
+        key: Option<crate::git::SshGitPrivateKeyKnownHostsAndObservations>,
+    ) -> Self {
         self.ssh_key = key;
         self
     }
@@ -161,11 +163,7 @@ impl HttpRevisionResolver {
         let ref_owned = ref_.clone();
         let ssh_key = self.ssh_key.clone();
         let (rev, last_modified, tmp) = tokio::task::spawn_blocking(move || {
-            git_checkout(
-                &url,
-                ref_owned.as_deref(),
-                ssh_key.as_ref().map(SecretString::expose),
-            )
+            git_checkout(&url, ref_owned.as_deref(), ssh_key.as_ref())
         })
         .await
         .context("git checkout task panicked")??;
@@ -271,7 +269,7 @@ fn url_with_percent_encoded_path_segments(base: &Url, segments: &[&str]) -> Resu
 fn git_checkout(
     url: &str,
     ref_: Option<&str>,
-    ssh_key: Option<&str>,
+    ssh_key: Option<&crate::git::SshGitPrivateKeyKnownHostsAndObservations>,
 ) -> Result<(String, i64, tempfile::TempDir)> {
     let rev = crate::git::remote_ref_commit(url, ref_, ssh_key)
         .with_context(|| format!("Resolve git ref `{}` for {url}", ref_.unwrap_or("HEAD")))?;
@@ -418,7 +416,11 @@ mod tests {
     fn git_checkout_with_ssh_key_still_clones_file_url() {
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
-        let out = git_checkout(&url, None, Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
+        let ssh = crate::git::SshGitPrivateKeyKnownHostsAndObservations::new(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n".into(),
+            Vec::new(),
+        );
+        let out = git_checkout(&url, None, Some(&ssh));
         assert!(
             out.is_ok(),
             "file:// clone with an ssh key failed: {:?}",
