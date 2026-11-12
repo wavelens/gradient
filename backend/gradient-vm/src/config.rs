@@ -36,7 +36,6 @@ pub struct VmConfig {
     pub devices: Vec<DeviceConfig>,
     pub mounts: Vec<MountConfig>,
     pub bridge: String,
-    pub subnet: String,
     pub virtiofsd_bin: String,
     pub guests_dir: PathBuf,
 }

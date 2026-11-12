@@ -410,11 +410,8 @@ pub struct ExecArgs {
     #[arg(default_value = "gradient-guests")]
     pub bridge: String,
 
-    /// IPv4 subnet of {option}`services.gradient.worker.exec.bridge`. The bridge takes the
-    /// first host address. Guests with network access get the lowest free address after it.
-    /// Multi-node exec jobs need a different subnet on each exec worker of a zone.
-    #[arg(default_value = "10.233.0.0/16")]
-    pub subnet: String,
+    /// The IPv4 subnet for {option}`services.gradient.worker.exec.bridge`. Set this option when {option}`services.gradient.worker.capabilities.exec` is on. Pick a subnet free of other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span several nodes need a separate subnet on each Exec worker in the zone.
+    pub subnet: Option<String>,
 
     /// IPv4 addresses of the nameservers for guests with network access. An empty list uses the
     /// address of {option}`services.gradient.worker.exec.bridge`, where the NixOS module runs

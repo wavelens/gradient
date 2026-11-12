@@ -22,6 +22,7 @@ services.gradient.worker = {
     image = gradient.lib.mkWorkerImage { # (1)!
       modules = [ ./worker-guest.nix ];
     };
+    subnet = "10.233.0.0/16";
     preWarm = 2; # (2)!
     maxPreWarm = 8; # (3)!
     labels = [ "lab-a" ];
@@ -56,7 +57,7 @@ services.gradient.worker = {
 
 ## 2. Connect the Network
 
-- Networked jobs join the bridge `exec.bridge` with an address from `exec.subnet`. NAT rules on the host connect the bridge to the outside.
+- Workers with exec jobs need ``exec.subnet``, an IPv4 subnet for bridge ``exec.bridge``. Choose a subnet that no other network on the host can use. Networked jobs join the bridge with addresses from ``exec.subnet``. NAT rules on the host connect the bridge to the outside.
 - Guests resolve names through a DNS forwarder on the bridge. Addresses in `exec.nameservers` replace the forwarder.
 
 ## 3. Pick the Restart Behaviour
