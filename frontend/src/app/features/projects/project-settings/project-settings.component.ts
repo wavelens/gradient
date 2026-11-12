@@ -8,13 +8,14 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Observable, concat, finalize, toArray } from 'rxjs';
+import { Observable, concat, finalize, switchMap, toArray } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
+  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   CopyFieldComponent,
@@ -30,11 +31,12 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
+import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, splitLines, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
-import { PatchProjectRequest, ProjectResponse, accessTo } from '@core/models';
+import { GitSshHostKeyResponse, PatchProjectRequest, ProjectResponse, accessTo } from '@core/models';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
 
@@ -53,6 +55,9 @@ interface ProjectForm {
   standalone: true,
   imports: [
     LabelHelpComponent,
+    RelativeTimePipe,
+    ServerTimestampToLocalDateTimePipe,
+    BadgeComponent,
     CommonModule,
     RouterModule,
     FormsModule,
@@ -107,9 +112,13 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   sshLoading = signal(true);
   sshError = signal<unknown>(null);
   generatingSSH = signal(false);
+  sshHostKeysLoading = signal(true);
+  gitSshHostKeysLoadError = signal<unknown>(null);
+  hostKeyIdBeingScanned = signal<string | null>(null);
 
   project = signal<ProjectResponse | null>(null);
   sshKey = signal<string>('');
+  sshHostKeys = signal<GitSshHostKeyResponse[]>([]);
 
   saveError = signal<string | null>(null);
 
@@ -150,6 +159,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.loadProject();
     this.loadSSHKey();
+    this.loadSSHHostKeys();
   }
 
   loadProject(): void {
@@ -190,6 +200,21 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       error: (error) => {
         this.sshError.set(error);
         this.sshLoading.set(false);
+      },
+    });
+  }
+
+  loadSSHHostKeys(): void {
+    this.sshHostKeysLoading.set(true);
+    this.gitSshHostKeysLoadError.set(null);
+    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.listSSHHostKeys(this.projectName)).subscribe({
+      next: (keys) => {
+        this.sshHostKeys.set(keys);
+        this.sshHostKeysLoading.set(false);
+      },
+      error: (error) => {
+        this.gitSshHostKeysLoadError.set(error);
+        this.sshHostKeysLoading.set(false);
       },
     });
   }
@@ -273,6 +298,53 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       .subscribe({
         next: (key) => this.showSSHKey(key),
         error: (error: unknown) => this.notify.failure('SSH key generation failed', error),
+      });
+  }
+
+  scanHostConfirmFingerprintAndSave(key: GitSshHostKeyResponse): void {
+    this.hostKeyIdBeingScanned.set(key.id);
+    this.projectsService
+      .scanSavedHostKey(this.projectName, key.id)
+      .pipe(
+        finalize(() => this.hostKeyIdBeingScanned.set(null)),
+        switchMap((scanned) =>
+          this.confirm.confirm({
+            title: 'Trust new host key',
+            target: `${key.host}:${key.port}`,
+            consequence: `The Git server's current key, with fingerprint ${scanned.fingerprint}. Compare the fingerprint with the value that the Git host publishes. Fetches for this project trust only this key from now on.`,
+            confirmLabel: 'Trust',
+            failure: 'Failed to save the host key.',
+            action: () =>
+              this.projectsService.saveHostKey(this.projectName, {
+                host: key.host,
+                port: key.port,
+                public_key: scanned.public_key,
+              }),
+          }),
+        ),
+      )
+      .subscribe({
+        next: () => {
+          this.notify.success('Host key saved');
+          this.loadSSHHostKeys();
+        },
+        error: (error: unknown) => this.notify.failure('Reading the host key from the Git server failed', error),
+      });
+  }
+
+  confirmAndDeleteSavedHostKey(key: GitSshHostKeyResponse): void {
+    this.confirm
+      .confirm({
+        title: 'Delete Host Key',
+        target: `${key.host}:${key.port}`,
+        consequence: 'The next SSH fetch from this Git server can trust the key the server presents and save it again.',
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete host key.',
+        action: () => this.projectsService.deleteSavedHostKey(this.projectName, key.id),
+      })
+      .subscribe(() => {
+        this.notify.success('Host key deleted');
+        this.loadSSHHostKeys();
       });
   }
 

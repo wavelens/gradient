@@ -177,6 +177,62 @@
     }
 
   </gr-settings-section>
+
+  <gr-settings-section title="Host Keys for Git">
+    <p class="text-secondary">Gradient can trust the host key of the Git server on the first fetch of a repository for this project from that server over SSH. Later fetches fail on a different host key from the server.</p>
+    <gr-load-state
+      flat
+      [loading]="sshHostKeysLoading()"
+      [error]="gitSshHostKeysLoadError()"
+      [empty]="sshHostKeys().length === 0"
+      loadingMessage="Loading host keys..."
+      errorTitle="Failed to load host keys"
+      emptyIcon="key"
+      emptyTitle="No host keys yet"
+      emptyMessage="Git server host keys appear here after the first SSH fetch."
+      (retry)="loadSSHHostKeys()"
+    >
+      <gr-row-list>
+        @for (key of sshHostKeys(); track key.id) {
+          <gr-row icon="dns">
+            {{ key.host }}:{{ key.port }}
+            <gr-badge>{{ key.algorithm }}</gr-badge>
+            <span slot="meta">
+              <code>{{ key.fingerprint }}</code>
+              Learned <span [title]="key.learned_at | serverDate">{{ key.learned_at | relativeTime }}</span>
+              @if (key.changed_at) {
+                <gr-message-banner type="warning">The Git server sent a different key. Fetches fail until someone can confirm the new key.</gr-message-banner>
+              }
+            </span>
+            <div slot="actions" class="phone-icon-buttons">
+              @if (key.changed_at) {
+                <button
+                  *appWritable="sshKeyAccess()"
+                  grButton
+                  label="Check New Key"
+                  icon="verified_user"
+                  severity="secondary"
+                  size="small"
+                  [loading]="hostKeyIdBeingScanned() === key.id"
+                  [disabled]="hostKeyIdBeingScanned() !== null"
+                  (click)="scanHostConfirmFingerprintAndSave(key)"
+                ></button>
+              }
+              <button
+                *appWritable="sshKeyAccess()"
+                grButton
+                label="Delete"
+                icon="delete"
+                severity="danger"
+                size="small"
+                (click)="confirmAndDeleteSavedHostKey(key)"
+              ></button>
+            </div>
+          </gr-row>
+        }
+      </gr-row-list>
+    </gr-load-state>
+  </gr-settings-section>
   }
 
   <!-- Danger Zone -->
