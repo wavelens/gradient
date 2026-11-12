@@ -9,12 +9,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_types::SecretString;
+use gradient_sources::SshGitPrivateKeyKnownHostsAndObservations;
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{FlakeJob, FlakeSource};
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter, WorkerStore};
 use gradient_wire::types::{EvalProgress, InputFetch, InputFetchState};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::AbortSignal;
 use super::dependencies::InputSource;
@@ -41,6 +41,35 @@ pub async fn fetch_repository(
     updater: &mut dyn JobReporter,
     credentials: &JobCredentials,
     store: &dyn WorkerStore,
+    abort: AbortSignal,
+) -> Result<FetchOutcome> {
+    let ssh = credentials.ssh_git_private_key_known_hosts_and_observations();
+    let fetched =
+        fetch_repository_with_optional_ssh_credentials(job, updater, ssh.as_ref(), store, abort)
+            .await;
+    if let Some(ssh) = &ssh {
+        send_ssh_host_key_observations_or_log_warning(updater, ssh).await;
+    }
+    fetched
+}
+
+pub(crate) async fn send_ssh_host_key_observations_or_log_warning(
+    updater: &mut dyn JobReporter,
+    ssh: &SshGitPrivateKeyKnownHostsAndObservations,
+) {
+    if let Err(error) = updater
+        .report_git_ssh_host_key_observations(ssh.observations())
+        .await
+    {
+        warn!(%error, "The job doesn't send host key observations.");
+    }
+}
+
+async fn fetch_repository_with_optional_ssh_credentials(
+    job: &FlakeJob,
+    updater: &mut dyn JobReporter,
+    ssh_key: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    store: &dyn WorkerStore,
     mut abort: AbortSignal,
 ) -> Result<FetchOutcome> {
     if abort.is_aborted() {
@@ -49,19 +78,12 @@ pub async fn fetch_repository(
 
     updater.report_fetching().await?;
 
-    let ssh_key = credentials
-        .ssh_key()
-        .and_then(SecretString::from_utf8)
-        .map(|key| {
-            gradient_sources::SshGitPrivateKeyKnownHostsAndObservations::new(key, Vec::new())
-        });
-
     let (source_path, flake_root, _checkout) = match &job.source {
         FlakeSource::Repository { url, commit } => {
             let (url, commit) = (url.clone(), commit.clone());
             debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
 
-            let ssh_key_for_clone = ssh_key.clone();
+            let ssh_key_for_clone = ssh_key.cloned();
             let commit_for_clone = commit.clone();
             let clone_task = tokio::task::spawn_blocking(move || {
                 gradient_sources::checkout_commit(
@@ -84,7 +106,7 @@ pub async fn fetch_repository(
             let flake_root = flake_root(checkout.path(), job.flake_dir.as_deref())?;
 
             if let Some(spec) = &job.input_update {
-                run_input_update(spec, &flake_root, ssh_key.as_ref(), updater, &mut abort).await?;
+                run_input_update(spec, &flake_root, ssh_key, updater, &mut abort).await?;
             }
 
             let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;

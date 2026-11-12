@@ -57,6 +57,14 @@ pub trait JobReporter: Send + Sync {
         let _ = sources;
         Ok(())
     }
+
+    async fn report_git_ssh_host_key_observations(
+        &mut self,
+        observations: Vec<crate::types::GitSshHostKeyObservation>,
+    ) -> Result<()> {
+        let _ = observations;
+        Ok(())
+    }
     async fn report_evaluating_flake(&mut self) -> Result<()>;
     async fn report_evaluating_derivations(&mut self) -> Result<()>;
     async fn report_eval_result(

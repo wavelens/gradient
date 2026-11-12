@@ -485,13 +485,14 @@ impl MessageLoopState {
                 project,
                 request,
                 ssh_key,
-                ssh_host_keys: _,
+                ssh_host_keys,
             } => {
                 self.on_fetch_input(InputFetchJob {
                     fetch_id,
                     project,
                     request,
                     ssh_key,
+                    ssh_host_keys,
                 });
             }
             ServerMessage::OpenGuestChannel {

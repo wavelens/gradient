@@ -10,12 +10,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use git2::ErrorClass;
 use gradient_types::RepositoryLocation;
-use gradient_types::secret::SecretString;
 use gradient_wire::types::JobContext;
 use tokio_util::sync::CancellationToken;
 
 use super::job::{STORE_DIR, StoreAccess};
 use crate::executor::failure::BuildError;
+use crate::executor::fetch::send_ssh_host_key_observations_or_log_warning;
 use crate::proto::credentials::JobCredentials;
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{MissingInputs, SubstituteNotOnUpstream, ensure_path};
@@ -56,7 +56,7 @@ pub async fn checkout_work(
                 .await
                 .map_err(BuildError::transient)
         }
-        WorkSource::Git { url, commit } => clone_commit(work, url, commit, credentials)
+        WorkSource::Git { url, commit } => clone_commit(work, url, commit, credentials, updater)
             .await
             .map_err(git_failure),
     }
@@ -67,26 +67,24 @@ async fn clone_commit(
     url: &str,
     commit: &str,
     credentials: &JobCredentials,
+    updater: &mut JobUpdater,
 ) -> Result<()> {
-    let ssh_key = project_ssh_key(credentials)?;
-    let (dir, url, commit) = (work.to_path_buf(), url.to_owned(), commit.to_owned());
-    tokio::task::spawn_blocking(move || {
-        gradient_sources::checkout_commit_into(
-            &dir,
-            &url,
-            &commit,
-            ssh_key
-                .map(|key| {
-                    gradient_sources::SshGitPrivateKeyKnownHostsAndObservations::new(
-                        key,
-                        Vec::new(),
-                    )
-                })
-                .as_ref(),
-        )
+    let ssh = credentials.ssh_git_private_key_known_hosts_and_observations();
+    let (dir, url, commit, ssh_for_clone) = (
+        work.to_path_buf(),
+        url.to_owned(),
+        commit.to_owned(),
+        ssh.clone(),
+    );
+    let cloned = tokio::task::spawn_blocking(move || {
+        gradient_sources::checkout_commit_into(&dir, &url, &commit, ssh_for_clone.as_ref())
     })
     .await
-    .context("checkout task panicked")?
+    .context("checkout task panicked")?;
+    if let Some(ssh) = &ssh {
+        send_ssh_host_key_observations_or_log_warning(updater, ssh).await;
+    }
+    cloned
 }
 
 async fn copy_store_path(work: &Path, store_path: &str) -> Result<()> {
@@ -153,13 +151,6 @@ fn git_failure(error: anyhow::Error) -> BuildError {
         true => BuildError::permanent(error),
         false => BuildError::transient(error),
     }
-}
-
-fn project_ssh_key(credentials: &JobCredentials) -> Result<Option<SecretString>> {
-    credentials
-        .ssh_key()
-        .map(|key| SecretString::from_utf8(key).context("project SSH key is not UTF-8"))
-        .transpose()
 }
 
 #[cfg(test)]
