@@ -222,7 +222,6 @@ impl ExecArgs {
             devices: self.devices.clone(),
             mounts: self.mounts.clone(),
             bridge: self.bridge.clone(),
-            subnet: self.subnet.clone(),
             virtiofsd_bin: self.virtiofsd_bin.clone(),
             guests_dir,
         }

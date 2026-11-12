@@ -465,6 +465,10 @@ in {
         message = "services.gradient.worker.exec.allow.ports: Write each range in the form [ first last ]. Ensure first <= last.";
       }
       {
+        assertion = cfg.capabilities.exec -> exec.subnet != null;
+        message = "services.gradient.worker.exec.subnet: capabilities.exec is on, but this option has no value. Set an IPv4 subnet that no other network on the host uses.";
+      }
+      {
         assertion = exec.sops.files != [ ] -> exec.sops.keyFile != null;
         message = "services.gradient.worker.exec.sops.files: set without exec.sops.keyFile";
       }

@@ -60,6 +60,9 @@ impl ExecHost {
         if config.exec.image.is_none() {
             bail!("capabilities.exec needs exec.image, the guest image exec jobs boot");
         }
+        let Some(subnet) = &config.exec.subnet else {
+            bail!("`capabilities.exec` needs `exec.subnet`, the IPv4 subnet of the guest bridge");
+        };
         let secrets = WorkerSecrets::open(
             &config.exec.sops_files,
             config.exec.sops_key_file.as_deref(),
@@ -67,8 +70,8 @@ impl ExecHost {
         let vm = config.exec.vm_config(config.guests_dir());
         let units = GuestUnits::connect().await?;
         let devices = DeviceInventory::from_config(&vm.devices, &SysfsProbe);
-        let addresses = GuestAddresses::new(&config.exec.subnet, &config.exec.nameservers)
-            .context("exec.subnet")?;
+        let addresses =
+            GuestAddresses::new(subnet, &config.exec.nameservers).context("exec.subnet")?;
         let total = config
             .exec
             .guest_budget(&host_resources(&config.guests_dir())?);

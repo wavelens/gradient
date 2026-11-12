@@ -315,7 +315,10 @@ in {
             build = true;
             exec = true;
           };
-          exec.image = guestImage;
+          exec = {
+            image = guestImage;
+            subnet = "10.233.0.0/16";
+          };
         };
       };
 

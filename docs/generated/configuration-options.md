@@ -420,7 +420,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `worker.exec.sops.files` | list of path | `[ ]` | `GRADIENT_WORKER_EXEC_SOPS_FILES` | Sops files decrypted on the worker with `worker.exec.sops.keyFile`. Exec jobs get their top-level values by name. The server never sees them. |
 | `worker.exec.sops.keyFile` | null or path | `null` | `GRADIENT_WORKER_EXEC_SOPS_KEY_FILE` | SSH private key decrypting `worker.exec.sops.files`, an Ed25519 or RSA key. The age recipient derives from it. The worker reads it through a systemd credential, and `systemctl reload gradient-worker` decrypts the files again. `null` decrypts no file. |
 | `worker.exec.stopGuestsWithWorker` | bool | `true` | `GRADIENT_WORKER_EXEC_STOP_GUESTS_WITH_WORKER` | Whether stopping or restarting the worker stops every guest. The server queues the exec jobs of stopped guests again without using a retry. `false` keeps guests running across a worker restart and the restarted worker reattaches to them. |
-| `worker.exec.subnet` | string | `"10.233.0.0/16"` | `GRADIENT_WORKER_EXEC_SUBNET` | IPv4 subnet of `worker.exec.bridge`. The bridge takes the first host address. Guests with network access get the lowest free address after it. Multi-node exec jobs need a different subnet on each exec worker of a zone. |
+| `worker.exec.subnet` | null or string | `null` | `GRADIENT_WORKER_EXEC_SUBNET` | The IPv4 subnet for `worker.exec.bridge`. Set this option when `worker.capabilities.exec` is on. Pick a subnet free of other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span several nodes need a separate subnet on each Exec worker in the zone. |
 
 ## `worker.log`
 
