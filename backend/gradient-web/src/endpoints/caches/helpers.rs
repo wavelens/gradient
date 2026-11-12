@@ -94,10 +94,6 @@ async fn require_cache_auth(
     if can_read_store(db, &user, cache, api_key).await? {
         return Ok(());
     }
-    let unpinned_key = api_key.is_some_and(|key| key.cache_pin.is_none());
-    if unpinned_key && can_read_store(db, &user, cache, None).await? {
-        return Err(CacheRefusal::ApiKeyNotPinnedToCache.into());
-    }
     Err(CacheRefusal::ReadCachePermissionRequired.into())
 }
 

@@ -243,6 +243,7 @@ async fn decode_api_key(
 
     let context = ApiKeyContext {
         mask: api_key.permission,
+        cache_permission_mask: api_key.cache_permission,
         project: api_key.project,
         cache_pin: api_key.cache,
         allowed_ips: api_key.allowed_ips.clone().unwrap_or_default(),
@@ -273,6 +274,7 @@ async fn decode_job_token(db: &WebDb, raw: &str) -> Result<DecodedRequest, Statu
 
     let context = ApiKeyContext {
         mask: job_mask(),
+        cache_permission_mask: 0,
         project: Some(job.project),
         cache_pin: None,
         allowed_ips: Vec::new(),

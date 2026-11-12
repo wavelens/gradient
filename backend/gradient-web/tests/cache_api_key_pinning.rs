@@ -73,7 +73,7 @@ fn pinned_api_key(raw: &str, pin: CacheId, permission: i64) -> api::Model {
         key: hash_api_key(raw),
         last_used_at: now,
         created_at: now,
-        permission,
+        cache_permission: permission,
         cache: Some(pin),
         ..Default::default()
     }

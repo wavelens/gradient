@@ -78,6 +78,7 @@ mod m20261207_000000_add_abort_record_to_evaluation_and_one_commit_row_per_proje
 mod m20261208_000000_move_project_integrations_and_github_app_installations_to_git_host_connections_owned_by_instance_team_or_project_and_add_task_git_host_connection_and_task_report_status_and_replace_status_report_actions;
 mod m20261209_000000_add_pin_columns_to_cached_path_signature;
 mod m20261210_000000_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions;
+mod m20261211_000000_add_cache_permission_column_to_api_and_move_pinned_api_key_permissions_to_cache_permission;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -183,6 +184,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261208_000000_move_project_integrations_and_github_app_installations_to_git_host_connections_owned_by_instance_team_or_project_and_add_task_git_host_connection_and_task_report_status_and_replace_status_report_actions::Migration),
             Box::new(m20261209_000000_add_pin_columns_to_cached_path_signature::Migration),
             Box::new(m20261210_000000_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions::Migration),
+            Box::new(m20261211_000000_add_cache_permission_column_to_api_and_move_pinned_api_key_permissions_to_cache_permission::Migration),
         ]
     }
 }

@@ -24,6 +24,7 @@ pub struct Model {
     pub expires_at: Option<NaiveDateTime>,
     pub revoked_at: Option<NaiveDateTime>,
     pub permission: i64,
+    pub cache_permission: i64,
     pub project: Option<ProjectId>,
     pub cache: Option<CacheId>,
     /// Source CIDRs allowed to present this key. `None` or an empty list is allowing any source.
@@ -76,6 +77,7 @@ impl std::fmt::Debug for Model {
             .field("expires_at", &self.expires_at)
             .field("revoked_at", &self.revoked_at)
             .field("permission", &self.permission)
+            .field("cache_permission", &self.cache_permission)
             .field("project", &self.project)
             .field("cache", &self.cache)
             .field("allowed_ips", &self.allowed_ips)
