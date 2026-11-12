@@ -17,6 +17,7 @@ let
     shellHook = "echo shell ready";
   };
   shellProgram = devShellProgram shell;
+  plainShellProgram = devShellProgram (pkgs.mkShell { });
 in
 assert packageProgram pkgs.hello == "${pkgs.hello}/bin/hello";
 assert packageProgram (pkgs.hello // { meta.mainProgram = "hi"; }) == "${pkgs.hello}/bin/hi";
@@ -33,5 +34,6 @@ pkgs.runCommand "run-wrapping-check" { } ''
   grep -q 'bash-interactive-.*--rcfile' "$launcher/bin/gradient-devshell"
   grep -q 'GREETING=hello' "$launcher/rc"
   grep -q 'echo shell ready' "$launcher/rc"
+  grep -q '^exec bash --rcfile' ${plainShellProgram}
   touch $out
 ''
