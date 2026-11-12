@@ -132,6 +132,7 @@ export interface ApiKeyInfo {
   name: string;
   managed: boolean;
   permissions: string[];
+  cache_permissions: string[];
   project?: string | null;
   cache?: string | null;
   created_at: string;
@@ -722,7 +723,8 @@ export interface CreateActionResponse {
 export interface CreateApiKeyRequest {
   name: string;
   expires_in_days?: number | null;
-  permissions: string[];
+  permissions?: string[];
+  cache_permissions?: string[];
   project?: string | null;
   cache?: string | null;
   allowed_ips?: string[] | null;
@@ -2072,7 +2074,9 @@ export interface Paginated_TaskResponse {
 export interface PatchApiKeyRequest {
   name?: string | null;
   permissions?: string[] | null;
+  cache_permissions?: string[] | null;
   project?: string | null;
+  cache?: string | null;
   allowed_ips?: string[] | null;
 }
 

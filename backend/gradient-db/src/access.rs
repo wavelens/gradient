@@ -79,6 +79,31 @@ pub async fn load_cache_member_role_and_permission_mask<C: ConnectionTrait>(
     Ok(Some(CacheRoleAndPermissionMask { role, permissions }))
 }
 
+pub async fn load_cache_permission_masks_for_user<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+) -> Result<HashMap<CacheId, PermissionMask>, DbErr> {
+    let access = ECacheAccess::find()
+        .filter(CCacheAccess::User.eq(user))
+        .all(db)
+        .await?;
+    if access.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let roles: HashMap<RoleId, PermissionMask> = ECacheRole::find()
+        .filter(CCacheRole::Id.is_in(access.iter().map(|row| row.role)))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|role| (role.id, role.permission))
+        .collect();
+    let mut masks: HashMap<CacheId, PermissionMask> = HashMap::new();
+    for row in access {
+        *masks.entry(row.cache).or_default() |= roles.get(&row.role).copied().unwrap_or(0);
+    }
+    Ok(masks)
+}
+
 pub fn cache_role_rank(role: RoleId) -> u8 {
     match role {
         BASE_CACHE_ROLE_ADMIN_ID => 3,
