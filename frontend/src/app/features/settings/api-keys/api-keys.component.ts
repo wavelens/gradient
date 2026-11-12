@@ -46,12 +46,14 @@ import { PermissionPickerComponent } from '@shared/ui';
 import { CreateCacheDialogComponent, dialogFormChangesSinceOpen, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
-type ScopeType = 'none' | 'project' | 'cache';
+type ScopeType = 'unrestrictedScope' | 'project' | 'cache';
 
 interface KeyFields {
   name: string;
   permissions: string[];
+  cache_permissions: string[];
   project: string | null;
+  cache: string | null;
   allowed_ips: string[];
 }
 
@@ -62,7 +64,9 @@ function keyChanges(key: ApiKeyInfo, next: KeyFields): PatchApiKeyRequest {
   const patch: PatchApiKeyRequest = {};
   if (next.name !== key.name) patch.name = next.name;
   if (!sameList(next.permissions, key.permissions)) patch.permissions = next.permissions;
+  if (!sameList(next.cache_permissions, key.cache_permissions)) patch.cache_permissions = next.cache_permissions;
   if (next.project !== (key.project ?? null)) patch.project = next.project;
+  if (next.cache !== (key.cache ?? null)) patch.cache = next.cache;
   if (!sameList(next.allowed_ips, key.allowed_ips ?? [])) patch.allowed_ips = next.allowed_ips;
   return patch;
 }
@@ -129,7 +133,7 @@ export class ApiKeysComponent implements OnInit {
   cacheOptions = signal<SelectOption[]>([]);
 
   scopeOptions: { label: string; value: ScopeType }[] = [
-    { label: 'Any project', value: 'none' },
+    { label: 'Any', value: 'unrestrictedScope' },
     { label: 'Project', value: 'project' },
     { label: 'Cache', value: 'cache' },
   ];
@@ -153,7 +157,8 @@ export class ApiKeysComponent implements OnInit {
   formName = '';
   formExpiresInDays: number | null = null;
   formPermissions: Record<string, boolean> = {};
-  formScope: ScopeType = 'none';
+  cachePermissionCheckedById: Record<string, boolean> = {};
+  formScope: ScopeType = 'unrestrictedScope';
   formProject: string | null = null;
   formCache: string | null = null;
   formAllowedIps = '';
@@ -161,6 +166,7 @@ export class ApiKeysComponent implements OnInit {
     this.formName,
     this.formExpiresInDays,
     this.formPermissions,
+    this.cachePermissionCheckedById,
     this.formScope,
     this.formProject,
     this.formCache,
@@ -197,7 +203,7 @@ export class ApiKeysComponent implements OnInit {
     if (!this.cacheOptions().some((option) => option.value === cache)) {
       this.cacheOptions.update((options) => [{ label: cache, value: cache }, ...options]);
     }
-    this.formPermissions = { viewCache: true, readStore: true };
+    this.cachePermissionCheckedById = { viewCache: true, readStore: true };
     this.formChanges.mark();
   }
 
@@ -258,11 +264,11 @@ export class ApiKeysComponent implements OnInit {
     this.editingKey.set(null);
     this.formName = '';
     this.formExpiresInDays = null;
-    this.formScope = 'none';
+    this.formScope = 'unrestrictedScope';
     this.formProject = null;
     this.formCache = null;
-    this.formPermissions = this.permissionTemplate(false);
-    this.formPermissions['viewProject'] = true;
+    this.formPermissions = this.permissionTemplate(this.availablePermissions(), ['viewProject']);
+    this.cachePermissionCheckedById = this.permissionTemplate(this.availableCachePermissions(), []);
     this.formAllowedIps = '';
     this.errorMessage.set(null);
     this.attempted.set(false);
@@ -276,7 +282,7 @@ export class ApiKeysComponent implements OnInit {
     this.editingKey.set(key);
     this.formName = key.name;
     this.formExpiresInDays = null;
-    this.formScope = key.cache ? 'cache' : key.project ? 'project' : 'none';
+    this.formScope = key.cache ? 'cache' : key.project ? 'project' : 'unrestrictedScope';
     this.formProject = key.project ?? null;
     this.formCache = key.cache ?? null;
     if (key.cache && !this.cacheOptions().some((option) => option.value === key.cache)) {
@@ -286,8 +292,8 @@ export class ApiKeysComponent implements OnInit {
       this.projectOptions.update((options) => [{ label: key.project!, value: key.project! }, ...options]);
     }
     this.loadSignedInUserProjectPermissionsForProject(key.project ?? null);
-    this.formPermissions = this.permissionTemplate(false);
-    for (const p of key.permissions) this.formPermissions[p] = true;
+    this.formPermissions = this.permissionTemplate(this.availablePermissions(), key.permissions);
+    this.cachePermissionCheckedById = this.permissionTemplate(this.availableCachePermissions(), key.cache_permissions);
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
     this.errorMessage.set(null);
     this.attempted.set(false);
@@ -310,31 +316,22 @@ export class ApiKeysComponent implements OnInit {
     this.attempted.set(false);
     this.formProject = null;
     this.formCache = null;
-    if (this.formScope !== 'none') {
+    if (this.formScope !== 'unrestrictedScope') {
       const serverWideIds = new Set(this.serverWidePermissions().map((permission) => permission.id));
       this.formPermissions = Object.fromEntries(Object.entries(this.formPermissions).filter(([id]) => !serverWideIds.has(id)));
     }
-    const ids = this.activePermissions().map((permission) => permission.id);
-    if (ids.every((id) => id in this.formPermissions)) return;
-    const preselected = this.formScope === 'cache' ? ['viewCache', 'readStore'] : ['viewProject'];
-    this.formPermissions = Object.fromEntries(ids.map((id) => [id, preselected.includes(id)]));
+    if (!this.availablePermissions().every(({ id }) => id in this.formPermissions)) {
+      this.formPermissions = this.permissionTemplate(this.availablePermissions(), ['viewProject']);
+    }
+    if (this.formScope === 'cache' && !Object.values(this.cachePermissionCheckedById).some(Boolean)) {
+      this.cachePermissionCheckedById = this.permissionTemplate(this.availableCachePermissions(), ['viewCache', 'readStore']);
+    }
   }
 
-  activePermissions(): PermissionEntry[] {
-    return this.formScope === 'cache' ? this.availableCachePermissions() : this.availablePermissions();
-  }
-
-  /// An edit request cannot move a key between a cache pin and a project pin.
-  scopeChoices(): { label: string; value: ScopeType }[] {
-    const editing = this.editingKey();
-    if (!editing) return this.scopeOptions;
-    if (editing.cache) return this.scopeOptions.filter((option) => option.value === 'cache');
-    return this.scopeOptions.filter((option) => option.value !== 'cache');
-  }
-
-  private permissionTemplate(value: boolean): Record<string, boolean> {
+  private permissionTemplate(entries: PermissionEntry[], checked: readonly string[]): Record<string, boolean> {
     const out: Record<string, boolean> = {};
-    for (const p of this.activePermissions()) out[p.id] = value;
+    for (const p of entries) out[p.id] = false;
+    for (const id of checked) out[id] = true;
     return out;
   }
 
@@ -344,9 +341,17 @@ export class ApiKeysComponent implements OnInit {
   }
 
   selectedPermissions(): string[] {
+    if (this.formScope === 'cache') return [];
     const grantable = this.getPermissionIdsUserCanGrantForKeyBeingEdited();
     return Object.entries(this.formPermissions)
       .filter(([id, on]) => on && (grantable?.includes(id) ?? true))
+      .map(([id]) => id);
+  }
+
+  selectedCachePermissionIds(): string[] {
+    if (this.formScope === 'project') return [];
+    return Object.entries(this.cachePermissionCheckedById)
+      .filter(([, on]) => on)
       .map(([id]) => id);
   }
 
@@ -394,7 +399,8 @@ export class ApiKeysComponent implements OnInit {
   }
 
   permissionsError(): string | null {
-    return this.attempted() && this.selectedPermissions().length === 0 ? 'Select at least one permission.' : null;
+    const nothingSelected = this.selectedPermissions().length === 0 && this.selectedCachePermissionIds().length === 0;
+    return this.attempted() && nothingSelected ? 'Select at least one permission.' : null;
   }
 
   saveKey(): void {
@@ -406,13 +412,14 @@ export class ApiKeysComponent implements OnInit {
     }
     const name = this.formName.trim();
     const perms = this.selectedPermissions();
+    const cachePerms = this.selectedCachePermissionIds();
     const project = this.formScope === 'project' ? this.formProject : null;
     const cache = this.formScope === 'cache' ? this.formCache : null;
     const allowedIps = splitLines(this.formAllowedIps);
     const editing = this.editingKey();
     this.errorMessage.set(null);
     if (editing) {
-      const patch = keyChanges(editing, { name, permissions: perms, project, allowed_ips: allowedIps });
+      const patch = keyChanges(editing, { name, permissions: perms, cache_permissions: cachePerms, project, cache, allowed_ips: allowedIps });
       if (Object.keys(patch).length === 0) {
         this.showDialog.set(false);
         return;
@@ -435,7 +442,7 @@ export class ApiKeysComponent implements OnInit {
     } else {
       this.creating.set(true);
       this.userService
-        .createApiKey(name, this.formExpiresInDays, perms, project, cache, allowedIps)
+        .createApiKey(name, this.formExpiresInDays, perms, cachePerms, project, cache, allowedIps)
         .subscribe({
           next: (keyValue) => {
             this.creating.set(false);
@@ -523,7 +530,7 @@ export class ApiKeysComponent implements OnInit {
   }
 
   getReadableApiKeyPermissionNamesForOwnerOnPinnedProject(key: ApiKeyInfo): string {
-    const permissions = this.getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key);
+    const permissions = [...this.getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key), ...key.cache_permissions];
     return permissions.length === 0 ? 'No permissions' : this.permissionIdsToCommaSeparatedLabels(permissions);
   }
 
@@ -531,7 +538,7 @@ export class ApiKeysComponent implements OnInit {
     const label = (options: SelectOption[], name: string) => options.find((option) => option.value === name)?.label ?? name;
     if (key.cache) return `Cache ${label(this.cacheOptions(), key.cache)}`;
     if (key.project) return label(this.projectOptions(), key.project);
-    return 'Any project';
+    return 'Any';
   }
 
   isApiKeyExpired(key: ApiKeyInfo): boolean {

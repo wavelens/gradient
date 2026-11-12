@@ -65,11 +65,12 @@ export class UserService {
     name: string,
     expiresInDays?: number | null,
     permissions: string[] = ['viewProject'],
+    cachePermissions: string[] = [],
     project: string | null = null,
     cache: string | null = null,
     allowedIps: string[] = [],
   ): Observable<string> {
-    const body: CreateApiKeyRequest = { name, permissions, project, cache, allowed_ips: allowedIps };
+    const body: CreateApiKeyRequest = { name, permissions, cache_permissions: cachePermissions, project, cache, allowed_ips: allowedIps };
     if (expiresInDays !== null && expiresInDays !== undefined) {
       body.expires_in_days = expiresInDays;
     }
