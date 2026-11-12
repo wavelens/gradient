@@ -14,7 +14,9 @@ use base64::Engine;
 use gradient_entity::{api, cache, ids::*};
 use gradient_fixtures::ids::{cache_id, project_id, user_id};
 use gradient_fixtures::mock::{exec_ok, mock_db};
-use gradient_fixtures::rows::{cache_member, cache_view_role, user};
+use gradient_fixtures::rows::{
+    cache_member, cache_member_in, cache_view_role, cache_with_id, user,
+};
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
 use gradient_types::consts::{BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID};
@@ -48,6 +50,17 @@ fn key_row(raw: &str, permission: i64, cache: Option<CacheId>) -> api::Model {
         permission,
         cache,
         ..Default::default()
+    }
+}
+
+fn cache_permission_key_row(
+    raw: &str,
+    cache_permission: i64,
+    cache: Option<CacheId>,
+) -> api::Model {
+    api::Model {
+        cache_permission,
+        ..key_row(raw, 0, cache)
     }
 }
 
@@ -121,16 +134,6 @@ async fn any_project_key_cannot_change_or_delete_a_member_cache() {
 }
 
 #[tokio::test]
-async fn any_project_key_cannot_read_a_private_cache_without_a_grant() {
-    let raw = "c".repeat(64);
-    let db = with_key(mock_db(), &view_project_key(&raw))
-        .append_query_results([vec![private_cache()]])
-        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
-    let status = refused_with_key(db, &raw, |s| s.get("/api/v1/caches/test-cache")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
 async fn api_keys_cannot_create_list_change_or_delete_teams() {
     let any_project = "d".repeat(64);
     let cache_scope = "e".repeat(64);
@@ -138,7 +141,7 @@ async fn api_keys_cannot_create_list_change_or_delete_teams() {
         (any_project.clone(), key_row(&any_project, i64::MAX, None)),
         (
             cache_scope.clone(),
-            key_row(
+            cache_permission_key_row(
                 &cache_scope,
                 cache_mask_from(CachePermission::ALL),
                 Some(cache_id()),
@@ -170,7 +173,7 @@ async fn api_keys_cannot_create_list_change_or_delete_teams() {
 }
 
 fn cache_scope_key(raw: &str) -> api::Model {
-    key_row(raw, cache_mask_from(CachePermission::ALL), Some(cache_id()))
+    cache_permission_key_row(raw, cache_mask_from(CachePermission::ALL), Some(cache_id()))
 }
 
 #[tokio::test]
@@ -329,16 +332,69 @@ async fn pull_status(db: MockDatabase, password: &str) -> StatusCode {
         .status_code()
 }
 
+fn api_key_row_without_project_or_cache_pin_and_with_view_cache_and_read_store_permissions(
+    raw: &str,
+) -> api::Model {
+    cache_permission_key_row(
+        raw,
+        cache_mask_from(&[CachePermission::ViewCache, CachePermission::ReadStore]),
+        None,
+    )
+}
+
 #[tokio::test]
-async fn any_project_key_cannot_pull_from_a_member_cache() {
-    let raw = "f".repeat(64);
+async fn api_key_with_no_project_or_cache_pin_and_read_store_pulls_from_two_private_caches_where_owner_is_member()
+ {
+    let raw = "h".repeat(64);
+    let other = cache_with_id(CacheId::now_v7(), "other-cache", user_id());
+    for (cache, member) in [
+        (private_cache(), cache_member(BASE_CACHE_ROLE_VIEW_ID)),
+        (
+            other.clone(),
+            cache_member_in(other.id, BASE_CACHE_ROLE_VIEW_ID),
+        ),
+    ] {
+        let path = format!("/cache/{}/nix-cache-info", cache.name);
+        let db = with_key(mock_db().append_query_results([vec![cache]]), &api_key_row_without_project_or_cache_pin_and_with_view_cache_and_read_store_permissions(&raw))
+            .append_query_results([vec![member]])
+            .append_query_results([vec![cache_view_role()]]);
+        let res = make_test_server(db.into_connection())
+            .get(&path)
+            .add_header("authorization", basic(&format!("GRAD{raw}")))
+            .await;
+        res.assert_status(StatusCode::OK);
+    }
+}
+
+#[tokio::test]
+async fn api_key_without_cache_permissions_is_refused_download_from_private_cache_with_401_and_missing_read_store()
+ {
+    let raw = "i".repeat(64);
     let db = with_key(
         mock_db().append_query_results([vec![private_cache()]]),
         &view_project_key(&raw),
     )
-    .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-    .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
     .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
+    let res = make_test_server(db.into_connection())
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("authorization", basic(&format!("GRAD{raw}")))
+        .await;
+    res.assert_status(StatusCode::UNAUTHORIZED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["missing_permissions"], json!(["readStore"]), "{body}");
+}
+
+#[tokio::test]
+async fn unpinned_api_key_with_read_store_permission_is_refused_private_cache_download_when_owner_leaves_cache()
+ {
+    let raw = "j".repeat(64);
+    let db = with_key(
+        mock_db().append_query_results([vec![private_cache()]]),
+        &api_key_row_without_project_or_cache_pin_and_with_view_cache_and_read_store_permissions(
+            &raw,
+        ),
+    )
+    .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()]);
     assert_eq!(
         pull_status(db, &format!("GRAD{raw}")).await,
         StatusCode::UNAUTHORIZED
@@ -346,28 +402,23 @@ async fn any_project_key_cannot_pull_from_a_member_cache() {
 }
 
 #[tokio::test]
-async fn any_project_key_of_a_cache_member_is_told_to_use_a_cache_key() {
-    let raw = "r".repeat(64);
+async fn unpinned_api_key_without_cache_permissions_downloads_from_public_cache() {
+    let raw = "k".repeat(64);
+    let public_cache = cache::Model {
+        public: true,
+        ..private_cache()
+    };
     let db = with_key(
-        mock_db().append_query_results([vec![private_cache()]]),
+        mock_db().append_query_results([vec![public_cache]]),
         &view_project_key(&raw),
-    )
-    .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-    .append_query_results([vec![cache_member(BASE_CACHE_ROLE_VIEW_ID)]])
-    .append_query_results([vec![cache_view_role()]]);
-    let server = make_test_server(db.into_connection());
-    let res = server
-        .get("/cache/test-cache/nix-cache-info")
-        .add_header("authorization", basic(&format!("GRAD{raw}")))
-        .await;
-    res.assert_status(StatusCode::UNAUTHORIZED);
-    assert!(res.text().contains("pin to this cache"), "{}", res.text());
+    );
+    assert_eq!(pull_status(db, &format!("GRAD{raw}")).await, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn cache_scope_key_pulls_from_its_cache() {
     let raw = "g".repeat(64);
-    let key = key_row(
+    let key = cache_permission_key_row(
         &raw,
         cache_mask_from(&[CachePermission::ViewCache, CachePermission::ReadStore]),
         Some(cache_id()),
@@ -400,7 +451,7 @@ async fn session_token_pulls_from_a_member_cache() {
 async fn api_key_without_read_cache_permission_is_refused_download_from_cache_with_401_and_missing_read_store()
  {
     let raw = "s".repeat(64);
-    let key = key_row(
+    let key = cache_permission_key_row(
         &raw,
         cache_mask_from(&[CachePermission::ViewCache, CachePermission::WriteStore]),
         Some(cache_id()),

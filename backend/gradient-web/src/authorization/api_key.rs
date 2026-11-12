@@ -14,6 +14,7 @@ use gradient_types::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiKeyContext {
     pub mask: PermissionMask,
+    pub cache_permission_mask: PermissionMask,
     pub project: Option<ProjectId>,
     pub cache_pin: Option<CacheId>,
     pub allowed_ips: Vec<String>,
@@ -178,6 +179,7 @@ mod tests {
     fn full_key() -> ApiKeyContext {
         ApiKeyContext {
             mask: mask_from(Permission::ALL),
+            cache_permission_mask: 0,
             project: None,
             cache_pin: None,
             allowed_ips: Vec::new(),

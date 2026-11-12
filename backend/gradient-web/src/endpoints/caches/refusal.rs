@@ -12,10 +12,6 @@ use crate::refusal::{Refusal, RefusalStatus};
 pub(crate) enum CacheRefusal {
     #[error("Authentication required to access this cache")]
     AuthenticationRequired,
-    #[error(
-        "This API key has no pin to this cache. Create an API key with a pin to this cache to read from this cache."
-    )]
-    ApiKeyNotPinnedToCache,
     #[error("Downloads from this cache need the \"{}\" permission.", CachePermission::ReadStore.permission_label())]
     ReadCachePermissionRequired,
     #[error("Signature not yet computed")]
@@ -87,9 +83,9 @@ pub(crate) enum CacheRefusal {
 impl Refusal for CacheRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
-            Self::AuthenticationRequired
-            | Self::ApiKeyNotPinnedToCache
-            | Self::ReadCachePermissionRequired => RefusalStatus::Unauthorized,
+            Self::AuthenticationRequired | Self::ReadCachePermissionRequired => {
+                RefusalStatus::Unauthorized
+            }
             Self::AnonymousAccessDisabled | Self::CacheLimitReached => RefusalStatus::Forbidden,
             Self::SignaturePending | Self::NotRecorded(_) => RefusalStatus::NotFound,
             Self::NarTooLarge { .. } => RefusalStatus::PayloadTooLarge,
