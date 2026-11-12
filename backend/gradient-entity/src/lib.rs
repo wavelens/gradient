@@ -75,6 +75,7 @@ pub mod project_access;
 pub mod project_cache;
 pub mod project_invitation;
 pub mod project_secret;
+pub mod project_ssh_host_key;
 pub mod project_user;
 pub mod pull_request_summary;
 pub mod retired_cache_signing_key;
