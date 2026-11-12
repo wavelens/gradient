@@ -139,6 +139,37 @@ async fn logged_in_user_api_key_revoke_resolves_the_name_to_the_id() {
 }
 
 #[tokio::test]
+async fn logged_in_user_api_key_create_sends_cache_permissions() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/user/keys"))
+        .and(body_json(
+            json!({"name": "ci", "cache_permissions": ["readStore"]}),
+        ))
+        .respond_with(ok(json!("GRADabc")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+
+    run_gradient_with_temp_home_stdin_and_args(
+        &home,
+        "",
+        &[
+            "--json",
+            "logged-in-user",
+            "api-keys",
+            "create",
+            "ci",
+            "--cache-permission",
+            "readStore",
+        ],
+    )
+    .success()
+    .stdout(predicate::str::contains("GRADabc"));
+}
+
+#[tokio::test]
 async fn logged_in_user_delete_account_refuses_json_without_password() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
