@@ -99,8 +99,14 @@ impl UpstreamProbe {
         targets.extend(unprobed_dependencies(&self.db, &targets).await?);
         let plan = plan_probes(&self.db, &targets).await?;
         let mut unanswered_outputs: HashSet<String> = HashSet::new();
+        let mut upstream_found_outputs: HashSet<String> = HashSet::new();
         for (evaluation, targets) in &plan.rounds {
-            for chunk in targets.chunks(PROBE_BATCH) {
+            let outputs_missing_from_upstream_cache: Vec<StorePath> = targets
+                .iter()
+                .filter(|path| !upstream_found_outputs.contains(path.hash()))
+                .cloned()
+                .collect();
+            for chunk in outputs_missing_from_upstream_cache.chunks(PROBE_BATCH) {
                 let answer = crate::eval::probe_outputs(
                     &self.db,
                     &self.store_path_mapping,
@@ -119,12 +125,14 @@ impl UpstreamProbe {
                 if answer.hits.is_empty() {
                     continue;
                 }
+                upstream_found_outputs.extend(answer.hits.keys().cloned());
                 self.graph
                     .upstream_hits(answer.hits)
                     .await
                     .context("apply what the upstream probe found")?;
             }
         }
+        unanswered_outputs.retain(|hash| !upstream_found_outputs.contains(hash));
 
         self.graph
             .upstream_probed(plan.answered_except(&unanswered_outputs))
@@ -316,14 +324,15 @@ pub(crate) async fn plan_probes(
         .context("find the outputs some cache already holds")?;
     let to_ask: Vec<&MDerivationOutput> =
         outputs.iter().filter(|o| !cached.contains(&o.id)).collect();
-    let evaluation_of = evaluation_naming_each(db, &to_ask).await?;
+    let newest_evaluations_by_derivation_id =
+        newest_evaluation_per_naming_project(db, &to_ask).await?;
 
     let mut plan = ProbePlan::default();
     let mut by_evaluation: HashMap<EvaluationId, (MEvaluation, HashMap<String, StorePath>)> =
         HashMap::new();
     let mut unaskable: HashSet<DerivationId> = HashSet::new();
     for o in to_ask {
-        let Some(evaluation) = evaluation_of.get(&o.derivation) else {
+        let Some(evaluations) = newest_evaluations_by_derivation_id.get(&o.derivation) else {
             unaskable.insert(o.derivation);
             continue;
         };
@@ -331,11 +340,13 @@ pub(crate) async fn plan_probes(
             continue;
         };
         let hash = path.hash().to_owned();
-        by_evaluation
-            .entry(evaluation.id)
-            .or_insert_with(|| (evaluation.clone(), HashMap::new()))
-            .1
-            .insert(hash.clone(), path);
+        for evaluation in evaluations {
+            by_evaluation
+                .entry(evaluation.id)
+                .or_insert_with(|| (evaluation.clone(), HashMap::new()))
+                .1
+                .insert(hash.clone(), path.clone());
+        }
         plan.owners.entry(hash).or_default().push(o.derivation);
     }
 
@@ -353,10 +364,13 @@ pub(crate) async fn plan_probes(
     Ok(plan)
 }
 
-async fn evaluation_naming_each(
+/// Misses in the upstream caches of one project say nothing about the upstream caches of another
+/// project. The probe can query every project that names the shared build, through the newest
+/// evaluation of each project.
+async fn newest_evaluation_per_naming_project(
     db: &WorkerDb,
     outputs: &[&MDerivationOutput],
-) -> Result<HashMap<DerivationId, MEvaluation>> {
+) -> Result<HashMap<DerivationId, Vec<MEvaluation>>> {
     let mut derivations: Vec<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
     derivations.sort_unstable();
     derivations.dedup();
@@ -367,34 +381,72 @@ async fn evaluation_naming_each(
             .await
     })
     .await
-    .context("find an evaluation naming each shared build that became wanted")?;
+    .context("find the evaluations that name each shared build that became wanted")?;
 
     let mut ids: Vec<EvaluationId> = jobs.iter().map(|j| j.evaluation).collect();
     ids.sort_unstable();
     ids.dedup();
-    let evaluations: HashMap<EvaluationId, MEvaluation> =
-        gradient_db::fetch_in_chunks(&ids, |chunk| async move {
-            EEvaluation::find()
-                .filter(CEvaluation::Id.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("load the evaluations the probe reads its upstream caches through")?
-        .into_iter()
-        .map(|e| (e.id, e))
-        .collect();
+    let evaluations = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
+        EEvaluation::find()
+            .filter(CEvaluation::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("load the evaluations the probe reads its upstream caches through")?;
+    let project_id_by_evaluation_id = load_project_ids_for_evaluations(db, &evaluations).await?;
 
-    let mut evaluation_of: HashMap<DerivationId, MEvaluation> = HashMap::new();
-    for job in jobs {
-        if let Some(evaluation) = evaluations.get(&job.evaluation) {
-            evaluation_of
-                .entry(job.derivation)
-                .or_insert_with(|| evaluation.clone());
+    let mut newest_evaluation_per_project: HashMap<ProjectId, MEvaluation> = HashMap::new();
+    for evaluation in evaluations {
+        if let Some(&project) = project_id_by_evaluation_id.get(&evaluation.id)
+            && newest_evaluation_per_project
+                .get(&project)
+                .is_none_or(|kept| kept.id < evaluation.id)
+        {
+            newest_evaluation_per_project.insert(project, evaluation);
         }
     }
 
-    Ok(evaluation_of)
+    let mut newest_evaluations_by_derivation: HashMap<DerivationId, Vec<MEvaluation>> =
+        HashMap::new();
+    let mut already_added_derivation_project_pairs: HashSet<(DerivationId, ProjectId)> =
+        HashSet::new();
+    for job in jobs {
+        if let Some(&project) = project_id_by_evaluation_id.get(&job.evaluation)
+            && already_added_derivation_project_pairs.insert((job.derivation, project))
+            && let Some(evaluation) = newest_evaluation_per_project.get(&project)
+        {
+            newest_evaluations_by_derivation
+                .entry(job.derivation)
+                .or_default()
+                .push(evaluation.clone());
+        }
+    }
+
+    Ok(newest_evaluations_by_derivation)
+}
+
+async fn load_project_ids_for_evaluations(
+    db: &WorkerDb,
+    evaluations: &[MEvaluation],
+) -> Result<HashMap<EvaluationId, ProjectId>> {
+    let mut task_ids: Vec<TaskId> = evaluations.iter().filter_map(|e| e.task).collect();
+    task_ids.sort_unstable();
+    task_ids.dedup();
+    let project_id_by_task_id: HashMap<TaskId, ProjectId> =
+        gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
+        })
+        .await
+        .context("Load the projects of evaluations that name a shared build")?
+        .into_iter()
+        .map(|t| (t.id, t.project))
+        .collect();
+
+    Ok(evaluations
+        .iter()
+        .filter_map(|e| Some((e.id, *project_id_by_task_id.get(&e.task?)?)))
+        .collect())
 }
 
 #[cfg(test)]
