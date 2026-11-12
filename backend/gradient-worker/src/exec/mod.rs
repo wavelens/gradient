@@ -8,6 +8,7 @@ pub mod agent_client;
 pub mod channels;
 pub mod checkout;
 pub mod context;
+pub mod guest_console_oom_kill_reporter;
 pub mod host;
 pub mod inventory;
 pub mod job;

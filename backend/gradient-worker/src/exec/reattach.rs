@@ -13,6 +13,7 @@ use tracing::{info, warn};
 
 use super::agent_client::AgentClient;
 use super::channels::GuestChannelMux;
+use super::guest_console_oom_kill_reporter::GuestKernelOutOfMemoryKillLogScanner;
 use super::host::ExecHost;
 use super::job::{GuestJob, finish, unix_now, unless_aborted};
 use super::job_channels::JobChannels;
@@ -116,6 +117,10 @@ async fn follow_again(
             guest_upload_staging_bytes_from_requested_disk_mb(stored.disk_mb),
         ),
         keep_vm_running: KeepVmRunning::resumed(inbox.keep_vm_running, guest.dir()),
+        kernel_out_of_memory_kill_log_scanner: GuestKernelOutOfMemoryKillLogScanner::new(
+            guest.dir(),
+            guest.state().size.memory_mb,
+        ),
     };
     finish(&mut agent, updater, &mut job).await
 }
