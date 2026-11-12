@@ -642,14 +642,16 @@ async fn reject_api_key_permissions_not_held_by_owner(
     operation_id = "getUserKeyPermissions",
     tag = "user",
     summary = "List API-key permission catalogue",
-    description = "Returns the full set of capabilities a user-managed API key may grant.\nUsed by the create / edit dialog to populate the permission checkbox list.",
+    description = "Returns the full set of capabilities a user-managed API key may grant.\nUsed by the create / edit dialog to populate the permission checkbox list. `server_wide_permissions` lists `useSuperuserRights` only for superusers.",
     responses((status = OK, description = "Permission catalogue", body = ApiKeyPermissionsResponse), WebError)
 )]
-pub async fn get_key_permissions() -> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
+pub async fn get_key_permissions(
+    Extension(user): Extension<MUser>,
+) -> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
     Ok(ok_json(ApiKeyPermissionsResponse {
         available_permissions: available_permissions(),
         available_cache: available_cache_permissions(),
-        server_wide_permissions: available_server_permissions(),
+        server_wide_permissions: available_server_permissions(user.superuser),
     }))
 }
 
@@ -762,7 +764,7 @@ pub async fn get_key_visible_projects_and_caches_with_permissions(
     operation_id = "createUserKey",
     tag = "user",
     summary = "Create API key",
-    description = "Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller's permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects.",
+    description = "Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller's permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects. `useSuperuserRights` can apply only to an unpinned key with an owner that is a superuser. The key can then use the superuser rights of that owner.",
     request_body = CreateApiKeyRequest,
     responses((status = OK, description = "New API key", body = String, content_type = "application/json"), WebError)
 )]

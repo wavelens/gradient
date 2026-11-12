@@ -70,11 +70,12 @@ pub fn available_permissions() -> Vec<PermissionEntry> {
         .collect()
 }
 
-pub fn available_server_permissions() -> Vec<PermissionEntry> {
+pub fn available_server_permissions(signed_in_user_is_superuser: bool) -> Vec<PermissionEntry> {
     Permission::ALL
         .iter()
         .copied()
         .filter(|p| p.is_server_wide())
+        .filter(|p| signed_in_user_is_superuser || *p != Permission::UseSuperuserRights)
         .map(PermissionEntry::from)
         .collect()
 }

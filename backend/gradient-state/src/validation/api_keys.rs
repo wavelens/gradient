@@ -36,6 +36,18 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                         ),
                     )
                 }
+                Some(Permission::UseSuperuserRights)
+                    if lookup.user_exists(&api_key.owned_by)
+                        && !lookup.user_is_superuser(&api_key.owned_by) =>
+                {
+                    errors.push(
+                        format!("api_keys.{}.permissions", api_key.name),
+                        format!(
+                            "Permission 'useSuperuserRights' can apply only to an owner with superuser rights. Make user '{}' a superuser, or remove this permission.",
+                            api_key.owned_by
+                        ),
+                    )
+                }
                 Some(_) => {}
             }
         }
