@@ -19,10 +19,12 @@ use context::TaskGitContext;
 use gradient_db::DbContext;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
+use sea_orm::ConnectionTrait;
 use tracing::instrument;
 
 pub use checkout::{checkout_commit, checkout_commit_into};
 pub use commit_info::HeadCommit;
+pub use context::{load_ssh_private_key_and_known_hosts, save_observed_project_ssh_host_keys};
 pub use remote::BranchHead;
 pub use ssh::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
 
@@ -93,31 +95,34 @@ pub async fn resolve_remote_ref(
     url: &str,
     branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
-    let private_key = if gradient_types::input::check_repository_url_is_ssh(url) {
-        let (private_key, _) = crate::ssh_key::decrypt_ssh_private_key(
-            &ctx.config.secrets.crypt_file,
-            project.clone(),
-            &ctx.config.server.serve_url,
-        )?;
-        Some(SshGitPrivateKeyKnownHostsAndObservations::new(
-            private_key,
-            Vec::new(),
-        ))
-    } else {
-        None
-    };
+    let ssh = load_ssh_private_key_and_known_hosts(ctx, project, url).await?;
+    list_remote_refs_find_branch_head_and_save_host_keys(
+        &ctx.worker_db,
+        project.id,
+        url,
+        ssh,
+        branch,
+    )
+    .await
+}
 
-    let url = url.to_owned();
-    let branch = branch.map(|b| b.to_owned());
-
+async fn list_remote_refs_find_branch_head_and_save_host_keys<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    url: &str,
+    ssh: Option<SshGitPrivateKeyKnownHostsAndObservations>,
+    branch: Option<&str>,
+) -> Result<Vec<u8>, SourceError> {
+    let (url, branch, blocking_ssh) = (url.to_owned(), branch.map(str::to_owned), ssh.clone());
     let head = tokio::task::spawn_blocking(move || {
-        remote::ls_remote_head(&url, private_key.as_ref(), branch.as_deref())
+        remote::ls_remote_head(&url, blocking_ssh.as_ref(), branch.as_deref())
     })
     .await
     .map_err(|e| SourceError::GitExecution {
         error: e.to_string(),
-    })??;
-    Ok(head.commit)
+    });
+    save_observed_project_ssh_host_keys(db, project, ssh.as_ref()).await;
+    Ok(head??.commit)
 }
 
 pub(crate) fn remote_ref_commit(

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
-fn ed25519_pem() -> String {
+pub(crate) fn ed25519_pem() -> String {
     let pair = ed25519_compact::KeyPair::generate();
     ssh_key::PrivateKey::from(Ed25519Keypair::from_seed(&pair.sk.seed()))
         .to_openssh(LineEnding::LF)
@@ -29,7 +29,7 @@ fn ed25519_pem() -> String {
         .to_string()
 }
 
-fn decode(pem: &str) -> PrivateKey {
+pub(crate) fn decode(pem: &str) -> PrivateKey {
     russh::keys::decode_secret_key(pem, None).unwrap()
 }
 
@@ -102,7 +102,7 @@ async fn run_in_shell(channel: Channel<Msg>, handle: Handle, command: String) {
     let _ = handle.close(id).await;
 }
 
-async fn serve_git_over_ssh(client_key: PublicKey, host_keys: Vec<PrivateKey>) -> u16 {
+pub(crate) async fn serve_git_over_ssh(client_key: PublicKey, host_keys: Vec<PrivateKey>) -> u16 {
     let config = Arc::new(russh::server::Config {
         methods: MethodSet::from(&[MethodKind::PublicKey][..]),
         keys: host_keys,
@@ -130,7 +130,7 @@ async fn serve_git_over_ssh(client_key: PublicKey, host_keys: Vec<PrivateKey>) -
     port
 }
 
-fn generate_random_ssh_host_private_key(algorithm: Algorithm) -> PrivateKey {
+pub(crate) fn generate_random_ssh_host_private_key(algorithm: Algorithm) -> PrivateKey {
     PrivateKey::random(&mut rand::rng(), algorithm).unwrap()
 }
 
@@ -156,7 +156,8 @@ fn commit(repo: &git2::Repository, message: &str) -> git2::Oid {
         .unwrap()
 }
 
-fn create_temp_git_repository_with_two_commits_on_main() -> (tempfile::TempDir, git2::Oid) {
+pub(crate) fn create_temp_git_repository_with_two_commits_on_main() -> (tempfile::TempDir, git2::Oid)
+{
     let dir = tempfile::TempDir::new().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     repo.set_head("refs/heads/main").unwrap();

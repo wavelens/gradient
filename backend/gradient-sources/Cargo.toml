@@ -56,5 +56,6 @@ ed25519-compact = { workspace = true }
 ssh-key         = { workspace = true }
 
 [dev-dependencies]
+gradient-fixtures = { workspace = true }
 rand  = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }

@@ -3329,6 +3329,7 @@ dependencies = [
  "git2",
  "gradient-db",
  "gradient-derivation",
+ "gradient-fixtures",
  "gradient-types",
  "gradient-util",
  "gradient-wire",
