@@ -439,69 +439,56 @@ async fn p10_the_sweep_asks_every_walked_unprobed_builder_and_leaves_stubs_alone
 }
 
 #[tokio::test]
-async fn p11_a_build_named_by_two_projects_is_asked_once() {
-    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let (u1, u2) = (UpstreamServer::start().await, UpstreamServer::start().await);
-    u1.hit(A_OUT, "a", &[]).await;
+async fn p11_a_shared_build_named_by_three_projects_is_substituted_from_the_upstream_that_has_it() {
+    let (e1, e2, e3) = (
+        EvaluationId::now_v7(),
+        EvaluationId::now_v7(),
+        EvaluationId::now_v7(),
+    );
+    let (u2, u3) = (UpstreamServer::start().await, UpstreamServer::start().await);
     u2.miss(A_OUT).await;
+    u3.hit(A_OUT, "a", &[]).await;
     let given = shape()
         .evaluation(e1)
         .evaluation_status(EvaluationStatus::Building)
         .unprobed(A, A_OUT)
-        .into_cache(CacheId::now_v7())
-        .http_upstream(&u1, CacheSubscriptionMode::ReadWrite, true)
         .evaluation(e2)
         .evaluation_status(EvaluationStatus::Building)
         .derivation(A)
         .entry_point(&attr_of(A))
         .job()
         .into_cache(CacheId::now_v7())
-        .http_upstream(&u2, CacheSubscriptionMode::ReadWrite, true);
+        .http_upstream(&u2, CacheSubscriptionMode::ReadWrite, true)
+        .evaluation(e3)
+        .evaluation_status(EvaluationStatus::Building)
+        .derivation(A)
+        .entry_point(&attr_of(A))
+        .job()
+        .into_cache(CacheId::now_v7())
+        .http_upstream(&u3, CacheSubscriptionMode::ReadWrite, true);
     let case = SchedulerCase::start(given).await;
 
-    let planned = planned_targets(&case.plan_probes(&[A]).await);
-    let owners: Vec<EvaluationId> = planned
-        .iter()
-        .filter(|(_, hashes)| hashes.contains(A_OUT))
-        .map(|(evaluation, _)| *evaluation)
-        .collect();
-    assert!(
-        matches!(owners.as_slice(), [owner] if *owner == e1 || *owner == e2),
-        "after 1: A_OUT under a single evaluation of E1, E2, got {planned:?}"
+    assert_eq!(
+        planned_targets(&case.plan_probes(&[A]).await),
+        targets(&[(e1, &[A_OUT]), (e2, &[A_OUT]), (e3, &[A_OUT])]),
+        "after 1: A_OUT under an evaluation of every naming project"
     );
     case.check("step 1").await;
 
     case.probe_round(&[A]).await;
-    let asked: Vec<String> = case
-        .upstream_metrics()
-        .await
-        .into_iter()
-        .map(|t| t.url)
-        .collect();
-    let shared = case.sb(A).await;
-    if asked == vec![u1.url()] {
-        assert_eq!(
-            build_state(&shared),
-            (true, true, BuildStatus::Queued),
-            "after 2, asked through E1: sb(A)"
-        );
-        assert_eq!(
-            (case.counters(e1).await, case.counters(e2).await),
-            ([1, 1, 0, 1, 0], [1, 1, 0, 1, 0]),
-            "after 2, asked through E1: counters(E1), counters(E2)"
-        );
-    } else {
-        assert_eq!(
-            asked,
-            vec![u2.url()],
-            "after 2: the round asks the upstream of a single project"
-        );
-        assert_eq!(
-            (shared.probed, shared.cache_available),
-            (true, false),
-            "after 2, asked through E2: sb(A)"
-        );
-    }
+    assert_eq!(
+        build_state(&case.sb(A).await),
+        (true, true, BuildStatus::Queued),
+        "after 2: sb(A) {{probed, cache_available, status}}"
+    );
+    let tallies = case.upstream_metrics().await;
+    assert!(
+        tallies.contains(&tally(&u3, 1, 1, 0))
+            && tallies
+                .iter()
+                .all(|t| t.url == u3.url() || t == &tally(&u2, 1, 0, 1)),
+        "after 2: U3 hit once, U2 asked at most once, got {tallies:?}"
+    );
     case.check("step 2").await;
 
     case.finish().await;
