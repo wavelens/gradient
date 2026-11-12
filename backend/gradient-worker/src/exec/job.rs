@@ -21,7 +21,7 @@ use gradient_wire::guest::{
     AgentToWorker, GUEST_WORK_DISK_SINCE, GuestMount, GuestNetwork, GuestSecret, RunJob,
     WorkerToAgent,
 };
-use gradient_wire::types::{ExecJob, MAX_PHASE_PAYLOAD, UploadObject};
+use gradient_wire::types::{BuildFailureKind, ExecJob, MAX_PHASE_PAYLOAD, UploadObject};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -30,6 +30,7 @@ use super::agent_client::AgentClient;
 use super::channels::GuestChannelMux;
 use super::checkout::{WorkSource, checkout_work};
 use super::context::{ClusterContext, cluster_context, context_layers};
+use super::guest_console_oom_kill_reporter::GuestKernelOutOfMemoryKillLogScanner;
 use super::host::ExecHost;
 use super::inventory::device_requests;
 use super::job_channels::JobChannels;
@@ -327,6 +328,7 @@ pub struct GuestJob {
     pub channels: JobChannels,
     pub uploads: GuestUploads,
     pub keep_vm_running: KeepVmRunning,
+    pub kernel_out_of_memory_kill_log_scanner: GuestKernelOutOfMemoryKillLogScanner,
 }
 
 pub async fn finish<R: ExecReport>(
@@ -335,6 +337,13 @@ pub async fn finish<R: ExecReport>(
     job: &mut GuestJob,
 ) -> Result<()> {
     let followed = follow(agent, reporter, job).await;
+    let followed =
+        change_lost_guest_agent_error_to_out_of_memory_failure_when_console_shows_oom_kills(
+            followed,
+            &mut job.kernel_out_of_memory_kill_log_scanner,
+            reporter,
+        )
+        .await;
     if !matches!(followed, Followed::LeftRunning) {
         let exit_code = match followed {
             Followed::Exited(code) => Some(code),
@@ -377,6 +386,7 @@ pub async fn follow<R: ExecReport>(
         channels,
         uploads,
         keep_vm_running,
+        kernel_out_of_memory_kill_log_scanner,
     } = job;
     let mut exited = None;
     loop {
@@ -385,6 +395,8 @@ pub async fn follow<R: ExecReport>(
         {
             return Followed::Exited(code);
         }
+        watchdog
+            .update_vm_pinned_and_restart_max_silent_timer_on_unpin(keep_vm_running.requested());
         let watched = tokio::select! {
             biased;
             () = leave_running.cancelled() => return Followed::LeftRunning,
@@ -436,9 +448,15 @@ pub async fn follow<R: ExecReport>(
                     () = answer_open_uploads(agent, uploads) => {}
                 }
                 exited = Some(code);
+                if code != 0 {
+                    kernel_out_of_memory_kill_log_scanner
+                        .log_kernel_out_of_memory_lines_and_return_if_guest_ran_out_of_memory(
+                            reporter,
+                        )
+                        .await;
+                }
                 report_program_exit(reporter, code).await;
                 if keep_vm_running.requested() {
-                    watchdog.program_exited();
                     info!(code, "the program exited, the guest keeps running");
                 }
             }
@@ -446,6 +464,28 @@ pub async fn follow<R: ExecReport>(
             Err(e) => return Followed::Ended(BuildError::transient(e)),
         }
     }
+}
+
+async fn change_lost_guest_agent_error_to_out_of_memory_failure_when_console_shows_oom_kills<
+    R: ExecReport,
+>(
+    followed: Followed,
+    scanner: &mut GuestKernelOutOfMemoryKillLogScanner,
+    reporter: &mut R,
+) -> Followed {
+    let Followed::Ended(error) = followed else {
+        return followed;
+    };
+    if error.kind != BuildFailureKind::Transient
+        || !scanner
+            .log_kernel_out_of_memory_lines_and_return_if_guest_ran_out_of_memory(reporter)
+            .await
+    {
+        return Followed::Ended(error);
+    }
+    Followed::Ended(BuildError::permanent(anyhow!(
+        scanner.out_of_memory_message()
+    )))
 }
 
 fn agent_lost(watched: Watched<Result<AgentToWorker>>) -> Followed {
@@ -745,6 +785,10 @@ impl ExecRun<'_> {
                 inbox.keep_vm_running,
                 self.job.keep_vm_running,
                 Some(marker_file(guest.dir())),
+            ),
+            kernel_out_of_memory_kill_log_scanner: GuestKernelOutOfMemoryKillLogScanner::new(
+                guest.dir(),
+                guest.state().size.memory_mb,
             ),
         };
         finish(&mut agent, &mut *self.updater, &mut job).await
@@ -1084,6 +1128,10 @@ mod tests {
             channels: job_channels(false).1,
             uploads: GuestUploads::new(PathBuf::new(), 1024),
             keep_vm_running: KeepVmRunning::new(watch::channel(false).1, false, None),
+            kernel_out_of_memory_kill_log_scanner: GuestKernelOutOfMemoryKillLogScanner::new(
+                Path::new(""),
+                500,
+            ),
         }
     }
 
@@ -1331,6 +1379,77 @@ mod tests {
         assert!(matches!(followed, Followed::Exited(3)), "{followed:?}");
         assert_eq!(started.elapsed(), Duration::from_secs(60));
         assert_eq!(recorder.0, [Reported::Exited(3)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_kept_vm_holds_a_silent_running_program_until_the_release() {
+        let (mut agent, guest) = connected().await;
+        let (switch, mut job) = kept_job();
+        let started = Instant::now();
+        let release = async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            switch.send_replace(false);
+            (guest, switch)
+        };
+        let mut recorder = Recorder::default();
+
+        let (followed, _guest) = tokio::join!(follow(&mut agent, &mut recorder, &mut job), release);
+
+        assert!(
+            matches!(followed, Followed::Stopped(Stop::Silent(_))),
+            "{followed:?}"
+        );
+        assert_eq!(started.elapsed(), Duration::from_secs(65));
+    }
+
+    #[tokio::test]
+    async fn a_guest_agent_lost_to_an_out_of_memory_kill_fails_the_job() {
+        let (mut agent, guest) = connected().await;
+        drop(guest);
+        let dir = tempfile::tempdir().unwrap();
+        let console = dir.path().join(gradient_vm::console::CONSOLE_LOG);
+        std::fs::write(
+            &console,
+            "[    0.1] Out of memory: Killed process 9 (boot)\n",
+        )
+        .unwrap();
+        let mut job = GuestJob {
+            kernel_out_of_memory_kill_log_scanner: GuestKernelOutOfMemoryKillLogScanner::new(
+                dir.path(),
+                500,
+            ),
+            ..unwatched_job()
+        };
+        std::fs::write(
+            &console,
+            "[    0.1] Out of memory: Killed process 9 (boot)\n\
+             [   42.1] gradient-guest- invoked oom-killer: order=0, oom_score_adj=0\n",
+        )
+        .unwrap();
+        let mut recorder = Recorder::default();
+
+        let error = finish(&mut agent, &mut recorder, &mut job)
+            .await
+            .unwrap_err();
+
+        let error = error.downcast_ref::<BuildError>().unwrap();
+        assert_eq!(error.kind, BuildFailureKind::Permanent);
+        assert_eq!(
+            error.to_string(),
+            "guest ran out of memory at 500 MB. increase `memoryMb` for the job"
+        );
+        assert_eq!(
+            recorder.0,
+            [
+                Reported::Note(
+                    "Guest kernel: gradient-guest- invoked oom-killer: order=0, oom_score_adj=0"
+                        .into()
+                ),
+                Reported::Note(
+                    "guest ran out of memory at 500 MB. increase `memoryMb` for the job".into()
+                ),
+            ]
+        );
     }
 
     #[tokio::test]

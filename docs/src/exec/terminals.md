@@ -29,7 +29,7 @@ apps.x86_64-linux.notebook = {
 - A job with `ssh = false` provides the guest serial console as its only access.
 - Sessions need the `TriggerEvaluation` permission on the project, see [Members and Roles](../ui/members-and-roles.md).
 - New shells start as `gradient` in `/work` with the environment of the program.
-- Interactive programs still obey `maxSilent`. Typed input echoed by the terminal counts as output.
+- Interactive programs obey `maxSilent` while **Keep VM running** is off. Input that the terminal echoes is output.
 
 ## 2. Use the Terminal Tab
 
@@ -84,7 +84,7 @@ Click **Keep VM running** on the job page to hold the guest up after the program
 | Guest shutdown | End by the recorded exit code |
 
 - New shells, SSH logins and the console remain usable on a held guest.
-- Program exits end `maxSilent`. The job `timeout` is in force.
+- Held guests pause `maxSilent` for the whole time of the hold. Release a guest to restart the maxSilent clock. The job `timeout` is active.
 - All nodes of a multi-node job follow the switch.
 
 ## 5. Shut Down the Guest

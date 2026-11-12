@@ -101,6 +101,7 @@ Find a checkout of the commit under evaluation in `/work`. Build requests that i
 
 - `args` and `env` accept placeholders like `@gradient.job.commit@` or `@gradient.worker.zone@`. Unknown placeholders fail the job.
 - Timeout events end the attempt. The log shows `program produced no output for <n>s (maxSilent exceeded)` or `program exceeded wall-clock timeout of <n>s`.
+- Forced terminations from low memory inside the guest show up as `Guest kernel: Out of memory: Killed process <pid> (<name>)`, then as ``guest ran out of memory at <n> MB. increase `memoryMb` for the job``. Attempts that lose the guest agent to such a forced termination fail without a restart.
 
 ## Verify Deployment
 

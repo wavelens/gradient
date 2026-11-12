@@ -25,6 +25,7 @@ pub struct Watchdog {
     total: Option<Duration>,
     silent: Option<Duration>,
     last_output: Instant,
+    silent_limit_paused: bool,
 }
 
 impl Watchdog {
@@ -34,6 +35,7 @@ impl Watchdog {
             total,
             silent,
             last_output: started,
+            silent_limit_paused: false,
         }
     }
 
@@ -41,8 +43,11 @@ impl Watchdog {
         self.last_output = Instant::now();
     }
 
-    pub fn program_exited(&mut self) {
-        self.silent = None;
+    pub fn update_vm_pinned_and_restart_max_silent_timer_on_unpin(&mut self, pinned: bool) {
+        if self.silent_limit_paused && !pinned {
+            self.last_output = Instant::now();
+        }
+        self.silent_limit_paused = pinned;
     }
 
     pub async fn next<S: Stream + Unpin>(
@@ -53,11 +58,12 @@ impl Watchdog {
         if abort.is_aborted() {
             return Watched::Aborted;
         }
+        let silent = self.silent.filter(|_| !self.silent_limit_paused);
         tokio::select! {
             biased;
             () = abort.aborted() => Watched::Aborted,
             total = expires(self.started, self.total) => Watched::TotalExceeded(total),
-            silent = expires(self.last_output, self.silent) => Watched::Silent(silent),
+            silent = expires(self.last_output, silent) => Watched::Silent(silent),
             item = stream.next() => item.map_or(Watched::End, Watched::Item),
         }
     }
@@ -105,6 +111,26 @@ mod tests {
         let (event, _) = first_event(&mut watchdog, &mut stream).await;
         assert_eq!(event, Watched::Silent(Duration::from_secs(10)));
         assert_eq!(start.elapsed(), Duration::from_secs(19));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pinned_vm_pauses_max_silent_until_the_release() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(start, None, Some(Duration::from_secs(10)));
+        watchdog.update_vm_pinned_and_restart_max_silent_timer_on_unpin(true);
+        let mut stream = futures::stream::pending::<u32>();
+
+        let paused = tokio::time::timeout(
+            Duration::from_secs(60),
+            first_event(&mut watchdog, &mut stream),
+        )
+        .await;
+        assert!(paused.is_err());
+
+        watchdog.update_vm_pinned_and_restart_max_silent_timer_on_unpin(false);
+        let (event, _) = first_event(&mut watchdog, &mut stream).await;
+        assert_eq!(event, Watched::Silent(Duration::from_secs(10)));
+        assert_eq!(start.elapsed(), Duration::from_secs(70));
     }
 
     #[tokio::test(start_paused = true)]
