@@ -125,7 +125,7 @@
 
     <gr-form-field label="Scope">
       <gr-select-button
-        [options]="scopeChoices()"
+        [options]="scopeOptions"
         [(ngModel)]="formScope"
         optionLabel="label"
         optionValue="value"
@@ -155,7 +155,6 @@
           optionLabel="label"
           optionValue="value"
           [(ngModel)]="formCache"
-          [disabled]="!!editingKey()"
           placeholder="Select a cache"
         />
       </gr-form-field>
@@ -181,14 +180,25 @@
 
     <gr-divider />
 
-    <gr-form-field label="Permissions" hint="A key can never have more permissions than its owner's account." [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
-      <app-permission-picker
-        [permissions]="activePermissions()"
-        [serverWidePermissions]="formScope === 'none' ? serverWidePermissions() : []"
-        [selectablePermissionIds]="getPermissionIdsUserCanGrantForKeyBeingEdited()"
-        [(selection)]="formPermissions"
-      />
-    </gr-form-field>
+    @let keyCannotExceedOwnerPermissionsHint = "A key can never have more permissions than its owner's account.";
+    @if (formScope !== 'cache') {
+      <gr-form-field label="Project permissions" data-testid="key-project-permissions" [hint]="keyCannotExceedOwnerPermissionsHint" [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
+        <app-permission-picker
+          [permissions]="availablePermissions()"
+          [serverWidePermissions]="formScope === 'unrestrictedScope' ? serverWidePermissions() : []"
+          [selectablePermissionIds]="getPermissionIdsUserCanGrantForKeyBeingEdited()"
+          [(selection)]="formPermissions"
+        />
+      </gr-form-field>
+    }
+    @if (formScope !== 'project') {
+      <gr-form-field label="Cache permissions" data-testid="key-cache-permissions" [hint]="formScope === 'cache' ? keyCannotExceedOwnerPermissionsHint : ''" [invalid]="formScope === 'cache' && !!permissionsError()" [error]="formScope === 'cache' ? permissionsError() ?? '' : ''">
+        <app-permission-picker
+          [permissions]="availableCachePermissions()"
+          [(selection)]="cachePermissionCheckedById"
+        />
+      </gr-form-field>
+    }
   </div>
 
   <div grDialogFooter>
