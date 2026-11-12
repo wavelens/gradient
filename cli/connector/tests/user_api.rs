@@ -146,6 +146,7 @@ async fn create_key_returns_the_token_string() {
         .create_key(CreateApiKeyRequest {
             name: "ci".into(),
             permissions: vec!["viewProject".into()],
+            cache_permissions: Vec::new(),
             expires_in_days: None,
             project: None,
             cache: None,
@@ -178,7 +179,9 @@ async fn edit_api_key_patches_by_id() {
             PatchApiKeyRequest {
                 name: Some("deploy".into()),
                 permissions: None,
+                cache_permissions: None,
                 project: None,
+                cache: None,
                 allowed_ips: None,
             },
         )

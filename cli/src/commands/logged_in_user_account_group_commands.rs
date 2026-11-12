@@ -11,7 +11,8 @@ use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use connector::Client;
 use connector::api::{
-    ApiKeyInfo, CreateApiKeyRequest, CreateSshKeyRequest, DeleteUserRequest, PatchApiKeyRequest,
+    ApiKeyInfo, ApiKeyPermissionsResponse, CreateApiKeyRequest, CreateSshKeyRequest,
+    DeleteUserRequest, PatchApiKeyRequest,
 };
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -87,8 +88,11 @@ pub enum LoggedInUserApiKeyCommands {
         /// Name of the API key
         name: String,
         /// Permission to grant. Repeatable. `permissions` lists them all
-        #[arg(long = "permission", required = true)]
+        #[arg(long = "permission")]
         permissions: Vec<String>,
+        /// Cache permission to grant. Repeatable. See `permissions` for all of them.
+        #[arg(long = "cache-permission")]
+        cache_permissions: Vec<String>,
         /// Expire the key after this number of days
         #[arg(long)]
         expires_in_days: Option<NonZeroU32>,
@@ -102,7 +106,7 @@ pub enum LoggedInUserApiKeyCommands {
         #[arg(long = "allowed-ip")]
         allowed_ips: Vec<String>,
     },
-    /// Edit the API key. The specified permissions or IP addresses replace the current ones.
+    /// Edit the API key. The specified permissions, cache permissions, or IP addresses replace the current ones.
     Edit {
         /// API key name or ID
         key: String,
@@ -112,9 +116,15 @@ pub enum LoggedInUserApiKeyCommands {
         /// Permission to grant. Repeatable. `permissions` lists them all
         #[arg(long = "permission")]
         permissions: Vec<String>,
+        /// Cache permission to grant. Repeatable. See `permissions` for all of them.
+        #[arg(long = "cache-permission")]
+        cache_permissions: Vec<String>,
         /// Limit the key to this project
-        #[arg(long)]
+        #[arg(long, conflicts_with = "cache")]
         api_key_project: Option<String>,
+        /// Limit the key to this cache
+        #[arg(long)]
+        cache: Option<String>,
         /// Accept keys only from this IP address or CIDR range. Use the flag more than once.
         #[arg(long = "allowed-ip")]
         allowed_ips: Vec<String>,
@@ -250,6 +260,18 @@ pub async fn handle(cmd: Commands, out: Output) {
                                 ""
                             };
                             out.human(format!("{}: {}{revoked}", key.id, key.name));
+                            if !key.permissions.is_empty() {
+                                out.human(format!(
+                                    "  Project permissions: {}",
+                                    key.permissions.join(", ")
+                                ));
+                            }
+                            if !key.cache_permissions.is_empty() {
+                                out.human(format!(
+                                    "  Cache permissions: {}",
+                                    key.cache_permissions.join(", ")
+                                ));
+                            }
                         }
                     }
                     Err(e) => out.fail(e),
@@ -257,6 +279,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 LoggedInUserApiKeyCommands::Create {
                     name,
                     permissions,
+                    cache_permissions,
                     expires_in_days,
                     api_key_project,
                     cache,
@@ -266,6 +289,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         .create_key(CreateApiKeyRequest {
                             name,
                             permissions,
+                            cache_permissions,
                             expires_in_days,
                             project: api_key_project,
                             cache,
@@ -287,7 +311,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                     key,
                     name,
                     permissions,
+                    cache_permissions,
                     api_key_project,
+                    cache,
                     allowed_ips,
                 } => {
                     let key = find_user_api_key_by_id_or_name(&client, &key, out).await;
@@ -297,7 +323,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                             PatchApiKeyRequest {
                                 name,
                                 permissions: (!permissions.is_empty()).then_some(permissions),
+                                cache_permissions: (!cache_permissions.is_empty())
+                                    .then_some(cache_permissions),
                                 project: api_key_project,
+                                cache,
                                 allowed_ips: (!allowed_ips.is_empty()).then_some(allowed_ips),
                             },
                         )
@@ -333,12 +362,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 LoggedInUserApiKeyCommands::Permissions => match user.key_permissions().await {
                     Ok(catalogue) => {
                         out.ok(&catalogue);
-                        for permission in &catalogue.available_permissions {
-                            out.human(format!(
-                                "{}: {}",
-                                permission.id, permission.permission_explanation
-                            ));
-                        }
+                        print_api_key_permission_catalogue_for_humans(out, &catalogue);
                     }
                     Err(e) => out.fail(e),
                 },
@@ -499,4 +523,30 @@ async fn find_user_api_key_by_id_or_name(client: &Client, key: &str, out: Output
                 format!("No API keys have name or ID '{key}'."),
             )
         })
+}
+
+fn print_api_key_permission_catalogue_for_humans(
+    out: Output,
+    catalogue: &ApiKeyPermissionsResponse,
+) {
+    let sections = [
+        ("Project permissions", &catalogue.available_permissions),
+        ("Cache permissions", &catalogue.available_cache),
+        (
+            "Server-wide permissions",
+            &catalogue.server_wide_permissions,
+        ),
+    ];
+    for (label, permissions) in sections {
+        if permissions.is_empty() {
+            continue;
+        }
+        out.human(format!("{label}:"));
+        for permission in permissions {
+            out.human(format!(
+                "  {}: {}",
+                permission.id, permission.permission_explanation
+            ));
+        }
+    }
 }
