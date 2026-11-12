@@ -530,23 +530,28 @@ async fn cache_role_mask(
     )
 }
 
-/// Only a key that is pinned to that cache can reach the cache through cache roles. The key permissions cap the role.
+/// An API key can reach the cache through the owner's cache role, unless the key has a pin to a different cache. The cache permission of the key is the cap on that role.
 async fn cache_member_role_and_permission_mask(
     db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<CacheRoleAndPermissionMask>> {
-    if api_key.is_some_and(|key| key.cache_pin != Some(cache_id)) {
+    if api_key.is_some_and(|key| {
+        key.cache_permission_mask == 0 || key.cache_pin.is_some_and(|pin| pin != cache_id)
+    }) {
         return Ok(None);
     }
     Ok(
         gradient_db::access::load_cache_member_role_and_permission_mask(db, cache_id, user_id)
             .await?
             .map(|grant| CacheRoleAndPermissionMask {
-                permissions: api_key.map_or(grant.permissions, |key| grant.permissions & key.mask),
+                permissions: api_key.map_or(grant.permissions, |key| {
+                    grant.permissions & key.cache_permission_mask
+                }),
                 ..grant
-            }),
+            })
+            .filter(|grant| grant.permissions != 0),
     )
 }
 
@@ -1196,6 +1201,7 @@ mod tests {
     fn api_key_ctx(mask: PermissionMask, project: Option<ProjectId>) -> ApiKeyContext {
         ApiKeyContext {
             mask,
+            cache_permission_mask: 0,
             project,
             cache_pin: None,
             allowed_ips: Vec::new(),
@@ -1498,7 +1504,8 @@ mod tests {
 
     fn cache_view_api_key() -> ApiKeyContext {
         ApiKeyContext {
-            mask: crate::permissions::cache_view_mask(),
+            mask: 0,
+            cache_permission_mask: crate::permissions::cache_view_mask(),
             project: None,
             cache_pin: Some(cache_fixture(false).id),
             allowed_ips: Vec::new(),
@@ -1730,6 +1737,7 @@ mod tests {
     fn api_key_context_for_fixed_test_project() -> ApiKeyContext {
         ApiKeyContext {
             mask: i64::MAX,
+            cache_permission_mask: 0,
             project: Some(ProjectId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000001"
             ))),
@@ -1739,25 +1747,28 @@ mod tests {
     }
 
     #[test]
-    fn any_project_key_ignores_direct_cache_membership() {
+    fn unpinned_view_only_api_key_caps_owner_admin_cache_role_to_view_only() {
         run(async {
             let user = user_fixture();
-            let api_key = api_key_ctx(mask_from(&[Permission::ViewProject]), None);
+            let api_key = ApiKeyContext {
+                cache_permission_mask: crate::permissions::cache_view_mask(),
+                ..api_key_ctx(mask_from(&[Permission::ViewProject]), None)
+            };
             let db = mock_db()
-                .append_query_results([vec![cache_fixture(false)]])
-                .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
             let state = make_state(db);
-            let err = load_cache(
-                &state.db(),
-                Caller::User(&user),
+            let access = effective_cache_role_and_mask(
+                &state.web_db,
+                user.id,
+                cache_fixture(false).id,
                 Some(&api_key),
-                "test-cache".into(),
-                CacheAccess::Readable,
             )
             .await
-            .expect_err("an any-project key must not reach the owner's private caches");
-            assert!(matches!(err, WebError::NotFound(..)));
+            .expect("query ok")
+            .expect("the owner's role reaches the cache through the key");
+            assert_eq!(access.permissions, crate::permissions::cache_view_mask());
         });
     }
 

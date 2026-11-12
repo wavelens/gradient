@@ -93,6 +93,8 @@ mod tests {
 
     const USE_SUPERUSER_RIGHTS: &str = "m20261210_000001_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions";
 
+    const CACHE_PERMISSION_COLUMN: &str = "m20261211_000000_add_cache_permission_column_to_api_and_move_pinned_api_key_permissions_to_cache_permission";
+
     const VIEW_AND_READ_STORE: &str =
         "m20261130_000000_add_view_and_read_store_bits_to_existing_api_keys";
     const VIEW_PROJECT: &str =
@@ -249,6 +251,64 @@ mod tests {
         for (id, want) in &expected {
             let stored = db.find::<EApi>(*id).await.expect("the key exists");
             assert_eq!(stored.permission, *want, "{}", stored.name);
+        }
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn running_api_key_cache_permission_migration_moves_pinned_key_permission_to_cache_permission_keeps_unpinned_key_permission_and_is_idempotent()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let owner = crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        let cache = crate::rows::insert::<ECache, _>(&conn, rows::cache())
+            .await
+            .expect("the cache is written");
+        let read = cache_mask_from(&[CachePermission::ViewCache, CachePermission::ReadStore]);
+        let deploy = mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]);
+        let cases: [(
+            PermissionMask,
+            Option<CacheId>,
+            PermissionMask,
+            PermissionMask,
+        ); 2] = [(read, Some(cache.id), 0, read), (deploy, None, deploy, 0)];
+
+        let mut expected: Vec<(ApiId, PermissionMask, PermissionMask)> = Vec::new();
+        for (index, (permission, cache, want_permission, want_cache_permission)) in
+            cases.iter().enumerate()
+        {
+            let name = format!("key-{index}");
+            let row = crate::rows::insert::<EApi, _>(
+                &conn,
+                MApi {
+                    id: ApiId::now_v7(),
+                    owned_by: owner.id,
+                    name: name.clone(),
+                    key: name,
+                    last_used_at: test_date(),
+                    created_at: test_date(),
+                    permission: *permission,
+                    cache: *cache,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the key is written");
+            expected.push((row.id, *want_permission, *want_cache_permission));
+        }
+
+        run_migrations(&conn, &[CACHE_PERMISSION_COLUMN, CACHE_PERMISSION_COLUMN]).await;
+
+        for (id, want_permission, want_cache_permission) in &expected {
+            let stored = db.find::<EApi>(*id).await.expect("the key exists");
+            assert_eq!(
+                (stored.permission, stored.cache_permission),
+                (*want_permission, *want_cache_permission),
+                "{}",
+                stored.name
+            );
         }
         db.finish().await;
     }

@@ -168,7 +168,7 @@ type PaginatedCache = Paginated<MCache>;
     operation_id = "listCaches",
     tag = "caches",
     summary = "List caches",
-    description = "List binary caches for the current user in a paginated list. Include caches that belong to the user and caches that other members share with the user. Include caches that project subscriptions make available. Sort the list by display name. API keys with cache scope show only the cache in their scope. Other API keys show only caches that projects they can view subscribe to. Keys with a pinned project limit the list to that project.",
+    description = "List binary caches for the current user in a paginated list. Include caches that belong to the user and caches that other members share with the user. Include caches that project subscriptions make available. Sort the list by display name. API keys with cache scope show only the cache in their scope. Other API keys show caches that projects they can view subscribe to. Keys with cache permission also show caches that include a role for the owner. Keys with a pinned project limit the list to that project.",
     params(PaginationParams),
     responses((status = OK, description = "Paginated cache list", body = PaginatedCache), WebError)
 )]
@@ -190,13 +190,7 @@ pub async fn get(
                 ),
             )
             .add(CCache::Id.eq(pin)),
-        Some(key) if mask_grants(key.mask, Permission::ViewProject) => {
-            gradient_db::caches::subscribed_binary_caches_of_projects_visible_to_user(
-                user.id,
-                key.project,
-            )
-        }
-        Some(_) => Condition::all().add(Expr::val(false)),
+        Some(key) => sql_condition_for_caches_api_key_without_cache_pin_can_list(user.id, &key),
     };
     let listing = crate::helpers::paginate(
         gradient_db::caches::ordered_by_name(condition),
@@ -206,6 +200,29 @@ pub async fn get(
     .await?;
 
     Ok(ok_json(listing))
+}
+
+fn sql_condition_for_caches_api_key_without_cache_pin_can_list(
+    user_id: UserId,
+    key: &ApiKeyContext,
+) -> Condition {
+    let mut condition = Condition::any().add(Expr::val(false));
+    if mask_grants(key.mask, Permission::ViewProject) {
+        condition = condition.add(
+            gradient_db::caches::subscribed_binary_caches_of_projects_visible_to_user(
+                user_id,
+                key.project,
+            ),
+        );
+    }
+    if key.cache_permission_mask != 0 {
+        condition = condition.add(
+            gradient_db::caches::binary_caches_created_by_user_or_with_direct_cache_role_for_user(
+                user_id,
+            ),
+        );
+    }
+    condition
 }
 
 #[utoipa::path(
