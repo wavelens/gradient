@@ -27,7 +27,7 @@ let
       printf '%s\n' "''${shellHook:-}"
     } > "$out/rc"
 
-    interactive="$BASH"
+    interactive=bash
     IFS=: read -ra dirs <<< "$PATH"
     for dir in "''${dirs[@]}"; do
       case "$dir" in
