@@ -5,7 +5,7 @@
  */
 
 use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
-use super::ssh::with_private_key;
+use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, run_with_ssh_credentials};
 use super::url::git_transport_url;
 use anyhow::{Context, Result};
 use git2::{Direction, Oid, Remote, Repository};
@@ -13,12 +13,16 @@ use std::path::Path;
 use tempfile::TempDir;
 use tracing::debug;
 
-pub fn checkout_commit(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<TempDir> {
+pub fn checkout_commit(
+    url: &str,
+    commit: &str,
+    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+) -> Result<TempDir> {
     let checkout = tempfile::Builder::new()
         .prefix("gradient-fetch-")
         .tempdir()
         .context("create the checkout directory")?;
-    checkout_commit_into(checkout.path(), url, commit, ssh_key)?;
+    checkout_commit_into(checkout.path(), url, commit, ssh)?;
     Ok(checkout)
 }
 
@@ -26,11 +30,9 @@ pub fn checkout_commit_into(
     dir: &Path,
     url: &str,
     commit: &str,
-    ssh_key: Option<&str>,
+    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
 ) -> Result<()> {
-    with_private_key(ssh_key, || {
-        check_out_into(dir, git_transport_url(url), commit)
-    })
+    run_with_ssh_credentials(ssh, || check_out_into(dir, git_transport_url(url), commit))
 }
 
 fn check_out_into(dir: &Path, url: &str, commit: &str) -> Result<()> {

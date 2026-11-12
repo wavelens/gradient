@@ -75,7 +75,14 @@ async fn clone_commit(
             &dir,
             &url,
             &commit,
-            ssh_key.as_ref().map(SecretString::expose),
+            ssh_key
+                .map(|key| {
+                    gradient_sources::SshGitPrivateKeyKnownHostsAndObservations::new(
+                        key,
+                        Vec::new(),
+                    )
+                })
+                .as_ref(),
         )
     })
     .await

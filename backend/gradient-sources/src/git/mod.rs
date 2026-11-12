@@ -24,6 +24,7 @@ use tracing::instrument;
 pub use checkout::{checkout_commit, checkout_commit_into};
 pub use commit_info::HeadCommit;
 pub use remote::BranchHead;
+pub use ssh::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
 
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
 pub async fn check_task_updates(
@@ -98,7 +99,10 @@ pub async fn resolve_remote_ref(
             project.clone(),
             &ctx.config.server.serve_url,
         )?;
-        Some(private_key)
+        Some(SshGitPrivateKeyKnownHostsAndObservations::new(
+            private_key,
+            Vec::new(),
+        ))
     } else {
         None
     };
@@ -107,11 +111,7 @@ pub async fn resolve_remote_ref(
     let branch = branch.map(|b| b.to_owned());
 
     let head = tokio::task::spawn_blocking(move || {
-        remote::ls_remote_head(
-            &url,
-            private_key.as_ref().map(SecretString::expose),
-            branch.as_deref(),
-        )
+        remote::ls_remote_head(&url, private_key.as_ref(), branch.as_deref())
     })
     .await
     .map_err(|e| SourceError::GitExecution {
@@ -123,9 +123,9 @@ pub async fn resolve_remote_ref(
 pub(crate) fn remote_ref_commit(
     url: &str,
     ref_: Option<&str>,
-    private_key: Option<&str>,
+    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
 ) -> Result<String, SourceError> {
-    let refs = remote::list_remote_refs(url, private_key)?;
+    let refs = remote::list_remote_refs(url, ssh)?;
     remote::ref_commit(&refs, ref_).map(|commit| vec_to_hex(&commit))
 }
 

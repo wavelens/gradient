@@ -23,8 +23,9 @@ pub use self::daemon::*;
 pub use self::error::StoreDaemonError;
 pub use self::evaluator::*;
 pub use self::git::{
-    BranchHead, HeadCommit, check_task_updates, checkout_commit, checkout_commit_into,
-    get_commit_info, head_commit, remote_branch_head, remote_tag_commit, resolve_remote_ref,
+    BranchHead, HeadCommit, SshGitPrivateKeyKnownHostsAndObservations, check_task_updates,
+    checkout_commit, checkout_commit_into, fetch_ssh_host_key, get_commit_info, head_commit,
+    remote_branch_head, remote_tag_commit, resolve_remote_ref,
 };
 pub use self::secret::{decrypt_secret, encrypt_secret};
 pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};
@@ -107,6 +108,8 @@ pub enum SourceError {
     TagNotFound { tag: String },
     #[error("the remote has no branches")]
     EmptyRemote,
+    #[error("Host key read failed: {reason}")]
+    SshHostKeyReadFailed { reason: String },
     #[error("Project not found with ID: {id}")]
     ProjectNotFound { id: gradient_types::ids::ProjectId },
 }

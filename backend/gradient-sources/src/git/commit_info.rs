@@ -6,10 +6,9 @@
 
 use super::context::TaskGitContext;
 use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
-use super::ssh::with_private_key;
+use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, run_with_ssh_credentials};
 use super::url::git_transport_url;
 use crate::SourceError;
-use gradient_types::SecretString;
 use gradient_types::input::vec_to_hex;
 use tracing::{debug, instrument};
 
@@ -23,10 +22,10 @@ pub struct HeadCommit {
 
 pub(crate) fn fetch_commit(
     url: &str,
-    private_key: Option<&str>,
+    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
     refspec: &str,
 ) -> Result<HeadCommit, SourceError> {
-    with_private_key(private_key, || fetch_commit_into_temp_repo(url, refspec))
+    run_with_ssh_credentials(ssh, || fetch_commit_into_temp_repo(url, refspec))
 }
 
 fn fetch_commit_into_temp_repo(url: &str, refspec: &str) -> Result<HeadCommit, SourceError> {
@@ -82,16 +81,10 @@ impl TaskGitContext<'_> {
         let url = git_transport_url(&self.task.repository).to_string();
         let private_key = self.private_key.clone();
 
-        tokio::task::spawn_blocking(move || {
-            fetch_commit(
-                &url,
-                private_key.as_ref().map(SecretString::expose),
-                &refspec,
-            )
-        })
-        .await
-        .map_err(|e| SourceError::GitExecution {
-            error: e.to_string(),
-        })?
+        tokio::task::spawn_blocking(move || fetch_commit(&url, private_key.as_ref(), &refspec))
+            .await
+            .map_err(|e| SourceError::GitExecution {
+                error: e.to_string(),
+            })?
     }
 }

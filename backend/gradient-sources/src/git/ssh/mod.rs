@@ -7,44 +7,95 @@
 mod connection;
 mod target;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use super::git_network_limits::set_libgit2_connect_and_read_timeouts_once;
 use connection::SshCommandStream;
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream, Transport};
 use gradient_types::SecretString;
+use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
+use russh::keys::PublicKey;
 use std::cell::RefCell;
-use std::path::PathBuf;
-use std::sync::Once;
+use std::sync::{Arc, Mutex, Once, PoisonError};
 use target::SshTarget;
+
+pub use connection::fetch_ssh_host_key;
 
 const SCHEMES: [&str; 3] = ["ssh", "ssh+git", "git+ssh"];
 
 thread_local! {
-    static PRIVATE_KEY: RefCell<Option<SecretString>> = const { RefCell::new(None) };
-    static KNOWN_HOSTS_FILE_PATHS: RefCell<Vec<PathBuf>> =
-        RefCell::new(default_openssh_known_hosts_file_paths());
+    static CURRENT_THREAD_SSH_CREDENTIALS: RefCell<Option<SshGitPrivateKeyKnownHostsAndObservations>> =
+        const { RefCell::new(None) };
 }
 
-fn default_openssh_known_hosts_file_paths() -> Vec<PathBuf> {
-    let system = PathBuf::from("/etc/ssh/ssh_known_hosts");
-    let user = std::env::home_dir().map(|home| home.join(".ssh").join("known_hosts"));
-    std::iter::once(system).chain(user).collect()
+#[derive(Clone, Debug)]
+pub struct SshGitPrivateKeyKnownHostsAndObservations {
+    private_key: SecretString,
+    host_keys: Vec<GitServerSshHostKey>,
+    observations: Arc<Mutex<Vec<GitSshHostKeyObservation>>>,
 }
 
-pub(crate) fn with_private_key<T>(private_key: Option<&str>, operation: impl FnOnce() -> T) -> T {
+impl SshGitPrivateKeyKnownHostsAndObservations {
+    pub fn new(private_key: SecretString, host_keys: Vec<GitServerSshHostKey>) -> Self {
+        Self {
+            private_key,
+            host_keys,
+            observations: Arc::default(),
+        }
+    }
+
+    pub fn observations(&self) -> Vec<GitSshHostKeyObservation> {
+        std::mem::take(
+            &mut *self
+                .observations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
+    }
+
+    fn record_host_key_observation(&self, observation: GitSshHostKeyObservation) {
+        self.observations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(observation);
+    }
+
+    fn find_parsed_saved_host_public_key_for_host_and_port(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<Option<PublicKey>, String> {
+        let host = host.to_lowercase();
+        self.host_keys
+            .iter()
+            .find(|saved| saved.host.to_lowercase() == host && saved.port == port)
+            .map(|saved| {
+                PublicKey::from_openssh(&saved.public_key).map_err(|error| {
+                    format!(
+                        "Host key stored for {host}:{port} is not a valid OpenSSH public key ({error})."
+                    )
+                })
+            })
+            .transpose()
+    }
+}
+
+pub(crate) fn run_with_ssh_credentials<T>(
+    credentials: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    operation: impl FnOnce() -> T,
+) -> T {
     register();
     set_libgit2_connect_and_read_timeouts_once();
-    let previous = PRIVATE_KEY.replace(private_key.map(|key| SecretString::new(key.to_owned())));
+    let previous = CURRENT_THREAD_SSH_CREDENTIALS.replace(credentials.cloned());
     let _restore = Restore(previous);
     operation()
 }
 
-struct Restore(Option<SecretString>);
+struct Restore(Option<SshGitPrivateKeyKnownHostsAndObservations>);
 
 impl Drop for Restore {
     fn drop(&mut self) {
-        PRIVATE_KEY.set(self.0.take());
+        CURRENT_THREAD_SSH_CREDENTIALS.set(self.0.take());
     }
 }
 
@@ -61,21 +112,12 @@ fn register() {
 }
 
 fn transport(remote: &git2::Remote<'_>) -> Result<Transport, git2::Error> {
-    let private_key = PRIVATE_KEY.with_borrow(Clone::clone);
-    let known_hosts_files = KNOWN_HOSTS_FILE_PATHS.with_borrow(Clone::clone);
-    Transport::smart(
-        remote,
-        false,
-        SshSubtransport {
-            private_key,
-            known_hosts_files,
-        },
-    )
+    let credentials = CURRENT_THREAD_SSH_CREDENTIALS.with_borrow(Clone::clone);
+    Transport::smart(remote, false, SshSubtransport { credentials })
 }
 
 struct SshSubtransport {
-    private_key: Option<SecretString>,
-    known_hosts_files: Vec<PathBuf>,
+    credentials: Option<SshGitPrivateKeyKnownHostsAndObservations>,
 }
 
 impl SmartSubtransport for SshSubtransport {
@@ -92,17 +134,16 @@ impl SmartSubtransport for SshSubtransport {
             }
         };
 
-        let private_key = self
-            .private_key
+        let credentials = self
+            .credentials
             .as_ref()
-            .map(SecretString::expose)
             .ok_or_else(|| git2::Error::from_str("SSH remote needs a private key"))?;
-        let key = russh::keys::decode_secret_key(private_key, None)
+        let key = russh::keys::decode_secret_key(credentials.private_key.expose(), None)
             .map_err(|e| git2::Error::from_str(&format!("invalid SSH private key: {e}")))?;
         let target = SshTarget::parse(url).map_err(|e| git2::Error::from_str(&e.to_string()))?;
         let command = target.command(program);
 
-        SshCommandStream::open(&target, key, command, self.known_hosts_files.clone())
+        SshCommandStream::open(&target, key, command, credentials)
             .map(|stream| Box::new(stream) as Box<dyn SmartSubtransportStream>)
             .map_err(|e| git2::Error::from_str(&format!("SSH to {}: {e}", target.host)))
     }

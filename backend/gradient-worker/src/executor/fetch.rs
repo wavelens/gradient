@@ -49,7 +49,12 @@ pub async fn fetch_repository(
 
     updater.report_fetching().await?;
 
-    let ssh_key = credentials.ssh_key().and_then(SecretString::from_utf8);
+    let ssh_key = credentials
+        .ssh_key()
+        .and_then(SecretString::from_utf8)
+        .map(|key| {
+            gradient_sources::SshGitPrivateKeyKnownHostsAndObservations::new(key, Vec::new())
+        });
 
     let (source_path, flake_root, _checkout) = match &job.source {
         FlakeSource::Repository { url, commit } => {
@@ -62,7 +67,7 @@ pub async fn fetch_repository(
                 gradient_sources::checkout_commit(
                     &url,
                     &commit_for_clone,
-                    ssh_key_for_clone.as_ref().map(SecretString::expose),
+                    ssh_key_for_clone.as_ref(),
                 )
             });
 
@@ -439,7 +444,7 @@ async fn fetch_inputs(
 async fn run_input_update(
     spec: &gradient_wire::messages::InputUpdateSpec,
     flake_root: &Path,
-    ssh_key: Option<&SecretString>,
+    ssh_key: Option<&gradient_sources::SshGitPrivateKeyKnownHostsAndObservations>,
     updater: &mut dyn JobReporter,
     abort: &mut AbortSignal,
 ) -> Result<()> {
@@ -538,7 +543,7 @@ async fn read_input_sources(
 async fn resolve_newest_revisions(
     spec: &gradient_wire::messages::InputUpdateSpec,
     flake_root: &Path,
-    ssh_key: Option<&SecretString>,
+    ssh_key: Option<&gradient_sources::SshGitPrivateKeyKnownHostsAndObservations>,
     sink: &dyn EvalProgressSink,
     abort: &mut AbortSignal,
 ) -> Result<Option<gradient_sources::flake_lock::Patch>> {

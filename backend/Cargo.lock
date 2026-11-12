@@ -3337,6 +3337,7 @@ dependencies = [
  "harmonia-store-remote",
  "harmonia-utils-hash",
  "hex",
+ "rand 0.10.3",
  "reqwest",
  "russh",
  "sea-orm",
