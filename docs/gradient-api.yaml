@@ -13646,7 +13646,7 @@ paths:
       tags:
       - user
       summary: Create API key
-      description: 'Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller''s permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects.'
+      description: 'Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller''s permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects. `useSuperuserRights` can apply only to an unpinned key with an owner that is a superuser. The key can then use the superuser rights of that owner.'
       operationId: createUserKey
       requestBody:
         content:
@@ -13711,7 +13711,7 @@ paths:
       summary: List API-key permission catalogue
       description: |-
         Returns the full set of capabilities a user-managed API key may grant.
-        Used by the create / edit dialog to populate the permission checkbox list.
+        Used by the create / edit dialog to populate the permission checkbox list. `server_wide_permissions` lists `useSuperuserRights` only for superusers.
       operationId: getUserKeyPermissions
       responses:
         '200':
@@ -22025,6 +22025,7 @@ components:
       - manageTriggers
       - manageWebhooks
       - createProject
+      - useSuperuserRights
     PermissionEntry:
       type: object
       required:

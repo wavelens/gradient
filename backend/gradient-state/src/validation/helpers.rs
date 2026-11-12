@@ -41,6 +41,13 @@ impl<'a> EntityLookup<'a> {
         self.config.users.contains_key(name)
     }
 
+    pub(super) fn user_is_superuser(&self, name: &str) -> bool {
+        self.config
+            .users
+            .get(name)
+            .is_some_and(|user| user.superuser)
+    }
+
     pub(super) fn project_exists(&self, name: &str) -> bool {
         self.config.projects.contains_key(name)
     }

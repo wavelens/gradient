@@ -1200,6 +1200,7 @@
           `triggerEvaluation`, `editTask` or `manageMembers`. It must not be empty.
           `GET /user/keys/permissions` lists them all. Sets of Gradient permissions always contain
           `viewProject`. The key can create projects through `createProject` only with `project = null`.
+          A key can only use the superuser privileges of the owner through `useSuperuserRights`, if `project = null` is present and the owner has `superuser = true`.
         '';
       };
 
