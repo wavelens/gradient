@@ -290,6 +290,7 @@ def active_statements():
 
 
 def wait_until_settled(eval_id):
+    psql("ANALYZE build_job, derivation_build;")
     deadline = time.monotonic() + EVAL_TIMEOUT
     samples = []
     while int(psql(
