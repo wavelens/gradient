@@ -87,9 +87,11 @@ mod tests {
     use gradient_fixtures::{rows, test_date};
     use gradient_migration::{Migrator, MigratorTrait};
     use gradient_types::permissions::{
-        CachePermission, Permission, PermissionMask, cache_mask_from, mask_from,
+        CachePermission, Permission, PermissionMask, admin_mask, cache_mask_from, mask_from,
     };
     use sea_orm_migration::SchemaManager;
+
+    const USE_SUPERUSER_RIGHTS: &str = "m20261210_000000_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions";
 
     const VIEW_AND_READ_STORE: &str =
         "m20261130_000000_add_view_and_read_store_bits_to_existing_api_keys";
@@ -178,6 +180,70 @@ mod tests {
                 let stored = db.find::<EApi>(*id).await.expect("the key exists");
                 assert_eq!(stored.permission, *want, "{} after {order:?}", stored.name);
             }
+        }
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn running_use_superuser_rights_migration_marks_only_unpinned_keys_of_superusers_with_all_project_permissions_and_is_idempotent()
+     {
+        assert_eq!(admin_mask(), 32767);
+        assert_eq!(Permission::UseSuperuserRights.bit(), 65536);
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let admin = crate::rows::insert::<EUser, _>(&conn, rows::superuser())
+            .await
+            .expect("the superuser is written");
+        let member = crate::rows::insert::<EUser, _>(
+            &conn,
+            MUser {
+                id: UserId::now_v7(),
+                username: "member".into(),
+                email: "member@example.com".into(),
+                ..rows::user()
+            },
+        )
+        .await
+        .expect("the member is written");
+        let project = crate::rows::insert::<EProject, _>(&conn, rows::project())
+            .await
+            .expect("the project is written");
+        let full = admin_mask();
+        let marked = full | Permission::UseSuperuserRights.bit();
+        let cases: [(UserId, PermissionMask, Option<ProjectId>, PermissionMask); 4] = [
+            (admin.id, full, None, marked),
+            (admin.id, full, Some(project.id), full),
+            (member.id, full, None, full),
+            (admin.id, Permission::ViewProject.bit(), None, Permission::ViewProject.bit()),
+        ];
+
+        let mut expected: Vec<(ApiId, PermissionMask)> = Vec::new();
+        for (index, (owner, permission, project, want)) in cases.iter().enumerate() {
+            let name = format!("key-{index}");
+            let row = crate::rows::insert::<EApi, _>(
+                &conn,
+                MApi {
+                    id: ApiId::now_v7(),
+                    owned_by: *owner,
+                    name: name.clone(),
+                    key: name,
+                    last_used_at: test_date(),
+                    created_at: test_date(),
+                    permission: *permission,
+                    project: *project,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the key is written");
+            expected.push((row.id, *want));
+        }
+
+        run_migrations(&conn, &[USE_SUPERUSER_RIGHTS, USE_SUPERUSER_RIGHTS]).await;
+
+        for (id, want) in &expected {
+            let stored = db.find::<EApi>(*id).await.expect("the key exists");
+            assert_eq!(stored.permission, *want, "{}", stored.name);
         }
         db.finish().await;
     }
