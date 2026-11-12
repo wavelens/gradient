@@ -49,6 +49,7 @@ pub mod memberships;
 pub mod metrics;
 pub mod pool;
 pub mod project_secrets;
+pub mod project_ssh_host_keys;
 pub mod projects;
 pub mod pull_request_summaries;
 pub mod roles;
