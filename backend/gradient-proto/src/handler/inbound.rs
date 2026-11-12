@@ -639,7 +639,14 @@ impl<'a> InboundContext<'a> {
                     ));
                 true
             }
-            ClientMessage::SshHostKeyObservations { .. } => true,
+            ClientMessage::SshHostKeyObservations {
+                assignment,
+                observations,
+            } => {
+                self.on_ssh_host_key_observations(&assignment, &observations)
+                    .await;
+                true
+            }
         }
     }
 
@@ -662,8 +669,46 @@ impl<'a> InboundContext<'a> {
             .await;
     }
 
+    fn project_for_reported_assignment(
+        &self,
+        assignment: &gradient_wire::messages::WorkerReportAssignment,
+    ) -> Option<ProjectId> {
+        use gradient_wire::messages::WorkerReportAssignment;
+        match assignment {
+            WorkerReportAssignment::Job { job_id } => self.active.project(job_id),
+            WorkerReportAssignment::Fetch { fetch_id } => self.active.fetch_project(fetch_id),
+        }
+    }
+
+    async fn on_ssh_host_key_observations(
+        &self,
+        assignment: &gradient_wire::messages::WorkerReportAssignment,
+        observations: &[gradient_wire::messages::GitSshHostKeyObservation],
+    ) {
+        let Some(project) = self.project_for_reported_assignment(assignment) else {
+            return;
+        };
+        if let Err(error) =
+            gradient_db::project_ssh_host_keys::apply_project_ssh_host_key_observations(
+                &self.handles.db.worker_db,
+                project,
+                observations,
+            )
+            .await
+        {
+            warn!(peer_id = %self.peer_id, %project, %error, "Failed to save the reported host key");
+        }
+    }
+
     async fn admit(&self, msg: ClientMessage) -> Option<(ClientMessage, Option<StorePathMapper>)> {
         let project = match &msg {
+            ClientMessage::SshHostKeyObservations { assignment, .. } => {
+                if self.project_for_reported_assignment(assignment).is_none() {
+                    warn!(peer_id = %self.peer_id, ?assignment, "Host key report for an assignment this session does not run. Dropped.");
+                    return None;
+                }
+                None
+            }
             ClientMessage::InputFetched { fetch_id, .. } => self.active.fetch_project(fetch_id),
             ClientMessage::JobUpdate { job_id, .. }
             | ClientMessage::JobFailed { job_id, .. }
@@ -2159,6 +2204,27 @@ mod assignment_response_tests {
             matches!(&answered, ServerMessage::CacheStatus { query_id, .. } if query_id == "q2"),
             "{answered:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn host_key_observations_for_an_unknown_fetch_are_refused() {
+        use super::fixture::TestSession;
+        use gradient_wire::messages::WorkerReportAssignment;
+
+        let state = test_state(empty_db());
+        let (mut session, _sent, _admitted) = TestSession::new(&state).await;
+        let (ctx, _uploads) = session.split();
+
+        let admitted = ctx
+            .admit(ClientMessage::SshHostKeyObservations {
+                assignment: WorkerReportAssignment::Fetch {
+                    fetch_id: "gone".into(),
+                },
+                observations: Vec::new(),
+            })
+            .await;
+
+        assert!(admitted.is_none());
     }
 
     #[tokio::test]
