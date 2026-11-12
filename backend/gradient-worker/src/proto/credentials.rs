@@ -6,13 +6,15 @@
 
 //! Credentials never land on disk. They arrive as separate frames right before the job assignment that they belong to. CredentialStore can buffer them for a single connection. Each job assignment can retrieve its own set, so a completed job won't delete credentials of another job. SecretBytes can lock memory pages with mlock(2) and zero them on drop.
 
-use gradient_types::SecretBytes;
-use gradient_wire::messages::CredentialKind;
+use gradient_sources::SshGitPrivateKeyKnownHostsAndObservations;
+use gradient_types::{SecretBytes, SecretString};
+use gradient_wire::messages::{CredentialKind, GitServerSshHostKey};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct CredentialStore {
     ssh_key: Option<SecretBytes>,
+    ssh_host_keys: Vec<GitServerSshHostKey>,
     job_secrets: BTreeMap<(String, String), SecretBytes>,
 }
 
@@ -25,7 +27,9 @@ impl CredentialStore {
             CredentialKind::JobSecret { job_id, name } => {
                 self.job_secrets.insert((job_id, name), data);
             }
-            CredentialKind::SshHostKeys { .. } => {}
+            CredentialKind::SshHostKeys { keys } => {
+                self.ssh_host_keys = keys;
+            }
         }
     }
 
@@ -36,6 +40,7 @@ impl CredentialStore {
         self.job_secrets = others;
         JobCredentials {
             ssh_key: self.ssh_key.take(),
+            ssh_host_keys: std::mem::take(&mut self.ssh_host_keys),
             secrets: own
                 .into_iter()
                 .map(|((_, name), value)| (name, value))
@@ -47,12 +52,19 @@ impl CredentialStore {
 #[derive(Clone, Default)]
 pub struct JobCredentials {
     ssh_key: Option<SecretBytes>,
+    ssh_host_keys: Vec<GitServerSshHostKey>,
     secrets: BTreeMap<String, SecretBytes>,
 }
 
 impl JobCredentials {
-    pub fn ssh_key(&self) -> Option<SecretBytes> {
-        self.ssh_key.clone()
+    pub fn ssh_git_private_key_known_hosts_and_observations(
+        &self,
+    ) -> Option<SshGitPrivateKeyKnownHostsAndObservations> {
+        let private_key = SecretString::from_utf8(self.ssh_key.clone()?)?;
+        Some(SshGitPrivateKeyKnownHostsAndObservations::new(
+            private_key,
+            self.ssh_host_keys.clone(),
+        ))
     }
 
     pub fn secret_value_by_name(&self, name: &str) -> Option<SecretBytes> {
@@ -80,7 +92,7 @@ mod tests {
         let held = store.take_credentials_for_job("exec:1");
         store.store(CredentialKind::SshKey, b"p2".to_vec().into());
 
-        assert_eq!(held.ssh_key().expect("kept").expose(), b"p1");
+        assert_eq!(held.ssh_key.as_ref().expect("kept").expose(), b"p1");
         assert_eq!(
             held.secret_value_by_name("wandb-token")
                 .expect("kept")
@@ -95,7 +107,36 @@ mod tests {
         store.store(CredentialKind::SshKey, b"p1".to_vec().into());
         let _first = store.take_credentials_for_job("exec:1");
 
-        assert!(store.take_credentials_for_job("exec:2").ssh_key().is_none());
+        assert!(store.take_credentials_for_job("exec:2").ssh_key.is_none());
+    }
+
+    #[test]
+    fn host_keys_travel_with_the_ssh_key_into_job_credentials() {
+        let keys = vec![GitServerSshHostKey {
+            host: "git.elektrat.de".into(),
+            port: 22,
+            public_key: "ssh-ed25519 AAAA".into(),
+        }];
+        let mut store = CredentialStore::default();
+        store.store(CredentialKind::SshKey, b"p1".to_vec().into());
+        store.store(
+            CredentialKind::SshHostKeys { keys: keys.clone() },
+            Vec::<u8>::new().into(),
+        );
+
+        let held = store.take_credentials_for_job("exec:1");
+
+        assert_eq!(held.ssh_host_keys, keys);
+        assert!(
+            held.ssh_git_private_key_known_hosts_and_observations()
+                .is_some()
+        );
+        assert!(
+            store
+                .take_credentials_for_job("exec:2")
+                .ssh_host_keys
+                .is_empty()
+        );
     }
 
     #[test]

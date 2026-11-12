@@ -14,8 +14,9 @@ use bytes::Bytes;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
     EXEC_ABORT_REQUEST_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, EvalCachePullOutcome, EvalMessageLevel,
-    EvalStatsReport, FLAKE_INPUT_SOURCES_SINCE, HELD_EVAL_SHARDS_SINCE, JobPhase, JobUpdateKind,
-    QueryMode,
+    EvalStatsReport, FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, FLAKE_INPUT_SOURCES_SINCE,
+    GitSshHostKeyObservation, HELD_EVAL_SHARDS_SINCE, JobPhase, JobUpdateKind, QueryMode,
+    WorkerReportAssignment,
 };
 use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
@@ -815,6 +816,25 @@ impl JobReporter for JobUpdater {
             return Ok(());
         }
         self.send_update(JobUpdateKind::InputSources { sources })
+            .await
+    }
+
+    async fn report_git_ssh_host_key_observations(
+        &mut self,
+        observations: Vec<GitSshHostKeyObservation>,
+    ) -> Result<()> {
+        if observations.is_empty()
+            || self.server_older_than(FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS)
+        {
+            return Ok(());
+        }
+        self.writer
+            .send(ClientMessage::SshHostKeyObservations {
+                assignment: WorkerReportAssignment::Job {
+                    job_id: self.job_id.clone(),
+                },
+                observations,
+            })
             .await
     }
 
