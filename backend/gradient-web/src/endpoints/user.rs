@@ -67,8 +67,12 @@ enum UserRefusal {
     GrantUnheldCachePermissions(Vec<CachePermission>),
     #[error("API key cannot grant project permissions that the owner does not have.")]
     GrantUnheldProjectPermissions(Vec<Permission>),
-    #[error("Only keys that aren't pinned to a project can call `createProject`.")]
+    #[error(
+        "Only keys that aren't pinned to a project can have server-wide permissions (`createProject`, `useSuperuserRights`)."
+    )]
     ServerWidePermissionOnPinnedKey,
+    #[error("Only superusers can grant `useSuperuserRights` to an API key.")]
+    NonSuperuserGrantsSuperuserRightsOnApiKey,
     #[error(
         "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."
     )]
@@ -86,6 +90,7 @@ impl Refusal for UserRefusal {
             | Self::UsernameConfirmationMismatch
             | Self::GrantUnheldCachePermissions(_)
             | Self::GrantUnheldProjectPermissions(_)
+            | Self::NonSuperuserGrantsSuperuserRightsOnApiKey
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
             | Self::ServerWidePermissionOnPinnedKey
@@ -103,6 +108,9 @@ impl Refusal for UserRefusal {
             }
             Self::GrantUnheldProjectPermissions(permissions) => {
                 permissions.iter().map(|p| p.as_wire_name()).collect()
+            }
+            Self::NonSuperuserGrantsSuperuserRightsOnApiKey => {
+                vec![Permission::UseSuperuserRights.as_wire_name()]
             }
             _ => Vec::new(),
         }
@@ -619,6 +627,9 @@ async fn reject_api_key_permissions_not_held_by_owner(
         None => {
             if mask_grants(mask, Permission::CreateProject) {
                 require_create_permission(create_project, user)?;
+            }
+            if mask_grants(mask, Permission::UseSuperuserRights) && !user.superuser {
+                return Err(UserRefusal::NonSuperuserGrantsSuperuserRightsOnApiKey.into());
             }
             Ok(mask)
         }
