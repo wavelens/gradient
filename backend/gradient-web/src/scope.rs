@@ -170,6 +170,7 @@ pub mod can {
             ManageTriggers,
             ManageWebhooks,
             CreateProject,
+            UseSuperuserRights,
         ]
     );
 

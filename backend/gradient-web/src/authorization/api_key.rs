@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::permissions::{Permission, PermissionMask, admin_mask, mask_grants};
+use crate::permissions::{Permission, PermissionMask, mask_grants};
 use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 use gradient_types::ids::CacheId;
 use gradient_types::{
@@ -23,7 +23,7 @@ impl ApiKeyContext {
     pub fn has_full_account_access(&self) -> bool {
         self.project.is_none()
             && self.cache_pin.is_none()
-            && self.mask & admin_mask() == admin_mask()
+            && mask_grants(self.mask, Permission::UseSuperuserRights)
     }
 
     pub fn may_create_projects(&self) -> bool {
@@ -166,7 +166,7 @@ impl DecodedRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::permissions::mask_from;
+    use crate::permissions::{admin_mask, mask_from};
 
     fn superuser() -> MUser {
         MUser {
@@ -206,27 +206,41 @@ mod tests {
         );
     }
 
+    fn keeps_superuser(key: ApiKeyContext) -> bool {
+        DecodedRequest::ApiKey {
+            key: ApiId::now_v7(),
+            user_id: UserId::now_v7(),
+            context: key,
+        }
+        .user_with_superuser_allowed_for_credential(superuser())
+        .superuser
+    }
+
     #[test]
-    fn only_an_unpinned_key_with_every_permission_keeps_superuser() {
-        let cache_pinned = ApiKeyContext {
+    fn an_api_key_with_use_superuser_rights_keeps_owner_superuser() {
+        assert!(keeps_superuser(ApiKeyContext {
+            mask: Permission::UseSuperuserRights.bit() | Permission::ViewProject.bit(),
+            ..full_key()
+        }));
+    }
+
+    #[test]
+    fn api_key_with_all_project_permissions_without_superuser_rights_loses_owner_superuser_flag() {
+        assert!(!keeps_superuser(ApiKeyContext {
+            mask: admin_mask() | Permission::CreateProject.bit(),
+            ..full_key()
+        }));
+    }
+
+    #[test]
+    fn pinned_api_key_loses_superuser_even_with_use_superuser_rights() {
+        assert!(!keeps_superuser(ApiKeyContext {
             cache_pin: Some(CacheId::now_v7()),
             ..full_key()
-        };
-        let view_only = ApiKeyContext {
-            mask: Permission::ViewProject.bit(),
+        }));
+        assert!(!keeps_superuser(ApiKeyContext {
+            project: Some(ProjectId::now_v7()),
             ..full_key()
-        };
-
-        let api_key_with_all_project_permissions_but_no_create_project = ApiKeyContext {
-            mask: admin_mask(),
-            ..full_key()
-        };
-
-        assert!(full_key().has_full_account_access());
-        assert!(
-            api_key_with_all_project_permissions_but_no_create_project.has_full_account_access()
-        );
-        assert!(!cache_pinned.has_full_account_access());
-        assert!(!view_only.has_full_account_access());
+        }));
     }
 }
