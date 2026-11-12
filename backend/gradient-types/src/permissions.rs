@@ -29,6 +29,7 @@ pub enum Permission {
     ManageWebhooks,
 
     CreateProject,
+    UseSuperuserRights,
 }
 
 pub type PermissionMask = i64;
@@ -51,6 +52,7 @@ impl Permission {
         Permission::ManageTriggers,
         Permission::ManageWebhooks,
         Permission::CreateProject,
+        Permission::UseSuperuserRights,
     ];
 
     /// New permissions must be appended, and an existing one must never be renumbered.
@@ -73,6 +75,7 @@ impl Permission {
             Permission::ManageTriggers => 13,
             Permission::ManageWebhooks => 14,
             Permission::CreateProject => 15,
+            Permission::UseSuperuserRights => 16,
         };
         1_i64 << pos
     }
@@ -95,11 +98,15 @@ impl Permission {
             Permission::ManageTriggers => "manageTriggers",
             Permission::ManageWebhooks => "manageWebhooks",
             Permission::CreateProject => "createProject",
+            Permission::UseSuperuserRights => "useSuperuserRights",
         }
     }
 
     pub const fn is_server_wide(self) -> bool {
-        matches!(self, Permission::CreateProject)
+        matches!(
+            self,
+            Permission::CreateProject | Permission::UseSuperuserRights
+        )
     }
 
     pub const fn permission_explanation(self) -> &'static str {
@@ -124,6 +131,9 @@ impl Permission {
             Permission::ManageTriggers => "Pick when tasks run (e.g., on push, on schedule)",
             Permission::ManageWebhooks => "Send event notifications to an external URL.",
             Permission::CreateProject => "Create a new project on the server.",
+            Permission::UseSuperuserRights => {
+                "Act with the owner's superuser rights (admin endpoints, event stream)."
+            }
         }
     }
 
@@ -145,6 +155,7 @@ impl Permission {
             Permission::ManageTriggers => "triggers",
             Permission::ManageWebhooks => "webhooks",
             Permission::CreateProject => "create project",
+            Permission::UseSuperuserRights => "superuser rights",
         }
     }
 

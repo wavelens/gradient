@@ -433,3 +433,22 @@ async fn anonymous_private_cache_request_returns_401_without_missing_permission_
     let body: serde_json::Value = res.json();
     assert!(body.get("missing_permissions").is_none(), "{body}");
 }
+
+#[tokio::test]
+async fn a_superuser_without_superuser_rights_is_told_which_permission_is_missing() {
+    let raw = "u".repeat(64);
+    let key = key_row(&raw, admin_mask() | Permission::CreateProject.bit(), None);
+    let db = mock_db()
+        .append_query_results([vec![key.clone()]])
+        .append_exec_results([exec_ok()])
+        .append_query_results([vec![key]])
+        .append_query_results([vec![gradient_fixtures::rows::superuser()]]);
+    let res = make_test_server(db.into_connection())
+        .get("/api/v1/metrics/events")
+        .add_header("authorization", bearer_key(&raw))
+        .await;
+    res.assert_status(StatusCode::FORBIDDEN);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["code"], "superuser_required", "{body}");
+    assert_eq!(body["missing_permissions"], json!(["useSuperuserRights"]), "{body}");
+}
