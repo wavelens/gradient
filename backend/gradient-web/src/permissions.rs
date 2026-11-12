@@ -135,6 +135,13 @@ pub fn parse_cache_permission_list(
     Ok(cache_mask_from(&perms))
 }
 
+pub fn project_permission_mask_to_wire_names(mask: PermissionMask) -> Vec<&'static str> {
+    mask_to_vec(mask)
+        .into_iter()
+        .map(|p| p.as_wire_name())
+        .collect()
+}
+
 pub fn cache_mask_to_wire(mask: PermissionMask) -> Vec<&'static str> {
     cache_mask_to_vec(mask)
         .into_iter()

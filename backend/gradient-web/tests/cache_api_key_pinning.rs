@@ -11,15 +11,15 @@
 
 use gradient_entity::{api, cache, ids::*};
 use gradient_fixtures::ids::{project_id, user_id};
-use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::mock::{all_statements, mock_db};
 use gradient_fixtures::rows::{
     cache_member_in, cache_view_role, project_cache_link, project_member, user,
 };
 use gradient_fixtures::test_date;
 use gradient_test_support::web::make_test_server;
 use gradient_types::consts::{BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_VIEW_ID};
-use gradient_types::permissions::cache_admin_mask;
-use sea_orm::{MockDatabase, MockExecResult};
+use gradient_types::permissions::{CachePermission, cache_admin_mask, cache_mask_from};
+use sea_orm::{MockDatabase, MockExecResult, Value as SqlValue};
 use sha2::{Digest, Sha256};
 
 fn hash_api_key(raw: &str) -> String {
@@ -160,7 +160,7 @@ async fn create_key_rejects_both_project_and_cache_pin() {
         .add_header("authorization", format!("Bearer {}", token))
         .json(&serde_json::json!({
             "name": "bad-key",
-            "permissions": ["viewCache"],
+            "cache_permissions": ["viewCache"],
             "project": "test-project",
             "cache": "test-cache",
         }))
@@ -194,7 +194,7 @@ async fn create_cache_pinned_key_cannot_exceed_member_mask() {
         .add_header("authorization", format!("Bearer {}", token))
         .json(&serde_json::json!({
             "name": "my-cache-key",
-            "permissions": ["writeStore"],
+            "cache_permissions": ["writeStore"],
             "cache": "test-cache",
         }))
         .await;
@@ -234,10 +234,96 @@ async fn subscribed_project_member_cannot_create_a_key_pinned_to_the_cache() {
         .add_header("authorization", format!("Bearer {}", token))
         .json(&serde_json::json!({
             "name": "subscriber-key",
-            "permissions": ["readStore"],
+            "cache_permissions": ["readStore"],
             "cache": "test-cache",
         }))
         .await;
 
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn create_cache_pinned_key_rejects_project_permissions() {
+    let session_id = gradient_types::SessionId::now_v7();
+    let token = gradient_test_support::web::make_token(session_id);
+    let session = gradient_fixtures::rows::live_session(session_id);
+
+    let db = mock_db()
+        .append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]])
+        .append_query_results([Vec::<api::Model>::new()])
+        .append_query_results([vec![private_cache_row()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![cache_view_role()]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/user/keys")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "my-cache-key",
+            "permissions": ["viewProject"],
+            "cache_permissions": ["viewCache"],
+            "cache": "test-cache",
+        }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patch_permissions_of_cache_pinned_api_key_writes_cache_permission_column_and_keeps_project_permission_zero()
+ {
+    let session_id = gradient_types::SessionId::now_v7();
+    let token = gradient_test_support::web::make_token(session_id);
+    let session = gradient_fixtures::rows::live_session(session_id);
+    let key = pinned_api_key(
+        &"p".repeat(64),
+        cache_id(),
+        cache_mask_from(&[CachePermission::ViewCache]),
+    );
+    let edited = cache_mask_from(&[CachePermission::ViewCache, CachePermission::ReadStore]);
+    let conn = mock_db()
+        .append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![key.clone()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![api::Model {
+            cache_permission: edited,
+            ..key.clone()
+        }]])
+        .append_query_results([Vec::<gradient_entity::audit_log::Model>::new()])
+        .append_query_results([vec![private_cache_row()]])
+        .into_connection();
+
+    let res = make_test_server(conn.clone())
+        .patch(&format!("/api/v1/user/keys/{}", key.id))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "cache_permissions": ["viewCache", "readStore"] }))
+        .await;
+
+    res.assert_status_ok();
+    let update = all_statements(conn.into_transaction_log())
+        .into_iter()
+        .find(|statement| statement.sql.starts_with("UPDATE \"api\""))
+        .expect("the key row is updated");
+    let column_value = |column: &str| {
+        let marker = format!("\"{column}\" = $");
+        let index: usize = update.sql
+            [update.sql.find(&marker).expect("column is set") + marker.len()..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap();
+        update.values.as_ref().unwrap().0[index - 1].clone()
+    };
+    assert_eq!(
+        column_value("cache_permission"),
+        SqlValue::BigInt(Some(edited))
+    );
+    assert_eq!(column_value("permission"), SqlValue::BigInt(Some(0)));
 }

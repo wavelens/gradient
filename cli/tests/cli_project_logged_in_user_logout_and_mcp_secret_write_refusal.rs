@@ -114,7 +114,7 @@ async fn logged_in_user_api_key_revoke_resolves_the_name_to_the_id() {
     Mock::given(method("GET"))
         .and(path("/api/v1/user/keys"))
         .respond_with(ok(json!([{
-            "id": "00000000-0000-0000-0000-000000000001", "name": "ci", "managed": false, "permissions": [],
+            "id": "00000000-0000-0000-0000-000000000001", "name": "ci", "managed": false, "permissions": [], "cache_permissions": [],
             "created_at": "2026-01-01T00:00:00", "allowed_ips": []
         }])))
         .mount(&server)
