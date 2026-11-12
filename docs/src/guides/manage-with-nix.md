@@ -19,7 +19,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   https://gradient.example.com/api/v1/admin/state > state.nix
 ```
 
-All users, projects, tasks, caches, custom roles, API keys, workers and connections to Git hosts sit in file `state.nix`. The format is identical to `services.gradient.state`. Built-in roles and internal `build-request` tasks do not appear.
+All users, projects, tasks, caches, custom roles, API keys, workers and connections to Git hosts sit in file `state.nix`. The format is identical to `services.gradient.state`. Built-in roles and internal `build-request` tasks don't appear in the export. API keys that pin a cache don't appear either. The state format doesn't store a cache pin for keys.
 
 ## 2. Fill In the Secrets
 

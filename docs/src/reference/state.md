@@ -176,7 +176,8 @@ services.gradient.state = {
 | `key_file` | string | - | Path to a file that hold the SHA-256 hash of the API token. The hash use lowercase hex and omit the `GRAD` prefix. |
 | `name` | string | attribute name | Name of this API key. |
 | `owned_by` | string | - | Name of the user who own this key. |
-| `permissions` | list of string | `[ ]` | Permissions this key grant, written as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask` or `manageMembers`. Sets of Gradient permissions always contain `viewProject`. The key can create projects through `createProject` only with `project = null`. A key can only use the superuser privileges of the owner through `useSuperuserRights`, if `project = null` is present and the owner has `superuser = true`. |
+| `cache_permissions` | list of string | `[ ]` | A key can receive cache permissions `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. The key can get these permissions on every cache where the owner of the key has a role. The role of the owner in that cache can limit those permissions. Only keys with `project = null` can have cache permissions. |
+| `permissions` | list of string | `[ ]` | Permissions this key grant, written as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask` or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. Sets of Gradient permissions always contain `viewProject`. The key can create projects through `createProject` only with `project = null`. A key can only use the superuser privileges of the owner through `useSuperuserRights`, if `project = null` is present and the owner has `superuser = true`. |
 | `project` | null or string | `null` | Project to which this key restrict access. `null` mean no restriction. |
 
 ## `teams.<name>`

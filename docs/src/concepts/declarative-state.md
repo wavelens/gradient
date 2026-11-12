@@ -65,6 +65,8 @@ The Nix store never uses secret material. Each `*_file` option points to a path 
 
 The server stores only a digest of each API key. Put that digest in `key_file`. Clients send the token with a `GRAD` prefix.
 
+Keys with `project = null` can also list `cache_permissions` such as `readStore`. Those keys then receive these permissions on all caches where their owners are members. Examples include fetching from a private cache through the netrc file.
+
 ```sh
 gradient generate apikey
 ```

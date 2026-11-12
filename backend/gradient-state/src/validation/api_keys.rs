@@ -5,7 +5,8 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use gradient_types::permissions::Permission;
+use crate::config::StateApiKey;
+use gradient_types::permissions::{CachePermission, Permission};
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     for api_key in lookup.config.api_keys.values() {
@@ -15,12 +16,13 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 format!("User '{}' does not exist", api_key.owned_by),
             );
         }
-        if api_key.permissions.is_empty() {
+        if api_key.permissions.is_empty() && api_key.cache_permissions.is_empty() {
             errors.push(
                 format!("api_keys.{}.permissions", api_key.name),
-                "At least one permission must be declared.",
+                "Declare at least one entry in `permissions` or `cache_permissions`.",
             );
         }
+        validate_api_key_cache_permissions(api_key, errors);
         for wire in &api_key.permissions {
             match Permission::from_wire_name(wire) {
                 None => errors.push(
@@ -59,5 +61,23 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 format!("Project '{}' does not exist", project),
             );
         }
+    }
+}
+
+fn validate_api_key_cache_permissions(api_key: &StateApiKey, errors: &mut ErrorCollector) {
+    let field = format!("api_keys.{}.cache_permissions", api_key.name);
+    for wire in &api_key.cache_permissions {
+        if CachePermission::from_wire_name(wire).is_none() {
+            errors.push(
+                field.clone(),
+                format!("Unknown cache permission '{}'", wire),
+            );
+        }
+    }
+    if api_key.project.is_some() && !api_key.cache_permissions.is_empty() {
+        errors.push(
+            field,
+            "A key that has a project set can't have cache permissions. Clear the project field or remove the cache permissions.",
+        );
     }
 }
