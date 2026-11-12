@@ -14,7 +14,6 @@ use anyhow::{Context, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReporter, parse_owner_repo};
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
-use gradient_types::SecretString;
 use gradient_types::input::{check_repository_url_is_ssh, vec_to_hex};
 use gradient_types::{
     ActionConfig, ActionType, CTaskAction, ECommit, EEvaluation, EExecJob, EProject, ETaskAction,
@@ -186,28 +185,25 @@ async fn files_of_patch(
     ctx: &CiContext,
     request: &PatchPullRequest,
 ) -> Result<Vec<CommitFile>, PullRequestError> {
-    let ssh_key = repository_ssh_key(ctx, &request.task).await?;
+    let ssh = repository_ssh_key(ctx, &request.task).await?;
+    let blocking_ssh = ssh.clone();
     let repository = request.task.repository.clone();
     let start_commit = request.start_commit.clone();
     let patch = request.patch.clone();
     let files = tokio::task::spawn_blocking(move || {
-        let checkout = gradient_sources::checkout_commit(
-            &repository,
-            &start_commit,
-            ssh_key
-                .map(|key| {
-                    gradient_sources::SshGitPrivateKeyKnownHostsAndObservations::new(
-                        key,
-                        Vec::new(),
-                    )
-                })
-                .as_ref(),
-        )
-        .map_err(|e| PullRequestError::DoesNotApply(format!("{e:#}")))?;
+        let checkout =
+            gradient_sources::checkout_commit(&repository, &start_commit, blocking_ssh.as_ref())
+                .map_err(|e| PullRequestError::DoesNotApply(format!("{e:#}")))?;
         patched_files(checkout.path(), &patch)
     })
-    .await
-    .map_err(|e| PullRequestError::Forge(anyhow!("apply the patch: {e}")))??;
+    .await;
+    gradient_sources::git::save_observed_project_ssh_host_keys(
+        &ctx.db.worker_db,
+        request.task.project,
+        ssh.as_ref(),
+    )
+    .await;
+    let files = files.map_err(|e| PullRequestError::Forge(anyhow!("apply the patch: {e}")))??;
     if files.is_empty() {
         return Err(PullRequestError::Empty);
     }
@@ -217,7 +213,7 @@ async fn files_of_patch(
 async fn repository_ssh_key(
     ctx: &CiContext,
     task: &MTask,
-) -> Result<Option<SecretString>, PullRequestError> {
+) -> Result<Option<gradient_sources::SshGitPrivateKeyKnownHostsAndObservations>, PullRequestError> {
     if !check_repository_url_is_ssh(&task.repository) {
         return Ok(None);
     }
@@ -226,13 +222,9 @@ async fn repository_ssh_key(
         .context("load the task's project")
         .map_err(PullRequestError::Forge)?
         .ok_or_else(|| PullRequestError::Forge(anyhow!("the task's project is gone")))?;
-    let (private_key, _) = gradient_sources::decrypt_ssh_private_key(
-        &ctx.db.config.secrets.crypt_file,
-        project,
-        &ctx.db.config.server.serve_url,
-    )
-    .map_err(|e| PullRequestError::Forge(anyhow!("decrypt the project's SSH key: {e}")))?;
-    Ok(Some(private_key))
+    gradient_sources::git::load_ssh_private_key_and_known_hosts(&ctx.db, &project, &task.repository)
+        .await
+        .map_err(|e| PullRequestError::Forge(anyhow!("decrypt the project's SSH key: {e}")))
 }
 
 async fn record_for_job(

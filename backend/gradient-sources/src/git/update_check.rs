@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::context::TaskGitContext;
+use super::context::{TaskGitContext, save_observed_project_ssh_host_keys};
 use super::remote::{AdvertisedRef, BranchHead, branch_head, list_remote_refs, tag_commit};
 use crate::SourceError;
 use gradient_db::evaluations::branch::newest_on_branch;
@@ -78,13 +78,21 @@ impl TaskGitContext<'_> {
         F: FnOnce(&[AdvertisedRef]) -> Result<T, SourceError> + Send + 'static,
     {
         let url = self.task.repository.clone();
-        let private_key = self.private_key.clone();
+        let ssh = self.ssh.clone();
 
-        tokio::task::spawn_blocking(move || select(&list_remote_refs(&url, private_key.as_ref())?))
-            .await
-            .map_err(|e| SourceError::GitExecution {
-                error: e.to_string(),
-            })?
+        let selected =
+            tokio::task::spawn_blocking(move || select(&list_remote_refs(&url, ssh.as_ref())?))
+                .await
+                .map_err(|e| SourceError::GitExecution {
+                    error: e.to_string(),
+                });
+        save_observed_project_ssh_host_keys(
+            &self.ctx.worker_db,
+            self.task.project,
+            self.ssh.as_ref(),
+        )
+        .await;
+        selected?
     }
 
     async fn commit_hash(&self, evaluation: &MEvaluation) -> Result<Option<Vec<u8>>, SourceError> {

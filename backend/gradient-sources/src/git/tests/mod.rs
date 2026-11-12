@@ -557,3 +557,46 @@ fn a_commit_below_the_tip_is_checked_out_from_a_server_refusing_fetches_by_hash(
 
     assert_eq!(checked_out_file(&url, pinned), "pinned");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resolve_remote_ref_saves_the_key_of_an_unknown_host() {
+    use super::ssh::SshGitPrivateKeyKnownHostsAndObservations;
+    use super::ssh::tests::{
+        create_temp_git_repository_with_two_commits_on_main, decode, ed25519_pem,
+        generate_random_ssh_host_private_key, serve_git_over_ssh,
+    };
+
+    let (dir, tip) = create_temp_git_repository_with_two_commits_on_main();
+    let client_pem = ed25519_pem();
+    let port = serve_git_over_ssh(
+        decode(&client_pem).public_key().clone(),
+        vec![generate_random_ssh_host_private_key(
+            russh::keys::Algorithm::Ed25519,
+        )],
+    )
+    .await;
+    let url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let db = gradient_fixtures::mock::mock_db()
+        .append_exec_results([gradient_fixtures::mock::exec_ok()])
+        .into_connection();
+    let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(client_pem.into(), Vec::new());
+
+    let head = super::list_remote_refs_find_branch_head_and_save_host_keys(
+        &db,
+        gradient_types::ids::ProjectId::now_v7(),
+        &url,
+        Some(ssh),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(head, tip.as_bytes());
+    let statements = gradient_fixtures::mock::all_statements(db.into_transaction_log());
+    assert!(
+        statements.iter().any(|statement| statement
+            .sql
+            .starts_with(r#"INSERT INTO "project_ssh_host_key""#)),
+        "{statements:?}"
+    );
+}

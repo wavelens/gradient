@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::context::TaskGitContext;
+use super::context::{TaskGitContext, save_observed_project_ssh_host_keys};
 use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
 use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, run_with_ssh_credentials};
 use super::url::git_transport_url;
@@ -79,12 +79,20 @@ impl TaskGitContext<'_> {
 
     async fn fetch_commit(&self, refspec: String) -> Result<HeadCommit, SourceError> {
         let url = git_transport_url(&self.task.repository).to_string();
-        let private_key = self.private_key.clone();
+        let ssh = self.ssh.clone();
 
-        tokio::task::spawn_blocking(move || fetch_commit(&url, private_key.as_ref(), &refspec))
-            .await
-            .map_err(|e| SourceError::GitExecution {
-                error: e.to_string(),
-            })?
+        let fetched =
+            tokio::task::spawn_blocking(move || fetch_commit(&url, ssh.as_ref(), &refspec))
+                .await
+                .map_err(|e| SourceError::GitExecution {
+                    error: e.to_string(),
+                });
+        save_observed_project_ssh_host_keys(
+            &self.ctx.worker_db,
+            self.task.project,
+            self.ssh.as_ref(),
+        )
+        .await;
+        fetched?
     }
 }
