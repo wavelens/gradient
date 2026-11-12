@@ -14,10 +14,10 @@ pub use crate::types::{
     CredentialKind, DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome,
     EvalMessageLevel, EvalProgress, EvalSetCost, EvalShard, EvalShardOutcome, EvalShardSpec,
     EvalStatsReport, EvalSubtreeCost, FinishedShard, FlakeInputOverride, FlakeInputSourceWire,
-    FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities, GuestChannelKind,
-    InputFetch, InputFetchState, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase,
-    JobPhaseSpan, JobUpdateKind, QueryMode, Realisation, RequiredPath, RunningAssignment,
-    VmStateKind,
+    FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep, GitServerSshHostKey,
+    GitSshHostKeyObservation, GradientCapabilities, GuestChannelKind, InputFetch, InputFetchState,
+    InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode,
+    Realisation, RequiredPath, RunningAssignment, VmStateKind, WorkerReportAssignment,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,
@@ -52,6 +52,7 @@ pub const FLAKE_INPUT_SOURCES_SINCE: u16 = 56;
 
 pub const GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_SINCE: u16 = 60;
 pub const DRAIN_CANCELLED_SINCE: u16 = 62;
+pub const FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS: u16 = 63;
 
 pub const GUEST_CHANNEL_CHUNK: usize = 32 * 1024;
 

@@ -485,6 +485,7 @@ impl MessageLoopState {
                 project,
                 request,
                 ssh_key,
+                ssh_host_keys: _,
             } => {
                 self.on_fetch_input(InputFetchJob {
                     fetch_id,
@@ -1423,6 +1424,7 @@ mod tests {
                 project: "p1".into(),
                 request: "{}".into(),
                 ssh_key: None,
+                ssh_host_keys: Vec::new(),
             })
             .await
             .unwrap();
@@ -1486,6 +1488,7 @@ mod tests {
                 project: "p1".into(),
                 request: "{}".into(),
                 ssh_key: None,
+                ssh_host_keys: Vec::new(),
             })
             .await
             .unwrap();
