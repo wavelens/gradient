@@ -219,3 +219,34 @@ async fn api_key_pinned_to_project_cannot_have_superuser_rights() {
 
     res.assert_status(StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn key_permission_catalogue_hides_use_superuser_rights_from_non_superuser_and_shows_it_for_superuser()
+ {
+    let server_wide_permission_ids = |db: MockDatabase, session_id: SessionId| async move {
+        let res = make_test_server(db.into_connection())
+            .get("/api/v1/user/keys/permissions")
+            .add_header("authorization", bearer(session_id))
+            .await;
+        res.assert_status_ok();
+        res.json::<Value>()["message"]["server_wide_permissions"]
+            .as_array()
+            .expect("server_wide_permissions")
+            .iter()
+            .map(|entry| entry["id"].as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let regular_session = SessionId::now_v7();
+    let superuser_session = SessionId::now_v7();
+
+    let regular =
+        server_wide_permission_ids(with_auth(mock_db(), regular_session), regular_session).await;
+    let admin = server_wide_permission_ids(
+        with_auth_as(mock_db(), superuser_session, superuser()),
+        superuser_session,
+    )
+    .await;
+
+    assert_eq!(regular, vec!["createProject"]);
+    assert_eq!(admin, vec!["createProject", "useSuperuserRights"]);
+}

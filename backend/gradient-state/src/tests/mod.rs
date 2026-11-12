@@ -1057,3 +1057,39 @@ fn pinned_state_file_api_key_cannot_list_create_project_but_unpinned_can() {
     );
     assert!(unpinned.is_valid, "errors: {:?}", unpinned.errors);
 }
+
+#[test]
+fn rejects_use_superuser_rights_on_api_key_of_non_superuser_but_allows_superuser() {
+    let state_with_owner = |superuser: bool| {
+        let json = format!(
+            r#"{{
+            "users": {{
+                "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null", "superuser": {superuser} }}
+            }},
+            "api_keys": {{
+                "admin": {{ "name": "admin", "key_file": "/dev/null", "owned_by": "alice", "permissions": ["useSuperuserRights"] }}
+            }}
+        }}"#
+        );
+        serde_json::from_str::<StateConfiguration>(&json)
+            .unwrap()
+            .validate()
+    };
+
+    let regular_owner = state_with_owner(false);
+    let superuser_owner = state_with_owner(true);
+
+    assert!(
+        regular_owner
+            .errors
+            .iter()
+            .any(|e| e.field == "api_keys.admin.permissions"),
+        "errors: {:?}",
+        regular_owner.errors
+    );
+    assert!(
+        superuser_owner.is_valid,
+        "errors: {:?}",
+        superuser_owner.errors
+    );
+}
