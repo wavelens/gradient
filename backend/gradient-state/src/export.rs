@@ -295,7 +295,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     }
 
     for k in &api_keys {
-        if k.revoked_at.is_some() {
+        if k.revoked_at.is_some() || k.cache.is_some() {
             continue;
         }
         config.api_keys.insert(
@@ -305,6 +305,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 key_file: String::new(),
                 owned_by: name_or_blank(&username, k.owned_by),
                 permissions: mask_to_vec(k.permission)
+                    .into_iter()
+                    .map(|p| p.as_wire_name().to_string())
+                    .collect(),
+                cache_permissions: cache_mask_to_vec(k.cache_permission)
                     .into_iter()
                     .map(|p| p.as_wire_name().to_string())
                     .collect(),

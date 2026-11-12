@@ -1194,13 +1194,19 @@
 
       permissions = mkOption {
         type = types.listOf types.str;
+        default = [ ];
         example = [ "viewProject" "triggerEvaluation" ];
         description = ''
-          Permissions granted by the key, as camelCase identifiers such as `viewProject`,
-          `triggerEvaluation`, `editTask` or `manageMembers`. It must not be empty.
-          `GET /user/keys/permissions` lists them all. Sets of Gradient permissions always contain
-          `viewProject`. The key can create projects through `createProject` only with `project = null`.
-          A key can only use the superuser privileges of the owner through `useSuperuserRights`, if `project = null` is present and the owner has `superuser = true`.
+          The key can grant permissions as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask`, or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. All of them appear in `GET /user/keys/permissions`. Permission sets in Gradient always include `viewProject`. The key can create projects through `createProject`, if `project = null` is present and not otherwise. The key can use the owner's superuser rights through `useSuperuserRights` alone. Both `project = null` on the key and `superuser = true` on the owner are necessary for that use.
+        '';
+      };
+
+      cache_permissions = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [ "readStore" ];
+        description = ''
+          A key can receive cache permissions `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. The key can get these permissions on every cache where the owner of the key has a role. The role of the owner in that cache can limit those permissions. Only keys with `project = null` can have cache permissions.
         '';
       };
 

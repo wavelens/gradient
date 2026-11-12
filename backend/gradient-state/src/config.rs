@@ -252,7 +252,10 @@ pub struct StateApiKey {
     pub name: String,
     pub key_file: String,
     pub owned_by: String,
+    #[serde(default)]
     pub permissions: Vec<String>,
+    #[serde(default)]
+    pub cache_permissions: Vec<String>,
     #[serde(default)]
     pub project: Option<String>,
 }
