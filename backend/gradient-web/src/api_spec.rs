@@ -144,6 +144,13 @@ pub struct ProjectSecretPath {
 
 #[derive(IntoParams)]
 #[into_params(parameter_in = Path)]
+pub struct ProjectSshHostKeyPathParameters {
+    pub project: String,
+    pub host_key: String,
+}
+
+#[derive(IntoParams)]
+#[into_params(parameter_in = Path)]
 pub struct TaskPath {
     pub project: String,
     pub task: String,

@@ -28,6 +28,12 @@ pub(crate) enum ProjectRefusal {
     UnusableSopsKey { reason: String },
     #[error("Invalid worker URL: {reason}")]
     InvalidWorkerUrl { reason: String },
+    #[error("invalid SSH host key: {reason}")]
+    InvalidSshHostPublicKey { reason: String },
+    #[error("Host is empty")]
+    EmptyGitServerHostName,
+    #[error("failed to read host key: {reason}")]
+    GitServerSshHostKeyReadFailed { reason: String },
 }
 
 impl Refusal for ProjectRefusal {
@@ -37,7 +43,10 @@ impl Refusal for ProjectRefusal {
             | Self::InvalidSecretName { .. }
             | Self::EmptySecretValue
             | Self::SecretValueTooLarge
-            | Self::InvalidWorkerUrl { .. } => RefusalStatus::BadRequest,
+            | Self::InvalidWorkerUrl { .. }
+            | Self::InvalidSshHostPublicKey { .. }
+            | Self::EmptyGitServerHostName => RefusalStatus::BadRequest,
+            Self::GitServerSshHostKeyReadFailed { .. } => RefusalStatus::BadGateway,
             Self::TeamWorkerManagedOnTeamPage
             | Self::ProjectWorkerPageCannotDrainWorkerOnSharedMachine
             | Self::DeclaredInServerStateConfiguration

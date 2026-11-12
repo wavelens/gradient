@@ -5,6 +5,7 @@
  */
 
 pub mod management;
+pub mod project_git_ssh_host_keys;
 pub mod readiness;
 mod refusal;
 pub mod secrets;

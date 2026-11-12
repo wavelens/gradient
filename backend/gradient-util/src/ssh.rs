@@ -18,7 +18,7 @@ const KEX: &[kex::Name] = &[
     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
 ];
 
-const HOST_KEYS: &[Algorithm] = &[
+pub const HOST_KEYS: &[Algorithm] = &[
     Algorithm::Ed25519,
     Algorithm::Ecdsa {
         curve: EcdsaCurve::NistP256,

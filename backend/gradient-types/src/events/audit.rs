@@ -78,6 +78,8 @@ actions! {
     ProjectSecretCreatedOrReplaced => "project.secret.put",
     ProjectSecretDeleted => "project.secret.delete",
     ProjectSshKeyRegenerated => "project.ssh_key.regenerate",
+    ProjectGitServerSshHostKeyConfirmedOrReplaced => "project.ssh_host_key.put",
+    ProjectGitServerSshHostKeyDeleted => "project.ssh_host_key.delete",
     TaskCreate => "task.create",
     TaskUpdate => "task.update",
     TaskDelete => "task.delete",
