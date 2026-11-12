@@ -19,7 +19,7 @@ use crate::permissions::{
     CachePermission, Permission, PermissionEntry, PermissionMask, available_cache_permissions,
     available_permissions, available_server_permissions, cache_mask_to_vec, cache_mask_to_wire,
     mask_grants, mask_to_vec, mask_with_view_project_permission, parse_cache_permission_list,
-    parse_permission_list, server_wide_mask,
+    parse_permission_list, project_permission_mask_to_wire_names, server_wide_mask,
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
@@ -74,6 +74,14 @@ enum UserRefusal {
     #[error("Only superusers can grant `useSuperuserRights` to an API key.")]
     NonSuperuserGrantsSuperuserRightsOnApiKey,
     #[error(
+        "Keys pinned to a cache can have only cache permissions. Send them in `cache_permissions` and leave `permissions` empty."
+    )]
+    ProjectPermissionsOnCachePinnedKey,
+    #[error(
+        "Keys that are pinned to a project can't have cache permissions. Leave `cache_permissions` empty or unpin the project."
+    )]
+    CachePermissionsOnPinnedKey,
+    #[error(
         "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."
     )]
     ModifyOidcUserProfile,
@@ -94,6 +102,8 @@ impl Refusal for UserRefusal {
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
             | Self::ServerWidePermissionOnPinnedKey
+            | Self::ProjectPermissionsOnCachePinnedKey
+            | Self::CachePermissionsOnPinnedKey
             | Self::PinToProjectAndCache
             | Self::NoPermissionsSelected
             | Self::ApiKeyExpiryShorterThanOneDay
@@ -165,7 +175,10 @@ pub struct CreateApiKeyRequest {
     #[serde(default)]
     #[schema(minimum = 1)]
     pub expires_in_days: Option<u32>,
+    #[serde(default)]
     pub permissions: Vec<String>,
+    #[serde(default)]
+    pub cache_permissions: Vec<String>,
     #[serde(default)]
     pub project: Option<String>,
     #[serde(default)]
@@ -178,12 +191,18 @@ pub struct CreateApiKeyRequest {
 pub struct PatchApiKeyRequest {
     pub name: Option<String>,
     pub permissions: Option<Vec<String>>,
-    /// An omitted field leaves the pin unchanged. A name pins the key, and JSON null unpins it.
+    pub cache_permissions: Option<Vec<String>>,
+    /// An omitted field leaves the pin unchanged. A name pins the key and JSON null unpins it.
     #[serde(
         default,
         deserialize_with = "crate::helpers::deserialize_optional_field"
     )]
     pub project: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::deserialize_optional_field"
+    )]
+    pub cache: Option<Option<String>>,
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
 }
@@ -194,6 +213,7 @@ pub struct ApiKeyInfo {
     pub name: String,
     pub managed: bool,
     pub permissions: Vec<&'static str>,
+    pub cache_permissions: Vec<&'static str>,
     pub project: Option<String>,
     pub cache: Option<String>,
     pub created_at: String,
@@ -205,19 +225,12 @@ pub struct ApiKeyInfo {
 
 impl ApiKeyInfo {
     fn new(key: MApi, pins: &PinNames) -> Self {
-        let permissions = if key.cache.is_some() {
-            cache_mask_to_wire(key.permission)
-        } else {
-            mask_to_vec(key.permission)
-                .into_iter()
-                .map(|p| p.as_wire_name())
-                .collect()
-        };
         Self {
             id: key.id.to_string(),
             name: key.name,
             managed: key.managed,
-            permissions,
+            permissions: project_permission_mask_to_wire_names(key.permission),
+            cache_permissions: cache_mask_to_wire(key.cache_permission),
             project: key.project.and_then(|id| pins.projects.get(&id).cloned()),
             cache: key.cache.and_then(|id| pins.caches.get(&id).cloned()),
             created_at: fmt_dt(key.created_at),
@@ -555,6 +568,50 @@ async fn resolve_project_pin(
     Ok(Some(project.id))
 }
 
+async fn resolve_cache_pin(
+    db: &DbContext,
+    user: &MUser,
+    name: Option<String>,
+) -> WebResult<Option<CacheId>> {
+    let Some(name) = name.filter(|name| !name.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let cache = load_cache(
+        db,
+        Caller::User(user),
+        None,
+        name.trim().to_string(),
+        CacheAccess::Readable,
+    )
+    .await?;
+    Ok(Some(cache.id))
+}
+
+enum ApiKeyPin {
+    Project(ProjectId),
+    Cache(CacheId),
+    NotPinned,
+}
+
+impl ApiKeyPin {
+    fn of_at_most_one_of_project_id_and_cache_id(
+        project: Option<ProjectId>,
+        cache: Option<CacheId>,
+    ) -> WebResult<Self> {
+        match (project, cache) {
+            (Some(_), Some(_)) => Err(UserRefusal::PinToProjectAndCache.into()),
+            (Some(project), None) => Ok(Self::Project(project)),
+            (None, Some(cache)) => Ok(Self::Cache(cache)),
+            (None, None) => Ok(Self::NotPinned),
+        }
+    }
+}
+
+struct ApiKeyProjectAndCachePermissionBitmasks {
+    project_and_server_permission_bitmask: PermissionMask,
+    cache_permission_bitmask: PermissionMask,
+}
+
 struct PinNames {
     projects: HashMap<ProjectId, String>,
     caches: HashMap<CacheId, String>,
@@ -636,6 +693,63 @@ async fn reject_api_key_permissions_not_held_by_owner(
     }
 }
 
+async fn validate_api_key_permission_lists_against_pin_and_owner_grants_returning_stored_bitmasks(
+    db: &WebDb,
+    create_project: gradient_types::CreatePermission,
+    user: &MUser,
+    pin: &ApiKeyPin,
+    permissions: &[String],
+    cache_permissions: &[String],
+) -> WebResult<ApiKeyProjectAndCachePermissionBitmasks> {
+    let (project_and_server_permission_bitmask, cache_permission_bitmask) = match pin {
+        ApiKeyPin::Cache(_) if !permissions.is_empty() => {
+            return Err(UserRefusal::ProjectPermissionsOnCachePinnedKey.into());
+        }
+        ApiKeyPin::Project(_) if !cache_permissions.is_empty() => {
+            return Err(UserRefusal::CachePermissionsOnPinnedKey.into());
+        }
+        ApiKeyPin::Cache(cache) => (
+            0,
+            held_cache_permissions(db, user, *cache, cache_permissions).await?,
+        ),
+        ApiKeyPin::Project(project) => (
+            reject_api_key_permissions_not_held_by_owner(
+                db,
+                create_project,
+                user,
+                Some(*project),
+                permissions,
+            )
+            .await?,
+            0,
+        ),
+        ApiKeyPin::NotPinned => {
+            let project_mask = if permissions.is_empty() {
+                0
+            } else {
+                reject_api_key_permissions_not_held_by_owner(
+                    db,
+                    create_project,
+                    user,
+                    None,
+                    permissions,
+                )
+                .await?
+            };
+            let cache_mask =
+                parse_cache_permission_list(cache_permissions, "GET /user/keys/permissions")?;
+            if project_mask == 0 && cache_mask == 0 {
+                return Err(UserRefusal::NoPermissionsSelected.into());
+            }
+            (project_mask, cache_mask)
+        }
+    };
+    Ok(ApiKeyProjectAndCachePermissionBitmasks {
+        project_and_server_permission_bitmask,
+        cache_permission_bitmask,
+    })
+}
+
 #[utoipa::path(
     get,
     path = "/user/keys/permissions",
@@ -686,7 +800,7 @@ pub async fn get_keys(
     operation_id = "getUserKeyReach",
     tag = "user",
     summary = "List what an API key can reach",
-    description = "Projects and caches that an API key can reach appear in the list, each with the permissions for the key on that resource. The permissions of the key can't exceed the current role of the owner. A change to the owner's role can change the list. `create_project` is true when the key can call `PUT /projects`. Public projects and public caches stay readable by all keys. They don't appear in the list.",
+    description = "Projects and caches that the API key can access appear in the list, with the key permissions for each resource. Unpinned keys with cache permissions list all caches that include a role for the owner. Key permissions cannot exceed the current roles of the owner. Changes to the owner roles can change the list. `create_project` is true if the key can call `PUT /projects`. All keys can still read public projects and public caches. These items don't appear in the list.",
     params(("api_id" = ApiId, Path)),
     responses((status = OK, description = "Projects and caches the key can reach", body = ApiKeyVisibleProjectsAndCachesWithPermissionsResponse), WebError)
 )]
@@ -708,7 +822,7 @@ pub async fn get_key_visible_projects_and_caches_with_permissions(
         let caches = vec![ApiKeyVisibleProjectOrCacheWithPermissions {
             name: cache.name,
             display_name: cache.display_name,
-            permissions: cache_mask_to_wire(held & api_key.permission),
+            permissions: cache_mask_to_wire(held & api_key.cache_permission),
         }]
         .into_iter()
         .filter(|cache| !cache.permissions.is_empty())
@@ -738,24 +852,50 @@ pub async fn get_key_visible_projects_and_caches_with_permissions(
             (held != 0).then(|| ApiKeyVisibleProjectOrCacheWithPermissions {
                 name: project.name,
                 display_name: project.display_name,
-                permissions: mask_to_vec(held)
-                    .into_iter()
-                    .map(|p| p.as_wire_name())
-                    .collect(),
+                permissions: project_permission_mask_to_wire_names(held),
             })
         })
         .collect();
     let create_project = api_key.project.is_none()
         && mask_grants(api_key.permission, Permission::CreateProject)
         && require_create_permission(state.config.permissions.create_project, &user).is_ok();
+    let caches = if api_key.project.is_none() && api_key.cache_permission != 0 {
+        list_reachable_caches_for_unpinned_api_key(&state.web_db, &user, api_key.cache_permission)
+            .await?
+    } else {
+        Vec::new()
+    };
 
     Ok(ok_json(
         ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
             projects,
-            caches: Vec::new(),
+            caches,
             create_project,
         },
     ))
+}
+
+async fn list_reachable_caches_for_unpinned_api_key(
+    db: &WebDb,
+    user: &MUser,
+    api_key_cache_permission_mask: PermissionMask,
+) -> WebResult<Vec<ApiKeyVisibleProjectOrCacheWithPermissions>> {
+    let masks = gradient_db::access::load_cache_permission_masks_for_user(db, user.id).await?;
+    let ids: Vec<CacheId> = masks.keys().copied().collect();
+    let mut caches: Vec<ApiKeyVisibleProjectOrCacheWithPermissions> = by_ids::<ECache, _>(db, &ids)
+        .await?
+        .into_iter()
+        .filter_map(|(id, cache)| {
+            let held = masks.get(&id).copied().unwrap_or(0) & api_key_cache_permission_mask;
+            (held != 0).then(|| ApiKeyVisibleProjectOrCacheWithPermissions {
+                name: cache.name,
+                display_name: cache.display_name,
+                permissions: cache_mask_to_wire(held),
+            })
+        })
+        .collect();
+    caches.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(caches)
 }
 
 #[utoipa::path(
@@ -764,7 +904,7 @@ pub async fn get_key_visible_projects_and_caches_with_permissions(
     operation_id = "createUserKey",
     tag = "user",
     summary = "Create API key",
-    description = "Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller's permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects. `useSuperuserRights` can apply only to an unpinned key with an owner that is a superuser. The key can then use the superuser rights of that owner.",
+    description = "Create a new API key. The caller can get the full key (with the `GRAD` prefix) once. A second request can't retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to expire the key automatically. Omit this field to create a key with no expiry. Project and server-wide permissions go in `permissions`. Cache permissions go in `cache_permissions`. A key pinned to a project can hold only `permissions`. A key pinned to a cache can hold only `cache_permissions`. An unpinned key can hold both. No key can exceed the permissions of its owner. A key pinned to a project or cache can grant only the caller's permissions at that location. A caller in a project subscribed to a cache is a read-only member of that cache. That caller can create a read-only key for the cache. Grant `viewProject` to all keys with project permissions. Use `createProject` only for unpinned keys with an owner who can create projects. Use `useSuperuserRights` only for unpinned keys whose owner is a superuser. That key can then use the superuser permissions of that owner.",
     request_body = CreateApiKeyRequest,
     responses((status = OK, description = "New API key", body = String, content_type = "application/json"), WebError)
 )]
@@ -795,29 +935,19 @@ pub async fn post_keys(
         .expires_in_days
         .map(|days| gradient_types::now() + Duration::days(days as i64));
 
-    let (mask, project_pin, cache_pin) = if let Some(cache_name) = body.cache.clone() {
-        let cache = load_cache(
-            &db,
-            Caller::User(&user),
-            None,
-            cache_name,
-            CacheAccess::Readable,
-        )
-        .await?;
-        let m = held_cache_permissions(&state.web_db, &user, cache.id, &body.permissions).await?;
-        (m, None, Some(cache.id))
-    } else {
-        let project = resolve_project_pin(&db, user.id, body.project.clone()).await?;
-        let m = reject_api_key_permissions_not_held_by_owner(
+    let cache_pin = resolve_cache_pin(&db, &user, body.cache.clone()).await?;
+    let project_pin = resolve_project_pin(&db, user.id, body.project.clone()).await?;
+    let pin = ApiKeyPin::of_at_most_one_of_project_id_and_cache_id(project_pin, cache_pin)?;
+    let masks =
+        validate_api_key_permission_lists_against_pin_and_owner_grants_returning_stored_bitmasks(
             &state.web_db,
             state.config.permissions.create_project,
             &user,
-            project,
+            &pin,
             &body.permissions,
+            &body.cache_permissions,
         )
         .await?;
-        (m, project, None)
-    };
 
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?;
     let raw_key = generate_api_key();
@@ -829,7 +959,8 @@ pub async fn post_keys(
         last_used_at: *NULL_TIME,
         created_at: gradient_types::now(),
         expires_at,
-        permission: mask,
+        permission: masks.project_and_server_permission_bitmask,
+        cache_permission: masks.cache_permission_bitmask,
         project: project_pin,
         cache: cache_pin,
         allowed_ips,
@@ -840,7 +971,7 @@ pub async fn post_keys(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ApiKeyName))?;
 
-    audit.write(Action::ApiKeyCreate, EventOwner::default(), serde_json::json!({ "api_key_id": inserted.id.to_string(), "name": body.name, "expires_in_days": body.expires_in_days, "permissions_mask": mask, "project_id": project_pin.map(|id| id.to_string()), "cache_id": cache_pin.map(|id| id.to_string()), }))
+    audit.write(Action::ApiKeyCreate, EventOwner::default(), serde_json::json!({ "api_key_id": inserted.id.to_string(), "name": body.name, "expires_in_days": body.expires_in_days, "permissions_mask": masks.project_and_server_permission_bitmask, "cache_permissions_mask": masks.cache_permission_bitmask, "project_id": project_pin.map(|id| id.to_string()), "cache_id": cache_pin.map(|id| id.to_string()), }))
     .await;
 
     Ok(Json(BaseResponse {
@@ -855,7 +986,7 @@ pub async fn post_keys(
     operation_id = "patchUserKey",
     tag = "user",
     summary = "Update an API key's configurable options",
-    description = "Edit the key name, permission set, and pin to a project in place. The new permissions replace the existing set in full. Cache-pinned keys hold only cache permissions. Those keys hold only a subset of the caller's permissions on that cache. A key pinned to a cache can't also have a pin to a project. State-managed keys don't allow edits. A call with API-key authentication can't reach this endpoint. Use a session instead.",
+    description = "Edit key name, permissions and pins in place. New `permissions` and `cache_permissions` lists replace existing lists completely. Omitted lists stay unchanged. Pin changes to cache clear project permissions. Pin changes to project clear cache permissions. A key can't set pins to both project and cache. A pinned key can keep only a subset of caller permissions for that project or cache. State-managed keys stay read-only. Calls that use API key auth can't reach this endpoint. Use a session instead.",
     params(("api_id" = ApiId, Path)),
     request_body = PatchApiKeyRequest,
     responses((status = OK, description = "Updated key", body = ApiKeyInfo), WebError)
@@ -876,13 +1007,10 @@ pub async fn patch_key(
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::ApiKey).into());
     }
 
-    let pinned_cache = api_key.cache;
-    if pinned_cache.is_some() && matches!(body.project, Some(Some(_))) {
-        return Err(UserRefusal::PinToProjectAndCache.into());
-    }
-
     let previous_mask = api_key.permission;
+    let previous_cache_mask = api_key.cache_permission;
     let previous_project = api_key.project;
+    let previous_cache = api_key.cache;
     let previous_name = api_key.name.clone();
     let mut active: AApi = api_key.into_active_model();
 
@@ -900,36 +1028,53 @@ pub async fn patch_key(
         }
         active.name = Set(name);
     }
-    let mut new_project = previous_project;
-    if let Some(maybe_name) = body.project.clone() {
-        new_project = resolve_project_pin(&db, user.id, maybe_name).await?;
-        active.project = Set(new_project);
-    }
+    let new_project = match body.project.clone() {
+        Some(name) => resolve_project_pin(&db, user.id, name).await?,
+        None => previous_project,
+    };
+    let new_cache = match body.cache.clone() {
+        Some(name) => resolve_cache_pin(&db, &user, name).await?,
+        None => previous_cache,
+    };
+    let pin = ApiKeyPin::of_at_most_one_of_project_id_and_cache_id(new_project, new_cache)?;
     let mut new_mask = previous_mask;
-    match (pinned_cache, body.permissions) {
-        (Some(cache), Some(perms)) => {
-            new_mask = held_cache_permissions(&state.web_db, &user, cache, &perms).await?;
-        }
-        (Some(_), None) => {}
-        (None, perms) if perms.is_some() || body.project.is_some() => {
-            let wire = perms.unwrap_or_else(|| {
-                mask_to_vec(previous_mask)
-                    .into_iter()
-                    .map(|p| p.as_wire_name().to_string())
-                    .collect()
-            });
-            new_mask = reject_api_key_permissions_not_held_by_owner(
+    let mut new_cache_mask = previous_cache_mask;
+    if body.permissions.is_some()
+        || body.cache_permissions.is_some()
+        || body.project.is_some()
+        || body.cache.is_some()
+    {
+        let permissions = body.permissions.unwrap_or_else(|| match pin {
+            ApiKeyPin::Cache(_) => Vec::new(),
+            _ => project_permission_mask_to_wire_names(previous_mask)
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        });
+        let cache_permissions = body.cache_permissions.unwrap_or_else(|| match pin {
+            ApiKeyPin::Project(_) => Vec::new(),
+            _ => cache_mask_to_wire(previous_cache_mask)
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        });
+        let masks =
+            validate_api_key_permission_lists_against_pin_and_owner_grants_returning_stored_bitmasks(
                 &state.web_db,
                 state.config.permissions.create_project,
                 &user,
-                new_project,
-                &wire,
+                &pin,
+                &permissions,
+                &cache_permissions,
             )
             .await?;
-        }
-        (None, _) => {}
+        new_mask = masks.project_and_server_permission_bitmask;
+        new_cache_mask = masks.cache_permission_bitmask;
     }
+    active.project = Set(new_project);
+    active.cache = Set(new_cache);
     active.permission = Set(new_mask);
+    active.cache_permission = Set(new_cache_mask);
     if let Some(canon) = normalize_allowed_ips(body.allowed_ips)? {
         active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }
@@ -938,7 +1083,7 @@ pub async fn patch_key(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ApiKeyName))?;
 
-    audit.write(Action::ApiKeyUpdate, EventOwner::default(), serde_json::json!({ "api_key_id": api_id.to_string(), "previous_name": previous_name, "new_name": updated.name, "previous_permissions_mask": previous_mask, "new_permissions_mask": new_mask, "previous_project_id": previous_project.map(|i| i.to_string()), "new_project_id": new_project.map(|i| i.to_string()), }))
+    audit.write(Action::ApiKeyUpdate, EventOwner::default(), serde_json::json!({ "api_key_id": api_id.to_string(), "previous_name": previous_name, "new_name": updated.name, "previous_permissions_mask": previous_mask, "new_permissions_mask": new_mask, "previous_cache_permissions_mask": previous_cache_mask, "new_cache_permissions_mask": new_cache_mask, "previous_project_id": previous_project.map(|i| i.to_string()), "new_project_id": new_project.map(|i| i.to_string()), "previous_cache_id": previous_cache.map(|i| i.to_string()), "new_cache_id": new_cache.map(|i| i.to_string()), }))
     .await;
 
     let pins = PinNames::of(&state.web_db, std::slice::from_ref(&updated)).await?;
@@ -1283,7 +1428,10 @@ mod tests {
     fn a_cache_pinned_key_lists_its_cache_and_cache_permissions() {
         let cache = CacheId::now_v7();
         let key = MApi {
-            permission: cache_mask_from(&[CachePermission::ViewCache, CachePermission::WriteStore]),
+            cache_permission: cache_mask_from(&[
+                CachePermission::ViewCache,
+                CachePermission::WriteStore,
+            ]),
             cache: Some(cache),
             ..Default::default()
         };
@@ -1296,7 +1444,8 @@ mod tests {
 
         assert_eq!(info.cache.as_deref(), Some("nix-cache"));
         assert_eq!(info.project, None);
-        assert_eq!(info.permissions, ["viewCache", "writeStore"]);
+        assert!(info.permissions.is_empty());
+        assert_eq!(info.cache_permissions, ["viewCache", "writeStore"]);
     }
 
     #[test]

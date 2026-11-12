@@ -3510,7 +3510,7 @@ paths:
       tags:
       - caches
       summary: List caches
-      description: List binary caches for the current user in a paginated list. Include caches that belong to the user and caches that other members share with the user. Include caches that project subscriptions make available. Sort the list by display name. API keys with cache scope show only the cache in their scope. Other API keys show only caches that projects they can view subscribe to. Keys with a pinned project limit the list to that project.
+      description: List binary caches for the current user in a paginated list. Include caches that belong to the user and caches that other members share with the user. Include caches that project subscriptions make available. Sort the list by display name. API keys with cache scope show only the cache in their scope. Other API keys show caches that projects they can view subscribe to. Keys with cache permission also show caches that include a role for the owner. Keys with a pinned project limit the list to that project.
       operationId: listCaches
       parameters:
       - name: page
@@ -13783,7 +13783,7 @@ paths:
       tags:
       - user
       summary: Create API key
-      description: 'Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller''s permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects. `useSuperuserRights` can apply only to an unpinned key with an owner that is a superuser. The key can then use the superuser rights of that owner.'
+      description: 'Create a new API key. The caller can get the full key (with the `GRAD` prefix) once. A second request can''t retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to expire the key automatically. Omit this field to create a key with no expiry. Project and server-wide permissions go in `permissions`. Cache permissions go in `cache_permissions`. A key pinned to a project can hold only `permissions`. A key pinned to a cache can hold only `cache_permissions`. An unpinned key can hold both. No key can exceed the permissions of its owner. A key pinned to a project or cache can grant only the caller''s permissions at that location. A caller in a project subscribed to a cache is a read-only member of that cache. That caller can create a read-only key for the cache. Grant `viewProject` to all keys with project permissions. Use `createProject` only for unpinned keys with an owner who can create projects. Use `useSuperuserRights` only for unpinned keys whose owner is a superuser. That key can then use the superuser permissions of that owner.'
       operationId: createUserKey
       requestBody:
         content:
@@ -13874,7 +13874,7 @@ paths:
       tags:
       - user
       summary: Update an API key's configurable options
-      description: Edit the key name, permission set, and pin to a project in place. The new permissions replace the existing set in full. Cache-pinned keys hold only cache permissions. Those keys hold only a subset of the caller's permissions on that cache. A key pinned to a cache can't also have a pin to a project. State-managed keys don't allow edits. A call with API-key authentication can't reach this endpoint. Use a session instead.
+      description: Edit key name, permissions and pins in place. New `permissions` and `cache_permissions` lists replace existing lists completely. Omitted lists stay unchanged. Pin changes to cache clear project permissions. Pin changes to project clear cache permissions. A key can't set pins to both project and cache. A pinned key can keep only a subset of caller permissions for that project or cache. State-managed keys stay read-only. Calls that use API key auth can't reach this endpoint. Use a session instead.
       operationId: patchUserKey
       parameters:
       - name: api_id
@@ -13912,7 +13912,7 @@ paths:
       tags:
       - user
       summary: List what an API key can reach
-      description: Projects and caches that an API key can reach appear in the list, each with the permissions for the key on that resource. The permissions of the key can't exceed the current role of the owner. A change to the owner's role can change the list. `create_project` is true when the key can call `PUT /projects`. Public projects and public caches stay readable by all keys. They don't appear in the list.
+      description: Projects and caches that the API key can access appear in the list, with the key permissions for each resource. Unpinned keys with cache permissions list all caches that include a role for the owner. Key permissions cannot exceed the current roles of the owner. Changes to the owner roles can change the list. `create_project` is true if the key can call `PUT /projects`. All keys can still read public projects and public caches. These items don't appear in the list.
       operationId: getUserKeyReach
       parameters:
       - name: api_id
@@ -15921,6 +15921,7 @@ components:
       - name
       - managed
       - permissions
+      - cache_permissions
       - created_at
       - allowed_ips
       properties:
@@ -15931,6 +15932,10 @@ components:
         managed:
           type: boolean
         permissions:
+          type: array
+          items:
+            type: string
+        cache_permissions:
           type: array
           items:
             type: string
@@ -17647,7 +17652,6 @@ components:
       type: object
       required:
       - name
-      - permissions
       properties:
         name:
           type: string
@@ -17658,6 +17662,10 @@ components:
           format: int32
           minimum: 1
         permissions:
+          type: array
+          items:
+            type: string
+        cache_permissions:
           type: array
           items:
             type: string
@@ -21714,11 +21722,21 @@ components:
           - 'null'
           items:
             type: string
+        cache_permissions:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
         project:
           type:
           - string
           - 'null'
-          description: An omitted field leaves the pin unchanged. A name pins the key, and JSON null unpins it.
+          description: An omitted field leaves the pin unchanged. A name pins the key and JSON null unpins it.
+        cache:
+          type:
+          - string
+          - 'null'
         allowed_ips:
           type:
           - array
