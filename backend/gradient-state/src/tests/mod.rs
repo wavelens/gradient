@@ -1093,3 +1093,57 @@ fn rejects_use_superuser_rights_on_api_key_of_non_superuser_but_allows_superuser
         superuser_owner.errors
     );
 }
+
+fn validate_state_with_alice_and_ci_api_key_json(
+    api_key_json: &str,
+) -> crate::validation::ValidationResult {
+    let json = format!(
+        r#"{{
+        "users": {{
+            "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }}
+        }},
+        "api_keys": {{
+            "ci": {api_key_json}
+        }}
+    }}"#
+    );
+    serde_json::from_str::<StateConfiguration>(&json)
+        .unwrap()
+        .validate()
+}
+
+#[test]
+fn state_api_key_with_unknown_cache_permission_is_rejected() {
+    let unknown = validate_state_with_alice_and_ci_api_key_json(
+        r#"{ "name": "ci", "key_file": "/dev/null", "owned_by": "alice", "cache_permissions": ["pushEverything"] }"#,
+    );
+    let cache_only = validate_state_with_alice_and_ci_api_key_json(
+        r#"{ "name": "ci", "key_file": "/dev/null", "owned_by": "alice", "cache_permissions": ["readStore"] }"#,
+    );
+
+    assert!(
+        unknown
+            .errors
+            .iter()
+            .any(|e| e.field == "api_keys.ci.cache_permissions"),
+        "errors: {:?}",
+        unknown.errors
+    );
+    assert!(cache_only.is_valid, "errors: {:?}", cache_only.errors);
+}
+
+#[test]
+fn state_validation_rejects_api_key_pinned_to_project_with_cache_permissions() {
+    let result = validate_state_with_alice_and_ci_api_key_json(
+        r#"{ "name": "ci", "key_file": "/dev/null", "owned_by": "alice", "project": "web", "permissions": ["viewProject"], "cache_permissions": ["readStore"] }"#,
+    );
+
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.field == "api_keys.ci.cache_permissions"),
+        "errors: {:?}",
+        result.errors
+    );
+}
