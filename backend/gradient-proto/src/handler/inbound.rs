@@ -639,6 +639,7 @@ impl<'a> InboundContext<'a> {
                     ));
                 true
             }
+            ClientMessage::SshHostKeyObservations { .. } => true,
         }
     }
 

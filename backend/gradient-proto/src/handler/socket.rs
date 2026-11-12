@@ -134,6 +134,7 @@ pub(super) async fn send_input_fetch(
         project: fetch.project.to_string(),
         request: fetch.request,
         ssh_key,
+        ssh_host_keys: Vec::new(),
     };
     send_server_msg(writer, &outbound_message(msg, &mapper)).await
 }

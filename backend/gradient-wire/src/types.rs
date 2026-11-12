@@ -747,6 +747,29 @@ pub enum CredentialKind {
         job_id: String,
         name: String,
     },
+    #[proto(63)]
+    SshHostKeys {
+        keys: Vec<GitServerSshHostKey>,
+    },
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub struct GitServerSshHostKey {
+    pub host: String,
+    pub port: u16,
+    pub public_key: String,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub enum GitSshHostKeyObservation {
+    UnknownHostKeyAcceptedForSaving { key: GitServerSshHostKey },
+    HostKeyMismatchConnectionRefused { host: String, port: u16 },
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub enum WorkerReportAssignment {
+    Job { job_id: String },
+    Fetch { fetch_id: String },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

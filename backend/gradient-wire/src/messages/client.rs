@@ -11,8 +11,9 @@ use crate::codec::Proto;
 use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
     EvalMessageLevel, EvalProgress, EvalShardSpec, ExecInventory, FinishedShard,
-    GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
-    RunningAssignment, UploadMetadata, UploadObject, VmStateKind,
+    GitSshHostKeyObservation, GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan,
+    JobUpdateKind, QueryMode, RunningAssignment, UploadMetadata, UploadObject, VmStateKind,
+    WorkerReportAssignment,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -272,6 +273,12 @@ pub enum ClientMessage {
         state: VmStateKind,
         job_id: Option<String>,
     },
+
+    #[proto(63)]
+    SshHostKeyObservations {
+        assignment: WorkerReportAssignment,
+        observations: Vec<GitSshHostKeyObservation>,
+    },
 }
 
 impl ClientMessage {
@@ -344,6 +351,7 @@ impl ClientMessage {
             ClientMessage::GuestChannelData { .. } => "GuestChannelData",
             ClientMessage::CloseGuestChannel { .. } => "CloseGuestChannel",
             ClientMessage::VmState { .. } => "VmState",
+            ClientMessage::SshHostKeyObservations { .. } => "SshHostKeyObservations",
         }
     }
 

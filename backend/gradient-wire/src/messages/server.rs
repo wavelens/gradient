@@ -10,8 +10,8 @@ use gradient_secret::{SecretBytes, SecretString};
 use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
-    EvalCachePullOutcome, EvalShardOutcome, GradientCapabilities, GrantTarget, GuestChannelKind,
-    ImportOutcome, InputOutcome, Job, JobCandidate, UploadOutcome, WarmGuests,
+    EvalCachePullOutcome, EvalShardOutcome, GitServerSshHostKey, GradientCapabilities, GrantTarget,
+    GuestChannelKind, ImportOutcome, InputOutcome, Job, JobCandidate, UploadOutcome, WarmGuests,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -180,6 +180,8 @@ pub enum ServerMessage {
         project: String,
         request: String,
         ssh_key: Option<SecretString>,
+        #[proto(63, default)]
+        ssh_host_keys: Vec<GitServerSshHostKey>,
     },
 
     InputProgress {

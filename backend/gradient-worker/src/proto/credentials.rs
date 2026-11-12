@@ -25,6 +25,7 @@ impl CredentialStore {
             CredentialKind::JobSecret { job_id, name } => {
                 self.job_secrets.insert((job_id, name), data);
             }
+            CredentialKind::SshHostKeys { .. } => {}
         }
     }
 

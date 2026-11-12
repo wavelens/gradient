@@ -796,3 +796,88 @@ fn a_console_resize_needs_the_eighth_guest_version() {
     );
     assert!(to_bytes(&resize, since - 1).is_err());
 }
+
+fn elektrat_host_key() -> crate::types::GitServerSshHostKey {
+    crate::types::GitServerSshHostKey {
+        host: "git.elektrat.de".into(),
+        port: 2222,
+        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAA".into(),
+    }
+}
+
+#[test]
+fn ssh_host_key_observations_round_trip_at_version_63() {
+    use crate::codec::{EncodeError, from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS};
+    use crate::types::{GitSshHostKeyObservation, WorkerReportAssignment};
+
+    let since = FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS;
+    let msg = ClientMessage::SshHostKeyObservations {
+        assignment: WorkerReportAssignment::Fetch {
+            fetch_id: "f1".into(),
+        },
+        observations: vec![
+            GitSshHostKeyObservation::UnknownHostKeyAcceptedForSaving {
+                key: elektrat_host_key(),
+            },
+            GitSshHostKeyObservation::HostKeyMismatchConnectionRefused {
+                host: "git.example.org".into(),
+                port: 22,
+            },
+        ],
+    };
+    assert_eq!(
+        from_bytes::<ClientMessage>(to_bytes(&msg, since).unwrap(), since).unwrap(),
+        msg
+    );
+    assert!(matches!(
+        to_bytes(&msg, since - 1),
+        Err(EncodeError::NewerThanPeer { .. })
+    ));
+}
+
+#[test]
+fn fetch_input_drops_ssh_host_keys_below_version_63() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, ServerMessage};
+
+    let since = FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS;
+    let msg = ServerMessage::FetchInput {
+        fetch_id: "f1".into(),
+        project: "p".into(),
+        request: "{}".into(),
+        ssh_key: None,
+        ssh_host_keys: vec![elektrat_host_key()],
+    };
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, since).unwrap(), since).unwrap(),
+        msg
+    );
+    let ServerMessage::FetchInput { ssh_host_keys, .. } =
+        from_bytes::<ServerMessage>(to_bytes(&msg, since - 1).unwrap(), since - 1).unwrap()
+    else {
+        panic!("decoded a different message");
+    };
+    assert!(ssh_host_keys.is_empty());
+}
+
+#[test]
+fn ssh_host_keys_credential_round_trips_at_version_63() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{
+        CredentialKind, FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, ServerMessage,
+    };
+
+    let since = FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS;
+    let msg = ServerMessage::Credential {
+        kind: CredentialKind::SshHostKeys {
+            keys: vec![elektrat_host_key()],
+        },
+        data: Vec::new().into(),
+    };
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, since).unwrap(), since).unwrap(),
+        msg
+    );
+    assert!(to_bytes(&msg, since - 1).is_err());
+}
