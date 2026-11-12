@@ -394,7 +394,7 @@ pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
         Err(WebError::Forbidden(
             ErrorCode::SUPERUSER_REQUIRED,
             "superuser required".into(),
-            Vec::new(),
+            vec![gradient_types::permissions::Permission::UseSuperuserRights.as_wire_name()],
         ))
     }
 }
