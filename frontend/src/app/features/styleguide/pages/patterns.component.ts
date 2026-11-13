@@ -21,8 +21,11 @@ import {
   RowComponent,
   RowListComponent,
   SettingsSectionComponent,
+  SettingsPageSideNavigationComponent,
+  type VerticalNavigationLink,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, InputFetchListComponent } from '@shared/ui';
+import { ServerConfigurationManagedLockButtonComponent } from '@shared/access';
 import type { BuildProgress, InputFetch } from '@core/models';
 
 @Component({
@@ -33,6 +36,8 @@ import type { BuildProgress, InputFetch } from '@core/models';
     SettingsSectionComponent, FormFieldComponent, FieldRowComponent, ButtonComponent,
     BadgeComponent, InputDirective, FormsModule,
     NavCardComponent, SelectComponent, IconComponent, InputFetchListComponent, BuildProgressComponent,
+    ServerConfigurationManagedLockButtonComponent,
+    SettingsPageSideNavigationComponent,
   ],
   templateUrl: './patterns.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -43,6 +48,16 @@ export class PatternsComponent {
     { label: 'my-project', link: ['/styleguide'] },
     { label: 'Settings', link: ['/styleguide'] },
     { label: 'Git host connections' },
+  ];
+  settingsSideNavigationBreadcrumbTrail: Crumb[] = [
+    { label: 'my-project', link: ['/styleguide'] },
+    { label: 'Settings' },
+  ];
+  settingsSideNavigationLinks: VerticalNavigationLink[] = [
+    { label: 'Foundations', icon: 'palette', link: ['/styleguide', 'foundations'] },
+    { label: 'Elements', icon: 'widgets', link: ['/styleguide', 'elements'] },
+    { label: 'Components', icon: 'view_module', link: ['/styleguide', 'components'], badge: '2 Pending' },
+    { label: 'Patterns', icon: 'dashboard', link: ['/styleguide', 'patterns'], showSeparatorLineBeforeLink: true },
   ];
   role = signal('admin');
   roleOptions = [

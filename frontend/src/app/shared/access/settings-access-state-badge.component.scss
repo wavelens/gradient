@@ -1,0 +1,21 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+:host {
+  display: contents;
+}
+
+.access-status-chip-button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: $border-radius-sm;
+  background: none;
+  font: inherit;
+  cursor: help;
+}

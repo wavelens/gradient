@@ -105,6 +105,30 @@ describe('ExecJobListComponent', () => {
       .toBe('Waiting for manual start');
   });
 
+  it('append last failed attempt to row text for a job queued again', () => {
+    const queuedAgain: ExecJobSummary = { ...queuedJob(), waiting_reason: null, end_reason: 'lost' };
+    const waitsForDevicesAfterTimeout: ExecJobSummary = { ...queuedJob(), id: 'j2', end_reason: 'timeout' };
+    const queuedAfterAbort: ExecJobSummary = { ...queuedJob(), id: 'j3', waiting_reason: null, end_reason: 'aborted' };
+    TestBed.configureTestingModule({
+      imports: [ExecJobListComponent],
+      providers: [
+        provideRouter([]),
+        { provide: ExecJobsService, useValue: { forEvaluation: () => of([queuedAgain, waitsForDevicesAfterTimeout, queuedAfterAbort]) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(ExecJobListComponent);
+    fixture.componentRef.setInput('evaluation', 'e1');
+    fixture.componentRef.setInput('project', 'acme');
+    fixture.componentRef.setInput('task', 'demo');
+    fixture.detectChanges();
+
+    expect(Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.job-detail'), (detail) => detail.textContent)).toEqual([
+      'Queued, last attempt worker lost',
+      'Waiting for free devices on 1 worker, last attempt timed out',
+      'Queued',
+    ]);
+  });
+
   it('keeps polling a running evaluation until its exec jobs appear', () => {
     vi.useFakeTimers();
     try {

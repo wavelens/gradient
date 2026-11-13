@@ -32,11 +32,13 @@ import {
   SelectComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
+import { BinaryCacheSettingsNavigationComponent } from '../cache-settings-navigation/cache-settings-navigation.component';
 
 @Component({
   selector: 'app-cache-subscription-requests',
   standalone: true,
   imports: [
+    BinaryCacheSettingsNavigationComponent,
     EntityNameComponent,
     CommonModule,
     FormsModule,
@@ -66,7 +68,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   private cacheAccess = injectCacheAccessData();
 
   cacheName = '';
-  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Subscriptions' }));
+  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName));
   loading = signal(true);
   deciding = signal<string | null>(null);
   requests = signal<SubscriptionRequestItem[]>([]);

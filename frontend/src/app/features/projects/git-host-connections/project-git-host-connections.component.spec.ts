@@ -9,7 +9,7 @@ import { ActivatedRoute, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
-import type { AccessState, ProjectResponse } from '@core/models';
+import type { AccessState, GitHostConnectionSummary, ProjectResponse } from '@core/models';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { ProjectGitHostConnectionsComponent } from './project-git-host-connections.component';
@@ -17,8 +17,20 @@ import { ProjectGitHostConnectionsComponent } from './project-git-host-connectio
 const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
 const readOnly: AccessState = { managed: false, canEdit: false, canTrigger: false };
 
-function setup(access: AccessState, fields: Partial<ProjectResponse> = {}) {
-  const list = vi.fn().mockReturnValue(of([]));
+const ownConnection: GitHostConnectionSummary = {
+  id: 'c1',
+  owner: { type: 'project', name: 'acme' },
+  name: 'forgejo',
+  display_name: 'Forgejo',
+  git_host_type: 'forgejo',
+  base_url: 'https://forgejo.example.com',
+  receives_events: true,
+  reports_status: true,
+  can_manage: true,
+};
+
+function setup(access: AccessState, fields: Partial<ProjectResponse> = {}, connections: GitHostConnectionSummary[] = []) {
+  const list = vi.fn().mockReturnValue(of(connections));
   TestBed.configureTestingModule({
     imports: [ProjectGitHostConnectionsComponent],
     providers: [
@@ -39,6 +51,20 @@ describe('ProjectGitHostConnectionsComponent', () => {
     const { root, list } = setup(writable);
     expect(root.querySelector('app-git-host-connection-list')).not.toBeNull();
     expect(list).toHaveBeenCalledWith({ type: 'project', name: 'acme' });
+  });
+
+  it('puts New connection in the page header like other create buttons once connections exist', () => {
+    const newConnectionButtons = (root: HTMLElement) =>
+      Array.from(root.querySelectorAll('button')).filter((button) => button.textContent?.includes('New connection'));
+    const filled = setup(writable, {}, [ownConnection]).root;
+    const [headerButton] = newConnectionButtons(filled);
+    expect(newConnectionButtons(filled)).toHaveLength(1);
+    expect(headerButton.closest('app-git-host-connection-list')).toBeNull();
+    expect(headerButton.classList).toContain('gr-button--primary');
+    TestBed.resetTestingModule();
+    expect(newConnectionButtons(setup(writable).root).map((button) => button.closest('app-git-host-connection-list'))).not.toContain(null);
+    TestBed.resetTestingModule();
+    expect(newConnectionButtons(setup(readOnly, {}, [ownConnection]).root)).toHaveLength(0);
   });
 
   it('lists the connections read-only for a member without manageIntegrations', () => {

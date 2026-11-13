@@ -34,6 +34,7 @@
           @if (!$last) { <span class="breadcrumb-sep" aria-hidden="true">/</span> }
         }
       </nav>
+      <div class="log-sidebar-below-breadcrumb">
 
 
       <div
@@ -83,10 +84,10 @@
       @if (buildListError() && builds().length === 0) {
         <gr-load-state flat [error]="buildListError()" errorTitle="Failed to load builds" (retry)="loadBuilds()" />
       } @else if (builds().length > 0) {
-        <h2 class="sidebar-builds-heading">
-          @if (builds().length < totalBuilds()) { {{ builds().length }} of {{ plural(totalBuilds(), 'build') }} } @else { Builds }
-        </h2>
-        <div class="builds-list" (scroll)="onBuildsViewportScroll($event)">
+        @if (builds().length < totalBuilds()) {
+          <h2 class="sidebar-builds-heading">{{ builds().length }} of {{ plural(totalBuilds(), 'build') }}</h2>
+        }
+        <div class="builds-list" role="group" aria-label="Builds" (scroll)="onBuildsViewportScroll($event)">
           @for (group of groupedBuilds(); track group.key) {
             <div class="build-group">
               <button
@@ -116,7 +117,7 @@
                           [attr.aria-label]="buildRowLabel"
                           [attr.aria-pressed]="selectedBuildId() === build.id"
                           (click)="selectBuild(build, true)"
-                          (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(build.id, 1)"
+                          (keydown.arrowdown)="$event.preventDefault(); focusAttemptListOrSelectNextBuild(build.id)"
                           (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(build.id, -1)"></button>
                   <span class="build-dot"></span>
                   @let nameParts = splitNameHeadAndTail(buildDisplayName(build.name));
@@ -132,6 +133,13 @@
                     <gr-icon name="more_vert" size="sm" />
                   </button>
                 </div>
+                @if (selectedBuildId() === build.id && attemptRowsForLogOnlyIfMultiple().length) {
+                  <gr-log-attempt-list class="attempt-list-under-build-row"
+                                       [attemptRows]="attemptRowsForLogOnlyIfMultiple()"
+                                       [attemptNumberForLogOnScreenOrNull]="attemptNumberForLogOnScreenOrNull()"
+                                       (selectAttempt)="selectAttempt($event)"
+                                       (arrowKeyPressedAtAttemptListBoundary)="selectBuildOutsideAttemptListOnArrowKey(build.id, $event)" />
+                }
               }
             </div>
           }
@@ -141,6 +149,7 @@
           <gr-load-more [shown]="builds().length" [total]="totalBuilds()" [loading]="loadingMore()" (more)="loadMoreBuilds()" />
         </div>
       }
+      </div>
     </aside>
 
     <!-- ── Main ─────────────────────────────────────────────────── -->
@@ -172,7 +181,7 @@
           @if (ev.started_at) {
             <div class="info-metric">
               <span class="metric-label">Duration</span>
-              <span class="metric-value">{{ duration() }}</span>
+              <span class="metric-value metric-value-running-duration">{{ duration() }}</span>
             </div>
           }
           <div class="info-metric">
@@ -322,10 +331,6 @@
                 {{ buildDisplayName(build.name) }}
               }
             </code>
-            @if (attemptDropdownOptions().length > 1) {
-              <gr-select logTitle class="log-attempt-select" ariaLabel="Attempt" [options]="attemptDropdownOptions()"
-                         [ngModel]="attemptNumberForLogOnScreenOrNull()" (ngModelChange)="selectAttempt($event)" />
-            }
             @if (transferProgress(); as p) {
               <gr-build-progress [progress]="p" [compact]="true" />
             }

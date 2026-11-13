@@ -108,8 +108,10 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
   it('says why the locked name cannot change and points to the display name', async () => {
     const fixture = setup(admin);
     await settled(fixture);
-    const nameField = (fixture.nativeElement as HTMLElement).querySelector('#project-name')!.closest('gr-form-field')!;
-    expect(nameField.querySelector('.hint')?.textContent).toContain('display name');
+    const nameInput = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#project-name')!;
+    const nameField = nameInput.closest('gr-form-field')!;
+    const description = nameInput.getAttribute('aria-describedby')!.split(' ').map((id) => nameField.querySelector(`[id="${id}"]`)?.textContent).join(' ');
+    expect(description).toContain('display name');
   });
 
   it('disables Save without a hint while nothing changed', async () => {
@@ -196,7 +198,7 @@ describe('ProjectSettingsComponent - access gating', () => {
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
-    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('Only the admins of this project can change these settings.');
+    expect(fixture.nativeElement.querySelector('app-settings-access-state-badge')?.textContent).toContain('Only the admins of this project can change these settings.');
   });
 
   it('links a visitor without a role to no member-only page', async () => {
@@ -208,13 +210,11 @@ describe('ProjectSettingsComponent - access gating', () => {
     expect(text).not.toContain('SSH Key');
   });
 
-  it('hides Save and disables Delete under state-managed access', async () => {
+  it('hides Save and Delete under state-managed access', async () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
-    const del = findByText(fixture.nativeElement, 'delete project') as HTMLButtonElement | null;
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
-    expect(del).not.toBeNull();
-    expect(del!.getAttribute('aria-disabled')).toBe('true');
+    expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
   });
 });
 

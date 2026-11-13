@@ -95,8 +95,10 @@ describe('CacheSettingsComponent - first load', () => {
 
   it('says why the locked name cannot change and points to the display name', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    const nameField = (fixture.nativeElement as HTMLElement).querySelector('#cache-name')!.closest('gr-form-field')!;
-    expect(nameField.querySelector('.hint')?.textContent).toContain('display name');
+    const nameInput = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#cache-name')!;
+    const nameField = nameInput.closest('gr-form-field')!;
+    const description = nameInput.getAttribute('aria-describedby')!.split(' ').map((id) => nameField.querySelector(`[id="${id}"]`)?.textContent).join(' ');
+    expect(description).toContain('display name');
   });
 });
 
@@ -108,12 +110,10 @@ describe('CacheSettingsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
   });
 
-  it('hides Save and disables Delete under state-managed access', () => {
+  it('hides Save and Delete under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const del = findByText(fixture.nativeElement, 'delete cache') as HTMLButtonElement | null;
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
-    expect(del).not.toBeNull();
-    expect(del!.getAttribute('aria-disabled')).toBe('true');
+    expect(findByText(fixture.nativeElement, 'delete cache')).toBeNull();
   });
 
   it('keeps Deactivate usable under state-managed access, since state restores it on restart', () => {
@@ -133,15 +133,6 @@ describe('CacheSettingsComponent - access gating', () => {
     expect(hrefs.some((href) => href?.includes('/members'))).toBe(false);
     expect(hrefs).toContain('/caches/demo/subscriptions');
     expect(hrefs).toContain('/caches/demo/webhooks');
-  });
-
-  it('counts pending subscription requests on the Subscriptions row for subscription managers only', () => {
-    const managerRow = (setup({ managed: false, canEdit: true, canTrigger: true }).nativeElement as HTMLElement)
-      .querySelector('a[href="/caches/demo/subscriptions"]')!.closest('gr-row')!;
-    expect(managerRow.querySelector('gr-badge')?.textContent?.trim()).toBe('2 Pending');
-    TestBed.resetTestingModule();
-    const readerPage = setup({ managed: false, canEdit: false, canTrigger: false }).nativeElement as HTMLElement;
-    expect(readerPage.querySelector('gr-badge')).toBeNull();
   });
 
   it('links a read-only member to neither subscriptions nor event notifications', () => {

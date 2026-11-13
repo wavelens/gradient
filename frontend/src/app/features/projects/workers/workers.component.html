@@ -4,157 +4,76 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Workers" subtitle="Registered build workers for this project">
-  <app-server-configuration-managed-banner [access]="access()" kind="project" />
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Workers">
+  <app-project-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" />
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="project" />
   <button slot="actions"
       *appWritable="access()"
       grButton
       label="Register Worker"
       icon="add"
       (click)="showRegisterDialog.set(true)"
-      [appManagedDisable]="access()"
     ></button>
 
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="loadWorkers()" />
   } @else {
-    @if (gradientCi().state !== 'hidden') {
+    @if (gradientCi().state === 'connect') {
       <gr-row-list data-testid="gradient-ci-entry">
         <gr-row icon="cloud">
           Gradient.CI Servers
-          <div slot="meta">
-            @if (gradientCi().worker; as w) {
-              <div class="worker-stats text-secondary">{{ workerStatusText(w) }}</div>
-              <gr-allowed-capabilities [value]="w" [workerReportedCapabilities]="w.live?.capabilities" />
-              @if (!w.connected && w.last_error && access().canEdit) {
-                <div class="worker-last-error text-secondary">{{ w.last_error.reason }}</div>
-              }
-            } @else {
-              <div class="text-secondary">Build workers from {{ config.gradientCiUrl }}</div>
-            }
-          </div>
-          <div slot="actions">
-            @switch (gradientCi().state) {
-              @case ('connect') {
-                <button *appWritable="access()" grButton severity="secondary" label="Connect" icon="link" size="small" [appManagedDisable]="access()" (click)="showGradientCiConnect.set(true)"></button>
-              }
-              @case ('connected') {
-                @if (gradientCi().worker; as w) {
-                  <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small" class="worker-action-btn"
-                    [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
-                  @if (w.team) {
-                    <span class="text-secondary">Via <gr-entity-name [displayName]="w.team_display_name ?? w.team" [name]="w.team" /> (Workers)</span>
-                  } @else {
-                    <ng-container *ngTemplateOutlet="editAndToggle; context: { $implicit: w }" />
-                    <button *appWritable="access()" grButton label="Disconnect" icon="link_off" severity="danger" size="small"
-                      (click)="openGradientCiDisconnect()"></button>
-                  }
-                }
-              }
-            }
-          </div>
+          <div slot="meta" class="text-secondary">Build workers from {{ config.gradientCiUrl }}</div>
+          <button slot="actions" *appWritable="access()" grButton severity="secondary" label="Connect" icon="link" size="small"
+            (click)="showGradientCiConnect.set(true)"></button>
         </gr-row>
       </gr-row-list>
     }
-    @if (otherWorkers().length === 0) {
-      @if (gradientCi().state !== 'connected') {
-        <gr-empty-state icon="construction" title="No workers registered">
-          <p>Register a <code>gradient-worker</code> to run builds for this project.</p>
-        </gr-empty-state>
-      }
-    } @else {
-      <gr-row-list>
-        @for (worker of otherWorkers(); track worker.worker_id) {
-          <gr-row icon="construction">
-            {{ worker.display_name }}
-            <div slot="meta">
-                <div class="worker-source text-secondary" data-testid="worker-source">
-                  @if (worker.team) {
-                    Via <gr-entity-name [displayName]="worker.team_display_name ?? worker.team" [name]="worker.team" /> (Workers)
-                  } @else {
-                    Project worker
-                  }
-                </div>
-                <div class="worker-stats text-secondary">{{ workerStatusText(worker) }}</div>
-                @if (worker.url) {
-                  <div class="worker-url text-secondary">{{ worker.url }}</div>
-                }
-                <gr-allowed-capabilities [value]="worker" [workerReportedCapabilities]="worker.live?.capabilities" />
-                @if (!worker.connected && worker.last_error && access().canEdit) {
-                  <div class="worker-last-error text-secondary">{{ worker.last_error.reason }}</div>
-                }
-                @if (worker.live) {
-                  @if (worker.live.architectures.length > 0) {
-                    <div class="worker-archs text-secondary">
-                      {{ worker.live.architectures.join(', ') }}
-                      @if (worker.live.system_features.length > 0) {
-                        <button type="button" class="features-info" aria-label="System features" (click)="features.toggle($event)">
-                          <gr-icon name="info" size="sm" />
-                        </button>
-                        <gr-popover #features>
-                          <div class="features-list">
-                            <strong>System features</strong>
-                            <p>{{ worker.live.system_features.join(', ') }}</p>
-                          </div>
-                        </gr-popover>
-                      }
-                    </div>
-                  }
-                }
-            </div>
-            <div slot="actions" class="phone-icon-buttons">
-              @if (worker.live?.draining) {
-                <gr-badge severity="warning">Draining</gr-badge>
-              }
-              <a
-                grButton
-                label="Metrics"
-                icon="show_chart"
-                severity="secondary"
-                size="small"
-                class="worker-action-btn"
-                [routerLink]="links.workerMetrics(projectName, worker.worker_id)"
-              ></a>
-              @if (workerMenus().get(worker.worker_id); as items) {
-                @if (items.length) {
-                  <button grButton icon="more_vert" severity="secondary" size="small" aria-label="Worker actions"
-                    (click)="actions.toggle($event)"></button>
-                  <gr-menu #actions [model]="items" />
-                }
-              }
-            </div>
-          </gr-row>
+    @if (gradientCi().worker || otherWorkers().length > 0) {
+      <app-worker-card-list>
+        @if (gradientCi().worker; as w) {
+          <app-worker-card data-testid="gradient-ci-entry" [worker]="w" [showWorkerLastConnectionErrorReason]="access().canEdit">
+            <ng-container slot="source" *ngTemplateOutlet="workerSource; context: { $implicit: w }" />
+            <ng-container slot="actions">
+              <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small" class="worker-action-btn"
+                [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
+              <ng-container *ngTemplateOutlet="workerMenu; context: { $implicit: w }" />
+            </ng-container>
+          </app-worker-card>
         }
-      </gr-row-list>
+        @for (worker of otherWorkers(); track worker.worker_id) {
+          <app-worker-card [worker]="worker" [showWorkerLastConnectionErrorReason]="access().canEdit">
+            <ng-container slot="source" *ngTemplateOutlet="workerSource; context: { $implicit: worker }" />
+            <ng-container slot="actions">
+              <ng-container *ngTemplateOutlet="workerMenu; context: { $implicit: worker }" />
+            </ng-container>
+          </app-worker-card>
+        }
+      </app-worker-card-list>
+    } @else {
+      <gr-empty-state icon="construction" title="No workers registered">
+        <p>Register a <code>gradient-worker</code> to run builds for this project.</p>
+      </gr-empty-state>
     }
   }
 
-  <ng-template #editAndToggle let-worker>
-    <button
-      *appWritable="access()"
-      grButton
-      label="Edit"
-      icon="edit"
-      severity="secondary"
-      size="small"
-      class="worker-action-btn"
-      [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null || renaming()"
-      [appManagedDisable]="access()"
-      (click)="openRenameDialog(worker)"
-    ></button>
-    <button
-      *appWritable="access()"
-      grButton
-      [label]="worker.active ? 'Deactivate' : 'Activate'"
-      [icon]="worker.active ? 'pause' : 'play_arrow'"
-      severity="secondary"
-      size="small"
-      class="worker-action-btn"
-      [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
-      [appManagedDisable]="actionAccess()"
-      [loading]="togglingId() === worker.worker_id"
-      (click)="requestToggleWorker(worker)"
-    ></button>
+  <ng-template #workerSource let-worker>
+    <span data-testid="worker-source">
+      @if (worker.team) {
+        Via <gr-entity-name [displayName]="worker.team_display_name ?? worker.team" [name]="worker.team" /> (Workers)
+      } @else {
+        Project worker
+      }
+    </span>
+  </ng-template>
+
+  <ng-template #workerMenu let-worker>
+    @if (workerMenus().get(worker.worker_id); as items) {
+      @if (items.length) {
+        <button grButton icon="more_vert" severity="secondary" size="small" aria-label="Worker actions"
+          (click)="actions.toggle($event)"></button>
+        <gr-menu #actions [model]="items" />
+      }
+    }
   </ng-template>
 
   @if (!loadError()) {
@@ -209,8 +128,9 @@
         />
       </gr-form-field>
     }
-    <gr-form-field label="Allowed" hint="Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).">
-      <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
+    <gr-form-field label="Allowed">
+      <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities"
+        explanationText="Changes take effect on the worker's next reconnect (a re-auth is triggered automatically)." />
       <gr-allowed-capabilities editable [(value)]="editAllowed" />
     </gr-form-field>
   }

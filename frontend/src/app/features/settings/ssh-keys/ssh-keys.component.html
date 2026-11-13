@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" title="SSH Keys" subtitle="Keys for ssh-ng:// substituters, nix copy and build hosts">
+<gr-page-layout width="settings" title="SSH Keys">
   <app-settings-nav slot="banner" />
   @if (keys().length) {
     <button slot="actions" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>
@@ -28,7 +28,6 @@
     errorTitle="Failed to load SSH keys"
     emptyIcon="terminal"
     emptyTitle="No SSH keys"
-    emptyMessage="Add a public key to connect over ssh-ng://."
     (retry)="loadKeys()"
   >
     <button slot="empty-action" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>

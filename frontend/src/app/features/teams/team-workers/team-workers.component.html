@@ -27,59 +27,31 @@
       errorTitle="Failed to load workers"
       emptyIcon="construction"
       emptyTitle="No online workers"
-      emptyMessage="A team worker builds for every project that grants the team's workers."
       (retry)="load()"
     >
-      <gr-row-list>
+      <app-worker-card-list>
         @for (worker of shownWorkers(); track worker.worker_id) {
-          <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
-            {{ worker.display_name }}
-            <div slot="meta">
-              @if (worker.url) {
-                <div class="text-secondary">{{ worker.url }}</div>
-              }
-              <gr-allowed-capabilities [value]="worker" />
-              @if (!worker.connected && worker.last_error) {
-                <div class="text-secondary">{{ worker.last_error.reason }}</div>
-              }
-            </div>
-            <div slot="actions">
-              @if (worker.managed) {
-                <gr-badge severity="info">Managed</gr-badge>
-              }
-              @if (!worker.active) {
-                <gr-badge severity="neutral">Inactive</gr-badge>
-              }
-              <gr-badge [severity]="worker.connected ? 'success' : 'neutral'">{{ worker.connected ? 'Connected' : 'Offline' }}</gr-badge>
-              <app-worker-drain-badge [draining]="!!worker.live?.draining" [requestedByAdmin]="worker.requested_by_admin" />
+          <app-worker-card [worker]="worker" showWorkerLastConnectionErrorReason>
+            @if (worker.managed) {
+              <app-server-configuration-managed-lock-button slot="name" />
+            }
+            <span slot="source">Team worker</span>
+            <ng-container slot="actions">
               @if (worker.gradient_ci) {
                 <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small"
                   [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
               }
-              @if (isAdmin()) {
-                <button grButton label="Edit" icon="edit" severity="secondary" size="small"
-                  [disabled]="busy() === worker.worker_id" [disabledReason]="worker.managed ? managedItemDisabledReason : null" (click)="openEdit(worker)"></button>
-                @if (worker.requested_by_admin) {
-                  <button grButton label="Undrain" icon="play_arrow" severity="secondary" size="small"
-                    [loading]="busy() === worker.worker_id" (click)="cancelAdminRequestedWorkerDrain(worker)"></button>
-                } @else if (worker.live && !worker.live.draining) {
-                  <button grButton label="Drain" icon="hourglass_bottom" severity="secondary" size="small"
-                    [disabled]="busy() === worker.worker_id" (click)="confirmAndStartWorkerDrain(worker)"></button>
+              @if (workerMenus().get(worker.worker_id); as items) {
+                @if (items.length) {
+                  <button grButton icon="more_vert" severity="secondary" size="small" aria-label="Worker actions"
+                    (click)="actions.toggle($event)"></button>
+                  <gr-menu #actions [model]="items" />
                 }
-                @if (worker.active) {
-                  <button grButton label="Deactivate" icon="pause" severity="secondary" size="small"
-                    [disabled]="busy() === worker.worker_id" (click)="confirmDeactivateTeamWorkerAndReloadList(worker)"></button>
-                } @else {
-                  <button grButton label="Activate" icon="play_arrow" severity="secondary" size="small"
-                    [loading]="busy() === worker.worker_id" (click)="reactivateWorker(worker)"></button>
-                }
-                <button grButton label="Delete" icon="delete" severity="danger" size="small" [attr.aria-label]="'Delete worker ' + worker.display_name" [disabled]="busy() === worker.worker_id" [disabledReason]="worker.managed ? managedItemDisabledReason : null"
-                  (click)="remove(worker)"></button>
               }
-            </div>
-          </gr-row>
+            </ng-container>
+          </app-worker-card>
         }
-      </gr-row-list>
+      </app-worker-card-list>
     </gr-load-state>
   </gr-settings-section>
 }

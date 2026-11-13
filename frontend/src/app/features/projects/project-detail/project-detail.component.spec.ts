@@ -89,9 +89,9 @@ describe('ProjectDetailComponent readiness', () => {
   it('shows members the readiness card, also while the project has no tasks', () => {
     const { root, getProjectReadiness } = render(true);
     expect(getProjectReadiness).toHaveBeenCalledWith('acme');
-    expect(root.querySelector('gr-settings-section h2')?.textContent).toBe('Readiness');
+    expect(root.querySelector('gr-project-readiness-card')).not.toBeNull();
     expect(root.querySelector('[data-testid="readiness-cache"]')?.textContent).toContain('None writable');
-    expect(root.querySelector('gr-load-state gr-empty-state')?.textContent).toContain('Connect a repository');
+    expect(root.querySelector('gr-load-state gr-empty-state')?.textContent).toContain('Connect repository');
     expect(root.querySelector('[data-testid="no-cache-banner"]')).toBeNull();
   });
 
@@ -104,20 +104,10 @@ describe('ProjectDetailComponent readiness', () => {
 });
 
 describe('ProjectDetailComponent task cards', () => {
-  it('marks inactive tasks with a neutral badge', () => {
-    const task = (name: string, active: boolean) => ({ id: name, name, display_name: name, description: '', active, recent_evaluations: [] });
-    const { root } = render(true, () => of({ items: [task('on', true), task('off', false)], total: 2, page: 1 }));
-    const metas = Array.from(root.querySelectorAll('gr-nav-card')).map((card) => card.querySelector('[slot="meta"]')?.textContent?.trim());
-    expect(metas).toEqual(['', 'Inactive']);
-    expect(root.querySelector('gr-nav-card gr-badge .badge')?.classList).toContain('is-neutral');
-  });
-
-  it('titles each card with the display name and the slug', () => {
-    const task = { id: 't1', name: 'build', display_name: 'Nightly Build', description: '', active: true, recent_evaluations: [] };
-    const card = render(true, () => of({ items: [task], total: 1, page: 1 })).root.querySelector('gr-nav-card')!;
-    expect(card.querySelector('.nav-card__title')?.getAttribute('title')).toBe('Nightly Build (build)');
-    expect(card.querySelector('.entity-name__display')?.textContent).toBe('Nightly Build');
-    expect(card.querySelector('.entity-name__slug')?.textContent).toBe('build');
+  it('draws one task card per task', () => {
+    const task = (name: string) => ({ id: name, name, display_name: name, description: '', active: true, recent_evaluations: [] });
+    const { root } = render(true, () => of({ items: [task('on'), task('off')], total: 2, page: 1 }));
+    expect(root.querySelectorAll('app-task-card')).toHaveLength(2);
   });
 
   describe('latest evaluations', () => {
@@ -125,23 +115,20 @@ describe('ProjectDetailComponent task cards', () => {
       ({ id, status, duration_ms: 60_000, created_at: '2026-11-10 12:00:00', started_at: '2026-11-10 12:05:00', finished_at });
     const cardFor = (recent_evaluations: ReturnType<typeof run>[]) => {
       const task = { id: 't1', name: 'build', display_name: 'Build', description: '', active: true, recent_evaluations };
-      return render(false, () => of({ items: [task], total: 1, page: 1 }), { role: null, permissions: [] }).root.querySelector('gr-nav-card')!;
+      return render(false, () => of({ items: [task], total: 1, page: 1 }), { role: null, permissions: [] }).root.querySelector('app-task-card')!;
     };
 
     beforeEach(() => vi.useFakeTimers({ now: new Date('2026-11-10T12:30:00Z'), toFake: ['Date'] }));
     afterEach(() => vi.useRealTimers());
 
-    it('tells a guest when the latest evaluation finished and draws the recent ones without nested links', () => {
+    it('tells a guest when the latest evaluation finished', () => {
       const card = cardFor([run('e1', 'Failed', '2026-11-10 12:10:00'), run('e2', 'Completed', '2026-11-10 12:18:00')]);
-      expect(card.querySelector('.task-card-latest-evaluation')?.textContent?.trim()).toBe('Finished 12m ago');
-      expect(card.querySelectorAll('app-evaluation-history .bar')).toHaveLength(2);
-      expect(card.querySelector('app-evaluation-history a')).toBeNull();
+      expect(card.querySelector('.task-card__latest-evaluation')?.textContent?.trim()).toBe('Finished 12m ago');
     });
 
-    it('tells how long the latest evaluation runs and draws no history for a single run', () => {
+    it('tells how long the latest evaluation runs', () => {
       const card = cardFor([run('e1', 'Building', null)]);
-      expect(card.querySelector('.task-card-latest-evaluation')?.textContent?.trim()).toBe('Running for 25m 00s');
-      expect(card.querySelector('app-evaluation-history')).toBeNull();
+      expect(card.querySelector('.task-card__latest-evaluation')?.textContent?.trim()).toBe('Running for 25m 00s');
     });
   });
 });
@@ -170,19 +157,21 @@ describe('ProjectDetailComponent header', () => {
     expect(copy?.querySelector('button')?.getAttribute('aria-label')).toBe('Copy project name for CLI');
   });
 
-  it('links members and instance administrators to the Members page, but not visitors without a role', () => {
-    const membersLink = (root: HTMLElement) => root.querySelector('[slot="actions"] a[href="/project/acme/members/people"]');
-    expect(membersLink(render(true, undefined, { role: 'View', permissions: ['viewProject'] }).root)).not.toBeNull();
+  it('members and instance admins get Settings without a Members button while visitors without a role don\'t', () => {
+    const headerHrefs = (root: HTMLElement) => Array.from(root.querySelectorAll('[slot="actions"] a[grButton]'), (link) => link.getAttribute('href'));
+    const viewerHrefs = headerHrefs(render(true, undefined, { role: 'View', permissions: ['viewProject'] }).root);
+    expect(viewerHrefs).toContain('/project/acme/settings');
+    expect(viewerHrefs.some((href) => href?.includes('/members'))).toBe(false);
     TestBed.resetTestingModule();
-    expect(membersLink(render(true, undefined, { role: null, permissions: [] }).root)).toBeNull();
+    expect(headerHrefs(render(true, undefined, { role: null, permissions: [] }).root)).not.toContain('/project/acme/settings');
     TestBed.resetTestingModule();
-    expect(membersLink(render(true, undefined, { role: null, permissions: [] }, [], true).root)).not.toBeNull();
+    expect(headerHrefs(render(true, undefined, { role: null, permissions: [] }, [], true).root)).toContain('/project/acme/settings');
   });
 
-  it('offers a viewer neither Settings nor Connect repository, like the task header', () => {
+  it('give a viewer settings that contain the members page, but no Connect repository', () => {
     const { root } = render(true, undefined, { role: 'View', permissions: ['viewProject'] });
     const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());
-    expect(labels).not.toContain('Settings');
+    expect(labels).toContain('Settings');
     expect(labels).not.toContain('Connect repository');
     expect(root.textContent).toContain('Ask a project administrator to connect a repository.');
     expect(root.textContent?.match(/No tasks yet/g)).toHaveLength(1);

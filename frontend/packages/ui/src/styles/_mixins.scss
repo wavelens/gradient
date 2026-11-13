@@ -1,0 +1,29 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use 'variables' as *;
+
+@mixin card-link-surface {
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  box-shadow: var(--gr-shadow-raised);
+  color: var(--gr-text-primary);
+  text-decoration: none;
+  transition: $transition-base;
+
+  &:hover {
+    border-color: var(--gr-text-secondary);
+    transform: translateY(-2px);
+    box-shadow: var(--gr-shadow-overlay);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+
+    &:hover { transform: none; }
+  }
+}

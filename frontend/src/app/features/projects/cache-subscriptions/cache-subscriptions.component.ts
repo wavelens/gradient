@@ -21,7 +21,6 @@ import {
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
-  IconComponent,
   LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
@@ -32,10 +31,10 @@ import {
 } from '@gradient/ui/ui';
 import { EntityNameComponent, LabelHelpComponent, doesSearchQueryMatchEntityNameOrSlug, entityKindToIconName, entityToPickerOption, formatEntityLabel } from '@shared/ui';
 import {
-  MANAGED_ITEM_DISABLED_REASON,
   WritableDirective,
   ManagedDisableDirective,
-  ServerConfigurationManagedBannerComponent,
+  ServerConfigurationManagedLockButtonComponent,
+  SettingsAccessStateBadgeComponent,
   requestIfProjectMember,
 } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
@@ -45,6 +44,7 @@ import { accessTo, CacheSubscriptionItem, CacheSubscriptionMode, SubscribableCac
 import { links } from '@shared/routing';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, Observable, tap } from 'rxjs';
+import { ProjectSettingsNavigationComponent } from '../project-settings-navigation/project-settings-navigation.component';
 
 const subscriptionRequestedResponseMessage = 'Subscription requested';
 
@@ -52,6 +52,7 @@ const subscriptionRequestedResponseMessage = 'Subscription requested';
   selector: 'app-cache-subscriptions',
   standalone: true,
   imports: [
+    ProjectSettingsNavigationComponent,
     EntityNameComponent,
     LabelHelpComponent,
     CommonModule,
@@ -61,12 +62,13 @@ const subscriptionRequestedResponseMessage = 'Subscription requested';
     BadgeComponent,
     ButtonComponent,
     CheckboxComponent,
-    IconComponent,
     SelectComponent,
     AutoCompleteComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
+    ManagedDisableDirective,
+    ServerConfigurationManagedLockButtonComponent,
+    SettingsAccessStateBadgeComponent,
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
@@ -84,7 +86,6 @@ export class CacheSubscriptionsComponent implements OnInit {
   protected readonly links = links;
   protected readonly modes = SUBSCRIPTION_MODES;
   protected readonly modeLabel = subscriptionModeLabel;
-  protected readonly managedItemDisabledReason = MANAGED_ITEM_DISABLED_REASON;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private projectsService = inject(ProjectsService);
@@ -98,6 +99,10 @@ export class CacheSubscriptionsComponent implements OnInit {
   canCreateAndSubscribe = computed(() => this.userCanCreateCache() && this.access().canEdit && !this.access().managed);
   showCreateDialog = signal(false);
 
+  protected shouldShowLockIconForSubscription(cache: CacheSubscriptionItem): boolean {
+    return !!cache.managed && !this.access().managed;
+  }
+
   loading = signal(true);
   loadError = signal<unknown>(null);
   subscribing = signal(false);
@@ -105,7 +110,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   errorMessage = signal<string | null>(null);
 
   projectName = '';
-  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Cache Subscriptions' }));
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName));
   caches = signal<CacheSubscriptionItem[]>([]);
   newCacheName = '';
   selectedSubscriptionMode = signal<CacheSubscriptionMode>('ReadWrite');

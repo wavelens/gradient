@@ -24,6 +24,19 @@
     color: var(--gr-text-secondary);
     text-transform: none;
     letter-spacing: normal;
+
+    &:has(.badge__status-dot) {
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+  }
+
+  .badge__status-dot {
+    flex-shrink: 0;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: currentColor;
   }
 
   &.is-success { background: color-mix(in srgb, var(--gr-status-success) 18%, transparent); color: var(--gr-status-success-text); }

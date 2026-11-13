@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { LoadStateComponent, MessageBannerComponent, RowComponent, RowListComponent, SettingsSectionComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, RowComponent, RowListComponent, SettingsSectionComponent } from '@gradient/ui/ui';
 import type { UserAccessSummary, UserAccessibleProjectOrCacheRow, UserTeamMembership } from '@core/models';
 import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { links } from '@shared/routing';
@@ -16,13 +16,10 @@ import { teamRoleValueToDisplayLabel } from './team-access';
 @Component({
   selector: 'app-user-access-summary-sections',
   standalone: true,
-  imports: [EntityNameComponent, LoadStateComponent, MessageBannerComponent, RowComponent, RowListComponent, SettingsSectionComponent],
+  imports: [EntityNameComponent, LoadStateComponent, RowComponent, RowListComponent, SettingsSectionComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @let access = summary();
-    @if (access.superuser) {
-      <gr-message-banner type="info">This account is an instance administrator and can open all projects, caches and teams.</gr-message-banner>
-    }
     <gr-load-state
       [empty]="isEmpty()"
       emptyIcon="lock"

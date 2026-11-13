@@ -9,7 +9,7 @@ import { RouterModule, type UrlTree } from '@angular/router';
 import { Subscription, catchError, of, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
-import { execJobPhase, waitingReasonText } from '@shared/evaluation';
+import { buildAttemptEndReasonLabel, execJobPhase, waitingReasonText } from '@shared/evaluation';
 import type { EvaluationStatus, ExecJobSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
@@ -18,8 +18,14 @@ import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import { refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible } from '@shared/paging';
 import { EXEC_JOB_STATUS_LABEL, abortExecJobConfirm, deviceLabel, execJobMenu, execJobsMayStillAppear, getExecJobStatusBadgeLabel, isOpenExecJob } from '../exec-job-status';
+import { failedAttemptEndReasons } from '../exec-job-failed-attempt-warning';
 
 const POLL_MS = 4000;
+
+function getLastAttemptFailedWaitingToStartAgainText(job: Pick<ExecJobSummary, 'end_reason'>): string | null {
+  if (!job.end_reason || !failedAttemptEndReasons.has(job.end_reason)) return null;
+  return `last attempt ${buildAttemptEndReasonLabel(job.end_reason).toLowerCase()}`;
+}
 
 @Component({
   selector: 'app-exec-job-list',
@@ -118,7 +124,11 @@ export class ExecJobListComponent implements OnChanges {
     const label = EXEC_JOB_STATUS_LABEL[job.status];
     switch (job.status) {
       case 'created':
-      case 'queued': return waitingReasonText(job.waiting_reason) ?? label;
+      case 'queued': {
+        const waitingText = waitingReasonText(job.waiting_reason) ?? label;
+        const lastAttemptText = getLastAttemptFailedWaitingToStartAgainText(job);
+        return lastAttemptText ? `${waitingText}, ${lastAttemptText}` : waitingText;
+      }
       case 'running':
       case 'completed': return job.last_phase ? `${label}, phase ${job.last_phase}` : label;
       case 'failed': return job.message ?? getExecJobStatusBadgeLabel(job);

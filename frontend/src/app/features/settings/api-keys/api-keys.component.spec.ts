@@ -147,21 +147,13 @@ describe('ApiKeysComponent - managed-key gating', () => {
     expect(buttonsByText(root, 'revoke').length).toBe(1);
   });
 
-  it('renders Revoke / Delete present-but-disabled for a managed key', () => {
-    const fixture = setup([managedKey]);
-    const revokeButtons = buttonsByText(fixture.nativeElement, 'revoke');
-    const deleteButtons = buttonsByText(fixture.nativeElement, 'delete');
-    expect(revokeButtons.length).toBe(1);
-    expect(revokeButtons[0].getAttribute('aria-disabled')).toBe('true');
-    expect(deleteButtons.length).toBe(1);
-    expect(deleteButtons[0].getAttribute('aria-disabled')).toBe('true');
-  });
-
-  it('renders Edit present-but-disabled for a managed key', () => {
-    const fixture = setup([managedKey]);
-    const editButtons = buttonsByText(fixture.nativeElement, 'edit');
-    expect(editButtons.length).toBe(1);
-    expect(editButtons[0].getAttribute('aria-disabled')).toBe('true');
+  it('shows a lock instead of Edit / Revoke / Delete on a managed key', () => {
+    const root = setup([managedKey]).nativeElement as HTMLElement;
+    expect(root.querySelector('app-server-configuration-managed-lock-button')).not.toBeNull();
+    expect(buttonsByText(root, 'edit').length).toBe(0);
+    expect(buttonsByText(root, 'revoke').length).toBe(0);
+    expect(buttonsByText(root, 'delete').length).toBe(0);
+    expect(buttonsByText(root, 'access').length).toBe(1);
   });
 });
 

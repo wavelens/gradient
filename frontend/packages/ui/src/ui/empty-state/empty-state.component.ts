@@ -16,7 +16,7 @@ import { ButtonComponent } from '../button/button.component';
   templateUrl: './empty-state.component.html',
   styleUrl: './empty-state.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,
-  host: { '[class.flat]': 'flat()' },
+  host: { '[class.flat]': 'flat()', '[attr.title]': 'null' },
 })
 export class EmptyStateComponent {
   icon = input.required<string>();

@@ -1,0 +1,27 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+:host {
+  display: inline-flex;
+}
+
+.row-lock-icon-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: $border-radius-sm;
+  background: none;
+  color: var(--gr-text-muted);
+  cursor: help;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--gr-text-primary);
+  }
+}

@@ -15,22 +15,23 @@ const BLOCKED_NAMED = 5;
 export interface SummaryCountTile {
   label: string;
   value: number;
+  tooltip: string;
 }
 
-function countTile(value: number, singular: string, pluralLabel: string): SummaryCountTile {
-  return { label: value === 1 ? singular : pluralLabel, value };
+function countTile(value: number, singular: string, pluralLabel: string, tooltip: string): SummaryCountTile {
+  return { label: value === 1 ? singular : pluralLabel, value, tooltip };
 }
 
 export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, status: EvaluationStatus): SummaryCountTile[] {
   const { total, failed, blocked, built, unfinished } = summary.packages;
   if (isEvaluationNotStartedStatus(status) || total === 0) return [];
   return [
-    countTile(failed, 'Failed package', 'Failed packages'),
-    countTile(blocked, 'Skipped package', 'Skipped packages'),
-    countTile(built, 'Built package', 'Built packages'),
+    countTile(failed, 'Failed package', 'Failed packages', 'Packages of this evaluation whose own build failed or timed out.'),
+    countTile(blocked, 'Skipped package', 'Skipped packages', "Packages in this evaluation that weren't built because a build that they depend on failed."),
+    countTile(built, 'Built package', 'Built packages', 'Packages for this evaluation that built successfully or came ready-made from a binary cache.'),
     isRunningEvaluationStatus(status)
-      ? countTile(unfinished, 'Remaining package', 'Remaining packages')
-      : countTile(unfinished, 'Aborted package', 'Aborted packages'),
+      ? countTile(unfinished, 'Remaining package', 'Remaining packages', 'The packages in this evaluation whose build is still pending or in progress.')
+      : countTile(unfinished, 'Aborted package', 'Aborted packages', 'Packages in this evaluation whose build did not finish before the evaluation ended.'),
   ];
 }
 

@@ -29,12 +29,13 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService } from '@shared/access';
+import { WritableDirective, SettingsAccessStateBadgeComponent, AccessService } from '@shared/access';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
 import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache } from '@shared/forms';
 import { links } from '@shared/routing';
 import { SUBSCRIPTION_MODES, subscriptionModeLabel } from '@shared/text';
+import { BinaryCacheSettingsNavigationComponent } from '../cache-settings-navigation/cache-settings-navigation.component';
 
 type UpstreamType = 'internal' | 'gradient_proto' | 'http';
 type UpstreamErrors = Partial<Record<'cache_name' | 'display_name' | 'url' | 'remote_cache' | 'public_key', string | null>>;
@@ -68,6 +69,7 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
   selector: 'app-upstream-caches',
   standalone: true,
   imports: [
+    BinaryCacheSettingsNavigationComponent,
     CreateCacheDialogComponent,
     LabelHelpComponent,
     CommonModule,
@@ -79,7 +81,7 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
     InputDirective,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
+    SettingsAccessStateBadgeComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SelectComponent,
@@ -126,7 +128,7 @@ export class UpstreamCachesComponent implements OnInit {
   editAttempted = signal(false);
 
   cacheName = '';
-  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Upstream Caches' }));
+  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName));
 
   upstreamType: UpstreamType = 'internal';
   upstreamForm = {

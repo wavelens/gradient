@@ -166,11 +166,16 @@ describe('AppHeaderComponent - user menu', () => {
   });
 
   it('closes the navigation drawer when a menu command runs', async () => {
-    const { root, items } = await openMenu();
+    const fixture = setup(false, true, true, false, false);
+    const root = fixture.nativeElement as HTMLElement;
     const toggle = root.querySelector<HTMLButtonElement>('.menu-toggle')!;
     toggle.click();
     TestBed.tick();
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    (root.querySelector('.user-menu-trigger') as HTMLElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const items = Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'));
     items.find((item) => item.textContent?.includes('Log out'))!.click();
     TestBed.tick();
     expect(toggle.getAttribute('aria-expanded')).toBe('false');

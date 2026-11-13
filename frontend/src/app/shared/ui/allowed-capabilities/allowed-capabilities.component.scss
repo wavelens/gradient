@@ -47,17 +47,7 @@
   margin-top: $spacing-xs;
 }
 
-.allowed-pill {
-  padding: 1px $spacing-sm;
-  border-radius: 999px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow-wrap: normal;
-  background: var(--gr-surface-hover);
-  color: var(--gr-text-primary);
-
-  &--unsupported-by-worker {
-    background: var(--gr-surface-sunken);
-    color: var(--gr-text-muted);
-  }
+.allowed-capability-chip ::ng-deep .badge {
+  text-transform: none;
+  letter-spacing: normal;
 }

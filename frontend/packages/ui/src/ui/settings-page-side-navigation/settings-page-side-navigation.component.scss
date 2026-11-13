@@ -1,0 +1,89 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../styles/variables' as *;
+
+:host {
+  display: block;
+}
+
+.side-navigation {
+  display: flex;
+  gap: $spacing-xs;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--gr-border-subtle);
+
+  @media (min-width: $breakpoint-md) {
+    flex-direction: column;
+    overflow-x: visible;
+    mask-image: none;
+    border-bottom: none;
+  }
+}
+
+.side-navigation-link {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  white-space: nowrap;
+  color: var(--gr-text-secondary);
+  text-decoration: none;
+  border-radius: $border-radius-sm;
+  transition: color $transition-fast, background $transition-fast;
+
+  &:hover {
+    color: var(--gr-text-primary);
+    background: var(--gr-surface-raised);
+    text-decoration: none;
+  }
+
+  &.is-active {
+    color: var(--gr-text-primary);
+    background: var(--gr-surface-raised);
+    font-weight: 600;
+  }
+
+  @media (min-width: $breakpoint-md) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: $spacing-xs;
+    justify-items: start;
+
+    gr-badge { grid-column: 2; }
+  }
+
+  @media (max-width: $breakpoint-md - 1px) {
+    border-bottom: 2px solid transparent;
+    border-radius: $border-radius-sm $border-radius-sm 0 0;
+
+    &.is-active {
+      background: none;
+      border-bottom-color: var(--gr-accent);
+    }
+  }
+}
+
+.side-navigation-label {
+  @media (min-width: $breakpoint-md) {
+    white-space: normal;
+  }
+}
+
+.side-navigation-separator {
+  flex-shrink: 0;
+  margin: $spacing-xs 0;
+  border: none;
+  border-left: 1px solid var(--gr-border-subtle);
+
+  @media (min-width: $breakpoint-md) {
+    margin: $spacing-xs $spacing-md;
+    border-left: none;
+    border-top: 1px solid var(--gr-border-subtle);
+  }
+}

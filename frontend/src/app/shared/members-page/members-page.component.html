@@ -5,6 +5,13 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Members">
+  @if (kind === 'project') {
+    <app-project-settings-navigation slot="settings-navigation" [projectUrlName]="name" />
+  } @else if (kind === 'cache') {
+    <app-cache-settings-navigation slot="settings-navigation" [cacheUrlName]="name" />
+  } @else {
+    <app-team-settings-navigation slot="settings-navigation" [teamUrlName]="name" />
+  }
   <gr-link-tabs slot="banner" ariaLabel="Members" [tabs]="tabs()" />
   @if (!shouldShowNoAccessStateOnCachePage()) {
     <button
@@ -13,11 +20,10 @@
       grButton
       label="Invite Member"
       icon="person_add"
-      [appManagedDisable]="access()"
       (click)="showAddMemberDialog.set(true)"
     ></button>
   }
-  <app-server-configuration-managed-banner [access]="access()" [kind]="kind" />
+  <app-settings-access-state-badge slot="after-title" [access]="access()" [kind]="kind" />
   @if (tabContentNoAccessError(); as noAccessError) {
     <gr-load-state [error]="noAccessError" />
   } @else {
@@ -36,7 +42,6 @@
             errorTitle="Couldn't load members"
             emptyIcon="group"
             emptyTitle="No members"
-            emptyMessage="Invite people to grant access."
             (retry)="loadMembers()"
           >
             <app-project-members-access-list

@@ -17,7 +17,6 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ApiError } from '@core/services/api.service';
 import { MessageService } from '@gradient/ui/ui';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
-import { clockTime } from '@shared/text';
 import { ExecJobPageComponent } from './exec-job-page.component';
 
 vi.mock('@xterm/xterm', () => ({
@@ -356,7 +355,7 @@ describe('ExecJobPageComponent', () => {
       .map((metric) => Array.from(metric.querySelectorAll('.metric-label, .metric-value')).map((part) => part.textContent?.trim()).join(': '));
     expect(metrics).toContain('Program run: 3.0 s');
     expect(metrics.some((metric) => metric.startsWith('First start: '))).toBe(true);
-    expect((fixture.nativeElement as HTMLElement).querySelector('.info-bar .metric-sep')?.textContent?.trim()).toBe('Attempt 2');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.info-bar')?.textContent).not.toContain('Attempt');
     expect(fixture.componentInstance.firstAttemptStartedAt()).toBe('2026-01-01T00:00:01');
   });
 
@@ -494,18 +493,20 @@ describe('ExecJobPageComponent', () => {
     ],
   });
 
-  it('offers each attempt of a retried job and reads the log of the picked one', () => {
+  const getSidebarAttemptRowTexts = (root: HTMLElement) =>
+    Array.from(root.querySelectorAll('.log-sidebar .sidebar-attempt-row-button .attempt-build-status-label'), (label) => label.textContent?.trim());
+
+  it('list each attempt of a retried job in the sidebar and read the log of the selected attempt', () => {
     const { fixture, logAfter, navigate } = setup('completed', SSH, {}, retried());
     const page = fixture.componentInstance;
-    expect(page.attemptDropdownOptions().map((option) => option.label)).toEqual([
-      `Attempt 1 · worker lost ${clockTime('2026-01-01T15:13:00')}`,
-      `Attempt 2 · completed ${clockTime('2026-01-01T15:19:00')}`,
-    ]);
-    expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).not.toBeNull();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(getSidebarAttemptRowTexts(root)).toEqual(['Attempt 2 · completed', 'Attempt 1 · worker lost']);
     expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, 2, 0);
-    page.selectAttemptAndReloadLog(1);
-    expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { attempt: 1 } }));
+    page.showView('timeline');
+    root.querySelectorAll<HTMLButtonElement>('.sidebar-attempt-row-button')[1].click();
+    expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { attempt: 1, view: null } }));
     expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, 1, 0);
+    expect(page.view()).toBe('log');
     expect(page.pickedOrHighestNumberedAttemptForSelectedNode()?.number).toBe(1);
   });
 
@@ -515,9 +516,58 @@ describe('ExecJobPageComponent', () => {
     expect(fixture.componentInstance.formattedProgramRunTime()).toBe('50.0 s');
   });
 
-  it('hides the attempt selector for a job with one attempt', () => {
+  it("name attempt workers from the job despite no name on the same worker's node entry", () => {
+    const { fixture } = setup('completed', SSH, {}, { ...retried(), worker_name: 'gpu-box' });
+    const attemptRows = fixture.componentInstance.selectedNodeAttemptRowsWhenMoreThanOneAttempt();
+    expect(attemptRows.map((row) => row.attemptWorkerMachineDisplayName)).toEqual(['gpu-box', 'gpu-box']);
+  });
+
+  it('hide attempt list for jobs with a single attempt', () => {
     const { fixture } = setup('completed');
-    expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-log-attempt-list')).toBeNull();
+  });
+
+  const GUEST_AGENT_GONE = 'the guest agent closed the connection before the program exited';
+  const lostAttempt = (number: number) => ({
+    number, worker: 'w1', started_at: '2026-01-01T15:12:00', ended_at: '2026-01-01T15:13:00', end_reason: 'lost' as const, message: GUEST_AGENT_GONE,
+  });
+  const restartedAfterWorkerLosses = (): ExecJobResponse => ({
+    ...job('running'),
+    attempts: [lostAttempt(1), lostAttempt(2), { number: 3, worker: 'w1', started_at: '2026-01-01T15:18:00' }],
+  });
+  const getAttemptFailedWarningText = (root: HTMLElement) =>
+    root.querySelector('.exec-job-attempt-failed-warning .message-banner__content')?.textContent?.replace(/\s+/g, ' ').trim();
+
+  it('Warn that the attempt immediately before the running attempt lost a worker, with the reported message and consecutive losses', () => {
+    const { fixture } = setup('running', SSH, {}, restartedAfterWorkerLosses());
+    expect(getAttemptFailedWarningText(fixture.nativeElement)).toBe(
+      `Attempt 2 ended, worker lost: ${GUEST_AGENT_GONE} The job lost its worker 2 times in a row. Restarts after a lost worker don't use up a retry.`,
+    );
+  });
+
+  it('no warning banner during execution of the first attempt', () => {
+    const { fixture } = setup('running');
+    expect(getAttemptFailedWarningText(fixture.nativeElement)).toBeUndefined();
+  });
+
+  it('Display the message of a previously failed attempt selected from the sidebar.', () => {
+    const { fixture } = setup('completed', SSH, { attempt: '1' }, {
+      ...retried(),
+      attempts: [{ ...retried().attempts[0], end_reason: 'failed', message: 'the program exited with 1' }, retried().attempts[1]],
+    });
+    expect(getAttemptFailedWarningText(fixture.nativeElement)).toBe('Attempt 1 ended, failed: the program exited with 1');
+  });
+
+  it('Read the attempts of the selected node', () => {
+    const secondNodeLostItsWorker: ExecJobResponse = {
+      ...twoNodeJob('queued'),
+      attempts: [],
+      node_jobs: twoNodeJob('queued').node_jobs.map((nodeJob) => (nodeJob.node === 1 ? { ...nodeJob, attempts: [lostAttempt(1)] } : nodeJob)),
+    };
+    const { fixture } = setup('queued', SSH, { node: '1' }, secondNodeLostItsWorker);
+    expect(getAttemptFailedWarningText(fixture.nativeElement)).toBe(
+      `Attempt 1 ended, worker lost: ${GUEST_AGENT_GONE} Restarts after a lost worker don't use up a retry.`,
+    );
   });
 
   it('leaves out the job link while the job has no assignment to show', () => {

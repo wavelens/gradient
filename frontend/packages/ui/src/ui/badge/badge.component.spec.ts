@@ -11,7 +11,7 @@ import { BadgeComponent } from './badge.component';
 @Component({
   standalone: true,
   imports: [BadgeComponent],
-  template: `<gr-badge severity="success">Completed</gr-badge><gr-badge>Managed</gr-badge>`,
+  template: `<gr-badge severity="success">Completed</gr-badge><gr-badge>Managed</gr-badge><gr-badge showStatusDot>Offline</gr-badge>`,
 })
 class Host {}
 
@@ -33,5 +33,11 @@ describe('gr-badge', () => {
 
   it('defaults to neutral', async () => {
     expect((await render())[1].querySelector('.badge.is-neutral')).not.toBeNull();
+  });
+
+  it('draws a status dot only on request', async () => {
+    const badges = await render();
+    expect(badges[1].querySelector('.badge__status-dot')).toBeNull();
+    expect(badges[2].querySelector('.badge__status-dot')).not.toBeNull();
   });
 });

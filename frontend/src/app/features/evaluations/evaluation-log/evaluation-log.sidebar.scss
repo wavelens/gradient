@@ -47,6 +47,7 @@
   overflow-y: auto;
   display: block;
   min-height: 0;
+  border-top: 1px solid var(--gr-border-subtle);
 }
 
 .no-builds {
@@ -75,6 +76,11 @@
     background: var(--gr-surface-active);
     border-left-color: var(--build-status-color);
   }
+}
+
+.attempt-list-under-build-row {
+  margin-left: calc($spacing-md + 3px);
+  border-left: 1px solid var(--gr-border);
 }
 
 .build-dot {
@@ -125,3 +131,5 @@
   }
 }
 
+
+.sidebar-builds-heading + .builds-list { border-top: 0; }

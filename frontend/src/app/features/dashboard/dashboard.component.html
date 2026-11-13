@@ -19,18 +19,18 @@
     </gr-message-banner>
   }
   <div class="layout" [class.layout--start]="newUser()">
-    <div class="main">
-      @if (newUser()) {
-        <app-dashboard-start />
-      } @else {
-        <app-dashboard-stats />
-        <app-dashboard-task-table />
-        <app-dashboard-activity />
-      }
-    </div>
+    @if (newUser()) {
+      <app-dashboard-start />
+    } @else {
+      <app-dashboard-stats />
+      <app-dashboard-task-table />
+    }
     <app-dashboard-rail
       [class.hidden]="newUser()"
       (empty)="newUser.set($event)"
     />
+    @if (!newUser()) {
+      <app-dashboard-activity />
+    }
   </div>
 </div>

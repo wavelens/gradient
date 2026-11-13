@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, OnDestroy, ElementRef, HostListener, Injector, afterNextRender, afterRenderEffect, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, DestroyRef, OnInit, OnDestroy, ElementRef, HostListener, Injector, afterNextRender, afterRenderEffect, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule, UrlTree } from '@angular/router';
 import { catchError, finalize, map, Observable, of, Subject, Subscription, switchMap } from 'rxjs';
 import { auditTime, debounceTime, distinctUntilChanged, filter, share, tap } from 'rxjs/operators';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
@@ -35,6 +35,7 @@ import {
   MenuComponent,
   MenuItem,
   MessageBannerComponent,
+  PopoverComponent,
   SkeletonComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
@@ -58,9 +59,8 @@ import {
   EvaluationProgress,
   EvaluateRequest,
   EvaluationStatus,
-  ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, buildOutcomeLabel, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, evaluationRetryOrRerunLabel, getAbortedEvaluationExplanationWithReplacementId, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getRunningEvaluationProgress, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type AbortedEvaluationExplanation, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase, nextPollText } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, isRetryableBuildStatus, commitLabel, commitWebUrl, evaluationRetryOrRerunLabel, getAbortedEvaluationExplanationWithReplacementId, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getRunningEvaluationProgress, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhase, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type AbortedEvaluationExplanation, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase, nextPollText } from '@shared/evaluation';
 
 const NO_EVALUATION_SELECTED = 'No evaluation selected.';
 
@@ -73,7 +73,7 @@ type RunDialogStartChoice = 'latest-commit' | 'this-commit' | 'failed-builds';
     CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, BadgeComponent, BreadcrumbComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     SkeletonComponent, EmptyStateComponent, LoadStateComponent, MessageBannerComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
-    IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent, CopyFieldComponent,
+    IconComponent, InViewDirective, PopoverComponent, StatusIconComponent, StarButtonComponent, CopyFieldComponent,
     ExecJobListComponent, WaitingNoticeComponent,
     RepositoryFetchBannerComponent, LiveStatusComponent,
   ],
@@ -101,6 +101,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private live = inject(LiveService);
   private stars = inject(StarsService);
   private injector = inject(Injector);
+  private destroyRef = inject(DestroyRef);
 
   access = injectTaskAccess();
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
@@ -113,8 +114,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   canIncludeInstance = computed(() => this.resolved()?.task.permissions.includes('manageWorkers') ?? false);
   task = signal<TaskDetailsResponse | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
-  selectedEvaluationExecJobsLastReportedByList = signal<ExecJobSummary[]>([]);
-  selectedEvaluationLatestExecJobByEntryPointAttributePath = computed(() => new Map(this.selectedEvaluationExecJobsLastReportedByList().map((job) => [job.entry_point, job])));
   entryPointsTotal = signal(0);
   failedAttributes = signal<FailedAttributeSummary[]>([]);
   entryPointsLoading = signal(false);
@@ -224,6 +223,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (!latest || latest.id === this.selected()?.id || latest.id === this.newestEvaluationIdAtSelection()) return null;
     return latest;
   });
+  evaluationWildcardPatterns = computed(() => (this.task()?.wildcard ?? '').split(',').map((pattern) => pattern.trim()).filter(Boolean));
   retryOrRerunLabelByEvaluationId = computed(() => {
     const list = this.evaluations();
     return new Map(list.map((evaluation, index) => [evaluation.id, evaluationRetryOrRerunLabel(evaluation, list.slice(index + 1))]));
@@ -400,7 +400,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       // Drop the previous evaluation's packages immediately so the panel shows a
       // loading state, not stale data, during the (slow) entry-point fetch.
       this.entryPoints.set([]);
-      this.selectedEvaluationExecJobsLastReportedByList.set([]);
       this.entryPointsTotal.set(0);
       this.failedAttributes.set([]);
       this.entryPointsEvalId = undefined;
@@ -494,6 +493,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (this.starting()) return;
     this.starting.set(true);
     this.tasksService.startEvaluation(this.projectName, this.taskName, request).pipe(
+      filter(() => !this.destroyRef.destroyed),
       switchMap((evaluation) => {
         this.selectEvaluation(evaluation.id);
         return this.requestTaskDetailsIfNoNewerRequestApplied().pipe(catchError(() => of(null)));
@@ -543,6 +543,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private openNewEvaluation(id: string): void {
+    if (this.destroyRef.destroyed) return;
     this.selectEvaluation(id);
     this.loadTaskData(true);
   }
@@ -748,13 +749,18 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   entryPointGroups = computed(() => groupEntryPoints(this.entryPoints(), this.matchingFailedAttributes()));
 
   protected readonly evaluationPhase = evaluationPhase;
-  protected readonly buildOutcomeLabel = buildOutcomeLabel;
   protected readonly inputFetchPhase = inputFetchPhase;
 
   protected packagePhase(evaluation: EvaluationSummary, entry: EntryPointSummary): StatusPhase {
     if (evaluation.only_evaluate) return 'success';
     if (buildStatusToShowInEvaluation({ status: entry.build_status, ...entry }, evaluation) !== entry.build_status) return 'aborted';
-    return phaseInFinishedEvaluation(entryPointPhaseWithExecJob(entry, this.selectedEvaluationLatestExecJobByEntryPointAttributePath().get(entry.eval)?.status), evaluation.status);
+    return phaseInFinishedEvaluation(entryPointPhase(entry), evaluation.status);
+  }
+
+  protected packageEvaluationLogLink(evaluation: EvaluationSummary, entry: EntryPointSummary): UrlTree {
+    if (evaluation.only_evaluate) return links.evaluationLog(this.projectName, evaluation.id);
+    const build = entry.build_status === 'DependencyFailed' ? null : entry.build_id;
+    return links.evaluationLog(this.projectName, evaluation.id, { filter: entry.build_id, build });
   }
 
   pkgMenuModel = signal<MenuItem[]>([]);
@@ -780,7 +786,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       command: () => this.startEvaluation({ commit: selected.commit }),
     };
   });
-
   private evaluationPageItems = computed<MenuItem[]>(() => {
     const selected = this.selected();
     const disabledReason = selected ? null : NO_EVALUATION_SELECTED;
@@ -817,8 +822,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     : []);
 
   panelMenuModel = computed<MenuItem[]>(() => {
-    const runAgain = this.runEvaluationAgainMenuItem();
-    return [...this.evaluationLinkItems(), ...(runAgain ? [runAgain] : []), ...this.evaluationActionItems()];
+    const runAgainMenuItem = this.retryEvaluationItem() ? this.runEvaluationAgainMenuItem() : null;
+    return [...this.evaluationLinkItems(), ...(runAgainMenuItem ? [runAgainMenuItem] : []), ...this.evaluationActionItems()];
   });
 
   evalMenuModel = computed<MenuItem[]>(() => {
@@ -954,6 +959,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
     const evaluation = this.evaluations().find(e => e.id === evalId);
     const from = { task: this.taskName, evaluation: evalId };
+    const retryFailedBuilds = this.retryEvaluationItem();
     return [
       {
         label: 'Artefacts', icon: 'download', disabledReason: getArtefactsMenuItemDisabledReason(ep.build_status, ep.has_artefacts),
@@ -985,6 +991,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
              command: () => this.runAction(this.evaluationsService.retryBuild(ep.build_id),
                'Build retried', 'Failed to retry build') }]
         : []),
+      ...(retryFailedBuilds && evalId === this.selected()?.id && isRetryableBuildStatus(ep.build_status) ? [retryFailedBuilds] : []),
     ];
   }
 

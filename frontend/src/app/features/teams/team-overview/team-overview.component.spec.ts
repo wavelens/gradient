@@ -96,12 +96,12 @@ describe('TeamOverviewComponent', () => {
     expect(sections).toEqual(['Requests', 'Projects and Caches', 'Workers']);
   });
 
-  it('links every team member to the Members page next to the admin-only Settings', () => {
+  it('all team members link to Settings, the parent page of Members', () => {
     const memberHrefs = Array.from(render().querySelectorAll('a[slot="actions"]'), (link) => link.getAttribute('href'));
-    expect(memberHrefs).toEqual(['/team/platform/members/people']);
+    expect(memberHrefs).toEqual(['/team/platform/settings']);
     TestBed.resetTestingModule();
     const adminHrefs = Array.from(setup('admin').root.querySelectorAll('a[slot="actions"]'), (link) => link.getAttribute('href'));
-    expect(adminHrefs).toEqual(['/team/platform/members/people', '/team/platform/settings']);
+    expect(adminHrefs).toEqual(['/team/platform/settings']);
   });
 
   it('picks up new grants and workers while the page stays open', () => {

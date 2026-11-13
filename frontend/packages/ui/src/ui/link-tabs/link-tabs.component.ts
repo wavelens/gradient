@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, input, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, input, signal, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive, type UrlTree } from '@angular/router';
+import { scrollActiveLinkToMiddleAfterRenderAndResize } from '../scroll-active-link-to-middle';
 
 export interface LinkTab {
   label: string;
@@ -36,16 +37,6 @@ export class LinkTabsComponent {
   private tabLinksNavElement = viewChild.required<ElementRef<HTMLElement>>('tabLinksNav');
 
   constructor() {
-    afterRenderEffect((onCleanup) => {
-      this.tabs();
-      const link = this.activeLink();
-      if (!link) return;
-      const scrollActiveTabLinkToMiddle = () => link.scrollIntoView?.({ block: 'nearest', inline: 'center' });
-      if (typeof ResizeObserver === 'undefined') return scrollActiveTabLinkToMiddle();
-      const resizeObserver = new ResizeObserver(scrollActiveTabLinkToMiddle);
-      resizeObserver.observe(link);
-      resizeObserver.observe(this.tabLinksNavElement().nativeElement);
-      onCleanup(() => resizeObserver.disconnect());
-    });
+    scrollActiveLinkToMiddleAfterRenderAndResize(this.activeLink, () => this.tabLinksNavElement().nativeElement, this.tabs);
   }
 }

@@ -12,47 +12,39 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { StarsService } from '@core/services/stars.service';
 import {
-  BadgeComponent,
   ButtonComponent,
   CopyFieldComponent,
   CardGridComponent,
   LoadMoreComponent,
   LoadStateComponent,
-  NavCardComponent,
   PageLayoutComponent,
-  SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, StarButtonComponent, EntityNameComponent, ProjectReadinessCardComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
+import { StarButtonComponent, ProjectReadinessCardComponent, entityKindToIconName } from '@shared/ui';
 import { CacheSubscriptionItem, StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
-import { canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
+import { canOpenProjectMembersPage, canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ProjectsService } from '@core/services/projects.service';
 import { EMPTY, catchError, merge, tap } from 'rxjs';
 import { CurrentTimeSignal, formatDuration, relativeTime, serverTime } from '@shared/text';
-import { EvaluationHistoryComponent } from '@features/dashboard/evaluation-history/evaluation-history.component';
+import { TaskCardComponent } from '../task-card/task-card.component';
 
 @Component({
   selector: 'app-project-detail',
   standalone: true,
   imports: [
-    EntityNameComponent,
     CommonModule,
     RouterModule,
     ButtonComponent,
     CopyFieldComponent,
     LoadStateComponent,
-    EvalStatusBadgeComponent,
     CardGridComponent,
     LoadMoreComponent,
-    NavCardComponent,
     PageLayoutComponent,
     StarButtonComponent,
-    BadgeComponent,
     ProjectReadinessCardComponent,
-    SettingsSectionComponent,
-    EvaluationHistoryComponent,
+    TaskCardComponent,
   ],
   templateUrl: './project-detail.component.html',
   styleUrl: './project-detail.component.scss',
@@ -60,7 +52,6 @@ import { EvaluationHistoryComponent } from '@features/dashboard/evaluation-histo
 })
 export class ProjectDetailComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
-  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   protected readonly isViewerProjectMember = isViewerProjectMember;
   private route = inject(ActivatedRoute);
@@ -73,8 +64,7 @@ export class ProjectDetailComponent implements OnInit {
 
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   canCreateTask = computed(() => !this.project().managed && this.project().permissions.includes('createTask'));
-  canOpenSettings = computed(() => canOpenProjectSettings(this.project()));
-  canOpenMembers = computed(() => isViewerProjectMember(this.project()) || this.authService.user()?.superuser === true);
+  canShowSettingsButton = computed(() => canOpenProjectSettings(this.project()) || canOpenProjectMembersPage(this.project(), this.authService.user()));
   tasks = pagedList<TaskResponse>('tasks', (page) => this.tasksService.getTasks(this.projectName, page, 50));
   starred = signal(false);
   cacheSubscriptions = signal<CacheSubscriptionItem[] | null>(null);

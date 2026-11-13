@@ -36,7 +36,7 @@
     <div class="charts-grid">
       <gr-metric-chart
         title="Build Time"
-        subtitle="Time to build this package per evaluation"
+        explanationText="Time to build this package per evaluation"
         type="area"
         [height]="200"
         [series]="buildTimeSeries()"
@@ -47,7 +47,7 @@
 
       <gr-metric-chart
         title="Output Size"
-        subtitle="Size of this package's build output per evaluation"
+        explanationText="Size of this package's build output per evaluation"
         type="area"
         [height]="200"
         [series]="outputSizeSeries()"
@@ -58,7 +58,7 @@
 
       <gr-metric-chart
         title="Closure Size"
-        subtitle="Size including all transitive dependencies"
+        explanationText="Size including all transitive dependencies"
         type="area"
         [height]="200"
         [series]="closureSizeSeries()"
@@ -69,7 +69,7 @@
 
       <gr-metric-chart
         title="Dependencies Count"
-        subtitle="Number of transitive dependency builds"
+        explanationText="Number of transitive dependency builds"
         type="area"
         [height]="200"
         [series]="depsSeries()"

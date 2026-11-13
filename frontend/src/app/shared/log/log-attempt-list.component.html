@@ -1,0 +1,20 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+@for (row of attemptRowsNewestFirstWithDurationTextTooltipTextAndDotColour(); track row.number; let index = $index) {
+  <button #attemptRowButtons type="button" class="sidebar-attempt-row-button"
+          [attr.aria-current]="row.number === attemptNumberForLogOnScreenOrNull() ? 'true' : null"
+          [grTooltip]="row.finishTimeAndWorkerNameTooltip" tooltipPosition="right"
+          (click)="selectAttempt.emit(row.number)"
+          (keydown.arrowdown)="focusAdjacentAttemptRowOrEmitArrowKeyPastListEnd($event, index, 1)"
+          (keydown.arrowup)="focusAdjacentAttemptRowOrEmitArrowKeyPastListEnd($event, index, -1)">
+    <span class="attempt-status-dot" [style.background]="row.statusDotColor"></span>
+    <span class="attempt-build-status-label">Attempt {{ row.number }} · {{ row.status }}</span>
+    @if (row.durationText) {
+      <span class="attempt-row-duration">{{ row.durationText }}</span>
+    }
+  </button>
+}

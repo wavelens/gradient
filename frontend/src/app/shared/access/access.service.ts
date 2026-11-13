@@ -13,10 +13,6 @@ export class AccessService {
     return s.canEdit && !s.managed;
   }
 
-  shouldShowWriteAction(s: AccessState): boolean {
-    return s.canEdit;
-  }
-
   shouldDisableInput(s: AccessState): boolean {
     return s.managed || !s.canEdit;
   }

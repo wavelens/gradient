@@ -26,9 +26,13 @@
     </div>
     <div class="head-actions phone-icon-buttons">
       @if (authService.isAuthenticated()) {
-        <button *appWritable="triggerAccess()" grButton label="Run" icon="play_arrow"
-                (click)="openRunDialogWithDefaultChoices()" [loading]="starting()"
-                [disabledReason]="startDisabledReason()"></button>
+        <div *appWritable="triggerAccess()" class="joined-button-pair">
+          <button grButton label="Run" icon="play_arrow" [grTooltip]="runDialogStartBranchLabel()"
+                  (click)="evaluationInProgress() ? openRunDialogWithDefaultChoices() : startEvaluation()" [loading]="starting()"
+                  [disabledReason]="startDisabledReason()"></button>
+          <button grButton icon="expand_more" aria-label="Run options" grTooltip="Run options"
+                  (click)="openRunDialogWithDefaultChoices()" [disabledReason]="startDisabledReason()"></button>
+        </div>
         @if (proj.name !== 'build-request' && canOpenSettings()) {
           <a grButton label="Settings" icon="settings" severity="secondary"
                   [routerLink]="links.taskPage(projectName, taskName, 'settings')"></a>
@@ -63,7 +67,16 @@
       @if (repo.flakeDir; as flakeDir) {
         <span class="chip mono" title="Flake directory"><gr-icon name="folder" size="sm" />dir {{ flakeDir }}</span>
       }
-      <span class="chip chip--wildcard mono">{{ proj.wildcard }}</span>
+      <button type="button" class="chip chip--link chip--wildcard mono" grTooltip="Show the full evaluation wildcard"
+              (click)="evaluationWildcardPopover.toggle($event)">{{ proj.wildcard }}</button>
+      <gr-popover #evaluationWildcardPopover>
+        <strong>Evaluation Wildcard</strong>
+        <ul class="wildcard-pattern-list mono">
+          @for (pattern of evaluationWildcardPatterns(); track $index) {
+            <li>{{ pattern }}</li>
+          }
+        </ul>
+      </gr-popover>
       @for (branch of activeTriggerBranchLabels(); track branch) {
         <span class="chip mono" grTooltip="Branches that active triggers for this task evaluate"><gr-icon name="call_split" size="sm" />{{ branch }}</span>
       }
@@ -219,9 +232,14 @@
               <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
                       severity="danger" [loading]="aborting()" [disabled]="aborting()"
                       (click)="requestAbort($event, sel)"></button>
-            } @else if (retryEvaluationItem(); as retry) {
-              <button grButton size="small" label="Retry failed builds" icon="replay" severity="secondary"
-                      [disabled]="retry.disabled" [disabledReason]="retry.disabledReason" (click)="retry.command?.()"></button>
+            } @else {
+              @if (retryEvaluationItem(); as retry) {
+                <button grButton size="small" label="Retry failed builds" icon="replay" severity="secondary"
+                        [disabled]="retry.disabled" [disabledReason]="retry.disabledReason" (click)="retry.command?.()"></button>
+              } @else if (runEvaluationAgainMenuItem(); as runAgain) {
+                <button grButton size="small" label="Run again" icon="play_arrow" severity="secondary"
+                        [disabled]="runAgain.disabled" [disabledReason]="runAgain.disabledReason" (click)="runAgain.command?.()"></button>
+              }
             }
             <button grButton size="small" icon="more_vert" severity="secondary"
                     (click)="panelMenu.toggle($event)" aria-label="More"></button>
@@ -247,10 +265,9 @@
                   @let ep = row.entry;
                   @let depTally = buildTally(barCounts(ep), sel.status);
                   @let phase = packagePhase(sel, ep);
-                  @let execJob = selectedEvaluationLatestExecJobByEntryPointAttributePath().get(ep.eval);
                   <div class="entry-row pkg" [attr.data-phase]="phase" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
-                    <a class="entry-link" [routerLink]="execJob ? links.execJob(projectName, taskName, execJob.id) : links.evaluationLog(projectName, sel.id, { filter: sel.only_evaluate ? null : ep.build_id })"
+                    <a class="entry-link" [routerLink]="packageEvaluationLogLink(sel, ep)"
                        [title]="ep.eval + ' - ' + ep.derivation_path + (ep.ifd ? ' (import from derivation: evaluation waited for this build)' : '')" [attr.aria-label]="row.label + (ep.ifd ? ' (import from derivation: evaluation waited for this build)' : '')"></a>
                     <gr-status-icon class="phase-swatch" [phase]="phase" [prioritized]="ep.prioritized" size="sm" />
                     <span class="pkg-name entry-name" [title]="row.label">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
@@ -258,12 +275,8 @@
                     @if (sel.only_evaluate) {
                       <span class="pkg-deps">Evaluated</span>
                     } @else {
-                      @if (execJob) {
-                        <span class="pkg-deps">{{ buildOutcomeLabel(ep.build_status) }}</span>
-                      } @else {
-                        <gr-segmented-bar class="pkg-bar" [counts]="depTally.counts" />
-                        <span class="pkg-deps" [title]="buildCountTitle(depTally)">@for (piece of getBuildCountTextPieces(depTally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
-                      }
+                      <gr-segmented-bar class="pkg-bar" [counts]="depTally.counts" />
+                      <span class="pkg-deps" [title]="buildCountTitle(depTally)">@for (piece of getBuildCountTextPieces(depTally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
                       <span class="pkg-time">
                         {{ pkgDuration(sel, ep) }}
                         @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
@@ -336,19 +349,16 @@
           } @else if (!entryPointsLoading() && sel.status === 'Aborted') {
             <gr-empty-state flat icon="block" [title]="abortedWithoutBuildsTitle(sel.started_at)" />
           } @else if (!entryPointsLoading()) {
-            <gr-empty-state flat icon="package_2" title="No packages"
-              message="This evaluation produced no entry-point builds." />
+            <gr-empty-state flat icon="package_2" title="No packages" />
           }
-          <app-exec-job-list [evaluation]="sel.id" [evaluationStatus]="sel.status" [project]="projectName" [task]="taskName" [canTrigger]="canTrigger()"
-                             (allExecJobsLoadedOrPolled)="selectedEvaluationExecJobsLastReportedByList.set($event)" />
+          <app-exec-job-list [evaluation]="sel.id" [evaluationStatus]="sel.status" [project]="projectName" [task]="taskName" [canTrigger]="canTrigger()" />
           <gr-menu #pkgMenu [model]="pkgMenuModel()" />
         </div>
       }
     </div>
   } @else {
     <div class="pad">
-      <gr-empty-state icon="assessment" title="No evaluations yet"
-        [message]="access().canTrigger ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'" />
+      <gr-empty-state icon="assessment" title="No evaluations yet" />
     </div>
   }
 

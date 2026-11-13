@@ -13,10 +13,7 @@
     <gr-copy-field slot="meta" inline [value]="cacheName" copyLabel="Copy cache name for the CLI" />
     <div slot="actions">
       <a grButton label="Packages" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
-      @if (canOpenMembers()) {
-        <a grButton label="Members" icon="group" severity="secondary" [routerLink]="links.membersPage('cache', cacheName)"></a>
-      }
-      @if (editAccess().canEdit) {
+      @if (canShowSettingsButton()) {
         <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.cachePage(cacheName, 'settings')"></a>
       }
       @if (authService.isAuthenticated()) {
@@ -43,20 +40,12 @@
     @if (!c.public) {
       <gr-divider />
       <gr-form-field label="Install netrc" for="cache-netrc">
-        <gr-label-help slot="label" doc="guides/share-a-cache/#1-use-the-cache-on-a-machine" title="Cache authentication docs" />
+        <gr-label-help slot="label" doc="guides/share-a-cache/#1-use-the-cache-on-a-machine" title="Cache authentication docs" [explanationText]="installNetrcCommandExplanation" />
         <gr-copy-field inputId="cache-netrc" multiline [value]="installNetrcCommand" />
         @if (authService.isAuthenticated()) {
           <a grButton label="Create key for this cache" icon="key" severity="secondary" size="small"
              data-testid="create-cache-key" [routerLink]="links.createApiKeyPageForCache(cacheName)"></a>
         }
-        <span slot="hint">
-          This cache is private. Run the command as root and replace <code>&lt;YOUR_TOKEN&gt;</code> with an
-          <a [routerLink]="links.settings('keys')">API key</a> with Cache scope for this cache. "Any project" keys can't read the cache.
-          Use this command to write credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate.
-          A declarative NixOS config is another option. See the
-          <a [href]="netrcDocsUrl" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
-          in the docs.
-        </span>
       </gr-form-field>
     }
   </gr-settings-section>
@@ -79,9 +68,9 @@
         />
     </div>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
-      <gr-stat-card label="Packages" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
-      <gr-stat-card label="Uncompressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_nar_bytes ?? 0)" />
-      <gr-stat-card label="Compressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_bytes ?? 0)" />
+      <gr-stat-card label="Packages" [valueExplanation]="binaryCacheStatTileValueExplanations.packages" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
+      <gr-stat-card label="Uncompressed size" [valueExplanation]="binaryCacheStatTileValueExplanations.uncompressedSize" [value]="statsLoading() ? null : formatBytes(stats()?.total_nar_bytes ?? 0)" />
+      <gr-stat-card label="Compressed size" [valueExplanation]="binaryCacheStatTileValueExplanations.compressedSize" [value]="statsLoading() ? null : formatBytes(stats()?.total_bytes ?? 0)" />
     </gr-card-grid>
 
     <gr-metric-chart title="Storage over time"
@@ -99,8 +88,8 @@
   <div class="section">
     <h2>Traffic</h2>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
-      <gr-stat-card label="Requests last 60 minutes" [value]="statsLoading() ? null : formatCount(last60MinutesTrafficTotals().requests)" />
-      <gr-stat-card label="Traffic last 60 minutes" [value]="statsLoading() ? null : formatBytes(last60MinutesTrafficTotals().bytes)" />
+      <gr-stat-card label="Requests last 60 minutes" valueExplanation="The number of package files this cache sent to clients. The Total and External options on the chart below can change this number." [value]="statsLoading() ? null : formatCount(last60MinutesTrafficTotals().requests)" />
+      <gr-stat-card label="Traffic last 60 minutes" valueExplanation="Total bytes of package files that this cache sent. The Total / External switch on the chart below can change the number." [value]="statsLoading() ? null : formatBytes(last60MinutesTrafficTotals().bytes)" />
     </gr-card-grid>
 
     <gr-metric-chart title="Traffic over time"
@@ -127,7 +116,7 @@
   }
   </gr-load-state>
 
-  <gr-settings-section class="used-by" title="Projects using this cache" description="Projects that push builds to this cache or read from this cache." [card]="false">
+  <gr-settings-section class="used-by" title="Projects using this cache" [card]="false">
     @if (authService.isAuthenticated()) {
       <button slot="actions" grButton label="Use with project" icon="add_link" severity="secondary" (click)="useDialogOpen.set(true)"></button>
     }

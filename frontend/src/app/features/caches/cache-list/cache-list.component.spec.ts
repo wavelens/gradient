@@ -103,7 +103,6 @@ describe('CacheListComponent', () => {
   it('offers Create in the header once the list has caches', () => {
     const { element } = setup({ authenticated: true });
     expect(element.querySelectorAll('app-create-cache-button')).toHaveLength(1);
-    expect(element.textContent).toContain('Manage your build caches');
   });
 
   it('opens the created cache', () => {

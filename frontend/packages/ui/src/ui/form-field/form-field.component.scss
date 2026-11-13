@@ -30,6 +30,12 @@
     color: var(--gr-text-primary);
   }
 
+  &__control-wrapper:has(> gr-label-explanation-button) {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+  }
+
   .required {
     color: var(--gr-status-danger);
   }

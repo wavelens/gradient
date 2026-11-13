@@ -4,11 +4,13 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Team Settings">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="General">
+  <app-team-settings-navigation slot="settings-navigation" [teamUrlName]="teamName" />
+  @if (team()) {
+    <app-settings-access-state-badge slot="after-title" [access]="access()" kind="team" showReadOnlyNote />
+  }
   @if (team(); as team) {
-    <app-server-configuration-managed-banner [access]="access()" kind="team" showReadOnlyNote />
-
-    <gr-settings-section title="General">
+    <gr-settings-section>
       <gr-form-field label="Display Name" for="team-display-name" [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
         <input grInput id="team-display-name" [maxlength]="maxDisplayNameCharacterCount" [(ngModel)]="form.display_name" [appManagedDisable]="access()" (keyup.enter)="save()" />
       </gr-form-field>
@@ -42,28 +44,12 @@
       }
     </gr-settings-section>
 
-    <gr-settings-section title="More Settings" [card]="false">
-      <gr-row-list>
-        <gr-row icon="hub" linkLabel="Git host connections" [link]="links.teamPage(teamName, 'git-host-connections')">
-          Git host connections
-          <span slot="meta">Receive events from a Git host and report commit status.</span>
-        </gr-row>
-        @if (team.role === 'admin' || isSuperuser()) {
-          <gr-row icon="webhook" linkLabel="Event notifications" [link]="links.teamPage(teamName, 'webhooks')">
-            Event notifications
-            <span slot="meta">Signed HTTP requests for this team's events</span>
-          </gr-row>
-        }
-      </gr-row-list>
-    </gr-settings-section>
-
-    @if (access().canEdit) {
+    @if (accessService.isWritable(access())) {
       <gr-settings-section title="Danger Zone" danger>
         <gr-row>
           Delete Team
           <span slot="meta">Removes the team, its grants, requests, invitations and workers.</span>
-          <button slot="actions" grButton label="Delete Team" icon="delete" severity="danger" (click)="remove()"
-            [appManagedDisable]="access()"></button>
+          <button slot="actions" grButton label="Delete Team" icon="delete" severity="danger" (click)="remove()"></button>
         </gr-row>
       </gr-settings-section>
     }

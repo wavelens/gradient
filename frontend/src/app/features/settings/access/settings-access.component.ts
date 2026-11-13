@@ -17,7 +17,7 @@ import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
   imports: [LoadStateComponent, PageLayoutComponent, SettingsNavComponent, UserAccessSummarySectionsComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <gr-page-layout width="settings" title="Access" subtitle="Every project, cache and team this account can access and why.">
+    <gr-page-layout width="settings" title="Access">
       <app-settings-nav slot="banner" />
       <gr-load-state [loading]="loading()" [error]="loadError()" loadingMessage="Loading access..." errorTitle="Couldn't load access" (retry)="load()">
         @if (summary(); as summary) {

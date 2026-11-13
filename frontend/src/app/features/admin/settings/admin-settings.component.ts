@@ -27,6 +27,12 @@ const optionValueSourceLabels: Record<ServerOptionValueSource, string> = {
       @for (section of serverOptionsByGroup(); track section.group) {
         <h2>{{ section.group }}</h2>
         <gr-table class="options">
+          <colgroup>
+            <col class="server-option-flag-column">
+            <col class="environment-variable-name-column">
+            <col class="current-option-value-column">
+            <col class="value-source-column">
+          </colgroup>
           <thead><tr><th>Flag</th><th>Environment</th><th>Value</th><th>Source</th></tr></thead>
           <tbody>
             @for (option of section.options; track option.flag) {
@@ -52,6 +58,14 @@ const optionValueSourceLabels: Record<ServerOptionValueSource, string> = {
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: '../admin-area.scss',
+  styles: `
+    .server-option-flag-column { width: 25%; }
+    .environment-variable-name-column { width: 30%; }
+    .current-option-value-column { width: 25%; }
+    .value-source-column { width: 20%; }
+    .options ::ng-deep table { table-layout: fixed; min-width: 40rem; }
+    .options code { overflow-wrap: anywhere; }
+  `,
 })
 export class AdminSettingsComponent implements OnInit {
   private admin = inject(AdminService);

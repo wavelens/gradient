@@ -4,12 +4,15 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Settings">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="General">
+<app-cache-settings-navigation slot="settings-navigation" [cacheUrlName]="cacheName" />
+@if (cache()) {
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="cache" showReadOnlyNote />
+}
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!cache()" loadingMessage="Loading cache settings..."
                errorTitle="Failed to load cache settings" (retry)="loadCache()">
 @if (cache(); as c) {
-    <app-server-configuration-managed-banner [access]="access()" kind="cache" showReadOnlyNote />
-    <gr-settings-section title="General">
+    <gr-settings-section>
       <gr-form-field label="Name" for="cache-name" hint="This name is part of the URL and can't be changed here. Change the display name instead.">
         <input grInput id="cache-name" [value]="c.name" disabled />
       </gr-form-field>
@@ -69,11 +72,13 @@
       <gr-form-field
         label="Max Storage (GB)"
         for="max-storage"
-        [hint]="config.maxCachedNarStorageGb != null ? 'Instance limit: ' + config.maxCachedNarStorageGb + ' GB' : undefined"
         [invalid]="!!fieldError('max_storage_gb')"
         [error]="fieldError('max_storage_gb') ?? ''"
       >
         <gr-label-help slot="label" doc="ui/settings/#cache-settings" title="Storage limit of this cache. 0 is unlimited." />
+        @if (config.maxCachedNarStorageGb != null) {
+          <span slot="hint">Instance limit: {{ config.maxCachedNarStorageGb }} GB</span>
+        }
         <input
           grInput
           type="number"
@@ -135,7 +140,8 @@
     <gr-settings-section title="Signing Key">
       <p class="text-secondary">The Nix client can use this public key to verify store paths from this cache.</p>
       @if (cachePublicKeyHistory(); as keys) {
-        <gr-form-field label="Public Key" [hint]="'In use since ' + (keys.created_at | serverDate)">
+        <gr-form-field label="Public Key">
+          <span slot="hint">In use since {{ keys.created_at | serverDate }}</span>
           <gr-copy-field [value]="keys.public_key" />
         </gr-form-field>
         @for (retired of keys.retired; track retired.public_key + retired.retired_at) {
@@ -145,47 +151,15 @@
           </div>
         }
       }
-      @if (manageKeysAccess().canEdit) {
+      @if (accessService.isWritable(manageKeysAccess())) {
         <div class="gr-form-actions">
-          <button grButton label="Rotate Key" icon="autorenew" severity="secondary" [appManagedDisable]="manageKeysAccess()"
+          <button grButton label="Rotate Key" icon="autorenew" severity="secondary"
             (click)="confirmRotateCacheSigningKeyAndReloadKeyList()"></button>
         </div>
       }
     </gr-settings-section>
 
-    <gr-settings-section title="More Settings" [card]="false">
-      <gr-row-list>
-        <gr-row
-          icon="cloud_download"
-          linkLabel="Upstream caches"
-          [link]="links.cachePage(cacheName, 'upstream-caches')"
-        >
-          Upstream Caches
-          <span slot="meta">External and internal caches this cache pulls through from</span>
-        </gr-row>
-        @if (manageCacheSubscriptionsAccess().canEdit) {
-          <gr-row
-            icon="hub"
-            linkLabel="Subscriptions"
-            [link]="links.cachePage(cacheName, 'subscriptions')"
-          >
-            Subscriptions
-            @if (pendingSubscriptionRequestCount(); as pending) {
-              <gr-badge severity="warning">{{ pending }} Pending</gr-badge>
-            }
-            <span slot="meta">Projects asking to use this cache</span>
-          </gr-row>
-        }
-        @if (webhooksAccess().canEdit) {
-          <gr-row icon="webhook" linkLabel="Event notifications" [link]="links.cachePage(cacheName, 'webhooks')">
-            Event notifications
-            <span slot="meta">Signed HTTP requests for this cache's events</span>
-          </gr-row>
-        }
-      </gr-row-list>
-    </gr-settings-section>
-
-    @if (access().canEdit || deleteAccess().canEdit) {
+    @if (access().canEdit || accessService.isWritable(deleteAccess())) {
       <gr-settings-section title="Danger Zone" danger>
         @if (access().canEdit) {
           <gr-row>
@@ -204,7 +178,7 @@
             ></button>
           </gr-row>
         }
-        @if (deleteAccess().canEdit) {
+        @if (accessService.isWritable(deleteAccess())) {
           <gr-row>
             Delete Cache
             <span slot="meta">Permanently delete this cache and all its stored artifacts.</span>
@@ -215,7 +189,6 @@
               icon="delete"
               severity="danger"
               (click)="deleteCache()"
-              [appManagedDisable]="deleteAccess()"
             ></button>
           </gr-row>
         }

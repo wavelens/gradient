@@ -14,6 +14,7 @@ export type PageWidth = 'form' | 'settings' | 'detail' | 'full';
   standalone: true,
   imports: [BreadcrumbComponent],
   templateUrl: './page-layout.component.html',
+  host: { '[attr.title]': 'null' },
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './page-layout.component.scss',
 })

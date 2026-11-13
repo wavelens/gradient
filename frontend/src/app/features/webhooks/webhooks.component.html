@@ -5,6 +5,13 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" [title]="title">
+  @if (scope.kind === 'project') {
+    <app-project-settings-navigation slot="settings-navigation" [projectUrlName]="scope.name" />
+  } @else if (scope.kind === 'cache') {
+    <app-cache-settings-navigation slot="settings-navigation" [cacheUrlName]="scope.name" />
+  } @else if (scope.kind === 'team') {
+    <app-team-settings-navigation slot="settings-navigation" [teamUrlName]="scope.name" />
+  }
   @if (webhooks().length) {
     <button slot="actions" grButton label="New event notification" icon="add" (click)="startCreate()"></button>
   }
@@ -17,7 +24,6 @@
     errorTitle="Failed to load event notifications"
     emptyIcon="webhook"
     emptyTitle="No event notifications"
-    emptyMessage="Create an event notification to receive events as signed HTTP requests."
     (retry)="load()"
   >
     <button slot="empty-action" grButton label="New event notification" icon="add" (click)="startCreate()"></button>
@@ -68,14 +74,13 @@
   <gr-form-field label="URL" for="webhook-url" [invalid]="!!urlError()" [error]="urlError() ?? ''">
     <input grInput id="webhook-url" [ngModel]="url()" (ngModelChange)="url.set($event)" placeholder="https://example.com/gradient" (keyup.enter)="save()" />
   </gr-form-field>
-  <gr-form-field label="Events" hint="Nothing selected receives every event in this scope.">
-    <gr-label-help slot="label" doc="reference/events/#webhooks" title="Events" />
+  <gr-form-field label="Events">
+    <gr-label-help slot="label" doc="reference/events/#webhooks" title="Events" explanationText="Nothing selected receives every event in this scope." />
     <app-action-events [(selected)]="events" [eventNamePrefixes]="eventNamePrefixes" />
   </gr-form-field>
   <gr-form-field label="Event globs (optional)" for="webhook-globs" [hint]="eventGlobsExamplesHint" [invalid]="!!globsError()" [error]="globsError() ?? ''">
     <input grInput id="webhook-globs" [ngModel]="globs()" (ngModelChange)="globs.set($event)" (keyup.enter)="save()" />
   </gr-form-field>
-  <gr-checkbox label="Active" [ngModel]="active()" (ngModelChange)="active.set($event)" />
   </div>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" [disabled]="saving()" (click)="webhookDialog.close()"></button>

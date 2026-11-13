@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" title="Profile" subtitle="Manage your personal information">
+<gr-page-layout width="settings" title="Profile">
   <app-settings-nav slot="banner" />
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading profile..."
@@ -144,7 +144,7 @@
 >
   <p>Delete the account <strong>{{ savedUsername() }}</strong> for good. No way to undo this action.</p>
   @if (!hasPassword()) {
-    <gr-form-field label="Type your username to confirm" for="confirm-username" [hint]="savedUsername()">
+    <gr-form-field label="Type your username to confirm" for="confirm-username">
       <input grInput id="confirm-username" [(ngModel)]="deleteUsernameConfirm" />
     </gr-form-field>
   } @else {

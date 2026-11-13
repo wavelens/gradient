@@ -30,11 +30,11 @@ const FIRST_FRAME_MS = 10_000;
         <gr-live-status [connected]="!!connected()" />
       }
       <gr-card-grid class="kpis" min="160px">
-        <gr-stat-card compact label="Compressed size" [value]="bytes(stats()?.totals?.bytes ?? 0)" />
-        <gr-stat-card compact label="NAR size" [value]="bytes(stats()?.totals?.nar_bytes ?? 0)" />
-        <gr-stat-card compact label="Packages" [value]="count(stats()?.totals?.packages ?? 0)" />
-        <gr-stat-card compact label="Served total" [value]="bytes(stats()?.totals?.bytes_sent_total ?? 0)" />
-        <gr-stat-card compact label="Requests total" [value]="count(stats()?.totals?.requests_total ?? 0)" />
+        <gr-stat-card compact label="Compressed size" valueExplanation="Current sum of compressed sizes for all saved package files across every cache on this server. Files that several caches contain count once." [value]="bytes(stats()?.totals?.bytes ?? 0)" />
+        <gr-stat-card compact label="NAR size" valueExplanation="Total uncompressed size of every stored package in all binary caches on this server." [value]="bytes(stats()?.totals?.nar_bytes ?? 0)" />
+        <gr-stat-card compact label="Packages" valueExplanation="Number of store paths this server stores across all caches. A path that several caches share counts once." [value]="count(stats()?.totals?.packages ?? 0)" />
+        <gr-stat-card compact label="Served total" valueExplanation="Total bytes of package files that all caches sent. The server keeps traffic counters for a period (14 days by default). The number covers only that period." [value]="bytes(stats()?.totals?.bytes_sent_total ?? 0)" />
+        <gr-stat-card compact label="Requests total" valueExplanation="The number of package files that all caches on the server sent to clients. The time window is the retention period of traffic counters. Default is 14 days." [value]="count(stats()?.totals?.requests_total ?? 0)" />
       </gr-card-grid>
 
       <gr-metric-chart

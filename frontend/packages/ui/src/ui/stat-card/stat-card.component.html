@@ -18,6 +18,19 @@
         {{ value() }}
       }
     </div>
-    <div class="stat-label">{{ label() }}</div>
+    <span class="stat-label">{{ label() }}</span>
+    @if (valueExplanation(); as explanation) {
+      <button
+        type="button"
+        class="stat-label-explanation-button"
+        [grTooltip]="explanation"
+        tooltipPosition="bottom"
+        [attr.aria-label]="'About ' + label()"
+        [attr.aria-describedby]="valueExplanationDescriptionId"
+      >
+        <gr-icon name="info" size="sm" />
+      </button>
+      <span hidden [id]="valueExplanationDescriptionId">{{ explanation }}</span>
+    }
   </div>
 </div>

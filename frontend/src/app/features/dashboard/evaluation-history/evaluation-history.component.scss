@@ -17,7 +17,8 @@
   overflow: hidden;
   align-items: flex-end;
   gap: 2px;
-  height: 26px;
+  height: var(--evaluation-history-row-height, 26px);
+  justify-content: var(--evaluation-history-row-justify-content, flex-start);
 }
 
 .bar {

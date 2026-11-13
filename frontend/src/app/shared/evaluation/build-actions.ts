@@ -49,6 +49,10 @@ export function canAbortBuild(evaluationStatus: EvaluationStatus, buildStatus: s
   return isRunningEvaluationStatus(evaluationStatus) && isPendingBuildStatus(buildStatus);
 }
 
+export function isRetryableBuildStatus(buildStatus: string): boolean {
+  return RETRYABLE_BUILD_STATUSES.has(buildStatus);
+}
+
 export function canRetryBuild(evaluationStatus: EvaluationStatus, buildStatus: string): boolean {
-  return isRunningEvaluationStatus(evaluationStatus) && RETRYABLE_BUILD_STATUSES.has(buildStatus);
+  return isRunningEvaluationStatus(evaluationStatus) && isRetryableBuildStatus(buildStatus);
 }

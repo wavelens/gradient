@@ -70,6 +70,15 @@ describe('ExecJobInfoComponent', () => {
     expect(rows(render(rerun))['Attempt']).toBe('2');
   });
 
+  it('Exclude attempts that lost their worker from the retry budget.', () => {
+    const restartedAfterWorkerLoss = {
+      ...JOB,
+      retries: 2,
+      attempts: [{ number: 1, end_reason: 'lost' }, { number: 2 }],
+    } as unknown as ExecJobResponse;
+    expect(rows(render(restartedAfterWorkerLoss))['Attempt']).toBe('2 of 4');
+  });
+
   it('leaves the wait reason to the banner above every view', () => {
     expect(render(JOB).textContent).not.toContain('needs a worker');
   });

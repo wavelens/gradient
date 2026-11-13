@@ -47,14 +47,14 @@ import {
   CacheSubscribersResponse,
   TrafficKind,
 } from '@core/models';
-import { docsUrl } from '@core/docs';
 import { buildGradientCliInstallNetrcCommand, buildNixConfCacheSubstituterAndKeyLines, clockTime, formatBytes, formatCount, monthDay, plural, subscriptionModeLabel } from '@shared/text';
 import { UseCacheDialogComponent } from './use-cache-dialog.component';
 import { injectPendingSubscriptionRequestCount } from '../pending-subscription-request-count';
+import { BINARY_CACHE_STAT_TILE_VALUE_EXPLANATIONS } from '../cache-storage-stat-explanations';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { FormsModule } from '@angular/forms';
 import { links } from '@shared/routing';
-import { isViewerCacheMember } from '@shared/access';
+import { canOpenCacheMembersPage } from '@shared/access';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
@@ -100,7 +100,8 @@ export class CacheDetailComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
-  protected readonly netrcDocsUrl = docsUrl('guides/share-a-cache/#1-use-the-cache-on-a-machine');
+  protected readonly binaryCacheStatTileValueExplanations = BINARY_CACHE_STAT_TILE_VALUE_EXPLANATIONS;
+  protected readonly installNetrcCommandExplanation = "Run as root and replace <YOUR_TOKEN> with a cache-scoped key. An 'Any project' key can't read this cache. Click to see a declarative NixOS example.";
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
@@ -111,7 +112,7 @@ export class CacheDetailComponent implements OnInit {
   private access = injectCacheAccessData();
   protected editAccess = injectCacheAccess();
   cache = computed<CacheResponse | null>(() => this.access()?.cache ?? null);
-  canOpenMembers = computed(() => isViewerCacheMember(this.cache()) || this.authService.user()?.superuser === true);
+  canShowSettingsButton = computed(() => this.editAccess().canEdit || canOpenCacheMembersPage(this.cache(), this.authService.user()));
   statsLoading = signal(true);
   stats = signal<CacheStatsResponse | null>(null);
   statsError = signal<unknown>(null);

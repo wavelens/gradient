@@ -1,0 +1,89 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+@use '@gradient/ui/styles/mixins' as *;
+
+:host {
+  display: block;
+}
+
+.task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name history arrow"
+    "description history arrow"
+    "status latest arrow";
+  column-gap: $spacing-lg;
+  row-gap: $spacing-xs;
+  height: 100%;
+  padding: $spacing-lg;
+  @include card-link-surface;
+
+  &:hover {
+    .task-card__arrow { transform: translateX(4px); }
+  }
+}
+
+.task-card__name,
+.task-card__description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-card__name {
+  grid-area: name;
+  margin: 0;
+  font-size: $font-size-lg;
+  line-height: $line-height-tight;
+}
+
+.task-card__description {
+  grid-area: description;
+  margin: 0;
+  min-height: 1lh;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+}
+
+.task-card__status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  min-height: 1.5rem;
+}
+
+.task-card__history {
+  grid-area: history;
+  align-self: end;
+  justify-self: end;
+  width: 4.5rem;
+  --evaluation-history-row-height: 2.75rem;
+  --evaluation-history-row-justify-content: flex-end;
+}
+
+.task-card__latest-evaluation {
+  grid-area: latest;
+  justify-self: end;
+  align-self: center;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-xs;
+  white-space: nowrap;
+}
+
+.task-card__arrow {
+  grid-area: arrow;
+  align-self: center;
+  color: var(--gr-text-secondary);
+  transition: $transition-base;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-card__arrow { transition: none; }
+}

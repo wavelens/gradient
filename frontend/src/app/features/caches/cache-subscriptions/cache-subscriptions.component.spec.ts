@@ -97,7 +97,7 @@ describe('CacheSubscriptionRequestsComponent', () => {
 
   it('shows the requested access mode so push access stands out from read-only', () => {
     const { fixture } = setup([request, { ...request, project: 'docs', project_display_name: 'Docs', mode: 'ReadOnly' }]);
-    const badges = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-badge')).map((b) => b.textContent?.trim());
+    const badges = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row-list gr-badge')).map((b) => b.textContent?.trim());
     expect(badges).toEqual(['Read & Write', 'Read Only']);
   });
 

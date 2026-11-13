@@ -14,8 +14,8 @@ import {
   ButtonComponent,
   LoadStateComponent,
   PageLayoutComponent,
-  RowComponent,
-  RowListComponent,
+  CardGridComponent,
+  NavCardComponent,
 } from '@gradient/ui/ui';
 import { CreateTeamDialogComponent, injectCanCreateTeam, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { links } from '@shared/routing';
@@ -31,8 +31,8 @@ import { PendingInvitationsBannerComponent, teamRoleDisplayLabels } from '@share
     ButtonComponent,
     LoadStateComponent,
     PageLayoutComponent,
-    RowComponent,
-    RowListComponent,
+    CardGridComponent,
+    NavCardComponent,
     CreateTeamDialogComponent,
     PendingInvitationsBannerComponent,
   ],

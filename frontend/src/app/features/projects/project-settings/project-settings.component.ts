@@ -10,7 +10,6 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Observable, concat, finalize, switchMap, toArray } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -32,13 +31,14 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
+import { AccessService, ManagedDisableDirective, SettingsAccessStateBadgeComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, splitLines, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { GitSshHostKeyResponse, PatchProjectRequest, ProjectResponse, accessTo } from '@core/models';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
+import { ProjectSettingsNavigationComponent } from '../project-settings-navigation/project-settings-navigation.component';
 
 interface ProjectForm {
   display_name: string;
@@ -66,8 +66,7 @@ interface ProjectForm {
     CopyFieldComponent,
     CheckboxComponent,
     LoadStateComponent,
-    WritableDirective,
-    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
+    ManagedDisableDirective, SettingsAccessStateBadgeComponent, ProjectSettingsNavigationComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,
@@ -82,7 +81,6 @@ interface ProjectForm {
   styleUrl: './project-settings.component.scss',
 })
 export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate {
-  protected readonly links = links;
   protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   readonly visibilityOptions = [
     { label: 'Private', value: false },
@@ -98,12 +96,10 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   private confirm = inject(ConfirmService);
   private saveSettingsWithPrivateToPublicConfirmation = injectSaveSettingsWithPrivateToPublicConfirmation();
   protected accessService = inject(AccessService);
-  protected config = inject(ConfigService);
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));
   sshKeyAccess = computed(() => accessTo(this.resolvedProject(), 'manageSshKey'));
   deleteAccess = computed(() => accessTo(this.resolvedProject(), 'deleteProject'));
-  webhooksAccess = computed(() => accessTo(this.resolvedProject(), 'manageWebhooks'));
   isViewerProjectMember = computed(() => isViewerProjectMember(this.resolvedProject()));
 
   loading = signal(true);
@@ -123,7 +119,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   saveError = signal<string | null>(null);
 
   projectName = '';
-  breadcrumb = computed(() => this.crumbs.project(this.projectName, { label: 'Settings' }));
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName));
 
   formData: ProjectForm = {
     display_name: '',

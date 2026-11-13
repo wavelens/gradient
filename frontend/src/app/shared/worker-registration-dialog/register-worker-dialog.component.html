@@ -17,9 +17,9 @@
       <input grInput id="register-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto"
         (keyup.enter)="register()" />
     </gr-form-field>
-    <gr-form-field label="Allowed"
-      hint="exec can start exec jobs on this worker. These jobs are flake apps that boot in a new virtual machine after each evaluation. Leave this off unless the worker settings enable exec jobs.">
-      <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
+    <gr-form-field label="Allowed">
+      <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities"
+        explanationText="exec can start exec jobs on this worker. These jobs are flake apps that boot in a new virtual machine after each evaluation. Leave this off unless the worker settings enable exec jobs." />
       <gr-allowed-capabilities editable [(value)]="form.allowed" />
     </gr-form-field>
   </div>

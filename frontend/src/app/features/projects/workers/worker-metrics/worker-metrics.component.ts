@@ -23,6 +23,7 @@ import { WorkerSamplePoint, WorkerConnectionEntry, WorkerMetricsResponse } from 
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { tap } from 'rxjs';
 import { links } from '@shared/routing';
+import { ProjectSettingsNavigationComponent } from '../../project-settings-navigation/project-settings-navigation.component';
 
 interface WorkerMetricChart {
   title: string;
@@ -46,6 +47,7 @@ function speedTitle(shownSeriesNames: string[]): string {
   selector: 'app-worker-metrics',
   standalone: true,
   imports: [
+    ProjectSettingsNavigationComponent,
     CommonModule,
     ServerTimestampToLocalDateTimePipe,
     RouterModule,
@@ -61,15 +63,15 @@ function speedTitle(shownSeriesNames: string[]): string {
     <gr-page-layout
       [breadcrumb]="breadcrumb()"
       [title]="workerName()"
-      subtitle="Live metrics and connection history"
     >
+      <app-project-settings-navigation slot="settings-navigation" [projectUrlName]="project" />
       <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!loaded()" errorTitle="Failed to load worker stats" (retry)="load()">
       @if (samples().length === 0) {
         <gr-empty-state icon="monitoring" title="No metrics yet" message="Connected workers send CPU, memory, network, and disk samples. Graphs appear with the first sample." />
       } @else {
         <gr-card-grid min="160px">
-          <gr-stat-card label="Jobs for this project" [value]="jobsAssigned()" />
-          <gr-stat-card label="Sessions" [value]="connections().length" />
+          <gr-stat-card label="Jobs for this project" valueExplanation="Jobs for this project that the scheduler assigned to this worker, running and finished alike. These records make up the number and stay on the server for 90 days by default." [value]="jobsAssigned()" />
+          <gr-stat-card label="Sessions" valueExplanation="Connections this worker opened to the server, for all projects. Covers the connection records the server keeps, 90 days by default, and at most the 100 most recent." [value]="connections().length" />
         </gr-card-grid>
 
         <gr-card-grid min="380px">
@@ -117,7 +119,6 @@ export class WorkerMetricsComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.projectSettings(
     this.project,
     { label: 'Workers', link: links.projectPage(this.project, 'workers') },
-    { label: this.workerName() },
   ));
 
   readonly percent = (value: number) => formatPercent(value / 100);

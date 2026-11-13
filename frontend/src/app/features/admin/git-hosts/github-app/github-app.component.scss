@@ -6,8 +6,12 @@
 .result-panel {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  margin-top: 1rem;
+  gap: $spacing-md;
+
+  > p,
+  > .gr-form-actions {
+    margin: 0;
+  }
 }
 
 .error {

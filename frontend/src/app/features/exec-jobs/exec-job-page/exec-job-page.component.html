@@ -47,6 +47,18 @@
           }
         }
 
+        @if (selectedNodeAttemptRowsWhenMoreThanOneAttempt(); as attemptRows) {
+          @if (attemptRows.length) {
+            <div class="sidebar-group-header">
+              Attempts
+              <span class="sidebar-group-count">{{ attemptRows.length }}</span>
+            </div>
+            <gr-log-attempt-list [attemptRows]="attemptRows"
+                                 [attemptNumberForLogOnScreenOrNull]="pickedOrHighestNumberedAttemptForSelectedNode()?.number ?? null"
+                                 (selectAttempt)="selectAttemptFromSidebarClosePhoneDrawerShowLogViewAndLoadLog($event)" />
+          }
+        }
+
         @if (phaseLines().length > 0) {
           <div class="sidebar-group-header">
             Phases
@@ -121,8 +133,7 @@
           @if (formattedProgramRunTime(); as programRun) {
             <div class="info-metric">
               <span class="metric-label">Program run</span>
-              <span class="metric-value">{{ programRun }}</span>
-              @if (laterAttempt) { <span class="metric-sep">Attempt {{ laterAttempt }}</span> }
+              <span class="metric-value metric-value-running-duration">{{ programRun }}</span>
             </div>
           }
           @if (firstAttemptStartedAt(); as startedAt) {
@@ -176,6 +187,18 @@
         @if (job.message) {
           <gr-message-banner [type]="phase(job.status) === 'failure' ? 'error' : 'info'">{{ job.message }}</gr-message-banner>
         }
+        @if (selectedNodeLogAttemptBanner(); as failedAttempt) {
+          <gr-message-banner class="exec-job-attempt-failed-warning" type="warning">
+            Attempt {{ failedAttempt.failedAttemptNumber }} ended, {{ failedAttempt.attemptEndReasonDisplayText }}@if (failedAttempt.endedAttemptMessageText; as message) {: {{ message }}}
+            @if (failedAttempt.consecutiveLostWorkerAttemptCount > 0) {
+              <br />
+              @if (failedAttempt.consecutiveLostWorkerAttemptCount > 1) {
+                The job lost its worker {{ failedAttempt.consecutiveLostWorkerAttemptCount }} times in a row.
+              }
+              Restarts after a lost worker don't use up a retry.
+            }
+          </gr-message-banner>
+        }
 
         @if (view() === 'terminal') {
           <div class="log-header">
@@ -208,7 +231,6 @@
         } @else if (view() === 'timeline') {
           <div class="log-header">
             <span class="log-header-title">Worker timeline</span>
-            @if (laterAttempt) { <span class="metric-sep">Attempt {{ laterAttempt }}</span> }
             <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" />
           </div>
           <div class="timeline">
@@ -217,10 +239,6 @@
         } @else {
           <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker">
             <span logTitle class="log-header-title">Log</span>
-            @if (attemptDropdownOptions().length > 1) {
-              <gr-select logTitle class="log-attempt-select" ariaLabel="Attempt" [options]="attemptDropdownOptions()"
-                         [ngModel]="pickedOrHighestNumberedAttemptForSelectedNode()?.number" (ngModelChange)="selectAttemptAndReloadLog($event)" />
-            }
           </gr-log-viewer>
         }
       </div>

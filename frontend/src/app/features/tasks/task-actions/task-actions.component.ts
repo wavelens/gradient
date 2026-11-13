@@ -26,7 +26,7 @@ import {
   LoadStateComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, SettingsAccessStateBadgeComponent, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccessData, injectTaskAccessTo } from '@core/resolvers/inject-access';
 import {
   ACTION_TYPE_LABEL,
@@ -42,12 +42,14 @@ import { ActionFormComponent } from './action-form.component';
 import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@shared/outgoing-deliveries';
 import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
+import { TaskSettingsNavigationComponent } from '../task-settings-navigation/task-settings-navigation.component';
 
 @Component({
   selector: 'app-task-actions',
   standalone: true,
   imports: [
-    ServerConfigurationManagedBannerComponent,
+    TaskSettingsNavigationComponent,
+    SettingsAccessStateBadgeComponent,
     RelativeTimePipe,
     CopyFieldComponent,
     CommonModule,
@@ -57,7 +59,6 @@ import { links } from '@shared/routing';
     ButtonComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
     ActionFormComponent,
     OutgoingWebhookDeliveryListDialog,
     IconComponent,
@@ -105,7 +106,7 @@ export class TaskActionsComponent implements OnInit {
 
   projectName = '';
   taskName = '';
-  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Actions' }));
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName));
 
   actions = signal<ActionResponse[]>([]);
   gitHostConnectionsThatCanReportCommitStatus = signal<GitHostConnectionSummary[]>([]);

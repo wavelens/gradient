@@ -12,10 +12,7 @@
   @if (canSetOwnerTeam() && canCreateCache()) {
     <button slot="actions" grButton label="Create Cache" icon="add" severity="secondary" (click)="isCreateCacheDialogOpen.set(true)"></button>
   }
-  <a slot="actions" grButton label="Members" icon="group" severity="secondary" [routerLink]="links.membersPage('team', teamName)"></a>
-  @if (isAdmin()) {
-    <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.teamPage(teamName, 'settings')"></a>
-  }
+  <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.teamPage(teamName, 'settings')"></a>
   @if (team(); as team) {
     @if (isAdmin() && requests().length > 0) {
       <gr-settings-section title="Requests" [card]="false">

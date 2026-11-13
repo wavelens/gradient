@@ -7,13 +7,15 @@
 import { Component, input, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormErrors } from '../form-field/form-errors';
+import { LabelExplanationButtonComponent } from '../label-explanation-button/label-explanation-button.component';
 
 @Component({
   selector: 'gr-settings-section',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, LabelExplanationButtonComponent],
   providers: [FormErrors],
   templateUrl: './settings-section.component.html',
+  host: { '[attr.title]': 'null' },
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './settings-section.component.scss',
 })

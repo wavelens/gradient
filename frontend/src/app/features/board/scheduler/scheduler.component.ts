@@ -25,9 +25,9 @@ const WHOLE_NUMBER = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading scheduler stats..." errorTitle="Failed to load scheduler stats" (retry)="retry()">
       <gr-card-grid class="kpis" min="180px">
-        <gr-stat-card compact label="Scored assignments (24h)" [value]="summary()?.sample_size ?? failed" />
-        <gr-stat-card compact label="Avg score" [value]="summary() === null ? failed : (summary()?.score_avg | number: scoreDigits)" />
-        <gr-stat-card compact label="Min / Max" [value]="summary() === null ? failed : (summary()?.score_min | number: '1.0-0') + ' / ' + (summary()?.score_max | number: '1.0-0')" />
+        <gr-stat-card compact label="Scored assignments (24h)" valueExplanation="Jobs that the scheduler assigned to workers, across all projects. At most the 2,000 most recent assignments enter the count." [value]="summary()?.sample_size ?? failed" />
+        <gr-stat-card compact label="Avg score" valueExplanation="The value is the mean scheduler score of job assignments across all projects in the last 24 hours. At most the 2,000 most recent assignments count." [value]="summary() === null ? failed : (summary()?.score_avg | number: scoreDigits)" />
+        <gr-stat-card compact label="Min / Max" valueExplanation="Lowest and highest scheduler score for the job assignments that the scheduler made in the last 24 hours across all projects. Scores come from at most the 2,000 most recent assignments." [value]="summary() === null ? failed : (summary()?.score_min | number: '1.0-0') + ' / ' + (summary()?.score_max | number: '1.0-0')" />
       </gr-card-grid>
 
       <gr-metric-chart

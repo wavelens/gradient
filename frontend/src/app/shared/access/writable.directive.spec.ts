@@ -33,10 +33,10 @@ describe('WritableDirective (*appWritable)', () => {
     expect(fixture.nativeElement.querySelector('button')).not.toBeNull();
   });
 
-  it('renders content when canEdit and managed are both true', () => {
+  it('hides content of managed settings, also from a viewer with the permission', () => {
     fixture.componentInstance.access.set({ managed: true, canEdit: true, canTrigger: true });
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('button')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('button')).toBeNull();
   });
 
   it('hides content when canEdit is false', () => {

@@ -13,18 +13,3 @@
   margin-left: $spacing-xs;
   line-height: 1;
 }
-
-.label-help {
-  display: inline-flex;
-  align-items: center;
-  color: var(--gr-text-muted);
-  line-height: 1;
-  padding: 0;
-  border-radius: 0;
-
-  &:hover {
-    color: var(--gr-text-primary);
-    background: transparent;
-    border-radius: 0;
-  }
-}

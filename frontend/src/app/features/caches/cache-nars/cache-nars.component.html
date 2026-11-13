@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Packages" subtitle="Browse and manage the packages stored in this cache (Nix archives, NAR).">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Packages">
   @if (stats()?.total_nars === 0) {
     <p class="text-secondary" data-testid="no-packages">No packages yet. See <a [routerLink]="links.cache(cacheName)">How to Use This Cache</a>.</p>
   } @else {
@@ -13,10 +13,10 @@
   } @else {
     @let s = stats();
     <gr-card-grid class="nar-stats" min="150px" [attr.aria-busy]="!s || null">
-      <gr-stat-card compact label="Packages" [value]="s && formatCount(s.total_nars)" />
-      <gr-stat-card compact label="Uncompressed size" [value]="s && formatBytes(s.total_nar_size)" />
-      <gr-stat-card compact label="Compressed size" [value]="s && formatBytes(s.total_file_size)" />
-      <gr-stat-card compact label="Last uploaded" [value]="s && (s.last_uploaded_at | relativeTime)" />
+      <gr-stat-card compact label="Packages" [valueExplanation]="binaryCacheStatTileValueExplanations.packages" [value]="s && formatCount(s.total_nars)" />
+      <gr-stat-card compact label="Uncompressed size" [valueExplanation]="binaryCacheStatTileValueExplanations.uncompressedSize" [value]="s && formatBytes(s.total_nar_size)" />
+      <gr-stat-card compact label="Compressed size" [valueExplanation]="binaryCacheStatTileValueExplanations.compressedSize" [value]="s && formatBytes(s.total_file_size)" />
+      <gr-stat-card compact label="Last uploaded" valueExplanation="The most recent time a package in this cache first arrived on the server." [value]="s && (s.last_uploaded_at | relativeTime)" />
     </gr-card-grid>
   }
 
@@ -52,15 +52,25 @@
     errorTitle="Failed to load packages"
     emptyIcon="inbox"
     emptyTitle="No packages found"
-    [emptyMessage]="hasSearchFilterFromUrl() ? 'No archives match the current filters.' : 'This cache has no archives yet.'"
+    [emptyMessage]="hasSearchFilterFromUrl() ? 'No archives match the current filters.' : undefined"
     (retry)="refresh()"
   >
     <gr-table [attr.aria-busy]="loading() || null">
+      <colgroup>
+        <col>
+        <col>
+        <col class="package-uncompressed-size-column">
+        <col class="compressed-file-size-column">
+        <col class="package-uploaded-time-column">
+        <col class="last-fetched-time-column">
+        <col class="pinned-by-badge-column-width">
+        <col class="row-icon-buttons-column">
+      </colgroup>
       <thead>
         <tr>
           <th>Package</th>
           <th>Hash</th>
-          <th class="size-col" [attr.aria-sort]="ariaSort('nar_size')">
+          <th class="num" [attr.aria-sort]="ariaSort('nar_size')">
             <button class="gr-th-sort" type="button" (click)="sortBy('nar_size')">
               Uncompressed size
               @if (sort() === 'nar_size') {
@@ -68,7 +78,7 @@
               }
             </button>
           </th>
-          <th class="size-col">Compressed size</th>
+          <th class="num">Compressed size</th>
           <th [attr.aria-sort]="ariaSort('created_at')">
             <button class="gr-th-sort" type="button" (click)="sortBy('created_at')">
               Created
@@ -93,52 +103,54 @@
         @for (_ of rows() ? [] : placeholders; track $index) {
           <tr>
             <td><gr-skeleton width="12ch" /></td>
-            <td><code class="mono"><gr-skeleton width="32ch" /></code></td>
-            <td class="size-col"><gr-skeleton width="6ch" /></td>
-            <td class="size-col"><gr-skeleton width="6ch" /></td>
+            <td class="package-nix-store-hash"><code class="mono"><gr-skeleton width="32ch" /></code></td>
+            <td class="num"><gr-skeleton width="6ch" /></td>
+            <td class="num"><gr-skeleton width="6ch" /></td>
             <td><gr-skeleton width="7ch" /></td>
             <td><gr-skeleton width="7ch" /></td>
             <td><gr-skeleton width="7ch" /></td>
-            <td class="nar-actions"><gr-skeleton /><gr-skeleton /></td>
+            <td><div class="nar-actions"><gr-skeleton /><gr-skeleton /></div></td>
           </tr>
         }
         @for (row of rows(); track row.hash) {
           <tr class="is-clickable" (click)="show(row)">
-            <td>{{ row.package }}</td>
-            <td><code class="mono">{{ row.hash }}</code></td>
-            <td class="size-col">{{ formatBytes(row.nar_size) }}</td>
-            <td class="size-col">{{ formatBytes(row.file_size) }}</td>
+            <td class="package-name-cell-break-anywhere">{{ row.package }}</td>
+            <td class="package-nix-store-hash" [title]="row.hash"><code class="mono">{{ row.hash }}</code></td>
+            <td class="num">{{ formatBytes(row.nar_size) }}</td>
+            <td class="num">{{ formatBytes(row.file_size) }}</td>
             <td class="text-secondary">{{ row.created_at | relativeTime }}</td>
             <td class="text-secondary">{{ row.last_fetched_at | relativeTime }}</td>
             <td class="pinned-col">
               @if (row.pinned_at) {
-                <gr-badge severity="info" data-testid="pinned-badge">
+                <gr-badge severity="info" data-testid="pinned-badge" [attr.title]="row.pinned_by_username">
                   <gr-icon name="push_pin" size="sm" />
                   {{ row.pinned_by_username ?? 'Pinned' }}
                 </gr-badge>
               }
             </td>
-            <td class="nar-actions" (click)="$event.stopPropagation()">
-              <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
-              <button
-                *appWritable="access()"
-                grButton
-                [icon]="row.pinned_at ? 'keep_off' : 'push_pin'"
-                severity="secondary"
-                [text]="true"
-                (click)="openPinDialog(row)"
-                [title]="row.pinned_at ? 'Unpin' : 'Pin'"
-                data-testid="pin-button"
-              ></button>
-              <button
-                *appWritable="access()"
-                grButton
-                icon="delete"
-                severity="danger"
-                [text]="true"
-                (click)="askDelete(row)"
-                title="Delete"
-              ></button>
+            <td (click)="$event.stopPropagation()">
+              <div class="nar-actions">
+                <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
+                @if (access().canEdit) {
+                  <button
+                    grButton
+                    [icon]="row.pinned_at ? 'keep_off' : 'push_pin'"
+                    severity="secondary"
+                    [text]="true"
+                    (click)="openPinDialog(row)"
+                    [title]="row.pinned_at ? 'Unpin' : 'Pin'"
+                    data-testid="pin-button"
+                  ></button>
+                  <button
+                    grButton
+                    icon="delete"
+                    severity="danger"
+                    [text]="true"
+                    (click)="askDelete(row)"
+                    title="Delete"
+                  ></button>
+                }
+              </div>
             </td>
           </tr>
         }

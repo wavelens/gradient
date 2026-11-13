@@ -73,9 +73,10 @@ describe('SettingsAccessComponent', () => {
     expect(name('/team/alice-team')?.querySelector('.entity-name__slug')?.textContent?.trim()).toBe('alice-team');
   });
 
-  it('says that an instance administrator can open everything', () => {
+  it('shows no instance administrator note above the access lists', () => {
     const { root } = render(() => of({ ...summary, superuser: true }));
-    expect(root.querySelector('gr-message-banner')?.textContent).toContain('This account is an instance administrator');
+    expect(root.querySelector('gr-message-banner')).toBeNull();
+    expect(root.textContent).not.toContain('instance administrator');
   });
 
   it('explains how to get access when the account has none', () => {

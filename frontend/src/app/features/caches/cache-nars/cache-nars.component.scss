@@ -18,14 +18,42 @@
   margin-bottom: $spacing-lg;
 
   input { flex: 1; min-width: 0; }
+
+  @media (max-width: $breakpoint-sm) {
+    flex-wrap: wrap;
+
+    input { flex-basis: 100%; }
+  }
 }
 
-.size-col {
+gr-table ::ng-deep table {
+  table-layout: fixed;
+  min-width: 70rem;
+}
+
+gr-table thead th {
+  white-space: normal;
+}
+
+.package-uncompressed-size-column { width: 7.5rem; }
+.compressed-file-size-column { width: 7rem; }
+.package-uploaded-time-column { width: 7rem; }
+.last-fetched-time-column { width: 7.5rem; }
+.pinned-by-badge-column-width { width: 9rem; }
+.row-icon-buttons-column { width: 9rem; }
+
+.package-name-cell-break-anywhere {
+  overflow-wrap: anywhere;
+}
+
+.package-nix-store-hash {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 7.5rem;
 }
 
 .pinned-col {
+  overflow: hidden;
   white-space: nowrap;
 }
 
@@ -47,7 +75,6 @@
   align-items: center;
   justify-content: flex-end;
   gap: $spacing-xs;
-  white-space: nowrap;
 }
 
 .nar-actions gr-skeleton {

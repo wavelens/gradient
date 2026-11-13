@@ -8,14 +8,14 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import { FormsModule } from '@angular/forms';
 import { BadgeComponent, ButtonComponent, RowComponent, RowListComponent, SelectComponent, TooltipDirective } from '@gradient/ui/ui';
 import type { AccessState } from '@core/models';
-import { ManagedDisableDirective, teamRoleValueToDisplayLabel } from '@shared/access';
+import { ManagedDisableDirective, WritableDirective, teamRoleValueToDisplayLabel } from '@shared/access';
 import { EntityNameComponent } from '@shared/ui';
 import type { PeopleListRow } from './access-reason-label';
 
 @Component({
   selector: 'app-project-members-access-list',
   standalone: true,
-  imports: [FormsModule, BadgeComponent, ButtonComponent, EntityNameComponent, RowComponent, RowListComponent, SelectComponent, TooltipDirective, ManagedDisableDirective],
+  imports: [FormsModule, BadgeComponent, ButtonComponent, EntityNameComponent, RowComponent, RowListComponent, SelectComponent, TooltipDirective, ManagedDisableDirective, WritableDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <gr-row-list>
@@ -41,6 +41,7 @@ import type { PeopleListRow } from './access-reason-label';
               />
               @if (row.directRole) {
                 <button
+                  *appWritable="access()"
                   grButton
                   label="Remove"
                   icon="close"
@@ -48,7 +49,6 @@ import type { PeopleListRow } from './access-reason-label';
                   [attr.aria-label]="'Remove ' + row.user"
                   [disabled]="pending !== null"
                   [disabledReason]="soleAdminReason"
-                  [appManagedDisable]="access()"
                   (click)="removeMember.emit(row.user)"
                 ></button>
               }

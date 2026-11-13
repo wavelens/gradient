@@ -20,11 +20,14 @@
 
     h2 {
       font-size: $font-size-xl;
-      margin: 0 0 $spacing-xs 0;
+      margin: 0;
     }
   }
 
   &__heading {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
     flex: 1 1 12rem;
     min-width: 0;
   }
@@ -37,12 +40,6 @@
     min-width: 0;
 
     &:empty { display: none; }
-  }
-
-  &__description {
-    color: var(--gr-text-secondary);
-    margin: 0;
-    font-size: $font-size-sm;
   }
 
   &__body--card {

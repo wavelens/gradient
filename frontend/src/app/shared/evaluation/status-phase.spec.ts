@@ -6,7 +6,7 @@
 
 import type { BuildStatus, EvaluationStatus, ExecJobStatus } from '@core/models';
 import {
-  abortedWithoutBuildsTitle, buildOutcomeLabel, buildPhase, entryPointPhase, entryPointPhaseWithExecJob, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
+  abortedWithoutBuildsTitle, buildOutcomeLabel, buildPhase, entryPointPhase, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
   PHASE_COLOR, PHASE_SEVERITY, phaseInFinishedEvaluation, type StatusPhase,
 } from './status-phase';
 
@@ -122,22 +122,6 @@ describe('execJobPhase', () => {
     ['aborted', 'aborted'],
   ])('maps %s to %s', (status, phase) => {
     expect(execJobPhase(status)).toBe(phase);
-  });
-});
-
-describe('entryPointPhaseWithExecJob', () => {
-  const deps = { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0 };
-
-  it.each<[BuildStatus, ExecJobStatus | null, StatusPhase]>([
-    ['Completed', 'queued', 'queued'],
-    ['Substituted', 'created', 'waiting'],
-    ['Completed', 'running', 'running'],
-    ['Completed', 'failed', 'failure'],
-    ['Completed', null, 'success'],
-    ['Building', 'created', 'running'],
-    ['FailedPermanent', 'aborted', 'failure'],
-  ])('maps a %s build with a %s exec job to %s', (build_status, execJob, phase) => {
-    expect(entryPointPhaseWithExecJob({ build_status, deps }, execJob)).toBe(phase);
   });
 });
 

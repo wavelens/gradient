@@ -37,7 +37,8 @@ import { GitHostConnectionsApi } from '@core/services/git-host-connections.servi
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
-import { MANAGED_ITEM_DISABLED_REASON, ManagedDisableDirective } from '@shared/access/managed-disable.directive';
+import { AccessService } from '@shared/access/access.service';
+import { MANAGED_ITEM_DISABLED_REASON } from '@shared/access/managed-disable.directive';
 import { IncomingDeliveriesComponent } from '@shared/git/incoming-deliveries.component';
 import { ForgejoOAuthConnectionComponent } from './forgejo-oauth-connection.component';
 import { SELF_HOSTED_GIT_HOSTS, gitHostLabel, webhookEvents } from '@shared/git/git-host';
@@ -91,7 +92,6 @@ function emptyForm(): ConnectionForm {
     SelectComponent,
     SettingsSectionComponent,
     SubmitDirective,
-    ManagedDisableDirective,
     IncomingDeliveriesComponent,
     ForgejoOAuthConnectionComponent,
   ],
@@ -103,6 +103,7 @@ export class GitHostConnectionListComponent implements OnInit {
   private api = inject(GitHostConnectionsApi);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  protected accessService = inject(AccessService);
 
   gitHostConnectionOwner = input.required<GitHostConnectionOwner>();
   access = input.required<AccessState>();
@@ -123,7 +124,6 @@ export class GitHostConnectionListComponent implements OnInit {
   inheritedReadOnlyConnections = computed(() =>
     this.connections().filter((c) => !isSameGitHostConnectionOwner(c.owner, this.gitHostConnectionOwner())),
   );
-  canCreate = computed(() => this.access().canEdit);
 
   dialogOpen = signal(false);
   editing = signal<GitHostConnectionResponse | null>(null);
@@ -198,7 +198,7 @@ export class GitHostConnectionListComponent implements OnInit {
   }
 
   canEditRow(connection: GitHostConnectionSummary): boolean {
-    return connection.can_manage && connection.git_host_type !== 'github';
+    return this.accessService.isWritable(this.access()) && connection.can_manage && connection.git_host_type !== 'github';
   }
 
   canReadDeliveries(connection: GitHostConnectionSummary): boolean {

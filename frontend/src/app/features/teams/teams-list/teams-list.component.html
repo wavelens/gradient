@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Teams" subtitle="Manage teams">
+<gr-page-layout title="Teams">
   @if (canCreateTeam() && items().length) {
     <button slot="actions" grButton label="Create Team" icon="add" (click)="openCreate()"></button>
   }
@@ -17,20 +17,23 @@
     errorTitle="Failed to load teams"
     emptyIcon="groups"
     emptyTitle="No teams"
-    emptyMessage="Teams share their members and workers with projects and caches."
     (retry)="load()"
   >
     @if (canCreateTeam()) {
       <button slot="empty-action" grButton label="Create Team" icon="add" (click)="openCreate()"></button>
     }
-    <gr-row-list>
+    <gr-card-grid>
       @for (team of items(); track team.name) {
-        <gr-row [icon]="entityKindToIconName.team" [link]="links.team(team.name)" [linkLabel]="'Open team ' + formatEntityLabel(team)">
-          <gr-entity-name [displayName]="team.display_name" [name]="team.name" />
-          <gr-badge>{{ teamRoleDisplayLabels[team.role] }}</gr-badge>
-        </gr-row>
+        <gr-nav-card [icon]="entityKindToIconName.team" [title]="formatEntityLabel(team)" [link]="links.team(team.name)">
+          <gr-entity-name slot="title" [displayName]="team.display_name" [name]="team.name" />
+          <div slot="meta">
+            @if (team.role !== 'admin') {
+              <gr-badge>{{ teamRoleDisplayLabels[team.role] }}</gr-badge>
+            }
+          </div>
+        </gr-nav-card>
       }
-    </gr-row-list>
+    </gr-card-grid>
   </gr-load-state>
 </gr-page-layout>
 

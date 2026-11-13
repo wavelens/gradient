@@ -22,7 +22,6 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
 import { MenuItem } from '@gradient/ui/ui';
-import { MANAGED_ITEM_DISABLED_REASON } from '@shared/access';
 import { ProjectWorkerEntry } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -174,7 +173,7 @@ describe('WorkersComponent - access gating', () => {
     });
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'register worker')).toBeNull();
-    expect(menuOf(fixture, workerUnmanaged)).toEqual([]);
+    expect(menuOf(fixture, workerUnmanaged).map((item) => item.label)).toEqual(['Metrics']);
   });
 
   it('hides Register Worker button under read-only project access', async () => {
@@ -183,19 +182,17 @@ describe('WorkersComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'register worker')).toBeNull();
   });
 
-  it('offers no row menu under read-only project access', async () => {
+  it('offers only the metrics in the row menu under read-only project access', async () => {
     const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
-    expect(menuOf(fixture, workerUnmanaged)).toEqual([]);
-    expect(fixture.nativeElement.querySelector('[aria-label="Worker actions"]')).toBeNull();
+    expect(menuOf(fixture, workerUnmanaged).map((item) => item.label)).toEqual(['Metrics']);
+    expect(fixture.nativeElement.querySelector('[aria-label="Worker actions"]')).not.toBeNull();
   });
 
-  it('shows but disables Register Worker under state-managed project', async () => {
+  it('hides Register Worker under state-managed project', async () => {
     const fixture = setup({ access: { managed: true, canEdit: true, canTrigger: true }, workers: [], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
-    const btn = findByText(fixture.nativeElement, 'register worker') as HTMLButtonElement | null;
-    expect(btn).not.toBeNull();
-    expect(btn!.getAttribute('aria-disabled')).toBe('true');
+    expect(findByText(fixture.nativeElement, 'register worker')).toBeNull();
   });
 
   it('keeps Edit, Test worker and Delete in the row menu, each running its action', async () => {
@@ -216,6 +213,21 @@ describe('WorkersComponent - access gating', () => {
     expect(remove).toHaveBeenCalledWith(workerUnmanaged);
     expect(itemOf(menu, 'Delete')?.danger).toBe(true);
     expect(findByText(fixture.nativeElement, 'fire test')).toBeNull();
+  });
+
+  it('opens the metrics from the first menu item instead of a button on the card, also for viewers', async () => {
+    for (const canEdit of [true, false]) {
+      const fixture = setup({ access: { managed: false, canEdit, canTrigger: canEdit }, workers: [workerUnmanaged, workerOfTeam], caches: [{ id: 'c', name: 'c' }] });
+      await settled(fixture);
+      for (const worker of [workerUnmanaged, workerOfTeam]) {
+        const [first] = menuOf(fixture, worker);
+        expect(first.label).toBe('Metrics');
+        expect(String(first.routerLink)).toBe(`/project/demo/workers/${worker.worker_id}/metrics`);
+      }
+      expect(findByText(fixture.nativeElement, 'metrics')).toBeNull();
+      expect((fixture.nativeElement as HTMLElement).querySelector('a[href*="/metrics"]')).toBeNull();
+      TestBed.resetTestingModule();
+    }
   });
 
   it('disables Test worker with a reason until the worker is connected', async () => {
@@ -328,8 +340,9 @@ describe('WorkersComponent - team workers', () => {
     await settled(fixture);
     const menu = menuOf(fixture, workerUnmanaged);
     expect(itemOf(menu, 'Deactivate')?.disabled).toBe(false);
-    expect(itemOf(menu, 'Edit')?.disabledReason).toBe(MANAGED_ITEM_DISABLED_REASON);
-    expect(itemOf(menu, 'Delete')?.disabledReason).toBe(MANAGED_ITEM_DISABLED_REASON);
+    expect(itemOf(menu, 'Edit')).toBeUndefined();
+    expect(itemOf(menu, 'Delete')).toBeUndefined();
+    expect(menu.map((item) => item.label ?? 'separator')).toEqual(['Metrics', 'separator', 'Deactivate', 'Test worker']);
   });
 
   it('fireTest calls the service and surfaces the result via a toast', async () => {
@@ -354,77 +367,22 @@ describe('WorkersComponent - team workers', () => {
   });
 });
 
-describe('WorkersComponent - system features', () => {
-  it('lists the architectures and keeps the system features behind an info button', async () => {
-    const live = {
-      capabilities: { network: true, secrets: true, exec: false, eval: true, build: true, federate: false },
-      architectures: ['x86_64-linux'], system_features: ['kvm', 'nixos-test'], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
-    } as unknown as ProjectWorkerEntry['live'];
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [{ ...workerUnmanaged, live }],
-      caches: [{ id: 'c', name: 'c' }],
-    });
+describe('WorkersComponent - worker cards', () => {
+  it('shows the Gradient.CI connection and every registered worker as the same worker card', async () => {
+    const fixture = setup({ access: writable, workers: [gciRegistration, workerUnmanaged, workerOfTeam], caches });
     await settled(fixture);
-    const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('.worker-archs')?.textContent).toContain('x86_64-linux');
-    expect(root.textContent).not.toContain('nixos-test');
-
-    (root.querySelector('[aria-label="System features"]') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    expect(document.body.textContent).toContain('kvm, nixos-test');
-  });
-});
-
-describe('WorkersComponent - connection status', () => {
-  const live = {
-    capabilities: { network: true, secrets: true, exec: false, eval: true, build: true, federate: false },
-    architectures: [], system_features: [], max_concurrent_builds: 32, assigned_job_count: 3, draining: false,
-  } as unknown as ProjectWorkerEntry['live'];
-  const status = (fixture: ComponentFixture<WorkersComponent>) =>
-    (fixture.nativeElement as HTMLElement).querySelector('.worker-stats')?.textContent?.trim();
-  const badges = (fixture: ComponentFixture<WorkersComponent>) =>
-    Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-badge')).map((b) => b.textContent?.trim());
-
-  it('shows a deactivated worker as inactive, also while it is still connected', async () => {
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [{ ...workerUnmanaged, active: false, live }],
-      caches: [{ id: 'c', name: 'cache-1' }],
-    });
-    await settled(fixture);
-    expect(status(fixture)).toBe('Inactive');
+    const cards = (fixture.nativeElement as HTMLElement).querySelectorAll('app-worker-card-list > app-worker-card');
+    expect(Array.from(cards).map((card) => card.querySelector('.worker-name-cell')?.textContent?.trim())).toEqual([
+      'Gradient.CI Servers',
+      'Builder',
+      'Team worker',
+    ]);
   });
 
-  it('shows an active connected worker with its jobs and capacity, without a status badge', async () => {
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [{ ...workerUnmanaged, live }],
-      caches: [{ id: 'c', name: 'cache-1' }],
-    });
+  it('hides the last connection failure from viewers who cannot edit workers', async () => {
+    const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [gciRegistration], caches });
     await settled(fixture);
-    expect(status(fixture)).toBe('Connected · 3/32 jobs');
-    expect(badges(fixture)).not.toContain('Connected');
-  });
-
-  it('says a connected worker without live data takes no jobs of this project', async () => {
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [{ ...workerUnmanaged, connected: true, live: null }],
-      caches: [{ id: 'c', name: 'cache-1' }],
-    });
-    await settled(fixture);
-    expect(status(fixture)).toBe('Connected, no jobs for this project (reconnect with the project token)');
-  });
-
-  it('shows a worker without a connection as offline', async () => {
-    const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [{ ...workerUnmanaged, live: null }],
-      caches: [{ id: 'c', name: 'cache-1' }],
-    });
-    await settled(fixture);
-    expect(status(fixture)).toBe('Offline');
+    expect(entry(fixture)!.textContent).not.toContain('401 unknown worker id or wrong token');
   });
 });
 
@@ -469,17 +427,18 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(1);
   });
 
-  it('shows but disables Connect on a state-managed project, like Register Worker', async () => {
+  it('hides Connect on a state-managed project, like Register Worker', async () => {
     const fixture = setup({ access: { ...writable, managed: true }, workers: [], caches });
     await settled(fixture);
-    expect(buttonsLabelled(entry(fixture)!, 'Connect')[0].getAttribute('aria-disabled')).toBe('true');
+    expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(0);
   });
 
   it('shows a project connection with its offline reason and Disconnect', async () => {
     const fixture = setup({ access: writable, workers: [gciRegistration], caches });
     await settled(fixture);
     expect(entry(fixture)!.textContent).toContain('401 unknown worker id or wrong token');
-    expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(1);
+    expect(itemOf(menuOf(fixture, gciRegistration), 'Disconnect')).toBeDefined();
+    expect(itemOf(menuOf(fixture, gciRegistration), 'Delete')).toBeUndefined();
   });
 
   it('shows a connection of a granted team as coming from that team', async () => {
@@ -487,10 +446,11 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     await settled(fixture);
     expect(entry(fixture)!.textContent).toContain('Via Platform Team');
     expect(entry(fixture)!.querySelector('gr-entity-name')?.getAttribute('title')).toBe('Platform Team (platform)');
-    expect(entry(fixture)!.textContent).toContain('Allowed:');
-    expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(0);
-    expect(buttonsLabelled(entry(fixture)!, 'Edit').length).toBe(0);
-    expect(buttonsLabelled(entry(fixture)!, 'Deactivate').length).toBe(0);
+    expect(entry(fixture)!.querySelector('.allowed-capability-chip')).not.toBeNull();
+    const menu = menuOf(fixture, gciTeam);
+    expect(itemOf(menu, 'Disconnect')).toBeUndefined();
+    expect(itemOf(menu, 'Edit')).toBeUndefined();
+    expect(itemOf(menu, 'Deactivate')).toBeUndefined();
   });
 
   it('switches a project connection off and on like a registered worker', async () => {
@@ -498,7 +458,7 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     await settled(fixture);
     const workers = TestBed.inject(WorkersService) as unknown as { setWorkerActive: ReturnType<typeof vi.fn> };
 
-    buttonsLabelled(entry(fixture)!, 'Activate')[0].click();
+    itemOf(menuOf(fixture, gciRegistration), 'Activate')!.command!();
 
     expect(workers.setWorkerActive).toHaveBeenCalledWith('demo', 'g1', true);
   });
@@ -507,9 +467,9 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     const fixture = setup({ access: writable, workers: [gciRegistration], caches });
     await settled(fixture);
     const workers = TestBed.inject(WorkersService) as unknown as { patchWorker: ReturnType<typeof vi.fn> };
-    expect(entry(fixture)!.textContent).toContain('Allowed:');
+    expect(entry(fixture)!.querySelector('.allowed-capability-chip')).not.toBeNull();
 
-    buttonsLabelled(entry(fixture)!, 'Edit')[0].click();
+    itemOf(menuOf(fixture, gciRegistration), 'Edit')!.command!();
     fixture.detectChanges();
     const dialog = document.querySelector('.gr-dialog')!;
     expect(dialog.querySelector('#rename-name')).toBeNull();
@@ -543,7 +503,7 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
   it('keeps an existing connection listed when the option is off', async () => {
     const fixture = setup({ access: writable, workers: [gciRegistration], caches, gradientCi: false });
     await settled(fixture);
-    expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(1);
+    expect(itemOf(menuOf(fixture, gciRegistration), 'Disconnect')).toBeDefined();
     expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(0);
   });
 
@@ -697,7 +657,7 @@ describe('WorkersComponent - write failures', () => {
     workers.deleteWorker.mockReturnValue(pending);
     const cmp = fixture.componentInstance;
 
-    buttonsLabelled(entry(fixture)!, 'Disconnect')[0].click();
+    itemOf(menuOf(fixture, gciRegistration), 'Disconnect')!.command!();
     fixture.detectChanges();
     const dialog = document.querySelector('.gr-dialog')!;
     buttonsLabelled(dialog, 'Disconnect')[0].click();

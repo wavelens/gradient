@@ -71,13 +71,10 @@ echarts.use([
           <div>
             <h2>
               {{ title() }}
-              @if (doc(); as link) {
-                <gr-label-help [doc]="link" [title]="'About ' + title()" />
+              @if (doc() || explanationText()) {
+                <gr-label-help [doc]="doc()" [title]="'About ' + title()" [explanationText]="explanationText()" />
               }
             </h2>
-            @if (subtitle()) {
-              <p class="metric-chart__subtitle">{{ subtitle() }}</p>
-            }
           </div>
           <div class="metric-chart__actions">
             <ng-content select="[slot=actions]"></ng-content>
@@ -96,12 +93,13 @@ echarts.use([
       </div>
     </div>
   `,
+  host: { '[attr.title]': 'null' },
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './metric-chart.component.scss',
 })
 export class MetricChartComponent implements OnDestroy {
   title = input('');
-  subtitle = input('');
+  explanationText = input<string>();
   doc = input<DocLink | undefined>(undefined);
   type = input<MetricChartType>('area');
   height = input(260, { transform: numberAttribute });

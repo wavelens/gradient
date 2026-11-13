@@ -6,7 +6,7 @@
 
 import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { TasksService } from '@core/services/tasks.service';
@@ -26,20 +26,20 @@ import {
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
-  RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { EntityNameComponent, LabelHelpComponent, entityToPickerOption, formatEntityLabel } from '@shared/ui';
-import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenProjectSettings } from '@shared/access';
+import { AccessService, WritableDirective, ManagedDisableDirective, SettingsAccessStateBadgeComponent } from '@shared/access';
 import { NameFieldsComponent, fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, nameAvailability, unsavedChanges } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
 import { RESERVED_TASK_NAMES } from '../connect-repository/connect-repository.component';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
-import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
+import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { links } from '@shared/routing';
+import { TaskSettingsNavigationComponent } from '../task-settings-navigation/task-settings-navigation.component';
 
 interface TaskForm {
   display_name: string;
@@ -58,8 +58,8 @@ interface TaskForm {
   selector: 'app-task-settings',
   standalone: true,
   imports: [
+    TaskSettingsNavigationComponent,
     CommonModule,
-    RouterModule,
     FormsModule,
     DialogComponent,
     EntityNameComponent,
@@ -75,9 +75,8 @@ interface TaskForm {
     LabelHelpComponent,
     SettingsSectionComponent,
     MessageBannerComponent,
-    ServerConfigurationManagedBannerComponent,
+    SettingsAccessStateBadgeComponent,
     RowComponent,
-    RowListComponent,
     SubmitDirective,
     NameFieldsComponent,
   ],
@@ -86,7 +85,6 @@ interface TaskForm {
   styleUrl: './task-settings.component.scss',
 })
 export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
-  protected readonly links = links;
   protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -103,8 +101,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   private saveArea = viewChild<ElementRef<HTMLElement>>('saveArea');
 
   access = injectTaskAccess();
-  private resolvedTask = injectTaskAccessData();
-  canOpenParentProjectSettings = computed(() => canOpenProjectSettings(this.resolvedTask()?.task));
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -133,7 +129,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   projectName = '';
   taskName = '';
   deleteCompletedEvaluationsBeforeDate = '';
-  breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName, { label: 'Settings' }));
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName));
 
   formData: TaskForm = {
     display_name: '',

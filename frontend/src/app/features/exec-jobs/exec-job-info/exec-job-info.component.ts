@@ -31,6 +31,10 @@ function attemptLabel(attempt: number, budget: number): string {
   return attempt <= budget ? `${attempt} of ${budget}` : String(attempt);
 }
 
+function countAttemptsEndedByLostWorkerMachine(job: ExecJobResponse): number {
+  return job.attempts.filter((attempt) => attempt.end_reason === 'lost').length;
+}
+
 function requestedFields(job: ExecJobResponse): RequestedField[] {
   return [
     field('Architecture', [job.architecture]),
@@ -46,7 +50,7 @@ function requestedFields(job: ExecJobResponse): RequestedField[] {
     field('Image', [job.image]),
     field('Timeout', [seconds(job.timeout_secs)]),
     field('Time without output', [seconds(job.max_silent_secs)]),
-    field('Attempt', [attemptLabel(job.attempts.length, job.retries + 1)]),
+    field('Attempt', [attemptLabel(job.attempts.length, job.retries + 1 + countAttemptsEndedByLostWorkerMachine(job))]),
   ].filter((requested) => requested.values.length > 0);
 }
 

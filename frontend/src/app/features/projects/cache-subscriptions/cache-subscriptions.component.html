@@ -4,15 +4,15 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
-  <app-server-configuration-managed-banner [access]="access()" kind="project" />
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache subscriptions">
+  <app-project-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" />
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="project" />
   @if (!loading() && !loadError()) {
     <button slot="actions"
         *appWritable="access()"
         grButton
         label="Add Cache"
         icon="add"
-        [appManagedDisable]="access()"
         (click)="openSubscribeDialog()"
       ></button>
   }
@@ -20,15 +20,15 @@
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading cache subscriptions..." errorTitle="Failed to load caches" (retry)="loadCaches()" />
   } @else {
     @if (caches().length === 0) {
-      <gr-empty-state [icon]="entityKindToIconName.cache" title="No cache subscriptions" message="Subscribe to a Nix binary cache to have builds pushed there automatically." />
+      <gr-empty-state [icon]="entityKindToIconName.cache" title="No cache subscriptions" />
     } @else {
       <gr-row-list>
         @for (cache of caches(); track cache.id) {
           <gr-row [icon]="entityKindToIconName.cache">
             <gr-entity-name [displayName]="cache.display_name" [name]="cache.name" />
             <gr-badge severity="neutral">{{ modeLabel(cache.mode) }}</gr-badge>
-            @if (cache.managed) {
-              <gr-badge severity="info"><gr-icon name="lock" size="sm" />Managed</gr-badge>
+            @if (shouldShowLockIconForSubscription(cache)) {
+              <app-server-configuration-managed-lock-button />
             }
             @if (cache.status === 'pending') {
               <gr-badge severity="warning">Pending approval</gr-badge>
@@ -37,9 +37,6 @@
               @if (cache.status === 'pending') {
                 {{ buildPendingSubscriptionApproversText(cache) }}
               } @else {
-                @if (cache.managed) {
-                  <span>{{ managedItemDisabledReason }}</span>
-                }
                 <gr-checkbox
                   [inputId]="'sign-pushed-paths-' + cache.name"
                   label="Sign pushed paths with the cache key"
@@ -60,17 +57,17 @@
                 [attr.aria-label]="'Open cache ' + formatEntityLabel(cache)"
                 grTooltip="Open cache"
               ></a>
-              <button
-                *appWritable="access()"
-                grButton
-                [label]="cache.status === 'pending' ? 'Withdraw request' : 'Unsubscribe'"
-                icon="close"
-                severity="danger"
-                size="small"
-                [appManagedDisable]="access()"
-                [disabledReason]="cache.managed ? managedItemDisabledReason : null"
-                (click)="unsubscribeCache(cache)"
-              ></button>
+              @if (!cache.managed) {
+                <button
+                  *appWritable="access()"
+                  grButton
+                  [label]="cache.status === 'pending' ? 'Withdraw request' : 'Unsubscribe'"
+                  icon="close"
+                  severity="danger"
+                  size="small"
+                  (click)="unsubscribeCache(cache)"
+                ></button>
+              }
             </div>
           </gr-row>
         }
@@ -92,8 +89,8 @@
   [busy]="subscribing()"
   width="440px"
 >
-  <gr-form-field label="Cache Name" for="cache-name" hint="Select the caches that this project can use.">
-    <gr-label-help slot="label" doc="guides/share-a-cache/#2-share-with-another-project" title="Share a cache" />
+  <gr-form-field label="Cache Name" for="cache-name">
+    <gr-label-help slot="label" doc="guides/share-a-cache/#2-share-with-another-project" title="Share a cache" explanationText="Select the caches that this project can use." />
     <gr-autocomplete
       inputId="cache-name"
       [(ngModel)]="newCacheName"

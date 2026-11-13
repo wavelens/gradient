@@ -4,12 +4,15 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Project Settings">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="General">
+<app-project-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" />
+@if (project()) {
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="project" showReadOnlyNote />
+}
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!project()" loadingMessage="Loading project settings..."
                errorTitle="Failed to load project settings" (retry)="loadProject()">
 @if (project(); as project) {
-  <app-server-configuration-managed-banner [access]="access()" kind="project" showReadOnlyNote />
-  <gr-settings-section title="General">
+  <gr-settings-section>
     <gr-form-field label="Name" for="project-name" hint="This name is part of the URL and can't be changed here. Change the display name instead.">
       <input
         grInput
@@ -122,35 +125,6 @@
   </gr-settings-section>
 
   @if (isViewerProjectMember()) {
-  <gr-settings-section title="More Settings" [card]="false">
-    <gr-row-list>
-      <gr-row icon="construction" linkLabel="Workers" [link]="links.projectPage(projectName, 'workers')">
-        Workers
-        <span slot="meta">Build workers registered to this project</span>
-      </gr-row>
-      <gr-row icon="database" linkLabel="Cache subscriptions" [link]="links.projectPage(projectName, 'caches')">
-        Cache Subscriptions
-        <span slot="meta">Nix binary caches this project pushes builds to</span>
-      </gr-row>
-      <gr-row icon="hub" linkLabel="Git host connections" [link]="links.projectPage(projectName, 'git-host-connections')">
-        Git host connections
-        <span slot="meta">Receive events from a Git host and report commit status.</span>
-      </gr-row>
-      @if (config.execEnabled && access().canEdit) {
-        <gr-row icon="key" linkLabel="Secrets" [link]="links.projectPage(projectName, 'secrets')">
-          Secrets
-          <span slot="meta">Values for exec jobs, set here and never shown again</span>
-        </gr-row>
-      }
-      @if (webhooksAccess().canEdit) {
-        <gr-row icon="webhook" linkLabel="Event notifications" [link]="links.projectPage(projectName, 'webhooks')">
-          Event notifications
-          <span slot="meta">Signed HTTP requests for this project's events</span>
-        </gr-row>
-      }
-    </gr-row-list>
-  </gr-settings-section>
-
   <!-- SSH Key -->
   <gr-settings-section title="SSH Key">
     @if (sshLoading() || sshError()) {
@@ -164,15 +138,16 @@
         </gr-form-field>
       } @else {
         <p class="text-secondary">No SSH key generated yet.</p>
-        <button
-          *appWritable="sshKeyAccess()"
-          grButton severity="secondary"
-          label="Generate SSH Key"
-          icon="key"
-          (click)="generateSSHKey()"
-          [loading]="generatingSSH()"
-          [disabled]="generatingSSH()"
-        ></button>
+        @if (sshKeyAccess().canEdit) {
+          <button
+            grButton severity="secondary"
+            label="Generate SSH Key"
+            icon="key"
+            (click)="generateSSHKey()"
+            [loading]="generatingSSH()"
+            [disabled]="generatingSSH()"
+          ></button>
+        }
       }
     }
 
@@ -204,30 +179,30 @@
                 <gr-message-banner type="warning">The Git server sent a different key. Fetches fail until someone can confirm the new key.</gr-message-banner>
               }
             </span>
-            <div slot="actions" class="phone-icon-buttons">
-              @if (key.changed_at) {
+            @if (sshKeyAccess().canEdit) {
+              <div slot="actions" class="phone-icon-buttons">
+                @if (key.changed_at) {
+                  <button
+                    grButton
+                    label="Check New Key"
+                    icon="verified_user"
+                    severity="secondary"
+                    size="small"
+                    [loading]="hostKeyIdBeingScanned() === key.id"
+                    [disabled]="hostKeyIdBeingScanned() !== null"
+                    (click)="scanHostConfirmFingerprintAndSave(key)"
+                  ></button>
+                }
                 <button
-                  *appWritable="sshKeyAccess()"
                   grButton
-                  label="Check New Key"
-                  icon="verified_user"
-                  severity="secondary"
+                  label="Delete"
+                  icon="delete"
+                  severity="danger"
                   size="small"
-                  [loading]="hostKeyIdBeingScanned() === key.id"
-                  [disabled]="hostKeyIdBeingScanned() !== null"
-                  (click)="scanHostConfirmFingerprintAndSave(key)"
+                  (click)="confirmAndDeleteSavedHostKey(key)"
                 ></button>
-              }
-              <button
-                *appWritable="sshKeyAccess()"
-                grButton
-                label="Delete"
-                icon="delete"
-                severity="danger"
-                size="small"
-                (click)="confirmAndDeleteSavedHostKey(key)"
-              ></button>
-            </div>
+              </div>
+            }
           </gr-row>
         }
       </gr-row-list>
@@ -236,9 +211,9 @@
   }
 
   <!-- Danger Zone -->
-  @if ((sshKey() && sshKeyAccess().canEdit) || deleteAccess().canEdit) {
+  @if ((sshKey() && accessService.isWritable(sshKeyAccess())) || accessService.isWritable(deleteAccess())) {
     <gr-settings-section title="Danger Zone" danger>
-      @if (sshKey() && sshKeyAccess().canEdit) {
+      @if (sshKey() && accessService.isWritable(sshKeyAccess())) {
         <gr-row>
           Regenerate SSH Key
           <span slot="meta">Generate a new SSH key. The existing key will stop working immediately.</span>
@@ -250,11 +225,10 @@
             severity="danger"
             (click)="regenerateSSHKey()"
             [disabled]="generatingSSH()"
-            [appManagedDisable]="sshKeyAccess()"
           ></button>
         </gr-row>
       }
-      @if (deleteAccess().canEdit) {
+      @if (accessService.isWritable(deleteAccess())) {
         <gr-row>
           Delete Project
           <span slot="meta">Permanently delete this project and all its tasks.</span>
@@ -265,7 +239,6 @@
             icon="delete"
             severity="danger"
             (click)="deleteProject()"
-            [appManagedDisable]="deleteAccess()"
           ></button>
         </gr-row>
       }

@@ -20,19 +20,18 @@ import {
   MessageBannerComponent,
   DrawerDirective,
   SelectButtonComponent,
-  SelectComponent,
   TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent, WaitingNoticeComponent } from '@shared/ui';
 import { AuthService } from '@core/services/auth.service';
 import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.component';
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
-import { LogViewerComponent, appendLogChunkToSplitLines } from '@shared/log';
+import { LogAttemptListComponent, LogViewerComponent, appendLogChunkToSplitLines, buildExecJobAttemptViewToAttemptLogRow } from '@shared/log';
 import { refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible } from '@shared/paging';
 import { ApiError } from '@core/services/api.service';
 import { WritableDirective, AccessService } from '@shared/access';
 import { formatDuration, plural, RelativeTimePipe, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { buildAttemptEndReasonLabel, evaluationPhase, execJobPhase, formatAttemptDropdownLabel, waitingAccessFrom } from '@shared/evaluation';
+import { buildAttemptEndReasonLabel, evaluationPhase, execJobPhase, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { composeTitle } from '@core/title/gradient-title-strategy';
@@ -44,6 +43,7 @@ import type { ExecJobAttemptView, ExecJobLog, ExecJobPullRequestView, ExecJobRes
 import {
   abortExecJobConfirm, getExecJobStatusBadgeLabel, hasExecTerminal, isExecJobWaitingToStart, isOpenExecJob,
 } from '../exec-job-status';
+import { getFailureBannerForDisplayedAttempt } from '../exec-job-failed-attempt-warning';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
@@ -85,8 +85,8 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   imports: [
     RouterModule, FormsModule, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MessageBannerComponent,
-    SelectButtonComponent, SelectComponent, TabSwitchComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
-    LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
+    SelectButtonComponent, TabSwitchComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
+    LogAttemptListComponent, LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
     ServerTimestampToLocalDateTimePipe,
   ],
   templateUrl: './exec-job-page.component.html',
@@ -213,12 +213,21 @@ export class ExecJobPageComponent implements OnInit {
     const picked = attempts.find((a) => a.number === this.selectedAttemptNumber());
     return picked ?? attempts.reduce<ExecJobAttemptView | null>((latest, a) => (!latest || a.number > latest.number ? a : latest), null);
   });
-  attemptDropdownOptions = computed(() => {
+  selectedNodeAttemptRowsWhenMoreThanOneAttempt = computed(() => {
     const job = this.job();
-    return (job ? getAttemptsForNode(job, this.node()) : []).map((attempt) => ({
-      label: formatAttemptDropdownLabel(attempt.number, attempt.end_reason ? buildAttemptEndReasonLabel(attempt.end_reason) : 'running', attempt.ended_at ?? attempt.started_at),
-      value: attempt.number,
-    }));
+    const attempts = job ? getAttemptsForNode(job, this.node()) : [];
+    if (!job || attempts.length < 2) return [];
+    const workerNameByWorkerId = new Map([job, ...job.node_jobs].filter((jobWithWorker) => jobWithWorker.worker_name).map((jobWithWorker) => [jobWithWorker.worker, jobWithWorker.worker_name]));
+    return attempts.map((attempt) => buildExecJobAttemptViewToAttemptLogRow(attempt, workerNameByWorkerId.get(attempt.worker) ?? null));
+  });
+  selectedNodeLogAttemptBanner = computed(() => {
+    const job = this.job();
+    if (!job) return null;
+    return getFailureBannerForDisplayedAttempt(
+      job,
+      getAttemptsForNode(job, this.node()),
+      this.pickedOrHighestNumberedAttemptForSelectedNode()?.number ?? null,
+    );
   });
   formattedProgramRunTime = computed(() => {
     const attempt = this.pickedOrHighestNumberedAttemptForSelectedNode();
@@ -259,16 +268,19 @@ export class ExecJobPageComponent implements OnInit {
     this.watch();
   }
 
-  selectAttemptAndReloadLog(attempt: number): void {
-    if (attempt === this.pickedOrHighestNumberedAttemptForSelectedNode()?.number) return;
-    this.selectedAttemptNumber.set(attempt);
+  selectAttemptFromSidebarClosePhoneDrawerShowLogViewAndLoadLog(attempt: number): void {
+    const clickedAttemptIsLogOnScreenAttempt = attempt === this.pickedOrHighestNumberedAttemptForSelectedNode()?.number;
+    if (!clickedAttemptIsLogOnScreenAttempt) this.selectedAttemptNumber.set(attempt);
+    this.sidebarOpen.set(false);
+    this.view.set(LOG_VIEW.value);
+    this.terminal.set(null);
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { attempt },
+      queryParams: { attempt: this.selectedAttemptNumber(), view: null },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
-    this.watch();
+    if (!clickedAttemptIsLogOnScreenAttempt) this.watch();
   }
 
   pickNode(node: number): void {

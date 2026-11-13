@@ -23,7 +23,6 @@ import {
   BadgeComponent,
   type BadgeSeverity,
   ButtonComponent,
-  CheckboxComponent,
   CopyFieldComponent,
   type Crumb,
   DialogComponent,
@@ -42,7 +41,9 @@ import { RelativeTimePipe } from '@shared/text';
 import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@shared/outgoing-deliveries';
 import { dialogFormChangesSinceOpen, fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
-import { links } from '@shared/routing';
+import { ProjectSettingsNavigationComponent } from '../projects/project-settings-navigation/project-settings-navigation.component';
+import { BinaryCacheSettingsNavigationComponent } from '../caches/cache-settings-navigation/cache-settings-navigation.component';
+import { TeamSettingsNavigationComponent } from '../teams/team-settings-navigation/team-settings-navigation.component';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 
 type WebhookFormField = 'name' | 'url' | 'globs';
@@ -67,6 +68,9 @@ const webhookCardStateBadgeLabelAndColorSeverityByState: Record<WebhookCardState
   selector: 'app-webhooks',
   standalone: true,
   imports: [
+    ProjectSettingsNavigationComponent,
+    BinaryCacheSettingsNavigationComponent,
+    TeamSettingsNavigationComponent,
     RelativeTimePipe,
     CopyFieldComponent,
     LabelHelpComponent,
@@ -76,7 +80,6 @@ const webhookCardStateBadgeLabelAndColorSeverityByState: Record<WebhookCardState
     OutgoingWebhookDeliveryListDialog,
     BadgeComponent,
     ButtonComponent,
-    CheckboxComponent,
     DialogComponent,
     FormFieldComponent,
     InputDirective,
@@ -117,8 +120,7 @@ export class WebhooksComponent implements OnInit {
   url = signal('');
   events = signal<string[]>([]);
   globs = signal('');
-  active = signal(true);
-  formChanges = dialogFormChangesSinceOpen(() => [this.name(), this.url(), this.events(), this.globs(), this.active()]);
+  formChanges = dialogFormChangesSinceOpen(() => [this.name(), this.url(), this.events(), this.globs()]);
   attempted = signal(false);
   serverFieldRejection = signal<{ field: WebhookFormField; value: string; message: string } | null>(null);
   nameError = computed(() => (this.attempted() && !this.name().trim() ? 'Enter a name.' : this.serverRejectionOf('name', this.name())));
@@ -162,15 +164,15 @@ export class WebhooksComponent implements OnInit {
     switch (data['webhookScope']) {
       case 'project':
         this.scope = { kind: 'project', name: paramMap.get('project') ?? '' };
-        this.title = 'Project event notifications';
+        this.title = 'Event notifications';
         break;
       case 'cache':
         this.scope = { kind: 'cache', name: paramMap.get('cache') ?? '' };
-        this.title = 'Cache event notifications';
+        this.title = 'Event notifications';
         break;
       case 'team':
         this.scope = { kind: 'team', name: paramMap.get('team') ?? '' };
-        this.title = 'Team event notifications';
+        this.title = 'Event notifications';
         break;
       default:
         this.scope = { kind: 'instance' };
@@ -184,16 +186,15 @@ export class WebhooksComponent implements OnInit {
   }
 
   private trail(): Crumb[] {
-    const page = { label: 'Event notifications' };
     switch (this.scope.kind) {
       case 'project':
-        return this.crumbs.projectSettings(this.scope.name, page);
+        return this.crumbs.projectSettings(this.scope.name);
       case 'cache':
-        return this.crumbs.cacheSettings(this.scope.name, page);
+        return this.crumbs.cacheSettings(this.scope.name);
       case 'team':
-        return this.crumbs.team(this.scope.name, { label: 'Settings', link: links.teamPage(this.scope.name, 'settings') }, page);
+        return this.crumbs.teamSettings(this.scope.name);
       case 'instance':
-        return this.crumbs.admin(page);
+        return this.crumbs.admin({ label: 'Event notifications' });
     }
   }
 
@@ -280,7 +281,6 @@ export class WebhooksComponent implements OnInit {
     const patterns = hook?.events ?? [];
     this.events.set(patterns.filter(offered));
     this.globs.set(patterns.filter((event) => !offered(event)).join(', '));
-    this.active.set(hook?.active ?? true);
     this.formChanges.mark();
     this.formOpen.set(true);
   }
@@ -300,7 +300,7 @@ export class WebhooksComponent implements OnInit {
       this.revealFirstInvalid(() => this.webhookForm()?.nativeElement);
       return;
     }
-    const body = { name: this.name().trim(), url: this.url().trim(), events: this.patterns(), active: this.active() };
+    const body = { name: this.name().trim(), url: this.url().trim(), events: this.patterns() };
     const target = this.editing();
     this.saving.set(true);
     this.formError.set(null);

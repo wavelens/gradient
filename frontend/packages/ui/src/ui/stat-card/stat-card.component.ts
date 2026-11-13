@@ -7,12 +7,15 @@
 import { Component, booleanAttribute, input, ChangeDetectionStrategy } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 import { SkeletonComponent } from '../skeleton/skeleton.component';
+import { TooltipDirective } from '../tooltip/tooltip.directive';
 import { CommonModule } from '@angular/common';
+
+let valueExplanationSpanSeq = 0;
 
 @Component({
   selector: 'gr-stat-card',
   standalone: true,
-  imports: [IconComponent, SkeletonComponent, CommonModule],
+  imports: [IconComponent, SkeletonComponent, TooltipDirective, CommonModule],
   templateUrl: './stat-card.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './stat-card.component.scss',
@@ -21,5 +24,8 @@ export class StatCardComponent {
   icon = input<string>();
   value = input.required<number | string | null>();
   label = input.required<string>();
+  valueExplanation = input<string>();
   compact = input(false, { transform: booleanAttribute });
+
+  protected readonly valueExplanationDescriptionId = `gr-stat-card-value-explanation-${valueExplanationSpanSeq++}`;
 }

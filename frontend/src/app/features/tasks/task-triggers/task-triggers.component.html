@@ -4,7 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Evaluations from the &quot;Run&quot; button use the default trigger.">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers">
+  <app-task-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" [taskUrlName]="taskName" />
   @if (triggers().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -12,15 +13,14 @@
         label="New Trigger"
         icon="add"
         (click)="startCreate()"
-        [appManagedDisable]="access()"
       ></button>
   }
-  <app-server-configuration-managed-banner [access]="access()" kind="task" permission="manageTriggers" showReadOnlyNote />
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="task" permission="manageTriggers" showReadOnlyNote />
   @if (fallbackPollingTrigger(); as polling) {
     <gr-message-banner type="info" data-testid="polling-fallback">
       Polling acts as a fallback while a push trigger is active. Pause polling to stop the scheduled checks of the repository.
       <button *appWritable="access()" grButton label="Pause polling" icon="pause" severity="secondary" size="small"
-        [disabled]="rowBusy()" [appManagedDisable]="access()" (click)="deactivateTrigger(polling)"></button>
+        [disabled]="rowBusy()" (click)="deactivateTrigger(polling)"></button>
     </gr-message-banner>
   }
   <gr-load-state
@@ -31,7 +31,6 @@
     errorTitle="Failed to load triggers"
     emptyIcon="schedule_send"
     emptyTitle="No triggers configured"
-    emptyMessage="Create a trigger to start evaluations on a schedule, push event, or pull request."
     (retry)="loadTriggers()"
   >
     <button slot="empty-action"
@@ -40,7 +39,6 @@
       label="New Trigger"
       icon="add"
       (click)="startCreate()"
-      [appManagedDisable]="access()"
     ></button>
     <div class="triggers-list">
       @for (trigger of triggers(); track trigger.id) {
@@ -92,7 +90,6 @@
                   size="small"
                   [loading]="makingDefaultId() === trigger.id"
                   [disabled]="rowBusy()"
-                  [appManagedDisable]="access()"
                   (click)="makeDefault(trigger.id)"
                 ></button>
               }
@@ -104,7 +101,6 @@
                 severity="secondary"
                 size="small"
                 [disabled]="rowBusy()"
-                [appManagedDisable]="access()"
                 (click)="startEdit(trigger)"
               ></button>
               @if (!trigger.is_default) {
@@ -116,7 +112,6 @@
                   severity="danger"
                   size="small"
                   [disabled]="rowBusy()"
-                  [appManagedDisable]="access()"
                   (click)="deleteTrigger(trigger)"
                 ></button>
               }
@@ -126,7 +121,7 @@
       }
     </div>
   </gr-load-state>
-  @if (missingTriggerConfigSuggestions().length && access().canEdit) {
+  @if (missingTriggerConfigSuggestions().length && access().canEdit && !access().managed) {
     <gr-settings-section title="Recommended Triggers" description="Events arrive at the Git host connection for the repository of this task. Add a trigger to start an evaluation on push or pull request.">
       <div class="triggers-list" data-testid="trigger-suggestions">
         @for (suggestion of missingTriggerConfigSuggestions(); track suggestion.type) {
@@ -136,7 +131,7 @@
                 <gr-badge>{{ typeLabel(suggestion.type) }}</gr-badge>
               </div>
               <div class="trigger-actions">
-                <button grButton label="Add" icon="add" severity="secondary" size="small" [appManagedDisable]="access()"
+                <button grButton label="Add" icon="add" severity="secondary" size="small"
                   (click)="createTriggerFromSuggestedConfig(suggestion)"></button>
               </div>
             </div>
@@ -275,8 +270,7 @@
       />
     </gr-form-field>
 
-    <gr-form-field>
-      <span slot="hint">When enabled (secure-by-default), PRs from contributors who are not repo writers on the Git host are parked until a maintainer clicks “Approve and run” on the GitHub Check or comments <code>/gradient approve</code> (or <code>/gradient run</code>) on the PR. Disable to build every PR automatically.</span>
+    <gr-form-field hint="When enabled (secure-by-default), PRs from contributors who are not repo writers on the Git host are parked until a maintainer clicks “Approve and run” on the GitHub Check or comments /gradient approve (or /gradient run) on the PR. Disable to build every PR automatically.">
       <gr-checkbox
         inputId="trig-require-approval"
         [(ngModel)]="form.require_approval"

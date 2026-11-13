@@ -41,14 +41,6 @@
   &:disabled, &[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
 }
 
-.gr-menu__reason {
-  display: block;
-  max-width: 16rem;
-  padding: 0 0.6rem 0.35rem;
-  color: var(--gr-text-secondary);
-  font-size: $font-size-xs;
-}
-
 .gr-menu__icon { color: var(--gr-text-secondary); font-size: 1.125rem; }
 
 .gr-menu__chevron { margin-left: auto; }
