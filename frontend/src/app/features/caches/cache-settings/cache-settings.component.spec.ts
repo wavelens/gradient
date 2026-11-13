@@ -127,10 +127,10 @@ describe('CacheSettingsComponent - access gating', () => {
     return (Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[]).map((el) => el.getAttribute('href'));
   }
 
-  it('always reaches upstream caches, even when state-managed, and leaves members to the cache page header', () => {
+  it('always reaches upstream caches and members, even when state-managed', () => {
     const hrefs = linkTargets(setup({ managed: true, canEdit: true, canTrigger: true }));
     expect(hrefs).toContain('/caches/demo/upstream-caches');
-    expect(hrefs.some((href) => href?.includes('/members'))).toBe(false);
+    expect(hrefs.some((href) => href?.includes('/caches/demo/members'))).toBe(true);
     expect(hrefs).toContain('/caches/demo/subscriptions');
     expect(hrefs).toContain('/caches/demo/webhooks');
   });
