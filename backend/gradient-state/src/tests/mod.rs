@@ -74,6 +74,12 @@ fn a_state_task_with_an_escaping_flake_directory_is_refused() {
 }
 
 #[test]
+fn restricted_evaluation_is_off_unless_a_project_turns_it_on() {
+    let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+    assert!(!cfg.projects["acme"].restrict_evaluation_fetches);
+}
+
+#[test]
 fn secret_files_default_to_empty() {
     let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
     assert!(cfg.projects["acme"].secret_files.is_empty());
@@ -157,7 +163,7 @@ fn errors_of(cfg: &StateConfiguration) -> Vec<(String, String)> {
 fn state_validation_rejects_extra_allowed_url_prefix_with_whitespace() {
     let mut cfg = reporter_cfg("github", "{}");
     let project = cfg.projects.get_mut("acme").unwrap();
-    assert!(project.restrict_evaluation_fetches);
+    project.restrict_evaluation_fetches = true;
     project.extra_allowed_uri_prefixes = vec!["github:".into(), "https://a https://b".into()];
 
     let v = cfg.validate();

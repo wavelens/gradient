@@ -190,7 +190,7 @@
 
       restrict_evaluation_fetches = mkOption {
         type = types.bool;
-        default = true;
+        default = false;
         description = ''
           Evaluate projects with Nix `restrict-eval`. Fetches during evaluation (`builtins.fetchTree`, `fetchurl`, `fetchTarball`, `fetchGit`) can access only the inputs locked in `flake.lock`, the server's allowed URL prefixes and `extra_allowed_uri_prefixes`. Set `false` to let projects fetch any URL during evaluation.
         '';
