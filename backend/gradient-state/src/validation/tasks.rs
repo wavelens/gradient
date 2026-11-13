@@ -5,7 +5,7 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use crate::config::{StateGitHostConnection, StateTask};
+use crate::config::{StateAction, StateGitHostConnection, StateTask};
 use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::triggers::TriggerType;
 use gradient_types::{ActionType, RepositoryLocation};
@@ -67,6 +67,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                     format!("{} actions cannot carry custom events", action.action_type),
                 );
             }
+            validate_task_open_pr_action_git_host_connection_declared(lookup, task, action, errors);
             if !action_names.insert(action.name.as_str()) {
                 errors.push(
                     format!("tasks.{}.actions.{}.name", task.name, action.name),
@@ -100,14 +101,10 @@ fn validate_task_git_host_connection_reference(
         .and_then(|name| find_declared_git_host_connection_for_task(lookup, &task.project, name));
     if let Some(name) = name
         && connection.is_none()
-        && !is_auto_created_github_app_connection_name(name)
     {
         errors.push(
             format!("tasks.{}.git_host_connection", task.name),
-            format!(
-                "Git host connection '{}' does not match any connection owned by project '{}', its owner team, or the instance.",
-                name, task.project
-            ),
+            format_unknown_connection_name_error_message(name, &task.project),
         );
     }
 
@@ -152,6 +149,40 @@ fn validate_task_git_host_connection_reference(
     }
 }
 
+fn validate_task_open_pr_action_git_host_connection_declared(
+    lookup: &EntityLookup,
+    task: &StateTask,
+    action: &StateAction,
+    errors: &mut ErrorCollector,
+) {
+    if action.action_type != ActionType::OpenPr.as_str() {
+        return;
+    }
+    let Some(name) = action
+        .config
+        .get("git_host_connection")
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    if find_declared_git_host_connection_for_task(lookup, &task.project, name).is_none() {
+        errors.push(
+            format!(
+                "tasks.{}.actions.{}.config.git_host_connection",
+                task.name, action.name
+            ),
+            format_unknown_connection_name_error_message(name, &task.project),
+        );
+    }
+}
+
+fn format_unknown_connection_name_error_message(name: &str, project: &str) -> String {
+    format!(
+        "Git host connection '{}' does not match any connection owned by project '{}', its owner team, or the instance.",
+        name, project
+    )
+}
+
 fn find_declared_git_host_connection_for_task<'a>(
     lookup: &EntityLookup<'a>,
     project: &str,
@@ -176,8 +207,4 @@ fn find_declared_git_host_connection_for_task<'a>(
             connection.name == name && connection.owner.parse().ok().as_ref() == Some(&owner)
         })
     })
-}
-
-fn is_auto_created_github_app_connection_name(name: &str) -> bool {
-    name == "github" || name.starts_with("github-")
 }

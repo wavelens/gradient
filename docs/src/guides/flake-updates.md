@@ -42,6 +42,8 @@ Supported input types: `github`, `gitlab` and `git`, including `git` over SSH wi
 
 === "Declarative"
 
+    Do the same as [GitHub guide](github.md#4-choose-the-connection-on-the-task) and declare the `github-acme` connection first.
+
     ```nix
     services.gradient.state.tasks.web-app.actions = [{
       name = "flake-update";

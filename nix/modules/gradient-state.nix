@@ -484,7 +484,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          The name of the Git host connection for a task. Push and pull request webhooks arrive at this connection. The connection can report commit status. Gradient can search for that name in the task project, then in the team that owns the project, then in the instance. The `reporter_push` and `reporter_pull_request` triggers need a connection with `receives_events = true`. GitHub App connections use the name `github` or `github-<account>`. Use `null` to leave the task without a connection.
+          The name of the connection to the Git host for the task. Webhooks for push and pull requests arrive at this connection. This connection can report commit statuses. Gradient can search for that name in the task project, then in the team owning the project, then in the instance. Triggers `reporter_push` and `reporter_pull_request` need a connection with `receives_events = true`. Connections for a GitHub App also count. Declare the connection in `git_host_connections`. Use `null` to leave the task without a connection.
         '';
       };
 

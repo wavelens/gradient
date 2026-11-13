@@ -50,14 +50,23 @@ Tasks map to one Git host connection each. Push triggers and pull request trigge
 
 === "Declarative"
 
-    Declared tasks have no connection and no triggers by default. Configure a connection, then add both triggers to the task.
+    A declarative task has no connection and no triggers by default. Declare a connection for the app installation with the installation ID, then add both triggers to the task. The installation webhook can reuse the declared connection.
 
     ```nix
+    services.gradient.state.git_host_connections.github-acme = {
+      owner = "instance";
+      git_host_type = "github";
+      installation_id = 12345678; # (1)!
+      account_login = "acme";
+      reports_status = true;
+      created_by = "alice";
+    };
+
     services.gradient.state.tasks.app = {
       project = "acme";
       repository = "https://github.com/acme/app.git";
       created_by = "alice";
-      git_host_connection = "github-acme"; # (1)!
+      git_host_connection = "github-acme";
       report_status = true;
       triggers = [
         { type = "reporter_push"; }
@@ -66,7 +75,7 @@ Tasks map to one Git host connection each. Push triggers and pull request trigge
     };
     ```
 
-    1.  The connection that the App installation created for the `acme` account.
+    1.  ID of the app installation. Find this number at the end of the URL in the settings for the app installation on GitHub.
 
 ## Verify Deployment
 

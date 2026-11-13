@@ -62,6 +62,8 @@ gradient pr open --title "flake: update inputs" --branch update/flake flake.lock
 
 === "Declarative"
 
+    Do the same as [GitHub guide](../guides/github.md#4-choose-the-connection-on-the-task) and declare the `github-acme` connection first.
+
     ```nix
     services.gradient.state.tasks.infra.actions = [{
       name = "tree-pr";

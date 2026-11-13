@@ -228,9 +228,38 @@ fn push_trigger_rejects_missing_or_non_receiving_connection() {
 }
 
 #[test]
-fn state_reporter_trigger_accepts_github_app_name() {
-    let cfg = reporter_cfg("github-acme", "{}");
-    let v = cfg.validate();
+fn state_reporter_trigger_rejects_undeclared_github_app_connection() {
+    let errors = errors_of(&reporter_cfg("github-acme", "{}"));
+    assert!(
+        errors
+            .iter()
+            .any(|(field, message)| field == "tasks.web.git_host_connection"
+                && message.contains("github-acme")),
+        "expected undeclared GitHub App connection to be rejected, got: {errors:?}"
+    );
+}
+
+#[test]
+fn open_pr_action_rejects_undeclared_git_host_connection() {
+    let cfg = make_state_with_git_host_connections_and_web_task_extra_fields(
+        "{}",
+        r#""actions": [{ "name": "flake-update", "type": "open_pr", "config": { "git_host_connection": "github-acme" } }]"#,
+    );
+    let errors = errors_of(&cfg);
+    assert!(
+        errors.iter().any(|(field, message)| field
+            == "tasks.web.actions.flake-update.config.git_host_connection"
+            && message.contains("github-acme")),
+        "expected undeclared action connection to be rejected, got: {errors:?}"
+    );
+}
+
+#[test]
+fn state_reporter_trigger_accepts_declared_github_app_connection() {
+    let connections = r#"{
+        "github-acme": { "name": "github-acme", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
+    }"#;
+    let v = reporter_cfg("github-acme", connections).validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
 }
 
@@ -502,6 +531,9 @@ fn state_action_validate_accepts_open_pr() {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
             }
+        },
+        "git_host_connections": {
+            "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
         },
         "tasks": {
             "web": {
