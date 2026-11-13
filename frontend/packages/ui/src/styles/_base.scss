@@ -265,6 +265,22 @@ a {
   }
 }
 
+.joined-button-pair {
+  display: inline-flex;
+
+  > .gr-button:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  > .gr-button:last-child {
+    padding: 0 $spacing-xs;
+    border-left-color: color-mix(in srgb, var(--gr-btn-fg) 35%, transparent);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+}
+
 // A block of page body: a heading and the content under it. Children stack on
 // the block rhythm, so a card grid followed by a chart never collides.
 .section {

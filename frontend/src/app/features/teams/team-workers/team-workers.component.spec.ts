@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -18,6 +18,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { TeamResponse, TeamWorkerEntry } from '@core/models';
+import { MenuItem } from '@gradient/ui/ui';
 
 const team = { id: 't1', name: 'platform', display_name: 'Platform', managed: false, role: 'admin' } as TeamResponse;
 
@@ -78,11 +79,32 @@ function button(root: Element, label: string): HTMLButtonElement | undefined {
   );
 }
 
+function findMenuItemByLabelInAllTeamWorkerMenus(fixture: ComponentFixture<TeamWorkersComponent>, label: string): MenuItem | undefined {
+  return [...fixture.componentInstance.workerMenus().values()].flat().find((item) => item.label === label);
+}
+
 describe('TeamWorkersComponent', () => {
   it('shows members what a worker is allowed without letting them change it', () => {
     const { root } = setup('member');
-    expect(root.textContent).toContain('Allowed:');
-    expect(button(root, 'Edit')).toBeUndefined();
+    expect(root.querySelector('.allowed-capability-chip')).not.toBeNull();
+    expect(root.querySelector('[aria-label="Worker actions"]')).toBeNull();
+  });
+
+  it('shows every worker as a worker card with its status and source', () => {
+    const { root } = setup('admin', [{ ...connection, live }]);
+    const card = root.querySelector('app-worker-card-list > app-worker-card')!;
+    expect(card.querySelector('.worker-source')?.textContent).toContain('Team worker');
+    expect(card.querySelector('.worker-card__status-pills-cell')?.textContent).toContain('Connected');
+    expect(card.querySelector('.job-count')?.textContent?.trim()).toBe('1 / 2');
+    expect(card.querySelector('[aria-label="Worker actions"]')).not.toBeNull();
+  });
+
+  it('shows a lock instead of Edit and Delete on a worker set in the server configuration', () => {
+    const { fixture, root } = setup('admin', [{ ...connection, managed: true }]);
+    expect(root.querySelector('app-server-configuration-managed-lock-button')).not.toBeNull();
+    expect(findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Edit')).toBeUndefined();
+    expect(findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Delete')).toBeUndefined();
+    expect(findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Deactivate')).toBeDefined();
   });
 
   it('hides the Workers section from members while the team has no workers, but not from admins', () => {
@@ -92,9 +114,9 @@ describe('TeamWorkersComponent', () => {
   });
 
   it('saves what a Gradient.CI connection is allowed from its Edit dialog', () => {
-    const { fixture, root, updateWorker } = setup();
+    const { fixture, updateWorker } = setup();
 
-    button(root, 'Edit')!.click();
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Edit')!.command!();
     fixture.detectChanges();
     const dialog = document.querySelector('.gr-dialog')!;
     Array.from(dialog.querySelectorAll('gr-allowed-capabilities button'))
@@ -126,8 +148,8 @@ describe('TeamWorkersComponent', () => {
   });
 
   it('closes the Edit dialog without a request when nothing changed', () => {
-    const { fixture, root, updateWorker } = setup();
-    button(root, 'Edit')!.click();
+    const { fixture, updateWorker } = setup();
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Edit')!.command!();
     fixture.detectChanges();
     button(document.querySelector('.gr-dialog')!, 'Save')!.click();
     expect(updateWorker).not.toHaveBeenCalled();
@@ -137,7 +159,7 @@ describe('TeamWorkersComponent', () => {
   it('keeps a failed edit inside the Edit dialog', () => {
     const { fixture, root, updateWorker } = setup();
     updateWorker.mockReturnValue(throwError(() => new ApiError('Worker is managed', 409)));
-    button(root, 'Edit')!.click();
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Edit')!.command!();
     fixture.componentInstance.editAllowed = { ...connection, enable_secrets: true };
     fixture.detectChanges();
     button(document.querySelector('.gr-dialog')!, 'Save')!.click();
@@ -148,47 +170,47 @@ describe('TeamWorkersComponent', () => {
   });
 
   it('asks before deactivating a worker, since it aborts running jobs', () => {
-    const { root, updateWorker, notify, confirm } = setup();
-    button(root, 'Deactivate')!.click();
+    const { fixture, updateWorker, notify, confirm } = setup();
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Deactivate')!.command!();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Disable Worker', target: 'Gradient.CI Servers' }));
     expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { active: false });
     expect(notify.success).toHaveBeenCalledWith('Worker deactivated');
   });
 
   it('sends no deactivation when the confirmation is cancelled', () => {
-    const { root, updateWorker, confirm } = setup();
+    const { fixture, updateWorker, confirm } = setup();
     confirm.mockImplementation(() => EMPTY);
-    button(root, 'Deactivate')!.click();
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Deactivate')!.command!();
     expect(updateWorker).not.toHaveBeenCalled();
   });
 
   it('asks first, then drains a connected worker', () => {
-    const { root, updateWorker, notify, confirm } = setup('admin', [{ ...connection, live }]);
-    button(root, 'Drain')!.click();
+    const { fixture, updateWorker, notify, confirm } = setup('admin', [{ ...connection, live }]);
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Drain')!.command!();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Worker Drain', target: 'Gradient.CI Servers' }));
     expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { draining: true });
     expect(notify.success).toHaveBeenCalledWith('Drain started');
   });
 
   it('offers Undrain on an admin drain and shows the Draining badge', () => {
-    const { root, updateWorker, notify, confirm } = setup('admin', [{ ...connection, live: { ...live, draining: true }, requested_by_admin: true }]);
+    const { fixture, root, updateWorker, notify, confirm } = setup('admin', [{ ...connection, live: { ...live, draining: true }, requested_by_admin: true }]);
     expect(root.querySelector('app-worker-drain-badge')?.textContent).toContain('Draining');
-    expect(button(root, 'Drain')).toBeUndefined();
-    button(root, 'Undrain')!.click();
+    expect(findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Drain')).toBeUndefined();
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Undrain')!.command!();
     expect(confirm).not.toHaveBeenCalled();
     expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { draining: false });
     expect(notify.success).toHaveBeenCalledWith('Drain stopped');
   });
 
   it('offers no drain on a worker that drains itself or is offline', () => {
-    expect(button(setup('admin', [{ ...connection, live: { ...live, draining: true } }]).root, 'Drain')).toBeUndefined();
+    expect(findMenuItemByLabelInAllTeamWorkerMenus(setup('admin', [{ ...connection, live: { ...live, draining: true } }]).fixture, 'Drain')).toBeUndefined();
     TestBed.resetTestingModule();
-    expect(button(setup('admin', [connection]).root, 'Drain')).toBeUndefined();
+    expect(findMenuItemByLabelInAllTeamWorkerMenus(setup('admin', [connection]).fixture, 'Drain')).toBeUndefined();
   });
 
   it('asks before deleting a worker, naming it, then confirms the deletion', () => {
-    const { root, removeWorker, notify, confirm } = setup();
-    root.querySelector<HTMLButtonElement>('gr-row button.gr-button--danger')!.click();
+    const { fixture, removeWorker, notify, confirm } = setup();
+    findMenuItemByLabelInAllTeamWorkerMenus(fixture, 'Delete')!.command!();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete worker', target: 'Gradient.CI Servers' }));
     expect(removeWorker).toHaveBeenCalledWith('platform', 'g1');
     expect(notify.success).toHaveBeenCalledWith('Worker deleted');

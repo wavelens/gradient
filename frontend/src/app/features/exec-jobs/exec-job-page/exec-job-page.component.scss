@@ -62,6 +62,7 @@ a.sidebar-item { text-decoration: none; }
 .log-area gr-message-banner {
   flex-shrink: 0;
   margin: $spacing-sm $spacing-md 0;
+  overflow-wrap: anywhere;
 }
 
 .kept-vm button { margin-left: $spacing-sm; }
@@ -89,9 +90,4 @@ gr-terminal.terminal {
   background: var(--gr-surface-raised);
 
   gr-form-field { flex: 1 1 20rem; min-width: 0; }
-}
-
-.log-attempt-select {
-  flex: 0 0 auto;
-  width: 13rem;
 }

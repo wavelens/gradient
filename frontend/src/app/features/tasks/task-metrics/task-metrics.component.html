@@ -19,7 +19,7 @@
 
       <gr-metric-chart
         title="Total Build Time"
-        subtitle="Sum of all completed build durations"
+        explanationText="Sum of all completed build durations"
         type="area"
         [height]="200"
         [series]="buildTimeSeries()"
@@ -30,7 +30,7 @@
 
       <gr-metric-chart
         title="Evaluation Time"
-        subtitle="Wall-clock time from start to finish"
+        explanationText="Wall-clock time from start to finish"
         type="area"
         [height]="200"
         [series]="evalTimeSeries()"
@@ -41,7 +41,7 @@
 
       <gr-metric-chart
         title="Output Size"
-        subtitle="Entry-point packages only, excluding dependencies"
+        explanationText="Entry-point packages only, excluding dependencies"
         type="area"
         [height]="200"
         [series]="outputSizeSeries()"
@@ -52,7 +52,7 @@
 
       <gr-metric-chart
         title="Closure Size"
-        subtitle="All packages including transitive dependencies"
+        explanationText="All packages including transitive dependencies"
         type="line"
         [height]="200"
         [series]="closureSizeSeries()"
@@ -64,7 +64,7 @@
       <gr-metric-chart
         class="chart--full"
         title="Dependencies Count"
-        subtitle="Number of dependency builds (excluding entry points)"
+        explanationText="Number of dependency builds (excluding entry points)"
         type="area"
         [height]="200"
         [series]="depsSeries()"

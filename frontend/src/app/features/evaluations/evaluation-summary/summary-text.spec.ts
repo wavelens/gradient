@@ -61,6 +61,13 @@ describe('evaluation summary text', () => {
     expect(tiles(summary({ built: 5 }), 'Waiting')).toEqual([]);
   });
 
+  it('describe every tile and distinguish remaining packages from aborted packages', () => {
+    const runningEvaluationSummaryCountTiles = getEvaluationSummaryCountTiles(summary({ built: 5, unfinished: 15 }), 'Building');
+    const completedEvaluationSummaryCountTiles = getEvaluationSummaryCountTiles(summary({ built: 5, unfinished: 15 }), 'Completed');
+    expect([...runningEvaluationSummaryCountTiles, ...completedEvaluationSummaryCountTiles].every((tile) => tile.tooltip.trim().length > 0)).toBe(true);
+    expect(runningEvaluationSummaryCountTiles[3].tooltip).not.toBe(completedEvaluationSummaryCountTiles[3].tooltip);
+  });
+
   it('shows no tiles until the evaluation found its packages', () => {
     expect(getEvaluationSummaryCountTiles(summary({ total: 0 }), 'EvaluatingDerivation')).toEqual([]);
     expect(getEvaluationSummaryCountTiles(summary({ total: 0 }, 1), 'Failed')).toEqual([]);

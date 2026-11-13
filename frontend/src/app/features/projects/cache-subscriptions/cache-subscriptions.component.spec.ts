@@ -23,7 +23,6 @@ import { AccessState } from '@core/models/access.model';
 import { By } from '@angular/platform-browser';
 import { CreateCacheDialogComponent } from '@shared/forms';
 import { CacheSubscriptionItem, SubscribableCache } from '@core/models';
-import { MANAGED_ITEM_DISABLED_REASON } from '@shared/access';
 
 function routeStub(access: AccessState, query: Record<string, string>): Partial<ActivatedRoute> {
   const route = projectRouteStub('acme', access);
@@ -105,12 +104,11 @@ describe('CacheSubscriptionsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'unsubscribe')).toBeNull();
   });
 
-  it('shows but disables Add Cache under state-managed access', async () => {
+  it('hides Add Cache and Unsubscribe under state-managed access', async () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
-    const btn = findByText(fixture.nativeElement, 'add cache') as HTMLButtonElement | null;
-    expect(btn).not.toBeNull();
-    expect(btn!.getAttribute('aria-disabled')).toBe('true');
+    expect(findByText(fixture.nativeElement, 'add cache')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'unsubscribe')).toBeNull();
   });
 });
 
@@ -392,18 +390,23 @@ describe('CacheSubscriptionsComponent - write failures', () => {
 });
 
 describe('CacheSubscriptionsComponent - subscriptions from the server configuration', () => {
-  it('locks Unsubscribe and the sign setting on a managed row and names the reason', async () => {
+  it('marks a managed row of an unmanaged project with a lock, hides Unsubscribe and disables the sign setting', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     TestBed.inject(ProjectsService).getSubscribedCaches = (() => of([subscription({ managed: true })])) as never;
     await settled(fixture);
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.textContent).toContain('Managed');
-    expect(root.querySelector('.row-meta')?.textContent).toContain(MANAGED_ITEM_DISABLED_REASON);
-    const unsubscribe = findByText(root, 'unsubscribe')!;
-    expect(unsubscribe.getAttribute('aria-disabled')).toBe('true');
-    unsubscribe.click();
-    expect(confirm).not.toHaveBeenCalled();
+    expect(root.querySelector('gr-row app-server-configuration-managed-lock-button')).not.toBeNull();
+    expect(findByText(root, 'unsubscribe')).toBeNull();
     expect(root.querySelector<HTMLInputElement>('#sign-pushed-paths-shared')!.disabled).toBe(true);
+  });
+
+  it('leaves the lock to the title chip when the whole project is managed', async () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    TestBed.inject(ProjectsService).getSubscribedCaches = (() => of([subscription({ managed: true })])) as never;
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-row app-server-configuration-managed-lock-button')).toBeNull();
+    expect(root.querySelector('app-settings-access-state-badge')?.textContent).toContain('Managed');
   });
 
   it('leaves an unmanaged row editable', async () => {

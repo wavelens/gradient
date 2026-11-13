@@ -71,13 +71,6 @@ h2 {
   margin: 0;
 }
 
-.metric-chart__subtitle {
-  margin: 2px 0 0;
-  color: var(--gr-text-muted);
-  font-size: $font-size-xs;
-}
-    
-
 .metric-chart--compact .metric-chart__header {
   flex-direction: column;
 }

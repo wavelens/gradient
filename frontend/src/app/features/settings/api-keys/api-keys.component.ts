@@ -30,9 +30,9 @@ import {
   SelectButtonComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { ManagedDisableDirective } from '@shared/access';
+import { ServerConfigurationManagedLockButtonComponent } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { AccessState, ApiKeyInfo, ApiKeyVisibleProjectsAndCachesWithPermissionsResponse, PatchApiKeyRequest, PermissionEntry } from '@core/models';
+import { ApiKeyInfo, ApiKeyVisibleProjectsAndCachesWithPermissionsResponse, PatchApiKeyRequest, PermissionEntry } from '@core/models';
 import {
   buildGradientCliInstallNetrcCommand,
   buildNetrcEntryForServerUrl,
@@ -94,7 +94,7 @@ interface SelectOption {
     SelectComponent,
     SelectButtonComponent,
     LoadStateComponent,
-    ManagedDisableDirective,
+    ServerConfigurationManagedLockButtonComponent,
     PageLayoutComponent,
     FormFieldComponent,
     BadgeComponent,
@@ -543,9 +543,5 @@ export class ApiKeysComponent implements OnInit {
 
   isApiKeyExpired(key: ApiKeyInfo): boolean {
     return !!key.expires_at && serverTime(key.expires_at).getTime() <= Date.now();
-  }
-
-  rowAccess(key: ApiKeyInfo): AccessState {
-    return { managed: key.managed, canEdit: true, canTrigger: true };
   }
 }

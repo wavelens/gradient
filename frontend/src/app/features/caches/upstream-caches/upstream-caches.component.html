@@ -4,8 +4,9 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Upstream Caches" subtitle="External and internal caches this cache pulls through from">
-  <app-server-configuration-managed-banner [access]="access()" kind="cache" />
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Upstream caches">
+  <app-cache-settings-navigation slot="settings-navigation" [cacheUrlName]="cacheName" />
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="cache" />
   @if (upstreamCaches().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -13,7 +14,6 @@
         label="Add Upstream Cache"
         icon="add"
         (click)="openAddDialog()"
-        [appManagedDisable]="access()"
       ></button>
   }
   <gr-load-state
@@ -24,7 +24,6 @@
     errorTitle="Failed to load upstream caches"
     emptyIcon="cloud_download"
     emptyTitle="No upstream caches"
-    emptyMessage="Add an upstream cache to enable pull-through caching from another cache."
     (retry)="loadUpstreamCaches()"
   >
     <button slot="empty-action"
@@ -33,7 +32,6 @@
       label="Add Upstream Cache"
       icon="add"
       (click)="openAddDialog()"
-      [appManagedDisable]="access()"
       ></button>
       <gr-row-list>
         @for (u of upstreamCaches(); track u.id) {
@@ -57,28 +55,28 @@
               @if (u.upstream_cache_name; as upstream) {
                 <a grButton icon="arrow_forward" severity="secondary" label="Open cache" [routerLink]="links.cache(upstream)"></a>
               }
-              @if (u.kind === 'http') {
+              @if (access().canEdit) {
+                @if (u.kind === 'http') {
+                  <button
+                    grButton
+                    label="Test"
+                    icon="bolt"
+                    severity="secondary"
+                    [loading]="testingUpstreamId() === u.id"
+                    [disabled]="testingUpstreamId() !== null"
+                    (click)="testUpstream(u)"
+                  ></button>
+                }
                 <button
-                  *appWritable="access()"
                   grButton
-                  label="Test"
-                  icon="bolt"
+                  [label]="u.active ? 'Deactivate' : 'Activate'"
+                  [icon]="u.active ? 'pause' : 'play_arrow'"
                   severity="secondary"
-                  [loading]="testingUpstreamId() === u.id"
-                  [disabled]="testingUpstreamId() !== null"
-                  (click)="testUpstream(u)"
+                  [loading]="togglingUpstreamId() === u.id"
+                  [disabled]="rowBusy()"
+                  (click)="toggleUpstream(u)"
                 ></button>
               }
-              <button
-                *appWritable="access()"
-                grButton
-                [label]="u.active ? 'Deactivate' : 'Activate'"
-                [icon]="u.active ? 'pause' : 'play_arrow'"
-                severity="secondary"
-                [loading]="togglingUpstreamId() === u.id"
-                [disabled]="rowBusy()"
-                (click)="toggleUpstream(u)"
-              ></button>
               <button
                 *appWritable="access()"
                 grButton
@@ -87,7 +85,6 @@
                 severity="secondary"
                 [attr.aria-label]="'Edit upstream cache ' + u.display_name"
                 [disabled]="rowBusy()"
-                [appManagedDisable]="access()"
                 (click)="openEditDialog(u)"
               ></button>
               <button
@@ -98,7 +95,6 @@
                 severity="danger"
                 [attr.aria-label]="'Delete upstream cache ' + u.display_name"
                 [disabled]="rowBusy()"
-                [appManagedDisable]="access()"
                 (click)="removeUpstream(u)"
               ></button>
             </div>
@@ -185,8 +181,13 @@
         <span slot="label" class="text-secondary">(optional)</span>
         <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" (keyup.enter)="addUpstream()" />
       </gr-form-field>
-      <gr-form-field label="Mode" for="up-mode" hint="Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.">
-        <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream modes" />
+      <gr-form-field label="Mode" for="up-mode">
+        <gr-label-help
+          slot="label"
+          doc="concepts/caches/#upstream-types"
+          title="Upstream modes"
+          explanationText="Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only."
+        />
         <gr-select
             inputId="up-mode"
             [options]="modes"

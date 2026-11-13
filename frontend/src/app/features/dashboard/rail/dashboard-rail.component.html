@@ -4,60 +4,71 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+<ng-template #dashboardSidebarCardHeadingTemplate let-title="title" let-link="link" let-total="total">
+  <h2>
+    <a class="card-heading-link" [routerLink]="link">
+      <span class="dashboard-rail-card-heading-text">{{ title }}</span>
+      @if (total > maxRowsPerDashboardRailCard) {
+        <gr-badge>{{ total }}</gr-badge>
+      }
+      <gr-icon name="chevron_right" />
+    </a>
+  </h2>
+</ng-template>
+
 @if (rail(); as r) {
   <aside class="rail">
-    <section>
-      <h3>Projects</h3>
-      <ul>
-        @for (p of r.projects; track p.name) {
-          <li>
-            <span class="row">
-              <gr-star-button [target]="{ kind: 'project', project: p.name }" [starredItemDisplayName]="p.display_name" [(starred)]="p.starred" />
-              <span class="dot" [style.background]="evaluationStatusDotColor(p.status)"></span>
-              <a class="n" [routerLink]="links.project(p.name)" [title]="formatEntityLabel(p)">{{ p.display_name }}</a>
-              @if (!p.tasks) {
-                <span class="count">{{ p.task_count }} {{ p.task_count === 1 ? 'task' : 'tasks' }}</span>
+    @if (r.projects.length) {
+      <section class="rail-card">
+        <ng-container [ngTemplateOutlet]="dashboardSidebarCardHeadingTemplate" [ngTemplateOutletContext]="{ title: 'Projects', link: links.projects(), total: r.projects.length }" />
+        <ul>
+          @for (p of projectsCardEntries(); track p.name) {
+            <li>
+              <div class="row">
+                <span class="dot" role="img" [attr.aria-label]="statusDotTooltipText(p.status)" [grTooltip]="statusDotTooltipText(p.status)" [style.background]="evaluationStatusDotColor(p.status)"></span>
+                <a class="n" [routerLink]="links.project(p.name)" [grTooltip]="getProjectRowLinkTooltipText(p)" [attr.aria-label]="getProjectRowLinkTooltipText(p)">{{ p.display_name }}</a>
+                <gr-star-button [class.star-button-shown-on-hover]="!p.starred" [target]="{ kind: 'project', project: p.name }" [starredItemDisplayName]="p.display_name" [(starred)]="p.starred" />
+              </div>
+              @if (p.tasks) {
+                <ul class="tasks">
+                  @for (t of p.tasks; track t.name) {
+                    <li>
+                      <a class="row" [routerLink]="links.task(p.name, t.name)">
+                        <span class="dot" role="img" [attr.aria-label]="statusDotTooltipText(t.status)" [grTooltip]="statusDotTooltipText(t.status)" [style.background]="evaluationStatusDotColor(t.status)"></span>
+                        <span class="n" [grTooltip]="formatEntityLabel(t)">{{ t.display_name }}</span>
+                      </a>
+                    </li>
+                  }
+                </ul>
               }
-            </span>
-            @if (p.tasks) {
-              <ul class="tasks">
-                @for (t of p.tasks; track t.name) {
-                  <li>
-                    <a class="row" [routerLink]="links.task(p.name, t.name)">
-                      <span class="dot" [style.background]="evaluationStatusDotColor(t.status)"></span>
-                      <span class="n" [title]="formatEntityLabel(t)">{{ t.display_name }}</span>
-                    </a>
-                  </li>
-                }
-              </ul>
-            }
-          </li>
-        }
-      </ul>
-      <a class="all" [routerLink]="links.projects()">All projects -></a>
-    </section>
+            </li>
+          }
+        </ul>
+      </section>
+    }
 
-    <section>
-      <h3>Caches</h3>
-      <ul>
-        @for (c of r.caches; track c.name) {
-          <li>
-            <span class="row">
-              <gr-star-button [target]="{ kind: 'cache', cache: c.name }" [starredItemDisplayName]="c.display_name" [(starred)]="c.starred" />
-              <a class="n" [routerLink]="links.cache(c.name)" [title]="formatEntityLabel(c)">{{ c.display_name }}</a>
-              <span class="count">{{ count(c.nar_count) }} packages</span>
-            </span>
-          </li>
-        }
-      </ul>
-      <a class="all" [routerLink]="links.caches()">All caches -></a>
-    </section>
+    @if (r.caches.length) {
+      <section class="rail-card">
+        <ng-container [ngTemplateOutlet]="dashboardSidebarCardHeadingTemplate" [ngTemplateOutletContext]="{ title: 'Caches', link: links.caches(), total: r.caches.length }" />
+        <ul>
+          @for (c of cachesCardEntries(); track c.name) {
+            <li>
+              <div class="row">
+                <a class="n" [routerLink]="links.cache(c.name)" [grTooltip]="formatEntityLabel(c)" [attr.aria-label]="formatEntityLabel(c) + ' · ' + getPackageCountTooltipText(c.nar_count)">{{ c.display_name }}</a>
+                <span class="count" aria-hidden="true" [grTooltip]="getPackageCountTooltipText(c.nar_count)">{{ count(c.nar_count) }}</span>
+                <gr-star-button [class.star-button-shown-on-hover]="!c.starred" [target]="{ kind: 'cache', cache: c.name }" [starredItemDisplayName]="c.display_name" [(starred)]="c.starred" />
+              </div>
+            </li>
+          }
+        </ul>
+      </section>
+    }
   </aside>
 } @else if (!hidden() && !failed()) {
   <aside class="rail" aria-busy="true">
-    @for (title of ['Projects', 'Caches']; track title) {
-      <section>
-        <h3>{{ title }}</h3>
+    @for (card of [{ title: 'Projects', link: links.projects() }, { title: 'Caches', link: links.caches() }]; track card.title) {
+      <section class="rail-card">
+        <ng-container [ngTemplateOutlet]="dashboardSidebarCardHeadingTemplate" [ngTemplateOutletContext]="{ title: card.title, link: card.link, total: 0 }" />
         <ul>
           @for (_ of [1, 2, 3, 4]; track $index) {
             <li class="row"><gr-skeleton /></li>

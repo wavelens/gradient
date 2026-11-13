@@ -6,10 +6,10 @@
 
 import { ActivatedRouteSnapshot, PRIMARY_OUTLET, Params, UrlSegment, UrlSegmentGroup, UrlTree } from '@angular/router';
 
-export type ProjectPage = 'settings' | 'connect' | 'workers' | 'git-host-connections' | 'secrets' | 'webhooks' | 'caches';
+export type ProjectPage = 'settings' | 'members' | 'connect' | 'workers' | 'git-host-connections' | 'secrets' | 'webhooks' | 'caches';
 export type TaskPage = 'settings' | 'repository' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
-export type CachePage = 'settings' | 'upstream-caches' | 'nars' | 'subscriptions' | 'webhooks';
-export type TeamPage = 'settings' | 'webhooks' | 'git-host-connections';
+export type CachePage = 'settings' | 'members' | 'upstream-caches' | 'nars' | 'subscriptions' | 'webhooks';
+export type TeamPage = 'settings' | 'members' | 'webhooks' | 'git-host-connections';
 export type SettingsPage = 'profile' | 'keys' | 'ssh-keys' | 'sessions' | 'invites' | 'access';
 export type BoardTab =
   | 'overview' | 'live' | 'scheduler' | 'throughput' | 'durations' | 'workers' | 'cache'

@@ -80,12 +80,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 <gr-loading-spinner message="Loading the connection to the Git host..." />
 <gr-empty-state icon="hub" title="No Connections to a Git Host" message="Create a connection to a Git host to receive webhooks." />
 
-<p>With the action that resolves it. The button centres under the message.</p>
-<gr-empty-state icon="schedule_send" title="No triggers configured"
-  message="Create a trigger to start evaluations on a schedule, push event, or pull request.">
+<p>An action can clear the empty state. A button can replace the message.</p>
+<gr-empty-state icon="schedule_send" title="No triggers configured">
   <button slot="action" grButton label="New Trigger" icon="add"></button>
 </gr-empty-state>
-<gr-stat-card icon="inbox" [value]="12" label="Queued" />
+<p>A tile can explain its number. Set <code>valueExplanation</code> to show an info button after the label. Hover and keyboard focus both open the tooltip.</p>
+<gr-stat-card icon="inbox" [value]="12" label="Queued" valueExplanation="Jobs in the scheduler queue that wait for a worker." />
 
 <p>Lists that load their own data go inside <code>gr-load-state</code>. A failed load can show the reason and a "Try Again" button in place of the empty state.</p>
 <gr-load-state errorTitle="Failed to Load Connection to Git Host" error="Database connection failed." />

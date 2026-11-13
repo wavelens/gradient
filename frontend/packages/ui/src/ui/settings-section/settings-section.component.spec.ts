@@ -22,7 +22,18 @@ describe('gr-settings-section', () => {
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('h2')?.textContent).toContain('General');
-    expect(root.querySelector('.settings-section__description')?.textContent).toContain('Names.');
+  });
+
+  it('turns the description into an explanation button after the heading', async () => {
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    document.body.append(root);
+    const button = root.querySelector('h2 + gr-label-explanation-button button')!;
+    expect(button.getAttribute('aria-label')).toBe('About General');
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toBe('Names.');
+    expect(root.querySelector('p')?.textContent).toBe('x');
   });
 
   it('projects its body', async () => {

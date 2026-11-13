@@ -98,6 +98,10 @@ export class BreadcrumbsService {
     return [{ label: 'Teams', link: links.teams() }, { label: name(), link: links.team(team) }, ...tail];
   }
 
+  teamSettings(team: string, ...tail: Crumb[]): Crumb[] {
+    return this.team(team, { label: 'Settings', link: links.teamPage(team, 'settings') }, ...tail);
+  }
+
   admin(...tail: Crumb[]): Crumb[] {
     return [{ label: 'Admin', link: links.admin('overview') }, ...tail];
   }

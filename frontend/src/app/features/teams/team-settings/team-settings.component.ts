@@ -6,7 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, linkedSignal, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -14,7 +14,7 @@ import { injectTeam } from '@core/resolvers/team-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
 import { formatEntityLabel } from '@shared/ui';
-import { AccessService, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canManageTeam } from '@shared/access';
+import { AccessService, ManagedDisableDirective, SettingsAccessStateBadgeComponent, canManageTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -25,12 +25,12 @@ import {
   InputDirective,
   PageLayoutComponent,
   RowComponent,
-  RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
+import { TeamSettingsNavigationComponent } from '../team-settings-navigation/team-settings-navigation.component';
 
 interface SettingsForm {
   display_name: string;
@@ -45,16 +45,15 @@ interface SettingsForm {
   selector: 'app-team-settings',
   standalone: true,
   imports: [
+    TeamSettingsNavigationComponent,
     FormsModule,
-    RouterModule,
-    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
+    ManagedDisableDirective, SettingsAccessStateBadgeComponent,
     ButtonComponent,
     CheckboxComponent,
     FormFieldComponent,
     InputDirective,
     PageLayoutComponent,
     RowComponent,
-    RowListComponent,
     SelectComponent,
     SettingsSectionComponent,
     SubmitDirective,
@@ -68,7 +67,6 @@ interface SettingsForm {
   `,
 })
 export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
-  protected readonly links = links;
   protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -88,7 +86,7 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
   private resolvedTeam = injectTeam();
 
   teamName = '';
-  breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Settings' }));
+  breadcrumb = computed(() => this.crumbs.teamSettings(this.teamName));
   team = linkedSignal<TeamResponse | null>(() => this.resolvedTeam() ?? null);
   saving = signal(false);
   form: SettingsForm = this.formOf(null);

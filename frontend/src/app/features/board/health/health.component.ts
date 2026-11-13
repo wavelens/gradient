@@ -25,7 +25,7 @@ import { BoardHealth } from '@core/models';
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Version" [value]="h.version" />
         <gr-stat-card compact label="Uptime" [value]="seconds(h.uptime_seconds)" />
-        <gr-stat-card compact label="Worker and cache connections" [value]="h.proto_sessions" />
+        <gr-stat-card compact label="Worker and cache connections" valueExplanation="The current number of connections open to the server over the Gradient protocol. Connected workers have one open connection each. Cache clients on this protocol have one too." [value]="h.proto_sessions" />
       </gr-card-grid>
 
       <h2>Process</h2>

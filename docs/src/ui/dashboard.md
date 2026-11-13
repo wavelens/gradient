@@ -16,7 +16,7 @@ The dashboard opens after sign-in. It lists every task that needs attention acro
 | Filter | **Starred**, **All** and **Failing**, each with a count. **Starred** is the default, and hidden while no task is starred | Switch the task list. The choice stays in the URL |
 | Task list | The top 10 tasks: latest commit, recent evaluations as bars, entry points ok/total, change in failures, speed | Open a task from the row, an evaluation from a bar. Page through every task with **Show all** |
 | Activity | A calendar of the last year | Switch between evaluations and failures |
-| Rail | Projects by rank, caches with starred first | Star a project or cache. Open its tasks |
+| Rail | One Projects card and one Caches card. Up to 5 items per card. Starred items come first. Card titles open the full list on click. | Star a project or cache. Open its tasks |
 
 In the task list, bar height shows the duration and bar color shows the status.
 

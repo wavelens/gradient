@@ -14,7 +14,6 @@
     severity="secondary"
     (click)="openCreateRoleDialog()"
     [disabled]="rolesLoading() || availablePermissions().length === 0"
-    [appManagedDisable]="roleAccess()"
   ></button>
   <gr-load-state
     [loading]="rolesLoading()"
@@ -24,7 +23,6 @@
     errorTitle="Couldn't load roles"
     emptyIcon="shield"
     emptyTitle="No roles"
-    emptyMessage="Create a role to describe what members may do."
     (retry)="roleListChanged.emit()"
   >
     <gr-row-list>
@@ -46,7 +44,6 @@
                 severity="secondary"
                 [attr.aria-label]="'Edit role ' + role.name"
                 [disabled]="savingRole() || deletingRole()"
-                [appManagedDisable]="roleAccess()"
                 (click)="openEditRoleDialog(role)"
               ></button>
               <button
@@ -58,7 +55,6 @@
                 [attr.aria-label]="'Delete role ' + role.name"
                 [disabled]="savingRole() || deletingRole()"
                 [disabledReason]="holders.total > 0 ? 'Assign another role to the members, teams and invitations of this role before deletion.' : null"
-                [appManagedDisable]="roleAccess()"
                 (click)="deleteRole(role)"
               ></button>
             }

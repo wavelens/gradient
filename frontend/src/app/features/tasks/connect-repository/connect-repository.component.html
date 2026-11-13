@@ -4,8 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="form" [breadcrumb]="breadcrumb()" title="Connect repository"
-  subtitle="Gradient can build each new commit in a repository and report the result to the Git host.">
+<gr-page-layout width="form" [breadcrumb]="breadcrumb()" title="Connect repository">
   @if (!access().canEdit) {
     <gr-load-state [error]="missingPermission()" />
   } @else {
@@ -22,7 +21,7 @@
         <gr-settings-section title="Repository">
           <gr-project-readiness-card [project]="projectName" [projectPermissions]="project()?.permissions ?? []" [projectSettingsAreManagedByServer]="!!project()?.managed" />
           <gr-divider />
-          <gr-form-field label="Repository URL" for="connect-repo" required hint="URL of the Git repository to evaluate"
+          <gr-form-field label="Repository URL" for="connect-repo" required
             [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
             <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path, git://host/path" />
             <input grInput id="connect-repo" [ngModel]="form.repository" (ngModelChange)="repositoryChanged($event)"
@@ -32,9 +31,9 @@
           <gr-form-field label="Branch" for="connect-branch" hint="Leave empty to build the default branch (HEAD) of the repository.">
             <input grInput id="connect-branch" [(ngModel)]="form.branch" placeholder="HEAD (default branch)" (keyup.enter)="continueFromRepository()" />
           </gr-form-field>
-          <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Output pattern to evaluate"
+          <gr-form-field label="Evaluation Wildcard" for="connect-wildcard"
             [invalid]="!!wildcardError" [error]="wildcardError ?? ''">
-            <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
+            <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" explanationText="Output pattern to evaluate" />
             <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="continueFromRepository()" />
           </gr-form-field>
           <div class="gr-form-actions gr-form-actions--end">

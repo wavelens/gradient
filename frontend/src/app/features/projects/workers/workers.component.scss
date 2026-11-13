@@ -6,41 +6,9 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-.worker-meta {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-}
-
 .worker-action-btn {
   min-width: 110px;
   justify-content: center;
 
   @media (max-width: $breakpoint-sm) { min-width: 0; }
-}
-
-.worker-source,
-.worker-url,
-.worker-archs,
-.worker-stats {
-  font-size: $font-size-sm;
-}
-
-.worker-archs { font-family: $font-family-mono; }
-.worker-archs { display: flex; flex-wrap: wrap; align-items: center; gap: $spacing-xs; }
-.features-info {
-  display: inline-flex;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--gr-text-muted);
-  cursor: pointer;
-
-  &:hover { color: var(--gr-text-primary); }
-}
-.features-list {
-  max-width: 22rem;
-
-  strong { display: block; margin-bottom: $spacing-xs; color: var(--gr-text-primary); }
-  p { margin: 0; font-family: $font-family-mono; font-size: $font-size-sm; color: var(--gr-text-secondary); }
 }

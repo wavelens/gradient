@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import type { Permission, ProjectReadinessResponse } from '@core/models';
 import { NotifyService } from '@core/services/notify.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -39,8 +39,8 @@ function readiness(overrides: Partial<ProjectReadinessResponse> = {}): ProjectRe
   };
 }
 
-function render(response: ProjectReadinessResponse, permissions: Permission[] = ADMIN) {
-  const getProjectReadiness = vi.fn(() => of(response));
+function render(response: ProjectReadinessResponse | Observable<ProjectReadinessResponse>, permissions: Permission[] = ADMIN, showOnlyProblemItems = false) {
+  const getProjectReadiness = vi.fn(() => (response instanceof Observable ? response : of(response)));
   const updateProjectGrant = vi.fn(() => of('Team grant updated'));
   const grantProject = vi.fn(() => of('Request sent'));
   const notify = { success: vi.fn(), failure: vi.fn() };
@@ -56,6 +56,7 @@ function render(response: ProjectReadinessResponse, permissions: Permission[] = 
   const fixture = TestBed.createComponent(ProjectReadinessCardComponent);
   fixture.componentRef.setInput('project', 'acme');
   fixture.componentRef.setInput('projectPermissions', permissions);
+  fixture.componentRef.setInput('showOnlyProblemItems', showOnlyProblemItems);
   fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
   const row = (name: string) => root.querySelector<HTMLElement>(`[data-testid="readiness-${name}"]`)!;
@@ -79,6 +80,65 @@ describe('ProjectReadinessCardComponent', () => {
     expect(row('workers').querySelector('gr-badge .badge')?.classList).toContain('is-success');
     expect(row('cache').querySelector('gr-entity-name')?.textContent).toContain('Main');
     expect(row('git').querySelector('gr-badge')?.textContent?.trim()).toBe('Verified');
+  });
+
+  it('lists all three rows without a section for a fully ready project', () => {
+    const { root, row } = render(readiness({
+      ready: true,
+      workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+      cache: { ready: true, subscriptions: [] },
+      repository: { status: 'verified', tasks: [] },
+    }));
+    expect(row('workers')).not.toBeNull();
+    expect(row('cache')).not.toBeNull();
+    expect(row('git')).not.toBeNull();
+    expect(root.querySelector('gr-settings-section')).toBeNull();
+  });
+
+  it('renders nothing when workers and cache are ready and git access is verified', () => {
+    const { root } = render(readiness({
+      ready: true,
+      workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+      cache: { ready: true, subscriptions: [] },
+      repository: { status: 'verified', tasks: [] },
+    }), ADMIN, true);
+    expect(root.querySelector('gr-settings-section')).toBeNull();
+    expect(root.querySelector('gr-row')).toBeNull();
+  });
+
+  it('renders nothing while the request is pending', () => {
+    const { root } = render(NEVER, ADMIN, true);
+    expect(root.querySelector('gr-settings-section')).toBeNull();
+    expect(root.querySelector('gr-row')).toBeNull();
+  });
+
+  it('renders nothing for unchecked git access with ready workers and cache', () => {
+    const { root } = render(readiness({
+      ready: true,
+      workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+      cache: { ready: true, subscriptions: [] },
+      repository: { status: 'unchecked', tasks: [] },
+    }), ADMIN, true);
+    expect(root.querySelector('gr-settings-section')).toBeNull();
+    expect(root.querySelector('gr-row')).toBeNull();
+  });
+
+  it('renders the heading and only the git access row when only git access fails', () => {
+    const { root, row } = render(readiness({
+      ready: false,
+      workers: { ready: true, registered: 1, teams: [], teams_granted_without_workers: [], teams_you_can_grant: [] },
+      cache: { ready: true, subscriptions: [] },
+    }), ADMIN, true);
+    expect(root.querySelector('gr-settings-section h2')?.textContent).toBe('Readiness');
+    expect(row('git')).not.toBeNull();
+    expect(row('workers')).toBeNull();
+    expect(row('cache')).toBeNull();
+  });
+
+  it('renders the error state inside the section when the request fails', () => {
+    const { root } = render(throwError(() => new Error('boom')), ADMIN, true);
+    expect(root.querySelector('gr-settings-section gr-load-state')).not.toBeNull();
+    expect(root.querySelector('gr-settings-section')?.textContent).toContain("Couldn't load readiness");
   });
 
   it('says what is missing in every row, with the failing task and its error', () => {

@@ -11,16 +11,11 @@
 
 <gr-load-state [loading]="loading()" [error]="loadError()" loadingMessage="Loading connections for Git hosts..."
   errorTitle="Failed to load connections to Git hosts" (retry)="load()">
-  <gr-settings-section title="Owned Connections" [card]="false">
-    @if (canCreate() && ownConnections().length) {
-      <button slot="actions" grButton label="New connection" icon="add" severity="secondary" (click)="openCreate()"
-        [appManagedDisable]="access()" data-testid="new-connection"></button>
-    }
+  <gr-settings-section [title]="inheritedReadOnlyConnections().length ? 'Owned Connections' : undefined" [card]="false">
     @if (ownConnections().length === 0) {
-      <gr-empty-state icon="hub" title="No connections to Git hosts"
-        message="Create a connection. The Git host can send events to Gradient, or Gradient can report commit status to the Git host.">
-        @if (canCreate()) {
-          <button slot="action" grButton label="New connection" icon="add" (click)="openCreate()" [appManagedDisable]="access()"
+      <gr-empty-state icon="hub" title="No connections to Git hosts">
+        @if (accessService.isWritable(access())) {
+          <button slot="action" grButton label="New connection" icon="add" (click)="openCreate()"
             data-testid="new-connection"></button>
         }
       </gr-empty-state>
@@ -33,16 +28,16 @@
               @if (canEditRow(connection)) {
                 <button grButton label="Edit" icon="edit" severity="secondary" size="small"
                   [attr.aria-label]="'Edit ' + connection.display_name" [loading]="openingId() === connection.id"
-                  [appManagedDisable]="access()" (click)="openEdit(connection)"></button>
+                  (click)="openEdit(connection)"></button>
               }
               @if (canReadDeliveries(connection)) {
                 <button grButton label="Deliveries" icon="list" severity="secondary" size="small"
                   [attr.aria-label]="'Deliveries of ' + connection.display_name"
                   [attr.aria-expanded]="deliveriesShownFor() === connection.id" (click)="toggleDeliveries(connection)"></button>
               }
-              @if (connection.can_manage) {
+              @if (connection.can_manage && accessService.isWritable(access())) {
                 <button grButton label="Delete" icon="delete" severity="danger" size="small"
-                  [attr.aria-label]="'Delete ' + connection.display_name" [appManagedDisable]="access()"
+                  [attr.aria-label]="'Delete ' + connection.display_name"
                   (click)="remove(connection)"></button>
               }
             </div>
@@ -106,7 +101,8 @@
     <gr-message-banner type="info">{{ managedReason }}</gr-message-banner>
   }
   @if (editing()?.webhook_url; as webhookUrl) {
-    <gr-form-field label="Webhook URL" [hint]="'Events to enable: ' + requiredWebhookEvents(form().git_host_type)">
+    <gr-form-field label="Webhook URL">
+      <span slot="hint">Events to enable: {{ requiredWebhookEvents(form().git_host_type) }}</span>
       <gr-copy-field [value]="webhookUrl" />
     </gr-form-field>
   }
@@ -160,8 +156,10 @@
   }
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="connectionDialog.close()" [disabled]="saving()"></button>
-    <button grButton [label]="editing() ? 'Save' : 'Create'" icon="check" (grSubmit)="save()" [loading]="saving()"
-      [disabled]="saving()" [disabledReason]="editing()?.managed ? managedReason : null" data-testid="save-connection"></button>
+    @if (!editing()?.managed) {
+      <button grButton [label]="editing() ? 'Save' : 'Create'" icon="check" (grSubmit)="save()" [loading]="saving()"
+        [disabled]="saving()" data-testid="save-connection"></button>
+    }
   </div>
 </gr-dialog>
 
@@ -169,7 +167,8 @@
   (visibleChange)="$event || createdConnectionWithOneTimeSecret.set(null)" [closable]="false" width="560px">
   @if (createdConnectionWithOneTimeSecret(); as created) {
     <p>Now copy the Webhook URL and secret into the webhook settings of the Git host. Gradient can show the secret only once.</p>
-    <gr-form-field label="Webhook URL" [hint]="'Events to enable: ' + requiredWebhookEvents(created.gitHostType)">
+    <gr-form-field label="Webhook URL">
+      <span slot="hint">Events to enable: {{ requiredWebhookEvents(created.gitHostType) }}</span>
       <gr-copy-field [value]="created.webhookUrl" />
     </gr-form-field>
     <gr-form-field label="Webhook secret">

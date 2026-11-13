@@ -454,7 +454,7 @@ describe('EvaluationLogComponent', () => {
       cmp.builds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
       fixture.detectChanges();
 
-      expect(fixture.nativeElement.querySelector('.sidebar-builds-heading')?.textContent?.trim()).toBe('Builds');
+      expect(fixture.nativeElement.querySelector('.sidebar-builds-heading')).toBeNull();
       const rows = fixture.nativeElement.querySelectorAll('.build-item') as NodeListOf<HTMLElement>;
       rows[1].dispatchEvent(new MouseEvent('contextmenu', { clientX: 9, clientY: 9, bubbles: true, cancelable: true }));
       fixture.detectChanges();
@@ -898,22 +898,47 @@ describe('EvaluationLogComponent', () => {
       ({ number, outcome, started_at: finished_at, finished_at, worker: null, reason: null });
     const requestedPaths = (fetchLog: { mock: { calls: unknown[][] } }) => fetchLog.mock.calls.map(([url]) => String(url));
 
-    it('loads the attempts of the linked build and offers a selector only for more than one', () => {
-      const { cmp, fixture, getBuildAttempts } = setupScoped({ build: 'b1' }, of('eval-1'), [], 'Completed', {
+    const getSidebarAttemptRowTexts = (root: HTMLElement) =>
+      Array.from(root.querySelectorAll('.sidebar-attempt-row-button .attempt-build-status-label'), (label) => label.textContent?.trim());
+
+    it('load attempts for a linked build and only list them under its row, when there are multiple', () => {
+      const { cmp, fixture, getBuildAttempts } = setupScoped({ build: 'b1' }, of('eval-1'), [build('b1', 'first')], 'Completed', {
         attempts: [attempt(1, 'Failed', '2026-01-01T15:13:00'), attempt(2, 'Built', '2026-01-01T15:19:00')],
       });
       cmp.logLoading.set(false);
       fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
       expect(getBuildAttempts).toHaveBeenCalledWith('b1');
-      expect(cmp.attemptDropdownOptions().map((option) => option.label)).toEqual([
-        `Attempt 1 · failed ${clockTime('2026-01-01T15:13:00')}`,
-        `Attempt 2 · built ${clockTime('2026-01-01T15:19:00')}`,
-      ]);
+      expect(getSidebarAttemptRowTexts(root)).toEqual(['Attempt 2 · built', 'Attempt 1 · failed']);
+      expect(root.querySelector('gr-log-attempt-list')?.previousElementSibling?.getAttribute('data-build-id')).toBe('b1');
       expect(cmp.attemptNumberForLogOnScreenOrNull()).toBe(2);
-      expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).not.toBeNull();
+      expect(root.querySelector('.sidebar-attempt-row-button[aria-current="true"]')?.textContent).toContain('Attempt 2');
       cmp.selectedBuildAttempts.set([attempt(1, 'Built', '2026-01-01T15:13:00')]);
       fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).querySelector('gr-select.log-attempt-select')).toBeNull();
+      expect(root.querySelector('gr-log-attempt-list')).toBeNull();
+      fixture.destroy();
+    });
+
+    it('move focus from selected build row to child attempt with down arrow and select next build after last attempt', () => {
+      const { cmp, fixture } = setupScoped({ build: 'b1' }, of('eval-1'), [build('b1', 'first'), build('b2', 'second')], 'Completed', {
+        attempts: [attempt(1, 'Failed', '2026-01-01T15:13:00'), attempt(2, 'Built', '2026-01-01T15:19:00')],
+      });
+      Element.prototype.scrollIntoView = vi.fn();
+      const root = fixture.nativeElement as HTMLElement;
+      document.body.appendChild(root);
+      fixture.detectChanges();
+      const buildRowLink =(id: string) => root.querySelector<HTMLButtonElement>(`.build-item[data-build-id="${id}"] .sidebar-row-link`)!;
+      const attemptRowButtons = () => Array.from(root.querySelectorAll<HTMLButtonElement>('.sidebar-attempt-row-button'));
+      const pressKey = (button: HTMLButtonElement, key: string) => button.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+
+      pressKey(buildRowLink('b1'), 'ArrowDown');
+      expect(document.activeElement).toBe(attemptRowButtons()[0]);
+      expect(cmp.selectedBuildId()).toBe('b1');
+      pressKey(attemptRowButtons()[0], 'ArrowUp');
+      expect(document.activeElement).toBe(buildRowLink('b1'));
+      pressKey(attemptRowButtons()[1], 'ArrowDown');
+      expect(cmp.selectedBuildId()).toBe('b2');
+      root.remove();
       fixture.destroy();
     });
 
@@ -1017,6 +1042,23 @@ describe('EvaluationLogComponent', () => {
         queryParams: { build: 'dep', attempt: null, eval: null },
         queryParamsHandling: 'merge',
       }));
+      fixture.destroy();
+    });
+
+    it("Open the first failed build of the package when the link doesn't name a build.", () => {
+      const listed = [build('lib', 'hash-lib.drv', 'FailedPermanent', 2), build('pkg', 'hash-pkg.drv', 'DependencyFailed', 1)];
+      const { cmp, fixture, getBuild, getBuilds, navigate } = setupScoped({ filter: 'pkg' }, of('eval-1'), listed, 'Failed');
+      expect(getBuilds.mock.calls[0][3]).toBe('pkg');
+      expect(getBuild).not.toHaveBeenCalled();
+      expect(cmp.selectedBuildId()).toBe('lib');
+      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { build: 'lib', attempt: null, eval: null }, queryParamsHandling: 'merge' }));
+      fixture.destroy();
+    });
+
+    it("Open the build of the package when the link doesn't specify a build and no build of the package failed.", () => {
+      const listed = [build('pkg', 'hash-pkg.drv', 'Completed', 1), build('lib', 'hash-lib.drv', 'Completed', 2)];
+      const { cmp, fixture } = setupScoped({ filter: 'pkg' }, of('eval-1'), listed);
+      expect(cmp.selectedBuildId()).toBe('pkg');
       fixture.destroy();
     });
 
@@ -1135,7 +1177,7 @@ describe('EvaluationLogComponent', () => {
       (root.querySelector('gr-load-more button') as HTMLButtonElement).click();
       fixture.detectChanges();
       expect(getBuilds.mock.lastCall?.[2]).toBe(1);
-      expect(root.querySelector('.sidebar-builds-heading')?.textContent?.trim()).toBe('Builds');
+      expect(root.querySelector('.sidebar-builds-heading')).toBeNull();
       expect(root.querySelector('gr-load-more button')).toBeNull();
       fixture.destroy();
     });
@@ -1658,14 +1700,12 @@ describe('EvaluationLogComponent', () => {
       const crumbs = Array.from(
         (fixture.nativeElement as HTMLElement).querySelectorAll('nav[aria-label="Breadcrumb"] .breadcrumb-link, nav[aria-label="Breadcrumb"] .breadcrumb-current'),
       );
-      expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'MyProject', 'Nightly', 'Evaluation']);
+      expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'MyProject', 'Nightly']);
       expect(crumbs.map((crumb) => crumb.getAttribute('href'))).toEqual([
         '/projects',
         '/project/proj',
         '/project/proj/task/nightly?eval=eval-1',
-        null,
       ]);
-      expect(crumbs[3].getAttribute('aria-current')).toBe('page');
       fixture.destroy();
     });
   });

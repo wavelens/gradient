@@ -4,9 +4,12 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Actions" subtitle="Side effects triggered by evaluation and build events">
-  <a slot="actions" *appWritable="access()" grButton label="Open the Repository page" icon="hub" severity="secondary"
-     [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Actions">
+  <app-task-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" [taskUrlName]="taskName" />
+  @if (access().canEdit) {
+    <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
+       [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
+  }
   @if (actions().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -14,10 +17,9 @@
         label="New Action"
         icon="add"
         (click)="startCreate()"
-        [appManagedDisable]="access()"
       ></button>
   }
-  <app-server-configuration-managed-banner [access]="access()" kind="task" permission="manageActions" showReadOnlyNote />
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="task" permission="manageActions" showReadOnlyNote />
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"
@@ -26,7 +28,6 @@
     errorTitle="Failed to load actions"
     emptyIcon="notifications_active"
     emptyTitle="No actions configured"
-    [emptyMessage]="access().canEdit ? 'Create actions that post webhooks, post chat messages, or report build status to the Git host.' : undefined"
     (retry)="loadActions()"
   >
     <button slot="empty-action"
@@ -35,7 +36,6 @@
       label="New Action"
       icon="add"
       (click)="startCreate()"
-      [appManagedDisable]="access()"
       ></button>
       <div class="actions-list">
         @for (action of actions(); track action.id) {
@@ -109,7 +109,6 @@
                   severity="secondary"
                   size="small"
                   [disabled]="rowBusy()"
-                  [appManagedDisable]="access()"
                   (click)="startEdit(action)"
                 ></button>
                 <button
@@ -120,7 +119,6 @@
                   severity="danger"
                   size="small"
                   [disabled]="rowBusy()"
-                  [appManagedDisable]="access()"
                   (click)="deleteAction(action)"
                 ></button>
               </div>

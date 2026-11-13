@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Caches" [subtitle]="authService.isAuthenticated() ? 'Manage your build caches' : 'Public caches on this server. Sign in to see your own.'">
+<gr-page-layout title="Caches" [subtitle]="authService.isAuthenticated() ? undefined : 'Public caches on this server. Sign in to see your own.'">
   @if (canCreateCache && caches.items().length) {
     <app-create-cache-button slot="actions" (create)="openCreateDialog()" />
   }
@@ -22,7 +22,6 @@
         slot="empty"
         [icon]="entityKindToIconName.cache"
         title="No caches yet"
-        [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No cache memberships yet.'"
       >
         @if (canCreateCache) {
           <app-create-cache-button slot="action" (create)="openCreateDialog()" />
@@ -98,7 +97,7 @@
     >
       <div slot="empty">
         @if (!authService.isAuthenticated()) {
-          <gr-empty-state [icon]="entityKindToIconName.cache" title="No caches yet" message="No caches have been created yet" />
+          <gr-empty-state [icon]="entityKindToIconName.cache" title="No caches yet" />
         }
       </div>
       <div class="discover-header">

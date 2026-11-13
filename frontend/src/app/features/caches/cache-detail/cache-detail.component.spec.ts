@@ -193,6 +193,14 @@ describe('CacheDetailComponent empty and inactive caches', () => {
     expect(link?.textContent).toContain('Create key for this cache');
     expect(link?.getAttribute('href')).toBe('/settings/keys?cache=main');
   });
+
+  it('describe the netrc command in the help icon tooltip', () => {
+    const root = render(true, false, false, true);
+    const field = root.querySelector('#cache-netrc')!.closest('gr-form-field')!;
+    const helpLink = field.querySelector('gr-label-help a')!;
+    expect(field.querySelector(`#${helpLink.getAttribute('aria-describedby')}`)?.textContent).toContain('cache-scoped key');
+    expect(field.querySelector('[slot="hint"]')).toBeNull();
+  });
 });
 
 describe('CacheDetailComponent traffic cards', () => {
@@ -277,13 +285,15 @@ describe('CacheDetailComponent header', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
   });
 
-  it('links cache members and instance administrators to the Members page, but not guests', () => {
-    const membersLink = (root: HTMLElement) => root.querySelector('[slot="actions"] a[href="/caches/main/members/people"]');
-    expect(membersLink(render(true, ['viewCache'], 'View').root)).not.toBeNull();
+  it('cache members and instance admins get Settings without the Members button, but guests don\'t', () => {
+    const headerHrefs = (root: HTMLElement) => Array.from(root.querySelectorAll('[slot="actions"] a[grButton]'), (link) => link.getAttribute('href'));
+    const viewerHrefs = headerHrefs(render(true, ['viewCache'], 'View').root);
+    expect(viewerHrefs).toContain('/caches/main/settings');
+    expect(viewerHrefs.some((href) => href?.includes('/members'))).toBe(false);
     TestBed.resetTestingModule();
-    expect(membersLink(render(false).root)).toBeNull();
+    expect(headerHrefs(render(false).root)).not.toContain('/caches/main/settings');
     TestBed.resetTestingModule();
-    expect(membersLink(render(true, [], null, true).root)).not.toBeNull();
+    expect(headerHrefs(render(true, [], null, true).root)).toContain('/caches/main/settings');
   });
 
   it('show projects that use the cache as links and omit private projects', () => {

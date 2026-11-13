@@ -39,13 +39,15 @@ function render(stats: () => Observable<DashboardStats>) {
 
 describe('DashboardStatsComponent', () => {
   it('reads the stats in human units, one card each', () => {
-    expect(cards(render(() => of(STATS)).root)).toEqual({
+    const root = render(() => of(STATS)).root;
+    expect(cards(root)).toEqual({
       'CPU time': '18.4 y',
       'Completed builds': '1.28M',
       'Total cached': '2.4 TiB',
       'Worker load': '72%',
       'Queue wait': '38.0 s',
     });
+    expect(root.querySelectorAll('gr-stat-card .stat-label-explanation-button').length).toBe(5);
   });
 
   it('lays out every labelled card with a placeholder value until the stats arrive', () => {

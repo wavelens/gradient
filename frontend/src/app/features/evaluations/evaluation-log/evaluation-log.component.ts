@@ -12,17 +12,17 @@ import {
   signal,
   computed,
   ViewChild,
+  viewChild,
   DestroyRef,
   HostListener,
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, splitLogLines } from '@shared/log';
+import { LogAttemptListComponent, LogViewerComponent, ServerLog, ansiToHtml, buildAttemptResponseToAttemptRow, isFindShortcut, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
 import { BuildLogStreamDecoder, buildBuildLogApiPath, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
 import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule, UrlTree } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { EMPTY, Observable, Subscription, firstValueFrom, forkJoin, merge, of } from 'rxjs';
@@ -72,11 +72,10 @@ import {
   MessageBannerComponent,
   MessageService,
   DrawerDirective,
-  SelectComponent,
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildOutcomeLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, formatAttemptDropdownLabel, getAbortedEvaluationExplanationWithReplacementId, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildOutcomeLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getAbortedEvaluationExplanationWithReplacementId, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { saveResponse } from '@shared/download';
 
 const packageNameVisibleTrailingCharacterCount = 10;
@@ -85,7 +84,7 @@ const emptyBuildPageForEvaluationOnly: PaginatedBuilds = { builds: [], total: 0,
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, FormsModule, SelectComponent, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadMoreComponent,LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadMoreComponent,LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogAttemptListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -170,7 +169,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   breadcrumb = computed(() => {
     const task = this.evaluation()?.task_name;
     return task
-      ? this.crumbs.buildEvaluationPageBreadcrumbs(this.projectName, this.evaluationId, task)
+      ? this.crumbs.buildEvaluationPageBreadcrumbs(this.projectName, this.evaluationId, task).slice(0, -1)
       : this.crumbs.project(this.projectName);
   });
   projectAndTaskCrumbs = computed(() => this.breadcrumb().slice(1).filter((crumb) => crumb.link));
@@ -189,10 +188,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   selectedBuildAttempts = signal<BuildAttemptResponse[]>([]);
   selectedAttemptNumberOrNull = signal<number | null>(null);
   private initialAttemptNumber: number | null = null;
-  attemptDropdownOptions = computed(() => this.selectedBuildAttempts().map((attempt) => ({
-    label: formatAttemptDropdownLabel(attempt.number, attempt.outcome, attempt.finished_at ?? attempt.started_at),
-    value: attempt.number,
-  })));
+  attemptRowsForLogOnlyIfMultiple = computed(() => {
+    const attempts = this.selectedBuildAttempts();
+    return attempts.length > 1 ? attempts.map(buildAttemptResponseToAttemptRow) : [];
+  });
+  private attemptListComponent = viewChild(LogAttemptListComponent);
   attemptNumberForLogOnScreenOrNull = computed(() =>
     this.selectedAttemptNumberOrNull() ?? this.selectedBuildAttempts().reduce<number | null>((latest, a) => Math.max(latest ?? 0, a.number), null),
   );
@@ -326,7 +326,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const query = this.route.snapshot.queryParamMap;
     this.scopeBuildId.set(query.get('filter'));
     this.initialShowEval = query.get('eval') !== null;
-    this.initialBuildId = this.initialShowEval ? null : query.get('build') ?? query.get('filter');
+    this.initialBuildId = this.initialShowEval ? null : query.get('build');
     const attempt = Number(query.get('attempt'));
     this.initialAttemptNumber = Number.isInteger(attempt) && attempt > 0 ? attempt : null;
     const resolved = this.route.snapshot.data?.['evaluationAccess'] as EvaluationWithOptionalTask | undefined;
@@ -572,6 +572,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         // or implicit fallback when there is nothing to build).
         this.initialShowEval = false;
         this.selectEvaluationSection();
+      } else if (!this.initialBuildId && !this.selectedBuildId() && this.scopeBuildId()) {
+        this.selectFirstFailedBuildOrLimitedBuild();
       } else if (!this.initialBuildId && !this.selectedBuildId()) {
         const firstBuilding = this.builds().find(b => b.status === 'Building');
         const firstFailed = this.builds().find(b => this.statusClass(b.status) === 'failed');
@@ -615,6 +617,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (this.builds().length < result.active_count && !this.loadingMore()) {
       this.doLoadMore();
     }
+  }
+
+  private selectFirstFailedBuildOrLimitedBuild(): void {
+    const firstFailed = this.builds().find(b => this.statusClass(b.status) === 'failed');
+    if (firstFailed) this.selectBuild(firstFailed, true);
+    else this.initialBuildId = this.scopeBuildId();
   }
 
   /** Triggered by scroll proximity - pre-fetches next page before user hits bottom. */
@@ -834,6 +842,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   selectAttempt(attempt: number): void {
+    this.buildsOpen.set(false);
     const buildId = this.selectedBuildId();
     if (!buildId || attempt === this.attemptNumberForLogOnScreenOrNull()) return;
     this.selectedAttemptNumberOrNull.set(attempt);
@@ -1296,11 +1305,24 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (!target) return;
     this.selectBuild(target, true);
     const targetId = target.id;
-    setTimeout(() => {
-      const el = document.querySelector<HTMLElement>(`.build-item[data-build-id="${targetId}"] .sidebar-row-link`);
-      el?.scrollIntoView({ block: 'nearest' });
-      el?.focus();
-    }, 0);
+    setTimeout(() => this.scrollBuildRowIntoViewAndFocusButton(targetId), 0);
+  }
+
+  private scrollBuildRowIntoViewAndFocusButton(buildId: string): void {
+    const el = document.querySelector<HTMLElement>(`.build-item[data-build-id="${buildId}"] .sidebar-row-link`);
+    el?.scrollIntoView({ block: 'nearest' });
+    el?.focus();
+  }
+
+  focusAttemptListOrSelectNextBuild(buildId: string): void {
+    const selectedBuildAttemptListComponent = this.selectedBuildId() === buildId ? this.attemptListComponent() : undefined;
+    if (selectedBuildAttemptListComponent) selectedBuildAttemptListComponent.focusFirstAttemptRow();
+    else this.selectAdjacentBuild(buildId, 1);
+  }
+
+  selectBuildOutsideAttemptListOnArrowKey(buildId: string, step: 1 | -1): void {
+    if (step === -1) this.scrollBuildRowIntoViewAndFocusButton(buildId);
+    else this.selectAdjacentBuild(buildId, 1);
   }
 
   // <hash>-name-version.drv -> <hash>-name-version (the store file name, without .drv)

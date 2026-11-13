@@ -215,6 +215,19 @@ describe('MembersPageComponent teams', () => {
   });
 });
 
+describe('MembersPageComponent settings layout', () => {
+  it.each([
+    { place: 'project', route: () => projectRoute(viewer), navigation: 'app-project-settings-navigation' },
+    { place: 'cache', route: () => cacheRoute(viewer, 'View'), navigation: 'app-cache-settings-navigation' },
+    { place: 'team', route: () => teamRoute('member'), navigation: 'app-team-settings-navigation' },
+  ])('show settings navigation and members on current page, breadcrumb trail ending with Settings ($place)', ({ route, navigation }) => {
+    const { root, fixture } = setup(route());
+    const labels = Array.from(root.querySelectorAll(`${navigation} .side-navigation-label`), (label) => label.textContent);
+    expect(labels).toContain('Members');
+    expect(fixture.componentInstance.breadcrumb().at(-1)?.label).toBe('Settings');
+  });
+});
+
 describe('MembersPageComponent other places', () => {
   it('shows no access on a cache to people outside it without asking the server', () => {
     const { root, caches } = setup(cacheRoute(viewer, null));

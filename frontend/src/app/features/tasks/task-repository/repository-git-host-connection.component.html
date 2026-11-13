@@ -21,7 +21,10 @@
         [ngModel]="selectedGitHostConnectionId()" (ngModelChange)="selectGitHostConnectionAndUpdateReportCommitStatus($event)"
         [disabled]="!state().can_edit" />
     </gr-form-field>
-    <gr-form-field [hint]="selectedConnectionCanReportCommitStatus() ? '' : 'The selected connection can\'t report status.'">
+    <gr-form-field>
+      @if (!selectedConnectionCanReportCommitStatus()) {
+        <span slot="hint">The selected connection can't report status.</span>
+      }
       <gr-checkbox inputId="task-report-commit-status" label="Report commit status" [ngModel]="reportCommitStatusChecked()"
         (ngModelChange)="reportCommitStatusChecked.set($event)"
         [disabled]="!state().can_edit || !selectedConnectionCanReportCommitStatus()" />
@@ -52,7 +55,8 @@
 
   @if (savedGitHostConnectionReceivesEvents()) {
     @if (state().webhook_url; as url) {
-      <gr-form-field label="Webhook URL" [hint]="'Events to enable: ' + events()">
+      <gr-form-field label="Webhook URL">
+        <span slot="hint">Events to enable: {{ events() }}</span>
         <gr-copy-field [value]="url" />
       </gr-form-field>
     }

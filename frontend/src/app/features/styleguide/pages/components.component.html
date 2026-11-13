@@ -17,20 +17,29 @@ SPDX-License-Identifier: AGPL-3.0-only
 </div>
 
 <h2>Form field</h2>
-<p>Works with template-driven forms, which is what most of the app uses. The help link is
-   projected into the label rather than sitting beside it.</p>
+<p>The <code>gr-form-field</code> component can work with template-driven forms. The hint can appear after the label as a help icon. Hover or keyboard focus reveal hint text. Documentation links move the hint into <code>gr-label-help</code>. Clicks on the hint open the documentation. Errors and warnings appear below the field.</p>
 <gr-form-field
   label="Name"
   for="sg-name"
-  hint="Lowercase letters, digits and dashes."
   error="Cannot start or end with a dash."
   [invalid]="nameInvalid()"
   [required]="true"
 >
-  <gr-label-help slot="label" doc="concepts/projects-and-tasks/#project" title="Naming rules" />
+  <gr-label-help
+    slot="label"
+    doc="concepts/projects-and-tasks/#project"
+    title="Naming rules"
+    explanationText="Lowercase letters, digits and dashes."
+  />
   <input grInput id="sg-name" [(ngModel)]="name" />
 </gr-form-field>
 <button grButton label="Toggle error" severity="secondary" (click)="nameInvalid.set(!nameInvalid())"></button>
+
+<p>Live values such as the current instance limit stay visible under the field in the hint slot, so the user can check them.</p>
+<gr-form-field label="Concurrent builds" for="sg-limit">
+  <input grInput id="sg-limit" type="number" value="10" />
+  <span slot="hint">Instance limit: 30</span>
+</gr-form-field>
 
 <gr-form-field label="Password" for="sg-pw">
   <gr-password-input inputId="sg-pw" [(ngModel)]="password" />

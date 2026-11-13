@@ -6,15 +6,15 @@
 
 import { ChangeDetectionStrategy, Component, DestroyRef, booleanAttribute, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import type { Observable, Subscription } from 'rxjs';
-import { BadgeComponent, type BadgeSeverity, ButtonComponent, LoadStateComponent, RowComponent } from '@gradient/ui/ui';
+import { BadgeComponent, type BadgeSeverity, ButtonComponent, LoadStateComponent, RowComponent, SettingsSectionComponent } from '@gradient/ui/ui';
 import type { Permission, ProjectReadinessResponse, TaskRepositoryFetchStatus, TeamReadinessEntry } from '@core/models';
 import { accessTo } from '@core/models/access.model';
 import { NotifyService } from '@core/services/notify.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TeamsService } from '@core/services/teams.service';
-import { ManagedDisableDirective } from '@shared/access/managed-disable.directive';
 import { requestIfProjectMember } from '@shared/access/request-if-member';
 import { WritableDirective } from '@shared/access/writable.directive';
 import { links } from '@shared/routing';
@@ -30,12 +30,23 @@ const badgeLabelAndSeverityByGitAccessStatus: Record<TaskRepositoryFetchStatus, 
 @Component({
   selector: 'gr-project-readiness-card',
   standalone: true,
-  imports: [RouterLink, BadgeComponent, ButtonComponent, LoadStateComponent, RowComponent, EntityNameComponent, WritableDirective, ManagedDisableDirective],
+  imports: [NgTemplateOutlet, RouterLink, BadgeComponent, ButtonComponent, LoadStateComponent, RowComponent, SettingsSectionComponent, EntityNameComponent, WritableDirective],
   template: `
-    <gr-load-state flat [loading]="!readiness() && !readinessLoadError()" [error]="readinessLoadError()"
+    @if (showOnlyProblemItems()) {
+      @if (readinessLoadError() || anyReadinessItemNeedsAttention()) {
+        <gr-settings-section title="Readiness">
+          <ng-container *ngTemplateOutlet="readinessRows" />
+        </gr-settings-section>
+      }
+    } @else {
+      <ng-container *ngTemplateOutlet="readinessRows" />
+    }
+    <ng-template #readinessRows>
+    <gr-load-state flat [loading]="!showOnlyProblemItems() && !readiness() && !readinessLoadError()" [error]="readinessLoadError()"
       loadingMessage="Checking project readiness..." errorTitle="Couldn't load readiness" (retry)="load()">
       @if (readiness(); as r) {
         <div class="project-readiness-rows">
+          @if (!showOnlyProblemItems() || workersNeedAttention()) {
           <gr-row data-testid="readiness-workers">
             Workers
             <gr-badge [severity]="r.workers.ready ? 'success' : 'warning'">{{ r.workers.ready ? 'Ready' : 'Missing' }}</gr-badge>
@@ -59,20 +70,22 @@ const badgeLabelAndSeverityByGitAccessStatus: Record<TaskRepositoryFetchStatus, 
               @if (!r.workers.ready) {
                 @for (team of r.workers.teams_granted_without_workers; track team.name) {
                   <button grButton size="small" severity="secondary" label="Enable workers" [attr.aria-label]="'Enable workers for ' + formatEntityLabel(team)"
-                    [appManagedDisable]="workerFixesAccessState()" [disabled]="teamNameWithGrantRequestInFlight() !== null"
+                    [disabled]="teamNameWithGrantRequestInFlight() !== null"
                     [loading]="teamNameWithGrantRequestInFlight() === team.name" (click)="addTeamWorkersToProjectTeamGrantAndReload(team)"></button>
                 }
                 @for (team of r.workers.teams_you_can_grant; track team.name) {
                   <button grButton size="small" severity="secondary" [label]="'Grant to ' + team.display_name + ' including workers'"
                     [attr.aria-label]="'Grant to ' + formatEntityLabel(team) + ' including workers'"
-                    [appManagedDisable]="workerFixesAccessState()" [disabled]="teamNameWithGrantRequestInFlight() !== null"
+                    [disabled]="teamNameWithGrantRequestInFlight() !== null"
                     [loading]="teamNameWithGrantRequestInFlight() === team.name" (click)="createTeamGrantForTeamWorkersOnly(team)"></button>
                 }
                 <a grButton size="small" severity="secondary" label="Register worker" icon="construction" [routerLink]="links.projectPage(project(), 'workers')"></a>
               }
             </ng-container>
           </gr-row>
+          }
 
+          @if (!showOnlyProblemItems() || cacheNeedsAttention()) {
           <gr-row data-testid="readiness-cache">
             Cache
             <gr-badge [severity]="r.cache.ready ? 'success' : 'warning'">{{ r.cache.ready ? 'Ready' : 'Missing' }}</gr-badge>
@@ -92,7 +105,9 @@ const badgeLabelAndSeverityByGitAccessStatus: Record<TaskRepositoryFetchStatus, 
               }
             </ng-container>
           </gr-row>
+          }
 
+          @if (!showOnlyProblemItems() || gitAccessNeedsAttention()) {
           <gr-row data-testid="readiness-git">
             Git Access
             <gr-badge [severity]="gitAccessBadge().severity">{{ gitAccessBadge().label }}</gr-badge>
@@ -107,16 +122,20 @@ const badgeLabelAndSeverityByGitAccessStatus: Record<TaskRepositoryFetchStatus, 
                 }
               }
             </ng-container>
-            <ng-container slot="actions" *appWritable="taskRepositoryPageLinkAccessState()">
-              @for (task of tasksWithFailingRepositoryAccess(); track task.name) {
-                <a grButton size="small" severity="secondary" label="Open repository" [attr.aria-label]="'Open the repository for ' + formatEntityLabel(task)"
-                  [routerLink]="links.taskPage(project(), task.name, 'repository')"></a>
-              }
-            </ng-container>
+            @if (taskRepositoryPageLinkAccessState().canEdit) {
+              <ng-container slot="actions">
+                @for (task of tasksWithFailingRepositoryAccess(); track task.name) {
+                  <a grButton size="small" severity="secondary" label="Open repository" [attr.aria-label]="'Open the repository for ' + formatEntityLabel(task)"
+                    [routerLink]="links.taskPage(project(), task.name, 'repository')"></a>
+                }
+              </ng-container>
+            }
           </gr-row>
+          }
         </div>
       }
     </gr-load-state>
+    </ng-template>
   `,
   styleUrl: './project-readiness-card.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -133,6 +152,7 @@ export class ProjectReadinessCardComponent {
   readonly project = input.required<string>();
   readonly projectPermissions = input.required<readonly Permission[]>();
   readonly projectSettingsAreManagedByServer = input(false, { transform: booleanAttribute });
+  readonly showOnlyProblemItems = input(false, { transform: booleanAttribute });
 
   protected readonly readiness = signal<ProjectReadinessResponse | null>(null);
   protected readonly readinessLoadError = signal<unknown>(null);
@@ -152,6 +172,10 @@ export class ProjectReadinessCardComponent {
   protected readonly tasksWithFailingRepositoryAccess = computed(() =>
     (this.readiness()?.repository.tasks ?? []).filter((task) => task.status === 'failing'),
   );
+  protected readonly workersNeedAttention = computed(() => this.readiness()?.workers.ready === false);
+  protected readonly cacheNeedsAttention = computed(() => this.readiness()?.cache.ready === false);
+  protected readonly gitAccessNeedsAttention = computed(() => this.readiness()?.repository.status === 'failing');
+  protected readonly anyReadinessItemNeedsAttention = computed(() => this.workersNeedAttention() || this.cacheNeedsAttention() || this.gitAccessNeedsAttention());
   protected readonly gitAccessBadge = computed(() => badgeLabelAndSeverityByGitAccessStatus[this.readiness()?.repository.status ?? 'unchecked']);
 
   constructor() {

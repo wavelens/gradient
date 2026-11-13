@@ -23,18 +23,18 @@ function render(editable: boolean) {
 }
 
 describe('AllowedCapabilitiesComponent', () => {
-  const pills = (root: HTMLElement, selector = '.allowed-pill') =>
-    Array.from(root.querySelectorAll(selector)).map((el) => el.textContent?.trim());
+  const pills = (root: HTMLElement, selector = '.allowed-capability-chip') =>
+    Array.from(root.querySelectorAll(selector)).map((el) => el.textContent?.split(':')[0].trim());
 
   it('lists only the allowed capabilities, in the order network, secrets, exec, eval, build', () => {
     const root = render(false).nativeElement as HTMLElement;
 
-    expect(root.textContent).toContain('Allowed:');
+    expect(root.textContent).not.toContain('Allowed:');
     expect(root.querySelectorAll('button').length).toBe(0);
     expect(pills(root)).toEqual(['network', 'eval', 'build']);
   });
 
-  it('says none when no capability is allowed', () => {
+  it('renders nothing when no capability is allowed', () => {
     const fixture = render(false);
     fixture.componentRef.setInput('value', {
       enable_network: false,
@@ -46,15 +46,28 @@ describe('AllowedCapabilitiesComponent', () => {
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     expect(pills(root)).toEqual([]);
-    expect(root.textContent).toContain('none');
+    expect(root.textContent?.trim()).toBe('');
   });
 
-  it("grey out an allowed capability that the connected worker doesn't report", () => {
+  it('shows every allowed capability grey while the worker reports nothing', () => {
+    const root = render(false).nativeElement as HTMLElement;
+    expect(pills(root, '.allowed-capability-chip:not(.chip-capability-reported)')).toEqual(['network', 'eval', 'build']);
+    expect(pills(root, '.chip-capability-reported')).toEqual([]);
+  });
+
+  it('turns allowed capabilities green only when the worker reports them', () => {
     const fixture = render(false);
     fixture.componentRef.setInput('workerReportedCapabilities', { network: true, secrets: true, exec: true, eval: false, build: true });
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
-    expect(pills(root, '.allowed-pill--unsupported-by-worker')).toEqual(['eval']);
+    expect(pills(root, '.chip-capability-reported')).toEqual(['network', 'build']);
+    expect(pills(root, '.allowed-capability-chip:not(.chip-capability-reported)')).toEqual(['eval']);
+    const hints = Array.from(root.querySelectorAll('.allowed-capability-chip .sr-only')).map((el) => el.textContent);
+    expect(hints).toEqual([
+      ': Allowed and supported by the worker.',
+      ": Allowed. The worker didn't report support.",
+      ': Allowed and supported by the worker.',
+    ]);
   });
 
   it('toggles only the clicked capability when editable', () => {

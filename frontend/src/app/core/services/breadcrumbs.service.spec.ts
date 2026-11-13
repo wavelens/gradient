@@ -73,6 +73,15 @@ describe('BreadcrumbsService', () => {
     expect(labels(crumbs.team('core', { label: 'Members' }))).toEqual(['Teams', 'MyTeam', 'Members']);
   });
 
+  it('ends a team settings trail at a linked settings crumb', () => {
+    const { crumbs } = setup();
+
+    const trail = crumbs.teamSettings('core');
+
+    expect(labels(trail)).toEqual(['Teams', 'MyTeam', 'Settings']);
+    expect(String(trail[2].link)).toBe('/team/core/settings');
+  });
+
   it('holds a name back until it is known instead of showing the URL name', () => {
     const project = new Subject<{ display_name: string }>();
     const { crumbs } = setup({ getProject: () => project });

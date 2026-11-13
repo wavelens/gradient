@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, booleanAttribute, input, model } from '@angular/core';
 import { AllowedCapabilities, GradientCapabilities } from '@core/models';
-import { IconComponent } from '@gradient/ui/ui';
+import { BadgeComponent, IconComponent, TooltipDirective } from '@gradient/ui/ui';
 
 @Component({
   selector: 'gr-allowed-capabilities',
   standalone: true,
-  imports: [IconComponent],
+  imports: [BadgeComponent, IconComponent, TooltipDirective],
   template: `
     @if (editable()) {
       <div class="allowed-toggles">
@@ -30,19 +30,18 @@ import { IconComponent } from '@gradient/ui/ui';
       </div>
     } @else {
       <div class="allowed-summary">
-        Allowed:
         @for (cap of capabilities; track cap.key) {
           @if (value()[cap.key]) {
-            @let unsupported = workerReportedCapabilities()?.[cap.reportedCapabilityKey] === false;
-            <span
-              class="allowed-pill"
-              [class.allowed-pill--unsupported-by-worker]="unsupported"
-              [attr.title]="unsupported ? 'Allowed, but the worker doesn\\'t report support' : null"
-            >{{ cap.label }}</span>
+            @let reported = workerReportedCapabilities()?.[cap.reportedCapabilityKey] === true;
+            @let tooltip = reported ? reportedTooltip : unreportedTooltip;
+            <gr-badge
+              class="allowed-capability-chip"
+              [class.chip-capability-reported]="reported"
+              [severity]="reported ? 'success' : 'neutral'"
+              [grTooltip]="tooltip"
+              tabindex="0"
+            >{{ cap.label }}<span class="sr-only">: {{ tooltip }}</span></gr-badge>
           }
-        }
-        @if (!hasAnyCapability()) {
-          none
         }
       </div>
     }
@@ -63,7 +62,8 @@ export class AllowedCapabilitiesComponent {
     { key: 'enable_build', reportedCapabilityKey: 'build', label: 'build' },
   ];
 
-  readonly hasAnyCapability = computed(() => this.capabilities.some((cap) => this.value()[cap.key]));
+  readonly reportedTooltip = 'Allowed and supported by the worker.';
+  readonly unreportedTooltip = "Allowed. The worker didn't report support.";
 
   toggle(key: keyof AllowedCapabilities): void {
     this.value.update((value) => ({ ...value, [key]: !value[key] }));

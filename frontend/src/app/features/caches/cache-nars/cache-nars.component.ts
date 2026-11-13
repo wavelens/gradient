@@ -25,12 +25,12 @@ import {
   StatCardComponent,
   TableComponent,
 } from '@gradient/ui/ui';
-import { WritableDirective } from '@shared/access';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
 import { CacheNarsPinScopeDialogComponent } from './cache-nars-pin-scope-dialog.component';
 import { formatBytes, formatCount, RelativeTimePipe } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
+import { BINARY_CACHE_STAT_TILE_VALUE_EXPLANATIONS } from '../cache-storage-stat-explanations';
 import { NarSummary, NarStats, Paginated } from '@core/models';
 import { links } from '@shared/routing';
 
@@ -55,7 +55,6 @@ function convertPinnedQueryValueToFilter(value: string | null): PackagePinFilter
     ButtonComponent,
     InputDirective,
     SkeletonComponent,
-    WritableDirective,
     CacheNarsDetailDrawerComponent,
     CacheNarsPinScopeDialogComponent,
     BadgeComponent,
@@ -80,6 +79,7 @@ export class CacheNarsComponent implements OnInit {
   private confirm = inject(ConfirmService);
 
   protected readonly links = links;
+  protected readonly binaryCacheStatTileValueExplanations = BINARY_CACHE_STAT_TILE_VALUE_EXPLANATIONS;
   access = injectCacheAccessTo('writeStore');
 
   cacheName = '';

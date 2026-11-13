@@ -16,7 +16,10 @@ import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AuthService } from '@core/services/auth.service';
 
-const TEAMS = [{ name: 'platform', display_name: 'Platform', role: 'admin' }] as TeamSummary[];
+const TEAMS = [
+  { name: 'platform', display_name: 'Platform', role: 'admin' },
+  { name: 'web', display_name: 'Web', role: 'member' },
+] as TeamSummary[];
 
 function setup(canCreateTeam: boolean, list: () => Observable<TeamSummary[]> = () => of(TEAMS)) {
   const create = vi.fn().mockReturnValue(of('id'));
@@ -38,12 +41,12 @@ function setup(canCreateTeam: boolean, list: () => Observable<TeamSummary[]> = (
 }
 
 describe('TeamsListComponent', () => {
-  it('lists the teams of the user with their role', () => {
+  it('lists the teams as cards like projects and caches, with a role badge only for members', () => {
     const { fixture } = setup(true);
-    const text = (fixture.nativeElement as HTMLElement).textContent || '';
-    expect(text).toContain('Platform');
-    expect(text).toContain('Admin');
-    expect((fixture.nativeElement as HTMLElement).querySelector('.row-link')?.getAttribute('aria-label')).toBe('Open team Platform (platform)');
+    const cards = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLAnchorElement>('gr-card-grid gr-nav-card a.nav-card'));
+    expect(cards.map((card) => card.getAttribute('href'))).toEqual(['/team/platform', '/team/web']);
+    expect(cards[0].querySelector('.nav-card__meta gr-badge')).toBeNull();
+    expect(cards[1].querySelector('.nav-card__meta gr-badge')?.textContent?.trim()).toBe('Member');
   });
 
   it('shows a failed load with Try Again instead of the empty state', () => {

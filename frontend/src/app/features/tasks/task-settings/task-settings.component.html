@@ -4,15 +4,13 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Task Settings">
-@if (canOpenParentProjectSettings()) {
-  <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
-}
-<app-server-configuration-managed-banner [access]="access()" kind="task" permission="editTask" showReadOnlyNote />
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="General">
+<app-task-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" [taskUrlName]="taskName" />
+<app-settings-access-state-badge slot="after-title" [access]="access()" kind="task" permission="editTask" showReadOnlyNote />
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!task()" loadingMessage="Loading task settings..."
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
-  <gr-settings-section title="General">
+  <gr-settings-section>
     <gr-form-field label="Name" for="task-name" hint="The name is part of every URL and stays locked here. Edit the Display Name instead.">
       <input grInput id="task-name" [value]="proj.name" disabled />
     </gr-form-field>
@@ -31,8 +29,11 @@
     </gr-form-field>
 
     <gr-form-field label="Keep Evaluations" for="task-keep" required
-      [hint]="config.maxKeepEvaluationsPerTask != null ? 'Instance limit: ' + config.maxKeepEvaluationsPerTask : undefined" [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
+      [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
       <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Number of completed evaluations to retain for metrics and history" />
+      @if (config.maxKeepEvaluationsPerTask != null) {
+        <span slot="hint">Instance limit: {{ config.maxKeepEvaluationsPerTask }}</span>
+      }
       <input grInput id="task-keep" type="number" min="1" step="1" [attr.max]="config.maxKeepEvaluationsPerTask" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
@@ -124,39 +125,9 @@
 
   </gr-settings-section>
 
-  <gr-settings-section title="More Settings" [card]="false">
-    <gr-row-list>
-      <gr-row icon="hub" linkLabel="Repository" [link]="links.taskPage(projectName, taskName, 'repository')">
-        Repository
-        <span slot="meta">Repository URL, deploy key, builds from events on the Git host, commit status</span>
-      </gr-row>
-      <gr-row icon="schedule" linkLabel="Triggers" [link]="links.taskPage(projectName, taskName, 'triggers')">
-        Triggers
-        <span slot="meta">Polling interval, cron schedule, push trigger, pull request trigger.</span>
-      </gr-row>
-      <gr-row icon="bolt" linkLabel="Actions" [link]="links.taskPage(projectName, taskName, 'actions')">
-        Actions
-        <span slot="meta">Webhooks, chat messages, commit statuses, pull requests</span>
-      </gr-row>
-      <gr-row icon="share" linkLabel="Flake inputs" [link]="links.taskPage(projectName, taskName, 'flake-inputs')">
-        Flake Inputs
-        <span slot="meta">Override an input's git URL, or force an update keeping the original</span>
-      </gr-row>
-      <gr-row icon="database" linkLabel="Project cache subscriptions" [link]="links.projectPage(projectName, 'caches')">
-        Cache Subscriptions
-        <span slot="meta">Nix binary caches the project pushes builds to</span>
-      </gr-row>
-      <gr-row icon="construction" linkLabel="Project workers" [link]="links.projectPage(projectName, 'workers')">
-        Workers
-        <span slot="meta">Build workers registered to the project</span>
-      </gr-row>
-    </gr-row-list>
-  </gr-settings-section>
-
-  <!-- Status -->
-  <gr-settings-section title="Status">
+  <gr-settings-section title="Management">
     <gr-row>
-      {{ proj.active ? 'Task is Active' : 'Task is Inactive' }}
+      {{ proj.active ? 'Active' : 'Inactive' }}
       <span slot="meta">{{ proj.active ? 'Triggers start an evaluation.' : "Triggers don't start an evaluation. The Run button can still start an evaluation." }}</span>
       <button
         slot="actions"
@@ -167,29 +138,22 @@
         severity="secondary"
         (click)="toggleActive()"
         [loading]="toggling()"
-        [appManagedDisable]="access()"
       ></button>
     </gr-row>
-  </gr-settings-section>
-
-  @if (hasCreateTaskPermission()) {
-    <gr-settings-section title="Duplicate task">
+    @if (hasCreateTaskPermission() && accessService.isWritable(access())) {
       <gr-row>
-        Duplicate task
-        <span slot="meta">Create a new task for another branch with the same settings, triggers and actions.</span>
+        Copy for another branch
         <button
-            slot="actions"
-            *appWritable="access()"
-            grButton
-            label="Duplicate task"
-            icon="content_copy"
-            severity="secondary"
-            (click)="openDuplicateTaskDialogWithPrefilledFields()"
-            [appManagedDisable]="access()"
+          slot="actions"
+          grButton
+          label="Duplicate task"
+          icon="content_copy"
+          severity="secondary"
+          (click)="openDuplicateTaskDialogWithPrefilledFields()"
         ></button>
       </gr-row>
-    </gr-settings-section>
-  }
+    }
+  </gr-settings-section>
 
   @if (accessService.isWritable(access())) {
     <gr-settings-section title="Danger Zone" danger>

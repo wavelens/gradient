@@ -4,25 +4,33 @@ SPDX-License-Identifier: AGPL-3.0-only
 -->
 
 <div class="page-layout" [class]="'page-layout page-layout--' + width()">
-  <header class="page-layout__header">
   @if (breadcrumb().length) {
     <gr-breadcrumb [trail]="breadcrumb()" />
   }
-    <h1 tabindex="-1" [attr.title]="title()">{{ title() }}</h1>
-    @if (subtitle()) {
-      <p class="page-layout__subtitle">{{ subtitle() }}</p>
-    }
-    <div class="page-layout__meta">
-      <ng-content select="[slot=meta]"></ng-content>
-    </div>
-    <div class="page-layout__actions">
-      <ng-content select="[slot=actions]"></ng-content>
-    </div>
-  </header>
-  <div class="page-layout__banners">
-    <ng-content select="[slot=banner]"></ng-content>
+  <div class="page-layout__settings-navigation">
+    <ng-content select="[slot=settings-navigation]"></ng-content>
   </div>
-  <div class="page-layout__body">
-    <ng-content></ng-content>
+  <div class="page-layout__main-column">
+    <header class="page-layout__header">
+      <div class="page-layout__title-row">
+        <h1 tabindex="-1" [attr.title]="title()">{{ title() }}</h1>
+        <ng-content select="[slot=after-title]"></ng-content>
+      </div>
+      @if (subtitle()) {
+        <p class="page-layout__subtitle">{{ subtitle() }}</p>
+      }
+      <div class="page-layout__meta">
+        <ng-content select="[slot=meta]"></ng-content>
+      </div>
+      <div class="page-layout__actions">
+        <ng-content select="[slot=actions]"></ng-content>
+      </div>
+    </header>
+    <div class="page-layout__banners">
+      <ng-content select="[slot=banner]"></ng-content>
+    </div>
+    <div class="page-layout__body">
+      <ng-content></ng-content>
+    </div>
   </div>
 </div>

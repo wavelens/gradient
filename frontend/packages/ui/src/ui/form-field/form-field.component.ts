@@ -7,6 +7,8 @@
 import { Component, DestroyRef, ElementRef, effect, inject, input, computed, signal, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { AbstractControl, NgControl } from '@angular/forms';
 import { FormErrors } from './form-errors';
+import { NgTemplateOutlet } from '@angular/common';
+import { LabelExplanationButtonComponent } from '../label-explanation-button/label-explanation-button.component';
 
 type FieldControl = AbstractControl | NgControl | null;
 
@@ -16,6 +18,7 @@ let formFieldMessageSeq = 0;
 /// the app binds ngModel against plain objects and has no AbstractControl to pass.
 @Component({
   selector: 'gr-form-field',
+  imports: [NgTemplateOutlet, LabelExplanationButtonComponent],
   standalone: true,
   templateUrl: './form-field.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -47,6 +50,11 @@ export class FormFieldComponent {
     const id = this.for();
     return id ? `${id}-message` : this.messageElementIdWhenForInputIsMissing;
   });
+  hintTextId = computed(() => `${this.messageId()}-hint`);
+  helpButtonAccessibleName = computed(() => {
+    const label = this.label();
+    return label ? `About ${label}` : 'About this setting';
+  });
 
   /// The projected control is owned by the caller, so the error semantics are
   /// applied to it here rather than duplicated at every call site.
@@ -71,7 +79,7 @@ export class FormFieldComponent {
       if (!control) return;
       const invalid = this.showError();
       control.setAttribute('aria-invalid', String(invalid));
-      control.setAttribute('aria-describedby', this.messageId());
+      control.setAttribute('aria-describedby', this.hint() ? `${this.hintTextId()} ${this.messageId()}` : this.messageId());
       if (this.required()) control.setAttribute('aria-required', 'true');
     });
   }

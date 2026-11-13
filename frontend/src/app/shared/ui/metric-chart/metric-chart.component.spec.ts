@@ -129,15 +129,16 @@ describe('MetricChartComponent', () => {
     fixture.destroy();
     expect(fixture.nativeElement.querySelector('.metric-chart__plot svg')).toBeNull();
   });
-  it('renders a subtitle under the title', async () => {
+  it('explains the chart by a help button after the title', async () => {
     const fixture = TestBed.createComponent(MetricChartComponent);
     fixture.componentRef.setInput('title', 'Total Build Time');
-    fixture.componentRef.setInput('subtitle', 'Sum of all completed build durations');
+    fixture.componentRef.setInput('explanationText', 'Sum of all completed build durations');
     fixture.detectChanges();
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('h2')?.textContent).toContain('Total Build Time');
-    expect(root.querySelector('.metric-chart__subtitle')?.textContent).toContain('Sum of all');
+    const button = root.querySelector('h2 gr-label-help button')!;
+    expect(button.getAttribute('aria-label')).toBe('About Total Build Time');
+    expect(root.querySelector('h2 [hidden]')?.textContent).toBe('Sum of all completed build durations');
   });
 
   it('covers the plot with a placeholder while loading and keeps the header', async () => {
@@ -159,13 +160,13 @@ describe('MetricChartComponent', () => {
   it('drops the header entirely when bare', async () => {
     const fixture = TestBed.createComponent(MetricChartComponent);
     fixture.componentRef.setInput('title', 'Total');
-    fixture.componentRef.setInput('subtitle', 'Sum');
+    fixture.componentRef.setInput('explanationText', 'Sum');
     fixture.componentRef.setInput('bare', true);
     fixture.detectChanges();
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('h2')).toBeNull();
-    expect(root.querySelector('.metric-chart__subtitle')).toBeNull();
+    expect(root.querySelector('gr-label-help')).toBeNull();
   });
   it('gives up to eight series distinct palette colours and keeps the danger colour out of it', () => {
     const roles = ['--gr-graph-running', '--gr-graph-success', '--gr-graph-warning', '--gr-chart-purple', '--gr-chart-cyan', '--gr-chart-pink', '--gr-chart-orange', '--gr-chart-teal'];

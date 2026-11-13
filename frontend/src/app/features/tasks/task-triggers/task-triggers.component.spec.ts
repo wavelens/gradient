@@ -122,19 +122,13 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(hint?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
   });
 
-  it('shows but disables write buttons under state-managed access', () => {
+  it('hides write buttons under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('server configuration');
-    const newBtn = findByText(fixture.nativeElement, 'new trigger') as HTMLButtonElement | null;
-    const editBtn = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
-    const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
+    expect(fixture.nativeElement.querySelector('app-settings-access-state-badge')?.textContent).toContain('server configuration');
     const fireBtn = findByText(fixture.nativeElement, 'poll now') as HTMLButtonElement | null;
-    expect(newBtn).not.toBeNull();
-    expect(newBtn!.getAttribute('aria-disabled')).toBe('true');
-    expect(editBtn).not.toBeNull();
-    expect(editBtn!.getAttribute('aria-disabled')).toBe('true');
-    expect(deleteBtn).not.toBeNull();
-    expect(deleteBtn!.getAttribute('aria-disabled')).toBe('true');
+    expect(findByText(fixture.nativeElement, 'new trigger')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
     expect(fireBtn).not.toBeNull();
     // Poll now can start an evaluation. The button doesn't edit config, so the managed flag can't disable it (AccessService.triggerAccess).
     expect(fireBtn!.disabled).toBe(false);

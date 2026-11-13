@@ -56,7 +56,14 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   font-size: $font-size-xs;
   color: var(--gr-text-secondary);
 
-  &--wildcard { max-width: 100%; overflow-wrap: anywhere; }
+  &--wildcard {
+    display: inline-block;
+    max-width: min(100%, 24rem);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    background: none;
+  }
 
   &--link {
     text-decoration: none;
@@ -68,6 +75,15 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
       border-color: var(--gr-accent);
     }
   }
+}
+
+.wildcard-pattern-list {
+  margin: $spacing-xs 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: $font-size-sm;
+  color: var(--gr-text-secondary);
+  overflow-wrap: anywhere;
 }
 
 // 3px bottom padding gives the selected tab's 1px cover shadow room to paint

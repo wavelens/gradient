@@ -86,6 +86,7 @@ function setup(
           getUpstreamCaches: Array.isArray(upstreamCaches) ? () => of(upstreamCaches) : upstreamCaches,
           updateUpstream,
           removeUpstream: extra.removeUpstream ?? vi.fn(() => of('ok')),
+          getSubscriptionRequests: () => of([]),
         },
       },
       ...(extra.confirm ? [{ provide: ConfirmService, useValue: { confirm: extra.confirm } }] : []),
@@ -134,18 +135,13 @@ describe('UpstreamCachesComponent - access gating', () => {
     expect(findIconButton(fixture.nativeElement, 'delete')).toBeNull();
   });
 
-  it('shows but disables Add / Edit / Delete under state-managed access and says why', () => {
+  it('hides Add / Edit / Delete under state-managed access and says why in the title chip', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const addBtn = findByText(fixture.nativeElement, 'add upstream cache') as HTMLButtonElement | null;
-    const editBtn = findIconButton(fixture.nativeElement, 'edit');
-    const delBtn = findIconButton(fixture.nativeElement, 'delete');
-    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')?.textContent).toContain('come from the server configuration');
-    expect(addBtn).not.toBeNull();
-    expect(addBtn!.getAttribute('aria-disabled')).toBe('true');
-    expect(editBtn).not.toBeNull();
-    expect(editBtn!.getAttribute('aria-disabled')).toBe('true');
-    expect(delBtn).not.toBeNull();
-    expect(delBtn!.getAttribute('aria-disabled')).toBe('true');
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('app-settings-access-state-badge')?.textContent).toContain('come from the server configuration');
+    expect(findByText(root, 'add upstream cache')).toBeNull();
+    expect(findIconButton(root, 'edit')).toBeNull();
+    expect(findIconButton(root, 'delete')).toBeNull();
   });
 
   it('renders Add / Edit / Delete enabled under full access', () => {

@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? 'My projects' : 'Public projects on this server. Sign in to see your own.'">
+<gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? undefined : 'Public projects on this server. Sign in to see your own.'">
   @if (canCreateProject() && projects.items().length) {
     <button slot="actions" grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
   } @else if (!authService.isAuthenticated()) {
@@ -24,7 +24,7 @@
         slot="empty"
         [icon]="entityKindToIconName.project"
         title="No projects yet"
-        [message]="canCreateProject() ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
+        [message]="canCreateProject() ? undefined : 'Ask a project administrator to add this account to a project.'"
       >
         @if (canCreateProject()) {
           <button slot="action" grButton label="Create Project" (click)="openCreateDialog()"></button>
@@ -71,7 +71,7 @@
   >
     <div slot="empty">
       @if (!authService.isAuthenticated()) {
-        <gr-empty-state icon="public" title="No public projects" message="Nobody has published a project on this server yet." />
+        <gr-empty-state icon="public" title="No public projects" />
       }
     </div>
     <div class="discover-header">

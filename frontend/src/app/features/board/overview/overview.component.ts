@@ -28,9 +28,9 @@ const formatJobCountWithHiddenJobs = (shown: number, hidden: number): number | s
         <gr-live-status [connected]="!!connected()" />
       }
       <gr-card-grid class="kpis" min="180px">
-        <gr-stat-card compact label="Connected workers" [value]="workers() ?? failed" />
-        <gr-stat-card compact label="Pending jobs" [value]="pending() ?? failed" />
-        <gr-stat-card compact label="Running jobs" [value]="active() ?? failed" />
+        <gr-stat-card compact label="Connected workers" valueExplanation="Total number of worker machines across all projects with a current connection to the server." [value]="workers() ?? failed" />
+        <gr-stat-card compact label="Pending jobs" valueExplanation="Jobs in the scheduler queue with no worker assigned yet plus evaluations that have not started make up this number in projects you can view." [value]="pending() ?? failed" />
+        <gr-stat-card compact label="Running jobs" valueExplanation="Jobs that the scheduler assigned to a worker and that have no finish time yet, in projects you can view. The count can reach 500 at most." [value]="active() ?? failed" />
       </gr-card-grid>
 
       <gr-metric-chart

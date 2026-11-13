@@ -54,7 +54,6 @@ export function formatRevokedAccessCountsText(counts: RevokedUserAccessCounts): 
       width="settings"
       [breadcrumb]="breadcrumb()"
       [title]="username() || 'User access'"
-      subtitle="Enter a username to show all projects, caches and teams that the user can access."
     >
       @if (summary() && username()) {
         <button slot="actions" grButton label="Revoke All Access" icon="person_remove" severity="danger" (click)="confirmAndRevokeAllUserAccess()"></button>

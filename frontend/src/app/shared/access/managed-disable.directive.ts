@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Directive, ElementRef, Injector, Renderer2, booleanAttribute, computed, effect, inject, input } from '@angular/core';
+import { Directive, ElementRef, Renderer2, booleanAttribute, computed, effect, inject, input } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgControl } from '@angular/forms';
-import { ButtonComponent, ButtonDisabledReasonSignalSupplier, GR_BUTTON_DISABLED_REASON_INJECTION_TOKEN } from '@gradient/ui/ui';
 import { AccessState } from '@core/models/access.model';
 import { AccessService } from './access.service';
 
@@ -15,14 +14,12 @@ import { AccessService } from './access.service';
 @Directive({
   selector: '[appManagedDisable]',
   standalone: true,
-  providers: [{ provide: GR_BUTTON_DISABLED_REASON_INJECTION_TOKEN, useExisting: ManagedDisableDirective }],
 })
-export class ManagedDisableDirective implements ButtonDisabledReasonSignalSupplier {
+export class ManagedDisableDirective {
   private el = inject(ElementRef<HTMLElement>);
   private renderer = inject(Renderer2);
   private access = inject(AccessService);
   private ngControl = inject(NgControl, { optional: true, self: true });
-  private injector = inject(Injector);
 
   appManagedDisable = input.required<AccessState | null | undefined>();
   disabled = input(false, { transform: booleanAttribute });
@@ -42,10 +39,6 @@ export class ManagedDisableDirective implements ButtonDisabledReasonSignalSuppli
 
   private apply(disable: boolean, reason: string | null): void {
     const node = this.el.nativeElement;
-    if (this.injector.get(ButtonComponent, null, { self: true })) {
-      this.renderer.setProperty(node, 'disabled', this.disabled());
-      return;
-    }
     this.renderer.setProperty(node, 'disabled', disable);
     if (reason) {
       this.renderer.setAttribute(node, 'aria-disabled', 'true');

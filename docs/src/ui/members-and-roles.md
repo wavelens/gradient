@@ -5,9 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Members and Roles
 
-Members and roles define who can access a project, cache, or team and what each person can do there. Projects, caches, and teams each have a separate member list. Use the **Members** button in the header of a project, cache, or team page to open the page. The URL is `/project/<name>/members/people`, `/caches/<name>/members/people`, or `/team/<name>/members/people`.
+Members and roles define who can access a project, cache, or team and what each person can do there. Projects, caches, and teams each have a separate member list. Open **Settings** in the header of a project, cache, or team page. Select **Members** in the side navigation. The URL is `/project/<name>/members/people`, `/caches/<name>/members/people`, or `/team/<name>/members/people`.
 
-- The project page and the cache page show the **Members** button to members and instance admins. Anonymous visitors and signed-in users without access don't see the button.
+- Project pages and cache pages display **Settings** for members and instance admins. Members who can't change settings see the same button on those pages. Those members view settings pages in read-only mode. Team pages display **Settings** for all team members. Anonymous visitors and signed-in users without access don't see the buttons.
 - Members with the `View` role see the page in read-only mode. They get no **Invite Member**, no role changes, and no **Remove**.
 
 ![Members](../assets/screenshots/members_and_roles.png)

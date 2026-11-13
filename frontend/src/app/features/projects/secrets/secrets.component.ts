@@ -15,7 +15,6 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { accessTo, ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
 import { docsUrl } from '@core/docs';
 import {
-  BadgeComponent,
   ButtonComponent,
   CopyFieldComponent,
   DialogComponent,
@@ -27,10 +26,11 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { MANAGED_ITEM_DISABLED_REASON, WritableDirective, createMissingPermissionLoadStateError, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
+import { ServerConfigurationManagedLockButtonComponent, createMissingPermissionLoadStateError, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { RelativeTimePipe } from '@shared/text';
+import { ProjectSettingsNavigationComponent } from '../project-settings-navigation/project-settings-navigation.component';
 
 const SECRET_NAME_MAX_LENGTH = 64;
 const SECRET_NAME = new RegExp(`^[a-z0-9][a-z0-9-]{0,${SECRET_NAME_MAX_LENGTH - 1}}$`);
@@ -39,9 +39,9 @@ const SECRET_NAME = new RegExp(`^[a-z0-9][a-z0-9-]{0,${SECRET_NAME_MAX_LENGTH - 
   selector: 'app-project-secrets',
   standalone: true,
   imports: [
+    ProjectSettingsNavigationComponent,
     RelativeTimePipe,
     FormsModule,
-    BadgeComponent,
     ButtonComponent,
     CopyFieldComponent,
     DialogComponent,
@@ -53,7 +53,7 @@ const SECRET_NAME = new RegExp(`^[a-z0-9][a-z0-9-]{0,${SECRET_NAME_MAX_LENGTH - 
     RowComponent,
     RowListComponent,
     SettingsSectionComponent,
-    WritableDirective,
+    ServerConfigurationManagedLockButtonComponent,
   ],
   templateUrl: './secrets.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -64,7 +64,6 @@ export class SecretsComponent implements OnInit {
   private secretsService = inject(ProjectSecretsService);
   private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
-  protected readonly managedItemDisabledReason = MANAGED_ITEM_DISABLED_REASON;
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
@@ -87,7 +86,7 @@ export class SecretsComponent implements OnInit {
   formError = signal<string | null>(null);
 
   projectName = '';
-  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Secrets' }));
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName));
   nameError = computed(() => {
     const name = this.name();
     if (name === '' || SECRET_NAME.test(name)) return null;

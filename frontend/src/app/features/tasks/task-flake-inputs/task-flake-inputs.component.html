@@ -4,9 +4,12 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Flake Inputs" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
-  <a slot="actions" *appWritable="access()" grButton label="Open the Repository page" icon="hub" severity="secondary"
-     [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Flake inputs">
+  <app-task-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" [taskUrlName]="taskName" />
+  @if (access().canEdit) {
+    <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
+       [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
+  }
   @if (overrides().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -14,10 +17,9 @@
         label="New Override"
         icon="add"
         (click)="startCreate()"
-        [appManagedDisable]="access()"
       ></button>
   }
-  <app-server-configuration-managed-banner [access]="access()" kind="task" permission="editTask" showReadOnlyNote />
+  <app-settings-access-state-badge slot="after-title" [access]="access()" kind="task" permission="editTask" showReadOnlyNote />
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"
@@ -35,7 +37,6 @@
       label="New Override"
       icon="add"
       (click)="startCreate()"
-      [appManagedDisable]="access()"
       ></button>
       <div class="overrides-list">
         @for (override of overrides(); track override.id) {
@@ -65,7 +66,6 @@
                   icon="edit"
                   severity="secondary"
                   size="small"
-                  [appManagedDisable]="access()"
                   (click)="startEdit(override)"
                 ></button>
                 <button
@@ -75,7 +75,6 @@
                   icon="delete"
                   severity="danger"
                   size="small"
-                  [appManagedDisable]="access()"
                   (click)="deleteOverride(override)"
                 ></button>
               </div>
@@ -122,8 +121,8 @@
 <ng-template #overrideForm>
   <gr-form-field label="Input Name" for="fi-input-name" required
     [invalid]="(submitAttempted() || inputNameModel.dirty) && !!inputNameError" [error]="inputNameError ?? ''">
-    <gr-label-help slot="label" doc="guides/flake-updates/#1-track-the-inputs" title="Track flake inputs" />
-    <span slot="hint">Input name from your flake.nix, or a glob like <code>nixpkgs*</code> / <code>*</code> to match many. A literal name wins over a glob.</span>
+    <gr-label-help slot="label" doc="guides/flake-updates/#1-track-the-inputs" title="Track flake inputs"
+      explanationText="Input name from your flake.nix, or a glob like nixpkgs* / * to match many. A literal name wins over a glob." />
     <input
       grInput
       id="fi-input-name"

@@ -6,7 +6,7 @@
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { catchError, finalize, map, of, switchMap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -14,7 +14,6 @@ import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
-  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   CopyFieldComponent,
@@ -24,14 +23,13 @@ import {
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
-  RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
 import {
   ManagedDisableDirective,
-  ServerConfigurationManagedBannerComponent,
+  SettingsAccessStateBadgeComponent,
   AccessService,
   injectSaveSettingsWithPrivateToPublicConfirmation,
 } from '@shared/access';
@@ -44,7 +42,7 @@ import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
 import { plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { injectPendingSubscriptionRequestCount } from '../pending-subscription-request-count';
+import { BinaryCacheSettingsNavigationComponent } from '../cache-settings-navigation/cache-settings-navigation.component';
 
 const CACHE_DELETE_CONSEQUENCE = 'All store paths in this cache are deleted with the cache.';
 
@@ -84,14 +82,13 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
   selector: 'app-cache-settings',
   standalone: true,
   imports: [
+    BinaryCacheSettingsNavigationComponent,
     CommonModule,
-    RouterModule,
     FormsModule,
-    BadgeComponent,
     ButtonComponent,
     InputDirective,
     LoadStateComponent,
-    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
+    ManagedDisableDirective, SettingsAccessStateBadgeComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,
@@ -99,7 +96,6 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
     MessageBannerComponent,
     RowComponent,
     SelectComponent,
-    RowListComponent,
     CheckboxComponent,
     CopyFieldComponent,
     LabelHelpComponent,
@@ -121,7 +117,6 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
   `,
 })
 export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
-  protected readonly links = links;
   protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   private route = inject(ActivatedRoute);
   protected accessService = inject(AccessService);
@@ -136,10 +131,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private resolved = injectCacheAccessData();
   access = injectCacheAccess();
   deleteAccess = injectCacheAccessTo('deleteCache');
-  manageCacheSubscriptionsAccess = injectCacheAccessTo('manageCacheSubscriptions');
-  webhooksAccess = injectCacheAccessTo('manageCacheWebhooks');
   manageKeysAccess = injectCacheAccessTo('manageCacheKeys');
-  pendingSubscriptionRequestCount = injectPendingSubscriptionRequestCount();
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -151,7 +143,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   saveError = signal<string | null>(null);
 
   cacheName = '';
-  breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'Settings' }));
+  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName));
 
   readonly visibilityOptions = [
     { label: 'Private', value: false },

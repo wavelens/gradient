@@ -1,0 +1,25 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<a class="task-card" [routerLink]="links.task(project(), task().name)" [attr.title]="formatEntityLabel(task())">
+  <h3 class="task-card__name">{{ task().display_name }}</h3>
+  <p class="task-card__description" [attr.title]="task().description">{{ task().description }}</p>
+  <div class="task-card__status">
+    @if (!task().active) {
+      <gr-badge severity="neutral">Inactive</gr-badge>
+    }
+    @if (task().last_evaluation_status; as status) {
+      <gr-eval-status-badge [status]="status" />
+    }
+  </div>
+  @if (task().recent_evaluations.length > 1) {
+    <app-evaluation-history class="task-card__history" [bars]="task().recent_evaluations" [project]="project()" [task]="task().name" [barsAreLinks]="false" />
+  }
+  @if (latestEvaluationStatusText(); as text) {
+    <span class="task-card__latest-evaluation">{{ text }}</span>
+  }
+  <gr-icon class="task-card__arrow" name="arrow_forward" />
+</a>

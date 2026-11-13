@@ -23,6 +23,18 @@ class TemplateDrivenHost {
   bad = signal(false);
 }
 
+@Component({
+  standalone: true,
+  imports: [FormFieldComponent],
+  template: `
+    <gr-form-field label="Keep Evaluations">
+      <span slot="hint">Instance limit: 30</span>
+      <input />
+    </gr-form-field>
+  `,
+})
+class VisibleHintHost {}
+
 describe('gr-form-field', () => {
   async function render<T>(type: new () => T) {
     const fixture = TestBed.createComponent(type);
@@ -50,23 +62,54 @@ describe('gr-form-field', () => {
     expect(root.querySelector('.form-field__label .help')).not.toBeNull();
   });
 
-  it('shows the hint while valid', async () => {
+  it('turns the hint into an explanation button after the label instead of a line under the field', async () => {
     const root = (await render(TemplateDrivenHost)).nativeElement as HTMLElement;
-    expect(root.querySelector('.hint')?.textContent).toContain('Lowercase only');
+    const button = root.querySelector('.form-field__label gr-label-explanation-button button')!;
+    expect(button.getAttribute('aria-label')).toBe('About Name');
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toBe('Lowercase only');
+    expect(root.querySelector('small.hint')?.textContent?.trim()).toBe('');
     expect(root.querySelector('.field-error')).toBeNull();
   });
 
-  it('replaces the hint with the error when invalid is set', async () => {
+  it('places the explanation button beside the control when the field has no label', async () => {
+    const fixture = TestBed.createComponent(FormFieldComponent);
+    fixture.componentRef.setInput('hint', 'For caches that break HTTP/2 transfers.');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.form-field__label')).toBeNull();
+    expect(root.querySelector('.form-field__control-wrapper gr-label-explanation-button')).not.toBeNull();
+  });
+
+  it('keeps projected hint content visible under the field', async () => {
+    const root = (await render(VisibleHintHost)).nativeElement as HTMLElement;
+    expect(root.querySelector('small.hint')?.textContent).toContain('Instance limit: 30');
+    expect(root.querySelector('gr-label-explanation-button')).toBeNull();
+  });
+
+  it('describes the control by the hint and by the visible message', async () => {
+    const fixture = await render(TemplateDrivenHost);
+    fixture.componentInstance.bad.set(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    const describedBy = root.querySelector('input')!.getAttribute('aria-describedby')!.split(' ');
+    const hintId = root.querySelector('.form-field > span[hidden]')!.id;
+    expect(describedBy).toEqual([hintId, root.querySelector('.field-error')!.id]);
+  });
+
+  it('shows the error under the field and keeps the explanation button', async () => {
     const fixture = await render(TemplateDrivenHost);
     fixture.componentInstance.bad.set(true);
     fixture.detectChanges();
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('.field-error')?.textContent).toContain('Name is taken');
-    expect(root.querySelector('.hint')).toBeNull();
+    expect(root.querySelector('small.hint')).toBeNull();
+    expect(root.querySelector('gr-label-explanation-button')).not.toBeNull();
   });
 
-  it('shows a warning in place of the hint and the error over both', async () => {
+  it('shows a warning under the field and the error over it', async () => {
     const fixture = TestBed.createComponent(FormFieldComponent);
     fixture.componentRef.setInput('hint', 'Lowercase only');
     fixture.componentRef.setInput('warning', 'Not pinned');
@@ -74,7 +117,7 @@ describe('gr-form-field', () => {
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('.field-warning')?.textContent).toContain('Not pinned');
-    expect(root.querySelector('.hint')).toBeNull();
+    expect(root.querySelector('small.hint')).toBeNull();
 
     fixture.componentRef.setInput('invalid', true);
     fixture.componentRef.setInput('error', 'Required');
@@ -136,7 +179,7 @@ describe('gr-form-field', () => {
     const root = fixture.nativeElement as HTMLElement;
     const error = root.querySelector('.field-error')!;
     expect(error.getAttribute('role')).toBe('alert');
-    expect(root.querySelector('input')!.getAttribute('aria-describedby')).toBe(error.id);
+    expect(root.querySelector('input')!.getAttribute('aria-describedby')).toContain(error.id);
   });
 
   it('gives each field without a for id its own message id', async () => {

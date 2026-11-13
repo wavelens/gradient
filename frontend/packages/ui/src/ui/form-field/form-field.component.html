@@ -13,16 +13,28 @@ SPDX-License-Identifier: AGPL-3.0-only
         }
       </label>
       <ng-content select="[slot=label]"></ng-content>
+      @if (hint()) {
+        <ng-container *ngTemplateOutlet="hintButton" />
+      }
     </div>
   }
-  <ng-content></ng-content>
+  <div class="form-field__control-wrapper">
+    <ng-content></ng-content>
+    @if (hint() && !label()) {
+      <ng-container *ngTemplateOutlet="hintButton" />
+    }
+  </div>
+  <ng-template #hintButton>
+    <gr-label-explanation-button [iconButtonAriaLabel]="helpButtonAccessibleName()" [explanationText]="hint()" />
+  </ng-template>
+  @if (hint()) {
+    <span hidden [id]="hintTextId()">{{ hint() }}</span>
+  }
   @if (showError()) {
     <small class="field-error" [id]="messageId()" role="alert">{{ errorText() }}</small>
   } @else if (warning()) {
     <small class="field-warning" [id]="messageId()" role="status">{{ warning() }}</small>
   } @else {
-    <small class="hint" [id]="messageId()"
-      >{{ hint() }}<ng-content select="[slot=hint]"></ng-content
-    ></small>
+    <small class="hint" [id]="messageId()"><ng-content select="[slot=hint]"></ng-content></small>
   }
 </div>

@@ -28,7 +28,8 @@ function setup(displayName: string, load: () => Observable<unknown> = () => metr
       {
         provide: ActivatedRoute,
         useValue: {
-          snapshot: { paramMap: convertToParamMap({ project: 'testproject', workerId: WORKER_ID }) },
+          snapshot: { paramMap: convertToParamMap({ project: 'testproject', workerId: WORKER_ID }), data: {} },
+          data: of({}),
         },
       },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Test Project' }) } },
@@ -109,7 +110,7 @@ describe('WorkerMetricsComponent', () => {
   it('walks back through breadcrumbs rather than a lone back arrow', async () => {
     const fixture = setup('builder-1');
     await settled(fixture);
-    expect(crumbs(fixture)).toEqual(['Projects', 'Test Project', 'Settings', 'Workers', 'builder-1']);
+    expect(crumbs(fixture)).toEqual(['Projects', 'Test Project', 'Settings', 'Workers']);
     expect(fixture.nativeElement.querySelector('.back')).toBeNull();
   });
 

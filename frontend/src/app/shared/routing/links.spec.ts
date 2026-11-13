@@ -39,7 +39,7 @@ const every: UrlTree[] = [
   links.register(),
   links.projects(),
   links.project('p'),
-  ...(['settings', 'workers', 'git-host-connections', 'secrets', 'webhooks', 'caches'] as const)
+  ...(['settings', 'members', 'workers', 'git-host-connections', 'secrets', 'webhooks', 'caches'] as const)
     .map((page) => links.projectPage('p', page)),
   links.workerMetrics('p', 'w'),
   links.subscribeToCache('p', 'c'),
@@ -55,11 +55,12 @@ const every: UrlTree[] = [
   links.closure('p', 'build', 'b'),
   links.caches(),
   links.cache('c'),
-  ...(['settings', 'upstream-caches', 'nars', 'subscriptions', 'webhooks'] as const)
+  ...(['settings', 'members', 'upstream-caches', 'nars', 'subscriptions', 'webhooks'] as const)
     .map((page) => links.cachePage('c', page)),
   links.teams(),
   links.team('t'),
   links.teamPage('t', 'settings'),
+  links.teamPage('t', 'members'),
   links.teamPage('t', 'webhooks'),
   links.teamPage('t', 'git-host-connections'),
   ...(['people', 'teams', 'pending', 'roles'] as const).flatMap((tab) => [links.membersPage('project', 'p', tab), links.membersPage('cache', 'c', tab)]),

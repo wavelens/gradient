@@ -23,7 +23,7 @@ export class WritableDirective {
   private rendered = false;
 
   @Input({ required: true }) set appWritable(state: AccessState | null | undefined) {
-    const shouldRender = !!state && state.canEdit;
+    const shouldRender = !!state && state.canEdit && !state.managed;
     if (shouldRender && !this.rendered) {
       this.vcr.createEmbeddedView(this.templateRef);
       this.rendered = true;

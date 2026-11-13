@@ -5,6 +5,7 @@
  */
 
 @use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
 
 :host {
   display: block;
@@ -16,19 +17,9 @@
   gap: $spacing-md;
   height: 100%;
   padding: $spacing-lg;
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  box-shadow: var(--gr-shadow-raised);
-  color: var(--gr-text-primary);
-  text-decoration: none;
-  transition: $transition-base;
+  @include card-link-surface;
 
   &:hover {
-    border-color: var(--gr-text-secondary);
-    transform: translateY(-2px);
-    box-shadow: var(--gr-shadow-overlay);
-
     .nav-card__arrow { transform: translateX(4px); }
   }
 
@@ -93,8 +84,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nav-card,
   .nav-card__arrow { transition: none; }
-
-  .nav-card:hover { transform: none; }
 }

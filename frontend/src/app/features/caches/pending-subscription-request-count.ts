@@ -10,12 +10,12 @@ import { catchError, map, of, switchMap } from 'rxjs';
 import { CachesService } from '@core/services/caches.service';
 import { injectCacheAccessData } from '@core/resolvers/inject-access';
 
-export function injectPendingSubscriptionRequestCount(): Signal<number | null> {
+export function injectPendingSubscriptionRequestCount(shouldFetchPendingSubscriptionRequestCount: () => boolean = () => true): Signal<number | null> {
   const caches = inject(CachesService);
   const cacheData = injectCacheAccessData();
   const cacheNameIfViewerCanManageSubscriptions = computed(() => {
     const cache = cacheData()?.cache;
-    return cache?.permissions?.includes('manageCacheSubscriptions') ? cache.name : null;
+    return shouldFetchPendingSubscriptionRequestCount() && cache?.permissions?.includes('manageCacheSubscriptions') ? cache.name : null;
   });
   return toSignal(
     toObservable(cacheNameIfViewerCanManageSubscriptions).pipe(

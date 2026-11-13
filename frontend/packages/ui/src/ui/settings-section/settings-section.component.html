@@ -8,8 +8,8 @@ SPDX-License-Identifier: AGPL-3.0-only
     <header class="settings-section__header">
       <div class="settings-section__heading">
         <h2>{{ title() }}</h2>
-        @if (description()) {
-          <p class="settings-section__description">{{ description() }}</p>
+        @if (description(); as text) {
+          <gr-label-explanation-button [iconButtonAriaLabel]="'About ' + title()" [explanationText]="text" />
         }
       </div>
       <div class="settings-section__actions">

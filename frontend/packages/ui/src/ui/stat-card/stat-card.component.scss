@@ -6,6 +6,8 @@
 
 @use '../../styles/variables' as *;
 
+$stat-label-explanation-button-side-length: $spacing-lg;
+
 :host {
   display: block;
 }
@@ -59,6 +61,33 @@
 .stat-label {
   font-size: $font-size-sm;
   color: var(--gr-text-secondary);
+}
+
+// The label reserves the width of the info button as end padding. The button shifts back into that space. This keeps the button on the last line of the label.
+.stat-label:has(+ .stat-label-explanation-button) {
+  padding-inline-end: $stat-label-explanation-button-side-length;
+}
+
+.stat-label-explanation-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  width: $stat-label-explanation-button-side-length;
+  height: $stat-label-explanation-button-side-length;
+  margin-block: -$spacing-xs;
+  margin-inline-start: -$stat-label-explanation-button-side-length;
+  padding: 0;
+  border: 0;
+  border-radius: $border-radius-sm;
+  background: none;
+  color: var(--gr-text-muted);
+  cursor: help;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--gr-text-primary);
+  }
 }
 
 @mixin compact {

@@ -41,6 +41,13 @@ export function evaluationPhase(status: EvaluationStatus, waitingReason?: Waitin
   return waitingReason && (phase === 'queued' || phase === 'running') ? 'waiting' : phase;
 }
 
+export function getEvaluationStatusLabel(status: EvaluationStatus, waitingReason?: WaitingReason | null): string {
+  if (evaluationPhase(status, waitingReason) === 'waiting') return 'Waiting';
+  if (status === 'Fetching') return 'Fetching flake';
+  if (status === 'EvaluatingFlake' || status === 'EvaluatingDerivation') return 'Evaluating';
+  return status;
+}
+
 function statusToDisplayPhase(status: EvaluationStatus): StatusPhase {
   switch (status) {
     case 'Queued': return 'queued';
@@ -122,14 +129,6 @@ export function execJobPhase(status: ExecJobStatus): StatusPhase {
     case 'failed': return 'failure';
     case 'aborted': return 'aborted';
   }
-}
-
-export function entryPointPhaseWithExecJob(
-  ep: Pick<EntryPointSummary, 'build_status' | 'deps'>,
-  execJobStatus: ExecJobStatus | null | undefined,
-): StatusPhase {
-  const phase = entryPointPhase(ep);
-  return phase === 'success' && execJobStatus ? execJobPhase(execJobStatus) : phase;
 }
 
 /// A finished evaluation stopped waiting for its unfinished work, even when another evaluation still builds the same package.

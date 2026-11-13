@@ -24,7 +24,7 @@ import type { AccessState, PatchRoleRequest, PendingInvitationItem, PermissionEn
 import { TeamsService } from '@core/services/teams.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
-import { ManagedDisableDirective, WritableDirective, countRoleHoldersAndBuildBreakdownText } from '@shared/access';
+import { WritableDirective, countRoleHoldersAndBuildBreakdownText } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { permissionLabel } from '@shared/text';
@@ -54,7 +54,6 @@ interface RoleEditFormState {
     RowListComponent,
     SettingsSectionComponent,
     SubmitDirective,
-    ManagedDisableDirective,
     WritableDirective,
     LabelHelpComponent,
     PermissionPickerComponent,

@@ -1,0 +1,175 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+// Cards get their own columns from the list grid (subgrid). Load, features and actions align across cards with different content.
+:host {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  grid-template-rows: auto auto auto;
+  grid-template-areas:
+    'name load actions'
+    'source load actions'
+    'status status actions';
+  gap: $spacing-xs $spacing-lg;
+  padding: $spacing-md $spacing-lg;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  color: var(--gr-text-primary);
+  font-size: $font-size-sm;
+}
+
+.worker-name-cell {
+  display: flex;
+  grid-area: name;
+  align-items: center;
+  gap: $spacing-sm;
+  min-width: 0;
+  font-size: $font-size-md;
+  font-weight: 600;
+}
+
+.worker-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-source {
+  display: flex;
+  grid-area: source;
+  align-items: center;
+  gap: $spacing-sm;
+  min-width: 0;
+  color: var(--gr-text-secondary);
+  white-space: nowrap;
+}
+
+.worker-source-text-no-shrink {
+  flex-shrink: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worker-archs,
+.worker-url {
+  min-width: 0;
+  overflow: hidden;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  text-overflow: ellipsis;
+}
+
+.worker-url { flex-shrink: 4; }
+
+.features-info {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: -$spacing-xs;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gr-text-muted);
+  cursor: pointer;
+
+  &:hover { color: var(--gr-text-primary); }
+}
+
+.features-list {
+  max-width: 22rem;
+
+  strong { display: block; margin-bottom: $spacing-xs; color: var(--gr-text-primary); }
+  p { margin: 0; font-family: $font-family-mono; font-size: $font-size-sm; color: var(--gr-text-secondary); }
+}
+
+.worker-card__status-pills-and-allowed-capabilities-row {
+  display: flex;
+  flex-wrap: wrap;
+  grid-area: status;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-xs $spacing-md;
+}
+
+.worker-card__status-pills-cell {
+  display: flex;
+  flex-wrap: wrap;
+  grid-area: status;
+  align-items: center;
+  gap: $spacing-xs;
+}
+
+.worker-card-job-count-cell {
+  display: flex;
+  flex-direction: column;
+  grid-area: load;
+  align-items: flex-end;
+  align-self: end;
+  min-width: 0;
+  text-align: right;
+}
+
+.job-count {
+  font-family: $font-family-mono;
+  font-size: $font-size-lg;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.worker-card__load-job-count-label {
+  max-width: 14rem;
+  min-height: calc($font-size-xs * 1.4);
+  overflow: hidden;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-xs;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allowed-capabilities-chips-cell {
+  grid-area: capabilities;
+  margin-left: auto;
+
+  ::ng-deep .allowed-summary { margin-top: 0; }
+}
+
+.worker-card-action-buttons-cell {
+  display: flex;
+  grid-area: actions;
+  align-items: center;
+  align-self: center;
+  justify-self: end;
+  gap: $spacing-sm;
+}
+
+:host(.is-offline) :is(.worker-name-cell, .job-count) { color: var(--gr-text-muted); }
+
+@media (max-width: $breakpoint-sm) {
+  :host {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: none;
+    grid-template-areas:
+      'name actions'
+      'source source'
+      'status load'
+      'capabilities capabilities';
+    padding: $spacing-md;
+  }
+
+  .worker-card__status-pills-and-allowed-capabilities-row { display: contents; }
+
+  .worker-card__status-pills-cell { align-self: center; }
+
+  .allowed-capabilities-chips-cell { margin-left: 0; }
+
+  .worker-card__load-job-count-label { max-width: 12rem; }
+}

@@ -51,5 +51,24 @@ describe('gr-stat-card', () => {
     expect(root.querySelector('.stat-label')?.textContent).toContain('Queued');
   });
 
+  it('render an info button with explanation when valueExplanation is set', async () => {
+    const valueExplanation = 'Jobs in the scheduler queue that wait for a worker.';
+    const [first, second] = [await render({ value: 12, label: 'Queued', valueExplanation }), await render({ value: 3, label: 'Running', valueExplanation })];
+    const button = first.querySelector('.stat-label + button')!;
+    document.body.append(first, second);
+
+    expect(first.querySelector('.stat-label')?.textContent?.trim()).toBe('Queued');
+    expect(button.getAttribute('aria-label')).toBe('About Queued');
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toBe(valueExplanation);
+    expect(second.querySelector('button')?.getAttribute('aria-describedby')).not.toBe(button.getAttribute('aria-describedby'));
+
+    button.dispatchEvent(new FocusEvent('focus'));
+    expect(document.querySelector('.gr-tooltip')?.textContent).toContain(valueExplanation);
+    button.dispatchEvent(new FocusEvent('blur'));
+  });
+
+  it('does not render the info button when valueExplanation is missing', async () => {
+    expect((await render({ value: 12, label: 'Queued' })).querySelector('button')).toBeNull();
+  });
 });
 

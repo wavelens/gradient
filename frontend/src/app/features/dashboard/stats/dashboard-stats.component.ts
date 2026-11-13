@@ -24,7 +24,7 @@ import { formatCpuTime } from '../format';
     @if (!hidden() && !failed()) {
       <gr-card-grid min="150px" [attr.aria-busy]="!stats()">
         @for (c of cards(); track c.label) {
-          <gr-stat-card compact [label]="c.label" [value]="c.value" />
+          <gr-stat-card compact [label]="c.label" [value]="c.value" [valueExplanation]="c.valueExplanation" />
         }
       </gr-card-grid>
     }
@@ -39,11 +39,38 @@ export class DashboardStatsComponent implements OnInit {
   cards = computed(() => {
     const s = this.stats();
     return [
-      ...(s?.cpu_time_ms == null ? [] : [{ label: 'CPU time', value: formatCpuTime(s.cpu_time_ms) }]),
-      { label: 'Completed builds', value: s && formatCount(s.builds_completed) },
-      { label: 'Total cached', value: s && formatBytes(s.cache_size_bytes) },
-      { label: 'Worker load', value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '0 online') },
-      { label: 'Queue wait', value: s && formatDuration(s.queue_wait_p50_ms) },
+      ...(s?.cpu_time_ms == null
+        ? []
+        : [
+            {
+              label: 'CPU time',
+              value: formatCpuTime(s.cpu_time_ms),
+              valueExplanation: 'CPU time for builds in viewable projects. Only build records that remain on the server feed the total (90 days by default).',
+            },
+          ]),
+      {
+        label: 'Completed builds',
+        value: s && formatCount(s.builds_completed),
+        valueExplanation:
+          "Builds that ran to completion in projects you can view, within evaluations that still exist on the server. Builds from a binary cache don't count. A build that several evaluations reuse counts once.",
+      },
+      {
+        label: 'Total cached',
+        value: s && formatBytes(s.cache_size_bytes),
+        valueExplanation:
+          'Total size stored across all caches you created or can reach through a project membership. Superusers see the sum of every cache on the server. Two caches that hold the same store path both count its size toward the total.',
+      },
+      {
+        label: 'Worker load',
+        value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '0 online'),
+        valueExplanation: 'The average percentage of build slots in use across connected workers that serve projects that you can view.',
+      },
+      {
+        label: 'Queue wait',
+        value: s && formatDuration(s.queue_wait_p50_ms),
+        valueExplanation:
+          'Median time a job waited in the scheduler queue before the scheduler assigned it to a worker machine. Covers jobs assigned in the last 24 hours, for projects you can view.',
+      },
     ];
   });
 

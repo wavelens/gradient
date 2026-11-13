@@ -73,17 +73,19 @@ function setup(
       provideRouter([]),
       { provide: WebhooksService, useValue: service },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
-      { provide: CachesService, useValue: { getCache: () => of({ display_name: 'Main' }) } },
+      { provide: CachesService, useValue: { getCache: () => of({ display_name: 'Main' }), getSubscriptionRequests: () => of([]) } },
       { provide: TeamsService, useValue: { get: () => of({ display_name: 'Platform' }) } },
       { provide: EventsService, useValue: { catalog$: of(catalog) } },
       {
         provide: ActivatedRoute,
-        useValue: {
-          snapshot: {
-            data: { projectAccess: { project: { permissions: EVERY_PERMISSION } }, teamAccess: { team: { role: 'admin' } }, ...data },
-            paramMap: convertToParamMap(params),
-          },
-          parent: { snapshot: { data: { cacheAccess: { cache: { permissions: EVERY_CACHE_PERMISSION } } } } },
+        useFactory: () => {
+          const routeData = { projectAccess: { project: { permissions: EVERY_PERMISSION, role: 'Admin' } }, teamAccess: { team: { role: 'admin' } }, ...data };
+          const parentData = { cacheAccess: { cache: { permissions: EVERY_CACHE_PERMISSION } } };
+          return {
+            snapshot: { data: routeData, paramMap: convertToParamMap(params) },
+            data: of(routeData),
+            parent: { snapshot: { data: parentData }, data: of(parentData) },
+          };
         },
       },
       { provide: NotifyService, useValue: notify },
@@ -127,14 +129,15 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
-    { scope: 'project', trail: ['Projects', 'Acme', 'Settings', 'Event notifications'] },
-    { scope: 'cache', trail: ['Caches', 'Main', 'Settings', 'Event notifications'] },
-    { scope: 'team', trail: ['Teams', 'Platform', 'Settings', 'Event notifications'] },
-    { scope: 'instance', trail: ['Admin', 'Event notifications'] },
-  ])('leads the $scope scope back to the page its webhooks are reached from', ({ scope, trail }) => {
+    { scope: 'project', trail: ['Projects', 'Acme', 'Settings'], title: 'Event notifications' },
+    { scope: 'cache', trail: ['Caches', 'Main', 'Settings'], title: 'Event notifications' },
+    { scope: 'team', trail: ['Teams', 'Platform', 'Settings'], title: 'Event notifications' },
+    { scope: 'instance', trail: ['Admin', 'Event notifications'], title: 'Instance event notifications' },
+  ])('leads the $scope scope back to the page its webhooks are reached from', ({ scope, trail, title }) => {
     const { root } = setup({ webhookScope: scope }, { [scope]: 'main' });
     const crumbs = Array.from(root.querySelectorAll('.breadcrumb-link, .breadcrumb-current'));
     expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(trail);
+    expect(root.querySelector('h1')?.textContent?.trim()).toBe(title);
   });
 
   it('reads its scope from the route', () => {
@@ -231,6 +234,15 @@ describe('WebhooksComponent', () => {
       'w1',
       expect.objectContaining({ events: ['team.worker.create', 'evaluation.completed', 'build.*'] }),
     );
+  });
+
+  it('leaves enabling to the row menu, so editing a disabled webhook sends no active flag', () => {
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    component.startEdit({ ...hook, active: false });
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-checkbox')).toBeNull();
+    component.save();
+    expect(service.update).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', expect.not.objectContaining({ active: expect.anything() }));
   });
 
   it.each([

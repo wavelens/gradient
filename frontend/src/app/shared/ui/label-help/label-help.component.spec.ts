@@ -31,4 +31,21 @@ describe('gr-label-help', () => {
     const a = await render({ doc: 'reference/wildcards/', title: 'Naming rules' });
     expect(a.getAttribute('aria-label')).toBe('Naming rules');
   });
+
+  it('describes the link by the field explanation', async () => {
+    const a = await render({ doc: 'reference/wildcards/', title: 'Naming rules', explanationText: 'Output pattern to evaluate' });
+    document.body.append(a.closest('gr-label-help') ?? a);
+    expect(document.getElementById(a.getAttribute('aria-describedby')!)?.textContent).toBe('Output pattern to evaluate');
+  });
+
+  it('is a plain explanation button without a docs page', async () => {
+    const fixture = TestBed.createComponent(LabelHelpComponent);
+    fixture.componentRef.setInput('title', 'About Build time');
+    fixture.componentRef.setInput('explanationText', 'Sum of all completed build durations');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('a')).toBeNull();
+    expect(root.querySelector('button')?.getAttribute('aria-label')).toBe('About Build time');
+  });
 });

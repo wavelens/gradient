@@ -106,7 +106,7 @@ describe('CacheNarsComponent loading', () => {
   it('mentions filters in the empty state only when a search filter is set', () => {
     const empty = { ...PAGE, items: [], total: 0 };
     const { fixture, query, root } = render(() => of(empty));
-    expect(root.textContent).toContain('This cache has no archives yet.');
+    expect(root.textContent).toContain('No packages found');
     expect(root.textContent).not.toContain('current filters');
     query.next(convertToParamMap({ package: 'hello' }));
     fixture.detectChanges();
@@ -173,6 +173,13 @@ describe('CacheNarsComponent pinning', () => {
     const badges = root.querySelectorAll('[data-testid="pinned-badge"]');
     expect(badges).toHaveLength(1);
     expect(badges[0].textContent).toContain('alice');
+  });
+
+  it('keep the action column as a table cell so the pin button can align with the header', () => {
+    const { root } = render(() => of(PAGE));
+    const cells = Array.from(root.querySelectorAll<HTMLElement>('tbody tr:first-child > td'));
+    expect(cells).toHaveLength(root.querySelectorAll('thead th').length);
+    expect(cells.map((cell) => getComputedStyle(cell).display)).not.toContain('flex');
   });
 
   it('request only pinned packages with pinned=true in URL', () => {

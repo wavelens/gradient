@@ -4,23 +4,30 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Observable, filter, tap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
-import { EvaluationStatus, Rail } from '@core/models';
-import { SkeletonComponent } from '@gradient/ui/ui';
+import { EvaluationStatus, Rail, RailProject } from '@core/models';
+import { BadgeComponent, IconComponent, SkeletonComponent, TooltipDirective } from '@gradient/ui/ui';
 import { StarButtonComponent, formatEntityLabel } from '@shared/ui';
-import { formatCount } from '@shared/text';
-import { PHASE_COLOR, evaluationPhase } from '@shared/evaluation';
+import { formatCount, plural } from '@shared/text';
+import { PHASE_COLOR, evaluationPhase, getEvaluationStatusLabel } from '@shared/evaluation';
 import { links } from '@shared/routing';
+
+const maxRowsPerDashboardRailCard = 5;
+
+function starredFirstEntriesLimitedToMaxRowsPerCard<T extends { starred: boolean }>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => Number(b.starred) - Number(a.starred)).slice(0, maxRowsPerDashboardRailCard);
+}
 
 @Component({
   selector: 'app-dashboard-rail',
   standalone: true,
-  imports: [RouterLink, SkeletonComponent, StarButtonComponent],
+  imports: [NgTemplateOutlet, RouterLink, BadgeComponent, IconComponent, SkeletonComponent, StarButtonComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './dashboard-rail.component.html',
   styleUrl: './dashboard-rail.component.scss',
@@ -28,8 +35,11 @@ import { links } from '@shared/routing';
 export class DashboardRailComponent implements OnInit {
   protected readonly links = links;
   protected readonly formatEntityLabel = formatEntityLabel;
+  protected readonly maxRowsPerDashboardRailCard = maxRowsPerDashboardRailCard;
   private dashboard = inject(DashboardService);
   rail = signal<Rail | null>(null);
+  protected projectsCardEntries = computed(() => starredFirstEntriesLimitedToMaxRowsPerCard(this.rail()?.projects ?? []));
+  protected cachesCardEntries = computed(() => starredFirstEntriesLimitedToMaxRowsPerCard(this.rail()?.caches ?? []));
   failed = signal(false);
   hidden = signal(false);
   empty = output<boolean>();
@@ -38,6 +48,18 @@ export class DashboardRailComponent implements OnInit {
 
   evaluationStatusDotColor(status: EvaluationStatus | null | undefined): string | null {
     return status ? PHASE_COLOR[evaluationPhase(status)] : null;
+  }
+
+  statusDotTooltipText(status: EvaluationStatus | null | undefined): string {
+    return status ? getEvaluationStatusLabel(status) : 'No evaluations yet';
+  }
+
+  getProjectRowLinkTooltipText(project: RailProject): string {
+    return `${formatEntityLabel(project)} · ${plural(project.task_count, 'task')}`;
+  }
+
+  getPackageCountTooltipText(narCount: number): string {
+    return `${narCount.toLocaleString('en')} ${narCount === 1 ? 'package' : 'packages'}`;
   }
 
   constructor() {

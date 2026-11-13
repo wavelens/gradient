@@ -6,6 +6,8 @@
 
 @use '../../styles/variables' as *;
 
+$left-settings-navigation-column-width: 15rem;
+
 .page-layout {
   margin: 0 auto;
   padding: $spacing-md;
@@ -15,19 +17,48 @@
   &--settings { max-width: $content-width-settings; }
   &--full { max-width: none; }
 
+  &:has(> .page-layout__settings-navigation nav) {
+    display: grid;
+    grid-template-columns: $left-settings-navigation-column-width minmax(0, 1fr);
+    grid-template-areas:
+      'crumbs crumbs'
+      'navigation main';
+    column-gap: $spacing-xl;
+    align-items: start;
+  }
+
+  &--settings:has(> .page-layout__settings-navigation nav) {
+    max-width: calc(#{$left-settings-navigation-column-width} + #{$spacing-xl} + #{$content-width-settings});
+  }
+
+  &__settings-navigation {
+    grid-area: navigation;
+
+    &:not(:has(nav)) { display: none; }
+  }
+
+  &__main-column {
+    grid-area: main;
+    min-width: 0;
+  }
+
   &__header {
     margin-bottom: $spacing-xxl;
+
+    &:has(+ .page-layout__banners gr-link-tabs) {
+      margin-bottom: $spacing-md;
+    }
+
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      'crumbs actions'
       'title actions'
       'subtitle actions'
       'meta actions';
     gap: $spacing-xs $spacing-md;
 
     h1 {
-      grid-area: title;
+      min-width: 0;
       font-size: $font-size-xxl;
       margin: 0;
       overflow-wrap: anywhere;
@@ -37,6 +68,15 @@
       line-clamp: 2;
       overflow: hidden;
     }
+  }
+
+  &__title-row {
+    grid-area: title;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: $spacing-xs $spacing-sm;
+    min-width: 0;
   }
 
   &__subtitle {
@@ -85,16 +125,30 @@
   }
 }
 
-// Place the global breadcrumb recipe in the header grid.
 gr-breadcrumb {
   grid-area: crumbs;
+  display: block;
+  margin-bottom: $spacing-xs;
+}
+
+@media (max-width: $breakpoint-md - 1px) {
+  .page-layout:has(> .page-layout__settings-navigation nav) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'crumbs'
+      'navigation'
+      'main';
+  }
+
+  .page-layout__settings-navigation {
+    margin-bottom: $spacing-lg;
+  }
 }
 
 @media (max-width: $breakpoint-sm) {
   .page-layout__header {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      'crumbs'
       'title'
       'subtitle'
       'meta'

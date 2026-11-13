@@ -1,0 +1,63 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+:host { display: block; }
+
+.sidebar-attempt-row-button {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 $spacing-md;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: $font-size-xs;
+  color: var(--gr-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: background $transition-fast, color $transition-fast;
+
+  &:hover {
+    background: var(--gr-surface-hover);
+    color: var(--gr-text-primary);
+  }
+
+  &[aria-current='true'] {
+    background: var(--gr-surface-raised);
+    color: var(--gr-text-primary);
+    font-weight: 600;
+  }
+
+  &:focus-visible { outline-offset: -$focus-ring-width; }
+}
+
+.attempt-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.attempt-build-status-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attempt-row-duration {
+  flex-shrink: 0;
+  color: var(--gr-text-muted);
+  font-variant-numeric: tabular-nums;
+
+  [aria-current='true'] > & { color: inherit; }
+}

@@ -31,15 +31,6 @@ describe('AccessService', () => {
     });
   });
 
-  describe('shouldShowWriteAction', () => {
-    it('returns canEdit (managed users still see write actions, just disabled)', () => {
-      expect(svc.shouldShowWriteAction(s(false, true))).toBe(true);
-      expect(svc.shouldShowWriteAction(s(true, true))).toBe(true);
-      expect(svc.shouldShowWriteAction(s(false, false))).toBe(false);
-      expect(svc.shouldShowWriteAction(s(true, false))).toBe(false);
-    });
-  });
-
   describe('shouldDisableInput', () => {
     it('disables when managed OR !canEdit', () => {
       expect(svc.shouldDisableInput(s(false, true))).toBe(false);

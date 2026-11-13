@@ -108,7 +108,7 @@ describe('TaskSettingsComponent - access gating', () => {
 
   it('hides Save Changes when task is state-managed', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('server configuration');
+    expect(fixture.nativeElement.querySelector('app-settings-access-state-badge')?.textContent).toContain('server configuration');
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
   });
 
@@ -392,6 +392,14 @@ describe('TaskSettingsComponent - duplicate task', () => {
     expect(findByText(setup(admin).nativeElement, 'duplicate task')).not.toBeNull();
     TestBed.resetTestingModule();
     expect(findByText(setup({ managed: false, canEdit: false }).nativeElement, 'duplicate task')).toBeNull();
+  });
+
+  it('keeps the active state and the copy for another branch as two rows of one Management section', () => {
+    const root = setup(admin).nativeElement as HTMLElement;
+    const section = Array.from(root.querySelectorAll('gr-settings-section')).find((s) => s.querySelector('h2')?.textContent?.trim() === 'Management');
+    const rows = Array.from(section?.querySelectorAll('gr-row') ?? []).map((row) => row.textContent?.replace(/\s+/g, ' ').trim());
+    expect(rows).toEqual([expect.stringMatching(/^Active Triggers start an evaluation\..*Deactivate$/), expect.stringMatching(/^Copy for another branch.*Duplicate task$/)]);
+    expect(root.textContent?.match(/Duplicate task/g)).toHaveLength(1);
   });
 
   it('copies the task onto the chosen branch and opens the copy', () => {

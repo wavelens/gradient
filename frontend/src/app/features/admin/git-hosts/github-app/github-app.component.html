@@ -7,7 +7,6 @@
 <gr-settings-section
   title="GitHub App"
   description="Register a new GitHub App for this Gradient instance using GitHub's manifest flow."
-  [card]="false"
 >
 
   @if (!showResult()) {
@@ -36,15 +35,17 @@
         />
       </gr-form-field>
 
-      <button
-        grButton
-        type="button"
-        label="Create on GitHub"
-        data-testid="github-app-create-button"
-        [loading]="loading()"
-        [disabled]="!!githubHostInvalidCharacterErrorMessage()"
-        (click)="create()"
-      ></button>
+      <div class="gr-form-actions">
+        <button
+          grButton
+          type="button"
+          label="Create on GitHub"
+          data-testid="github-app-create-button"
+          [loading]="loading()"
+          [disabled]="!!githubHostInvalidCharacterErrorMessage()"
+          (click)="create()"
+        ></button>
+      </div>
     </div>
   } @else {
     <gr-load-state
@@ -59,7 +60,9 @@
       <div class="error" data-testid="github-app-credentials-missing">
         Credentials are no longer available. Start setup again.
       </div>
-      <button grButton type="button" label="Start again" icon="refresh" (click)="removeReadyQueryParamAndReturnToSetupForm()"></button>
+      <div class="gr-form-actions">
+        <button grButton type="button" label="Start again" icon="refresh" (click)="removeReadyQueryParamAndReturnToSetupForm()"></button>
+      </div>
     } @else if (credentials(); as c) {
       <div class="result-panel">
         <h2>App created - {{ c.slug }}</h2>

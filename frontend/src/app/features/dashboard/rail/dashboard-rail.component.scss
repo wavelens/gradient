@@ -24,25 +24,53 @@ a {
   top: $spacing-lg;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: $spacing-xl;
+  gap: $spacing-md;
   font-size: $font-size-sm;
 }
 
-h3 {
-  margin: 0 0 10px;
+.rail-card {
+  min-width: 0;
   padding-bottom: $spacing-sm;
-  border-bottom: 1px solid var(--gr-border-subtle);
-  color: var(--gr-text-muted);
-  font-size: $font-size-xs;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  box-shadow: var(--gr-shadow-raised);
+}
+
+h2 {
+  margin: 0;
+  font-size: $font-size-md;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+}
+
+.card-heading-link {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 14px $spacing-md $spacing-sm;
+  color: var(--gr-text-primary);
+  text-decoration: none;
+
+  gr-icon {
+    margin-left: auto;
+    color: var(--gr-text-muted);
+  }
+
+  &:hover {
+    .dashboard-rail-card-heading-text {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    gr-icon {
+      color: var(--gr-text-primary);
+    }
+  }
 }
 
 ul {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -51,12 +79,18 @@ ul {
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
-  padding: 5px 0;
+  min-height: 34px;
+  padding: 0 $spacing-md;
+
+  &:hover {
+    background: var(--gr-surface-hover);
+  }
 }
 
 .n {
+  flex: 1;
   overflow: hidden;
   min-width: 0;
   color: var(--gr-text-primary);
@@ -71,33 +105,30 @@ ul {
 }
 
 .tasks {
-  margin-left: 18px;
-  padding-left: 10px;
-  border-left: 1px solid var(--gr-border-subtle);
+  margin-bottom: $spacing-xs;
 
   .row {
-    padding: 3px 0;
+    min-height: 28px;
+    padding-left: 34px;
+    font-size: $font-size-xs;
     text-decoration: none;
   }
 
   .n {
     color: var(--gr-text-secondary);
   }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+  }
 }
 
 .count {
   flex: none;
-  margin-left: auto;
   color: var(--gr-text-muted);
   font-size: $font-size-xs;
   font-variant-numeric: tabular-nums;
-}
-
-.all {
-  display: block;
-  padding-top: 6px;
-  color: var(--gr-text-secondary);
-  font-size: $font-size-xs;
 }
 
 .dot {
@@ -106,6 +137,12 @@ ul {
   height: 8px;
   border-radius: 50%;
   background: var(--gr-text-muted);
+}
+
+@media (hover: hover) {
+  .row:not(:hover, :focus-within) .star-button-shown-on-hover {
+    opacity: 0;
+  }
 }
 
 @media (max-width: $breakpoint-lg) {

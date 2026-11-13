@@ -27,6 +27,7 @@ import {
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { TooltipDirective } from '../tooltip/tooltip.directive';
 import { MenuItem } from '../types';
 
 const DROPDOWN_POSITIONS: ConnectedPosition[] = [
@@ -50,7 +51,7 @@ let disabledReasonMenuSeq = 0;
 @Component({
   selector: 'gr-menu',
   standalone: true,
-  imports: [RouterLink, NgTemplateOutlet],
+  imports: [RouterLink, NgTemplateOutlet, TooltipDirective],
   template: `
     <ng-template #panel>
       <ul class="gr-menu" role="menu">
@@ -113,6 +114,7 @@ let disabledReasonMenuSeq = 0;
             class="gr-menu__item"
             [class.gr-menu__item--danger]="item.danger"
             [disabled]="item.disabled"
+            [grTooltip]="item.disabledReason ?? ''"
             [attr.aria-disabled]="item.disabledReason ? 'true' : null"
             [attr.aria-describedby]="item.disabledReason ? reasonId : null"
             (click)="run(item)"
@@ -123,7 +125,7 @@ let disabledReasonMenuSeq = 0;
             <span>{{ item.label }}</span>
           </button>
           @if (item.disabledReason) {
-            <span class="gr-menu__reason" [id]="reasonId">{{ item.disabledReason }}</span>
+            <span class="sr-only" [id]="reasonId">{{ item.disabledReason }}</span>
           }
         }
       </li>
@@ -142,6 +144,7 @@ export class MenuComponent implements OnDestroy {
   private injector = inject(Injector);
   private ref?: OverlayRef;
   private returnFocus?: HTMLElement;
+  private eventThatClosedMenu?: Event;
   private readonly openState = signal(false);
   protected readonly expandedTopLevelItemIndex = signal<number | null>(null);
   readonly isOpen = this.openState.asReadonly();
@@ -151,6 +154,10 @@ export class MenuComponent implements OnDestroy {
   }
 
   toggle(event: Event): void {
+    if (event === this.eventThatClosedMenu) {
+      this.eventThatClosedMenu = undefined;
+      return;
+    }
     if (this.ref?.hasAttached()) return this.hide();
     this.show((event.currentTarget ?? event.target) as HTMLElement);
   }
@@ -179,13 +186,16 @@ export class MenuComponent implements OnDestroy {
     this.expandedTopLevelItemIndex.set(null);
     this.returnFocus = origin instanceof HTMLElement ? origin : undefined;
     this.ref = this.overlay.create({
-      hasBackdrop: true,
-      backdropClass: 'cdk-overlay-transparent-backdrop',
       panelClass: 'gr-menu-panel',
       scrollStrategy: this.overlay.scrollStrategies.reposition(),
       positionStrategy: this.overlay.position().flexibleConnectedTo(origin).withPositions(positions),
     });
-    this.ref.backdropClick().subscribe(() => this.hide());
+    this.ref.outsidePointerEvents().subscribe((event) => {
+      if (event.type === 'auxclick' && event.button === 2) return;
+      const insideOpener = this.returnFocus?.contains(event.target as Node);
+      this.eventThatClosedMenu = insideOpener ? event : undefined;
+      this.hide();
+    });
     this.ref.keydownEvents().subscribe((e) => this.onKeydown(e));
     this.ref.attach(new TemplatePortal(this.panel(), this.vcr));
     this.openState.set(true);
@@ -208,7 +218,7 @@ export class MenuComponent implements OnDestroy {
 
   private items(panel: HTMLElement): HTMLElement[] {
     return Array.from(
-      panel.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled], [aria-disabled="true"])'),
+      panel.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'),
     );
   }
 

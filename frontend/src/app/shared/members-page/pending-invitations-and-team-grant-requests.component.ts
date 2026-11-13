@@ -10,7 +10,7 @@ import { ButtonComponent, LoadStateComponent, RowComponent, RowListComponent, Se
 import type { AccessState, CacheResponse, PendingInvitationItem } from '@core/models';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
-import { ManagedDisableDirective, formatMemberNameForConfirmDialog, teamRoleValueToDisplayLabel, type MemberPlace } from '@shared/access';
+import { WritableDirective, formatMemberNameForConfirmDialog, teamRoleValueToDisplayLabel, type MemberPlace } from '@shared/access';
 import { PENDING_INVITATION_REVOKE_FAILURE, getPendingInvitationRevocationConsequenceSentence } from '@shared/access/pending-invitation-revoke-dialog-texts';
 import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { EntityNameComponent } from '@shared/ui';
@@ -28,7 +28,7 @@ import type { MembersPageRequests } from './members-page-requests';
     RowComponent,
     RowListComponent,
     SettingsSectionComponent,
-    ManagedDisableDirective,
+    WritableDirective,
     ServerTimestampToLocalDateTimePipe,
     TeamGrantsComponent,
   ],
@@ -52,12 +52,12 @@ import type { MembersPageRequests } from './members-page-requests';
               <span slot="meta">Role {{ teamRoleValueToDisplayLabel(invitation.role) }} · Expires {{ invitation.expires_at | serverDate }}</span>
               <button
                 slot="actions"
+                *appWritable="access()"
                 grButton
                 label="Revoke"
                 icon="close"
                 severity="danger"
                 [attr.aria-label]="'Revoke invitation for ' + invitation.user"
-                [appManagedDisable]="access()"
                 (click)="revokeInvitation(invitation)"
               ></button>
             </gr-row>

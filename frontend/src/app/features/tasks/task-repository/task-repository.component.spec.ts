@@ -70,11 +70,10 @@ describe('TaskRepositoryComponent', () => {
     expect(el.textContent).not.toContain('Try Again');
   });
 
-  it('tells a view-only member once at the top that the page is read-only', () => {
+  it('tells a view-only member once in the title chip that the page is read-only', () => {
     const el = render(() => of({ ...state, can_edit: false, can_manage_integrations: false }), true, false).nativeElement as HTMLElement;
-    const banners = el.querySelectorAll('gr-message-banner');
-    expect(banners.length).toBe(1);
-    expect(banners[0].textContent).toContain('Only the admins of this project can change these settings.');
+    expect(el.querySelectorAll('gr-message-banner').length).toBe(0);
+    expect(el.querySelector('app-settings-access-state-badge')?.textContent).toContain('Only the admins of this project can change these settings.');
     expect(el.querySelector('[data-testid="read-only"]')).toBeNull();
   });
 

@@ -29,7 +29,7 @@ import {
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, SettingsAccessStateBadgeComponent, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData, injectTaskAccessTo } from '@core/resolvers/inject-access';
 import {
   TriggerType,
@@ -43,6 +43,7 @@ import { links } from '@shared/routing';
 import { splitList } from '@shared/forms';
 import { getCiTriggerTypeLabel, getNextPollTime, nextPollText } from '@shared/evaluation';
 import { cronExpressionToPlainEnglish } from './cron-expression-description';
+import { TaskSettingsNavigationComponent } from '../task-settings-navigation/task-settings-navigation.component';
 
 interface Option<T> {
   label: string;
@@ -82,7 +83,8 @@ const DEFAULT_FORM: TriggerFormState = {
   selector: 'app-task-triggers',
   standalone: true,
   imports: [
-    ServerConfigurationManagedBannerComponent,
+    TaskSettingsNavigationComponent,
+    SettingsAccessStateBadgeComponent,
     RelativeTimePipe,
     LabelHelpComponent,
     CommonModule,
@@ -95,7 +97,6 @@ const DEFAULT_FORM: TriggerFormState = {
     CheckboxComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
@@ -142,7 +143,7 @@ export class TaskTriggersComponent implements OnInit {
 
   projectName = '';
   taskName = '';
-  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Triggers' }));
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName));
 
   triggers = signal<TriggerOut[]>([]);
   editingTrigger = signal<TriggerOut | null>(null);

@@ -26,10 +26,11 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { fieldChecks } from '@shared/forms';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, SettingsAccessStateBadgeComponent, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { links } from '@shared/routing';
 import { FlakeInputOverrideOut, CreateFlakeInputOverrideRequest } from '@core/models';
+import { TaskSettingsNavigationComponent } from '../task-settings-navigation/task-settings-navigation.component';
 
 interface FlakeInputFormState {
   input_name: string;
@@ -52,7 +53,8 @@ const DEFAULT_FORM: FlakeInputFormState = {
   selector: 'app-task-flake-inputs',
   standalone: true,
   imports: [
-    ServerConfigurationManagedBannerComponent,
+    TaskSettingsNavigationComponent,
+    SettingsAccessStateBadgeComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -63,7 +65,6 @@ const DEFAULT_FORM: FlakeInputFormState = {
     CheckboxComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
     PageLayoutComponent,
     FormFieldComponent,
     BadgeComponent,
@@ -91,7 +92,7 @@ export class TaskFlakeInputsComponent implements OnInit {
 
   projectName = '';
   taskName = '';
-  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Flake Inputs' }));
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName));
 
   overrides = signal<FlakeInputOverrideOut[]>([]);
   editingId = signal<string | null>(null);

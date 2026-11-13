@@ -16,3 +16,7 @@
   font-size: $font-size-md;
   box-shadow: var(--gr-shadow-overlay);
 }
+
+:host {
+  display: contents;
+}

@@ -1,0 +1,18 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+:host {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: $spacing-md $spacing-lg;
+
+  @media (max-width: $breakpoint-sm) {
+    display: flex;
+    flex-direction: column;
+  }
+}

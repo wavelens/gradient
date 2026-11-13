@@ -16,6 +16,7 @@ import { MenuItem } from '../types';
   imports: [MenuComponent],
   template: `
     <button class="anchor" (click)="menu().toggle($event)">Actions</button>
+    <button class="other" (click)="menu().toggle($event)">Other</button>
     <div class="row" (contextmenu)="menu().openAt($event)">Row</div>
     <gr-menu [model]="model()"></gr-menu>
   `,
@@ -37,7 +38,8 @@ function render() {
   fixture.detectChanges();
   const anchor = () => fixture.nativeElement.querySelector('.anchor') as HTMLButtonElement;
   const row = () => fixture.nativeElement.querySelector('.row') as HTMLElement;
-  return { fixture, anchor, row };
+  const other = () => fixture.nativeElement.querySelector('.other') as HTMLButtonElement;
+  return { fixture, anchor, row, other };
 }
 
 const items = () => Array.from(document.querySelectorAll('.gr-menu__item')) as HTMLButtonElement[];
@@ -106,7 +108,53 @@ describe('MenuComponent', () => {
     expect(items()[1].disabled).toBe(true);
   });
 
-  it('Exclude an item that has a disabled reason from keyboard focus, show the reason and ignore clicks on it', async () => {
+  it('keeps the page click working: another button opens its menu at once', () => {
+    const spy = vi.spyOn(OverlayPositionBuilder.prototype, 'flexibleConnectedTo');
+    const { fixture, anchor, other } = render();
+    anchor().click();
+    fixture.detectChanges();
+    other().click();
+    fixture.detectChanges();
+    expect(items()).toHaveLength(3);
+    expect(fixture.componentInstance.menu().isOpen()).toBe(true);
+    expect(spy).toHaveBeenLastCalledWith(other());
+  });
+
+  it('closes on a click on the button that opened it and stays closed', () => {
+    const { fixture, anchor } = render();
+    anchor().click();
+    fixture.detectChanges();
+    anchor().click();
+    fixture.detectChanges();
+    expect(items()).toHaveLength(0);
+    expect(fixture.componentInstance.menu().isOpen()).toBe(false);
+  });
+
+  it('closes on a click outside the menu', () => {
+    const { fixture, anchor } = render();
+    anchor().click();
+    fixture.detectChanges();
+    document.body.click();
+    fixture.detectChanges();
+    expect(items()).toHaveLength(0);
+    expect(fixture.componentInstance.menu().isOpen()).toBe(false);
+  });
+
+  it('explains a disabled item through a tooltip and a hidden description only', async () => {
+    const { fixture, anchor } = render();
+    fixture.componentInstance.model.set([{ label: 'Artefacts', disabledReason: 'Needs a finished build' }]);
+    anchor().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const [blocked] = items();
+    expect(document.querySelector('.gr-menu__reason')).toBeNull();
+    expect(blocked.getAttribute('aria-disabled')).toBe('true');
+    const reason = document.getElementById(blocked.getAttribute('aria-describedby')!)!;
+    expect(reason.textContent).toBe('Needs a finished build');
+    expect(reason.classList.contains('sr-only')).toBe(true);
+  });
+
+  it('stops keyboard focus on an item with a disabled reason, show nothing for it and ignore clicks on it', async () => {
     const { fixture, anchor } = render();
     const opened = vi.fn();
     fixture.componentInstance.model.set([
@@ -122,10 +170,11 @@ describe('MenuComponent', () => {
     expect(blocked.getAttribute('aria-disabled')).toBe('true');
     const reason = document.getElementById(blocked.getAttribute('aria-describedby')!)!;
     expect(reason.textContent).toBe('Needs a finished build');
-    expect(getComputedStyle(reason).display).not.toBe('none');
-    expect(document.activeElement).toBe(edit);
+    expect(document.activeElement).toBe(blocked);
     press('ArrowDown');
     expect(document.activeElement).toBe(edit);
+    press('ArrowDown');
+    expect(document.activeElement).toBe(blocked);
     blocked.click();
     fixture.detectChanges();
     expect(opened).not.toHaveBeenCalled();
@@ -143,15 +192,12 @@ describe('MenuComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     const [blocked, target] = items();
-    const reason = document.getElementById(blocked.getAttribute('aria-describedby')!)!;
     blocked.focus();
-    const displayBefore = getComputedStyle(reason).display;
     const pointer = { bubbles: true, cancelable: true, button: 0 };
     target.dispatchEvent(new PointerEvent('pointerdown', pointer));
     target.dispatchEvent(new MouseEvent('mousedown', pointer));
     target.focus();
     fixture.detectChanges();
-    expect(getComputedStyle(reason).display).toBe(displayBefore);
     target.dispatchEvent(new PointerEvent('pointerup', pointer));
     target.dispatchEvent(new MouseEvent('mouseup', pointer));
     target.dispatchEvent(new MouseEvent('click', pointer));
@@ -222,6 +268,14 @@ describe('MenuComponent', () => {
       expect(event.defaultPrevented).toBe(true);
       expect(items()).toHaveLength(3);
       expect(spy).toHaveBeenCalledWith({ x: 120, y: 80 });
+    });
+
+    it('stays open when the right mouse button of the opening right click is released', () => {
+      const { fixture, row } = render();
+      rightClick(row(), 120, 80);
+      row().dispatchEvent(new MouseEvent('auxclick', { button: 2, bubbles: true }));
+      fixture.detectChanges();
+      expect(items()).toHaveLength(3);
     });
 
     it('falls back to the event target when the Menu key fires without coordinates', () => {

@@ -88,6 +88,20 @@ describe('GitHostConnectionListComponent', () => {
     expect(inheritedRows[0].querySelector('button')).toBeNull();
   });
 
+  it('names the own connections only when inherited ones are listed below them', () => {
+    const headings = (el: HTMLElement) => Array.from(el.querySelectorAll('h2')).map((h) => h.textContent?.trim());
+    expect(headings(render(writable, [own, inherited]).el)).toEqual(['Owned Connections', 'Inherited Connections']);
+    TestBed.resetTestingModule();
+    const { el } = render(writable, []);
+    expect(headings(el)).toEqual(['No connections to Git hosts']);
+    expect(rows(el, 'new-connection')).toHaveLength(1);
+  });
+
+  it('leaves the new connection button of a filled list to the page header', () => {
+    const { el } = render(writable, [own]);
+    expect(rows(el, 'new-connection')).toHaveLength(0);
+  });
+
   it('creates a connection with PUT and shows the generated secret once', () => {
     const create = vi.fn(() => of({ ...full, generated_secret: 'whsec-123' }));
     const { fixture, component, notify } = render(writable, [own], { create });

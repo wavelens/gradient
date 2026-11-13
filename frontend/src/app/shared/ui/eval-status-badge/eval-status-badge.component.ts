@@ -5,7 +5,7 @@
  */
 
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
-import { evaluationPhase } from '@shared/evaluation';
+import { evaluationPhase, getEvaluationStatusLabel } from '@shared/evaluation';
 import { StatusBadgeComponent } from '../status-badge/status-badge.component';
 import type { EvaluationStatus, WaitingReason } from '@core/models';
 
@@ -14,6 +14,7 @@ import type { EvaluationStatus, WaitingReason } from '@core/models';
   standalone: true,
   imports: [StatusBadgeComponent],
   template: `<gr-status-badge [phase]="phase()" [label]="label()" [prioritized]="prioritized()" />`,
+  styles: ':host { display: inline-flex; }',
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class EvalStatusBadgeComponent {
@@ -23,11 +24,5 @@ export class EvalStatusBadgeComponent {
 
   phase = computed(() => evaluationPhase(this.status(), this.waitingReason()));
 
-  label = computed(() => {
-    const s = this.status();
-    if (this.phase() === 'waiting') return 'Waiting';
-    if (s === 'Fetching') return 'Fetching flake';
-    if (s === 'EvaluatingFlake' || s === 'EvaluatingDerivation') return 'Evaluating';
-    return s;
-  });
+  label = computed(() => getEvaluationStatusLabel(this.status(), this.waitingReason()));
 }

@@ -113,10 +113,10 @@ describe('TaskActionsComponent', () => {
   it('tells only a member who can edit actions to create one', () => {
     const viewer = setup({ managed: false, canEdit: false, canTrigger: false }, []).nativeElement as HTMLElement;
     expect(viewer.textContent).toContain('No actions configured');
-    expect(viewer.textContent).not.toContain('Create actions');
+    expect(viewer.textContent).not.toContain('New Action');
     TestBed.resetTestingModule();
     const editor = setup({ managed: false, canEdit: true, canTrigger: true }, []).nativeElement as HTMLElement;
-    expect(editor.textContent).toContain('Create actions');
+    expect(editor.textContent).toContain('New Action');
   });
 
   it('offers the pull request action only the git host connections that can report commit status', () => {
@@ -146,24 +146,18 @@ describe('TaskActionsComponent', () => {
 
   it('links editors to the Repository page for status reports, not read-only users', () => {
     const repositoryLink = (fixture: ReturnType<typeof setup>) =>
-      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository'));
+      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository') && !a.closest('gr-settings-page-side-navigation'));
     expect(repositoryLink(setup({ managed: false, canEdit: true, canTrigger: true }))?.getAttribute('href')).toMatch(/\/project\/acme\/task\/[^/]+\/repository$/);
     TestBed.resetTestingModule();
     expect(repositoryLink(setup({ managed: false, canEdit: false, canTrigger: false }))).toBeUndefined();
   });
 
-  it('shows but disables write buttons under state-managed access', () => {
+  it('hides write buttons under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const newBtn = findByText(fixture.nativeElement, 'new action') as HTMLButtonElement | null;
-    const editBtn = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
-    const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
     const testBtn = findByText(fixture.nativeElement, 'test') as HTMLButtonElement | null;
-    expect(newBtn).not.toBeNull();
-    expect(newBtn!.getAttribute('aria-disabled')).toBe('true');
-    expect(editBtn).not.toBeNull();
-    expect(editBtn!.getAttribute('aria-disabled')).toBe('true');
-    expect(deleteBtn).not.toBeNull();
-    expect(deleteBtn!.getAttribute('aria-disabled')).toBe('true');
+    expect(findByText(fixture.nativeElement, 'new action')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
     expect(testBtn).not.toBeNull();
     // Test is a trigger action, not a config edit - exempt from the managed flag (AccessService.triggerAccess).
     expect(testBtn!.disabled).toBe(false);
@@ -174,8 +168,7 @@ describe('TaskActionsComponent', () => {
     const crumbs = Array.from(
       fixture.nativeElement.querySelectorAll('.breadcrumb-link, .breadcrumb-current'),
     ) as HTMLElement[];
-    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'Acme', 'Demo Task', 'Settings', 'Actions']);
-    expect(crumbs[3].getAttribute('href')).toBe('/project/acme/task/demo/settings');
+    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'Acme', 'Demo Task', 'Settings']);
   });
 
   it('renders action name and event chips', () => {

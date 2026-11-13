@@ -1,0 +1,56 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+@let w = worker();
+<div class="worker-name-cell">
+  <span class="worker-name-text" [title]="w.display_name">{{ w.display_name }}</span>
+  <ng-content select="[slot=name]"></ng-content>
+</div>
+
+<div class="worker-source">
+  <span class="worker-source-text-no-shrink"><ng-content select="[slot=source]"></ng-content></span>
+  @if (w.live?.architectures?.length) {
+    @let workerArchitecturesCommaSeparated = w.live!.architectures.join(', ');
+    <span class="worker-archs" [title]="workerArchitecturesCommaSeparated">{{ workerArchitecturesCommaSeparated }}</span>
+    @if (w.live!.system_features.length > 0) {
+      <button type="button" class="features-info" aria-label="System features" (click)="features.toggle($event)">
+        <gr-icon name="info" size="sm" />
+      </button>
+      <gr-popover #features>
+        <div class="features-list">
+          <strong>System features</strong>
+          <p>{{ w.live!.system_features.join(', ') }}</p>
+        </div>
+      </gr-popover>
+    }
+  }
+  @if (w.url) {
+    <span class="worker-url" [title]="w.url">{{ w.url }}</span>
+  }
+</div>
+
+<div class="worker-card-job-count-cell">
+  <span class="job-count">{{ workerLoadText() }}</span>
+  <span class="worker-card__load-job-count-label" [title]="jobCountStatusTitle()">{{ jobCountStatusText() }}</span>
+</div>
+
+<div class="worker-card__status-pills-and-allowed-capabilities-row">
+  <div class="worker-card__status-pills-cell">
+    @if (!w.active) {
+      <gr-badge severity="neutral" showStatusDot>Inactive</gr-badge>
+    } @else if (w.connected) {
+      <gr-badge severity="success" showStatusDot>Connected</gr-badge>
+    } @else {
+      <gr-badge severity="neutral" showStatusDot>Offline</gr-badge>
+    }
+    <app-worker-drain-badge [draining]="!!w.live?.draining" [requestedByAdmin]="!!w.requested_by_admin" />
+  </div>
+  <gr-allowed-capabilities class="allowed-capabilities-chips-cell" [value]="w" [workerReportedCapabilities]="w.live?.capabilities" />
+</div>
+
+<div class="worker-card-action-buttons-cell phone-icon-buttons">
+  <ng-content select="[slot=actions]"></ng-content>
+</div>

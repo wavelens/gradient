@@ -14,10 +14,7 @@
     @if (canCreateTask() && tasks.items().length) {
       <a grButton label="Connect repository" icon="add" [routerLink]="links.projectPage(projectName, 'connect')"></a>
     }
-    @if (canOpenMembers()) {
-      <a grButton label="Members" icon="group" severity="secondary" [routerLink]="links.membersPage('project', projectName)"></a>
-    }
-    @if (canOpenSettings()) {
+    @if (canShowSettingsButton()) {
       <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
     }
     @if (authService.isAuthenticated()) {
@@ -25,9 +22,7 @@
     }
   </div>
   @if (isViewerProjectMember(project)) {
-    <gr-settings-section title="Readiness">
-      <gr-project-readiness-card [project]="projectName" [projectPermissions]="project.permissions" [projectSettingsAreManagedByServer]="project.managed" />
-    </gr-settings-section>
+    <gr-project-readiness-card showOnlyProblemItems [project]="projectName" [projectPermissions]="project.permissions" [projectSettingsAreManagedByServer]="project.managed" />
   }
   <gr-load-state
     [loading]="tasks.loading()"
@@ -37,7 +32,7 @@
     errorTitle="Failed to load tasks"
     [emptyIcon]="entityKindToIconName.task"
     emptyTitle="No tasks yet"
-    [emptyMessage]="canCreateTask() ? 'Connect a repository to start a Nix build.' : 'Ask a project administrator to connect a repository.'"
+    [emptyMessage]="canCreateTask() ? undefined : 'Ask a project administrator to connect a repository.'"
     (retry)="tasks.reload()"
   >
     @if (canCreateTask()) {
@@ -47,28 +42,7 @@
       <h2>Tasks</h2>
       <gr-card-grid>
         @for (task of tasks.items(); track task.id) {
-          <gr-nav-card
-            [icon]="entityKindToIconName.task"
-            [title]="formatEntityLabel(task)"
-            [description]="task.description"
-            [link]="links.task(projectName, task.name)"
-          >
-            <gr-entity-name slot="title" [displayName]="task.display_name" [name]="task.name" />
-            <div slot="meta">
-              @if (!task.active) {
-                <gr-badge severity="neutral">Inactive</gr-badge>
-              }
-              @if (task.last_evaluation_status) {
-                <gr-eval-status-badge [status]="task.last_evaluation_status" />
-              }
-              @if (getLatestEvaluationStatusText(task); as latestEvaluationText) {
-                <span class="task-card-latest-evaluation">{{ latestEvaluationText }}</span>
-              }
-              @if (task.recent_evaluations.length > 1) {
-                <app-evaluation-history [bars]="task.recent_evaluations" [project]="projectName" [task]="task.name" [barsAreLinks]="false" />
-              }
-            </div>
-          </gr-nav-card>
+          <app-task-card [task]="task" [project]="projectName" [latestEvaluationStatusText]="getLatestEvaluationStatusText(task)" />
         }
       </gr-card-grid>
       <gr-load-more [shown]="tasks.items().length" [total]="tasks.total()" [loading]="tasks.loadingMore()" (more)="tasks.loadMore()" />

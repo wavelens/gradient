@@ -21,21 +21,26 @@ import {
   WorkerConnection,
   PatchWorkerRequest,
 } from '@core/models';
-import { AllowedCapabilitiesComponent, confirmAndDrainWorker, GradientCiConnectComponent, WorkerDrainingBadgeComponent } from '@shared/ui';
+import {
+  AllowedCapabilitiesComponent,
+  confirmAndDrainWorker,
+  GradientCiConnectComponent,
+  WorkerCardComponent,
+  WorkerCardGridComponent,
+} from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { MANAGED_ITEM_DISABLED_REASON, canManageTeam } from '@shared/access';
+import { ServerConfigurationManagedLockButtonComponent, canManageTeam } from '@shared/access';
 import { RegisterWorkerDialogComponent } from '@shared/worker-registration-dialog/register-worker-dialog.component';
 import { EMPTY, Observable, map, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import {
-  BadgeComponent,
   ButtonComponent,
   DialogComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  RowComponent,
-  RowListComponent,
+  MenuComponent,
+  MenuItem,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
 
@@ -47,16 +52,16 @@ import {
     FormsModule,
     GradientCiConnectComponent,
     RegisterWorkerDialogComponent,
-    BadgeComponent,
     ButtonComponent,
     DialogComponent,
     FormFieldComponent,
     InputDirective,
     LoadStateComponent,
-    RowComponent,
-    RowListComponent,
+    MenuComponent,
+    ServerConfigurationManagedLockButtonComponent,
     SettingsSectionComponent,
-    WorkerDrainingBadgeComponent,
+    WorkerCardComponent,
+    WorkerCardGridComponent,
   ],
   templateUrl: './team-workers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -66,7 +71,6 @@ export class TeamWorkersComponent implements OnInit {
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
-  protected readonly managedItemDisabledReason = MANAGED_ITEM_DISABLED_REASON;
   config = inject(ConfigService);
 
   team = input.required<TeamResponse>();
@@ -88,6 +92,27 @@ export class TeamWorkersComponent implements OnInit {
   canConnectGradientCi = computed(
     () => this.isAdmin() && this.config.gradientCiEnabled && !this.workers().some((w) => w.gradient_ci),
   );
+  workerMenus = computed(() => new Map(this.shownWorkers().map((w) => [w.worker_id, this.menuFor(w)])));
+
+  private menuFor(worker: TeamWorkerEntry): MenuItem[] {
+    if (!this.isAdmin()) return [];
+    const isWorkerRequestRunning = this.busy() === worker.worker_id;
+    const workerDrainMenuItem: MenuItem[] = worker.requested_by_admin
+      ? [{ label: 'Undrain', icon: 'play_arrow', disabled: isWorkerRequestRunning, command: () => this.cancelAdminRequestedWorkerDrain(worker) }]
+      : worker.live && !worker.live.draining
+        ? [{ label: 'Drain', icon: 'hourglass_bottom', disabled: isWorkerRequestRunning, command: () => this.confirmAndStartWorkerDrain(worker) }]
+        : [];
+    return [
+      ...(worker.managed ? [] : [{ label: 'Edit', icon: 'edit', disabled: isWorkerRequestRunning, command: () => this.openEdit(worker) }]),
+      ...workerDrainMenuItem,
+      worker.active
+        ? { label: 'Deactivate', icon: 'pause', disabled: isWorkerRequestRunning, command: () => this.confirmDeactivateTeamWorkerAndReloadList(worker) }
+        : { label: 'Activate', icon: 'play_arrow', disabled: isWorkerRequestRunning, command: () => this.reactivateWorker(worker) },
+      ...(worker.managed
+        ? []
+        : [{ separator: true }, { label: 'Delete', icon: 'delete', danger: true, disabled: isWorkerRequestRunning, command: () => this.remove(worker) }]),
+    ];
+  }
 
   statusOf = (workerId: string): Observable<WorkerConnection | undefined> =>
     this.teams.workers(this.teamName).pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));

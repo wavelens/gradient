@@ -26,8 +26,7 @@ import { injectProject } from '@core/resolvers/project-access.resolver';
 import { injectTeam } from '@core/resolvers/team-access.resolver';
 import { injectCacheAccessData } from '@core/resolvers/inject-access';
 import {
-  ManagedDisableDirective,
-  ServerConfigurationManagedBannerComponent,
+  SettingsAccessStateBadgeComponent,
   WritableDirective,
   buildMemberSoleAdminDisabledReasonTextForUsername,
   canManageTeam,
@@ -49,6 +48,9 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { links, type MembersPageTab } from '@shared/routing';
 import { formatEntityLabel } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
+import { ProjectSettingsNavigationComponent } from '@features/projects/project-settings-navigation/project-settings-navigation.component';
+import { BinaryCacheSettingsNavigationComponent } from '@features/caches/cache-settings-navigation/cache-settings-navigation.component';
+import { TeamSettingsNavigationComponent } from '@features/teams/team-settings-navigation/team-settings-navigation.component';
 import {
   type PeopleListRow,
   copyPeopleRowAfterRoleSave,
@@ -77,10 +79,12 @@ const roleNamesForUnavailableRoleList = ['View', 'Write', 'Admin'];
     LoadStateComponent,
     PageLayoutComponent,
     SettingsSectionComponent,
-    ManagedDisableDirective,
-    ServerConfigurationManagedBannerComponent,
+    SettingsAccessStateBadgeComponent,
     WritableDirective,
     TeamGrantsComponent,
+    ProjectSettingsNavigationComponent,
+    BinaryCacheSettingsNavigationComponent,
+    TeamSettingsNavigationComponent,
     ProjectMembersAccessListComponent,
     InvitePersonDialogComponent,
     ProjectOrCacheRolesListComponent,
@@ -141,10 +145,9 @@ export class MembersPageComponent implements OnInit {
   });
 
   breadcrumb = computed(() => {
-    const crumb = { label: 'Members' };
-    if (this.kind === 'project') return this.crumbs.project(this.name, crumb);
-    if (this.kind === 'cache') return this.crumbs.cache(this.name, crumb);
-    return this.crumbs.team(this.name, crumb);
+    if (this.kind === 'project') return this.crumbs.projectSettings(this.name);
+    if (this.kind === 'cache') return this.crumbs.cacheSettings(this.name);
+    return this.crumbs.teamSettings(this.name);
   });
   tabs = computed<LinkTab[]>(() => {
     const tab = (label: string, target: MembersPageTab): LinkTab => ({ label, link: links.membersPage(this.kind, this.name, target) });

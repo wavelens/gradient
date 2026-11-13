@@ -44,6 +44,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-left: 1px solid var(--gr-border-subtle);
 }
 
 .info-bar {
@@ -52,7 +53,7 @@
   justify-content: space-between;
   padding: 0 $spacing-lg;
   min-height: 48px;
-  background: var(--gr-surface-raised);
+  background: var(--gr-surface-base);
   border-bottom: 1px solid var(--gr-border-subtle);
   flex-shrink: 0;
   flex-wrap: wrap;
@@ -117,6 +118,11 @@
   text-overflow: ellipsis;
 }
 
+.metric-value-running-duration {
+  min-width: 9ch;
+  font-variant-numeric: tabular-nums;
+}
+
 .sidebar-toggle {
   display: none;
 }
@@ -124,7 +130,6 @@
 .log-sidebar {
   width: 260px;
   flex-shrink: 0;
-  border-right: 1px solid var(--gr-border-subtle);
   background: var(--gr-surface-base);
   display: flex;
   flex-direction: column;
@@ -184,6 +189,8 @@
 
   .info-bar-left { margin-left: 0; }
 
+  .log-area { border-left: none; }
+
   .info-bar-right {
     flex-basis: 100%;
     margin-left: 0;
@@ -196,6 +203,7 @@
     left: 0;
     z-index: $z-dropdown;
     width: min(85vw, 320px);
+    border-right: 1px solid var(--gr-border-subtle);
     transform: translateX(-100%);
     visibility: hidden;
     transition: transform $transition-base, visibility $transition-base;
@@ -216,4 +224,41 @@
 
 @media (max-width: $breakpoint-md) and (prefers-reduced-motion: reduce) {
   .log-sidebar { transition: none; }
+}
+
+.log-sidebar-below-breadcrumb {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (min-width: ($breakpoint-md + 1px)) {
+  .log-page {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .log-sidebar,
+  .log-main {
+    display: grid;
+    grid-row: 1 / -1;
+    grid-template-rows: subgrid;
+  }
+
+  .log-sidebar { width: auto; }
+
+  .info-bar { grid-row: 1; }
+
+  .log-area {
+    grid-row: 2;
+    min-height: 0;
+  }
+
+  .sidebar-breadcrumb {
+    align-content: center;
+    border-bottom: 1px solid var(--gr-border-subtle);
+  }
 }

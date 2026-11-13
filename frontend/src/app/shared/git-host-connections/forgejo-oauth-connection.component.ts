@@ -19,7 +19,6 @@ import {
 import { environment } from '@environments/environment';
 import { AccessState } from '@core/models';
 import { ConfigService } from '@core/services/config.service';
-import { ManagedDisableDirective } from '@shared/access/managed-disable.directive';
 import { gitHostLabel } from '@shared/git/git-host';
 import { slugify } from '@shared/text';
 
@@ -50,17 +49,16 @@ function deriveDefaultConnectionNameFromUrl(url: string): string {
     MessageBannerComponent,
     SettingsSectionComponent,
     SubmitDirective,
-    ManagedDisableDirective,
   ],
   template: `
     @if (gitHostOauthApprovalReturnBannerSignal(); as outcome) {
       <gr-message-banner [type]="outcome.severity" data-testid="oauth-outcome-banner">{{ outcome.text }}</gr-message-banner>
     }
-    @if (giteaForgejoOAuth2AppConfig && access().canEdit) {
+    @if (giteaForgejoOAuth2AppConfig && access().canEdit && !access().managed) {
       <gr-settings-section [title]="oauth2AppGitHostTypeAndInstanceHostnameLabel" data-testid="oauth-connect-section">
         <p class="text-secondary">Connect this project to a Git host with OAuth2. Gradient can create a connection after authorization on the Git host. That connection can receive events and report commit status. Gradient can refresh the access token automatically. Gradient can also install Webhooks on repositories of project tasks that don't have a connection on this Git host yet.</p>
         <button grButton [label]="'Connect with ' + oauth2AppGitHostTypeAndInstanceHostnameLabel" icon="link"
-          (click)="openOAuth2ConnectDialogWithDefaultNameFromHostname()" [appManagedDisable]="access()"></button>
+          (click)="openOAuth2ConnectDialogWithDefaultNameFromHostname()"></button>
       </gr-settings-section>
 
       <gr-dialog [header]="'Connect with ' + oauth2AppGitHostTypeAndInstanceHostnameLabel" [visible]="isOAuth2ConnectionNameDialogOpen()"

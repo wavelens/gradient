@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" title="API Keys" subtitle="Manage API keys for programmatic access">
+<gr-page-layout width="settings" title="API Keys">
   <app-settings-nav slot="banner" />
   @if (keys().length) {
     <button slot="actions" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
@@ -17,7 +17,6 @@
     errorTitle="Failed to load API keys"
     emptyIcon="key"
     emptyTitle="No API keys"
-    emptyMessage="Create an API key to access Gradient programmatically."
     (retry)="loadKeys()"
   >
     <button slot="empty-action" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
@@ -28,7 +27,7 @@
             {{ key.name }}
             <gr-badge>{{ scopeBadge(key) }}</gr-badge>
             @if (key.managed) {
-              <gr-badge severity="info">Managed</gr-badge>
+              <app-server-configuration-managed-lock-button />
             }
             @if (key.revoked_at) {
               <gr-badge severity="danger">Revoked</gr-badge>
@@ -53,31 +52,32 @@
                   severity="secondary"
                   (click)="openApiKeyAccessDialog(key)"
                 ></button>
+              }
+              @if (!key.managed) {
+                @if (!key.revoked_at && !expired) {
+                  <button
+                    grButton
+                    label="Edit"
+                    icon="edit"
+                    severity="secondary"
+                    (click)="openEditDialog(key)"
+                  ></button>
+                  <button
+                    grButton
+                    label="Revoke"
+                    icon="block"
+                    severity="danger"
+                    (click)="revokeKey(key)"
+                  ></button>
+                }
                 <button
                   grButton
-                  label="Edit"
-                  icon="edit"
-                  severity="secondary"
-                  (click)="openEditDialog(key)"
-                  [appManagedDisable]="rowAccess(key)"
-                ></button>
-                <button
-                  grButton
-                  label="Revoke"
-                  icon="block"
+                  label="Delete"
+                  icon="delete"
                   severity="danger"
-                  (click)="revokeKey(key)"
-                  [appManagedDisable]="rowAccess(key)"
+                  (click)="deleteKey(key)"
                 ></button>
               }
-              <button
-                grButton
-                label="Delete"
-                icon="delete"
-                severity="danger"
-                (click)="deleteKey(key)"
-                [appManagedDisable]="rowAccess(key)"
-              ></button>
             </div>
           </gr-row>
         }

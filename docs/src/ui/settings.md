@@ -32,9 +32,10 @@ Open **Settings** from the project page.
 | Section | Content | Actions |
 |---|---|---|
 | General | Name, display name, description, visibility | Edit. **Hide Build Requests task** removes the task holding `gradient build` evaluations from task lists. The evaluations themselves continue to run |
-| More Settings | Links to Workers, Cache Subscriptions, Git host connections, Event notifications | Open each page |
 | SSH Key | Public key used for cloning the project's repositories | Copy and add it as a deploy key on the Git host |
 | Danger Zone | | **Regenerate Key** invalidates the old key immediately. **Delete Project** removes the project |
+
+The project settings pages share a side navigation. Navigation items include General, Members, Workers, Cache Subscriptions, Git host connections, Secrets and Event notifications. Only pages that a user can open appear in that list.
 
 Anyone can view every evaluation and build on a public project, signed in or not.
 
@@ -53,7 +54,7 @@ Public projects and caches also appear in lists of projects and caches, search, 
 | Visibility | Public caches hand out paths without credentials |
 | Signing Key | Current public keys and their start dates, plus retired keys. Use **Rotate Key** to make a new key pair. See [Signing Key](../concepts/caches.md#signing-key). |
 
-The cache page also includes **Upstream Caches**, **NARs**, **Members**, **Subscriptions** and **Webhooks**.
+The items in the side navigation for cache settings also include **Members**, **Upstream Caches**, **Subscriptions** and **Webhooks**. The items on the cache page include **NARs**.
 
 The pin button on the NARs tab can keep a path beyond garbage collection. This works regardless of gc.narTtlHours. A popup can ask whether to pin only this path or all paths that the path can reference. The Pinned column can show which user pinned a path. Filters can show only pinned paths. They can also show only unpinned paths.
 

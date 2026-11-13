@@ -16,6 +16,7 @@ import { IconComponent } from '../icon/icon.component';
   imports: [RouterLink, IconComponent],
   templateUrl: './nav-card.component.html',
   styleUrl: './nav-card.component.scss',
+  host: { '[attr.title]': 'null' },
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class NavCardComponent {

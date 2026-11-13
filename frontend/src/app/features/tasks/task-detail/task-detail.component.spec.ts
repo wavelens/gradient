@@ -477,10 +477,17 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(spy).toHaveBeenCalledWith('e1');
   });
 
-  it('keeps logs, summary and retry out of the dots menu', () => {
+  it('moves Run again into the dots menu while retry holds the single panel button', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
     for (const label of ['Logs', 'Summary', 'Retry failed builds']) expect(labels).not.toContain(label);
+    expect(labels).toContain('Run again');
+  });
+
+  it('keeps Run again as the single panel button when nothing failed', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
+    expect(actionLabels(fixture)).toEqual(['Logs', 'Summary', 'Run again', 'More']);
+    expect(fixture.componentInstance.panelMenuModel().map(i => i.label)).not.toContain('Run again');
   });
 
   it('retries the selected evaluation from the menu, then refreshes', () => {
@@ -545,12 +552,12 @@ describe('TaskDetailComponent evaluation menu', () => {
       Array.from(document.querySelectorAll<HTMLInputElement>('input[name="run-scope"]'))
         .map((input) => ({ value: input.value, disabled: input.disabled, text: input.parentElement?.textContent?.replace(/\s+/g, ' ').trim() }));
 
-    it('opens from the header Run button with the latest commit chosen and no input walk', () => {
+    it('opens from the second part of the header Run button with the latest commit chosen and no input walk', () => {
       const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
       const comp = fixture.componentInstance;
       comp.runScopeChoice.set('this-commit');
       comp.walkAllInputsChecked.set(true);
-      findByText(fixture.nativeElement, 'run')!.click();
+      (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.head-actions button[aria-label="Run options"]')!.click();
       fixture.detectChanges();
       expect(comp.runDialogOpen()).toBe(true);
       expect(comp.runScopeChoice()).toBe('latest-commit');
@@ -623,10 +630,12 @@ describe('TaskDetailComponent evaluation menu', () => {
     });
   });
 
-  it('runs the commit of the selected evaluation again from both menus', () => {
+  it('runs the commit of the selected evaluation again from the panel button and the tab menu', () => {
     const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
     const start = vi.spyOn(tasksService, 'startEvaluation');
-    expect(fixture.componentInstance.panelMenuModel().map(i => i.label)).toContain('Run again');
+    panelActions(fixture)[actionLabels(fixture).indexOf('Run again')].click();
+    expect(start).toHaveBeenCalledWith('acme', 'demo', { commit: 'abc1234def5678' });
+    start.mockClear();
     fixture.componentInstance.evalMenuModel().find(i => i.label === 'Run again')!.command!();
     expect(start).toHaveBeenCalledWith('acme', 'demo', { commit: 'abc1234def5678' });
   });
@@ -687,11 +696,48 @@ describe('TaskDetailComponent evaluation menu', () => {
       expect(notify.success).toHaveBeenCalledWith('Evaluation retried');
       expect(fixture.componentInstance.selected()?.id).toBe('e3');
     });
+
+    it("Response to Run button after user departure doesn't navigate back to the task page.", () => {
+      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+      const start = new Subject<{ id: string; name: string; url: string }>();
+      vi.spyOn(tasksService, 'startEvaluation').mockReturnValue(start);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      fixture.componentInstance.startEvaluation();
+      fixture.destroy();
+      expect(start.observed).toBe(true);
+      start.next({ id: 'e2', name: 'acme/demo', url: '' });
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it('Task page does not navigate back to itself when run dialog start response arrives after user leaves', () => {
+      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+      const start = new Subject<{ id: string; name: string; url: string }>();
+      vi.spyOn(tasksService, 'startEvaluation').mockReturnValue(start);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      fixture.componentInstance.openRunDialogWithDefaultChoices();
+      fixture.componentInstance.startEvaluationOrRetryFailedBuildsFromRunDialog();
+      fixture.destroy();
+      expect(start.observed).toBe(true);
+      start.next({ id: 'e2', name: 'acme/demo', url: '' });
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it('No return to task page on late response to retry failed builds after user departure', () => {
+      const { fixture, evaluationsService, notify } = setup(trigger, { primaryStatus: 'Failed', primary: failedBuilds });
+      const retry = new Subject<string>();
+      vi.spyOn(evaluationsService, 'retryEvaluation').mockReturnValue(retry);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      fixture.componentInstance.retryEvaluationItem()?.command?.();
+      fixture.destroy();
+      retry.next('e3');
+      expect(notify.success).toHaveBeenCalledWith('Evaluation retried');
+      expect(navigate).not.toHaveBeenCalled();
+    });
   });
 
   it('holds Run again while an evaluation is queued', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Queued' });
-    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Run again')?.disabledReason).toBe('The latest evaluation has not started yet.');
+    expect(fixture.componentInstance.runEvaluationAgainMenuItem()?.disabledReason).toBe('The latest evaluation has not started yet.');
   });
 
   it('offers no Run again and no input walk without trigger access', () => {
@@ -1072,7 +1118,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(root.querySelector('.eval-only')?.textContent).toContain('Evaluation only');
   });
 
-  it('shows an app row as queued while its exec job waits after the build finished', () => {
+  it('Keep the row of a finished app build green with the exec job queued or running.', () => {
     const { fixture } = setup(
       { managed: false, canEdit: true, canTrigger: true },
       {
@@ -1081,11 +1127,12 @@ describe('TaskDetailComponent - evaluation selection', () => {
       },
     );
     const row = () => (fixture.nativeElement as HTMLElement).querySelector('.entry-row.pkg')?.getAttribute('data-phase');
-    expect(row()).toBe('success');
     const execJobList = fixture.debugElement.query(By.directive(ExecJobListComponent)).componentInstance as ExecJobListComponent;
-    execJobList.allExecJobsLoadedOrPolled.emit([{ id: 'x1', entry_point: 'apps.x86_64-linux.app', status: 'queued', nodes: 1, labels: [], devices: [], autostart: true, keep_vm_running: false }]);
-    fixture.detectChanges();
-    expect(row()).toBe('queued');
+    for (const status of ['queued', 'running'] as const) {
+      execJobList.allExecJobsLoadedOrPolled.emit([{ id: 'x1', entry_point: 'apps.x86_64-linux.app', status, nodes: 1, labels: [], devices: [], autostart: true, keep_vm_running: false }]);
+      fixture.detectChanges();
+      expect(row()).toBe('success');
+    }
   });
 
   it('offers the project/task path the CLI uses for copying', () => {
@@ -1094,7 +1141,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(copy?.querySelector('code')?.textContent).toBe('acme/demo');
   });
 
-  it('shows the own build status of an app row and links it to its exec job', () => {
+  it('renders an app row like every other entry point and links it to the build log', () => {
     const { fixture } = setup(
       { managed: false, canEdit: true, canTrigger: true },
       {
@@ -1102,13 +1149,9 @@ describe('TaskDetailComponent - evaluation selection', () => {
         getEntryPoints: () => of({ entry_points: [{ ...epSummary('app', 'apps.x86_64-linux.app'), build_status: 'Completed' }], total: 1, failed_attributes: [] }),
       },
     );
-    const execJobList = fixture.debugElement.query(By.directive(ExecJobListComponent)).componentInstance as ExecJobListComponent;
-    execJobList.allExecJobsLoadedOrPolled.emit([{ id: 'x1', entry_point: 'apps.x86_64-linux.app', status: 'running', nodes: 1, labels: [], devices: [], autostart: true, keep_vm_running: false }]);
-    fixture.detectChanges();
     const row = (fixture.nativeElement as HTMLElement).querySelector('.entry-row.pkg')!;
-    expect(row.querySelector('.pkg-bar')).toBeNull();
-    expect(row.querySelector('.pkg-deps')?.textContent?.trim()).toBe('Completed');
-    expect(row.querySelector('.entry-link')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/x1');
+    expect(row.querySelector('.pkg-bar')).not.toBeNull();
+    expect(row.querySelector('.entry-link')?.getAttribute('href')).toBe('/project/acme/log/e1?build=b-app&filter=b-app');
   });
 
   it('tags the row of a derivation an evaluation imported', () => {
@@ -1740,6 +1783,16 @@ describe('TaskDetailComponent - #636 eval page', () => {
     });
     fixture.detectChanges();
     const link = fixture.nativeElement.querySelector('.pkg a.entry-link') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/project/acme/log/e1?build=b-hello&filter=b-hello');
+  });
+
+  it('Link a package that was skipped after a dependency failure to its builds in the log without a build parameter', () => {
+    const { fixture } = setup(access, {
+      primaryStatus: 'Failed',
+      getEntryPoints: () => of({ entry_points: [{ ...epSummary('hello'), build_status: 'DependencyFailed' }], total: 1, failed_attributes: [] }),
+    });
+    fixture.detectChanges();
+    const link = fixture.nativeElement.querySelector('.pkg a.entry-link') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe('/project/acme/log/e1?filter=b-hello');
   });
 
@@ -1916,10 +1969,15 @@ describe('TaskDetailComponent entry point abort and retry', () => {
     expect(spy).toHaveBeenCalledWith('b-hello');
   });
 
-  it('offers no single build retry once the evaluation finished, leaving Retry failed builds as the way', () => {
-    const { fixture } = setup(edit, { primaryStatus: 'Failed', primary: failedBuilds });
-    expect(pkgLabels(fixture, entryPoint('FailedPermanent'))).not.toContain('Retry');
-    expect(menuLabels(fixture)).toContain('Retry failed builds');
+  it('offers Retry failed builds, not a single build retry, in the menu of a failed build once the evaluation finished', () => {
+    const { fixture, evaluationsService } = setup(edit, { primaryStatus: 'Failed', primary: failedBuilds });
+    const spy = vi.spyOn(evaluationsService, 'retryEvaluation');
+    expect(pkgLabels(fixture, entryPoint('Completed'))).not.toContain('Retry failed builds');
+    const labels = pkgLabels(fixture, entryPoint('FailedPermanent'));
+    expect(labels).not.toContain('Retry');
+    expect(labels).toContain('Retry failed builds');
+    run(fixture, 'Retry failed builds');
+    expect(spy).toHaveBeenCalledWith('e1');
   });
 
   it('offers neither abort nor retry without edit access', () => {
@@ -2270,5 +2328,38 @@ describe('TaskDetailComponent - live package reloads', () => {
     fixture.componentInstance.loadTaskData(true);
     fixture.detectChanges();
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Waiting for evaluation worker');
+  });
+});
+
+describe('TaskDetailComponent evaluation wildcard chip', () => {
+  it('lists every pattern of the wildcard after a click on the chip', () => {
+    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false });
+    fixture.componentInstance.task.update((task) => ({ ...task!, wildcard: 'packages.x86_64-linux.*, !packages.x86_64-linux.docs' }));
+    fixture.detectChanges();
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button.chip--wildcard')!.click();
+    fixture.detectChanges();
+    const patterns = Array.from(document.querySelectorAll('.wildcard-pattern-list li')).map((item) => item.textContent?.trim());
+    expect(patterns).toEqual(['packages.x86_64-linux.*', '!packages.x86_64-linux.docs']);
+  });
+});
+
+describe('TaskDetailComponent two-part run button', () => {
+  const runButtonParts = (fixture: ComponentFixture<TaskDetailComponent>) =>
+    Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('.head-actions .joined-button-pair > button'));
+
+  it('starts an evaluation of the latest commit from the first part without the dialog', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
+    const start = vi.spyOn(tasksService, 'startEvaluation');
+    runButtonParts(fixture)[0].click();
+    expect(start).toHaveBeenCalledWith('acme', 'demo', {});
+    expect(fixture.componentInstance.runDialogOpen()).toBe(false);
+  });
+
+  it('opens the dialog from the first part while an evaluation runs, since a new one can abort it', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Building' });
+    const start = vi.spyOn(tasksService, 'startEvaluation');
+    runButtonParts(fixture)[0].click();
+    expect(start).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.runDialogOpen()).toBe(true);
   });
 });

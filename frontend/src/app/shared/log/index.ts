@@ -7,3 +7,5 @@
 export * from './ansi';
 export * from './log-window';
 export * from './log-viewer.component';
+export * from './attempt-log-row';
+export * from './log-attempt-list.component';

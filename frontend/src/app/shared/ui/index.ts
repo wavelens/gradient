@@ -28,3 +28,4 @@ export * from './permission-picker/permission-picker.component';
 export * from './project-readiness/project-readiness-card.component';
 export * from './waiting-notice/waiting-notice.component';
 export * from './worker-drain/worker-drain';
+export * from './worker-card/worker-card.component';

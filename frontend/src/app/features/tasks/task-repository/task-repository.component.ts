@@ -14,18 +14,21 @@ import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { RepositoryAccessComponent } from './repository-access.component';
 import { RepositoryGitHostConnectionAndCommitStatusComponent } from './repository-git-host-connection.component';
 import { repositoryHost } from '@shared/git';
-import { ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
+import { SettingsAccessStateBadgeComponent, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccessData } from '@core/resolvers/inject-access';
+import { TaskSettingsNavigationComponent } from '../task-settings-navigation/task-settings-navigation.component';
 
 @Component({
   selector: 'app-task-repository',
   standalone: true,
-  imports: [LoadStateComponent, PageLayoutComponent, RepositoryAccessComponent, RepositoryGitHostConnectionAndCommitStatusComponent, ServerConfigurationManagedBannerComponent],
+  imports: [TaskSettingsNavigationComponent, LoadStateComponent, PageLayoutComponent, RepositoryAccessComponent, RepositoryGitHostConnectionAndCommitStatusComponent, SettingsAccessStateBadgeComponent],
   template: `
-    <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Repository"
-      subtitle="Repository URL, access, and connection to the Git host.">
+    <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Repository">
+      <app-task-settings-navigation slot="settings-navigation" [projectUrlName]="projectName" [taskUrlName]="taskName" />
+      @if (state()) {
+        <app-settings-access-state-badge slot="after-title" [access]="taskAccess()?.access" kind="task" showReadOnlyNote />
+      }
       @if (state(); as repo) {
-        <app-server-configuration-managed-banner [access]="taskAccess()?.access" kind="task" showReadOnlyNote />
         <app-repository-access [project]="projectName" [task]="taskName" [state]="repo"
           [gitHost]="gitHost()" (changed)="load()" />
         <app-repository-git-host-connection [project]="projectName" [task]="taskName" [state]="repo"
@@ -53,7 +56,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   loading = signal(true);
   loadError = signal<unknown>(null);
 
-  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Repository' }));
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName));
   gitHost = computed(() => {
     const repo = this.state();
     if (!repo) return null;

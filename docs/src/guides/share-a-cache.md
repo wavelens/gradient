@@ -84,7 +84,7 @@ Roles on a cache belong to members of the cache itself. Project roles do not car
 
 === "UI"
 
-    On the cache page, open **Members -> Invite Member**. Enter a user name and a role, then pick **Send invitation**. The invited user accepts the invitation on the **Requests** page in the user menu of the header. Cache access only begins after acceptance. Instance administrators and people adding a user who already has access through a team can pick **Add now** instead.
+    Open **Settings -> Members -> Invite Member** on the cache page. Enter a user name and a role, then pick **Send invitation**. The invited user accepts the invitation on the **Requests** page in the user menu of the header. Cache access only begins after acceptance. Instance administrators and people adding a user who already has access through a team can pick **Add now** instead.
 
     - Invites expire after 7 days.
     - With [mail](../reference/configuration.md#email) configured, the invitee also gets an email with a link.
@@ -109,7 +109,7 @@ nix store info --store https://gradient.example.com/cache/main
 - The output shows the store info of the cache.
 - A private cache return `401` without a valid netrc entry.
 - The other project list the cache under **Settings -> Cache Subscriptions** with no pending badge.
-- Members appear under **Members** on the cache page.
+- Members appear under **Settings -> Members** on the cache page.
 
 ## Next Steps
 

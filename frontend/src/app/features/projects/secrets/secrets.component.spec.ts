@@ -190,12 +190,13 @@ describe('SecretsComponent', () => {
     expect(fixture.componentInstance.formOpen()).toBe(true);
   });
 
-  it('blocks Replace and Delete on a managed secret', async () => {
+  it('shows a lock instead of Replace and Delete on a managed secret', async () => {
     const { fixture } = setup();
     await settled(fixture);
     const row = rowOf(fixture, 'lab-key');
-    expect(buttonIn(row, 'Replace')!.getAttribute('aria-disabled')).toBe('true');
-    expect(buttonIn(row, 'Delete')!.getAttribute('aria-disabled')).toBe('true');
+    expect(row.querySelector('app-server-configuration-managed-lock-button')).not.toBeNull();
+    expect(buttonIn(row, 'Replace')).toBeNull();
+    expect(buttonIn(row, 'Delete')).toBeNull();
     expect(buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.getAttribute('aria-disabled')).toBeNull();
   });
 

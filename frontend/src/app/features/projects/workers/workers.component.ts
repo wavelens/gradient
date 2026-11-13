@@ -28,7 +28,6 @@ import {
   PatchWorkerRequest,
 } from '@core/models';
 import {
-  BadgeComponent,
   ButtonComponent,
   DialogComponent,
   EmptyStateComponent,
@@ -41,24 +40,33 @@ import {
   MenuItem,
   MessageService,
   PageLayoutComponent,
-  PopoverComponent,
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
-import { AllowedCapabilitiesComponent, EntityNameComponent, GradientCiConnectComponent, LabelHelpComponent, entityKindToIconName } from '@shared/ui';
-import { MANAGED_ITEM_DISABLED_REASON, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
+import {
+  AllowedCapabilitiesComponent,
+  EntityNameComponent,
+  GradientCiConnectComponent,
+  LabelHelpComponent,
+  WorkerCardComponent,
+  WorkerCardGridComponent,
+  entityKindToIconName,
+} from '@shared/ui';
+import { WritableDirective, SettingsAccessStateBadgeComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { RegisterWorkerDialogComponent } from '@shared/worker-registration-dialog/register-worker-dialog.component';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { links } from '@shared/routing';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { ProjectSettingsNavigationComponent } from '../project-settings-navigation/project-settings-navigation.component';
 
 @Component({
   selector: 'app-workers',
   standalone: true,
   imports: [
+    ProjectSettingsNavigationComponent,
     AllowedCapabilitiesComponent,
     LabelHelpComponent,
     CommonModule,
@@ -69,18 +77,18 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
     InputDirective,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
+    SettingsAccessStateBadgeComponent,
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
     FieldRowComponent,
     EmptyStateComponent,
-    BadgeComponent,
     RowListComponent,
     RowComponent,
     MenuComponent,
-    PopoverComponent,
     EntityNameComponent,
+    WorkerCardComponent,
+    WorkerCardGridComponent,
     GradientCiConnectComponent,
     RegisterWorkerDialogComponent,
     TeamGrantsComponent,
@@ -125,26 +133,25 @@ export class WorkersComponent implements OnInit {
   toggleError = signal<string | null>(null);
 
   projectName = '';
-  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Workers' }));
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName));
   workers = signal<ProjectWorkerEntry[]>([]);
   newName = '';
   editAllowed: AllowedCapabilities = ALL_ALLOWED;
 
   gradientCi = computed(() => gradientCiEntry(this.config.gradientCiEnabled, this.workers()));
   otherWorkers = computed(() => listedWorkers(this.workers(), this.gradientCi()));
-  workerMenus = computed(() => new Map(this.otherWorkers().map((w) => [w.worker_id, this.menuFor(w)])));
-
-  workerStatusText(worker: ProjectWorkerEntry): string {
-    if (!worker.active) return 'Inactive';
-    const live = worker.live;
-    if (live) return `Connected · ${live.assigned_job_count}/${live.max_concurrent_builds} jobs`;
-    return worker.connected ? 'Connected, no jobs for this project (reconnect with the project token)' : 'Offline';
-  }
+  workerMenus = computed(() => new Map(this.workers().map((w) => [w.worker_id, this.menuFor(w)])));
 
   private menuFor(worker: ProjectWorkerEntry): MenuItem[] {
+    const actions = this.workerChangeOrTestMenuItems(worker);
+    if (worker.gradient_ci) return actions;
+    const metrics: MenuItem = { label: 'Metrics', icon: 'show_chart', routerLink: this.links.workerMetrics(this.projectName, worker.worker_id) };
+    return actions.length ? [metrics, { separator: true }, ...actions] : [metrics];
+  }
+
+  private workerChangeOrTestMenuItems(worker: ProjectWorkerEntry): MenuItem[] {
     const busy = this.deletingId() !== null || this.togglingId() !== null || this.testingId() !== null;
-    const canEdit = this.access().canEdit;
-    const lockedReason = this.access().managed ? MANAGED_ITEM_DISABLED_REASON : null;
+    const { canEdit, managed } = this.access();
     const testWorker: MenuItem = {
       label: 'Test worker',
       icon: 'bolt',
@@ -161,7 +168,7 @@ export class WorkersComponent implements OnInit {
     }
     if (!canEdit) return [];
     return [
-      { label: 'Edit', icon: 'edit', disabled: busy || this.renaming(), disabledReason: lockedReason, command: () => this.openRenameDialog(worker) },
+      ...(managed ? [] : [{ label: 'Edit', icon: 'edit', disabled: busy || this.renaming(), command: () => this.openRenameDialog(worker) }]),
       {
         label: worker.active ? 'Deactivate' : 'Activate',
         icon: worker.active ? 'pause' : 'play_arrow',
@@ -169,8 +176,11 @@ export class WorkersComponent implements OnInit {
         command: () => this.requestToggleWorker(worker),
       },
       testWorker,
-      { separator: true },
-      { label: 'Delete', icon: 'delete', danger: true, disabled: busy, disabledReason: lockedReason, command: () => this.deleteWorker(worker) },
+      ...(worker.gradient_ci
+        ? [{ separator: true }, { label: 'Disconnect', icon: 'link_off', danger: true, disabled: busy, command: () => this.openGradientCiDisconnect() }]
+        : managed
+          ? []
+          : [{ separator: true }, { label: 'Delete', icon: 'delete', danger: true, disabled: busy, command: () => this.deleteWorker(worker) }]),
     ];
   }
   showGradientCiConnect = signal(false);
