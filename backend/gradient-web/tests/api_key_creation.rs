@@ -172,7 +172,7 @@ async fn non_superuser_create_api_key_with_superuser_rights_returns_403_and_list
 }
 
 #[tokio::test]
-async fn unpinned_key_by_superuser_always_gets_use_superuser_rights() {
+async fn superuser_creates_unpinned_api_key_with_use_superuser_rights_and_view_project() {
     let session_id = SessionId::now_v7();
     let expected = mask_from(&[Permission::ViewProject, Permission::UseSuperuserRights]);
     let conn = with_auth_as(mock_db(), session_id, superuser())
