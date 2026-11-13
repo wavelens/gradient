@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 pub(crate) struct ManagedKeepSets<'a> {
     usernames: HashSet<&'a String>,
     project_names: HashSet<&'a String>,
-    task_names: HashSet<&'a String>,
+    task_keys: HashSet<(&'a str, &'a str)>,
     cache_names: HashSet<&'a String>,
     api_key_names: HashSet<&'a String>,
     team_names: HashSet<&'a String>,
@@ -30,7 +30,11 @@ pub(crate) fn managed_keep_sets(config: &StateConfiguration) -> ManagedKeepSets<
     ManagedKeepSets {
         usernames: config.users.values().map(|u| &u.username).collect(),
         project_names: config.projects.values().map(|o| &o.name).collect(),
-        task_names: config.tasks.values().map(|p| &p.name).collect(),
+        task_keys: config
+            .tasks
+            .values()
+            .map(|t| (t.project.as_str(), t.name.as_str()))
+            .collect(),
         cache_names: config.caches.values().map(|c| &c.name).collect(),
         api_key_names: config.api_keys.values().map(|k| &k.name).collect(),
         team_names: config.teams.values().map(|t| &t.name).collect(),
@@ -70,7 +74,7 @@ impl<'a> StateApplicator<'a> {
         let ManagedKeepSets {
             usernames,
             project_names,
-            task_names,
+            task_keys,
             cache_names,
             api_key_names,
             team_names,
@@ -96,11 +100,12 @@ impl<'a> StateApplicator<'a> {
 
         unmark_managed!(db, user, usernames, username, delete_state, "user");
         unmark_managed!(db, project, project_names, name, delete_state, "project");
-        unmark_managed!(db, task, task_names, name, delete_state, "task");
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
         unmark_managed!(db, team, team_names, name, delete_state, "team");
 
+        self.unmark_removed_tasks(&task_keys, &project_name_by_id, delete_state)
+            .await?;
         self.unmark_removed_roles(config, &project_name_by_id, delete_state)
             .await?;
         let team_name_by_id: HashMap<TeamId, String> = team::Entity::find()
@@ -158,6 +163,37 @@ impl<'a> StateApplicator<'a> {
             tracing::info!(worker_id, "Deleted team worker");
         }
 
+        Ok(())
+    }
+
+    async fn unmark_removed_tasks(
+        &self,
+        task_keys: &HashSet<(&str, &str)>,
+        project_name_by_id: &HashMap<ProjectId, String>,
+        delete_state: bool,
+    ) -> Result<(), DynError> {
+        let managed_tasks = task::Entity::find()
+            .filter(task::Column::Managed.eq(true))
+            .all(self.db)
+            .await?;
+        for managed in managed_tasks {
+            let project_name = project_name_by_id
+                .get(&managed.project)
+                .map_or("", String::as_str);
+            if task_keys.contains(&(project_name, managed.name.as_str())) {
+                continue;
+            }
+            let task_name = managed.name.clone();
+            if delete_state {
+                task::Entity::delete_by_id(managed.id).exec(self.db).await?;
+                tracing::info!(project = %project_name, task = %task_name, "Deleted managed task");
+            } else {
+                let mut active: task::ActiveModel = managed.into();
+                active.managed = Set(false);
+                active.update(self.db).await?;
+                tracing::info!(project = %project_name, task = %task_name, "Unmarked managed task");
+            }
+        }
         Ok(())
     }
 
@@ -314,10 +350,9 @@ mod keep_set_tests {
         assert!(sets.project_names.contains(&acme));
         assert!(!sets.project_names.contains(&acme_key));
 
-        let main = "main".to_string();
-        let foo_key = "foo-key".to_string();
-        assert!(sets.task_names.contains(&main));
-        assert!(!sets.task_names.contains(&foo_key));
+        assert!(sets.task_keys.contains(&("acme", "main")));
+        assert!(!sets.task_keys.contains(&("acme", "foo-key")));
+        assert!(!sets.task_keys.contains(&("acme-pr", "main")));
 
         let primary = "primary".to_string();
         let cache_key = "cache-key".to_string();
