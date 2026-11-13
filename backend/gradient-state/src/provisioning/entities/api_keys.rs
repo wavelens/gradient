@@ -83,6 +83,11 @@ impl<'a> StateApplicator<'a> {
                 .await?;
 
             if let Some(api_key_model) = existing_api_key {
+                warn_if_declared_permissions_remove_use_superuser_rights(
+                    state_api_key,
+                    api_key_model.permission,
+                    mask,
+                );
                 let mut api_key: api::ActiveModel = api_key_model.into();
                 api_key.key = Set(key_hash);
                 api_key.managed = Set(true);
@@ -111,5 +116,19 @@ impl<'a> StateApplicator<'a> {
         }
 
         Ok(())
+    }
+}
+
+fn warn_if_declared_permissions_remove_use_superuser_rights(
+    state_api_key: &StateApiKey,
+    stored_mask: gradient_types::permissions::PermissionMask,
+    declared_mask: gradient_types::permissions::PermissionMask,
+) {
+    let use_superuser_rights = gradient_types::permissions::Permission::UseSuperuserRights.bit();
+    if stored_mask & use_superuser_rights != 0 && declared_mask & use_superuser_rights == 0 {
+        tracing::warn!(
+            name = %state_api_key.name,
+            "Declared permissions that lack useSuperuserRights remove superuser access from this key. Add useSuperuserRights to the permissions list to keep that access."
+        );
     }
 }
