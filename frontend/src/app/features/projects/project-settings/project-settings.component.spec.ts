@@ -236,11 +236,11 @@ describe('ProjectSettingsComponent - permissions', () => {
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
   });
 
-  it('links only to the settings pages the role can open', async () => {
+  it('links to Members and only to the other settings pages the role can open', async () => {
     const fixture = setup(writable, ['viewProject', 'manageMembers', 'manageWebhooks']);
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).not.toContain('Members');
+    expect(text).toContain('Members');
     expect(text).toContain('Event notifications');
     expect(text).toContain('Git host connections');
   });
