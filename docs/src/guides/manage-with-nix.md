@@ -49,6 +49,9 @@ The NixOS build runs `state.validate` on the state. This check is on by default.
 !!! warning
     `state.delete` is on by default. Once users, projects or caches disappear from the configuration, Gradient removes them from the database.
 
+!!! note
+    Upgrading from a release without `useSuperuserRights`: API keys from `services.gradient.state` that relied on listing every permission lose superuser access on the next start. Add `useSuperuserRights` to their `permissions`. The server logs a warning for each such key.
+
 ## Verify Deployment
 
 - `journalctl -u gradient-server` shows `State configuration validated successfully` after the new state loads.

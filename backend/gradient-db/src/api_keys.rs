@@ -214,7 +214,12 @@ mod tests {
             (admin.id, full, None, marked),
             (admin.id, full, Some(project.id), full),
             (member.id, full, None, full),
-            (admin.id, Permission::ViewProject.bit(), None, Permission::ViewProject.bit()),
+            (
+                admin.id,
+                Permission::ViewProject.bit(),
+                None,
+                Permission::ViewProject.bit(),
+            ),
         ];
 
         let mut expected: Vec<(ApiId, PermissionMask)> = Vec::new();

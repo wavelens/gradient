@@ -450,5 +450,9 @@ async fn a_superuser_without_superuser_rights_is_told_which_permission_is_missin
     res.assert_status(StatusCode::FORBIDDEN);
     let body: serde_json::Value = res.json();
     assert_eq!(body["code"], "superuser_required", "{body}");
-    assert_eq!(body["missing_permissions"], json!(["useSuperuserRights"]), "{body}");
+    assert_eq!(
+        body["missing_permissions"],
+        json!(["useSuperuserRights"]),
+        "{body}"
+    );
 }
