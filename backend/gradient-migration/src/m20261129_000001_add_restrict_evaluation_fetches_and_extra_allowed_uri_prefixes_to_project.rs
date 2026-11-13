@@ -8,7 +8,7 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
 const UP: &str = "ALTER TABLE public.project \
-    ADD COLUMN restrict_evaluation_fetches boolean DEFAULT true NOT NULL, \
+    ADD COLUMN restrict_evaluation_fetches boolean DEFAULT false NOT NULL, \
     ADD COLUMN extra_allowed_uri_prefixes text[] DEFAULT '{}' NOT NULL;";
 
 const DOWN: &str = "ALTER TABLE public.project \

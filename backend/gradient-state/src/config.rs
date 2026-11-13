@@ -42,7 +42,7 @@ pub struct StateProject {
     pub hide_build_requests: bool,
     #[serde(default)]
     pub allow_exec_in_build_requests: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub restrict_evaluation_fetches: bool,
     #[serde(default)]
     pub extra_allowed_uri_prefixes: Vec<String>,

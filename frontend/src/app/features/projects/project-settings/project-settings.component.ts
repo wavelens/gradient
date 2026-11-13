@@ -131,7 +131,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     public: false,
     hide_build_requests: false,
     allow_exec_in_build_requests: false,
-    restrict_evaluation_fetches: true,
+    restrict_evaluation_fetches: false,
     extra_allowed_uri_prefixes: '',
   };
   private savedForm: ProjectForm = { ...this.formData };
