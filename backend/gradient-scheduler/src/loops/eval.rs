@@ -475,7 +475,9 @@ fn build_nix_evaluation_fetch_url_access(
     task: &MTask,
     allowed_uri_prefixes: &[String],
 ) -> NixEvaluationFetchUrlAccess {
-    if !task.restrict_evaluation_fetches {
+    if !task.restrict_evaluation_fetches
+        || gradient_db::build_request_task::is_build_request_task(task)
+    {
         return NixEvaluationFetchUrlAccess::UnrestrictedEvaluation;
     }
 
@@ -584,6 +586,22 @@ mod eval_source_tests {
         let task = gradient_entity::task::Model {
             restrict_evaluation_fetches: false,
             extra_allowed_uri_prefixes: vec!["https://task.example".into()],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_nix_evaluation_fetch_url_access(&task, &["github:".into()]),
+            NixEvaluationFetchUrlAccess::UnrestrictedEvaluation
+        );
+    }
+
+    #[test]
+    fn task_build_request_gets_unrestricted_evaluation_fetch_access_even_when_evaluation_fetches_are_restricted()
+     {
+        let task = gradient_entity::task::Model {
+            name: gradient_db::build_request_task::BUILD_REQUEST_TASK_NAME.into(),
+            managed: true,
+            restrict_evaluation_fetches: true,
             ..Default::default()
         };
 

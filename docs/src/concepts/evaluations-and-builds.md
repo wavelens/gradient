@@ -99,6 +99,8 @@ A task can enable Nix setting `restrict-eval` for its evaluation. Fetches during
 
 All other fetches fail with `forbidden in restricted mode`.
 
+Build requests (`gradient build` and SSH submissions) always evaluate without restriction. Task options don't affect them.
+
 - Prefixes match the same URL, or a longer URL with `/` right after the prefix.
 - Prefixes that end in `:` (for example, `github:`) match an entire URL scheme.
 - Prefixes can't be empty and can't contain whitespace.
