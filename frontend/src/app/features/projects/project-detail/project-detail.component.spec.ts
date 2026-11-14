@@ -157,21 +157,19 @@ describe('ProjectDetailComponent header', () => {
     expect(copy?.querySelector('button')?.getAttribute('aria-label')).toBe('Copy project name for CLI');
   });
 
-  it('members and instance admins get Settings without a Members button while visitors without a role don\'t', () => {
+  it('shows Settings only to roles that can change project settings', () => {
     const headerHrefs = (root: HTMLElement) => Array.from(root.querySelectorAll('[slot="actions"] a[grButton]'), (link) => link.getAttribute('href'));
-    const viewerHrefs = headerHrefs(render(true, undefined, { role: 'View', permissions: ['viewProject'] }).root);
-    expect(viewerHrefs).toContain('/project/acme/settings');
-    expect(viewerHrefs.some((href) => href?.includes('/members'))).toBe(false);
+    expect(headerHrefs(render(true, undefined, { role: 'Admin', permissions: EVERY_PERMISSION }).root)).toContain('/project/acme/settings');
+    TestBed.resetTestingModule();
+    expect(headerHrefs(render(true, undefined, { role: 'View', permissions: ['viewProject'] }).root)).not.toContain('/project/acme/settings');
     TestBed.resetTestingModule();
     expect(headerHrefs(render(true, undefined, { role: null, permissions: [] }).root)).not.toContain('/project/acme/settings');
-    TestBed.resetTestingModule();
-    expect(headerHrefs(render(true, undefined, { role: null, permissions: [] }, [], true).root)).toContain('/project/acme/settings');
   });
 
-  it('give a viewer settings that contain the members page, but no Connect repository', () => {
+  it('gives a viewer neither Settings nor Connect repository', () => {
     const { root } = render(true, undefined, { role: 'View', permissions: ['viewProject'] });
     const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());
-    expect(labels).toContain('Settings');
+    expect(labels).not.toContain('Settings');
     expect(labels).not.toContain('Connect repository');
     expect(root.textContent).toContain('Ask a project administrator to connect a repository.');
     expect(root.textContent?.match(/No tasks yet/g)).toHaveLength(1);
