@@ -14,14 +14,11 @@
 
 .messages-panel {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .messages-list {
-  flex: 1;
-  overflow-y: auto;
   padding: $spacing-sm $spacing-lg;
   display: flex;
   flex-direction: column;
