@@ -9,6 +9,8 @@ use gradient_types::GitHostType;
 use serde_json::json;
 use tracing::warn;
 
+const WEBHOOK_DISPLAY_NAME: &str = "Gradient";
+
 const GITEA_EVENTS: &[&str] = &[
     "push",
     "create",
@@ -93,6 +95,7 @@ pub async fn install_webhook(
     let path = format!("{}/hooks", access.project_path());
     let body = match access.git_host {
         GitHostType::GitLab => json!({
+            "name": WEBHOOK_DISPLAY_NAME,
             "url": webhook_url,
             "token": secret,
             "push_events": true,
@@ -103,6 +106,7 @@ pub async fn install_webhook(
             "enable_ssl_verification": true,
         }),
         host => json!({
+            "name": WEBHOOK_DISPLAY_NAME,
             "type": host.as_path_segment(),
             "active": true,
             "events": GITEA_EVENTS,
@@ -173,6 +177,7 @@ mod tests {
             .and(path("/api/v1/repos/acme/app/hooks"))
             .and(header("Authorization", "token tok"))
             .and(body_partial_json(json!({
+                "name": "Gradient",
                 "type": "forgejo",
                 "config": { "url": "https://ci/hook", "secret": "s3cret", "content_type": "json" },
             })))

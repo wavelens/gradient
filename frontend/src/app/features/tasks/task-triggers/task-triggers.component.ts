@@ -79,6 +79,12 @@ const DEFAULT_FORM: TriggerFormState = {
   cron: '',
 };
 
+const secondsInOneHour = 3600;
+
+function getPollingIntervalSecondsOrDefault(trigger: TriggerOut): number {
+  return (trigger.config as { interval_secs?: number }).interval_secs ?? 300;
+}
+
 @Component({
   selector: 'app-task-triggers',
   standalone: true,
@@ -157,9 +163,10 @@ export class TaskTriggersComponent implements OnInit {
       !this.triggers().some((t) => t.type === suggestion.type),
     ),
   );
-  fallbackPollingTrigger = computed(() => {
+  activePollingTriggerThatChecksMoreOftenThanHourlyAfterPushTriggerHasFired = computed(() => {
     const active = this.triggers().filter((t) => t.active);
-    return active.some((t) => t.type === 'reporter_push') ? (active.find((t) => t.type === 'polling') ?? null) : null;
+    if (!active.some((t) => t.type === 'reporter_push' && t.last_fired_at)) return null;
+    return active.find((t) => t.type === 'polling' && getPollingIntervalSecondsOrDefault(t) < secondsInOneHour) ?? null;
   });
 
   form: TriggerFormState = { ...DEFAULT_FORM };
@@ -372,8 +379,9 @@ export class TaskTriggersComponent implements OnInit {
     });
   }
 
-  deactivateTrigger(trigger: TriggerOut): void {
-    this.triggersService.update(this.projectName, this.taskName, trigger.id, { active: false }).subscribe({
+  setPollingTriggerToHourly(trigger: TriggerOut): void {
+    const config = { ...(trigger.config as TriggerConfig), interval_secs: secondsInOneHour } as TriggerConfig;
+    this.triggersService.update(this.projectName, this.taskName, trigger.id, { config }).subscribe({
       next: () => {
         this.notify.success('Trigger saved');
         this.loadTriggers();
@@ -433,7 +441,7 @@ export class TaskTriggersComponent implements OnInit {
     const cfg = trigger.config as any;
     switch (trigger.type) {
       case 'polling': {
-        let summary = `every ${this.formatSeconds(cfg.interval_secs ?? 300)}`;
+        let summary = `every ${this.formatSeconds(getPollingIntervalSecondsOrDefault(trigger))}`;
         if (cfg.branch) summary += `, branch ${cfg.branch}`;
         return summary;
       }
@@ -465,7 +473,8 @@ export class TaskTriggersComponent implements OnInit {
     if (secs < 60) return `${secs}s`;
     const m = Math.floor(secs / 60);
     if (m < 60) return `${m} min`;
-    return `${Math.floor(m / 60)}h ${m % 60}min`;
+    const h = Math.floor(m / 60);
+    return m % 60 ? `${h}h ${m % 60} min` : `${h}h`;
   }
 
 }

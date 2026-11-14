@@ -71,6 +71,11 @@
         }
       </div>
     }
+    @if (webhookInstalledInThisSession()) {
+      <p class="text-secondary" role="status" data-testid="webhook-installed">
+        Webhook installation on the Git host is complete. The next push is the Last event below.
+      </p>
+    }
     <p class="text-secondary" role="status" data-testid="last-event">
       <strong>Last event</strong>
       {{ lastEvent() ?? 'No events yet. Send a test delivery from the webhook settings on the Git host.' }}
