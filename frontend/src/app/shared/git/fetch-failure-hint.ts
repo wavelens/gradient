@@ -18,6 +18,10 @@ const HINTS: { pattern: RegExp; hint: string }[] = [
     hint: 'The host closed the connection before Git started. Check the hostname and port in the repository URL.',
   },
   {
+    pattern: /branch .* does not exist/i,
+    hint: "The branch doesn't exist in the repository. Check the branch name in the trigger.",
+  },
+  {
     pattern: /not found|does not exist|repository .* not exist/i,
     hint: 'Repository not found. Check the URL. Confirm the deploy key can access the repository.',
   },
