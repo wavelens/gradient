@@ -66,8 +66,9 @@
         [(ngModel)]="formData.retry_failed_builds"
         [binary]="true"
         [appManagedDisable]="access()"
-        label="Retry failed builds on new evaluation"
+        label="Rebuild failed builds in each new evaluation"
       />
+      <span slot="hint">Off: failed builds remain failed in later evaluations. They don't run again until Retry. Both cases share the 3-retry limit. Builds that fail from transient errors (worker loss or timeout, for example) get up to 3 retries in that evaluation.</span>
     </gr-form-field>
 
     <gr-form-field>
