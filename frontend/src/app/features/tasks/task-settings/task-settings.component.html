@@ -68,7 +68,7 @@
         [appManagedDisable]="access()"
         label="Rebuild failed builds in each new evaluation"
       />
-      <span slot="hint">Off: failed builds remain failed in later evaluations. They don't run again until Retry. Both cases share the 3-retry limit. Builds that fail from transient errors (worker loss or timeout, for example) get up to 3 retries in that evaluation.</span>
+      <span slot="hint">Off: Builds that fail with a build error stay failed in later evaluations until Retry. Timeouts and transient failures (such as worker loss) continue to run again in every new evaluation. A single evaluation gives transient failures the number of attempts from admin settings. Timeouts get no extra attempts.</span>
     </gr-form-field>
 
     <gr-form-field>
