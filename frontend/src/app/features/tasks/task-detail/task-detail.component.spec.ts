@@ -976,9 +976,11 @@ describe('TaskDetailComponent - evaluation progress', () => {
   });
 });
 
+const repositoryUnreachableErrorMessage = "Gradient can't read the latest commit of the repository (branch main does not exist on the remote). Check the repository URL and branch, plus the access key of the project (deploy key). Then retry.";
+
 describe('TaskDetailComponent - error surfacing (issue #280)', () => {
   it('reports a failed start with the server reason and enables the button again', () => {
-    const error = new ApiError("Gradient can't read the latest commit of the repository. Check the repository URL, branch and the project's access key (deploy key), then try again.", 400, 'repository_unreachable');
+    const error = new ApiError(repositoryUnreachableErrorMessage, 400, 'repository_unreachable');
     const { fixture, notify } = setup({ managed: false, canEdit: true, canTrigger: true }, {
       startEvaluation: () => throwError(() => error),
     });
@@ -986,6 +988,50 @@ describe('TaskDetailComponent - error surfacing (issue #280)', () => {
 
     expect(notify.failure).toHaveBeenCalledWith('Failed to start evaluation', error);
     expect(fixture.componentInstance.starting()).toBe(false);
+  });
+});
+
+describe('TaskDetailComponent - saved repository fetch error (issue #1089)', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+  const savedError = 'branch main does not exist on the remote';
+
+  function createTaskDetailPageWithFailedEvaluationStartAndSavedRepositoryFetchErrorAndWarningBannerGetter() {
+    let fetchFailed = false;
+    const ctx = setup(access, {
+      startEvaluation: () => {
+        fetchFailed = true;
+        return throwError(() => new ApiError(repositoryUnreachableErrorMessage, 400, 'repository_unreachable'));
+      },
+      getTask: () => of({
+        ...resolvedTask(access, {}),
+        repository_fetch: fetchFailed
+          ? { checked_at: '2026-11-14T10:00:00Z', ok_at: null, failed: true, error: savedError }
+          : null,
+      }),
+    });
+    const banner = () => (ctx.fixture.nativeElement as HTMLElement).querySelector('[data-testid="repository-fetch-failed"]');
+    return { ...ctx, banner };
+  }
+
+  it('show saved repository fetch error in banner after failed start', () => {
+    const { fixture, banner } = createTaskDetailPageWithFailedEvaluationStartAndSavedRepositoryFetchErrorAndWarningBannerGetter();
+    expect(banner()).toBeNull();
+
+    fixture.componentInstance.startEvaluation();
+    fixture.detectChanges();
+
+    expect(banner()?.textContent).toContain(savedError);
+  });
+
+  it('Show the saved error from the repository fetch in the banner after a failed start of the run dialog', () => {
+    const { fixture, banner } = createTaskDetailPageWithFailedEvaluationStartAndSavedRepositoryFetchErrorAndWarningBannerGetter();
+    const comp = fixture.componentInstance;
+    comp.openRunDialogWithDefaultChoices();
+    comp.startEvaluationOrRetryFailedBuildsFromRunDialog();
+    fixture.detectChanges();
+
+    expect(comp.runDialogOpen()).toBe(true);
+    expect(banner()?.textContent).toContain(savedError);
   });
 });
 
