@@ -105,15 +105,28 @@ pub enum SharedRefusal {
     #[error("You do not have permission to perform this action.")]
     MissingPermission,
     #[error(
-        "Gradient can't read the latest commit of the repository. Check the repository URL, branch and the project's access key (deploy key), then try again."
+        "Gradient can't read the latest commit of the repository ({reason}). Check the repository URL and branch, plus the access key of the project (deploy key). Then retry."
     )]
-    RepositoryStateFetchFailed,
+    RepositoryStateFetchFailed { reason: String },
     #[error("Only members of a team can set that team as the owner of a project or cache.")]
     NotMemberOfOwnerTeam,
     #[error(
         "Only instance admins can add a member without an invitation, unless the person is in the owner team or already has access through a team. Send an invitation instead."
     )]
     AddingMemberWithoutInvitationNotAllowed,
+}
+
+impl SharedRefusal {
+    pub fn repository_state_fetch_failed_from_git_source_error(
+        error: &gradient_sources::SourceError,
+    ) -> Self {
+        Self::RepositoryStateFetchFailed {
+            reason: error
+                .short_reason_for_user()
+                .trim_end_matches('.')
+                .to_owned(),
+        }
+    }
 }
 
 impl Refusal for SharedRefusal {
@@ -132,7 +145,7 @@ impl Refusal for SharedRefusal {
             | Self::NoPendingInvitation
             | Self::EmptyField(_)
             | Self::InvalidAllowedIp { .. }
-            | Self::RepositoryStateFetchFailed => RefusalStatus::BadRequest,
+            | Self::RepositoryStateFetchFailed { .. } => RefusalStatus::BadRequest,
             Self::LastAdmin(_) | Self::WorkerManagedByState => RefusalStatus::Conflict,
             Self::InvalidToken | Self::AuthorizationRequired => RefusalStatus::Unauthorized,
         }
@@ -142,7 +155,7 @@ impl Refusal for SharedRefusal {
         match self {
             Self::SourceIpNotAllowed => ErrorCode::FORBIDDEN_SOURCE_IP,
             Self::InvalidAllowedIp { .. } => ErrorCode::INVALID_ALLOWED_IP,
-            Self::RepositoryStateFetchFailed => ErrorCode::REPOSITORY_UNREACHABLE,
+            Self::RepositoryStateFetchFailed { .. } => ErrorCode::REPOSITORY_UNREACHABLE,
             _ => self.status().default_code(),
         }
     }

@@ -104,7 +104,7 @@ pub async fn post_url(
                 .await
                 .map_err(|e| {
                     tracing::warn!(project_id = %project.id, error = %e, "reject build request because of failure to resolve git ref of repository");
-                    SharedRefusal::RepositoryStateFetchFailed
+                    SharedRefusal::repository_state_fetch_failed_from_git_source_error(&e)
                 })?;
             (hash, git_ref.unwrap_or("HEAD").to_string())
         }
