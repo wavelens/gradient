@@ -10,6 +10,8 @@
 
   removedStateOptions = [
     { group = "workers"; name = "enable_fetch"; reason = "replaced by enable_network and enable_secrets"; }
+    { group = "projects"; name = "restrict_evaluation_fetches"; reason = "moved to services.gradient.state.tasks.<name>.restrict_evaluation_fetches"; }
+    { group = "projects"; name = "extra_allowed_uri_prefixes"; reason = "moved to services.gradient.state.tasks.<name>.extra_allowed_uri_prefixes"; }
   ];
 
   stateEntries = group: value:
