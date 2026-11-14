@@ -7,6 +7,7 @@
 use super::helpers::{EntityLookup, ErrorCollector};
 use crate::config::{StateAction, StateGitHostConnection, StateTask};
 use gradient_types::git_host::GitHostConnectionOwner;
+use gradient_types::input::check_nix_restricted_evaluation_url_prefix;
 use gradient_types::triggers::TriggerType;
 use gradient_types::{ActionType, RepositoryLocation};
 use sea_orm::Iterable;
@@ -45,6 +46,15 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 format!("tasks.{}.keep_evaluations", task.name),
                 "keep_evaluations must be at least 1",
             );
+        }
+
+        for prefix in &task.extra_allowed_uri_prefixes {
+            if let Err(e) = check_nix_restricted_evaluation_url_prefix(prefix) {
+                errors.push(
+                    format!("tasks.{}.extra_allowed_uri_prefixes", task.name),
+                    e.to_string(),
+                );
+            }
         }
 
         let mut action_names: HashSet<&str> = HashSet::new();

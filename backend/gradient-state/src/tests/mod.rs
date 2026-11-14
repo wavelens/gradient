@@ -74,9 +74,10 @@ fn a_state_task_with_an_escaping_flake_directory_is_refused() {
 }
 
 #[test]
-fn restricted_evaluation_is_off_unless_a_project_turns_it_on() {
+fn declarative_state_task_without_restrict_evaluation_fetches_deserializes_with_restricted_evaluation_off()
+ {
     let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
-    assert!(!cfg.projects["acme"].restrict_evaluation_fetches);
+    assert!(!cfg.tasks["web"].restrict_evaluation_fetches);
 }
 
 #[test]
@@ -162,16 +163,16 @@ fn errors_of(cfg: &StateConfiguration) -> Vec<(String, String)> {
 #[test]
 fn state_validation_rejects_extra_allowed_url_prefix_with_whitespace() {
     let mut cfg = reporter_cfg("github", "{}");
-    let project = cfg.projects.get_mut("acme").unwrap();
-    project.restrict_evaluation_fetches = true;
-    project.extra_allowed_uri_prefixes = vec!["github:".into(), "https://a https://b".into()];
+    let task = cfg.tasks.get_mut("web").unwrap();
+    task.restrict_evaluation_fetches = true;
+    task.extra_allowed_uri_prefixes = vec!["github:".into(), "https://a https://b".into()];
 
     let v = cfg.validate();
 
     let rejected: Vec<_> = v
         .errors
         .iter()
-        .filter(|e| e.field == "projects.acme.extra_allowed_uri_prefixes")
+        .filter(|e| e.field == "tasks.web.extra_allowed_uri_prefixes")
         .collect();
     assert_eq!(rejected.len(), 1, "{:?}", v.errors);
 }

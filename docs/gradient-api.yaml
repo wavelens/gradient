@@ -10259,7 +10259,7 @@ paths:
       tags:
       - tasks
       summary: Update task
-      description: Update one or more fields of a task. Changes to `repository`, `wildcard`, `only_evaluate`, `exec_enabled` or `multi_node_evaluation` trigger a re-evaluation of the latest commit. Other fields take effect at the next evaluation.
+      description: Update one or more fields of a task. Changes to `repository`, `wildcard`, `only_evaluate`, `exec_enabled`, `multi_node_evaluation`, `restrict_evaluation_fetches` or `extra_allowed_uri_prefixes` trigger a re-evaluation of the latest commit. Other fields take effect at the next evaluation.
       operationId: patchTask
       parameters:
       - name: project
@@ -20979,6 +20979,16 @@ components:
           type:
           - boolean
           - 'null'
+        restrict_evaluation_fetches:
+          type:
+          - boolean
+          - 'null'
+        extra_allowed_uri_prefixes:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
         triggers:
           type:
           - array
@@ -21886,16 +21896,6 @@ components:
           type:
           - boolean
           - 'null'
-        restrict_evaluation_fetches:
-          type:
-          - boolean
-          - 'null'
-        extra_allowed_uri_prefixes:
-          type:
-          - array
-          - 'null'
-          items:
-            type: string
         owner_team:
           type:
           - string
@@ -21975,6 +21975,16 @@ components:
           type:
           - boolean
           - 'null'
+        restrict_evaluation_fetches:
+          type:
+          - boolean
+          - 'null'
+        extra_allowed_uri_prefixes:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
     PatchTeamRequest:
       type: object
       properties:
@@ -22384,8 +22394,6 @@ components:
       - public
       - hide_build_requests
       - allow_exec_in_build_requests
-      - restrict_evaluation_fetches
-      - extra_allowed_uri_prefixes
       - managed
       - created_by
       - created_at
@@ -22410,12 +22418,6 @@ components:
           type: boolean
         allow_exec_in_build_requests:
           type: boolean
-        restrict_evaluation_fetches:
-          type: boolean
-        extra_allowed_uri_prefixes:
-          type: array
-          items:
-            type: string
         managed:
           type: boolean
         owner_team:
@@ -22506,8 +22508,6 @@ components:
       - public
       - hide_build_requests
       - allow_exec_in_build_requests
-      - restrict_evaluation_fetches
-      - extra_allowed_uri_prefixes
       - managed
       - created_by
       - created_at
@@ -22533,12 +22533,6 @@ components:
           type: boolean
         allow_exec_in_build_requests:
           type: boolean
-        restrict_evaluation_fetches:
-          type: boolean
-        extra_allowed_uri_prefixes:
-          type: array
-          items:
-            type: string
         managed:
           type: boolean
         owner_team:
@@ -23895,6 +23889,8 @@ components:
       - multi_node_evaluation
       - exec_enabled
       - only_evaluate
+      - restrict_evaluation_fetches
+      - extra_allowed_uri_prefixes
       - branches
       - can_edit
       - can_trigger
@@ -23952,6 +23948,12 @@ components:
           type: boolean
         only_evaluate:
           type: boolean
+        restrict_evaluation_fetches:
+          type: boolean
+        extra_allowed_uri_prefixes:
+          type: array
+          items:
+            type: string
         repository_fetch:
           oneOf:
           - $ref: '#/components/schemas/RepositoryFetchStatus'

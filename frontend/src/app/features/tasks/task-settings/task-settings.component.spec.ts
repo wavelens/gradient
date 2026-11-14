@@ -45,6 +45,8 @@ function taskFor(c: AccessCase) {
     multi_node_evaluation: false,
     exec_enabled: false,
     only_evaluate: false,
+    restrict_evaluation_fetches: false,
+    extra_allowed_uri_prefixes: [],
     managed: c.managed,
     can_edit: c.canEdit,
     can_trigger: c.canTrigger ?? c.canEdit,
@@ -227,6 +229,20 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     const input = (fixture.nativeElement as HTMLElement).querySelector('#task-display') as HTMLInputElement;
     input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
     expect(updateTask).toHaveBeenCalledWith('acme', 'demo', { display_name: 'Renamed' });
+  });
+
+  it('sends additional allowed URL prefixes as one entry per line', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    await fixture.whenStable();
+    ((fixture.nativeElement as HTMLElement).querySelector('#task-restrict-evaluation-fetches') as HTMLInputElement).click();
+    fixture.detectChanges();
+    await typeInto(fixture, '#task-extra-allowed-uri-prefixes', 'https://example.com/archives\ngithub:');
+    fixture.componentInstance.saveSettings();
+    expect(updateTask).toHaveBeenCalledWith('acme', 'demo', {
+      restrict_evaluation_fetches: true,
+      extra_allowed_uri_prefixes: ['https://example.com/archives', 'github:'],
+    });
   });
 
   it('shows a failed save beside Save Changes and scrolls it into view', async () => {

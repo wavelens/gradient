@@ -558,6 +558,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                         multi_node_evaluation: None,
                         wait_for_workers: None,
                         exec_enabled: None,
+                        restrict_evaluation_fetches: None,
+                        extra_allowed_uri_prefixes: None,
                         triggers,
                     },
                 )

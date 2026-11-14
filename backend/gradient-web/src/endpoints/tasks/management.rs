@@ -35,7 +35,7 @@ use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_sources::resolve_remote_ref;
 use gradient_types::consts::*;
-use gradient_types::input::vec_to_hex;
+use gradient_types::input::{check_nix_restricted_evaluation_url_prefix, vec_to_hex};
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
@@ -64,6 +64,10 @@ pub struct MakeTaskRequest {
     pub multi_node_evaluation: Option<bool>,
     #[serde(default)]
     pub exec_enabled: Option<bool>,
+    #[serde(default)]
+    pub restrict_evaluation_fetches: Option<bool>,
+    #[serde(default)]
+    pub extra_allowed_uri_prefixes: Option<Vec<String>>,
     #[serde(default)]
     pub triggers: Option<Vec<TriggerConfig>>,
 }
@@ -106,6 +110,13 @@ fn validated_repository(repository: String) -> WebResult<String> {
     Ok(repository.to_owned())
 }
 
+fn validate_extra_allowed_uri_prefixes(prefixes: Vec<String>) -> WebResult<Vec<String>> {
+    Ok(prefixes
+        .iter()
+        .map(|prefix| check_nix_restricted_evaluation_url_prefix(prefix.trim()))
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchTaskRequest {
     pub name: Option<TaskName>,
@@ -120,6 +131,8 @@ pub struct PatchTaskRequest {
     pub multi_node_evaluation: Option<bool>,
     pub exec_enabled: Option<bool>,
     pub only_evaluate: Option<bool>,
+    pub restrict_evaluation_fetches: Option<bool>,
+    pub extra_allowed_uri_prefixes: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -275,6 +288,9 @@ pub async fn put(
             .collect::<WebResult<Vec<_>>>()?,
     };
 
+    let extra_allowed_uri_prefixes =
+        validate_extra_allowed_uri_prefixes(body.extra_allowed_uri_prefixes.unwrap_or_default())?;
+
     let now = gradient_types::now();
     let task = MTask {
         id: TaskId::now_v7(),
@@ -294,6 +310,8 @@ pub async fn put(
         retry_failed_builds: body.retry_failed_builds.unwrap_or(true),
         multi_node_evaluation: body.multi_node_evaluation.unwrap_or(false),
         exec_enabled: body.exec_enabled.unwrap_or(false),
+        restrict_evaluation_fetches: body.restrict_evaluation_fetches.unwrap_or(false),
+        extra_allowed_uri_prefixes,
         ..Default::default()
     };
 
@@ -382,7 +400,7 @@ pub async fn get_task(
     operation_id = "patchTask",
     tag = "tasks",
     summary = "Update task",
-    description = "Update one or more fields of a task. Changes to `repository`, `wildcard`, `only_evaluate`, `exec_enabled` or `multi_node_evaluation` trigger a re-evaluation of the latest commit. Other fields take effect at the next evaluation.",
+    description = "Update one or more fields of a task. Changes to `repository`, `wildcard`, `only_evaluate`, `exec_enabled`, `multi_node_evaluation`, `restrict_evaluation_fetches` or `extra_allowed_uri_prefixes` trigger a re-evaluation of the latest commit. Other fields take effect at the next evaluation.",
     params(TaskPath),
     request_body = PatchTaskRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
@@ -412,6 +430,14 @@ pub async fn patch_task(
         ),
         ("exec_enabled", body.exec_enabled.is_some()),
         ("only_evaluate", body.only_evaluate.is_some()),
+        (
+            "restrict_evaluation_fetches",
+            body.restrict_evaluation_fetches.is_some(),
+        ),
+        (
+            "extra_allowed_uri_prefixes",
+            body.extra_allowed_uri_prefixes.is_some(),
+        ),
     ]);
     let repository_changed = body
         .repository
@@ -429,7 +455,9 @@ pub async fn patch_task(
         || body.wildcard.is_some()
         || body.only_evaluate.is_some()
         || body.exec_enabled.is_some()
-        || body.multi_node_evaluation.is_some();
+        || body.multi_node_evaluation.is_some()
+        || body.restrict_evaluation_fetches.is_some()
+        || body.extra_allowed_uri_prefixes.is_some();
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
 
@@ -468,6 +496,13 @@ pub async fn patch_task(
     }
     if let Some(only_evaluate) = body.only_evaluate {
         patcher.atask.only_evaluate = Set(only_evaluate);
+    }
+    if let Some(restrict_evaluation_fetches) = body.restrict_evaluation_fetches {
+        patcher.atask.restrict_evaluation_fetches = Set(restrict_evaluation_fetches);
+    }
+    if let Some(prefixes) = body.extra_allowed_uri_prefixes {
+        patcher.atask.extra_allowed_uri_prefixes =
+            Set(validate_extra_allowed_uri_prefixes(prefixes)?);
     }
 
     if evaluation_inputs_changed {

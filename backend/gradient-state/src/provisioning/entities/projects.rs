@@ -83,10 +83,6 @@ impl<'a> StateApplicator<'a> {
                 project.hide_build_requests = Set(state_project.hide_build_requests);
                 project.allow_exec_in_build_requests =
                     Set(state_project.allow_exec_in_build_requests);
-                project.restrict_evaluation_fetches =
-                    Set(state_project.restrict_evaluation_fetches);
-                project.extra_allowed_uri_prefixes =
-                    Set(state_project.extra_allowed_uri_prefixes.clone());
                 project.managed = Set(true);
                 project.owner_team = Set(owner_team);
                 project.update(self.db).await?;
@@ -109,8 +105,6 @@ impl<'a> StateApplicator<'a> {
                     public: state_project.public,
                     hide_build_requests: state_project.hide_build_requests,
                     allow_exec_in_build_requests: state_project.allow_exec_in_build_requests,
-                    restrict_evaluation_fetches: state_project.restrict_evaluation_fetches,
-                    extra_allowed_uri_prefixes: state_project.extra_allowed_uri_prefixes.clone(),
                     created_by: created_by_id,
                     created_at: now,
                     managed: true,

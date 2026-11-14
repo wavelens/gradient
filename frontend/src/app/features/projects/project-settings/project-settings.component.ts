@@ -33,7 +33,7 @@ import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessService, ManagedDisableDirective, SettingsAccessStateBadgeComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { maxDisplayNameCharacterCount, splitLines, unsavedChanges } from '@shared/forms';
+import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { GitSshHostKeyResponse, PatchProjectRequest, ProjectResponse, accessTo } from '@core/models';
 import { injectProject } from '@core/resolvers/project-access.resolver';
@@ -46,8 +46,6 @@ interface ProjectForm {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
-  restrict_evaluation_fetches: boolean;
-  extra_allowed_uri_prefixes: string;
 }
 
 @Component({
@@ -127,8 +125,6 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     public: false,
     hide_build_requests: false,
     allow_exec_in_build_requests: false,
-    restrict_evaluation_fetches: false,
-    extra_allowed_uri_prefixes: '',
   };
   private savedForm: ProjectForm = { ...this.formData };
   readonly unsaved = unsavedChanges(() => this.formData, 'Project Settings');
@@ -137,14 +133,8 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     return this.formData.display_name.trim() ? null : 'Enter a display name.';
   }
 
-  get extraAllowedUriPrefixesError(): string | null {
-    return splitLines(this.formData.extra_allowed_uri_prefixes).some((prefix) => /\s/.test(prefix))
-      ? 'Remove spaces in each prefix.'
-      : null;
-  }
-
   get saveBlockedReason(): string | null {
-    return this.displayNameError || this.extraAllowedUriPrefixesError ? 'Fix the marked fields to save.' : null;
+    return this.displayNameError ? 'Fix the marked fields to save.' : null;
   }
 
   canDeactivate(): boolean | Observable<boolean> {
@@ -171,8 +161,6 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
           public: project.public,
           hide_build_requests: project.hide_build_requests,
           allow_exec_in_build_requests: project.allow_exec_in_build_requests,
-          restrict_evaluation_fetches: project.restrict_evaluation_fetches,
-          extra_allowed_uri_prefixes: project.extra_allowed_uri_prefixes.join('\n'),
         };
         this.savedForm = { ...this.formData };
         this.unsaved.mark();
@@ -218,13 +206,10 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   saveSettings(): void {
     if (this.saving() || !this.accessService.isWritable(this.access()) || this.saveBlockedReason) return;
     const saved = this.savedForm;
-    const { public: visibility, extra_allowed_uri_prefixes, ...fields } = this.formData;
+    const { public: visibility, ...fields } = this.formData;
     const patch: PatchProjectRequest = Object.fromEntries(
       Object.entries(fields).filter(([key, value]) => saved[key as keyof ProjectForm] !== value),
     );
-    if (extra_allowed_uri_prefixes !== saved.extra_allowed_uri_prefixes) {
-      patch.extra_allowed_uri_prefixes = splitLines(extra_allowed_uri_prefixes);
-    }
     const save = () => {
       this.saving.set(true);
       const requests: Observable<unknown>[] = [];

@@ -90,11 +90,11 @@ Import from derivation (IFD) allow a flake to read a derivation's output during 
 
 ## Restricted Evaluation
 
-A project can turn on Nix setting `restrict-eval` for its evaluation. Fetches during evaluation (`builtins.fetchTree`, `fetchurl`, `fetchTarball`, `fetchGit`) reach only the URLs below while this setting is on.
+A task can enable Nix setting `restrict-eval` for its evaluation. Fetches during evaluation (`builtins.fetchTree`, `fetchurl`, `fetchTarball`, `fetchGit`) reach only the URLs below while that setting is on.
 
 - The exact URLs of inputs locked in `flake.lock`. Nix can build those URLs the same way Nix can fetch those inputs during flake load.
 - Prefixes from the server option `GRADIENT_EVAL_ALLOWED_URI_PREFIXES` (comma-separated). See [Configuration](../reference/configuration.md).
-- URL prefixes that a project can allow in addition (`extra_allowed_uri_prefixes`).
+- URL prefixes that a task can allow in addition (`extra_allowed_uri_prefixes`).
 
 All other fetches fail with `forbidden in restricted mode`.
 
@@ -102,7 +102,7 @@ All other fetches fail with `forbidden in restricted mode`.
 - Prefixes that end in `:` (for example, `github:`) match an entire URL scheme.
 - Prefixes can't be empty and can't contain whitespace.
 
-The project option `restrict_evaluation_fetches` can turn on this restriction for one project. The option's disabled by default. Use the project settings page, the API `patchProject`, or [declarative state](../reference/state.md) to change both project options.
+The task option `restrict_evaluation_fetches` can turn on this restriction for one task. This option is off by default. Use the task settings page, the `patchTask` API, or [declarative state](../reference/state.md) to change both task options.
 
 Builds of [imported derivations](#imported-derivations) run inside the same restricted evaluator.
 

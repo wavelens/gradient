@@ -413,8 +413,6 @@ pub async fn handle(cmd: Commands, out: Output) {
                         description: Some(input.get("Description")),
                         hide_build_requests: None,
                         allow_exec_in_build_requests: None,
-                        restrict_evaluation_fetches: None,
-                        extra_allowed_uri_prefixes: None,
                         owner_team: None,
                     },
                 )
