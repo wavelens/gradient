@@ -70,6 +70,8 @@ pub struct Model {
     pub multi_node_evaluation: bool,
     pub exec_enabled: bool,
     pub only_evaluate: bool,
+    pub restrict_evaluation_fetches: bool,
+    pub extra_allowed_uri_prefixes: Vec<String>,
     pub last_fetch_at: Option<NaiveDateTime>,
     pub last_fetch_ok_at: Option<NaiveDateTime>,
     #[sea_orm(column_type = "Text", nullable)]

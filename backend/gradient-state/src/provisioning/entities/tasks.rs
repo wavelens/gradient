@@ -86,6 +86,9 @@ impl<'a> StateApplicator<'a> {
                 proj.multi_node_evaluation = Set(state_task.multi_node_evaluation);
                 proj.exec_enabled = Set(state_task.exec_enabled);
                 proj.only_evaluate = Set(state_task.only_evaluate);
+                proj.restrict_evaluation_fetches = Set(state_task.restrict_evaluation_fetches);
+                proj.extra_allowed_uri_prefixes =
+                    Set(state_task.extra_allowed_uri_prefixes.clone());
                 proj.git_host_connection = Set(connection_id);
                 proj.report_status = Set(state_task.report_status);
                 proj.managed = Set(true);
@@ -115,6 +118,8 @@ impl<'a> StateApplicator<'a> {
                     multi_node_evaluation: state_task.multi_node_evaluation,
                     exec_enabled: state_task.exec_enabled,
                     only_evaluate: state_task.only_evaluate,
+                    restrict_evaluation_fetches: state_task.restrict_evaluation_fetches,
+                    extra_allowed_uri_prefixes: state_task.extra_allowed_uri_prefixes.clone(),
                     git_host_connection: connection_id,
                     report_status: state_task.report_status,
                     ..Default::default()

@@ -1829,6 +1829,8 @@ export interface MakeTaskRequest {
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
   exec_enabled?: boolean | null;
+  restrict_evaluation_fetches?: boolean | null;
+  extra_allowed_uri_prefixes?: string[] | null;
   triggers?: TriggerConfig[] | null;
 }
 
@@ -2138,8 +2140,6 @@ export interface PatchProjectRequest {
   description?: string | null;
   hide_build_requests?: boolean | null;
   allow_exec_in_build_requests?: boolean | null;
-  restrict_evaluation_fetches?: boolean | null;
-  extra_allowed_uri_prefixes?: string[] | null;
   owner_team?: string | null;
 }
 
@@ -2165,6 +2165,8 @@ export interface PatchTaskRequest {
   multi_node_evaluation?: boolean | null;
   exec_enabled?: boolean | null;
   only_evaluate?: boolean | null;
+  restrict_evaluation_fetches?: boolean | null;
+  extra_allowed_uri_prefixes?: string[] | null;
 }
 
 export interface PatchTeamRequest {
@@ -2307,8 +2309,6 @@ export interface ProjectResponse {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
-  restrict_evaluation_fetches: boolean;
-  extra_allowed_uri_prefixes: string[];
   managed: boolean;
   owner_team?: TeamNameAndDisplayName | null;
   created_by: UserId;
@@ -2352,8 +2352,6 @@ export interface ProjectSummary {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
-  restrict_evaluation_fetches: boolean;
-  extra_allowed_uri_prefixes: string[];
   managed: boolean;
   owner_team?: TeamNameAndDisplayName | null;
   created_by: UserId;
@@ -2868,6 +2866,8 @@ export interface TaskResponse {
   multi_node_evaluation: boolean;
   exec_enabled: boolean;
   only_evaluate: boolean;
+  restrict_evaluation_fetches: boolean;
+  extra_allowed_uri_prefixes: string[];
   repository_fetch?: RepositoryFetchStatus | null;
   branches: (string | null)[];
   next_polling_trigger_check_at?: string | null;

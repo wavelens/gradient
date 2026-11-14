@@ -80,6 +80,7 @@ mod m20261209_000000_add_pin_columns_to_cached_path_signature;
 mod m20261210_000000_create_project_ssh_host_key_table;
 mod m20261210_000001_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions;
 mod m20261211_000000_add_cache_permission_column_to_api_and_move_pinned_api_key_permissions_to_cache_permission;
+mod m20261212_000000_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_task_and_drop_from_project;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -187,6 +188,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261210_000000_create_project_ssh_host_key_table::Migration),
             Box::new(m20261210_000001_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions::Migration),
             Box::new(m20261211_000000_add_cache_permission_column_to_api_and_move_pinned_api_key_permissions_to_cache_permission::Migration),
+            Box::new(m20261212_000000_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_task_and_drop_from_project::Migration),
         ]
     }
 }

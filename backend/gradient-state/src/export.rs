@@ -416,8 +416,6 @@ fn export_project(
         public: project.public,
         hide_build_requests: project.hide_build_requests,
         allow_exec_in_build_requests: project.allow_exec_in_build_requests,
-        restrict_evaluation_fetches: project.restrict_evaluation_fetches,
-        extra_allowed_uri_prefixes: project.extra_allowed_uri_prefixes.clone(),
         created_by: name_or_blank(username, project.created_by),
         members,
         teams,
@@ -447,6 +445,8 @@ fn export_task(
         multi_node_evaluation: task.multi_node_evaluation,
         exec_enabled: task.exec_enabled,
         only_evaluate: task.only_evaluate,
+        restrict_evaluation_fetches: task.restrict_evaluation_fetches,
+        extra_allowed_uri_prefixes: task.extra_allowed_uri_prefixes.clone(),
         flake_input_overrides: HashMap::new(),
         actions: Vec::new(),
         git_host_connection: None,
@@ -853,6 +853,26 @@ mod tests {
         let reread: StateTask =
             serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
         assert!(reread.exec_enabled);
+    }
+
+    #[test]
+    fn restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_of_a_task_survive_export_round_trip()
+     {
+        let task = gradient_entity::task::Model {
+            name: "web".into(),
+            restrict_evaluation_fetches: true,
+            extra_allowed_uri_prefixes: vec!["https://example.com/archives".into()],
+            ..Default::default()
+        };
+
+        let exported = export_task(&task, &HashMap::new(), &HashMap::new());
+        let reread: StateTask =
+            serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
+        assert!(reread.restrict_evaluation_fetches);
+        assert_eq!(
+            reread.extra_allowed_uri_prefixes,
+            ["https://example.com/archives"]
+        );
     }
 
     #[test]

@@ -188,23 +188,6 @@
         '';
       };
 
-      restrict_evaluation_fetches = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Evaluate projects with Nix `restrict-eval`. Fetches during evaluation (`builtins.fetchTree`, `fetchurl`, `fetchTarball`, `fetchGit`) can access only the inputs locked in `flake.lock`, the server's allowed URL prefixes and `extra_allowed_uri_prefixes`. Set `false` to let projects fetch any URL during evaluation.
-        '';
-      };
-
-      extra_allowed_uri_prefixes = mkOption {
-        type = types.listOf types.str;
-        default = [];
-        example = [ "https://example.com/archives" ];
-        description = ''
-          URL prefixes this project can fetch during evaluation. They add to the URL prefixes that locked flake inputs and the server allow. Prefixes match the same URL or a URL under it at the `/` position. Entries like `github:` allow a whole URL scheme. Nothing changes when `restrict_evaluation_fetches` is `false`.
-        '';
-      };
-
       created_by = mkOption {
         type = types.str;
         description = "User name of the project's creator.";
@@ -366,6 +349,23 @@
         type = types.bool;
         default = false;
         description = "Whether the evaluation of this task can run an evaluation alone. Such evaluations end at evaluation completion, build nothing, and run no exec jobs.";
+      };
+
+      restrict_evaluation_fetches = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Evaluate this task with Nix `restrict-eval`. Fetches during evaluation (`builtins.fetchTree`, `fetchurl`, `fetchTarball`, `fetchGit`) can access only the inputs locked in `flake.lock`, the URL prefixes in the server allowlist, and `extra_allowed_uri_prefixes`. Set `false` to let the task fetch any URL during evaluation.
+        '';
+      };
+
+      extra_allowed_uri_prefixes = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        example = [ "https://example.com/archives" ];
+        description = ''
+          URL prefixes this task can fetch during evaluation. They add to the URL prefixes that locked flake inputs and the server allow. Prefixes match the same URL or a URL under it at the `/` position. Entries like `github:` allow a whole URL scheme. Nothing changes when `restrict_evaluation_fetches` is `false`.
+        '';
       };
 
       concurrency = mkOption {

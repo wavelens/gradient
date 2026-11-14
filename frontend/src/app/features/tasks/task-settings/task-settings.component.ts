@@ -32,7 +32,7 @@ import {
 } from '@gradient/ui/ui';
 import { EntityNameComponent, LabelHelpComponent, entityToPickerOption, formatEntityLabel } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, SettingsAccessStateBadgeComponent } from '@shared/access';
-import { NameFieldsComponent, fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, nameAvailability, unsavedChanges } from '@shared/forms';
+import { NameFieldsComponent, fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, nameAvailability, splitLines, unsavedChanges } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
 import { RESERVED_TASK_NAMES } from '../connect-repository/connect-repository.component';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -52,6 +52,8 @@ interface TaskForm {
   multi_node_evaluation: boolean;
   exec_enabled: boolean;
   only_evaluate: boolean;
+  restrict_evaluation_fetches: boolean;
+  extra_allowed_uri_prefixes: string;
 }
 
 @Component({
@@ -142,6 +144,8 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     multi_node_evaluation: false,
     exec_enabled: false,
     only_evaluate: false,
+    restrict_evaluation_fetches: false,
+    extra_allowed_uri_prefixes: '',
   };
   private savedForm: TaskForm = { ...this.formData };
   readonly unsaved = unsavedChanges(() => this.formData, 'Task Settings');
@@ -162,8 +166,16 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     return wildcardError(this.formData.wildcard);
   }
 
+  get extraAllowedUriPrefixesError(): string | null {
+    return splitLines(this.formData.extra_allowed_uri_prefixes).some((prefix) => /\s/.test(prefix))
+      ? 'Remove spaces in each prefix.'
+      : null;
+  }
+
   get saveBlockedReason(): string | null {
-    return this.displayNameError || this.wildcardError || this.keepEvaluationsError ? 'Fix the marked fields to save.' : null;
+    return this.displayNameError || this.wildcardError || this.keepEvaluationsError || this.extraAllowedUriPrefixesError
+      ? 'Fix the marked fields to save.'
+      : null;
   }
 
   canDeactivate(): boolean | Observable<boolean> {
@@ -206,6 +218,8 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
           multi_node_evaluation: task.multi_node_evaluation,
           exec_enabled: task.exec_enabled,
           only_evaluate: task.only_evaluate,
+          restrict_evaluation_fetches: task.restrict_evaluation_fetches,
+          extra_allowed_uri_prefixes: task.extra_allowed_uri_prefixes.join('\n'),
         };
         this.savedForm = { ...this.formData };
         this.unsaved.mark();
@@ -225,9 +239,13 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
       return;
     }
     const saved = this.savedForm;
+    const { extra_allowed_uri_prefixes, ...fields } = this.formData;
     const patch: PatchTaskRequest = Object.fromEntries(
-      Object.entries(this.formData).filter(([key, value]) => saved[key as keyof TaskForm] !== value),
+      Object.entries(fields).filter(([key, value]) => saved[key as keyof TaskForm] !== value),
     );
+    if (extra_allowed_uri_prefixes !== saved.extra_allowed_uri_prefixes) {
+      patch.extra_allowed_uri_prefixes = splitLines(extra_allowed_uri_prefixes);
+    }
     this.saving.set(true);
     this.errorMessage.set(null);
     this.tasksService.updateTask(this.projectName, this.taskName, patch).subscribe({

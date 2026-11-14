@@ -42,10 +42,6 @@ pub struct StateProject {
     pub hide_build_requests: bool,
     #[serde(default)]
     pub allow_exec_in_build_requests: bool,
-    #[serde(default)]
-    pub restrict_evaluation_fetches: bool,
-    #[serde(default)]
-    pub extra_allowed_uri_prefixes: Vec<String>,
     pub created_by: String,
     /// An empty list is keeping the legacy auto-add of `created_by` as Admin. A non-empty list is
     /// authoritative and revoking unmatched memberships. Members referencing unknown users are
@@ -94,6 +90,10 @@ pub struct StateTask {
     pub exec_enabled: bool,
     #[serde(default)]
     pub only_evaluate: bool,
+    #[serde(default)]
+    pub restrict_evaluation_fetches: bool,
+    #[serde(default)]
+    pub extra_allowed_uri_prefixes: Vec<String>,
     #[serde(default)]
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
     #[serde(default)]

@@ -26,7 +26,6 @@ use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
-use gradient_types::input::check_nix_restricted_evaluation_url_prefix;
 
 use gradient_core::ServerState;
 use gradient_db::projects::ProjectEvaluationProgressCounts;
@@ -59,8 +58,6 @@ pub struct PatchProjectRequest {
     pub description: Option<String>,
     pub hide_build_requests: Option<bool>,
     pub allow_exec_in_build_requests: Option<bool>,
-    pub restrict_evaluation_fetches: Option<bool>,
-    pub extra_allowed_uri_prefixes: Option<Vec<String>>,
     /// Omitted fields leave the owner team unchanged. A team name can set the owner team. JSON null can clear the owner team.
     #[serde(
         default,
@@ -79,8 +76,6 @@ pub struct ProjectSummary {
     pub public: bool,
     pub hide_build_requests: bool,
     pub allow_exec_in_build_requests: bool,
-    pub restrict_evaluation_fetches: bool,
-    pub extra_allowed_uri_prefixes: Vec<String>,
     pub managed: bool,
     pub owner_team: Option<TeamNameAndDisplayName>,
     pub created_by: UserId,
@@ -109,8 +104,6 @@ impl ProjectSummary {
             public: project.public,
             hide_build_requests: project.hide_build_requests,
             allow_exec_in_build_requests: project.allow_exec_in_build_requests,
-            restrict_evaluation_fetches: project.restrict_evaluation_fetches,
-            extra_allowed_uri_prefixes: project.extra_allowed_uri_prefixes,
             managed: project.managed,
             created_by: project.created_by,
             created_at: project.created_at,
@@ -153,8 +146,6 @@ pub struct ProjectResponse {
     pub public: bool,
     pub hide_build_requests: bool,
     pub allow_exec_in_build_requests: bool,
-    pub restrict_evaluation_fetches: bool,
-    pub extra_allowed_uri_prefixes: Vec<String>,
     pub managed: bool,
     pub owner_team: Option<TeamNameAndDisplayName>,
     pub created_by: UserId,
@@ -184,8 +175,6 @@ impl ProjectResponse {
             public: project.public,
             hide_build_requests: project.hide_build_requests,
             allow_exec_in_build_requests: project.allow_exec_in_build_requests,
-            restrict_evaluation_fetches: project.restrict_evaluation_fetches,
-            extra_allowed_uri_prefixes: project.extra_allowed_uri_prefixes,
             managed: project.managed,
             created_by: project.created_by,
             created_at: project.created_at,
@@ -568,14 +557,6 @@ pub async fn patch_project(
             "allow_exec_in_build_requests",
             body.allow_exec_in_build_requests.is_some(),
         ),
-        (
-            "restrict_evaluation_fetches",
-            body.restrict_evaluation_fetches.is_some(),
-        ),
-        (
-            "extra_allowed_uri_prefixes",
-            body.extra_allowed_uri_prefixes.is_some(),
-        ),
     ]);
     let project_id = project.id;
     let mut aproject: AProject = project.into();
@@ -601,15 +582,7 @@ pub async fn patch_project(
 
     crate::patch_field!(aproject, body, hide_build_requests);
     crate::patch_field!(aproject, body, allow_exec_in_build_requests);
-    crate::patch_field!(aproject, body, restrict_evaluation_fetches);
 
-    if let Some(prefixes) = body.extra_allowed_uri_prefixes {
-        let prefixes = prefixes
-            .iter()
-            .map(|prefix| check_nix_restricted_evaluation_url_prefix(prefix.trim()))
-            .collect::<Result<Vec<_>, _>>()?;
-        aproject.extra_allowed_uri_prefixes = Set(prefixes);
-    }
     if let Some(owner_team) = owner_team {
         aproject.owner_team = Set(owner_team);
     }

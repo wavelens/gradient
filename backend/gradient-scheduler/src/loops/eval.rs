@@ -319,8 +319,8 @@ fn assemble_eval_job(
     };
 
     flake_job.nix_evaluation_fetch_url_access = maps
-        .project_fetch_url_accesses
-        .get(&project_id)
+        .fetch_url_access_by_task_id
+        .get(&task_id)
         .cloned()
         .unwrap_or_default();
 
@@ -375,7 +375,7 @@ struct EvalAssignMaps {
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
     overrides: HashMap<EvaluationId, Vec<gradient_wire::types::FlakeInputOverride>>,
     projects: HashMap<TaskId, ProjectId>,
-    project_fetch_url_accesses: HashMap<ProjectId, NixEvaluationFetchUrlAccess>,
+    fetch_url_access_by_task_id: HashMap<TaskId, NixEvaluationFetchUrlAccess>,
     build_request_tasks: HashSet<TaskId>,
 }
 
@@ -445,18 +445,15 @@ impl EvalAssignMaps {
         .await?;
         let projects: HashMap<TaskId, ProjectId> =
             tasks.iter().map(|t| (t.id, t.project)).collect();
-        let project_ids: Vec<ProjectId> = projects.values().copied().collect();
-        let project_fetch_url_accesses =
-            by_ids::<gradient_entity::project::Entity, _>(db, &project_ids)
-                .await?
-                .into_iter()
-                .map(|(id, project)| {
-                    (
-                        id,
-                        build_nix_evaluation_fetch_url_access(&project, allowed_uri_prefixes),
-                    )
-                })
-                .collect();
+        let fetch_url_access_by_task_id = tasks
+            .iter()
+            .map(|task| {
+                (
+                    task.id,
+                    build_nix_evaluation_fetch_url_access(task, allowed_uri_prefixes),
+                )
+            })
+            .collect();
         let build_request_tasks = tasks
             .iter()
             .filter(|t| gradient_db::build_request_task::is_build_request_task(t))
@@ -468,24 +465,24 @@ impl EvalAssignMaps {
             sidecars,
             overrides,
             projects,
-            project_fetch_url_accesses,
+            fetch_url_access_by_task_id,
             build_request_tasks,
         })
     }
 }
 
 fn build_nix_evaluation_fetch_url_access(
-    project: &gradient_entity::project::Model,
+    task: &MTask,
     allowed_uri_prefixes: &[String],
 ) -> NixEvaluationFetchUrlAccess {
-    if !project.restrict_evaluation_fetches {
+    if !task.restrict_evaluation_fetches {
         return NixEvaluationFetchUrlAccess::UnrestrictedEvaluation;
     }
 
     NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
         extra_allowed_uri_prefixes: allowed_uri_prefixes
             .iter()
-            .chain(&project.extra_allowed_uri_prefixes)
+            .chain(&task.extra_allowed_uri_prefixes)
             .cloned()
             .collect(),
     }
@@ -582,34 +579,33 @@ mod eval_source_tests {
     use gradient_wire::types::{FlakeSource, FlakeStep, NixEvaluationFetchUrlAccess};
 
     #[test]
-    fn project_opted_out_of_restricted_evaluation_fetches_gets_unrestricted_evaluation_access() {
-        let project = gradient_entity::project::Model {
+    fn task_with_restrict_evaluation_fetches_false_gets_unrestricted_evaluation_fetch_access_even_with_extra_allowed_url_prefixes()
+     {
+        let task = gradient_entity::task::Model {
             restrict_evaluation_fetches: false,
-            extra_allowed_uri_prefixes: vec!["https://project.example".into()],
+            extra_allowed_uri_prefixes: vec!["https://task.example".into()],
             ..Default::default()
         };
 
         assert_eq!(
-            build_nix_evaluation_fetch_url_access(&project, &["github:".into()]),
+            build_nix_evaluation_fetch_url_access(&task, &["github:".into()]),
             NixEvaluationFetchUrlAccess::UnrestrictedEvaluation
         );
     }
 
     #[test]
-    fn restricted_project_gets_server_url_prefixes_then_its_extra_prefixes() {
-        let project = gradient_entity::project::Model {
+    fn task_with_restrict_evaluation_fetches_gets_server_allowed_url_prefixes_then_its_extra_allowed_url_prefixes()
+     {
+        let task = gradient_entity::task::Model {
             restrict_evaluation_fetches: true,
-            extra_allowed_uri_prefixes: vec!["https://project.example".into()],
+            extra_allowed_uri_prefixes: vec!["https://task.example".into()],
             ..Default::default()
         };
 
         assert_eq!(
-            build_nix_evaluation_fetch_url_access(&project, &["github:".into()]),
+            build_nix_evaluation_fetch_url_access(&task, &["github:".into()]),
             NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
-                extra_allowed_uri_prefixes: vec![
-                    "github:".into(),
-                    "https://project.example".into()
-                ],
+                extra_allowed_uri_prefixes: vec!["github:".into(), "https://task.example".into()],
             }
         );
     }
