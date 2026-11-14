@@ -559,6 +559,23 @@ fn an_inventory_from_before_version_53_has_no_warm_guest_size() {
 }
 
 #[test]
+fn an_inventory_from_protocol_63_or_older_has_no_max_server_requested_warm_guests() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::types::ExecInventory;
+
+    let inventory = ExecInventory {
+        max_server_requested_warm_guests: Some(0),
+        ..ExecInventory::default()
+    };
+    assert_eq!(
+        from_bytes::<ExecInventory>(to_bytes(&inventory, 64).unwrap(), 64).unwrap(),
+        inventory
+    );
+    let older: ExecInventory = from_bytes(to_bytes(&inventory, 63).unwrap(), 63).unwrap();
+    assert_eq!(older.max_server_requested_warm_guests, None);
+}
+
+#[test]
 fn a_warm_guest_of_any_reported_size_fits_its_job() {
     use crate::types::{ExecInventory, GuestSize, WarmGuests};
 

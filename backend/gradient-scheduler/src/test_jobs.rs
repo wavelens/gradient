@@ -260,6 +260,7 @@ pub(crate) fn worker_info(id: &str, caps: WorkerCaps) -> WorkerInfo {
         disk_speed_mbps: None,
         upload_speed_mbps: None,
         download_speed_mbps: None,
+        zone: None,
         exec: caps.exec,
     }
 }

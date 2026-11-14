@@ -661,7 +661,7 @@ async fn a_completed_job_run_again_and_aborted_ends_its_evaluation_aborted() {
 const EVALUATOR: &str = "we";
 const SECOND_ATTR: &str = "apps.x86_64-linux.b";
 
-fn pre_warms(signals: &[SessionSignal]) -> Vec<u32> {
+pub(super) fn pre_warms(signals: &[SessionSignal]) -> Vec<u32> {
     signals
         .iter()
         .filter_map(|signal| match signal {

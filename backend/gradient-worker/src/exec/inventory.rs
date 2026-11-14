@@ -48,6 +48,7 @@ pub fn advertised(
             .map(|warm| warm.size)
             .unwrap_or_default(),
         warm_guest_sizes,
+        max_server_requested_warm_guests: Some(config.max_pre_warm.saturating_sub(config.pre_warm)),
     }
 }
 

@@ -109,9 +109,14 @@ Workers get `ServerMessage::PreWarmVms { count, sizes }` as an absolute target o
 
 - Exec entry points from a running evaluation without a job join the upcoming set. Jobs in `Created` or `Queued` belong to the same set.
 - Custom images keep their jobs out of the count. Jobs waiting for a manual start stay out of the count too.
-- Upcoming jobs add `nodes` to the entry of their guest size. Every worker without draining counts them. The worker needs a fit against device totals and access to the job's project.
 - The scheduler can refresh the counts after new capabilities, an exec pass, a recorded eval result and an abort.
 - Counts go out only on change. New connections start at 0.
+
+Future jobs add one guest per node. Nodes each get a separate worker in one zone. All worker counts sum to the required guest count.
+
+Four conditions define a qualifying worker. The worker is not in drain mode. The job can fit within the device total. The worker can access the job's project. The worker can report a nonzero `max_server_requested_warm_guests`. Workers report that value as `maxPreWarm` minus `preWarm`.
+
+Jobs with the fewest qualifying workers go first. Assign each node to a qualifying worker with free capacity and the fewest assigned guests. Break ties with the lowest worker ID. Jobs with no zone that can hold qualifying workers for each node skip that count. Workers below protocol 64 count as unlimited.
 
 ## Lifecycle
 

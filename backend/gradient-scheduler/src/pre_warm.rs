@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use gradient_db::exec_jobs::upcoming::{UpcomingExecJob, without_image};
 use gradient_pool::session_port::SessionSignal;
-use gradient_pool::{DeviceCount, WorkerInfo};
-use gradient_types::exec::{WarmGuests, count_warm_guests};
+use gradient_pool::{DeviceCount, WorkerCaps, WorkerInfo};
+use gradient_types::exec::{GuestSize, WarmGuests, count_warm_guests};
 use gradient_util::sync::Mutex;
 use tracing::warn;
 
@@ -44,29 +45,136 @@ impl PreWarmCounts {
     }
 }
 
+struct UpcomingExecJobForPreWarm {
+    fitting_exec_worker_indices: Vec<usize>,
+    guest: GuestSize,
+    nodes: u32,
+}
+
 pub(crate) fn pre_warm_counts(
     upcoming: &[UpcomingExecJob],
     workers: &[WorkerInfo],
 ) -> BTreeMap<String, Vec<WarmGuests>> {
-    workers
+    let mut exec_workers: Vec<(&WorkerInfo, WorkerCaps)> = workers
         .iter()
-        .filter_map(|worker| {
-            let caps = caps_of(worker);
-            let inventory = caps.exec.as_ref()?;
-            let sizes = upcoming
+        .map(|worker| (worker, caps_of(worker)))
+        .filter(|(_, caps)| caps.exec.is_some())
+        .collect();
+    exec_workers.sort_by(|(a, _), (b, _)| a.id.cmp(&b.id));
+
+    let mut jobs: Vec<UpcomingExecJobForPreWarm> = upcoming
+        .iter()
+        .filter(|exec| exec.spec.image.is_none())
+        .map(|exec| UpcomingExecJobForPreWarm {
+            fitting_exec_worker_indices: exec_workers
                 .iter()
-                .filter(|exec| exec.spec.image.is_none())
-                .filter(|exec| serves_project(worker, exec.project))
-                .filter_map(|exec| {
-                    let requirement = exec
-                        .spec
-                        .requirement_on(&exec.architecture, &inventory.defaults);
-                    caps.fits_exec(&requirement, DeviceCount::Total)
-                        .then(|| (requirement.guest, exec.spec.nodes.max(1)))
-                });
-            Some((worker.id.clone(), count_warm_guests(sizes)))
+                .enumerate()
+                .filter(|(_, (worker, caps))| {
+                    serves_project(worker, exec.project)
+                        && caps.exec.as_ref().is_some_and(|inventory| {
+                            if inventory.max_server_requested_warm_guests == Some(0) {
+                                return false;
+                            }
+                            let requirement = exec
+                                .spec
+                                .requirement_on(&exec.architecture, &inventory.defaults);
+                            caps.fits_exec(&requirement, DeviceCount::Total)
+                        })
+                })
+                .map(|(index, _)| index)
+                .collect(),
+            guest: exec.spec.guest,
+            nodes: exec.spec.nodes.max(1),
         })
+        .filter(|job| !job.fitting_exec_worker_indices.is_empty())
+        .collect();
+    jobs.sort_by(|a, b| {
+        let key = |job: &UpcomingExecJobForPreWarm| {
+            (
+                job.fitting_exec_worker_indices.len(),
+                Reverse(job.nodes),
+                job.guest.cpus,
+                job.guest.memory_mb,
+            )
+        };
+        key(a).cmp(&key(b)).then_with(|| {
+            a.fitting_exec_worker_indices
+                .cmp(&b.fitting_exec_worker_indices)
+        })
+    });
+
+    let reported_max_extra_warm_guests_for_server_count_by_worker: Vec<u32> = exec_workers
+        .iter()
+        .map(|(_, caps)| {
+            caps.exec
+                .as_ref()
+                .and_then(|inventory| inventory.max_server_requested_warm_guests)
+                .unwrap_or(u32::MAX)
+        })
+        .collect();
+    let zones: Vec<Option<&str>> = exec_workers
+        .iter()
+        .map(|(worker, _)| worker.zone.as_deref())
+        .collect();
+    let mut warm_vm_count_assigned_to_worker = vec![0_u32; exec_workers.len()];
+    let mut assigned: Vec<Vec<(GuestSize, u32)>> = vec![Vec::new(); exec_workers.len()];
+    for job in jobs {
+        let Some(chosen) = choose_same_zone_workers_for_multinode_job_warm_guests(
+            &job,
+            &zones,
+            &warm_vm_count_assigned_to_worker,
+            &reported_max_extra_warm_guests_for_server_count_by_worker,
+        ) else {
+            continue;
+        };
+        for index in chosen {
+            warm_vm_count_assigned_to_worker[index] += 1;
+            assigned[index].push((job.guest, 1));
+        }
+    }
+
+    exec_workers
+        .iter()
+        .zip(assigned)
+        .map(|((worker, _), sizes)| (worker.id.clone(), count_warm_guests(sizes)))
         .collect()
+}
+
+fn choose_same_zone_workers_for_multinode_job_warm_guests(
+    job: &UpcomingExecJobForPreWarm,
+    zones: &[Option<&str>],
+    warm_vm_count_assigned_to_worker: &[u32],
+    reported_max_extra_warm_guests_for_server_count_by_worker: &[u32],
+) -> Option<Vec<usize>> {
+    let preference = |index: usize| {
+        let already = warm_vm_count_assigned_to_worker[index];
+        (
+            already >= reported_max_extra_warm_guests_for_server_count_by_worker[index],
+            already,
+            index,
+        )
+    };
+    let mut by_zone: BTreeMap<Option<&str>, Vec<usize>> = BTreeMap::new();
+    for &index in &job.fitting_exec_worker_indices {
+        by_zone.entry(zones[index]).or_default().push(index);
+    }
+    let nodes = usize::try_from(job.nodes).ok()?;
+    by_zone
+        .into_values()
+        .filter(|members| members.len() >= nodes)
+        .map(|mut members| {
+            members.sort_by_key(|&index| preference(index));
+            members.truncate(nodes);
+            members
+        })
+        .min_by_key(|members| {
+            let full = members.iter().filter(|&&index| preference(index).0).count();
+            let load: u64 = members
+                .iter()
+                .map(|&index| u64::from(warm_vm_count_assigned_to_worker[index]))
+                .sum();
+            (full, load)
+        })
 }
 
 fn pre_warm_signal(sizes: Vec<WarmGuests>) -> SessionSignal {
@@ -144,9 +252,8 @@ mod tests {
 
     #[test]
     fn upcoming_jobs_count_per_guest_size() {
-        let sized = |cpus, nodes| {
+        let sized = |cpus| {
             upcoming(ExecSpec {
-                nodes,
                 guest: GuestSize {
                     cpus,
                     ..GuestSize::default_request()
@@ -154,12 +261,8 @@ mod tests {
                 ..ExecSpec::default()
             })
         };
-        let mut caps = exec_caps_labelled("lab-a");
-        if let Some(inventory) = caps.exec.as_mut() {
-            inventory.allow.nodes = 2;
-        }
-        let workers = [worker_info("w1", caps)];
-        let wanted = pre_warm_counts(&[sized(2, 1), sized(8, 2), sized(2, 1)], &workers);
+        let workers = [worker_info("w1", exec_caps_labelled("lab-a"))];
+        let wanted = pre_warm_counts(&[sized(2), sized(8), sized(8), sized(2)], &workers);
         let warm = |cpus| GuestSize {
             cpus,
             ..GuestSize::default_request()
@@ -176,28 +279,73 @@ mod tests {
     }
 
     #[test]
-    fn an_exec_counts_its_nodes_on_every_matching_worker() {
+    fn upcoming_two_node_exec_job_prewarms_one_guest_per_worker_in_same_zone_only() {
         let upcoming = [upcoming(ExecSpec {
             nodes: 2,
             labels: vec!["lab-a".into()],
             ..ExecSpec::default()
         })];
-        let two_node_worker = |id: &str, label: &str| {
+        let two_node_worker = |id: &str, label: &str, zone: &str| {
             let mut caps = exec_caps_labelled(label);
             if let Some(inventory) = caps.exec.as_mut() {
                 inventory.allow.nodes = 2;
             }
-            worker_info(id, caps)
+            WorkerInfo {
+                zone: Some(zone.into()),
+                ..worker_info(id, caps)
+            }
         };
         let workers = [
-            two_node_worker("w1", "lab-a"),
-            two_node_worker("w2", "lab-a"),
-            two_node_worker("w3", "lab-b"),
+            two_node_worker("w1", "lab-a", "fra1"),
+            two_node_worker("w2", "lab-a", "ams1"),
+            two_node_worker("w3", "lab-a", "ams1"),
+            two_node_worker("w4", "lab-b", "ams1"),
             worker_info("b1", build_only_caps()),
         ];
         assert_eq!(
             totals(pre_warm_counts(&upcoming, &workers)),
-            BTreeMap::from([("w1".into(), 2), ("w2".into(), 2), ("w3".into(), 0)])
+            BTreeMap::from([
+                ("w1".into(), 0),
+                ("w2".into(), 1),
+                ("w3".into(), 1),
+                ("w4".into(), 0),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_pre_warm_sum_over_three_workers_matches_needed_count() {
+        let upcoming = [
+            upcoming(ExecSpec::default()),
+            upcoming(ExecSpec::default()),
+            upcoming(ExecSpec::default()),
+        ];
+        let workers = [
+            worker_info("w1", exec_caps_labelled("lab-a")),
+            worker_info("w2", exec_caps_labelled("lab-a")),
+            worker_info("w3", exec_caps_labelled("lab-a")),
+        ];
+        assert_eq!(
+            totals(pre_warm_counts(&upcoming, &workers)),
+            BTreeMap::from([("w1".into(), 1), ("w2".into(), 1), ("w3".into(), 1)])
+        );
+    }
+
+    #[test]
+    fn pre_warm_assignment_skips_worker_with_zero_max_warm_guests_and_prefers_workers_with_room_before_overflow()
+     {
+        let limited = |id: &str, limit| {
+            let mut caps = exec_caps_labelled("lab-a");
+            if let Some(inventory) = caps.exec.as_mut() {
+                inventory.max_server_requested_warm_guests = Some(limit);
+            }
+            worker_info(id, caps)
+        };
+        let upcoming = vec![upcoming(ExecSpec::default()); 4];
+        let workers = [limited("w1", 0), limited("w2", 1), limited("w3", 3)];
+        assert_eq!(
+            totals(pre_warm_counts(&upcoming, &workers)),
+            BTreeMap::from([("w1".into(), 0), ("w2".into(), 1), ("w3".into(), 3)])
         );
     }
 
@@ -250,7 +398,7 @@ mod tests {
             totals(pre_warm_counts(&upcoming, &workers)),
             BTreeMap::from([
                 ("draining".into(), 0),
-                ("open".into(), 2),
+                ("open".into(), 1),
                 ("restricted".into(), 1),
             ])
         );

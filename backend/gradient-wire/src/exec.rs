@@ -263,6 +263,9 @@ pub struct ExecInventory {
     #[proto(54, default)]
     #[serde(default)]
     pub warm_guest_sizes: Vec<WarmGuests>,
+    #[proto(64, default)]
+    #[serde(default)]
+    pub max_server_requested_warm_guests: Option<u32>,
 }
 
 impl ExecInventory {
