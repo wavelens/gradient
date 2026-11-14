@@ -129,7 +129,7 @@ async fn answers_400_without_raw_git_error_when_head_commit_cannot_be_fetched() 
     assert_eq!(body["code"], "repository_unreachable");
     assert_eq!(
         body["message"],
-        "Gradient can't read the latest commit of the repository (Gradient can't list branches of the Git repository at this URL. Check the URL and port. Make sure Gradient can reach the server). Check the repository URL and branch, plus the access key of the project (deploy key). Then retry."
+        "Gradient can't read the latest commit of the repository. Gradient can't list branches of the Git repository at this URL. Check the URL and port. Make sure Gradient can reach the server. Check the repository URL and branch. Verify the access key of the project (deploy key). Then retry."
     );
     assert!(!res.text().contains(missing_repository));
 }
