@@ -16,11 +16,11 @@
       ></button>
   }
   <app-settings-access-state-badge slot="after-title" [access]="access()" kind="task" permission="manageTriggers" showReadOnlyNote />
-  @if (fallbackPollingTrigger(); as polling) {
+  @if (activePollingTriggerThatChecksMoreOftenThanHourlyAfterPushTriggerHasFired(); as polling) {
     <gr-message-banner type="info" data-testid="polling-fallback">
-      Polling acts as a fallback while a push trigger is active. Pause polling to stop the scheduled checks of the repository.
-      <button *appWritable="access()" grButton label="Pause polling" icon="pause" severity="secondary" size="small"
-        [disabled]="rowBusy()" (click)="deactivateTrigger(polling)"></button>
+      Push triggers start an evaluation for each push. An hourly poll can catch pushes that the Git host missed and pushes sent during downtime.
+      <button *appWritable="access()" grButton label="Poll every hour" icon="schedule" severity="secondary" size="small"
+        [disabled]="rowBusy()" (click)="setPollingTriggerToHourly(polling)"></button>
     </gr-message-banner>
   }
   <gr-load-state

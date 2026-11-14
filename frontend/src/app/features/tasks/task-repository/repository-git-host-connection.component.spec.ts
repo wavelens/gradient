@@ -209,15 +209,18 @@ describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
 
   it('shows the webhook URL and installs the webhook through a saved connection that reports status', () => {
     const installWebhook = vi.fn(() => of('ok'));
-    const { el, notify } = render(
+    const { el, notify, fixture } = render(
       { git_host_connection: reporting, report_status: true, webhook_url: 'https://ci.example.com/hooks/c1', can_manage_integrations: true },
       { installWebhook },
     );
     const urls = Array.from(el.querySelectorAll<HTMLInputElement>('gr-copy-field input')).map((input) => input.value);
     expect(urls).toContain('https://ci.example.com/hooks/c1');
     (testId(el, 'install-webhook') as HTMLButtonElement).click();
+    fixture.detectChanges();
     expect(installWebhook).toHaveBeenCalledWith('acme', 'app');
     expect(notify.success).toHaveBeenCalledWith('Webhook installed');
+    expect(testId(el, 'webhook-installed')?.textContent).toContain('Webhook installation on the Git host is complete');
+    expect(testId(el, 'install-webhook')).toBeNull();
   });
 
   it('asks before leaving with an unsaved connection choice', () => {

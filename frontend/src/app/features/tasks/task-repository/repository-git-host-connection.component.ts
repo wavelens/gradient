@@ -117,7 +117,13 @@ export class RepositoryGitHostConnectionAndCommitStatusComponent implements OnIn
   });
 
   savedGitHostConnectionReceivesEvents = computed(() => this.state().git_host_connection?.receives_events ?? false);
-  showInstallWebhookButton = computed(() => canInstallWebhookOrDeployKeyForTask(this.state()) && this.savedGitHostConnectionReceivesEvents());
+  webhookInstalledInThisSession = signal(false);
+  showInstallWebhookButton = computed(() =>
+    canInstallWebhookOrDeployKeyForTask(this.state()) &&
+    this.savedGitHostConnectionReceivesEvents() &&
+    !this.state().last_event &&
+    !this.webhookInstalledInThisSession(),
+  );
   hostLinks = computed(() => gitHostSettingsLinks(this.state().repository, this.state().git_host_connection?.git_host_type ?? null));
   events = computed(() => webhookEvents(this.state().git_host_connection?.git_host_type ?? 'forgejo'));
   lastEvent = computed(() => {
@@ -180,6 +186,7 @@ export class RepositoryGitHostConnectionAndCommitStatusComponent implements OnIn
     this.tasks.installWebhook(this.project(), this.task()).subscribe({
       next: () => {
         this.installingWebhook.set(false);
+        this.webhookInstalledInThisSession.set(true);
         this.notify.success('Webhook installed');
       },
       error: (error: unknown) => {

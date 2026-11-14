@@ -417,18 +417,30 @@ describe('TaskTriggersComponent - push triggers next to polling', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="trigger-suggestions"]')).toBeNull();
   });
 
-  it('pauses the polling fallback in one click while a push trigger is active', () => {
+  it('slows frequent polling to hourly in one click once the push trigger has fired', () => {
     const update = vi.fn((..._args: any[]) => of({}));
-    const fixture = setup(writer, [trigger, push], update);
+    const fixture = setup(writer, [trigger, { ...push, last_fired_at: new Date().toISOString() }], update);
     const banner = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="polling-fallback"]') as HTMLElement;
-    expect(banner.textContent).toContain('Polling acts as a fallback');
-    findByText(banner, 'pause polling')!.click();
-    expect(update).toHaveBeenCalledWith('acme', 'demo', 't1', { active: false });
+    expect(banner.textContent).toContain('An hourly poll can catch pushes');
+    findByText(banner, 'poll every hour')!.click();
+    expect(update).toHaveBeenCalledWith('acme', 'demo', 't1', { config: expect.objectContaining({ type: 'polling', interval_secs: 3600 }) });
   });
 
-  it('shows no polling fallback hint without an active push trigger', () => {
-    const fixture = setup(writer, [trigger, { ...push, active: false }]);
-    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="polling-fallback"]')).toBeNull();
+  it('shows no polling hint before the push trigger fired, without an active push trigger, or when polling is hourly', () => {
+    const fired = { ...push, last_fired_at: new Date().toISOString() };
+    const hourly = { ...trigger, config: { ...trigger.config, interval_secs: 3600 } } as typeof trigger;
+    for (const triggers of [[trigger, push], [trigger, { ...fired, active: false }], [hourly, fired]]) {
+      const fixture = setup(writer, triggers);
+      expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="polling-fallback"]')).toBeNull();
+      fixture.destroy();
+      TestBed.resetTestingModule();
+    }
+  });
+
+  it('names whole hours without a zero minute part', () => {
+    const fixture = setup(writer, [{ ...trigger, config: { ...trigger.config, interval_secs: 3600 } } as typeof trigger]);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('every 1h');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('0 min');
   });
 
   it('labels polling rows with Poll now and the next poll', () => {
