@@ -66,7 +66,6 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
-  LoadMoreComponent,
   MenuComponent,
   MenuItem,
   MessageBannerComponent,
@@ -84,7 +83,7 @@ const emptyBuildPageForEvaluationOnly: PaginatedBuilds = { builds: [], total: 0,
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadMoreComponent,LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogAttemptListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogAttemptListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -301,6 +300,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private userPickedBuild = false;
   private isInitialBuildsLoad = true;
   private readonly latestLiveBuildStatusByBuildId = new Map<string, BuildStatus>();
+  private readonly latestLiveBuildStatusDuringBackgroundLoadByBuildId = new Map<string, BuildStatus>();
+  protected readonly allBuildsAfterFirstPageLoadError = signal<unknown>(null);
   private pendingLogLines: string[] = [];
   private logDrainTimer?: ReturnType<typeof setInterval>;
   private readonly PAGE_SIZE = 1000;
@@ -612,10 +613,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     this.resolveInitialBuild();
 
-    // Auto-fetch more pages until all active builds are in memory.
-    // This ensures status transitions and log streaming work for every build.
-    if (this.builds().length < result.active_count && !this.loadingMore()) {
-      this.doLoadMore();
+    if (this.builds().length < result.total && !this.allBuildsAfterFirstPageLoadError()) {
+      this.loadAllBuildsAfterFirstPageAndMerge();
     }
   }
 
@@ -625,40 +624,26 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     else this.initialBuildId = this.scopeBuildId();
   }
 
-  /** Triggered by scroll proximity - pre-fetches next page before user hits bottom. */
-  loadMoreBuilds(): void {
-    if (this.loadingMore() || this.builds().length >= this.totalBuilds()) return;
-    this.doLoadMore();
-  }
-
-  private doLoadMore(): void {
-    if (this.loadingMore() || this.builds().length >= this.totalBuilds()) return;
+  loadAllBuildsAfterFirstPageAndMerge(): void {
+    if (this.loadingMore()) return;
     this.loadingMore.set(true);
-    const offset = this.builds().length;
+    this.allBuildsAfterFirstPageLoadError.set(null);
+    this.latestLiveBuildStatusDuringBackgroundLoadByBuildId.clear();
 
-    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.evalService.getBuilds(this.evaluationId, undefined, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
-        // Don't update activeBuildsCount here. loadBuilds() is the only owner of this signal, so a response that comes back at the same time can't change the value unexpectedly.
-        this.totalBuilds.set(result.total);
-        if (result.builds.length > 0) {
-          const existingIds = new Set(this.builds().map(b => b.id));
-          const newBuilds = result.builds.filter(b => !existingIds.has(b.id));
-          if (newBuilds.length > 0) {
-            this.builds.update(current => this.sortBuilds([...current, ...newBuilds]));
-          }
-        }
         this.loadingMore.set(false);
-
-        // A build paged in here may be the one we deep-linked to.
-        this.resolveInitialBuild();
-
-        // Continue fetching if there are still active builds not yet in memory
-        if (this.builds().length < result.active_count) {
-          this.doLoadMore();
-        }
+        const newerLiveStatuses = this.latestLiveBuildStatusDuringBackgroundLoadByBuildId;
+        const builds = result.builds.map((b) => {
+          const status = newerLiveStatuses.get(b.id);
+          return status ? { ...b, status } : b;
+        });
+        newerLiveStatuses.clear();
+        this.mergeBuildPageAndSelectOrFollowBuild({ ...result, builds });
       },
-      error: () => {
+      error: (error: unknown) => {
         this.loadingMore.set(false);
+        this.allBuildsAfterFirstPageLoadError.set(error);
       },
     });
   }
@@ -680,7 +665,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           filter(e => e.event !== 'evaluation.activity'),
           tap((e) => {
             const status = buildStatusNameFromStatusCode(e.content.status);
-            if (e.content.build_id && status) this.latestLiveBuildStatusByBuildId.set(e.content.build_id, status);
+            if (!e.content.build_id || !status) return;
+            this.latestLiveBuildStatusByBuildId.set(e.content.build_id, status);
+            if (this.loadingMore()) this.latestLiveBuildStatusDuringBackgroundLoadByBuildId.set(e.content.build_id, status);
           }),
           auditTime(300),
           switchMap(() => forkJoin({ evaluation: this.evalService.getEvaluation(this.evaluationId), page: this.firstBuildPage() }).pipe(
@@ -1143,14 +1130,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private trackRateLimit(lines: readonly string[]): void {
     const note = lastRateLimitNote(lines);
     if (note) this.logPaused.set(note === 'paused');
-  }
-
-  onBuildsViewportScroll(event: Event): void {
-    const el = event.target as HTMLElement;
-    // Pre-fetch the next page as the list nears the bottom.
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
-      this.loadMoreBuilds();
-    }
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {

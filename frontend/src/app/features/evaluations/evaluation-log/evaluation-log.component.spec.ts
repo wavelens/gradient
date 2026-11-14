@@ -20,7 +20,7 @@ import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
 import { CopyMenuService } from '@shared/routing';
-import { UserInfoResponse, BuildAttemptResponse, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
+import { UserInfoResponse, BuildAttemptResponse, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary, PaginatedBuilds } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
 import { clockTime } from '@shared/text';
@@ -1167,18 +1167,36 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    it('says the build list is partial and loads the next page on request', () => {
-      const getBuilds = vi.fn((..._args: unknown[]) => of({ builds: [build('ok', 'hash-zlib.drv')], total: 3, active_count: 0 }));
+    it('loads every build in the background after a partial first page', () => {
+      const remaining = new Subject<PaginatedBuilds>();
+      const all = [build('ok', 'hash-zlib.drv'), build('a', 'hash-a.drv'), build('b', 'hash-b.drv')];
+      const getBuilds = vi.fn((_id: string, limit?: number) =>
+        limit === undefined ? remaining : of({ builds: [all[0]], total: 3, active_count: 0 }));
       const fixture = setupEvaluationLogPageFixture([], getBuilds as never);
       fixture.detectChanges();
       const root = fixture.nativeElement as HTMLElement;
-      expect(root.querySelector('.sidebar-builds-heading')?.textContent?.trim()).toBe('1 of 3 builds');
-      getBuilds.mockReturnValue(of({ builds: [build('a', 'hash-a.drv'), build('b', 'hash-b.drv')], total: 3, active_count: 0 }));
-      (root.querySelector('gr-load-more button') as HTMLButtonElement).click();
+      expect(root.querySelector('.sidebar-builds-heading')?.textContent).toContain('1 of 3 builds');
+      expect(root.querySelector('.sidebar-builds-heading')?.textContent).toContain('Loading the rest');
+      expect(getBuilds).toHaveBeenCalledWith('eval-1', undefined, 0, undefined);
+      remaining.next({ builds: all, total: 3, active_count: 0 });
       fixture.detectChanges();
-      expect(getBuilds.mock.lastCall?.[2]).toBe(1);
       expect(root.querySelector('.sidebar-builds-heading')).toBeNull();
-      expect(root.querySelector('gr-load-more button')).toBeNull();
+      expect(root.querySelectorAll('.build-item')).toHaveLength(3);
+      fixture.destroy();
+    });
+
+    it('offers a retry when loading the remaining builds fails', () => {
+      const getBuilds = vi.fn((_id: string, limit?: number) =>
+        limit === undefined ? throwError(() => new Error('down')) : of({ builds: [build('ok', 'hash-zlib.drv')], total: 2, active_count: 0 }));
+      const fixture = setupEvaluationLogPageFixture([], getBuilds as never);
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.builds-list')?.textContent).toContain('Failed to load the remaining builds');
+      getBuilds.mockReturnValue(of({ builds: [build('ok', 'hash-zlib.drv'), build('a', 'hash-a.drv')], total: 2, active_count: 0 }));
+      (root.querySelector('.builds-list gr-load-state button') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(root.querySelector('.sidebar-builds-heading')).toBeNull();
+      expect(root.querySelectorAll('.build-item')).toHaveLength(2);
       fixture.destroy();
     });
 
