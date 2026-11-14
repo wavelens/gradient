@@ -976,7 +976,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
   });
 });
 
-const repositoryUnreachableErrorMessage = "Gradient can't read the latest commit of the repository (branch main does not exist on the remote). Check the repository URL and branch, plus the access key of the project (deploy key). Then retry.";
+const repositoryUnreachableErrorMessage = "Gradient can't read the latest commit of the repository. Branch main does not exist on the remote. Check the repository URL and branch. Verify the access key of the project (deploy key). Then retry.";
 
 describe('TaskDetailComponent - error surfacing (issue #280)', () => {
   it('reports a failed start with the server reason and enables the button again', () => {

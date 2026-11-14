@@ -105,7 +105,7 @@ pub enum SharedRefusal {
     #[error("You do not have permission to perform this action.")]
     MissingPermission,
     #[error(
-        "Gradient can't read the latest commit of the repository ({reason}). Check the repository URL and branch, plus the access key of the project (deploy key). Then retry."
+        "Gradient can't read the latest commit of the repository. {reason}. Check the repository URL and branch. Verify the access key of the project (deploy key). Then retry."
     )]
     RepositoryStateFetchFailed { reason: String },
     #[error("Only members of a team can set that team as the owner of a project or cache.")]
@@ -120,11 +120,13 @@ impl SharedRefusal {
     pub fn repository_state_fetch_failed_from_git_source_error(
         error: &gradient_sources::SourceError,
     ) -> Self {
+        let reason = error.short_reason_for_user();
+        let mut chars = reason.trim_end_matches('.').chars();
         Self::RepositoryStateFetchFailed {
-            reason: error
-                .short_reason_for_user()
-                .trim_end_matches('.')
-                .to_owned(),
+            reason: chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect())
+                .unwrap_or_default(),
         }
     }
 }
