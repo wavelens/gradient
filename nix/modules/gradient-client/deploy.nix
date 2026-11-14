@@ -21,7 +21,9 @@ in {
     system.gradient-deploy = {
       enable = lib.mkEnableOption "pull deployments from Gradient";
       type = lib.mkOption {
-        type = lib.types.listOf (lib.types.enum [ "system" "microvm" ]);
+        type = let
+          target = lib.types.enum [ "system" "microvm" ];
+        in lib.types.coercedTo target lib.singleton (lib.types.listOf target);
         default = [ "system" ];
         example = [ "system" "microvm" ];
         description = "Deployment target: the host system, imperative MicroVMs on this host, or both.";
