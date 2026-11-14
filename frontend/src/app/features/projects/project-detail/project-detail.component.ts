@@ -23,7 +23,7 @@ import { StarButtonComponent, ProjectReadinessCardComponent, entityKindToIconNam
 import { CacheSubscriptionItem, StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
-import { canOpenProjectMembersPage, canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
+import { canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ProjectsService } from '@core/services/projects.service';
 import { EMPTY, catchError, merge, tap } from 'rxjs';
@@ -64,7 +64,7 @@ export class ProjectDetailComponent implements OnInit {
 
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   canCreateTask = computed(() => !this.project().managed && this.project().permissions.includes('createTask'));
-  canShowSettingsButton = computed(() => canOpenProjectSettings(this.project()) || canOpenProjectMembersPage(this.project(), this.authService.user()));
+  canShowSettingsButton = computed(() => canOpenProjectSettings(this.project()));
   tasks = pagedList<TaskResponse>('tasks', (page) => this.tasksService.getTasks(this.projectName, page, 50));
   starred = signal(false);
   cacheSubscriptions = signal<CacheSubscriptionItem[] | null>(null);
