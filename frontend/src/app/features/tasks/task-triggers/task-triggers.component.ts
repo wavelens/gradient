@@ -380,7 +380,7 @@ export class TaskTriggersComponent implements OnInit {
   }
 
   setPollingTriggerToHourly(trigger: TriggerOut): void {
-    const config = { ...(trigger.config as TriggerConfig), interval_secs: secondsInOneHour } as TriggerConfig;
+    const config: TriggerConfig = { ...(trigger.config as { branch?: string | null }), type: 'polling', interval_secs: secondsInOneHour };
     this.triggersService.update(this.projectName, this.taskName, trigger.id, { config }).subscribe({
       next: () => {
         this.notify.success('Trigger saved');

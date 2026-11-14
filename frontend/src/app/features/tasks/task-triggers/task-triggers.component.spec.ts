@@ -40,7 +40,7 @@ const trigger = {
   id: 't1',
   type: 'polling' as const,
   active: true,
-  config: { type: 'polling', interval_secs: 300, branch: null },
+  config: { interval_secs: 300, branch: null },
   last_fired_at: null,
   created_at: '2026-01-01T00:00:00',
 };
