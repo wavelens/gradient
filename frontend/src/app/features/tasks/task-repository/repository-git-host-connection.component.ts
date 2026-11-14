@@ -121,7 +121,6 @@ export class RepositoryGitHostConnectionAndCommitStatusComponent implements OnIn
   showInstallWebhookButton = computed(() =>
     canInstallWebhookOrDeployKeyForTask(this.state()) &&
     this.savedGitHostConnectionReceivesEvents() &&
-    !this.state().last_event &&
     !this.webhookInstalledInThisSession(),
   );
   hostLinks = computed(() => gitHostSettingsLinks(this.state().repository, this.state().git_host_connection?.git_host_type ?? null));

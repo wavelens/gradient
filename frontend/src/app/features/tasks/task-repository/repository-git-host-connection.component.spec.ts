@@ -223,6 +223,17 @@ describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
     expect(testId(el, 'install-webhook')).toBeNull();
   });
 
+  it('keep Install webhook button after event from Git host', () => {
+    const { el } = render({
+      git_host_connection: reporting,
+      report_status: true,
+      can_manage_integrations: true,
+      last_event: { id: 'd1', event: 'push', status_code: 200, result: 'queued', tasks_scanned: 1, queued: 1, created_at: '2026-01-01T00:00:00Z' },
+    });
+    expect(testId(el, 'last-event')?.textContent).toContain('Queued 1 evaluation');
+    expect(testId(el, 'install-webhook')).not.toBeNull();
+  });
+
   it('asks before leaving with an unsaved connection choice', () => {
     const { component } = render();
     expect(component.unsaved.changed()).toBe(false);
