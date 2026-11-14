@@ -13,7 +13,7 @@ use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token};
 use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use sea_orm::MockDatabase;
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 
 fn authorized_db(session_id: SessionId) -> MockDatabase {
@@ -113,7 +113,12 @@ async fn answers_400_without_raw_git_error_when_head_commit_cannot_be_fetched() 
         ..Default::default()
     };
     let res = evaluate(
-        authorized_db_with_task(session_id, task).append_query_results([vec![default_trigger]]),
+        authorized_db_with_task(session_id, task)
+            .append_query_results([vec![default_trigger]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }]),
         session_id,
         json!({}),
     )
@@ -124,7 +129,7 @@ async fn answers_400_without_raw_git_error_when_head_commit_cannot_be_fetched() 
     assert_eq!(body["code"], "repository_unreachable");
     assert_eq!(
         body["message"],
-        "Gradient can't read the latest commit of the repository. Check the repository URL, branch and the project's access key (deploy key), then try again."
+        "Gradient can't read the latest commit of the repository (Gradient can't list branches of the Git repository at this URL. Check the URL and port. Make sure Gradient can reach the server). Check the repository URL and branch, plus the access key of the project (deploy key). Then retry."
     );
     assert!(!res.text().contains(missing_repository));
 }

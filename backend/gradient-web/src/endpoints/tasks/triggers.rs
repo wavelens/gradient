@@ -462,12 +462,22 @@ pub(super) async fn fire(
         .ok()
         .and_then(|cfg| cfg.trigger_branch().map(str::to_owned));
 
-    let (branch, head) = head_commit(db, task, branch.as_deref())
-        .await
-        .map_err(|e| {
-            tracing::warn!(task_id = %task.id, trigger_id = %trigger.id, error = %e, "rejecting evaluation: failed to fetch the head commit of the repository");
-            SharedRefusal::RepositoryStateFetchFailed
-        })?;
+    let resolved = head_commit(db, task, branch.as_deref()).await;
+    let fetch_error = resolved.as_ref().err().map(|e| e.short_reason_for_user());
+    if let Err(e) = gradient_db::tasks::record_fetch(
+        &db.web_db,
+        task.id,
+        gradient_types::now(),
+        fetch_error.as_deref(),
+    )
+    .await
+    {
+        tracing::warn!(task_id = %task.id, error = %e, "Failed to record the repository fetch result");
+    }
+    let (branch, head) = resolved.map_err(|e| {
+        tracing::warn!(task_id = %task.id, trigger_id = %trigger.id, error = %e, "rejecting evaluation: failed to fetch the head commit of the repository");
+        SharedRefusal::repository_state_fetch_failed_from_git_source_error(&e)
+    })?;
 
     let trigger_id = request.counts_as_trigger_run.then_some(trigger.id);
     let input_update = gradient_ci::trigger::maybe_trigger_input_update(
