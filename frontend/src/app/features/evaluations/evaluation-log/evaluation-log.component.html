@@ -85,9 +85,12 @@
         <gr-load-state flat [error]="buildListError()" errorTitle="Failed to load builds" (retry)="loadBuilds()" />
       } @else if (builds().length > 0) {
         @if (builds().length < totalBuilds()) {
-          <h2 class="sidebar-builds-heading">{{ builds().length }} of {{ plural(totalBuilds(), 'build') }}</h2>
+          <h2 class="sidebar-builds-heading" [attr.aria-busy]="loadingMore()">
+            {{ builds().length }} of {{ plural(totalBuilds(), 'build') }}
+            @if (loadingMore()) { <span class="text-secondary">· Loading the rest</span> }
+          </h2>
         }
-        <div class="builds-list" role="group" aria-label="Builds" (scroll)="onBuildsViewportScroll($event)">
+        <div class="builds-list" role="group" aria-label="Builds">
           @for (group of groupedBuilds(); track group.key) {
             <div class="build-group">
               <button
@@ -146,7 +149,9 @@
           @empty {
             <div class="no-builds">No matching builds</div>
           }
-          <gr-load-more [shown]="builds().length" [total]="totalBuilds()" [loading]="loadingMore()" (more)="loadMoreBuilds()" />
+          @if (allBuildsAfterFirstPageLoadError(); as error) {
+            <gr-load-state flat [error]="error" errorTitle="Failed to load the remaining builds" (retry)="loadAllBuildsAfterFirstPageAndMerge()" />
+          }
         </div>
       }
       </div>
