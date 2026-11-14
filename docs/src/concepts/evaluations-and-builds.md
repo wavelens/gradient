@@ -75,7 +75,7 @@ Builds belong to a derivation, not to an evaluation. Every evaluation that needs
 - Each try to build a derivation is an attempt with its own log. Log pages have an attempt selector. Links to log lines point to that attempt. `GET /builds/{build}/attempts` can list attempts and `?attempt=N` on the log endpoint can read one of them. The CLI can receive `gradient builds log --attempt N`.
 - Both kinds of retry query [upstream caches](caches.md#upstream-types) again. The worker can then substitute the builds from that query.
 - A new evaluation can query the upstream caches again about a failed build, one hour after the last query.
-- A new evaluation can queue every failed build it needs again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
+- A new evaluation can queue every failed build it needs again. The task option **Rebuild failed builds in each new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
 
 ## Imported Derivations
 
