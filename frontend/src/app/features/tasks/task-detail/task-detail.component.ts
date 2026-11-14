@@ -364,7 +364,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       .map(e => `${e.id}:${e.status}:${e.prioritized}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}:${JSON.stringify(e.waiting_reason)}`)
       .join('|');
     return [p.active, p.can_edit, p.can_trigger, p.display_name, p.description, p.repository,
-      p.wildcard, p.last_check_at, evals].join('§');
+      p.wildcard, p.last_check_at, JSON.stringify(p.repository_fetch), evals].join('§');
   }
 
   select(evaluation: EvaluationSummary): void {
@@ -501,7 +501,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       finalize(() => this.starting.set(false)),
     ).subscribe({
       next: (task) => task && this.applyTask(task, true),
-      error: (error: unknown) => this.notify.failure('Failed to start evaluation', error),
+      error: (error: unknown) => {
+        this.notify.failure('Failed to start evaluation', error);
+        this.loadTaskData();
+      },
     });
   }
 
@@ -528,7 +531,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         this.runDialogOpen.set(false);
         this.openNewEvaluation(id);
       },
-      error: (error: unknown) => this.runStartFailureReason.set(`Couldn't start evaluation: ${apiErrorMessage(error, 'no response from the server')}`),
+      error: (error: unknown) => {
+        this.runStartFailureReason.set(`Couldn't start evaluation: ${apiErrorMessage(error, 'no response from the server')}`);
+        this.loadTaskData();
+      },
     });
   }
 
