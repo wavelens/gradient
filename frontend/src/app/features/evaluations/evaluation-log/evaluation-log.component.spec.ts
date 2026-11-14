@@ -858,7 +858,11 @@ describe('EvaluationLogComponent', () => {
       buildEvaluation: Observable<string> = of('eval-1'),
       listed: BuildItem[] = [],
       evaluationStatus = 'Completed',
-      extra: { attempts?: BuildAttemptResponse[]; evaluation?: Partial<EvaluationResponse> } = {},
+      extra: {
+        attempts?: BuildAttemptResponse[];
+        evaluation?: Partial<EvaluationResponse>;
+        getBuildsImplementation?: (...args: unknown[]) => Observable<PaginatedBuilds>;
+      } = {},
     ) {
       const getBuildAttempts = vi.fn((_build: string) => of(extra.attempts ?? []));
       const getBuild = vi.fn((id: string) => buildEvaluation.pipe(map((evaluation) => ({
@@ -866,7 +870,8 @@ describe('EvaluationLogComponent', () => {
         architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: false, ifd: false, created_at: '', updated_at: '',
         entry_points: [`packages.x86_64-linux.${id}`],
       }))));
-      const getBuilds = vi.fn((..._args: unknown[]) => of({ builds: listed, total: listed.length, active_count: 0 }));
+      const getBuilds = vi.fn((...args: unknown[]) =>
+        extra.getBuildsImplementation?.(...args) ?? of({ builds: listed, total: listed.length, active_count: 0 }));
       TestBed.configureTestingModule({
         imports: [EvaluationLogComponent],
         providers: [
@@ -1072,6 +1077,28 @@ describe('EvaluationLogComponent', () => {
       expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { filter: null } }));
       expect(getBuilds.mock.lastCall?.[3]).toBeUndefined();
       expect(host.querySelector('.build-limit')).toBeNull();
+      fixture.destroy();
+    });
+
+    it('discard background load of scoped builds after Show All Builds and load all builds instead', () => {
+      const scopedRemaining = new Subject<PaginatedBuilds>();
+      const allRemaining = new Subject<PaginatedBuilds>();
+      const pkg = build('pkg', 'hash-pkg.drv');
+      const dep = build('dep', 'hash-dep.drv', 'Completed', 1);
+      const other = build('other', 'hash-other.drv');
+      const { cmp, fixture, getBuilds } = setupScoped({ filter: 'pkg' }, of('eval-1'), [], 'Completed', {
+        getBuildsImplementation: (_id, limit, _offset, filter) => {
+          if (limit !== undefined) return of({ builds: [pkg], total: filter === 'pkg' ? 2 : 3, active_count: 0 });
+          return filter === 'pkg' ? scopedRemaining : allRemaining;
+        },
+      });
+      expect(getBuilds).toHaveBeenLastCalledWith('eval-1', undefined, 0, 'pkg');
+      cmp.removeBuildLimit();
+      expect(getBuilds).toHaveBeenLastCalledWith('eval-1', undefined, 0, undefined);
+      scopedRemaining.next({ builds: [pkg, dep], total: 2, active_count: 0 });
+      expect(cmp.builds().map(b => b.id)).toEqual(['pkg']);
+      allRemaining.next({ builds: [pkg, dep, other], total: 3, active_count: 0 });
+      expect(cmp.builds().map(b => b.id).sort()).toEqual(['dep', 'other', 'pkg']);
       fixture.destroy();
     });
 
