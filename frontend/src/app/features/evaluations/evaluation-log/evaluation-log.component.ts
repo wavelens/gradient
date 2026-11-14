@@ -292,6 +292,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   private liveSub?: Subscription;
   private progressSub?: Subscription;
+  private loadAllBuildsAfterFirstPageSubscription?: Subscription;
   private logStreamAbortController?: AbortController;
   buildIdWithEndedLogStream = signal<string | null>(null);
   private buildLogStreamReconnectAttemptsSinceLastOutput = 0;
@@ -630,7 +631,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.allBuildsAfterFirstPageLoadError.set(null);
     this.latestLiveBuildStatusDuringBackgroundLoadByBuildId.clear();
 
-    this.evalService.getBuilds(this.evaluationId, undefined, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.loadAllBuildsAfterFirstPageSubscription = this.evalService.getBuilds(this.evaluationId, undefined, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.loadingMore.set(false);
         const newerLiveStatuses = this.latestLiveBuildStatusDuringBackgroundLoadByBuildId;
@@ -646,6 +647,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.allBuildsAfterFirstPageLoadError.set(error);
       },
     });
+  }
+
+  private cancelRemainingBuildsLoading(): void {
+    this.loadAllBuildsAfterFirstPageSubscription?.unsubscribe();
+    this.loadAllBuildsAfterFirstPageSubscription = undefined;
+    this.latestLiveBuildStatusDuringBackgroundLoadByBuildId.clear();
+    this.loadingMore.set(false);
   }
 
   startLiveUpdates(status: EvaluationStatus): void {
@@ -716,6 +724,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   removeBuildLimit(): void {
+    this.cancelRemainingBuildsLoading();
     this.scopeBuildId.set(null);
     this.router.navigate([], {
       relativeTo: this.route,
