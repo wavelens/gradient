@@ -19,7 +19,7 @@ use gradient_types::exec::{ExecInventory, ExecSpec, Phase, hash_job_token};
 use gradient_wire::types::GuestChannelKind;
 use gradient_wire::types::{BuildFailureKind, ClusterPeer, ExecJob, Job, JobKind};
 
-use super::exec::{W1, W2, exec_shape, inventory, spec};
+use super::exec::{W1, W2, exec_shape, inventory, pre_warms, spec};
 use super::{SchedulerCase, SlotKind, failure, w_exec, without_offers};
 use crate::GuestChannelRefusal;
 use crate::jobs::exec_job_key;
@@ -185,6 +185,17 @@ async fn statuses(case: &SchedulerCase) -> Vec<(ExecJobStatus, i32)> {
         .iter()
         .map(|row| (row.status, row.retries_left))
         .collect()
+}
+
+#[tokio::test]
+async fn queued_two_node_job_starts_one_guest_per_worker() {
+    let (case, _) = with_queued_cluster(pair_spec(0, false)).await;
+
+    connect_pair(&case).await;
+
+    assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 1: W1");
+    assert_eq!(pre_warms(&case.signals(W2)), vec![1], "after 1: W2");
+    case.finish().await;
 }
 
 #[tokio::test]

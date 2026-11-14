@@ -1762,6 +1762,7 @@ mod tests {
             disk_speed_mbps: None,
             upload_speed_mbps: None,
             download_speed_mbps: None,
+            zone: None,
             exec: None,
         }
     }

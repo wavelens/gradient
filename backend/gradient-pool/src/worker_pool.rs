@@ -495,6 +495,7 @@ impl WorkerPool {
             disk_speed_mbps: s.disk_speed_mbps,
             upload_speed_mbps: s.upload_speed_mbps,
             download_speed_mbps: s.download_speed_mbps,
+            zone: s.zone.clone(),
             exec: s.exec_inventory(),
         }
     }
@@ -541,6 +542,8 @@ pub struct WorkerInfo {
     pub upload_speed_mbps: Option<f32>,
     #[serde(skip)]
     pub download_speed_mbps: Option<f32>,
+    #[serde(skip)]
+    pub zone: Option<String>,
     #[serde(serialize_with = "serialize_exec_offer")]
     #[schema(value_type = Option<ExecOffer>)]
     pub exec: Option<ExecInventory>,
