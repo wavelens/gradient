@@ -9,7 +9,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 ```mermaid
 flowchart LR
-    start[Server start] --> f[require_upgrade_floor]
+    start[Server start] --> lock[Acquire schema lock 646]
+    lock --> f[require_upgrade_floor]
     f --> known[require_known_migrations]
     known --> prune[prune_removed_migrations]
     prune --> up["Migrator::up"]
@@ -18,6 +19,7 @@ flowchart LR
     baseline -->|provisioned| noop[Baseline as no-op]
     schema --> later[Later migrations replay]
     noop --> later
+    later --> roles[Seed built-in roles]
 ```
 
 ## Adding a Migration
@@ -25,6 +27,32 @@ flowchart LR
 1. A new file `mYYYYMMDD_NNNNNN_<name>.rs` in `backend/gradient-migration/src/`, registered in the `lib.rs` file.
 2. The matching entity in the `backend/gradient-entity/src/` directory.
 3. A `down()` that is a real inverse, or an explicit `Err(DbErr::Migration("... is irreversible"))` for a lossy change. A silent no-op `down()` is not allowed. Such a `down()` would claim a reversibility missing from the migration.
+
+## Multiple Instances
+
+Starting instances prepare the schema one at a time. Instances that prepare the schema hold an advisory lock at session level on key `646` for the whole time.
+
+- **Lock:** Calls to `take_schema_preparation_lock` (`backend/gradient-db/src/connection/schema_preparation_lock.rs`) take the lock on a dedicated connection outside the pool. PostgreSQL can release the lock when that connection is gone. The same can happen after a crash.
+- **Waiting Instances:** Other instances log `waiting for another instance to prepare the database schema` every 30 seconds. They find no pending migrations after release.
+- **Older Binary:** Old binaries that start later detect unknown migrations. `require_known_migrations` can refuse that startup. See [Newer Database](#newer-database).
+- **Connection Pooling:** Run the server with session pooling or a direct connection to PostgreSQL. PgBouncer in transaction mode can discard the advisory lock of the session. sqlx prepared statements already need session pooling.
+- **Lost Instance:** A host loss can leave an instance with the lock until PostgreSQL can detect the dead connection. `tcp_keepalives_idle` can shorten this wait. `pg_terminate_backend` can end that wait immediately.
+- **Wait Limit:** A strict upper bound for the wait is absent.
+
+## Policy
+
+- **Additive Changes:** Migrations in a release only add new tables, nullable columns or columns with a default value, and new indexes. Drop a column or table one release after the last code to read it.
+- **Indexes on Existing Tables:** Put `DROP INDEX CONCURRENTLY IF EXISTS` first. Use `CREATE INDEX CONCURRENTLY` with `use_transaction()` and return `Some(false)`. See `m20261201_000002_add_job_id_dispatched_at_desc_index_to_dispatched_job_concurrently.rs` for an example.
+- **Lock Wait:** DDL migrations on an existing table wait up to 5 seconds for a lock.
+    - Transaction migrations start with `SET LOCAL lock_timeout = '5s'`, as in `m20261216_000000_add_revision_to_pending_delivery.rs`.
+    - `CONCURRENTLY` migrations run outside a transaction. `SET LOCAL` can't take effect outside a transaction. These migrations start with `SET lock_timeout = '5s'` and end with `RESET lock_timeout`.
+    - Five seconds is still below the 10-second lock wait for transactions of the graph writer. Queued migrations therefore give up before graph transactions of running instances.
+    - Timeouts cause a server exit and a systemd restart.
+- **Backfills:** Migrations update at most a limited number of rows. Larger backfills run as a background pass with checkpoints after startup. The module `backend/gradient-cache/src/storage_migrations/mod.rs` and the `storage_migration` table are an example. Code can read both states until that pass is complete.
+- **Table Rewrites:** One transaction can rewrite a table with fewer than 20 million rows. Larger tables need online conversion. Graph transactions of running instances try 5 times with a 10 s lock wait each. They fail after those 5 attempts when a rewrite is above about 50 s.
+- **`down()`:** Make every `down()` work. Tests revert through the full chain.
+- **CLI:** The `gradient-migration` CLI (`backend/gradient-migration/src/main.rs`) commands skip the lock for schema preparation. They're for development only.
+- **Squash:** The same rules apply to the squash of #71.
 
 ## Baseline
 
