@@ -13,6 +13,7 @@ use crate::error::{WebError, WebResult, require_create_permission, require_super
 use crate::extractors::{JsonBody, Query};
 use crate::helpers::{CreatedEntityResponse, ok_json};
 use crate::names::{TeamDisplayName, TeamName};
+use crate::permissions::Permission;
 use crate::resource::Resource;
 use crate::scope::{AdminUnmanaged, Member, TeamScope};
 use axum::extract::State;
@@ -328,7 +329,7 @@ pub async fn patch_team(
         || body.new_project_workers.is_some()
         || body.new_project_role.is_some()
     {
-        require_superuser(&user)?;
+        require_superuser(&user, Permission::WriteSuperuser)?;
     }
 
     let team_id = team.id;

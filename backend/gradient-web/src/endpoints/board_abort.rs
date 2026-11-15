@@ -8,6 +8,7 @@ use crate::error::{ErrorCode, WebError, WebResult, require_superuser};
 use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::lookup::require;
+use crate::permissions::Permission;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -63,7 +64,7 @@ pub async fn post_board_job_abort(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::WriteSuperuser)?;
 
     let job = require::<dispatched_job::Entity>(&state.web_db, DispatchedJobId::from(id)).await?;
     if job.finished_at.is_some() {

@@ -8,6 +8,7 @@ use crate::endpoints::board_metrics::{WindowParams, bounded_window_hours_from_re
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::extractors::Query;
 use crate::helpers::ok_json;
+use crate::permissions::Permission;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -58,7 +59,7 @@ pub async fn get_board_storage(
     Extension(user): Extension<MUser>,
     Query(params): Query<WindowParams>,
 ) -> WebResult<Json<BaseResponse<BoardStorage>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::ReadSuperuser)?;
     let window = bounded_window_hours_from_requested(params.window_hours, 6);
     let granularity = granularity_for(window);
     let series = SeriesReader {

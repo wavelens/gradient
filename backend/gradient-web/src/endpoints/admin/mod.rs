@@ -17,6 +17,7 @@ pub mod workers;
 use crate::endpoints::git_host_connections;
 use crate::endpoints::webhooks::{self, WebhookMount};
 use crate::error::{WebResult, require_superuser};
+use crate::permissions::superuser_permission_for_http_method;
 use axum::Extension;
 use axum::extract::Request;
 use axum::middleware::{Next, from_fn};
@@ -32,7 +33,7 @@ async fn superuser_only(
     req: Request,
     next: Next,
 ) -> WebResult<Response> {
-    require_superuser(&user)?;
+    require_superuser(&user, superuser_permission_for_http_method(req.method()))?;
 
     Ok(next.run(req).await)
 }

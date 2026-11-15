@@ -12,6 +12,7 @@ use crate::error::{WebError, WebResult, require_superuser};
 use crate::extractors::Query;
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
+use crate::permissions::Permission;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -440,7 +441,7 @@ pub async fn get_board_health(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Extension(limiter): Extension<Arc<gradient_wire::ProtoLimiter>>,
 ) -> WebResult<Json<BaseResponse<BoardHealth>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::ReadSuperuser)?;
     let obs = collect(
         &state.web_db,
         state.started_at,

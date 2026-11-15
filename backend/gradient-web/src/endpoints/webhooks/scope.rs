@@ -10,7 +10,7 @@ use crate::access::{
 };
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, require_superuser};
-use crate::permissions::{CachePermission, Permission};
+use crate::permissions::{CachePermission, Permission, superuser_permission_for_http_method};
 use crate::scope::PathParams;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -162,7 +162,7 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
                 params,
             });
         }
-        require_superuser(&user)?;
+        require_superuser(&user, superuser_permission_for_http_method(&parts.method))?;
         Ok(Self {
             scope: WebhookScope::Instance,
             project: None,

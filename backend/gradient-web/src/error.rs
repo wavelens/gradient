@@ -405,22 +405,17 @@ impl WebError {
     }
 }
 
-pub(crate) fn superuser_permission_wire_names() -> Vec<&'static str> {
-    use gradient_types::permissions::{mask_to_vec, superuser_permissions_mask};
-    mask_to_vec(superuser_permissions_mask())
-        .into_iter()
-        .map(|p| p.as_wire_name())
-        .collect()
-}
-
-pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
+pub fn require_superuser(
+    user: &gradient_types::MUser,
+    needed: gradient_types::permissions::Permission,
+) -> Result<(), WebError> {
     if user.superuser {
         Ok(())
     } else {
         Err(WebError::Forbidden(
             ErrorCode::SUPERUSER_REQUIRED,
             "superuser required".into(),
-            superuser_permission_wire_names(),
+            vec![needed.as_wire_name()],
         ))
     }
 }
@@ -432,7 +427,10 @@ pub fn require_create_permission(
     use gradient_types::CreatePermission;
     match permission {
         CreatePermission::Everyone => Ok(()),
-        CreatePermission::Superusers => require_superuser(user),
+        CreatePermission::Superusers => require_superuser(
+            user,
+            gradient_types::permissions::Permission::WriteSuperuser,
+        ),
         CreatePermission::None => Err(WebError::Forbidden(
             ErrorCode::CREATION_DISABLED,
             "creation is managed by the declarative state".into(),

@@ -9,6 +9,7 @@ use crate::authorization::LiveStreamAuthToken;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::extractors::Query;
 use crate::helpers::ok_json;
+use crate::permissions::Permission;
 use axum::extract::State;
 use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
 use axum::response::{IntoResponse, Response};
@@ -43,7 +44,7 @@ pub async fn firehose_ws(
     credentials: LiveStreamAuthToken,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::ReadSuperuser)?;
     let ws = match ws {
         Ok(ws) => ws,
         Err(rejection) => return Ok(rejection.into_response()),

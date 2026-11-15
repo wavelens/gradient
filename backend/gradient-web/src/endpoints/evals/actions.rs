@@ -156,7 +156,7 @@ pub async fn post_evaluation_prioritize(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::WriteSuperuser)?;
     let evaluation = require::<EEvaluation>(&state.web_db, evaluation_id).await?;
 
     scheduler
