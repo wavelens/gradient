@@ -351,17 +351,8 @@ impl DaemonStore for CacheStore {
         drvs: &'a [DerivedPath],
         _mode: BuildMode,
     ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
-        crate::daemon_build::build_paths(self.session.clone(), drvs.to_vec()).and_then(
-            |results| async move {
-                match results
-                    .into_iter()
-                    .find_map(|r| r.result.failure().map(|f| f.error_msg.clone()))
-                {
-                    Some(message) => Err(err(String::from_utf8_lossy(&message))),
-                    None => Ok(()),
-                }
-            },
-        )
+        crate::daemon_build::build_paths(self.session.clone(), drvs.to_vec())
+            .and_then(|_| ready(Ok(())))
     }
 
     fn build_paths_with_results<'a>(
