@@ -11,6 +11,7 @@ use reqwest::Method;
 #[derive(Debug, Clone)]
 pub enum CliPollOutcome {
     Pending,
+    RateLimited,
     Expired,
     Denied,
     Token(String),

@@ -66,6 +66,29 @@ async fn username_availability_allows_fifteen_rapid_checks_before_rate_limit_res
 }
 
 #[tokio::test]
+async fn cli_poll_checks_do_not_use_sign_in_rate_limit_budget() {
+    let server = TestState::new().server();
+
+    for i in 1..=10 {
+        let status = server
+            .post("/api/v1/auth/cli/poll")
+            .json(&serde_json::json!({"device_code": "x"}))
+            .await
+            .status_code();
+        assert_ne!(status, 429, "poll {i} unexpectedly throttled");
+    }
+
+    for i in 1..=5 {
+        let status = server
+            .post("/api/v1/auth/basic/login")
+            .json(&serde_json::json!({"loginname": "x", "password": "x"}))
+            .await
+            .status_code();
+        assert_ne!(status, 429, "sign-in {i} throttled after polling");
+    }
+}
+
+#[tokio::test]
 async fn cache_tier_does_not_throttle_moderate_burst() {
     let server = TestState::new().server();
 

@@ -39,7 +39,9 @@ share the same tier. Clients that exceed their bucket receive HTTP
 
 | Tier | Routes | Refill | Burst |
 |---|---|---|---|
-| auth | `/auth/basic/login`, `/auth/basic/register`, `/auth/check-username`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/oauth/*`, `/auth/oidc/*` | 1 req / 6 s | 5 |
+| auth | `/auth/basic/login`, `/auth/basic/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/oauth/*`, `/auth/oidc/*`, `/auth/cli/start` | 1 req / 6 s | 5 |
+| cli-poll | `/auth/cli/poll` | 1 req / s | 10 |
+| username-check | `/auth/check-username` | 1 req / 2 s | 15 |
 | webhook | `/hooks/*` | 1 req / s | 30 |
 | cache | `/cache/{cache}/*` (public NAR surface) and `/cache/{cache}/proto` | 1 req / 20 ms | 3000 |
 | cache-inspect | `/cache/{cache}/{ls,serve}/*` | 1 req / 333 ms | 180 |

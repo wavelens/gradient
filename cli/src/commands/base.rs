@@ -613,7 +613,7 @@ async fn run_web_login(client: &Client, url: String, out: Output, no_browser: bo
         let _ = open_url(&start.verification_uri_complete);
     }
 
-    let interval = Duration::from_secs(start.interval.max(1).unsigned_abs());
+    let mut interval = Duration::from_secs(start.interval.max(1).unsigned_abs());
     let deadline =
         std::time::Instant::now() + Duration::from_secs(start.expires_in.max(0).unsigned_abs());
 
@@ -630,6 +630,7 @@ async fn run_web_login(client: &Client, url: String, out: Output, no_browser: bo
             .await
         {
             Ok(CliPollOutcome::Pending) => continue,
+            Ok(CliPollOutcome::RateLimited) => interval += Duration::from_secs(5),
             Ok(CliPollOutcome::Expired) => {
                 out.fail(CliError::AuthorizationExpired);
             }
