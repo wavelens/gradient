@@ -103,12 +103,13 @@ export class DashboardActivityComponent implements OnInit {
     return days.map((d, i) => {
       const idx = i + this.offset();
       const v = d[key];
+      const date = new Date(`${d.date}T00:00:00`).toLocaleDateString();
       return {
-        date: d.date,
+        date,
         x: Math.floor(idx / 7) * STEP,
         y: (idx % 7) * STEP,
         level: v === 0 ? 0 : Math.min(LEVELS, 1 + Math.floor((v / max) * LEVELS)),
-        title: `${d.date}: ${plural(d.evaluations, 'evaluation')}, ${d.failed} failed`,
+        title: `${date}: ${plural(d.evaluations, 'evaluation')}, ${d.failed} failed`,
       };
     });
   });
