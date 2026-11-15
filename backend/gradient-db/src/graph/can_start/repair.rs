@@ -17,6 +17,7 @@ use std::sync::LazyLock;
 use tracing::debug;
 
 pub const SWEEP_LOCK_CHUNK: usize = 1000;
+pub const SWEEP_CHUNKS_PER_TRANSACTION: usize = 8;
 
 fn repair_scope() -> String {
     let pending = crate::sql::status::build_in(&BuildStatus::PENDING);
@@ -65,8 +66,7 @@ pub struct RepairedFetchable {
 }
 
 #[derive(Debug, Default)]
-pub struct Repaired {
-    pub blocking_deps: u64,
+pub struct UnpromotedAndPromotedStatusTransitions {
     pub promoted: Vec<TransitionChange>,
     pub unpromoted: Vec<TransitionChange>,
 }
@@ -104,7 +104,7 @@ async fn skip_held_chunk(txn: DatabaseTransaction, shared_builds: usize) -> Resu
 }
 
 /// A column corrected without adjusting its parents' `blocking_deps` leaves them off by one for good.
-/// Queueing what reached zero is left to [`repair_can_start`], after every counter is recounted.
+/// Items that reached zero enter the queue in [`repair_all_shared_build_start_gate_states`] after all counters are recomputed.
 pub async fn repair_fetchable<C>(db: &C, scope: &[DerivationId]) -> Result<RepairedFetchable, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -127,10 +127,10 @@ where
     Ok(repaired)
 }
 
-/// The un-promote is going first.
-/// EvalPlanQual is not re-evaluating the gate's `EXISTS` subqueries.
-/// A promote can still fire on a `.drv` retired during a lock wait.
-pub async fn repair_can_start<C>(db: &C, scope: &[DerivationId]) -> Result<Repaired, DbErr>
+pub async fn recount_blocking_deps_for_derivation_ids<C>(
+    db: &C,
+    scope: &[DerivationId],
+) -> Result<u64, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
@@ -145,6 +145,15 @@ where
         txn.commit().await?;
     }
 
+    Ok(blocking_deps)
+}
+
+/// The un-promote is going first.
+/// EvalPlanQual is not re-evaluating the gate's `EXISTS` subqueries.
+/// A promote can still fire on a `.drv` retired during a lock wait.
+pub async fn repair_all_shared_build_start_gate_states<C: ConnectionTrait>(
+    db: &C,
+) -> Result<UnpromotedAndPromotedStatusTransitions, DbErr> {
     let unpromoted = returned_transitions(db.query_all_raw(UNPROMOTE_UNGATED_QUERY.stmt()).await?);
     let promoted = transitions_from(
         returned_derivations(db.query_all_raw(PROMOTE_ANY_QUERY.stmt()).await?),
@@ -152,8 +161,7 @@ where
         BuildStatus::Queued,
     );
 
-    Ok(Repaired {
-        blocking_deps,
+    Ok(UnpromotedAndPromotedStatusTransitions {
         promoted,
         unpromoted,
     })
@@ -270,7 +278,7 @@ mod tests {
         );
         assert!(
             !inside.iter().any(|s| s.contains("SET status = 1")),
-            "a parent reaching zero is queued by repair_can_start, after its recount: {inside:?}"
+            "a parent reaching zero is queued by repair_all_shared_build_start_gate_states, after its recount: {inside:?}"
         );
     }
 
@@ -290,13 +298,18 @@ mod tests {
 
         let scope = can_start_scope(&db).await.unwrap();
         let fetchable = repair_fetchable(&db, &scope).await.unwrap();
-        let repaired = repair_can_start(&db, &scope).await.unwrap();
+        let blocking_deps = recount_blocking_deps_for_derivation_ids(&db, &scope)
+            .await
+            .unwrap();
+        let queue = repair_all_shared_build_start_gate_states(&db)
+            .await
+            .unwrap();
 
-        assert_eq!((fetchable.marked, repaired.blocking_deps), (0, 3));
-        assert_eq!(repaired.unpromoted.len(), 1);
-        assert_eq!(repaired.unpromoted[0].derivation, demoted);
-        assert_eq!(repaired.promoted.len(), 1);
-        assert_eq!(repaired.promoted[0].derivation, promoted);
+        assert_eq!((fetchable.marked, blocking_deps), (0, 3));
+        assert_eq!(queue.unpromoted.len(), 1);
+        assert_eq!(queue.unpromoted[0].derivation, demoted);
+        assert_eq!(queue.promoted.len(), 1);
+        assert_eq!(queue.promoted[0].derivation, promoted);
 
         let raw = db.into_transaction_log();
         assert_eq!(
@@ -331,14 +344,15 @@ mod tests {
             .append_query_results([vec![drv(a)]])
             .append_query_results([empty(), locked()])
             .append_exec_results([exec(1)])
-            .append_query_results([empty(), empty()])
             .into_connection();
 
         let scope = can_start_scope(&db).await.unwrap();
         let fetchable = repair_fetchable(&db, &scope).await.unwrap();
-        let repaired = repair_can_start(&db, &scope).await.unwrap();
+        let blocking_deps = recount_blocking_deps_for_derivation_ids(&db, &scope)
+            .await
+            .unwrap();
 
-        assert_eq!((fetchable.marked, repaired.blocking_deps), (0, 1));
+        assert_eq!((fetchable.marked, blocking_deps), (0, 1));
         let raw = db.into_transaction_log();
         let skipped: Vec<&str> = raw[1].statements().iter().map(|s| s.sql.as_str()).collect();
         assert_eq!(
@@ -368,10 +382,15 @@ mod tests {
 
         let scope = can_start_scope(&db).await.unwrap();
         let fetchable = repair_fetchable(&db, &scope).await.unwrap();
-        let repaired = repair_can_start(&db, &scope).await.unwrap();
+        let blocking_deps = recount_blocking_deps_for_derivation_ids(&db, &scope)
+            .await
+            .unwrap();
+        repair_all_shared_build_start_gate_states(&db)
+            .await
+            .unwrap();
 
         assert_eq!(
-            (fetchable.marked, repaired.blocking_deps),
+            (fetchable.marked, blocking_deps),
             (0, 2),
             "one recounted row per chunk"
         );

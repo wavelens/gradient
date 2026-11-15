@@ -10,11 +10,17 @@
 //! Skipping it is only correct without cycles: on a cycle, stuck counters agree with their inputs
 //! and the recount never runs to fix them.
 
-use crate::DbContext;
+use crate::graph::can_start::{SWEEP_CHUNKS_PER_TRANSACTION, SWEEP_LOCK_CHUNK};
+use crate::graph::reachability::Adopted;
+use crate::{DbContext, WorkerDb};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_continuation::ContinuationStatus;
+use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr, Statement};
+use std::ops::Range;
+
+const SWEEP_MAX_LOCK_KEYS: usize = SWEEP_LOCK_CHUNK * SWEEP_CHUNKS_PER_TRANSACTION;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ConsistencyReport {
@@ -87,68 +93,286 @@ async fn count<C: ConnectionTrait>(db: &C, stmt: Statement) -> Result<i64, DbErr
         .unwrap_or(0))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildGraphConsistencyCheckStep {
+    RecountUnwalkedInputs,
+    RecountMissingRuntimeDeps,
+    ReadRepairScope,
+    RepairFetchable,
+    RecountWanted,
+    SettleSkipped,
+    RecountBlockingDeps,
+    UnpromoteAndPromote,
+    AdoptPendingClosures,
+    CountAlarms,
+}
+
+impl BuildGraphConsistencyCheckStep {
+    const ALL_CONSISTENCY_CHECK_STEPS_IN_RUN_ORDER: [Self; 10] = [
+        Self::RecountUnwalkedInputs,
+        Self::RecountMissingRuntimeDeps,
+        Self::ReadRepairScope,
+        Self::RepairFetchable,
+        Self::RecountWanted,
+        Self::SettleSkipped,
+        Self::RecountBlockingDeps,
+        Self::UnpromoteAndPromote,
+        Self::AdoptPendingClosures,
+        Self::CountAlarms,
+    ];
+
+    pub const fn step_name(self) -> &'static str {
+        match self {
+            Self::RecountUnwalkedInputs => "recount_unwalked_inputs",
+            Self::RecountMissingRuntimeDeps => "recount_missing_runtime_deps",
+            Self::ReadRepairScope => "read_repair_scope",
+            Self::RepairFetchable => "repair_fetchable",
+            Self::RecountWanted => "recount_wanted",
+            Self::SettleSkipped => "settle_skipped",
+            Self::RecountBlockingDeps => "recount_blocking_deps",
+            Self::UnpromoteAndPromote => "unpromote_and_promote",
+            Self::AdoptPendingClosures => "adopt_pending_closures",
+            Self::CountAlarms => "count_alarms",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConsistencyCheckRepairScopeChunkProgress {
+    covered_derivation_ids: Vec<DerivationId>,
+    pending_adopted_ids: Option<Vec<DerivationId>>,
+    derivation_ids_pending_forgotten_probe_rewalk: Vec<DerivationId>,
+    derivation_ids_waiting_for_promotion_after_rewalks: Vec<DerivationId>,
+    next_transaction_start_index: usize,
+    report_so_far: ConsistencyReport,
+}
+
+impl ConsistencyCheckRepairScopeChunkProgress {
+    fn next_step_after_finished_step(
+        &self,
+        finished: BuildGraphConsistencyCheckStep,
+    ) -> Option<BuildGraphConsistencyCheckStep> {
+        if self.chunked_step_needs_another_message(finished) {
+            return Some(finished);
+        }
+
+        BuildGraphConsistencyCheckStep::ALL_CONSISTENCY_CHECK_STEPS_IN_RUN_ORDER
+            .into_iter()
+            .skip_while(|step| *step != finished)
+            .nth(1)
+    }
+
+    fn chunked_step_needs_another_message(&self, step: BuildGraphConsistencyCheckStep) -> bool {
+        use BuildGraphConsistencyCheckStep as Step;
+
+        match step {
+            Step::RepairFetchable | Step::RecountBlockingDeps => {
+                self.next_transaction_start_index != 0
+            }
+            Step::AdoptPendingClosures => {
+                self.next_transaction_start_index != 0
+                    || !self
+                        .derivation_ids_pending_forgotten_probe_rewalk
+                        .is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    fn take_next_slice_range(&mut self, len: usize) -> Range<usize> {
+        let start = self.next_transaction_start_index;
+        let end = (start + SWEEP_MAX_LOCK_KEYS).min(len);
+        self.next_transaction_start_index = if end < len { end } else { 0 };
+        start..end
+    }
+}
+
+pub async fn run_consistency_check_steps<E, F, Fut>(mut run_step: F) -> Result<ConsistencyReport, E>
+where
+    F: FnMut(BuildGraphConsistencyCheckStep, ConsistencyCheckRepairScopeChunkProgress) -> Fut,
+    Fut: Future<Output = Result<ConsistencyCheckRepairScopeChunkProgress, E>>,
+{
+    let mut progress = ConsistencyCheckRepairScopeChunkProgress::default();
+    let mut step =
+        Some(BuildGraphConsistencyCheckStep::ALL_CONSISTENCY_CHECK_STEPS_IN_RUN_ORDER[0]);
+    while let Some(current) = step {
+        progress = run_step(current, progress).await?;
+        step = progress.next_step_after_finished_step(current);
+    }
+
+    Ok(progress.report_so_far)
+}
+
 pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
+    run_consistency_check_steps(|step, progress| {
+        run_one_consistency_check_step(ctx, step, progress)
+    })
+    .await
+}
+
+pub async fn run_one_consistency_check_step(
+    ctx: &DbContext,
+    step: BuildGraphConsistencyCheckStep,
+    mut progress: ConsistencyCheckRepairScopeChunkProgress,
+) -> Result<ConsistencyCheckRepairScopeChunkProgress, DbErr> {
+    use BuildGraphConsistencyCheckStep as Step;
+
     let db = &ctx.worker_db;
+    let report = &mut progress.report_so_far;
+    match step {
+        Step::RecountUnwalkedInputs => {
+            report.walk_drift =
+                crate::graph::walk_completeness::recount_walk_completeness(db).await? as i64;
+        }
+        Step::RecountMissingRuntimeDeps => {
+            report.runtime_drift =
+                crate::graph::runtime_can_start::recount_missing_runtime_deps(db).await? as i64;
+        }
+        Step::ReadRepairScope => {
+            progress.covered_derivation_ids = crate::graph::can_start::can_start_scope(db).await?;
+            report.repair_scope = progress.covered_derivation_ids.len() as i64;
+        }
+        Step::RepairFetchable => repair_fetchable_flag_for_next_slice(ctx, &mut progress).await?,
+        Step::RecountWanted => {
+            report.need_drift = crate::graph::can_start::recount_wanted(db).await? as i64;
+        }
+        Step::SettleSkipped => report.skipped_moves = settle_skipped_status(ctx).await?,
+        Step::RecountBlockingDeps => recount_next_blocking_deps_slice(db, &mut progress).await?,
+        Step::UnpromoteAndPromote => {
+            report.unpromoted_startable = unpromote_and_promote(ctx).await?
+        }
+        Step::AdoptPendingClosures => adopt_pending_and_promote_slice(ctx, &mut progress).await?,
+        Step::CountAlarms => count_alarms(db, report).await?,
+    }
 
-    let walk_drift = crate::graph::walk_completeness::recount_walk_completeness(db).await? as i64;
+    Ok(progress)
+}
 
-    let runtime_drift =
-        crate::graph::runtime_can_start::recount_missing_runtime_deps(db).await? as i64;
-    let scope = crate::graph::can_start::can_start_scope(db).await?;
-    let fetchable = crate::graph::can_start::repair_fetchable(db, &scope).await?;
+async fn repair_fetchable_flag_for_next_slice(
+    ctx: &DbContext,
+    progress: &mut ConsistencyCheckRepairScopeChunkProgress,
+) -> Result<(), DbErr> {
+    let range = progress.take_next_slice_range(progress.covered_derivation_ids.len());
+    let fetchable = crate::graph::can_start::repair_fetchable(
+        &ctx.worker_db,
+        &progress.covered_derivation_ids[range],
+    )
+    .await?;
     crate::status::emit_transition_effects(ctx, &fetchable.unqueued).await?;
+    progress.report_so_far.counter_drift += fetchable.marked as i64;
+    Ok(())
+}
 
-    let need_drift = crate::graph::can_start::recount_wanted(db).await? as i64;
-
-    let settled = crate::graph::can_start::settle_skipped(db).await?;
+async fn settle_skipped_status(ctx: &DbContext) -> Result<i64, DbErr> {
+    let settled = crate::graph::can_start::settle_skipped(&ctx.worker_db).await?;
     crate::status::emit_transition_effects(ctx, &settled).await?;
+    Ok(settled.len() as i64)
+}
 
-    let repaired = crate::graph::can_start::repair_can_start(db, &scope).await?;
+async fn recount_next_blocking_deps_slice(
+    db: &WorkerDb,
+    progress: &mut ConsistencyCheckRepairScopeChunkProgress,
+) -> Result<(), DbErr> {
+    let range = progress.take_next_slice_range(progress.covered_derivation_ids.len());
+    let blocking_deps = crate::graph::can_start::recount_blocking_deps_for_derivation_ids(
+        db,
+        &progress.covered_derivation_ids[range],
+    )
+    .await?;
+    progress.report_so_far.counter_drift += blocking_deps as i64;
+    Ok(())
+}
+
+async fn unpromote_and_promote(ctx: &DbContext) -> Result<i64, DbErr> {
+    let moved =
+        crate::graph::can_start::repair_all_shared_build_start_gate_states(&ctx.worker_db).await?;
     // Fan-out must follow the order the two statements ran in.
     // A row both moved would otherwise end on the board at the earlier status.
-    crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await?;
-    crate::status::emit_transition_effects(ctx, &repaired.promoted).await?;
+    crate::status::emit_transition_effects(ctx, &moved.unpromoted).await?;
+    crate::status::emit_transition_effects(ctx, &moved.promoted).await?;
+    Ok(moved.promoted.len() as i64)
+}
 
-    let adopted = if crate::graph::reachability::pending_orphan_frontier(db).await? {
-        let adopted = crate::graph::reachability::adopt_pending_closures(db).await?;
-        let mut queued = Vec::new();
-        for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
-            queued.extend(
-                crate::graph::can_start::update_and_settle_need(db, chunk)
-                    .await?
-                    .changes,
-            );
-        }
-        for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
-            queued.extend(crate::graph::can_start::promote(db, chunk).await?);
-        }
+async fn adopt_pending_and_promote_slice(
+    ctx: &DbContext,
+    progress: &mut ConsistencyCheckRepairScopeChunkProgress,
+) -> Result<(), DbErr> {
+    if !progress
+        .derivation_ids_pending_forgotten_probe_rewalk
+        .is_empty()
+    {
+        return rewalk_next_forgotten_probe_ids_then_promote(ctx, progress).await;
+    }
 
-        crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
-        crate::status::emit_transition_effects(ctx, &queued).await?;
-        adopted.pairs.len() as i64
+    let db = &ctx.worker_db;
+    let is_first_message_of_adopt_step = progress.pending_adopted_ids.is_none();
+    let adopted = if is_first_message_of_adopt_step
+        && crate::graph::reachability::pending_orphan_frontier(db).await?
+    {
+        crate::graph::reachability::adopt_pending_closures(db).await?
     } else {
-        0
+        Adopted::default()
     };
+    if is_first_message_of_adopt_step {
+        progress.report_so_far.adopted = adopted.pairs.len() as i64;
+        progress.pending_adopted_ids = Some(adopted.derivations());
+    }
 
-    let unbacked_trusted_outputs = count(db, UNBACKED_TRUSTED_OUTPUT_COUNT.stmt()).await?;
+    let adopted_derivation_id_count = progress.pending_adopted_ids.as_ref().map_or(0, Vec::len);
+    let range = progress.take_next_slice_range(adopted_derivation_id_count);
+    if range.is_empty() {
+        return Ok(());
+    }
+    let slice = &progress.pending_adopted_ids.as_deref().unwrap_or_default()[range];
+    let need_update = crate::graph::can_start::update_and_settle_need_with_advisory_key_limit(
+        db,
+        slice,
+        SWEEP_MAX_LOCK_KEYS,
+    )
+    .await?;
+    let mut queued = need_update.changes;
+    if need_update.deferred_rewalk_derivations.is_empty() {
+        queued.extend(crate::graph::can_start::promote(db, slice).await?);
+    } else {
+        let promotion_waitlist = &mut progress.derivation_ids_waiting_for_promotion_after_rewalks;
+        promotion_waitlist
+            .extend(need_update.wanted_derivation_ids_to_promote_after_deferred_rewalks);
+        promotion_waitlist.extend_from_slice(slice);
+        promotion_waitlist.sort_unstable();
+        promotion_waitlist.dedup();
+        progress.derivation_ids_pending_forgotten_probe_rewalk =
+            need_update.deferred_rewalk_derivations;
+    }
+    crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
+    crate::status::emit_transition_effects(ctx, &queued).await
+}
 
-    let eval_counter_drift =
+async fn rewalk_next_forgotten_probe_ids_then_promote(
+    ctx: &DbContext,
+    progress: &mut ConsistencyCheckRepairScopeChunkProgress,
+) -> Result<(), DbErr> {
+    let pending_derivation_ids = &mut progress.derivation_ids_pending_forgotten_probe_rewalk;
+    let slice: Vec<DerivationId> = pending_derivation_ids
+        .drain(..pending_derivation_ids.len().min(SWEEP_MAX_LOCK_KEYS))
+        .collect();
+    let mut changes =
+        crate::graph::can_start::recheck_forgotten_need(&ctx.worker_db, &slice).await?;
+    if pending_derivation_ids.is_empty() {
+        let promotion_waitlist =
+            std::mem::take(&mut progress.derivation_ids_waiting_for_promotion_after_rewalks);
+        for chunk in promotion_waitlist.chunks(crate::IN_CHUNK_SIZE) {
+            changes.extend(crate::graph::can_start::promote(&ctx.worker_db, chunk).await?);
+        }
+    }
+    crate::status::emit_transition_effects(ctx, &changes).await
+}
+
+async fn count_alarms(db: &WorkerDb, report: &mut ConsistencyReport) -> Result<(), DbErr> {
+    report.unbacked_trusted_outputs = count(db, UNBACKED_TRUSTED_OUTPUT_COUNT.stmt()).await?;
+    report.eval_counter_drift =
         crate::evaluations::counters::recount_eval_shared_build_counters(db).await? as i64;
-    let wedged_building_evals = count(db, WEDGED_BUILDING_EVALS.stmt()).await?;
-
-    Ok(ConsistencyReport {
-        counter_drift: (fetchable.marked + repaired.blocking_deps) as i64,
-        walk_drift,
-        runtime_drift,
-        need_drift,
-        skipped_moves: settled.len() as i64,
-        unpromoted_startable: repaired.promoted.len() as i64,
-        adopted,
-        unbacked_trusted_outputs,
-        wedged_building_evals,
-        eval_counter_drift,
-        repair_scope: scope.len() as i64,
-    })
+    report.wedged_building_evals = count(db, WEDGED_BUILDING_EVALS.stmt()).await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -391,5 +615,28 @@ mod tests {
         };
         assert_eq!(r.total(), 59);
         assert_eq!(ConsistencyReport::default().total(), 0);
+    }
+
+    #[test]
+    fn chunked_check_advances_slice_then_step_on_cursor_wrap() {
+        use BuildGraphConsistencyCheckStep as Step;
+
+        let bound = SWEEP_LOCK_CHUNK * SWEEP_CHUNKS_PER_TRANSACTION;
+        let mut progress = ConsistencyCheckRepairScopeChunkProgress::default();
+
+        assert_eq!(progress.take_next_slice_range(bound + 1), 0..bound);
+        assert_eq!(
+            progress.next_step_after_finished_step(Step::AdoptPendingClosures),
+            Some(Step::AdoptPendingClosures)
+        );
+        assert_eq!(progress.take_next_slice_range(bound + 1), bound..bound + 1);
+        assert_eq!(
+            progress.next_step_after_finished_step(Step::AdoptPendingClosures),
+            Some(Step::CountAlarms)
+        );
+        assert_eq!(
+            progress.next_step_after_finished_step(Step::RecountWanted),
+            Some(Step::SettleSkipped)
+        );
     }
 }

@@ -65,7 +65,7 @@ Queue every touched shared build through `can_start::promote`. The call embeds t
 - `unpromote_ungated` can move only `Queued` rows with no open assignment. A `Building` shared build can finish undisturbed.
 - `lost_fetchability` must raise `blocking_deps` on the builds that need the changed ones. The same statement (`RIPPLE_UP`) will move the `Queued` rows without an open assignment back to `Created`. After that, update the needs-build marks from the changed shared builds.
 - `assignment_record::claim_assignment` can insert an assignment row only while the shared build is still `Queued` with the expected `cache_available` value. The claim will drop a regressed job instead of handing it out.
-- `can_start::repair_can_start` act as the consistency check's backstop for a lost move.
+- `can_start::recount_blocking_deps_for_derivation_ids` act as the consistency check's backstop for a lost move.
 
 ## Needs Build
 
@@ -212,6 +212,6 @@ The `consistency::graph_consistency_report` gets built through a sequence of rec
 | `fetchable` (`repair_fetchable`) | `counter_drift` (with `blocking_deps`) |
 | `wanted` (`recount_wanted`) | `need_drift` |
 | `settle_skipped` | `skipped_moves` |
-| `blocking_deps` + queue (`repair_can_start`) | `counter_drift`, `unpromoted_startable` |
+| `blocking_deps` + queue (`recount_blocking_deps_for_derivation_ids`) | `counter_drift`, `unpromoted_startable` |
 | Adoption | `adopted` |
 | Evaluation counters | `eval_counter_drift`, `wedged_building_evals` |

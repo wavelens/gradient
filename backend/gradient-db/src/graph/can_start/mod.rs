@@ -23,11 +23,15 @@ pub use fetchable::{advance_fetchable, became_fetchable, lost_fetchability, seed
 pub(crate) use lock::ids;
 pub use lock::{SeedLock, SharedBuildLock, lock_seed_shared_builds, lock_shared_builds};
 pub use need::{
-    NeedMoved, SettledNeed, gain_and_settle_need, recount_wanted, settle_created, settle_skipped,
-    update_and_settle_need,
+    BudgetedNeedUpdate, NeedMoved, SettledNeed, gain_and_settle_need, recheck_forgotten_need,
+    recount_wanted, settle_created, settle_skipped, update_and_settle_need,
+    update_and_settle_need_with_advisory_key_limit,
 };
 pub(crate) use need::{settle_need, update_need, wanted_by_its_evaluation};
 pub use queue::{promote, promote_closure, unpromote_ungated, unwalk_derivations};
 pub use repair::{
-    Repaired, RepairedFetchable, can_start_scope, repair_can_start, repair_fetchable,
+    RepairedFetchable, SWEEP_CHUNKS_PER_TRANSACTION, SWEEP_LOCK_CHUNK,
+    UnpromotedAndPromotedStatusTransitions, can_start_scope,
+    recount_blocking_deps_for_derivation_ids, repair_all_shared_build_start_gate_states,
+    repair_fetchable,
 };

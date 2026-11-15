@@ -915,12 +915,104 @@ async fn d14_an_abort_for_all_evaluations_sticks_once_no_running_evaluation_want
     );
     case.zero_drift("step 2").await;
 
-    case.transition(Transition::ConsistencyCheck).await;
+    case.graph
+        .run_consistency_checks()
+        .await
+        .expect("the consistency check is written");
 
     assert_eq!(
         case.sb(S).await.status,
         BuildStatus::Aborted,
         "after 3: no recount thaws sb(S)"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn d15_one_key_budget_defers_forgotten_miss_rewalk_no_build_dep() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .output(A_OUT)
+            .depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .depends_on(C)
+            .build_status(BuildStatus::Skipped)
+            .derivation(C)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(C_OUT)
+            .build_status(BuildStatus::Skipped),
+    )
+    .await;
+    let before_e1 = gradient_fixtures::test_date() - chrono::Duration::days(1);
+    case.override_sb(B, |build| build.probed_at = Some(before_e1))
+        .await;
+    case.override_sb(A, |build| {
+        build.probed = true;
+        build.probed_at = Some(gradient_fixtures::test_date());
+    })
+    .await;
+    let root_derivation_ids: Vec<_> = case.ids(&[A]).await.into_iter().collect();
+
+    let single_lock_update =
+        gradient_db::graph::can_start::update_and_settle_need_with_advisory_key_limit(
+            &case.ctx.worker_db,
+            &root_derivation_ids,
+            1,
+        )
+        .await
+        .expect("The bounded need update is written.");
+
+    let deferred_derivation_ids = &single_lock_update.deferred_rewalk_derivations;
+    assert!(
+        case.ids(&[B])
+            .await
+            .iter()
+            .all(|b| deferred_derivation_ids.contains(b)),
+        "after step 1: sb(B) re-walk deferred: {:?}",
+        deferred_derivation_ids
+    );
+    let unpromoted_ids =
+        &single_lock_update.wanted_derivation_ids_to_promote_after_deferred_rewalks;
+    assert!(
+        case.ids(&[B, C])
+            .await
+            .iter()
+            .all(|id| unpromoted_ids.contains(id)),
+        "sb(B) and sb(C) wait for promotion after 1: {:?}",
+        unpromoted_ids
+    );
+    assert_eq!(
+        case.status(C).await,
+        BuildStatus::Created,
+        "After 1: sb(C) thawed but not queued"
+    );
+
+    gradient_db::graph::can_start::recheck_forgotten_need(
+        &case.ctx.worker_db,
+        deferred_derivation_ids,
+    )
+    .await
+    .expect("the deferred re-walk is written");
+
+    let c = case.sb(C).await;
+    assert_eq!(
+        (c.status, c.wanted),
+        (BuildStatus::Skipped, false),
+        "after 2: sb(C) status, wanted"
     );
     case.finish().await;
 }

@@ -63,13 +63,7 @@ impl Pass for GraphConsistency {
 }
 
 async fn consistency_check_pass(graph: &Graph) -> anyhow::Result<()> {
-    let Some(report) = graph
-        .transition(Transition::ConsistencyCheck)
-        .await?
-        .consistency
-    else {
-        return Ok(());
-    };
+    let report = graph.run_consistency_checks().await?;
     if report.total() > 0 {
         warn!(
             counter_drift = report.counter_drift,
