@@ -37,6 +37,7 @@ sequenceDiagram
     - Projects need a path once any of their jobs run on the path's derivation. Subscriptions with `sign_outputs` off add no row for that cache.
     - Each NAR commit can sign into the caches of the upload (`sign_into_caches` in `gradient-graph/src/nar.rs`).
     - Projects with a job on a committed path then receive its signature in their caches (`gradient-graph/src/claims.rs`).
+    - Claims also cover the store paths that the claimed path references. Rows where `references_are_claimed` is set end the walk over references. Values in that column record existing rows for all referenced paths in the same cache.
     - Recorded batches sign the already cached outputs of their jobs into their project's caches. Builds finished earlier for another project qualify too.
     - The sign sweep (`sign_missing_signatures` in `gradient-cache/src/signatures.rs`) fills rows inserted with a later subscription.
     - The sweep also fills rows a commit left unsigned.

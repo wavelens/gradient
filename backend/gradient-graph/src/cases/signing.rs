@@ -10,11 +10,11 @@ use gradient_entity::RotatedHashMapping;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cached_path_signature;
 use gradient_entity::ids::{CacheId, EvaluationId};
-use gradient_fixtures::shape::shape;
+use gradient_fixtures::shape::{Shape, shape};
 
 use super::{
-    A, A_OUT, A2, A2_OUT, B, B_OUT, Case, SOURCE, X_OUT, Y_OUT, batch, chain, drv, nar, with_attr,
-    with_output,
+    A, A_OUT, A2, A2_OUT, B, B_OUT, Case, SOURCE, X_OUT, Y_OUT, Z_OUT, batch, chain, drv, nar,
+    with_attr, with_output,
 };
 use crate::messages::{NarCommit, SignTargets};
 use crate::test_ctx::{Batch, BatchReport};
@@ -342,10 +342,68 @@ async fn k11_a_claimed_output_brings_the_cached_paths_it_references_into_the_cac
     case.finish().await;
 }
 
+fn b_above_x_above_y(e1: EvaluationId, c1: CacheId) -> Shape {
+    shape()
+        .evaluation(e1)
+        .into_cache(c1)
+        .keyed(Case::key())
+        .derivation(B)
+        .walked()
+        .probed()
+        .drv_cached()
+        .output(B_OUT)
+        .build_status(BuildStatus::Completed)
+        .cached_path(Y_OUT, "y")
+        .cached_path(X_OUT, "x")
+        .references(&[(Y_OUT, "y")])
+        .cached_output(B)
+        .references(&[(B_OUT, "b"), (X_OUT, "x")])
+}
+
+async fn references_are_claimed(case: &Case, hash: &str, cache: CacheId, line: &str) -> bool {
+    row(case, hash, cache, line).await.references_are_claimed
+}
+
 #[tokio::test]
-async fn k12_a_claim_stops_expanding_at_a_path_the_cache_already_signed() {
-    let e1 = EvaluationId::now_v7();
-    let c1 = CacheId::now_v7();
+async fn k12_a_claim_walk_stops_at_a_cache_row_whose_references_are_already_claimed_and_leaves_paths_below_without_rows()
+ {
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = Case::start(b_above_x_above_y(e1, c1)).await;
+    let earlier = vec![7; 64];
+    case.seed_signature_with_references_claimed(X_OUT, c1, Some(earlier.clone()))
+        .await;
+
+    walk_above_b(&case, e1, A, A_OUT, "pkg.a").await;
+
+    signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
+    unchanged(&case, X_OUT, c1, &earlier, "after 1: X keeps its signature").await;
+    no_row(&case, Y_OUT, c1, "after 1: the claim stopped at X").await;
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn k14_signed_row_with_unclaimed_references_is_expanded_by_reference_claim_walk_keeps_signature_bytes_and_sets_references_are_claimed_true()
+ {
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = Case::start(b_above_x_above_y(e1, c1)).await;
+    let earlier = vec![7; 64];
+    case.seed_signature(X_OUT, c1, Some(earlier.clone())).await;
+
+    walk_above_b(&case, e1, A, A_OUT, "pkg.a").await;
+
+    signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
+    unchanged(&case, X_OUT, c1, &earlier, "after 1: X keeps its signature").await;
+    let marked = references_are_claimed(&case, X_OUT, c1, "after 1: X").await;
+    assert!(marked, "after 1: X has its references claimed");
+    signed(&case, Y_OUT, c1, "after 1: C1 holds what X references").await;
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn k15_walked_path_references_are_claimed_only_after_all_references_are_stored() {
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
     let case = Case::start(
         shape()
             .evaluation(e1)
@@ -357,21 +415,55 @@ async fn k12_a_claim_stops_expanding_at_a_path_the_cache_already_signed() {
             .drv_cached()
             .output(B_OUT)
             .build_status(BuildStatus::Completed)
-            .cached_path(Y_OUT, "y")
             .cached_path(X_OUT, "x")
-            .references(&[(Y_OUT, "y")])
             .cached_output(B)
-            .references(&[(B_OUT, "b"), (X_OUT, "x")]),
+            .references(&[(B_OUT, "b"), (X_OUT, "x"), (Z_OUT, "z")]),
     )
     .await;
-    let earlier = vec![7; 64];
-    case.seed_signature(X_OUT, c1, Some(earlier.clone())).await;
 
     walk_above_b(&case, e1, A, A_OUT, "pkg.a").await;
 
+    let in_c1 = signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
+    signed(&case, X_OUT, c1, "after 1: C1 holds X").await;
+    let x_marked = references_are_claimed(&case, X_OUT, c1, "after 1: X").await;
+    assert!(x_marked, "after 1: X references nothing unstored");
+    let b_marked = references_are_claimed(&case, B_OUT, c1, "after 1: B").await;
+    assert!(!b_marked, "after 1: B references the unstored Z");
+    case.zero_drift("step 1").await;
+
+    case.commit_nar(nar(Z_OUT, "z")).await;
+    crate::claims::claim_committed_paths(&case.ctx, &[B_OUT.to_owned()])
+        .await
+        .expect("the claim is written");
+
+    signed(&case, Z_OUT, c1, "after 2: C1 holds Z").await;
+    unchanged(&case, B_OUT, c1, &in_c1, "after 2: B keeps its signature").await;
+    let b_marked = references_are_claimed(&case, B_OUT, c1, "after 2: B").await;
+    assert!(b_marked, "after 2: every reference of B is stored");
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn k13_a_committed_job_output_with_uploading_project_signing_targets_signs_itself_and_a_referenced_path_with_no_derivation_into_the_project_keyed_cache()
+ {
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = Case::start(
+        chain(e1)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .cached_path(X_OUT, "x"),
+    )
+    .await;
+
+    case.commit_nar(NarCommit {
+        references: vec![format!("{B_OUT}-b"), format!("{X_OUT}-x")],
+        ..commit_of_b(case.project_caches(e1).await)
+    })
+    .await;
+
     signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
-    unchanged(&case, X_OUT, c1, &earlier, "after 1: X keeps its signature").await;
-    no_row(&case, Y_OUT, c1, "after 1: the claim stopped at X").await;
+    signed(&case, X_OUT, c1, "after 1: C1 holds what B references").await;
     case.zero_drift("step 1").await;
     case.finish().await;
 }

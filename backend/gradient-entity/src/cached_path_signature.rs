@@ -27,6 +27,7 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub pinned_at: Option<NaiveDateTime>,
     pub pinned_by_user_id: Option<UserId>,
+    pub references_are_claimed: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

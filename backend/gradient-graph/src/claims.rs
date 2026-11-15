@@ -57,17 +57,26 @@ WITH RECURSIVE claim(hash, cache) AS (
     WHERE r.token <> ''
       AND NOT EXISTS (
           SELECT 1 FROM cached_path_signature s
-          WHERE s.cached_path = cp.id AND s.cache = claim.cache AND s.signature IS NOT NULL)
+          WHERE s.cached_path = cp.id AND s.cache = claim.cache AND s.references_are_claimed)
 )
 SELECT cp.id AS cached_path, cp.hash, cp.package, cp.nar_hash, cp.nar_size, cp."references",
-       claim.cache
+       claim.cache,
+       coalesce(s.signature IS NOT NULL, false) AS cached_path_has_signature,
+       NOT EXISTS (
+           SELECT 1
+           FROM unnest(string_to_array(cp."references", ' ')) r(token)
+           LEFT JOIN cached_path referenced_cached_path
+             ON referenced_cached_path.hash
+                = split_part(regexp_replace(r.token, '^/nix/store/', ''), '-', 1)
+            AND referenced_cached_path.file_hash IS NOT NULL
+           WHERE r.token <> '' AND referenced_cached_path.id IS NULL)
+           AS all_referenced_paths_are_stored
 FROM claim
 JOIN cached_path cp ON cp.hash = claim.hash
 JOIN cache c        ON c.id = claim.cache
+LEFT JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = claim.cache
 WHERE cp.file_hash IS NOT NULL AND c.private_key <> ''
-  AND NOT EXISTS (
-      SELECT 1 FROM cached_path_signature s
-      WHERE s.cached_path = cp.id AND s.cache = claim.cache AND s.signature IS NOT NULL)
+  AND (s.signature IS NULL OR NOT s.references_are_claimed)
 "#
     )
 }
@@ -81,6 +90,8 @@ struct Claim {
     nar_size: Option<i64>,
     references: Option<String>,
     cache: CacheId,
+    cached_path_has_signature: bool,
+    all_referenced_paths_are_stored: bool,
 }
 
 impl Claim {
@@ -147,6 +158,7 @@ async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<()> {
     let created_at = now();
     let rows: Vec<ACachedPathSignature> = claims
         .iter()
+        .filter(|claim| !claim.cached_path_has_signature || claim.all_referenced_paths_are_stored)
         .map(|claim| {
             MCachedPathSignature {
                 id: CachedPathSignatureId::now_v7(),
@@ -155,7 +167,9 @@ async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<()> {
                 signature: signers
                     .get(&claim.cache)
                     .and_then(Option::as_ref)
+                    .filter(|_| !claim.cached_path_has_signature)
                     .and_then(|signer| claim.signature(signer, &ctx.cache_mapper(claim.cache))),
+                references_are_claimed: claim.all_referenced_paths_are_stored,
                 created_at,
                 ..Default::default()
             }
@@ -164,7 +178,7 @@ async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<()> {
         .collect();
 
     for chunk in rows.chunks(INSERT_CHUNK) {
-        insert_signatures(db, chunk.to_vec()).await;
+        insert_signatures(db, chunk.to_vec()).await?;
     }
 
     Ok(())
