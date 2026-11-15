@@ -201,6 +201,24 @@ impl Case {
         self.insert_cache_claim(hash, cache, signature, None).await;
     }
 
+    pub async fn seed_signature_with_references_claimed(
+        &self,
+        hash: &str,
+        cache: CacheId,
+        signature: Option<Vec<u8>>,
+    ) {
+        self.seed_signature(hash, cache, signature).await;
+        let mut row = self
+            .signature(hash, cache)
+            .await
+            .expect("the seeded signature row")
+            .into_active_model();
+        row.references_are_claimed = Set(true);
+        row.update(&self.db.connection())
+            .await
+            .expect("the signature row is marked");
+    }
+
     pub async fn insert_cache_claim(
         &self,
         hash: &str,

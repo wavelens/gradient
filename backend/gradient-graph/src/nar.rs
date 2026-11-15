@@ -521,7 +521,7 @@ async fn sign_into_caches(
             );
         }
     }
-    insert_signatures(db, rows).await;
+    insert_signatures(db, rows).await?;
 
     Ok(signed)
 }
@@ -567,12 +567,15 @@ pub(crate) fn signer_for(ctx: &DbContext, cache: &MCache) -> Option<CacheSigner>
     .ok()
 }
 
-pub(crate) async fn insert_signatures(db: &WorkerDb, rows: Vec<ACachedPathSignature>) {
+pub(crate) async fn insert_signatures(
+    db: &WorkerDb,
+    rows: Vec<ACachedPathSignature>,
+) -> anyhow::Result<()> {
     if rows.is_empty() {
-        return;
+        return Ok(());
     }
 
-    let result = ECachedPathSignature::insert_many(rows)
+    ECachedPathSignature::insert_many(rows)
         .on_conflict(
             OnConflict::columns([
                 CCachedPathSignature::CachedPath,
@@ -582,11 +585,17 @@ pub(crate) async fn insert_signatures(db: &WorkerDb, rows: Vec<ACachedPathSignat
                 CCachedPathSignature::Signature,
                 Expr::cust("coalesce(cached_path_signature.signature, excluded.signature)"),
             )
+            .value(
+                CCachedPathSignature::ReferencesAreClaimed,
+                Expr::cust(
+                    "cached_path_signature.references_are_claimed OR excluded.references_are_claimed",
+                ),
+            )
             .to_owned(),
         )
         .exec(db)
-        .await;
-    if let Err(e) = result {
-        warn!(error = %e, "insert cached_path_signature failed");
-    }
+        .await
+        .context("insert the cache claim row")?;
+
+    Ok(())
 }
