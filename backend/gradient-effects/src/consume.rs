@@ -9,13 +9,13 @@
 //! branch. A log finalize is replacing the chunk index.
 
 use anyhow::{Context, Result, anyhow};
-use gradient_ci::actions::{
-    GIT_HOST_STATUS_EVENTS, active_actions_for_task, execute_action, matching_actions,
-};
+use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
 use gradient_ci::pull_request_summary::update_pull_request_summary_on_terminal;
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
+use gradient_ci::reporting::{CommitStatusCheckWithIds, check_context_kind_for_event};
 use gradient_ci::task_commit_status_posting::{
-    load_task_git_host_connection, post_commit_statuses_for_task_event_and_record_attempt,
+    load_task_git_host_connection,
+    post_commit_status_reports_for_task_check_event_and_record_attempt,
     task_should_post_commit_statuses,
 };
 use gradient_db::deliveries::pending::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
@@ -205,7 +205,7 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
 }
 
 fn posts_commit_status_for(event: &str, content: &JsonValue) -> bool {
-    GIT_HOST_STATUS_EVENTS.contains(&event)
+    check_context_kind_for_event(event).is_some()
         && content.get("evaluation_kind").and_then(|v| v.as_str()) != Some("input_update")
 }
 
@@ -216,7 +216,18 @@ async fn post_commit_status(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<(
         .ok_or_else(|| anyhow!("pending delivery payload event is not a string"))?;
     let envelope = field(row, "envelope")?;
     let content = envelope.get("content").cloned().unwrap_or_default();
-    post_commit_statuses_for_task_event_and_record_attempt(&ctx.ci(), task, event, &content).await
+    let Some(check) =
+        CommitStatusCheckWithIds::commit_status_check_from_event_name_and_content(event, &content)?
+    else {
+        return Ok(());
+    };
+    post_commit_status_reports_for_task_check_event_and_record_attempt(
+        &ctx.ci(),
+        task,
+        event,
+        &check,
+    )
+    .await
 }
 
 async fn live_webhook<C: ConnectionTrait>(

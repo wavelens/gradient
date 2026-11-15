@@ -8,19 +8,19 @@ use super::evaluation_rows::{EvaluationRows, load_evaluation_rows, load_project_
 use super::matchers::requested_actions_for;
 use crate::ActionError;
 use crate::context::CiContext;
+use crate::reporting::CommitStatusCheckWithIds;
 use crate::{parse_owner_repo, reporting};
-use anyhow::{Context, Result, anyhow};
-use gradient_db::MissingRow;
+use anyhow::{Context, Result};
 use gradient_db::evaluations::failed_attributes::failed_attributes;
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
+use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::{
     BuildJobId, CEntryPoint, EBuildJob, EDerivation, EDerivationBuild, EEntryPoint, EEvaluation,
-    EExecJob, EvaluationId, ExecJobId,
+    EExecJob, EvaluationId, ExecJobId, MBuildJob, MCommit, MEvaluation, MTask,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use serde_json::Value as JsonValue;
 use tracing::warn;
 
 gradient_db::sql! {
@@ -68,51 +68,143 @@ fn check_run_id_for_context(eval: &gradient_types::MEvaluation, context: &str) -
         .and_then(|v| v.as_i64())
 }
 
-pub(crate) async fn build_ci_reports_from_payload(
+pub(crate) async fn build_ci_reports_from_commit_status_check_rows(
     ctx: &CiContext,
-    event: &str,
-    payload: &JsonValue,
-    status: CiStatus,
+    check: &CommitStatusCheckWithIds,
 ) -> Result<Vec<CiReport>> {
-    let s = |k: &str| payload.get(k).and_then(|v| v.as_str()).map(String::from);
-
-    if let (Some(owner), Some(repo), Some(sha), Some(context)) =
-        (s("owner"), s("repo"), s("sha"), s("context"))
-    {
-        return Ok(vec![CiReport {
-            owner,
-            repo,
-            sha,
-            context,
-            requested_actions: requested_actions_for(status.clone()),
-            status,
-            description: s("description"),
-            details_url: s("details_url"),
-            existing_check_id: payload.get("check_run_id").and_then(|v| v.as_i64()),
-        }]);
-    }
-
-    let (evaluation, build_job) = load_subject(ctx, payload).await?;
-    let kind = reporting::check_context_kind_for_event(event);
-    if kind == Some(reporting::CheckContextKind::Build)
-        && !will_evaluation_build_derivation(ctx, &evaluation, build_job.as_ref()).await?
-    {
+    let Some(evaluation) = by_id::<EEvaluation, _>(&ctx.db.worker_db, check.evaluation_id())
+        .await
+        .context("load evaluation")?
+    else {
         return Ok(Vec::new());
-    }
-    let status = match status {
-        CiStatus::Pending | CiStatus::Running => load_current_ci_status_from_database(
-            ctx,
-            kind,
-            &evaluation,
-            build_job.as_ref(),
-            payload,
-        )
-        .await?
-        .unwrap_or(status),
-        status => status,
+    };
+    let Some(state) = read_check_report_state(ctx, check, &evaluation).await? else {
+        return Ok(Vec::new());
     };
     let EvaluationRows { task, commit } = load_evaluation_rows(ctx, &evaluation).await?;
+    let target = build_report_target(ctx, &evaluation, &task, &commit).await?;
 
+    Ok(match state {
+        CheckReportRow::Approval {
+            status,
+            description,
+        } => vec![target.report(
+            reporting::approval_check_context(&task.name),
+            status,
+            description,
+        )],
+        CheckReportRow::Evaluation {
+            status,
+            description,
+        } => evaluation_reports(ctx, &target, &task, status, description).await?,
+        CheckReportRow::EntryPoint { name, status } => vec![target.report(
+            reporting::build_check_context(&task.name, &name),
+            status,
+            None,
+        )],
+    })
+}
+
+enum CheckReportRow {
+    Approval {
+        status: CiStatus,
+        description: Option<String>,
+    },
+    Evaluation {
+        status: CiStatus,
+        description: Option<String>,
+    },
+    EntryPoint {
+        name: String,
+        status: CiStatus,
+    },
+}
+
+async fn read_check_report_state(
+    ctx: &CiContext,
+    check: &CommitStatusCheckWithIds,
+    evaluation: &MEvaluation,
+) -> Result<Option<CheckReportRow>> {
+    let reason = evaluation
+        .waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json);
+    let description =
+        reporting::queued_or_waiting_evaluation_description(evaluation.status, reason.clone())
+            .map(str::to_owned);
+
+    Ok(match check {
+        CommitStatusCheckWithIds::Approval { .. } => {
+            let status =
+                reporting::ci_status_for_approval_check(evaluation.status, reason.as_ref());
+            Some(CheckReportRow::Approval {
+                description: description.filter(|_| status == CiStatus::ActionRequired),
+                status,
+            })
+        }
+        CommitStatusCheckWithIds::Evaluation { .. } => Some(CheckReportRow::Evaluation {
+            status: reporting::ci_status_for_evaluation(&evaluation.status),
+            description,
+        }),
+        CommitStatusCheckWithIds::Build { build_job, .. } => {
+            load_build_job_check_state(ctx, evaluation, *build_job).await?
+        }
+        CommitStatusCheckWithIds::ExecJob {
+            job,
+            entry_point_name,
+            ..
+        } => read_exec_job_check_state_from_row(ctx, *job)
+            .await?
+            .map(|status| CheckReportRow::EntryPoint {
+                name: entry_point_name.clone(),
+                status,
+            }),
+    })
+}
+
+async fn load_build_job_check_state(
+    ctx: &CiContext,
+    evaluation: &MEvaluation,
+    build_job: BuildJobId,
+) -> Result<Option<CheckReportRow>> {
+    let db = &ctx.db.worker_db;
+    let Some(job) = by_id::<EBuildJob, _>(db, build_job)
+        .await
+        .context("load build_job")?
+    else {
+        return Ok(None);
+    };
+    if !will_evaluation_build_derivation(ctx, evaluation, &job).await? {
+        return Ok(None);
+    }
+    let Some(status) = by_id::<EDerivationBuild, _>(db, job.derivation_build)
+        .await
+        .context("load derivation_build")?
+        .and_then(|build| reporting::ci_status_for_build(&build.status))
+    else {
+        return Ok(None);
+    };
+    Ok(build_job_entry_point(ctx, &job)
+        .await?
+        .map(|name| CheckReportRow::EntryPoint { name, status }))
+}
+
+async fn read_exec_job_check_state_from_row(
+    ctx: &CiContext,
+    job: ExecJobId,
+) -> Result<Option<CiStatus>> {
+    Ok(by_id::<EExecJob, _>(&ctx.db.worker_db, job)
+        .await
+        .context("load exec_job")?
+        .and_then(|job| reporting::ci_status_for_exec_job(job.status)))
+}
+
+async fn build_report_target<'a>(
+    ctx: &CiContext,
+    evaluation: &'a MEvaluation,
+    task: &MTask,
+    commit: &MCommit,
+) -> Result<ReportTarget<'a>> {
     // Reports must target the task's base repository, not `evaluation.repository`. Fork PR
     // evaluations are pointing at the fork, where the GitHub App is missing and `/check-runs` is
     // returning 403.
@@ -120,8 +212,8 @@ pub(crate) async fn build_ci_reports_from_payload(
         parse_owner_repo(&task.repository).ok_or_else(|| ActionError::RepositoryUnparsable {
             repository: task.repository.clone(),
         })?;
-    let target = ReportTarget {
-        evaluation: &evaluation,
+    Ok(ReportTarget {
+        evaluation,
         owner,
         repo,
         sha: vec_to_hex(&commit.hash),
@@ -132,46 +224,11 @@ pub(crate) async fn build_ci_reports_from_payload(
                 evaluation.id,
             )
         }),
-    };
-    let description = s("description");
-    let payload_check_id = payload.get("check_run_id").and_then(|v| v.as_i64());
-
-    let mut reports = match kind {
-        Some(reporting::CheckContextKind::Approval) => vec![target.report(
-            reporting::approval_check_context(&task.name),
-            status,
-            description,
-        )],
-        Some(reporting::CheckContextKind::Build) => {
-            match build_job_entry_point(ctx, build_job.as_ref()).await? {
-                Some(label) => vec![target.report(
-                    reporting::build_check_context(&task.name, &label),
-                    status,
-                    description,
-                )],
-                None => Vec::new(),
-            }
-        }
-        Some(reporting::CheckContextKind::ExecJob) => match s("entry_point_name") {
-            Some(entry_point) => vec![target.report(
-                reporting::build_check_context(&task.name, &entry_point),
-                status,
-                description,
-            )],
-            None => Vec::new(),
-        },
-        Some(reporting::CheckContextKind::Evaluation) | None => {
-            evaluation_reports(ctx, &target, &task, status, description).await?
-        }
-    };
-    if let Some(first) = reports.first_mut() {
-        first.existing_check_id = first.existing_check_id.or(payload_check_id);
-    }
-    Ok(reports)
+    })
 }
 
 struct ReportTarget<'a> {
-    evaluation: &'a gradient_types::MEvaluation,
+    evaluation: &'a MEvaluation,
     owner: String,
     repo: String,
     sha: String,
@@ -194,103 +251,24 @@ impl ReportTarget<'_> {
     }
 }
 
-async fn load_subject(
-    ctx: &CiContext,
-    payload: &JsonValue,
-) -> Result<(
-    gradient_types::MEvaluation,
-    Option<gradient_types::MBuildJob>,
-)> {
-    let s = |k: &str| payload.get(k).and_then(|v| v.as_str());
-
-    if let Some(bid) = s("build_id") {
-        let build_job_id: BuildJobId = bid.parse().map_err(|_| anyhow!("invalid build_id"))?;
-        let build_job = by_id::<EBuildJob, _>(&ctx.db.worker_db, build_job_id)
-            .await
-            .context("load build_job")?
-            .ok_or_else(|| anyhow!("build_job {} not found", build_job_id))?;
-        let evaluation = by_id::<EEvaluation, _>(&ctx.db.worker_db, build_job.evaluation)
-            .await
-            .context("load evaluation")?
-            .ok_or(MissingRow::Evaluation {
-                id: build_job.evaluation,
-            })?;
-        return Ok((evaluation, Some(build_job)));
-    }
-
-    let Some(eid) = s("evaluation_id").or_else(|| s("evaluation")) else {
-        anyhow::bail!(
-            "payload missing 'build_id', 'evaluation_id', and the full owner/repo/sha/context set"
-        );
-    };
-    let evaluation_id: EvaluationId = eid.parse().map_err(|_| ActionError::InvalidEvaluationId)?;
-    let evaluation = by_id::<EEvaluation, _>(&ctx.db.worker_db, evaluation_id)
-        .await
-        .context("load evaluation")?
-        .ok_or(MissingRow::Evaluation { id: evaluation_id })?;
-    Ok((evaluation, None))
-}
-
-async fn load_current_ci_status_from_database(
-    ctx: &CiContext,
-    kind: Option<reporting::CheckContextKind>,
-    evaluation: &gradient_types::MEvaluation,
-    build_job: Option<&gradient_types::MBuildJob>,
-    payload: &JsonValue,
-) -> Result<Option<CiStatus>> {
-    let db = &ctx.db.worker_db;
-    Ok(match kind {
-        Some(reporting::CheckContextKind::Build) => match build_job {
-            Some(job) => by_id::<EDerivationBuild, _>(db, job.derivation_build)
-                .await
-                .context("load derivation_build")?
-                .and_then(|build| reporting::ci_status_for_build(&build.status)),
-            None => None,
-        },
-        Some(reporting::CheckContextKind::ExecJob) => {
-            let job = payload
-                .get("job")
-                .and_then(|v| v.as_str())
-                .and_then(|id| id.parse::<ExecJobId>().ok());
-            match job {
-                Some(job) => by_id::<EExecJob, _>(db, job)
-                    .await
-                    .context("load exec_job")?
-                    .and_then(|job| reporting::ci_status_for_exec_job(job.status)),
-                None => None,
-            }
-        }
-        Some(reporting::CheckContextKind::Evaluation) | None => {
-            reporting::ci_status_for_evaluation(&evaluation.status)
-        }
-        Some(reporting::CheckContextKind::Approval) => None,
-    })
-}
-
 async fn will_evaluation_build_derivation(
     ctx: &CiContext,
-    evaluation: &gradient_types::MEvaluation,
-    build_job: Option<&gradient_types::MBuildJob>,
+    evaluation: &MEvaluation,
+    job: &MBuildJob,
 ) -> Result<bool> {
-    let Some(job) = build_job.filter(|_| evaluation.only_evaluate) else {
+    if !evaluation.only_evaluate {
         return Ok(true);
-    };
+    }
     Ok(by_id::<EDerivation, _>(&ctx.db.worker_db, job.derivation)
         .await
         .context("load derivation")?
         .is_some_and(|derivation| derivation.ifd))
 }
 
-async fn build_job_entry_point(
-    ctx: &CiContext,
-    build_job: Option<&gradient_types::MBuildJob>,
-) -> Result<Option<String>> {
-    let Some(b) = build_job else {
-        return Ok(None);
-    };
+async fn build_job_entry_point(ctx: &CiContext, job: &MBuildJob) -> Result<Option<String>> {
     let entry_point = EEntryPoint::find()
-        .filter(CEntryPoint::Derivation.eq(b.derivation))
-        .filter(CEntryPoint::Evaluation.eq(b.evaluation))
+        .filter(CEntryPoint::Derivation.eq(job.derivation))
+        .filter(CEntryPoint::Evaluation.eq(job.evaluation))
         .one(&ctx.db.worker_db)
         .await
         .context("load entry points")?;
