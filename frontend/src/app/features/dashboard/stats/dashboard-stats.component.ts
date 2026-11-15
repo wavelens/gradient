@@ -49,7 +49,7 @@ export class DashboardStatsComponent implements OnInit {
             },
           ]),
       {
-        label: 'Completed builds',
+        label: 'Builds',
         value: s && formatCount(s.builds_completed),
         valueExplanation:
           "Builds that ran to completion in projects you can view, within evaluations that still exist on the server. Builds from a binary cache don't count. A build that several evaluations reuse counts once.",
@@ -61,9 +61,9 @@ export class DashboardStatsComponent implements OnInit {
           'Total size stored across all caches you created or can reach through a project membership. Superusers see the sum of every cache on the server. Two caches that hold the same store path both count its size toward the total.',
       },
       {
-        label: 'Worker load',
-        value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '0 online'),
-        valueExplanation: 'The average percentage of build slots in use across connected workers that serve projects that you can view.',
+        label: 'Worker slots',
+        value: s && `${s.workers.used_build_slot_count} / ${s.workers.total_build_slots}`,
+        valueExplanation: 'Build slots in use out of all build slots across connected workers that process projects the current user can view.',
       },
       {
         label: 'Queue wait',

@@ -808,7 +808,7 @@ export interface DashboardStats {
   cpu_time_ms_7d?: number | null;
   builds_completed: number;
   cache_size_bytes: number;
-  workers: OnlineWorkerLoad;
+  workers: VisibleWorkerBuildSlotCounts;
   queue_wait_p50_ms: number;
 }
 
@@ -2017,11 +2017,6 @@ export interface NixPathInfo {
 export interface NixRealisation {
   outPath: string;
   signatures: string[];
-}
-
-export interface OnlineWorkerLoad {
-  online: number;
-  busy_pct: number;
 }
 
 export interface Outcomes {
@@ -3260,6 +3255,11 @@ export interface UserTeamMembership {
 export type Value = unknown;
 
 export type VerifyGate = "none" | "eval" | "build";
+
+export interface VisibleWorkerBuildSlotCounts {
+  used_build_slot_count: number;
+  total_build_slots: number;
+}
 
 export type WaitingReason = {
   unmet: UnmetRequirement[];

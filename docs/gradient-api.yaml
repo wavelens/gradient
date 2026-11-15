@@ -5948,7 +5948,7 @@ paths:
         `builds_completed` counts the builds that ran to completion in those projects (substituted builds excluded, a build reused by several evaluations counts once); `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.
         `cpu_time_ms` and `cpu_time_ms_7d` are null if no workers report CPU time (build metrics are off on the worker).
         `cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.
-        Only connected workers of visible projects appear in ``workers``. ``busy_pct`` is the average slot use across those workers: assigned jobs relative to ``max_concurrent_builds``, with 100 as the maximum.
+        `workers` cover connected workers in viewable projects. `used_build_slot_count` is the count of build jobs assigned to them. `total_build_slots` is the sum of their `max_concurrent_builds`.
       operationId: getDashboardStats
       responses:
         '200':
@@ -17959,7 +17959,7 @@ components:
           type: integer
           format: int64
         workers:
-          $ref: '#/components/schemas/OnlineWorkerLoad'
+          $ref: '#/components/schemas/VisibleWorkerBuildSlotCounts'
         queue_wait_p50_ms:
           type: integer
           format: int64
@@ -21570,19 +21570,6 @@ components:
           type: array
           items:
             type: string
-    OnlineWorkerLoad:
-      type: object
-      required:
-      - online
-      - busy_pct
-      properties:
-        online:
-          type: integer
-          minimum: 0
-        busy_pct:
-          type: integer
-          format: int32
-          minimum: 0
     Outcomes:
       type: object
       required:
@@ -25097,6 +25084,18 @@ components:
       - none
       - eval
       - build
+    VisibleWorkerBuildSlotCounts:
+      type: object
+      required:
+      - used_build_slot_count
+      - total_build_slots
+      properties:
+        used_build_slot_count:
+          type: integer
+          minimum: 0
+        total_build_slots:
+          type: integer
+          minimum: 0
     WaitingReason:
       oneOf:
       - type: object

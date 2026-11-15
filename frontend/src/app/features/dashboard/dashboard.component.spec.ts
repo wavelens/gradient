@@ -24,7 +24,7 @@ let service: Record<'rail' | 'stats' | 'tasks' | 'activity', Mock>;
 function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0, recap: YearlyRecapResponse | null = null) {
   service = {
     rail: vi.fn(() => (rail instanceof Observable ? rail : of(rail))),
-    stats: vi.fn(() => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { online: 0, busy_pct: 0 }, queue_wait_p50_ms: 0 })),
+    stats: vi.fn(() => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { used_build_slot_count: 0, total_build_slots: 0 }, queue_wait_p50_ms: 0 })),
     tasks: vi.fn(() => of({ counts: { all: 0, failing: 0, starred: 0 }, total: 0, tasks: [] })),
     activity: vi.fn(() => of({ days: [] })),
   };
