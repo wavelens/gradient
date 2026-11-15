@@ -24,6 +24,8 @@ use crate::buildability::exec_waiting_reason;
 use crate::cluster::Membership;
 use crate::exec_secrets::{resolve_secret_names, secret_refusal};
 use crate::jobs::{ExecAssignment, PendingExecJob, PendingJob, exec_job_key};
+use crate::pending_job_input_store_paths::build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping;
+use gradient_entity::store_path_mapping::StorePathMapper;
 
 pub(crate) struct ExecDispatch {
     pub(crate) scheduler: Arc<Scheduler>,
@@ -189,7 +191,10 @@ async fn queued_job(
         });
     }
 
-    let Some(mut pending) = pending_exec_job(row, api_url, closures) else {
+    let mapper = scheduler
+        .resolve_project_store_path_mapping(row.project)
+        .await;
+    let Some(mut pending) = pending_exec_job(row, api_url, closures, mapper.as_ref()) else {
         return Ok(None);
     };
     let db = &scheduler.db;
@@ -247,6 +252,7 @@ pub(crate) fn pending_exec_job(
     row: &ExecDispatchRow,
     api_url: &str,
     closures: &ProgramClosures,
+    mapper: Option<&StorePathMapper>,
 ) -> Option<PendingExecJob> {
     let spec: ExecSpec = match serde_json::from_value(row.job.spec.clone()) {
         Ok(spec) => spec,
@@ -256,6 +262,15 @@ pub(crate) fn pending_exec_job(
         }
     };
     let required_paths = closures.required_paths(exec_roots(&spec, row));
+    let inputs = build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping(
+        mapper,
+        required_paths.iter().map(|required| {
+            (
+                required.path.as_str(),
+                required.cache_info.as_ref().map(|info| info.nar_size),
+            )
+        }),
+    );
     let now = gradient_types::now();
     Some(PendingExecJob {
         exec_job: row.job.id,
@@ -275,7 +290,7 @@ pub(crate) fn pending_exec_job(
         keep_vm_running: row.job.keep_vm_running,
         attempts_done: u32::try_from(row.attempts_done).unwrap_or(0),
         last_phase: row.last_phase.clone(),
-        required_paths,
+        shared_direct_input_store_paths_with_probe_words_and_nar_sizes: inputs,
         queued_at: row.job.created_at,
         ready_at: now,
         rescore_count: 0,

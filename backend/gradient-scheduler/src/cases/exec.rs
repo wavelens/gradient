@@ -19,12 +19,13 @@ use gradient_types::WaitingReason;
 use gradient_types::exec::{DISABLED_FOR_TASK, ExecInventory, ExecSpec, Phase, SopsFile};
 use gradient_wire::types::BuildFailureKind;
 use gradient_wire::types::{DiscoveredDerivation, FlakeSource, Job, JobKind};
+use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_two_u64_words;
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, SchedulerCase, drv, eval_key, failure, w_all, w_exec,
     with_attr, with_output,
 };
-use crate::jobs::Assignment;
+use crate::jobs::{Assignment, exec_job_key};
 use crate::test_jobs::allow_all;
 
 pub(super) const W1: &str = "w1";
@@ -147,7 +148,8 @@ async fn a_queued_exec_job_reaches_a_matching_exec_worker() {
 }
 
 #[tokio::test]
-async fn an_exec_offer_carries_the_program_closure_with_its_sizes() {
+async fn queued_exec_job_program_closure_inputs_probe_words_sizes_flake_source_zero_no_probe_words()
+{
     let e1 = EvaluationId::now_v7();
     let shape = exec_shape(e1)
         .derivation(B)
@@ -167,25 +169,27 @@ async fn an_exec_offer_carries_the_program_closure_with_its_sizes() {
     case.connect(W1, w_exec(inventory()), &[]).await;
 
     case.assign_exec_jobs().await;
-    let offer = case.offers_full(W1).await;
+    let rows = case.db.rows::<exec_job::Entity>().await;
+    let key = exec_job_key(rows[0].id);
+    let job = case
+        .pending_job(&key)
+        .await
+        .expect("after 1: the exec job is pending");
 
-    let mut paths: Vec<(String, Option<u64>)> = offer
-        .candidates
+    let mut inputs: Vec<(Option<[u64; 2]>, u64)> = job
+        .direct_inputs()
         .iter()
-        .flat_map(|candidate| &candidate.required_paths)
-        .map(|path| {
-            let size = path.cache_info.as_ref().map(|info| info.nar_size);
-            (path.path.clone(), size)
-        })
+        .map(|input| (input.store_path_bloom_filter_probe_words, input.nar_size))
         .collect();
-    paths.sort();
+    inputs.sort();
+    let mut expected = vec![
+        (decode_store_path_hash_into_two_u64_words(A_OUT), 5),
+        (None, 0),
+        (decode_store_path_hash_into_two_u64_words(B_OUT), 5),
+    ];
+    expected.sort();
     assert_eq!(
-        paths,
-        vec![
-            (format!("/nix/store/{A_OUT}-a"), Some(5)),
-            ("/nix/store/abc-source".into(), None),
-            (format!("/nix/store/{B_OUT}-b"), Some(5)),
-        ],
+        inputs, expected,
         "after 1: the program and its runtime dependency with their sizes, plus the uploaded source without a size"
     );
     case.finish().await;
@@ -925,8 +929,6 @@ async fn with_queued_continuation(evaluation: EvaluationId) -> SchedulerCase {
 async fn dispatched_continuation(case: &SchedulerCase) -> Assignment {
     case.connect(W1, w_all(), &[]).await;
     case.assign_queued_evals().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.request_job(W1, JobKind::Flake)
         .await
         .expect("the continuation eval job")

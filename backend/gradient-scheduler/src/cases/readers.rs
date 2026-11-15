@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use gradient_db::evaluations::counters::eval_counters;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -19,7 +19,7 @@ use gradient_entity::{
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use super::SchedulerCase;
-use crate::actor::{Offer, SchedulerMsg};
+use crate::actor::SchedulerMsg;
 use crate::cluster::{PendingCluster, Reservation, SlotKind};
 use crate::jobs::{PendingBuildJob, PendingJob, build_job_key};
 use crate::probe::ProbePlan;
@@ -50,10 +50,6 @@ pub(crate) fn planned_targets(plan: &ProbePlan) -> BTreeMap<EvaluationId, BTreeS
             )
         })
         .collect()
-}
-
-pub(crate) fn job_ids(offer: &Offer) -> Vec<String> {
-    offer.candidates.iter().map(|c| c.job_id.clone()).collect()
 }
 
 impl SchedulerCase {
@@ -359,15 +355,6 @@ impl SchedulerCase {
 
     pub fn import_waits(&self) -> usize {
         self.scheduler.import_waits.waiting_requests()
-    }
-
-    pub async fn sent_set(&self, worker: &str) -> HashSet<String> {
-        let worker = worker.to_owned();
-        self.scheduler
-            .call(|reply| SchedulerMsg::SentCandidates { worker, reply })
-            .await
-            .expect("the scheduler core lists the sent candidates")
-            .unwrap_or_default()
     }
 
     pub async fn idle_slots(&self) -> Vec<(String, SlotKind)> {

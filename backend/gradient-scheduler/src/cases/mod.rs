@@ -62,7 +62,7 @@ use invariants::{Observed, Rows};
 
 pub(crate) use crate::cluster::SlotKind;
 pub(crate) use outside::{GitRepo, UpstreamServer};
-pub(crate) use readers::{Totals, UpstreamTally, job_ids, planned_targets};
+pub(crate) use readers::{Totals, UpstreamTally, planned_targets};
 pub(crate) use session::{ClusterAssignment, Failure, failure};
 pub(crate) use shapes::*;
 

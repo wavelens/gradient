@@ -26,6 +26,11 @@ use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::build_history::BuildHistory;
 use crate::jobs::PendingBuildJob;
+use crate::pending_job_input_store_paths::{
+    build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping,
+    stored_store_path_to_bloom_filter_probe_words,
+};
+use gradient_entity::store_path_mapping::StorePathMapper;
 use gradient_pool::estimate::{BuildEstimate, GroupKey};
 use gradient_wire::types::{
     BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, Realisation,
@@ -235,6 +240,7 @@ struct BuildAssignMaps {
     prioritized_by_eval: HashSet<DerivationBuildId>,
     build_request_by_eval: HashSet<DerivationBuildId>,
     ifd_lifted: HashSet<DerivationBuildId>,
+    project_store_path_mappers: HashMap<ProjectId, StorePathMapper>,
     config: AssignConfig,
 }
 
@@ -534,6 +540,7 @@ impl BuildAssignMaps {
             prioritized_by_eval,
             build_request_by_eval,
             ifd_lifted,
+            project_store_path_mappers: HashMap::new(),
             config: AssignConfig::from_config(config),
         })
     }
@@ -675,14 +682,30 @@ impl BuildAssignMaps {
         } else {
             Vec::new()
         };
-        let required_paths = if anywhere {
-            Vec::new()
+        let mapper = self.project_store_path_mappers.get(&project_id);
+        let direct_inputs = if anywhere {
+            &[][..]
         } else {
             self.direct_inputs
                 .get(&shared_build.derivation)
-                .cloned()
-                .unwrap_or_default()
+                .map_or(&[][..], Vec::as_slice)
         };
+        let inputs = build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping(
+            mapper,
+            direct_inputs.iter().map(|required| {
+                (
+                    required.path.as_str(),
+                    required.cache_info.as_ref().map(|info| info.nar_size),
+                )
+            }),
+        );
+        let outputs = build_job
+            .build
+            .outputs
+            .iter()
+            .filter(|output| !output.path.is_empty())
+            .map(|output| stored_store_path_to_bloom_filter_probe_words(mapper, &output.path))
+            .collect();
 
         let prioritized =
             shared_build.prioritized || self.prioritized_by_eval.contains(&shared_build.id);
@@ -692,7 +715,8 @@ impl BuildAssignMaps {
             evaluation_id: eval_id,
             project_id,
             job: build_job,
-            required_paths,
+            shared_direct_input_store_paths_with_probe_words_and_nar_sizes: inputs,
+            output_path_bloom_filter_probe_words_after_store_path_mapping: outputs,
             dependency_count: self
                 .dep_counts
                 .get(&shared_build.derivation)
@@ -979,7 +1003,7 @@ async fn assign_maps(
     shared_builds: &[MDerivationBuild],
 ) -> anyhow::Result<BuildAssignMaps> {
     let waited_imports = scheduler.import_waits.waited_builds().await;
-    BuildAssignMaps::load(
+    let mut maps = BuildAssignMaps::load(
         &scheduler.db.worker_db,
         &scheduler.db.config,
         shared_builds,
@@ -990,7 +1014,11 @@ async fn assign_maps(
             .then_some(&*scheduler.scoring.build_history),
         &waited_imports,
     )
-    .await
+    .await?;
+    maps.project_store_path_mappers = scheduler
+        .resolve_store_path_mappers_for_projects(maps.tasks.values().copied())
+        .await;
+    Ok(maps)
 }
 
 pub(crate) async fn pending_build_jobs(

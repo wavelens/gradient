@@ -45,11 +45,6 @@ async fn admit(case: &SchedulerCase) {
     case.admit_startable_moves().await;
 }
 
-async fn offered_and_scored(case: &SchedulerCase) {
-    case.offers_full(W).await;
-    case.score_all(W).await;
-}
-
 async fn key_of_a(case: &SchedulerCase) -> String {
     build_job_key(case.db.shared_build(A).await.id)
 }
@@ -66,7 +61,6 @@ async fn a_case_finishes_while_an_abort_still_runs() {
     let case = SchedulerCase::start(queued_build(e)).await;
     connect_builder(&case).await;
     admit(&case).await;
-    offered_and_scored(&case).await;
 
     let assignment = case.request_job(W, JobKind::Build).await;
     assert!(assignment.is_some(), "W gets the build of A");
@@ -103,7 +97,6 @@ async fn an_open_transaction_starves_no_step() {
         .expect("the cache roles lock");
 
     within_budget("the admission", admit(&case)).await;
-    within_budget("the offer and the scores", offered_and_scored(&case)).await;
     let assignment = within_budget("the request", case.request_job(W, JobKind::Build)).await;
 
     assert!(assignment.is_some(), "W gets the build of A");

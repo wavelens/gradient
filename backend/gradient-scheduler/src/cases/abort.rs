@@ -24,8 +24,9 @@ use gradient_types::waiting_reason::{UnmetRequirement, WaitingReason};
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildSpecKind, Job, JobKind};
 
 use super::{
-    A, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, SchedulerCase, UpstreamServer, X86, ago,
-    attr_of, build_output, eval_key, failure, is_recent, output_nar, planned_targets, w_all,
+    A, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, N, N_OUT, SchedulerCase,
+    UpstreamServer, X86, ago, attr_of, build_output, eval_key, failure, is_recent, output_nar,
+    planned_targets, w_all,
 };
 
 const W1: &str = "w1";
@@ -127,8 +128,6 @@ async fn a01b_a_worker_cancel_of_a_build_requeues_it_without_failure() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -254,8 +253,6 @@ async fn a02_aborting_an_evaluation_stops_its_unshared_running_build() {
     let b = case.key(B).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -348,8 +345,6 @@ async fn a03_a_build_wanted_by_a_second_live_evaluation_is_not_stopped() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -434,8 +429,6 @@ async fn a04_aborting_the_last_live_wanting_evaluation_stops_the_build() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -509,8 +502,6 @@ async fn a05_a_pending_build_another_live_evaluation_wants_stays_pending() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     assert!(case.pending(&a).await, "after 1: pending(build:A)");
     assert!(
         case.open_assignment(&a).await.is_none(),
@@ -571,9 +562,14 @@ async fn a06_aborting_an_evaluation_drops_only_its_own_pending_jobs() {
     assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
     case.check("step 2").await;
 
-    let offer = case.offers_full(W1).await;
-    let candidates: Vec<_> = offer.candidates.iter().map(|c| c.job_id.clone()).collect();
-    assert_eq!(candidates, vec![b.clone()], "after 3: result.candidates");
+    let eval = case.request_job(W1, JobKind::Flake).await;
+    assert!(eval.is_none(), "after 3: result == nothing");
+    let handed = case.request_job(W1, JobKind::Build).await;
+    assert_eq!(
+        handed.as_ref().map(|j| j.job_id().to_owned()),
+        Some(b.clone()),
+        "after 3: result.job_id"
+    );
     case.check("step 3").await;
 
     case.finish().await;
@@ -587,8 +583,6 @@ async fn a07_an_unconfirmed_abort_is_reaped_after_the_grace() {
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -680,8 +674,6 @@ async fn a08_a_running_job_nobody_aborted_is_not_reaped_even_with_a_zero_grace()
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.request_job(W1, JobKind::Build)
         .await
         .expect("after 1: W1 gets build:A");
@@ -733,8 +725,6 @@ async fn a09_a_building_report_for_an_aborted_build_is_answered_with_abort() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -812,8 +802,6 @@ async fn a10_abort_build_is_refused_while_another_live_evaluation_names_the_buil
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.request_job(W1, JobKind::Build)
         .await
         .expect("after 1: W1 gets build:A");
@@ -934,8 +922,6 @@ async fn a12_retry_of_build_aborted_in_running_evaluation_is_refused_until_worke
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -997,8 +983,6 @@ async fn a12_retry_of_build_aborted_in_running_evaluation_is_refused_until_worke
 
     case.upstream_probed(&[A]).await;
     case.admit_startable_moves().await;
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let a2 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1122,7 +1106,9 @@ async fn a14_cancel_aborts_running_keys_and_drops_pending_keys_without_moving_th
             .evalq(e1)
             .startable(A, A_OUT)
             .startable(B, B_OUT)
-            .startable(C, C_OUT),
+            .startable(C, C_OUT)
+            .add_missing_cached_build_input(A, D, D_OUT)
+            .add_missing_cached_build_input(B, N, N_OUT),
     )
     .await;
     let key = eval_key(e1);
@@ -1134,16 +1120,6 @@ async fn a14_cancel_aborts_running_keys_and_drops_pending_keys_without_moving_th
     case.check("step 0").await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.scores(
-        W2,
-        &[
-            (c.as_str(), 0, 0, false),
-            (a.as_str(), 5, 5_000_000, false),
-            (b.as_str(), 5, 5_000_000, false),
-        ],
-    )
-    .await;
     let handed = case
         .request_job(W2, JobKind::Build)
         .await
@@ -1165,6 +1141,7 @@ async fn a14_cancel_aborts_running_keys_and_drops_pending_keys_without_moving_th
         Some(W2),
         "after 2: active(build:C)"
     );
+    assert!(case.pending(&a).await, "after 2: pending(build:A)");
     assert!(!case.pending(&b).await, "after 2: pending(build:B)");
     assert_eq!(
         case.sb(B).await.status,
@@ -1208,8 +1185,6 @@ async fn a15_a_late_completed_report_after_an_abort_moves_nothing_in_the_graph()
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1410,8 +1385,6 @@ async fn a18_a_prioritized_evaluation_wins_against_an_equal_smaller_id_candidate
     assert!(b < a, "seed: build:B sorts before build:A");
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.check("step 1").await;
 
     case.prioritize_evaluation(e1).await;
@@ -1466,8 +1439,6 @@ async fn a19_prioritize_build_marks_the_shared_build_and_the_pending_job() {
     assert!(a < b, "seed: build:A sorts before build:B");
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.check("step 1").await;
 
     case.prioritize_build(B).await;
@@ -1508,8 +1479,6 @@ async fn a20_aborting_one_of_two_evaluations_sharing_a_passthrough_keeps_the_sub
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await

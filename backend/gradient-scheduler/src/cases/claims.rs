@@ -18,15 +18,16 @@ use gradient_wire::types::{
     BuildFailureKind, BuildMetrics, BuildRequirement, BuildSpec, BuildSpecKind, FlakeSource,
     FlakeStep, Job, JobKind, JobPhase,
 };
+use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_two_u64_words;
 
 use super::{
     A, A_DEV, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase,
     SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv, drv_nar, drv_path, eval_key, failure,
-    from_now, is_recent, job_ids, narinfo, output_nar, span, store_path, w_all, w_network_build,
-    with_attr, with_output,
+    from_now, is_recent, narinfo, output_nar, span, store_path, w_all, w_network_build, with_attr,
+    with_output,
 };
-use crate::actor::Offer;
 use crate::jobs::Assignment;
+use crate::pending_job_input_store_paths::PendingJobInputStorePath;
 use crate::test_jobs::{RESTRICTED_WORKER, TRUSTED_KEY, TrustedSubstitutionsOnly};
 use std::sync::Arc;
 
@@ -54,27 +55,6 @@ async fn c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_sta
     );
     case.check("step 1").await;
 
-    let offer = case.offers_full(W1).await;
-    let candidates: Vec<_> = offer
-        .candidates
-        .iter()
-        .map(|c| (c.job_id.clone(), c.requirement.clone()))
-        .collect();
-    let x86 = BuildRequirement {
-        architecture: X86.into(),
-        required_features: Vec::new(),
-    };
-    assert_eq!(
-        candidates,
-        vec![(a.clone(), Some(x86))],
-        "after 2: candidates"
-    );
-    assert_eq!(offer.generation, 1, "after 2: generation");
-    case.check("step 2").await;
-
-    case.score_all(W1).await;
-    case.check("step 3").await;
-
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -84,6 +64,11 @@ async fn c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_sta
     let Job::Build(build) = &assignment.job else {
         panic!("after 4: a build job, got {:?}", assignment.job);
     };
+    assert_eq!(
+        build.requirement,
+        requirement(X86, &[]),
+        "after 4: result.requirement"
+    );
     let spec = &build.build;
     let outputs: Vec<&str> = spec.outputs.iter().map(|o| o.path.as_str()).collect();
     assert_eq!(
@@ -209,8 +194,6 @@ async fn c02_a_second_request_on_a_free_slot_gets_nothing_and_leaves_an_idle_slo
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.check("step 1").await;
 
     let first = case.request_job(W1, JobKind::Build).await;
@@ -247,12 +230,6 @@ async fn c03_two_workers_ask_for_the_only_candidate_and_the_loser_idles() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    for worker in [W1, W2] {
-        case.offers_full(worker).await;
-    }
-    for worker in [W1, W2] {
-        case.score_all(worker).await;
-    }
     assert_eq!(
         case.signals(W1),
         vec![SessionSignal::Offers(1)],
@@ -307,10 +284,6 @@ async fn c04_a_row_of_a_second_instance_makes_the_local_claim_lose() {
 
     case.admit_startable_moves().await;
     second.resync_startable_set().await;
-    case.offers_full(W1).await;
-    second.offers_full(W2).await;
-    case.score_all(W1).await;
-    second.score_all(W2).await;
     case.check("step 1").await;
     second.check("step 1").await;
 
@@ -361,19 +334,17 @@ async fn c04_a_row_of_a_second_instance_makes_the_local_claim_lose() {
 
 #[tokio::test]
 async fn c05_a_lost_claim_moves_on_to_the_next_candidate() {
-    let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
+    let seed = shape()
+        .two(EvaluationId::now_v7())
+        .add_missing_cached_build_input(B, D, D_OUT);
+    let case = SchedulerCase::start(seed).await;
     let second = case.second_instance().await;
     case.connect(W1, w_all(), &[]).await;
     second.connect(W2, w_all(), &[]).await;
     let (x, y) = (case.key(A).await, case.key(B).await);
-    let scores = [(x.as_str(), 0, 0, false), (y.as_str(), 5, 5_000_000, false)];
 
     case.admit_startable_moves().await;
     second.resync_startable_set().await;
-    case.offers_full(W1).await;
-    second.offers_full(W2).await;
-    case.scores(W1, &scores).await;
-    second.scores(W2, &scores).await;
     case.check("step 1").await;
     second.check("step 1").await;
 
@@ -418,7 +389,8 @@ async fn c06_three_lost_claims_end_the_request_and_the_next_request_gets_the_fou
             .one(e1, A, A_OUT)
             .startable(B, B_OUT)
             .startable(C, C_OUT)
-            .startable(D, D_OUT),
+            .startable(D, D_OUT)
+            .add_missing_cached_build_input(D, X, X_OUT),
     )
     .await;
     let second = case.second_instance().await;
@@ -427,18 +399,9 @@ async fn c06_three_lost_claims_end_the_request_and_the_next_request_gets_the_fou
     let lost_keys = vec![case.key(A).await, case.key(B).await, case.key(C).await];
     let remaining = case.key(D).await;
     let all_keys = [lost_keys.clone(), vec![remaining.clone()]].concat();
-    let mut scores: Vec<(&str, u32, u64, bool)> = lost_keys
-        .iter()
-        .map(|k| (k.as_str(), 0, 0, false))
-        .collect();
-    scores.push((remaining.as_str(), 5, 5_000_000, false));
 
     case.admit_startable_moves().await;
     second.resync_startable_set().await;
-    case.offers_full(W1).await;
-    second.offers_full(W2).await;
-    case.scores(W1, &scores).await;
-    second.scores(W2, &scores).await;
     case.check("step 1").await;
     second.check("step 1").await;
 
@@ -515,8 +478,6 @@ async fn c07_a_build_that_left_queued_before_the_claim_hands_out_nothing() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     assert!(case.pending(&a).await, "after 1: pending(build:A)");
     assert_eq!(
         case.signals(W1),
@@ -566,8 +527,6 @@ async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let pending = case
         .pending_build_job(&a)
         .await
@@ -600,10 +559,7 @@ async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a
     case.check("step 3").await;
 
     case.resync_startable_set().await;
-    let offer = case.offers_delta(W1).await;
-    case.score_all(W1).await;
     assert!(case.pending(&a).await, "after 4: pending(build:A)");
-    assert_eq!(job_ids(&offer), vec![a.clone()], "after 4: candidates");
     case.check("step 4").await;
 
     let substitute = case
@@ -616,8 +572,8 @@ async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a
         "after 5: result.job.kind"
     );
     assert!(
-        substitute.pending.required_paths().is_empty(),
-        "after 5: result.job.required_paths"
+        substitute.pending.direct_inputs().is_empty(),
+        "after 5: result.job.direct_inputs"
     );
     assert_eq!(case.attempts(A).await, vec![], "after 5: att(A) == []");
     assert!(
@@ -657,8 +613,6 @@ async fn c09_a_build_aborted_in_the_graph_before_the_claim_is_not_handed_out() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.signals(W1);
     case.check("step 1").await;
 
@@ -716,8 +670,6 @@ async fn c10_an_eval_claim_after_an_abort_on_the_second_instance_writes_no_row()
     let key = eval_key(e1);
 
     case.assign_queued_evals().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     assert!(case.pending(&key).await, "after 1: I1.pending(eval:E1)");
     assert_eq!(
         case.signals(W1),
@@ -767,14 +719,7 @@ async fn c11_a_won_eval_claim_writes_the_row_and_leaves_the_evaluation_queued() 
     let key = eval_key(e1);
 
     case.assign_queued_evals().await;
-    let offer = case.offers_full(W1).await;
-    case.score_all(W1).await;
     assert!(case.pending(&key).await, "after 1: pending(eval:E1)");
-    assert_eq!(
-        offered(&offer),
-        vec![(key.clone(), None)],
-        "after 1: candidates"
-    );
     case.check("step 1").await;
 
     let assignment = case
@@ -874,12 +819,6 @@ async fn c12_a_reject_closes_the_row_and_returns_the_job_to_every_worker() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    for worker in [W1, W2] {
-        case.offers_full(worker).await;
-    }
-    for worker in [W1, W2] {
-        case.score_all(worker).await;
-    }
     case.check("step 1").await;
 
     let a1 = case
@@ -889,8 +828,7 @@ async fn c12_a_reject_closes_the_row_and_returns_the_job_to_every_worker() {
         .assignment_id();
     case.check("step 2").await;
 
-    let offer = case.offers_delta(W2).await;
-    assert_eq!(job_ids(&offer), Vec::<String>::new(), "after 3: candidates");
+    assert!(!case.pending(&a).await, "after 3: pending(build:A)");
     case.check("step 3").await;
 
     case.reject(W1, &a).await;
@@ -919,9 +857,7 @@ async fn c12_a_reject_closes_the_row_and_returns_the_job_to_every_worker() {
     );
     case.check("step 4").await;
 
-    let offer = case.offers_delta(W2).await;
-    case.score_all(W2).await;
-    assert_eq!(job_ids(&offer), vec![a.clone()], "after 5: candidates");
+    assert!(case.pending(&a).await, "after 5: pending(build:A)");
     case.check("step 5").await;
 
     let retaken = case
@@ -970,8 +906,6 @@ async fn c13_a_claim_whose_assigned_transition_fails_closes_its_row_and_keeps_th
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.check("step 1").await;
 
     case.graph_writer_down().await;
@@ -999,8 +933,6 @@ async fn c13_a_claim_whose_assigned_transition_fails_closes_its_row_and_keeps_th
     case.graph_writer_up().await;
     case.check("step 2").await;
 
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let retaken = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1054,7 +986,6 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
     assert!(case.pending(&a).await, "after 1: pending(build:A)");
     assert!(case.pending(&b).await, "after 1: pending(build:B)");
     assert_eq!(
@@ -1101,10 +1032,6 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
         "after 5: signals(W1)"
     );
     case.check("step 5").await;
-
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(job_ids(&offer), vec![b], "after 6: candidates");
-    case.check("step 6").await;
 
     case.finish().await;
 }
@@ -1254,10 +1181,7 @@ async fn c17_a_server_drain_buffers_startable_moves_until_it_ends() {
     case.check("step 4").await;
 
     case.admit_startable_moves().await;
-    let offer = case.offers_delta(W1).await;
-    case.score_all(W1).await;
     assert!(case.pending(&a).await, "after 5: pending(build:A)");
-    assert_eq!(job_ids(&offer), vec![a.clone()], "after 5: candidates");
     assert_eq!(
         case.signals(W1),
         vec![SessionSignal::Offers(1)],
@@ -1304,8 +1228,6 @@ async fn c18_a_draining_worker_gets_no_offers_no_job_and_no_idle_slot() {
     assert_eq!(case.assignments(&a).await, vec![], "after 3: dj(build:A)");
     case.check("step 3").await;
 
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let taken_job = case.request_job(W2, JobKind::Build).await;
     assert_eq!(taken(taken_job.as_ref()), Some(a), "after 4: result.job_id");
     case.check("step 4").await;
@@ -1315,13 +1237,16 @@ async fn c18_a_draining_worker_gets_no_offers_no_job_and_no_idle_slot() {
 
 #[tokio::test]
 async fn c19_a_worker_with_full_build_slots_is_refused_until_the_completion() {
-    let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
+    let case = SchedulerCase::start(
+        shape()
+            .two(EvaluationId::now_v7())
+            .add_missing_cached_build_input(B, D, D_OUT),
+    )
+    .await;
     case.connect(W1, w_all().slots(1), &[]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.scores(W1, &a_before_b(&a, &b)).await;
     case.check("step 1").await;
 
     let a1 = case
@@ -1375,13 +1300,12 @@ async fn c19_a_worker_with_full_build_slots_is_refused_until_the_completion() {
 #[tokio::test]
 async fn c20_an_abort_pending_job_keeps_its_slot_until_the_worker_confirms() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(shape().two(e1)).await;
+    let case =
+        SchedulerCase::start(shape().two(e1).add_missing_cached_build_input(B, D, D_OUT)).await;
     case.connect(W1, w_all().slots(1), &[]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.scores(W1, &a_before_b(&a, &b)).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1470,11 +1394,6 @@ async fn c21_a_project_restricted_worker_gets_only_its_project_until_the_set_wid
     case.admit_startable_moves().await;
     case.check("step 1").await;
 
-    let offer = case.offers_full(W1).await;
-    case.score_all(W1).await;
-    assert_eq!(job_ids(&offer), vec![a.clone()], "after 2: candidates");
-    case.check("step 2").await;
-
     let first = case.request_job(W1, JobKind::Build).await;
     assert_eq!(taken(first.as_ref()), Some(a), "after 3: result.job_id");
     case.check("step 3").await;
@@ -1487,10 +1406,7 @@ async fn c21_a_project_restricted_worker_gets_only_its_project_until_the_set_wid
     case.authorize(W1, &[]).await;
     case.check("step 5").await;
 
-    let offer = case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let widened = case.request_job(W1, JobKind::Build).await;
-    assert_eq!(job_ids(&offer), vec![b.clone()], "after 6: candidates");
     assert_eq!(
         taken(widened.as_ref()),
         Some(b.clone()),
@@ -1520,9 +1436,6 @@ async fn c22_a_build_needing_a_feature_or_system_waits_for_matching_capabilities
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    let offer = case.offers_full(W1).await;
-    case.score_all(W1).await;
-    assert_eq!(offered(&offer), vec![], "after 1: candidates");
     case.check("step 1").await;
 
     let refused = case.request_job(W1, JobKind::Build).await;
@@ -1535,65 +1448,44 @@ async fn c22_a_build_needing_a_feature_or_system_waits_for_matching_capabilities
         .await;
     case.check("step 3").await;
 
-    let offer = case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let with_kvm = case.request_job(W1, JobKind::Build).await;
     assert_eq!(
-        offered(&offer),
-        vec![(a.clone(), requirement(X86, &["kvm"]))],
-        "after 4: candidates"
+        assigned_job_key_and_build_requirement(with_kvm.as_ref()),
+        Some((a, requirement(X86, &["kvm"]))),
+        "after 4: result.job_id and requirement"
     );
-    assert_eq!(taken(with_kvm.as_ref()), Some(a), "after 4: result.job_id");
     case.check("step 4").await;
 
     case.capabilities(W1, w_all().arch(&[X86, ARM]).features(&["kvm"]).slots(2))
         .await;
     case.check("step 5").await;
 
-    let offer = case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let with_arm = case.request_job(W1, JobKind::Build).await;
     assert_eq!(
-        offered(&offer),
-        vec![(b.clone(), requirement(ARM, &[]))],
-        "after 6: candidates"
+        assigned_job_key_and_build_requirement(with_arm.as_ref()),
+        Some((b, requirement(ARM, &[]))),
+        "after 6: result.job_id and requirement"
     );
-    assert_eq!(taken(with_arm.as_ref()), Some(b), "after 6: result.job_id");
     case.check("step 6").await;
 
     case.finish().await;
 }
 
 #[tokio::test]
-async fn c23_offer_generations_rise_per_enqueue_and_deltas_do_not_repeat_a_candidate() {
+async fn c23_queued_build_sends_job_list_signal_with_higher_generation() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().chain(e1)).await;
     case.connect(W1, w_all(), &[]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
+    assert!(case.pending(&b).await, "after 1: pending(build:B)");
     assert_eq!(
         case.signals(W1),
         vec![SessionSignal::Offers(1)],
         "after 1: signals(W1)"
     );
     case.check("step 1").await;
-
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(
-        (offer.generation, job_ids(&offer)),
-        (1, vec![b.clone()]),
-        "after 2: result"
-    );
-    case.check("step 2").await;
-
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(
-        (offer.generation, job_ids(&offer)),
-        (1, Vec::new()),
-        "after 3: result"
-    );
-    case.check("step 3").await;
 
     case.commit_nar(output_nar(B, B_OUT)).await;
     let shared_build = case.sb(B).await.id;
@@ -1634,18 +1526,6 @@ async fn c23_offer_generations_rise_per_enqueue_and_deltas_do_not_repeat_a_candi
     );
     case.check("step 5").await;
 
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(
-        (offer.generation, job_ids(&offer)),
-        (2, vec![a.clone()]),
-        "after 6: result"
-    );
-    case.check("step 6").await;
-
-    let offer = case.offers_full(W1).await;
-    assert_eq!(job_ids(&offer), vec![a], "after 7: candidates");
-    case.check("step 7").await;
-
     case.finish().await;
 }
 
@@ -1656,8 +1536,6 @@ async fn c24_a_capability_update_keeps_running_jobs_and_offers_new_jobs_as_a_del
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1685,11 +1563,6 @@ async fn c24_a_capability_update_keeps_running_jobs_and_offers_new_jobs_as_a_del
         "after 2: sb(A).status"
     );
     case.check("step 2").await;
-
-    let offer = case.offers_delta(W1).await;
-    case.score_all(W1).await;
-    assert_eq!(job_ids(&offer), vec![b.clone()], "after 3: candidates");
-    case.check("step 3").await;
 
     let second_job = case.request_job(W1, JobKind::Build).await;
     assert_eq!(
@@ -1730,8 +1603,6 @@ async fn c25_a_passthrough_is_a_substitute_job_and_finishes_substituted_without_
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let substitute = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1743,8 +1614,8 @@ async fn c25_a_passthrough_is_a_substitute_job_and_finishes_substituted_without_
         "after 1: result.job.kind"
     );
     assert!(
-        substitute.pending.required_paths().is_empty(),
-        "after 1: result.job.required_paths"
+        substitute.pending.direct_inputs().is_empty(),
+        "after 1: result.job.direct_inputs"
     );
     assert_eq!(case.attempts(A).await, vec![], "after 1: att(A) == []");
     case.check("step 1").await;
@@ -1862,19 +1733,17 @@ async fn c26_a_builtin_fixed_output_derivation_is_a_download_job_for_any_archite
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    let offer = case.offers_full(W1).await;
-    case.score_all(W1).await;
-    assert_eq!(
-        offered(&offer),
-        vec![(a.clone(), requirement("builtin", &[]))],
-        "after 1: candidates"
-    );
     case.check("step 1").await;
 
     let download = case
         .request_job(W1, JobKind::Build)
         .await
         .expect("after 2: W1 gets build:A");
+    assert_eq!(
+        assigned_job_key_and_build_requirement(Some(&download)),
+        Some((a.clone(), requirement("builtin", &[]))),
+        "after 2: result.job_id and requirement"
+    );
     let spec = build_spec(&download);
     assert_eq!(
         (spec.kind, spec.is_fixed_output),
@@ -1961,8 +1830,6 @@ async fn c28_a_registration_on_a_second_instance_leaves_rows_of_the_first_claim_
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -2042,8 +1909,6 @@ async fn c29_a_passthrough_fetches_only_the_outputs_it_did_not_leave_out() {
     case.connect(W1, w_all(), &[]).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let substitute = case
         .request_job(W1, JobKind::Build)
         .await
@@ -2082,40 +1947,37 @@ async fn c30_a_build_requires_only_the_outputs_its_derivation_names_of_an_input(
     case.connect(W1, w_all(), &[]).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let build = case
         .request_job(W1, JobKind::Build)
         .await
         .expect("after 1: W1 gets build:X");
-    let required: Vec<&str> = build
-        .pending
-        .required_paths()
-        .iter()
-        .map(|p| p.path.as_str())
-        .collect();
     assert_eq!(
-        required,
-        vec![store_path(A_OUT, "a").as_str()],
-        "after 1: result.job.required_paths"
+        build.pending.direct_inputs(),
+        [PendingJobInputStorePath {
+            store_path_bloom_filter_probe_words: decode_store_path_hash_into_two_u64_words(A_OUT),
+            nar_size: 5,
+        }],
+        "after 1: result.job.direct_inputs"
     );
     case.check("step 1").await;
     case.finish().await;
 }
 
-fn offered(offer: &Offer) -> Vec<(String, Option<BuildRequirement>)> {
-    offer
-        .candidates
-        .iter()
-        .map(|c| (c.job_id.clone(), c.requirement.clone()))
-        .collect()
+fn assigned_job_key_and_build_requirement(
+    assignment: Option<&Assignment>,
+) -> Option<(String, BuildRequirement)> {
+    let assignment = assignment?;
+    let Job::Build(build) = &assignment.job else {
+        return None;
+    };
+    Some((assignment.job_id().to_owned(), build.requirement.clone()))
 }
 
-fn requirement(architecture: &str, features: &[&str]) -> Option<BuildRequirement> {
-    Some(BuildRequirement {
+fn requirement(architecture: &str, features: &[&str]) -> BuildRequirement {
+    BuildRequirement {
         architecture: architecture.into(),
         required_features: features.iter().map(|f| (*f).into()).collect(),
-    })
+    }
 }
 
 fn taken(assignment: Option<&Assignment>) -> Option<String> {
@@ -2127,10 +1989,6 @@ fn build_spec(assignment: &Assignment) -> &BuildSpec {
         panic!("a build job, got {:?}", assignment.job);
     };
     &build.build
-}
-
-fn a_before_b<'k>(a: &'k str, b: &'k str) -> [(&'k str, u32, u64, bool); 2] {
-    [(a, 0, 0, false), (b, 5, 5_000_000, false)]
 }
 
 async fn open_rows(case: &SchedulerCase, keys: &[String]) -> Vec<(String, String)> {
@@ -2185,8 +2043,6 @@ async fn c31_a_restricted_worker_takes_only_substitutions_its_job_policy_allows(
         .await;
 
     case.admit_startable_moves().await;
-    case.offers_full(RESTRICTED_WORKER).await;
-    case.score_all(RESTRICTED_WORKER).await;
     let taken = case.request_job(RESTRICTED_WORKER, JobKind::Build).await;
     assert_eq!(
         taken.map(|j| j.job_id().to_owned()),
@@ -2200,8 +2056,6 @@ async fn c31_a_restricted_worker_takes_only_substitutions_its_job_policy_allows(
     case.check("step 2").await;
 
     case.connect(W2, w_network_build(), &[]).await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let taken = case.request_job(W2, JobKind::Build).await;
     assert_eq!(
         taken.map(|j| j.job_id().to_owned()),
@@ -2221,8 +2075,6 @@ async fn c32_a_reject_or_release_from_a_worker_that_does_not_run_the_job_keeps_t
     case.connect(W2, w_all(), &[]).await;
     let a = case.key(A).await;
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.request_job(W1, JobKind::Build)
         .await
         .expect("after 1: W1 gets build:A");

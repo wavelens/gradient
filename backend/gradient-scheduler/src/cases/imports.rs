@@ -221,8 +221,6 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
     case.check("step 1").await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let a2 = case
         .request_job(W2, JobKind::Build)
         .await
@@ -332,8 +330,6 @@ async fn f05_an_import_of_an_aborted_build_requeues_it_and_answers_after_the_reb
     case.check("step 1").await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let a2 = case
         .request_job(W2, JobKind::Build)
         .await
@@ -413,8 +409,6 @@ async fn f07_two_paths_settle_when_both_are_terminal_and_the_first_failure_wins(
     let (x, y) = (case.key(X).await, case.key(Y).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let mut claimed = Vec::new();
     for _ in 0..2 {
         let assignment = case
@@ -653,8 +647,6 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
 
     case.refresh_waiting_state().await;
     case.assign_queued_evals().await;
-    case.offers_full(W3).await;
-    case.score_all(W3).await;
     let rerun = case
         .request_job(W3, JobKind::Flake)
         .await
@@ -869,8 +861,6 @@ async fn evaluating(
 async fn claimed_by_w2(case: &SchedulerCase) -> (String, DispatchedJobId) {
     let x = case.key(X).await;
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let assignment = case
         .request_job(W2, JobKind::Build)
         .await

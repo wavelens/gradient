@@ -194,8 +194,10 @@ impl Scheduler {
         for row in started_exec_jobs(&self.db.worker_db, &exec_ids).await? {
             let key = crate::jobs::exec_job_key(row.job.id);
             row_jobs.live.insert(key.clone());
-            if let Some(job) = crate::loops::pending_exec_job(&row, api_url, &closures)
-                .filter(|job| job.assignment.is_some())
+            let mapper = self.resolve_project_store_path_mapping(row.project).await;
+            if let Some(job) =
+                crate::loops::pending_exec_job(&row, api_url, &closures, mapper.as_ref())
+                    .filter(|job| job.assignment.is_some())
             {
                 row_jobs.jobs.insert(key, PendingJob::Exec(Box::new(job)));
             }

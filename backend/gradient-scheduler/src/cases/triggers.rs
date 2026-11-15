@@ -20,15 +20,14 @@ use gradient_types::branch_key;
 use gradient_wire::types::{BuildFailureKind, JobKind};
 
 use super::{
-    A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, GitRepo, S, S_OUT, SchedulerCase, ago, attr_of, drv,
-    drv_path, eval_key, failure, is_recent, output_nar, polling, time_trigger, w_all, with_attr,
-    with_output,
+    A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, GitRepo, N, N_OUT, P, P_OUT, S, S_OUT,
+    SchedulerCase, ago, attr_of, drv, drv_path, eval_key, failure, is_recent, output_nar, polling,
+    time_trigger, w_all, with_attr, with_output,
 };
 
 const W1: &str = "w1";
 const W2: &str = "w2";
 const W3: &str = "w3";
-const FAR: u64 = 5_000_000;
 
 #[tokio::test]
 async fn t01_a_due_polling_trigger_gets_a_single_undelivered_firing() {
@@ -805,7 +804,8 @@ async fn t16_auto_aborts_the_older_evaluation_once_the_new_one_builds() {
             ConcurrencyPolicy::Auto,
         )
         .startable(A, A_OUT)
-        .startable(S, S_OUT),
+        .startable(S, S_OUT)
+        .add_missing_cached_build_input(A, D, D_OUT),
     )
     .await;
     let [a, s] = auto_prefix(&case, e1).await;
@@ -934,8 +934,6 @@ async fn t17_auto_keeps_the_older_evaluation_when_the_new_one_fails_to_evaluate(
     case.advance_evaluation(W1, &k1, EvaluationStatus::EvaluatingDerivation)
         .await;
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a = case.key(A).await;
     let build = case
         .request_job(W1, JobKind::Build)
@@ -1401,6 +1399,9 @@ fn hard_abort_seed(e0: EvaluationId, t1: TaskTriggerId, repo: &GitRepo, c0: &[u8
     .startable(A, A_OUT)
     .startable(B, B_OUT)
     .startable(C, C_OUT)
+    .add_missing_cached_build_input(A, D, D_OUT)
+    .add_missing_cached_build_input(B, N, N_OUT)
+    .add_missing_cached_build_input(C, P, P_OUT)
 }
 
 async fn start_eval_job(case: &SchedulerCase, e0: EvaluationId) {
@@ -1423,8 +1424,6 @@ async fn take_build(case: &SchedulerCase, worker: &str, key: &str) {
 async fn evaluate_and_build_a(case: &SchedulerCase, e0: EvaluationId) -> String {
     case.connect(W1, w_all().slots(2), &[]).await;
     start_eval_job(case, e0).await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a = case.key(A).await;
     take_build(case, W1, &a).await;
     case.signals(W1);
@@ -1437,18 +1436,10 @@ async fn hard_abort_prefix(case: &SchedulerCase, e0: EvaluationId) -> [String; 3
     case.connect(W2, w_all(), &[]).await;
     start_eval_job(case, e0).await;
     let (a, b, c) = (case.key(A).await, case.key(B).await, case.key(C).await);
-    case.offers_full(W1).await;
-    case.scores(
-        W1,
-        &[(&a, 0, 0, false), (&b, 5, FAR, false), (&c, 5, FAR, false)],
-    )
-    .await;
-    case.offers_full(W2).await;
-    case.scores(
-        W2,
-        &[(&a, 5, FAR, false), (&b, 5, FAR, false), (&c, 0, 0, false)],
-    )
-    .await;
+    case.install_worker_local_store_bloom_filter(W1, &[D_OUT])
+        .await;
+    case.install_worker_local_store_bloom_filter(W2, &[P_OUT])
+        .await;
     take_build(case, W1, &a).await;
     take_build(case, W2, &c).await;
     case.import_request(W1, &eval_key(e0), "r1", &[drv_path(C)])
@@ -1464,14 +1455,8 @@ async fn auto_prefix(case: &SchedulerCase, e1: EvaluationId) -> [String; 2] {
     case.connect(W2, w_all(), &[]).await;
     start_eval_job(case, e1).await;
     let (a, s) = (case.key(A).await, case.key(S).await);
-    case.offers_full(W1).await;
-    case.scores(W1, &[(&a, 0, 0, false), (&s, 5, FAR, false)])
-        .await;
-    case.offers_full(W2).await;
-    case.scores(W2, &[(&a, 5, FAR, false), (&s, 0, 0, false)])
-        .await;
-    take_build(case, W1, &a).await;
     take_build(case, W2, &s).await;
+    take_build(case, W1, &a).await;
     case.signals(W1);
     case.signals(W2);
     case.check("step 0").await;

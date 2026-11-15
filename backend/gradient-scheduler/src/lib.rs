@@ -23,6 +23,7 @@ pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
 pub mod loops;
+pub mod pending_job_input_store_paths;
 mod pre_warm;
 pub mod probe;
 pub mod reclaim;

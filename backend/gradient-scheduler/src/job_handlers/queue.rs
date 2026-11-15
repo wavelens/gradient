@@ -4,13 +4,45 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashMap;
+
 use crate::Scheduler;
 use crate::actor::{Offer, SchedulerMsg};
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
+use gradient_entity::store_path_mapping::StorePathMapper;
 use gradient_pool::WorkerInfo;
+use gradient_types::ids::ProjectId;
 use gradient_wire::types::GradientCapabilities;
+use tracing::warn;
 
 impl Scheduler {
+    pub async fn resolve_project_store_path_mapping(
+        &self,
+        project: ProjectId,
+    ) -> Option<StorePathMapper> {
+        self.db
+            .project_mapper(project)
+            .await
+            .inspect_err(|error| warn!(%project, %error, "The scheduler can't map the store paths for the project. Its pending jobs keep the unmapped probe words for scoring."))
+            .ok()
+    }
+
+    pub async fn resolve_store_path_mappers_for_projects(
+        &self,
+        projects: impl IntoIterator<Item = ProjectId>,
+    ) -> HashMap<ProjectId, StorePathMapper> {
+        let mut mappers = HashMap::new();
+        for project in projects {
+            if mappers.contains_key(&project) {
+                continue;
+            }
+            if let Some(mapper) = self.resolve_project_store_path_mapping(project).await {
+                mappers.insert(project, mapper);
+            }
+        }
+        mappers
+    }
+
     pub async fn enqueue_eval_job(
         &self,
         job_id: String,

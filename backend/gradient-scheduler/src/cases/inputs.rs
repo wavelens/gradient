@@ -287,8 +287,6 @@ async fn i07_an_input_request_from_a_build_job_is_dropped() {
     case.connect(W1, w_all(), &[]).await;
     case.connect(W2, w_fetch(), &[]).await;
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let build = case
         .request_job(W1, JobKind::Build)
         .await
@@ -422,8 +420,6 @@ async fn i10_a_running_fetch_takes_a_build_slot() {
     case.check("step 1").await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let taken = case.request_job(W2, JobKind::Build).await;
     assert!(
         taken.is_none(),
@@ -569,8 +565,6 @@ fn unplaced() -> InputOutcome {
 async fn building_on_w2(case: &SchedulerCase) -> (String, gradient_entity::ids::DispatchedJobId) {
     let a = case.key(A).await;
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let assignment = case
         .request_job(W2, JobKind::Build)
         .await

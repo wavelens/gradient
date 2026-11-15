@@ -29,6 +29,9 @@ use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
     EvalShardOutcome, MAX_PHASE_PAYLOAD,
 };
+use gradient_wire::worker_store_path_bloom_filter::{
+    BloomFilterBitArrayChunk, WorkerStorePathBloomFilterChunkCollector,
+};
 
 use super::SessionHandles;
 use super::auth::{challenge_for, resolve_authorized};
@@ -203,6 +206,8 @@ pub(super) struct InboundContext<'a> {
     pub job_events: &'a JobEvents,
     pub logs: &'a LogLane,
     pub dialed: Option<&'a DialedSession>,
+    pub worker_store_path_bloom_filter_chunk_collector:
+        &'a mut WorkerStorePathBloomFilterChunkCollector,
 }
 
 impl<'a> InboundContext<'a> {
@@ -647,7 +652,45 @@ impl<'a> InboundContext<'a> {
                     .await;
                 true
             }
-            ClientMessage::WorkerLocalStoreBloomFilterChunk { .. } => true,
+            ClientMessage::WorkerLocalStoreBloomFilterChunk {
+                bit_count,
+                probe_count,
+                offset,
+                bits,
+                is_final,
+            } => {
+                self.add_local_store_bloom_filter_chunk_to_collector_and_send_complete_filter_to_scheduler(
+                    BloomFilterBitArrayChunk {
+                        bit_count,
+                        probe_count,
+                        offset,
+                        bits,
+                        is_final,
+                    },
+                )
+                .await;
+                true
+            }
+        }
+    }
+
+    async fn add_local_store_bloom_filter_chunk_to_collector_and_send_complete_filter_to_scheduler(
+        &mut self,
+        chunk: BloomFilterBitArrayChunk,
+    ) {
+        match self
+            .worker_store_path_bloom_filter_chunk_collector
+            .add_chunk_and_return_complete_filter_if_final_chunk(chunk)
+        {
+            Ok(Some(filter)) => {
+                self.scheduler
+                    .set_worker_local_store_bloom_filter(self.peer_id, filter)
+                    .await;
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                warn!(peer_id = %self.peer_id, %reason, "Rejected a chunk of the summary of the worker store. Discarded the chunks received so far.");
+            }
         }
     }
 
@@ -1538,7 +1581,8 @@ pub(in crate::handler) mod fixture {
                 build: BuildSpec::default(),
                 requirement: Default::default(),
             },
-            required_paths: vec![],
+            shared_direct_input_store_paths_with_probe_words_and_nar_sizes: Default::default(),
+            output_path_bloom_filter_probe_words_after_store_path_mapping: Default::default(),
             dependency_count: 0,
             closure_size: None,
             prefer_local_build: false,
@@ -1578,7 +1622,7 @@ pub(in crate::handler) mod fixture {
                 run_overrides: None,
                 nix_evaluation_fetch_url_access: Default::default(),
             },
-            required_paths: vec![],
+            shared_direct_input_store_paths_with_probe_words_and_nar_sizes: Default::default(),
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
@@ -1614,7 +1658,7 @@ pub(in crate::handler) mod fixture {
             keep_vm_running: false,
             attempts_done: 0,
             last_phase: None,
-            required_paths: vec![],
+            shared_direct_input_store_paths_with_probe_words_and_nar_sizes: Default::default(),
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
@@ -1641,6 +1685,8 @@ pub(in crate::handler) mod fixture {
         pub logs: LogLane,
         pub active: ActiveJobs,
         pub uploads: UploadSession,
+        pub worker_store_path_bloom_filter_chunk_collector:
+            WorkerStorePathBloomFilterChunkCollector,
     }
 
     impl TestSession {
@@ -1691,6 +1737,7 @@ pub(in crate::handler) mod fixture {
                 logs: LogLane::spawn(&state.shutdown, |_, _| async {}),
                 active,
                 uploads,
+                worker_store_path_bloom_filter_chunk_collector: Default::default(),
             };
             (session, sent, admitted)
         }
@@ -1707,6 +1754,8 @@ pub(in crate::handler) mod fixture {
                     job_events: &self.job_events,
                     logs: &self.logs,
                     dialed: None,
+                    worker_store_path_bloom_filter_chunk_collector: &mut self
+                        .worker_store_path_bloom_filter_chunk_collector,
                 },
                 &mut self.uploads,
             )
@@ -1780,6 +1829,7 @@ mod assignment_response_tests {
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
+            worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
         ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()), None)
             .await;
@@ -1840,6 +1890,7 @@ mod assignment_response_tests {
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
+            worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
         ctx.on_assign_job_response("j1".into(), true, None, None)
             .await;
@@ -1878,6 +1929,7 @@ mod assignment_response_tests {
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
+            worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
         ctx.on_assign_job_response("build:foreign".into(), false, None, None)
             .await;
@@ -1944,6 +1996,7 @@ mod assignment_response_tests {
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
+            worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
         ctx.on_build_progress("j1", &shared_build.to_string(), progress);
         ctx.on_build_progress("j1", "not-a-uuid", progress);
@@ -2009,6 +2062,7 @@ mod assignment_response_tests {
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
+            worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
         ctx.on_eval_progress("job-1", WireEvalProgress::Evaluating { thunks: 42 });
         ctx.on_eval_progress("unknown-job", WireEvalProgress::Evaluating { thunks: 1 });
@@ -2074,6 +2128,7 @@ mod assignment_response_tests {
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
+            worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
 
         ctx.on_eval_progress("member-a", WireEvalProgress::Evaluating { thunks: 10 });
@@ -2132,6 +2187,7 @@ mod assignment_response_tests {
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
             dialed: None,
+            worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
         assert!(
             ctx.rpc()

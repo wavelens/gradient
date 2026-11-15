@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::BTreeSet;
-
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::commit;
@@ -59,12 +57,6 @@ async fn q01_a_queued_evaluation_becomes_one_pending_job_with_wildcards_and_over
     assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
     case.check("step 2").await;
 
-    let offer = case.offers_full(W1).await;
-    assert_eq!(
-        candidate_keys(&offer),
-        BTreeSet::from([key.clone()]),
-        "after 3: result.candidates"
-    );
     let job = flake_job(&case, &key).await;
     assert_eq!(
         (
@@ -180,7 +172,6 @@ async fn q04_an_idle_evaluation_only_worker_splits_the_pass_and_without_one_no_s
     case.check("step 1").await;
 
     case.seed(shape().evalq(e3)).await;
-    case.score_all(W2).await;
     let taken = case.request_job(W2, JobKind::Flake).await;
     assert!(
         taken.is_none(),
@@ -223,8 +214,6 @@ async fn q05_an_evaluation_only_worker_running_a_job_causes_no_split() {
     case.assign_queued_evals().await;
     case.check("step 1").await;
 
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let fetch = case
         .request_job(W1, JobKind::Flake)
         .await
@@ -236,8 +225,6 @@ async fn q05_an_evaluation_only_worker_running_a_job_causes_no_split() {
         .await;
     case.check("step 2").await;
 
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let follow_up = case.request_job(W2, JobKind::Flake).await;
     assert_eq!(
         follow_up.map(|a| a.job_id().to_owned()),
@@ -271,12 +258,6 @@ async fn q06_a_store_path_repository_yields_a_cached_source_that_still_fetches()
     let key = eval_key(e1);
 
     case.assign_queued_evals().await;
-    let offer = case.offers_full(W1).await;
-    assert_eq!(
-        candidate_keys(&offer),
-        BTreeSet::from([key.clone()]),
-        "after 1: result.candidates"
-    );
     let job = flake_job(&case, &key).await;
     assert_eq!(
         (job.steps, job.source),
@@ -308,7 +289,6 @@ async fn q07_an_input_update_evaluation_is_queued_on_its_base_commit_with_the_up
     let key = eval_key(e1);
 
     case.assign_queued_evals().await;
-    case.offers_full(W1).await;
     let job = flake_job(&case, &key).await;
     assert_eq!(
         (job.source, job.input_update),
@@ -341,21 +321,10 @@ async fn q08_a_fetch_step_needs_network_and_an_evaluation_step_needs_eval() {
     case.assign_queued_evals().await;
     case.check("step 1").await;
 
-    let fetcher = case.offers_full(W1).await;
-    let evaluator = case.offers_full(W2).await;
-    assert_eq!(
-        candidate_keys(&fetcher),
-        BTreeSet::from([key.clone(), eval_key(e2)]),
-        "after 2: offers(W1).candidates"
-    );
-    assert_eq!(
-        candidate_keys(&evaluator),
-        BTreeSet::new(),
-        "after 2: offers(W2).candidates"
-    );
+    let evaluator = case.request_job(W2, JobKind::Flake).await;
+    assert!(evaluator.is_none(), "after 2: W2 gets nothing");
     case.check("step 2").await;
 
-    case.score_all(W1).await;
     let fetch = case
         .request_job(W1, JobKind::Flake)
         .await
@@ -367,17 +336,17 @@ async fn q08_a_fetch_step_needs_network_and_an_evaluation_step_needs_eval() {
         .await;
     case.check("step 3").await;
 
-    let fetcher = case.offers_delta(W1).await;
-    let evaluator = case.offers_delta(W2).await;
+    let evaluation = case.request_job(W2, JobKind::Flake).await;
     assert_eq!(
-        candidate_keys(&fetcher),
-        BTreeSet::new(),
-        "after 4: offers(W1).candidates"
+        evaluation.as_ref().map(|j| j.job_id().to_owned()),
+        Some(key.clone()),
+        "after 4: W2 gets the evaluation job of E1"
     );
+    let fetch = case.request_job(W1, JobKind::Flake).await;
     assert_eq!(
-        candidate_keys(&evaluator),
-        BTreeSet::from([key.clone()]),
-        "after 4: offers(W2).candidates"
+        fetch.as_ref().map(|j| j.job_id().to_owned()),
+        Some(eval_key(e2)),
+        "after 4: W1 gets the fetch job of E2"
     );
     case.check("step 4").await;
 
@@ -898,10 +867,6 @@ fn all_steps() -> Vec<FlakeStep> {
     ]
 }
 
-fn candidate_keys(offer: &crate::actor::Offer) -> BTreeSet<String> {
-    offer.candidates.iter().map(|c| c.job_id.clone()).collect()
-}
-
 async fn flake_job(case: &SchedulerCase, key: &str) -> FlakeJob {
     case.pending_flake_job(key)
         .await
@@ -1014,26 +979,12 @@ async fn q18_a_fetch_step_of_an_ssh_repository_needs_secrets() {
     case.assign_queued_evals().await;
     case.check("step 1").await;
 
-    let without_secrets = case.offers_full(W1).await;
-    let with_secrets = case.offers_full(W2).await;
-    assert_eq!(
-        candidate_keys(&case.offers_full(W3).await),
-        BTreeSet::new(),
-        "after 2: offers(W3).candidates"
-    );
-    assert_eq!(
-        candidate_keys(&without_secrets),
-        BTreeSet::new(),
-        "after 2: offers(W1).candidates"
-    );
-    assert_eq!(
-        candidate_keys(&with_secrets),
-        BTreeSet::from([key.clone()]),
-        "after 2: offers(W2).candidates"
-    );
+    let evaluator = case.request_job(W3, JobKind::Flake).await;
+    assert!(evaluator.is_none(), "after 2: W3 gets nothing");
+    let without_secrets = case.request_job(W1, JobKind::Flake).await;
+    assert!(without_secrets.is_none(), "after 2: W1 gets nothing");
     case.check("step 2").await;
 
-    case.score_all(W2).await;
     let fetch = case
         .request_job(W2, JobKind::Flake)
         .await

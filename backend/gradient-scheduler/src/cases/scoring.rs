@@ -18,7 +18,8 @@ use gradient_pool::score::{ScoreBreakdown, Windowed};
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, FlakeStep, JobKind, JobPhase};
 
 use super::{
-    A, A_OUT, B, CaseShapes, SchedulerCase, SlotKind, ago, failure, is_recent, span, w_all,
+    A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, N, N_OUT, SchedulerCase, ago, attr_of,
+    failure, is_recent, output_nar, span, w_all,
 };
 
 const W1: &str = "w1";
@@ -180,8 +181,6 @@ async fn m08_only_a_real_build_or_an_oom_kill_writes_a_metric_row() {
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let mut assignments: HashMap<String, DispatchedJobId> = HashMap::new();
     for _ in 0..2 {
         let taken = case
@@ -260,66 +259,51 @@ async fn m08_only_a_real_build_or_an_oom_kill_writes_a_metric_row() {
 }
 
 #[tokio::test]
-async fn m09_an_unscored_build_waits_for_a_score_or_four_timer_ticks() {
+async fn m09_build_assigned_to_first_requesting_worker_without_score_report() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     case.connect(W1, w_all(), &[]).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
     case.check("step 1").await;
-
-    let unscored = case.request_job(W1, JobKind::Build).await;
-    assert!(unscored.is_none(), "after 2: result == nothing");
-    assert!(case.pending(&a).await, "after 2: pending(build:A)");
-    assert!(
-        case.idle_slots()
-            .await
-            .contains(&(W1.into(), SlotKind::Build)),
-        "after 2: idle_slots contains (W1, Build)"
-    );
-    case.check("step 2").await;
-
-    for _ in 0..4 {
-        case.build_assign_pass(true, false).await;
-    }
-    case.check("step 3").await;
 
     let taken = case.request_job(W1, JobKind::Build).await;
     assert_eq!(
         taken.as_ref().map(|j| j.job_id().to_owned()),
         Some(a.clone()),
-        "after 4: result.job_id"
+        "after 2: result.job_id"
     );
     let row = case
         .open_assignment(&a)
         .await
-        .expect("after 4: open(build:A)");
+        .expect("after 2: open(build:A)");
     assert_eq!(
         breakdown(&row.score_breakdown).vetoes,
         Vec::<String>::new(),
-        "after 4: open(build:A).score_breakdown.vetoes"
+        "after 2: open(build:A).score_breakdown.vetoes"
     );
     assert_eq!(
-        row.missing_nar_size, None,
-        "after 4: open(build:A).missing_nar_size"
+        row.missing_nar_size,
+        Some(0),
+        "after 2: open(build:A).missing_nar_size"
     );
-    case.check("step 4").await;
+    case.check("step 2").await;
 
     case.finish().await;
 }
 
 #[tokio::test]
 async fn m10_equal_scores_tie_to_the_smaller_job_id_and_the_row_keeps_the_score() {
-    let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
+    let seed = shape()
+        .two(EvaluationId::now_v7())
+        .add_missing_cached_build_input(A, D, D_OUT)
+        .add_missing_cached_build_input(B, N, N_OUT);
+    let case = SchedulerCase::start(seed).await;
     case.connect(W1, w_all(), &[]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
     let smaller = a.clone().min(b.clone());
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.scores(W1, &[(&a, 2, 2048, false), (&b, 2, 2048, false)])
-        .await;
     case.check("step 1").await;
 
     let taken = case.request_job(W1, JobKind::Build).await;
@@ -338,7 +322,7 @@ async fn m10_equal_scores_tie_to_the_smaller_job_id_and_the_row_keeps_the_score(
             row.missing_nar_size,
             row.dependency_count
         ),
-        (Some(2), Some(2048), Some(0)),
+        (Some(1), Some(5), Some(1)),
         "after 2: missing_count, missing_nar_size, dependency_count"
     );
     let ready_at = row.ready_at.expect("after 2: ready_at set");
@@ -370,10 +354,8 @@ async fn m11_outputs_present_on_the_worker_lift_the_predicted_resource_penalty()
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.offers_full(W2).await;
-    case.scores(W1, &[(&a, 0, 0, true)]).await;
-    case.scores(W2, &[(&a, 5, 50_000, false)]).await;
+    case.install_worker_local_store_bloom_filter(W1, &[A_OUT])
+        .await;
     case.check("step 1").await;
 
     let refused = case.request_job(W2, JobKind::Build).await;
@@ -389,6 +371,134 @@ async fn m11_outputs_present_on_the_worker_lift_the_predicted_resource_penalty()
     case.check("step 3").await;
 
     case.finish().await;
+}
+
+#[tokio::test]
+async fn m13_completed_build_updates_only_the_completing_workers_store_summary() {
+    let seed = shape()
+        .chain(EvaluationId::now_v7())
+        .add_missing_cached_build_input(B, D, D_OUT)
+        .derivation(C)
+        .walked()
+        .probed()
+        .drv_cached()
+        .entry_point(&attr_of(C))
+        .job()
+        .output(C_OUT)
+        .depends_on(B);
+    let case = SchedulerCase::start_with(seed, |c| c.build.retry_backoff_secs = 1).await;
+    case.connect(W1, w_all(), &[]).await;
+    case.connect(W2, w_all(), &[]).await;
+    case.install_worker_local_store_bloom_filter(W1, &[]).await;
+    case.install_worker_local_store_bloom_filter(W2, &[]).await;
+    let (a, b, c) = (case.key(A).await, case.key(B).await, case.key(C).await);
+
+    case.admit_startable_moves().await;
+    let b1 = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets build:B")
+        .assignment_id();
+    assert_eq!(
+        read_open_assignment_missing_count_and_nar_size_for_job_key(&case, &b).await,
+        (Some(1), Some(5)),
+        "after 1: open(build:B) misses D on W1"
+    );
+    case.check("step 1").await;
+
+    case.report_building(W1, &b).await;
+    case.commit_nar(output_nar(B, B_OUT)).await;
+    case.complete(W1, &b, b1, vec![span(JobPhase::Build, 0, 1000)], 1000)
+        .await;
+    case.admit_startable_moves().await;
+    case.check("step 2").await;
+
+    let assignment = case
+        .request_job(W2, JobKind::Build)
+        .await
+        .expect("after 3: W2 gets a dependent of B");
+    let first_dependent_job_key_received_by_worker_w2 = assignment.job_id().to_owned();
+    let remaining_dependent_build_job_key_for_worker_w1 =
+        if first_dependent_job_key_received_by_worker_w2 == a {
+            c.clone()
+        } else {
+            a.clone()
+        };
+    assert!(
+        [&a, &c].contains(&&first_dependent_job_key_received_by_worker_w2),
+        "after 3: W2 gets build:A or build:C"
+    );
+    assert_eq!(
+        read_open_assignment_missing_count_and_nar_size_for_job_key(
+            &case,
+            &first_dependent_job_key_received_by_worker_w2
+        )
+        .await,
+        (Some(1), Some(5)),
+        "after 3: W2 still misses B's output"
+    );
+    case.check("step 3").await;
+
+    case.report_building(W2, &first_dependent_job_key_received_by_worker_w2)
+        .await;
+    case.fail(
+        W2,
+        &first_dependent_job_key_received_by_worker_w2,
+        assignment.assignment_id(),
+        failure(BuildFailureKind::Transient).elapsed_ms(1),
+    )
+    .await;
+    case.check("step 4").await;
+
+    let taken = case.request_job(W1, JobKind::Build).await;
+    assert_eq!(
+        taken.as_ref().map(|j| j.job_id().to_owned()),
+        Some(remaining_dependent_build_job_key_for_worker_w1.clone()),
+        "after 5: W1 gets the other dependent of B"
+    );
+    assert_eq!(
+        read_open_assignment_missing_count_and_nar_size_for_job_key(
+            &case,
+            &remaining_dependent_build_job_key_for_worker_w1
+        )
+        .await,
+        (Some(0), Some(0)),
+        "after 5: W1 holds B's output without a new store summary"
+    );
+    case.check("step 5").await;
+
+    tokio::time::sleep(std::time::Duration::from_secs_f64(1.2)).await;
+    case.requeue_transient_retries().await;
+    case.admit_startable_moves().await;
+    let taken = case.request_job(W2, JobKind::Build).await;
+    assert_eq!(
+        taken.as_ref().map(|j| j.job_id().to_owned()),
+        Some(first_dependent_job_key_received_by_worker_w2.clone()),
+        "after 6: W2 gets the failed dependent again"
+    );
+    assert_eq!(
+        read_open_assignment_missing_count_and_nar_size_for_job_key(
+            &case,
+            &first_dependent_job_key_received_by_worker_w2
+        )
+        .await,
+        (Some(1), Some(5)),
+        "after 6: the failed build added nothing to W2's store summary"
+    );
+    case.check("step 6").await;
+
+    case.finish().await;
+}
+
+async fn read_open_assignment_missing_count_and_nar_size_for_job_key(
+    case: &SchedulerCase,
+    key: &str,
+) -> (Option<i32>, Option<i64>) {
+    let row = case
+        .open_assignment(key)
+        .await
+        .unwrap_or_else(|| panic!("open({key})"));
+    (row.missing_count, row.missing_nar_size)
 }
 
 fn whole_second_now() -> NaiveDateTime {

@@ -114,6 +114,7 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::Release {
                 worker,
                 job_id: job_id.to_owned(),
+                job_succeeded: true,
                 reply,
             })
             .await?;
@@ -152,7 +153,9 @@ impl Scheduler {
                     return match store_path {
                         Some(path) => {
                             let follow_id = crate::jobs::eval_job_key(j.evaluation_id, 0);
-                            let mut follow = j.cached_followup(path);
+                            let mapper =
+                                self.resolve_project_store_path_mapping(j.project_id).await;
+                            let mut follow = j.cached_followup(path, mapper.as_ref());
                             if let Some(task) = follow.task_id {
                                 follow.estimate = self
                                     .scoring
@@ -239,6 +242,7 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::Release {
                 worker,
                 job_id: job_id.to_owned(),
+                job_succeeded: false,
                 reply,
             })
             .await?;

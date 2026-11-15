@@ -5,23 +5,30 @@
  */
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::WalkMode;
+use gradient_entity::store_path_mapping::StorePathMapper;
 use gradient_types::ids::{
     ClusterAttemptId, ClusterJobId, ClusterMemberId, CommitId, DerivationBuildId, DerivationId,
     DispatchedJobId, EvaluationId, ExecJobId, ProjectId, TaskId,
 };
 use gradient_wire::types::{
     BuildJob, BuildSpecKind, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate,
-    JobKind, RequiredPath,
+    JobKind,
 };
+use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
-use crate::cluster::{ClusterBook, PendingCluster};
+use crate::cluster::{ClusterBook, PendingCluster, ScoreLookup};
 use crate::count::clamp_to_u32;
 pub use crate::exec_job::{ExecAssignment, ExecPeer, PendingExecJob, exec_job_key};
+use crate::pending_job_input_store_paths::{
+    PendingJobInputStorePath,
+    build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping,
+};
 use gradient_graph::RamShortage;
 use gradient_pool::score::weights::REFERENCE_CORES;
 use gradient_pool::score::{
@@ -37,7 +44,8 @@ pub struct PendingEvalJob {
     pub commit_id: CommitId,
     pub repository: String,
     pub job: FlakeJob,
-    pub required_paths: Vec<RequiredPath>,
+    pub shared_direct_input_store_paths_with_probe_words_and_nar_sizes:
+        Arc<[PendingJobInputStorePath]>,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
     pub rescore_count: u32,
@@ -50,19 +58,68 @@ pub struct PendingEvalJob {
 }
 
 impl PendingEvalJob {
-    pub fn cached_followup(&self, store_path: String) -> PendingEvalJob {
+    pub fn cached_followup(
+        &self,
+        store_path: String,
+        mapper: Option<&StorePathMapper>,
+    ) -> PendingEvalJob {
         let mut follow = self.clone();
         follow.job.steps = vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations];
+        follow.shared_direct_input_store_paths_with_probe_words_and_nar_sizes =
+            build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping(
+                mapper,
+                [(store_path.as_str(), None)],
+            );
         follow.job.source = FlakeSource::Cached {
-            store_path: store_path.clone(),
+            store_path,
             commit: self.job.source.commit().map(str::to_owned),
         };
-        follow.required_paths = vec![RequiredPath {
-            path: store_path,
-            cache_info: None,
-        }];
         follow
     }
+}
+
+pub fn score_worker_job_by_missing_inputs(
+    local_store: Option<&WorkerStorePathBloomFilter>,
+    job: &PendingJob,
+) -> WorkerJobScore {
+    let holds = |words: Option<[u64; 2]>| {
+        local_store
+            .zip(words)
+            .is_some_and(|(filter, words)| filter.probably_contains_probe_words(words))
+    };
+    let outputs = job.output_path_bloom_filter_probe_words_after_store_path_mapping();
+    let outputs_present = !outputs.is_empty() && outputs.iter().all(|words| holds(*words));
+    job.direct_inputs()
+        .iter()
+        .filter(|input| !holds(input.store_path_bloom_filter_probe_words))
+        .fold(
+            WorkerJobScore {
+                outputs_present,
+                ..WorkerJobScore::default()
+            },
+            |score, input| WorkerJobScore {
+                missing_count: score.missing_count.saturating_add(1),
+                missing_nar_size: score.missing_nar_size.saturating_add(input.nar_size),
+                ..score
+            },
+        )
+}
+
+pub fn score_waiting_cluster_member_jobs_for_connected_workers<'a>(
+    clusters: &[PendingCluster],
+    workers: impl IntoIterator<Item = (String, Option<&'a WorkerStorePathBloomFilter>)>,
+) -> ScoreLookup {
+    let mut scores = ScoreLookup::new();
+    for (worker, local_store) in workers {
+        let members = clusters.iter().flat_map(|cluster| &cluster.members);
+        for member in members {
+            if let Some(job) = &member.job {
+                let score = score_worker_job_by_missing_inputs(local_store, job);
+                scores.insert((worker.clone(), member.key.clone()), score);
+            }
+        }
+    }
+    scores
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +129,9 @@ pub struct PendingBuildJob {
     pub evaluation_id: EvaluationId,
     pub project_id: ProjectId,
     pub job: BuildJob,
-    pub required_paths: Vec<RequiredPath>,
+    pub shared_direct_input_store_paths_with_probe_words_and_nar_sizes:
+        Arc<[PendingJobInputStorePath]>,
+    pub output_path_bloom_filter_probe_words_after_store_path_mapping: Arc<[Option<[u64; 2]>]>,
     pub dependency_count: u32,
     pub closure_size: Option<i64>,
     pub prefer_local_build: bool,
@@ -150,11 +209,28 @@ impl PendingJob {
         }
     }
 
-    pub fn required_paths(&self) -> &[RequiredPath] {
+    pub fn direct_inputs(&self) -> &[PendingJobInputStorePath] {
         match self {
-            PendingJob::Eval(j) => &j.required_paths,
-            PendingJob::Build(j) => &j.required_paths,
-            PendingJob::Exec(j) => &j.required_paths,
+            PendingJob::Eval(j) => {
+                &j.shared_direct_input_store_paths_with_probe_words_and_nar_sizes
+            }
+            PendingJob::Build(j) => {
+                &j.shared_direct_input_store_paths_with_probe_words_and_nar_sizes
+            }
+            PendingJob::Exec(j) => {
+                &j.shared_direct_input_store_paths_with_probe_words_and_nar_sizes
+            }
+        }
+    }
+
+    pub fn output_path_bloom_filter_probe_words_after_store_path_mapping(
+        &self,
+    ) -> &[Option<[u64; 2]>] {
+        match self {
+            PendingJob::Build(j) => {
+                &j.output_path_bloom_filter_probe_words_after_store_path_mapping
+            }
+            PendingJob::Eval(_) | PendingJob::Exec(_) => &[],
         }
     }
 
@@ -187,7 +263,7 @@ impl PendingJob {
         };
         JobCandidate {
             job_id: job_id.to_owned(),
-            required_paths: self.required_paths().to_vec(),
+            required_paths: Vec::new(),
             drv_paths,
             output_paths,
             requirement,
@@ -538,15 +614,15 @@ fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
 fn exec_candidate(
     job: &PendingJob,
     exec: &PendingExecJob,
-    score: Option<&WorkerJobScore>,
+    score: &WorkerJobScore,
     worker: &WorkerContext<'_>,
     peers: &[ExecPeer],
     now: chrono::NaiveDateTime,
 ) -> ScoredCandidate {
-    let missing_nar_size = score.map(|s| s.missing_nar_size);
+    let missing_nar_size = Some(score.missing_nar_size);
     let breakdown = exec.score_on(worker.exec, missing_nar_size, peers, now);
     let ctx = JobContext {
-        missing_count: score.map(|s| s.missing_count),
+        missing_count: Some(score.missing_count),
         missing_nar_size,
         queued_at: exec.queued_at,
         ready_at: exec.ready_at,
@@ -934,6 +1010,7 @@ impl JobTracker {
         worker_id: &str,
         authorized: Option<&HashSet<ProjectId>>,
         caps: Option<&WorkerCaps>,
+        local_store: Option<&WorkerStorePathBloomFilter>,
         kind: &JobKind,
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
@@ -943,12 +1020,20 @@ impl JobTracker {
         let alone = worker_context_of(caps);
         let waiting = builds
             .then(|| {
-                self.recheck_waiting_build(worker_id, authorized, caps, policy, instance, &alone)
+                self.recheck_waiting_build(
+                    worker_id,
+                    authorized,
+                    caps,
+                    local_store,
+                    policy,
+                    instance,
+                    &alone,
+                )
             })
             .flatten();
         let worker_ctx = self.beside_waiting_build(worker_id, alone);
         let mut scored = self.score_candidates(
-            worker_id,
+            local_store,
             authorized,
             caps,
             kind,
@@ -1006,14 +1091,19 @@ impl JobTracker {
             instance_context,
         );
 
-        self.assign_pending(worker_id, &job_id, record, caps)
+        self.assign_pending(worker_id, &job_id, record, caps, local_store)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     fn recheck_waiting_build(
         &mut self,
         worker_id: &str,
         authorized: Option<&HashSet<ProjectId>>,
         caps: Option<&WorkerCaps>,
+        local_store: Option<&WorkerStorePathBloomFilter>,
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
         alone: &WorkerContext<'_>,
@@ -1024,13 +1114,13 @@ impl JobTracker {
             .get(&job_id)
             .filter(|job| visible_to(job, authorized, caps))
             .map(|job| {
-                let score = self.scores.get(worker_id).and_then(|ws| ws.get(&job_id));
+                let score = score_worker_job_by_missing_inputs(local_store, job);
                 let shares = self.project_work_shares(policy, instance);
                 let now = gradient_types::now();
                 self.score_job(
                     &job_id,
                     job,
-                    score,
+                    &score,
                     &shares,
                     policy,
                     instance,
@@ -1105,7 +1195,7 @@ impl JobTracker {
     )]
     fn score_candidates(
         &self,
-        worker_id: &str,
+        local_store: Option<&WorkerStorePathBloomFilter>,
         authorized: Option<&HashSet<ProjectId>>,
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
@@ -1114,7 +1204,6 @@ impl JobTracker {
         worker_ctx: &WorkerContext<'_>,
         exec_peers: &[ExecPeer],
     ) -> Vec<(String, ScoredCandidate)> {
-        let worker_scores = self.scores.get(worker_id);
         let shares = self.project_work_shares(policy, instance);
         let now = gradient_types::now();
 
@@ -1129,9 +1218,9 @@ impl JobTracker {
                 )
             })
             .map(|(id, job)| {
-                let score = worker_scores.and_then(|ws| ws.get(id));
+                let score = score_worker_job_by_missing_inputs(local_store, job);
                 let candidate = self.score_job(
-                    id, job, score, &shares, policy, instance, worker_ctx, exec_peers, now,
+                    id, job, &score, &shares, policy, instance, worker_ctx, exec_peers, now,
                 );
                 (id.clone(), candidate)
             })
@@ -1153,7 +1242,7 @@ impl JobTracker {
         &self,
         id: &str,
         job: &PendingJob,
-        score: Option<&WorkerJobScore>,
+        score: &WorkerJobScore,
         shares: &ProjectWorkShare,
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
@@ -1184,9 +1273,9 @@ impl JobTracker {
         };
         let ctx = JobContext {
             job: &scored_job,
-            missing_count: score.map(|s| s.missing_count),
-            missing_nar_size: score.map(|s| s.missing_nar_size),
-            outputs_present: score.is_some_and(|s| s.outputs_present),
+            missing_count: Some(score.missing_count),
+            missing_nar_size: Some(score.missing_nar_size),
+            outputs_present: score.outputs_present,
             substitute_outputs: job.substitute_outputs(),
             dependency_count: job.dependency_count(),
             queued_at: job.queued_at(),
@@ -1218,20 +1307,20 @@ impl JobTracker {
 
     pub fn member_record(
         &self,
-        worker_id: &str,
         caps: Option<&WorkerCaps>,
+        local_store: Option<&WorkerStorePathBloomFilter>,
         key: &str,
         job: &PendingJob,
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
     ) -> AssignmentRecord {
         let worker_ctx = worker_context_of(caps);
-        let score = self.scores.get(worker_id).and_then(|ws| ws.get(key));
+        let score = score_worker_job_by_missing_inputs(local_store, job);
         let shares = self.project_work_shares(policy, instance);
         let sc = self.score_job(
             key,
             job,
-            score,
+            &score,
             &shares,
             policy,
             instance,
@@ -1365,6 +1454,7 @@ impl JobTracker {
         job_id: &str,
         mut record: AssignmentRecord,
         caps: Option<&WorkerCaps>,
+        local_store: Option<&WorkerStorePathBloomFilter>,
     ) -> Option<Assignment> {
         let mut job = self.pending.remove(job_id)?;
         let Some(wire_job) = job.assigned_job(caps, &mut record, None) else {
@@ -1373,11 +1463,7 @@ impl JobTracker {
         };
         self.waiting_builds
             .retain(|_, waiting| waiting.job_id != job_id);
-        let outputs_present = self
-            .scores
-            .get_mut(worker_id)
-            .and_then(|ws| ws.remove(job_id))
-            .is_some_and(|score| score.outputs_present);
+        let outputs_present = score_worker_job_by_missing_inputs(local_store, &job).outputs_present;
 
         let assignment_id = record.assignment_id;
         let assignment = Assignment {
@@ -1541,18 +1627,6 @@ impl JobTracker {
 
     pub fn active_cluster(&self, job_id: &str) -> Option<ClusterAttemptId> {
         self.active.get(job_id).and_then(|a| a.cluster)
-    }
-
-    pub fn member_scores(&self, keys: &HashSet<&str>) -> HashMap<(String, String), WorkerJobScore> {
-        self.scores
-            .iter()
-            .flat_map(|(worker, scores)| {
-                scores
-                    .iter()
-                    .filter(|(key, _)| keys.contains(key.as_str()))
-                    .map(|(key, score)| ((worker.clone(), key.clone()), score.clone()))
-            })
-            .collect()
     }
 
     pub fn remove_active(&mut self, job_id: &str) -> Option<PendingJob> {
@@ -2039,6 +2113,7 @@ mod tests {
         BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep,
         GradientCapabilities, GuestSize,
     };
+    use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_two_u64_words;
 
     fn take_exec(tracker: &mut JobTracker, worker: &str, caps: &WorkerCaps) -> Option<Assignment> {
         take_exec_beside(tracker, worker, caps, &[])
@@ -2056,6 +2131,7 @@ mod tests {
             worker,
             None,
             Some(caps),
+            None,
             &JobKind::Exec,
             &*policy,
             &instance,
@@ -2337,7 +2413,7 @@ mod tests {
                 run_overrides: None,
                 nix_evaluation_fetch_url_access: Default::default(),
             },
-            required_paths: vec![],
+            shared_direct_input_store_paths_with_probe_words_and_nar_sizes: Default::default(),
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
@@ -2375,7 +2451,7 @@ mod tests {
                 run_overrides: None,
                 nix_evaluation_fetch_url_access: Default::default(),
             },
-            required_paths: vec![],
+            shared_direct_input_store_paths_with_probe_words_and_nar_sizes: Default::default(),
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
@@ -2610,7 +2686,7 @@ mod tests {
         );
     }
 
-    fn build_job(peer: ProjectId, required: Vec<RequiredPath>) -> PendingJob {
+    fn build_job(peer: ProjectId, required: Vec<PendingJobInputStorePath>) -> PendingJob {
         build_job_arch(peer, required, "x86_64-linux", vec![])
     }
 
@@ -2636,7 +2712,7 @@ mod tests {
 
     fn build_job_arch(
         peer: ProjectId,
-        required: Vec<RequiredPath>,
+        required: Vec<PendingJobInputStorePath>,
         architecture: &str,
         required_features: Vec<String>,
     ) -> PendingJob {
@@ -2663,7 +2739,8 @@ mod tests {
                     required_features,
                 },
             },
-            required_paths: required,
+            shared_direct_input_store_paths_with_probe_words_and_nar_sizes: required.into(),
+            output_path_bloom_filter_probe_words_after_store_path_mapping: Default::default(),
             dependency_count: 0,
             closure_size: None,
             prefer_local_build: false,
@@ -2809,7 +2886,7 @@ mod tests {
         let record = record_for(&tracker, "build:1");
         assert!(
             tracker
-                .assign_pending("worker", "build:1", record, None)
+                .assign_pending("worker", "build:1", record, None, None)
                 .is_some(),
             "job should assign"
         );
@@ -2829,7 +2906,7 @@ mod tests {
         tracker.add_pending(job_id.into(), build_job(ProjectId::now_v7(), vec![]));
         let record = record_for(tracker, job_id);
         tracker
-            .assign_pending("w1", job_id, record, None)
+            .assign_pending("w1", job_id, record, None, None)
             .expect("the job assigns");
     }
 
@@ -2959,6 +3036,7 @@ mod tests {
                     "w1",
                     None,
                     Some(&no_fetch),
+                    None,
                     &JobKind::Flake,
                     &*p,
                     &inst,
@@ -2986,6 +3064,7 @@ mod tests {
                     "w2",
                     None,
                     Some(&with_fetch),
+                    None,
                     &JobKind::Flake,
                     &*p,
                     &inst,
@@ -3019,6 +3098,7 @@ mod tests {
                     "w1",
                     None,
                     Some(&eval_no_fetch),
+                    None,
                     &JobKind::Flake,
                     &*p,
                     &inst,
@@ -3054,6 +3134,7 @@ mod tests {
                     "w1",
                     None,
                     Some(&fetch_build),
+                    None,
                     &JobKind::Flake,
                     &*p,
                     &inst,
@@ -3080,6 +3161,7 @@ mod tests {
             "w1",
             None,
             Some(&x86_caps),
+            None,
             &JobKind::Build,
             &*p,
             &inst,
@@ -3113,22 +3195,20 @@ mod tests {
             ..Default::default()
         };
         let (restricted, other) = (caps(RESTRICTED_WORKER), caps("other"));
-        for (w, id) in [(RESTRICTED_WORKER, "trusted"), ("other", "untrusted")] {
-            tracker.record_scores(
-                w,
-                vec![CandidateScore {
-                    job_id: id.into(),
-                    missing_count: 0,
-                    missing_nar_size: 0,
-                    outputs_present: false,
-                }],
-            );
-        }
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let mut take = |worker: &str, caps: &WorkerCaps| {
             tracker
-                .take_best_of_kind(worker, None, Some(caps), &JobKind::Build, &*p, &inst, &[])
+                .take_best_of_kind(
+                    worker,
+                    None,
+                    Some(caps),
+                    None,
+                    &JobKind::Build,
+                    &*p,
+                    &inst,
+                    &[],
+                )
                 .map(|a| a.job_id().to_owned())
         };
 
@@ -3150,22 +3230,20 @@ mod tests {
         );
         let no_kvm = build_caps(&["x86_64-linux"], &[]);
         let with_kvm = build_caps(&["x86_64-linux"], &["kvm"]);
-        for w in ["w1", "w2"] {
-            tracker.record_scores(
-                w,
-                vec![CandidateScore {
-                    job_id: "kvm".into(),
-                    missing_count: 0,
-                    missing_nar_size: 0,
-                    outputs_present: false,
-                }],
-            );
-        }
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &*p, &inst, &[])
+                .take_best_of_kind(
+                    "w1",
+                    None,
+                    Some(&no_kvm),
+                    None,
+                    &JobKind::Build,
+                    &*p,
+                    &inst,
+                    &[]
+                )
                 .is_none()
         );
         assert!(
@@ -3174,6 +3252,7 @@ mod tests {
                     "w2",
                     None,
                     Some(&with_kvm),
+                    None,
                     &JobKind::Build,
                     &*p,
                     &inst,
@@ -3187,13 +3266,13 @@ mod tests {
     fn records_assign_decisions_including_rejected_candidates() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
-        tracker.add_pending("j1".into(), build_job(peer, vec![]));
-        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
+        tracker.add_pending("vetoed".into(), build_job(peer, vec![]));
+        let p = gradient_pool::score::RulePolicy::new("test", vec![Box::new(PreferAndVeto)], false);
         let inst = gradient_pool::score::InstanceContext::default();
 
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[])
+                .take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[])
                 .is_none()
         );
         let decisions = tracker.recent_decisions();
@@ -3201,51 +3280,37 @@ mod tests {
         assert!(decisions[0].winner.is_none());
         assert_eq!(decisions[0].candidates.len(), 1);
         let candidate = &decisions[0].candidates[0];
-        assert_eq!(candidate.job_id, "j1");
+        assert_eq!(candidate.job_id, "vetoed");
         assert!(!candidate.won);
         let vetoes = candidate.score_breakdown["vetoes"]
             .as_array()
             .expect("a vetoed candidate records its vetoes");
-        assert!(
-            vetoes.iter().any(|v| v == "RescoreWaitRule"),
-            "the rescore hold must be visible on the rejected candidate"
-        );
+        assert!(vetoes.iter().any(|v| v == "PreferAndVeto"));
 
-        tracker.record_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-                outputs_present: false,
-            }],
-        );
+        tracker.add_pending("valid".into(), build_job(peer, vec![]));
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[])
+                .take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[])
                 .is_some()
         );
         let decisions = tracker.recent_decisions();
         assert_eq!(decisions.len(), 2, "most recent first");
-        assert_eq!(decisions[0].winner.as_deref(), Some("j1"));
+        assert_eq!(decisions[0].winner.as_deref(), Some("valid"));
     }
 
     #[test]
     fn candidates_carry_ephemeral_id_and_breakdown_for_detail_lookup() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
-        tracker.add_pending("j1".into(), build_job(peer, vec![]));
-        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
+        tracker.add_pending("vetoed".into(), build_job(peer, vec![]));
+        let p = gradient_pool::score::RulePolicy::new("test", vec![Box::new(PreferAndVeto)], false);
         let inst = gradient_pool::score::InstanceContext::default();
 
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[]);
+        tracker.take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[]);
 
         let decisions = tracker.recent_decisions();
         let cand = &decisions[0].candidates[0];
-        assert!(
-            !cand.won,
-            "an uncached candidate is passed over, not dispatched"
-        );
+        assert!(!cand.won);
         assert!(
             cand.score_breakdown.get("rules").is_some(),
             "candidate must carry its per-rule breakdown for the detail page"
@@ -3285,7 +3350,7 @@ mod tests {
                 }],
             );
         }
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[]);
+        tracker.take_best_of_kind("w1", None, None, None, &JobKind::Build, &*p, &inst, &[]);
 
         tracker.remove_active("build:j1");
         assert!(
@@ -3363,44 +3428,89 @@ mod tests {
     }
 
     #[test]
-    fn unscored_build_is_gated_until_scored() {
+    fn worker_store_summary_records_missing_direct_input_count_and_nar_size_for_pending_build_and_without_summary_counts_all()
+     {
+        let hashes = [
+            "0123456789abcdfghijklmnpqrsvwxyz",
+            "1123456789abcdfghijklmnpqrsvwxyz",
+            "2123456789abcdfghijklmnpqrsvwxyz",
+        ];
+        let inputs = hashes
+            .iter()
+            .zip([100, 200, 300])
+            .map(|(hash, nar_size)| PendingJobInputStorePath {
+                store_path_bloom_filter_probe_words: decode_store_path_hash_into_two_u64_words(
+                    hash,
+                ),
+                nar_size,
+            })
+            .collect();
         let mut tracker = JobTracker::new();
-        let peer = ProjectId::now_v7();
-        tracker.add_pending(
-            "j1".into(),
-            build_job(
-                peer,
-                vec![RequiredPath {
-                    path: "/nix/store/foo".into(),
-                    cache_info: None,
-                }],
-            ),
-        );
-
+        tracker.add_pending("j1".into(), build_job(ProjectId::now_v7(), inputs));
+        let holds_two = WorkerStorePathBloomFilter::from_store_path_hash_parts(&hashes[..2]);
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
 
-        assert!(
-            tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[])
-                .is_none()
-        );
-        assert_eq!(tracker.pending_count(), 1);
+        let job = tracker.pending_job("j1").expect("pending");
+        let without_summary = tracker.member_record(None, None, "j1", job, &*p, &inst);
+        assert_eq!(without_summary.job_context["missing_count"], 3);
+        assert_eq!(without_summary.job_context["missing_nar_size"], 600);
 
-        tracker.record_scores(
+        let assignment = tracker.take_best_of_kind(
             "w1",
-            vec![CandidateScore {
-                job_id: "j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-                outputs_present: false,
-            }],
+            None,
+            None,
+            Some(&holds_two),
+            &JobKind::Build,
+            &*p,
+            &inst,
+            &[],
         );
-        let assignment =
-            tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst, &[]);
-        assert_eq!(assignment.unwrap().job_id(), "j1");
-        assert_eq!(tracker.pending_count(), 0);
-        assert_eq!(tracker.active_count(), 1);
+        assert_eq!(
+            assignment.map(|a| a.job_id().to_owned()).as_deref(),
+            Some("j1")
+        );
+        let candidate = &tracker.recent_decisions()[0].candidates[0];
+        assert!(candidate.won);
+        assert_eq!(candidate.job_context["missing_count"], 1);
+        assert_eq!(candidate.job_context["missing_nar_size"], 300);
+    }
+
+    #[test]
+    fn worker_store_summary_sets_outputs_present_and_ram_need() {
+        let output_hash = "0123456789abcdfghijklmnpqrsvwxyz";
+        let mut tracker = JobTracker::new();
+        for key in ["j1", "j2"] {
+            let mut job = build_job(ProjectId::now_v7(), vec![]);
+            if let PendingJob::Build(build) = &mut job {
+                build.output_path_bloom_filter_probe_words_after_store_path_mapping =
+                    [decode_store_path_hash_into_two_u64_words(output_hash)].into();
+            }
+            tracker.add_pending(key.into(), job);
+        }
+        let holds_output = WorkerStorePathBloomFilter::from_store_path_hash_parts(&[output_hash]);
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
+        let inst = gradient_pool::score::InstanceContext::default();
+        let mut take = |worker: &str, local_store: Option<&WorkerStorePathBloomFilter>| {
+            tracker
+                .take_best_of_kind(
+                    worker,
+                    None,
+                    None,
+                    local_store,
+                    &JobKind::Build,
+                    &*p,
+                    &inst,
+                    &[],
+                )
+                .expect("a build is assigned")
+                .ram_need
+        };
+
+        assert_eq!(take("w2", None), RamNeed::Unmeasured);
+        assert_eq!(take("w1", Some(&holds_output)), RamNeed::Negligible);
+        let candidate = &tracker.recent_decisions()[0].candidates[0];
+        assert_eq!(candidate.job_context["outputs_present"], true);
     }
 
     #[derive(Debug)]
@@ -3445,7 +3555,7 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
 
         let assignment =
-            tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &p, &inst, &[]);
+            tracker.take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[]);
 
         assert_eq!(
             assignment.map(|a| a.job_id().to_owned()).as_deref(),
@@ -3484,7 +3594,7 @@ mod tests {
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment =
-            tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[]);
+            tracker.take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[]);
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
@@ -3508,6 +3618,7 @@ mod tests {
             "w1",
             None,
             None,
+            None,
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
@@ -3515,6 +3626,7 @@ mod tests {
         );
         tracker.take_best_of_kind(
             "w1",
+            None,
             None,
             None,
             &JobKind::Flake,
@@ -3542,9 +3654,9 @@ mod tests {
             "j1".into(),
             build_job(
                 peer,
-                vec![RequiredPath {
-                    path: "/nix/store/x".into(),
-                    cache_info: None,
+                vec![PendingJobInputStorePath {
+                    store_path_bloom_filter_probe_words: None,
+                    nar_size: 0,
                 }],
             ),
         );
@@ -3553,7 +3665,7 @@ mod tests {
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment =
-            tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[]);
+            tracker.take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[]);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id(), "j2");
     }
@@ -3571,6 +3683,7 @@ mod tests {
             "w1",
             None,
             None,
+            None,
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
@@ -3580,6 +3693,7 @@ mod tests {
             "w1",
             None,
             None,
+            None,
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
@@ -3587,6 +3701,7 @@ mod tests {
         );
         tracker.take_best_of_kind(
             "w1",
+            None,
             None,
             None,
             &JobKind::Flake,
@@ -3615,6 +3730,7 @@ mod tests {
             "w1",
             None,
             None,
+            None,
             &JobKind::Flake,
             &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             &gradient_pool::score::InstanceContext::default(),
@@ -3636,6 +3752,7 @@ mod tests {
 
         tracker.take_best_of_kind(
             "w1",
+            None,
             None,
             None,
             &JobKind::Flake,
@@ -3663,6 +3780,7 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.take_best_of_kind(
             "w1",
+            None,
             None,
             None,
             &JobKind::Flake,
@@ -3727,7 +3845,7 @@ mod tests {
         let key = job.job_key();
         let mut tracker = JobTracker::new();
         let record = tracker.member_record(
-            "w1",
+            None,
             None,
             &key,
             &job,
@@ -3757,7 +3875,7 @@ mod tests {
         };
         original.job.flake_dir = Some("nix/hosts".into());
 
-        let follow = original.cached_followup("/nix/store/abc-source".into());
+        let follow = original.cached_followup("/nix/store/abc-source".into(), None);
 
         assert_eq!(follow.job.flake_dir.as_deref(), Some("nix/hosts"));
     }
@@ -3769,27 +3887,29 @@ mod tests {
             unreachable!()
         };
 
-        let follow = original.cached_followup("/nix/store/abc-source".into());
+        let source_hash = "0123456789abcdfghijklmnpqrsvwxyz";
+        let source = format!("/nix/store/{source_hash}-source");
+        let follow = original.cached_followup(source.clone(), None);
 
         assert_eq!(
             follow.job.steps,
             vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations]
         );
         match &follow.job.source {
-            FlakeSource::Cached { store_path, .. } => {
-                assert_eq!(store_path, "/nix/store/abc-source")
-            }
+            FlakeSource::Cached { store_path, .. } => assert_eq!(store_path, &source),
             other => panic!("expected Cached, got {other:?}"),
         }
         assert_eq!(follow.evaluation_id, original.evaluation_id);
         assert_eq!(follow.project_id, original.project_id);
         assert_eq!(follow.repository, original.repository);
-        assert_eq!(follow.required_paths.len(), 1);
-        assert!(
-            follow
-                .required_paths
-                .iter()
-                .any(|p| p.path == "/nix/store/abc-source")
+        let words = decode_store_path_hash_into_two_u64_words(source_hash);
+        assert!(words.is_some());
+        assert_eq!(
+            *follow.shared_direct_input_store_paths_with_probe_words_and_nar_sizes,
+            [PendingJobInputStorePath {
+                store_path_bloom_filter_probe_words: words,
+                nar_size: 0,
+            }]
         );
     }
 
@@ -3804,7 +3924,7 @@ mod tests {
         assert_eq!(tracker.rescore_count_of("build:1"), 2);
 
         let record = record_for(&tracker, "build:1");
-        tracker.assign_pending("worker", "build:1", record, None);
+        tracker.assign_pending("worker", "build:1", record, None, None);
         tracker.bump_rescore_counts();
         assert_eq!(
             tracker.rescore_count_of("build:1"),
@@ -3871,7 +3991,7 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[])
+                .take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[])
                 .is_none()
         );
     }
@@ -4047,7 +4167,7 @@ mod tests {
         tracker.add_pending("single".into(), eval_job(peer));
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[]);
+        tracker.take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[]);
         tracker.activate_members(
             attempt,
             vec![(
@@ -4088,7 +4208,7 @@ mod tests {
         let key = build_job_key(shared_build);
 
         let rec = tracker.member_record(
-            "w1",
+            None,
             None,
             &key,
             &job,
@@ -4164,7 +4284,7 @@ mod tests {
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let claimed = tracker
-            .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst, &[])
+            .take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[])
             .expect("w1 claims eval:x")
             .assignment_id();
         let reattached = DispatchedJobId::now_v7();

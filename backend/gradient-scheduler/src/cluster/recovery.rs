@@ -164,6 +164,7 @@ impl Scheduler {
                 .call(|reply| SchedulerMsg::Release {
                     worker,
                     job_id,
+                    job_succeeded: false,
                     reply,
                 })
                 .await;

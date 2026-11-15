@@ -12,6 +12,7 @@ use gradient_types::ids::ProjectId;
 use gradient_wire::types::{
     BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, GuestSize, JobKind,
 };
+use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
 use crate::job_policy::{AllowedJobs, EveryJobAllowed, WorkerJobPolicy};
 use crate::peer_auth::PeerAuth;
@@ -187,6 +188,39 @@ impl WorkerPool {
                 allowed_jobs: AllowedJobs::of(id, &self.job_policy),
             }
         })
+    }
+
+    pub fn worker_local_store_bloom_filter(&self, id: &str) -> Option<&WorkerStorePathBloomFilter> {
+        self.workers
+            .get(id)
+            .and_then(|slot| slot.shared().local_store_bloom_filter.as_ref())
+    }
+
+    pub fn replace_worker_local_store_bloom_filter(
+        &mut self,
+        id: &str,
+        filter: WorkerStorePathBloomFilter,
+    ) {
+        if let Some(slot) = self.workers.get_mut(id) {
+            slot.shared_mut().local_store_bloom_filter = Some(filter);
+        }
+    }
+
+    pub fn add_store_path_probe_words_to_worker_local_store_bloom_filter(
+        &mut self,
+        id: &str,
+        probe_words: impl IntoIterator<Item = [u64; 2]>,
+    ) {
+        let Some(filter) = self
+            .workers
+            .get_mut(id)
+            .and_then(|slot| slot.shared_mut().local_store_bloom_filter.as_mut())
+        else {
+            return;
+        };
+        for words in probe_words {
+            filter.insert_probe_words_into_filter(words);
+        }
     }
 
     pub fn update_capabilities(&mut self, id: &str, profile: crate::WorkerProfile) {

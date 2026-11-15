@@ -20,17 +20,20 @@ use gradient_wire::types::{
     BuildFailureKind, BuildMetrics, BuildSpecKind, BumpedInputWire, EvalMessageLevel,
     EvalStatsReport, FlakeSource, FlakeStep, Job, JobKind, JobPhase, JobPhaseSpan,
 };
+use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_two_u64_words;
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, SchedulerCase, ago, attr_of, build_output, drv,
-    drv_nar, eval_key, failure, is_recent, job_ids, output_nar, span, w_all, w_eval,
-    w_network_eval, with_attr, with_output,
+    drv_nar, eval_key, failure, is_recent, output_nar, span, w_all, w_eval, w_network_eval,
+    with_attr, with_output,
 };
 use crate::jobs::PendingJob;
+use crate::pending_job_input_store_paths::PendingJobInputStorePath;
 
 const W1: &str = "w1";
 const W2: &str = "w2";
-const SOURCE: &str = "/nix/store/src1-source";
+const SOURCE_HASH: &str = "1b9p07z77phvv2hf6gm9f28syp39f1ag";
+const SOURCE: &str = "/nix/store/1b9p07z77phvv2hf6gm9f28syp39f1ag-source";
 
 #[tokio::test]
 async fn r01_the_building_report_moves_queued_to_building_and_opens_the_attempt() {
@@ -39,7 +42,7 @@ async fn r01_the_building_report_moves_queued_to_building_and_opens_the_attempt(
     case.connect(W1, w_all(), &[]).await;
     let a = case.key(A).await;
 
-    claim(&case, &[W1], W1).await;
+    claim(&case, W1).await;
     assert_eq!(
         case.sb(A).await.status,
         BuildStatus::Queued,
@@ -89,7 +92,7 @@ async fn r02_a_completion_without_a_building_report_leaves_no_second_running_att
     case.connect(W2, w_all(), &[]).await;
     let a = case.key(A).await;
 
-    let a1 = claim(&case, &[W1, W2], W1).await;
+    let a1 = claim(&case, W1).await;
     case.check("step 1").await;
 
     case.commit_nar(output_nar(A, A_OUT)).await;
@@ -112,8 +115,6 @@ async fn r02_a_completion_without_a_building_report_leaves_no_second_running_att
     assert!(!case.pending(&a).await, "after 3: pending(build:A)");
     case.check("step 3").await;
 
-    case.offers_delta(W2).await;
-    case.score_all(W2).await;
     let taken = case.request_job(W2, JobKind::Build).await;
     assert!(taken.is_none(), "after 4: result == nothing");
     case.check("step 4").await;
@@ -128,7 +129,7 @@ async fn r03_a_failure_after_a_completion_and_a_second_completion_change_nothing
     case.connect(W1, w_all(), &[]).await;
     let a = case.key(A).await;
 
-    let a1 = claim(&case, &[W1], W1).await;
+    let a1 = claim(&case, W1).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
 
@@ -199,7 +200,7 @@ async fn r04_each_build_output_writes_a_metric_row() {
         ..Default::default()
     };
 
-    claim(&case, &[W1], W1).await;
+    claim(&case, W1).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
 
@@ -255,7 +256,7 @@ async fn r05_a_report_for_a_reaped_job_leaves_the_closed_row_and_the_graph_alone
     case.connect(W1, w_all(), &[]).await;
     let a = case.key(A).await;
 
-    let a1 = claim(&case, &[W1], W1).await;
+    let a1 = claim(&case, W1).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
 
@@ -314,7 +315,7 @@ async fn r06_a_report_with_the_id_of_a_rejected_claim_is_dropped_once_another_wo
     case.connect(W2, w_all(), &[]).await;
     let a = case.key(A).await;
 
-    let a1 = claim(&case, &[W1, W2], W1).await;
+    let a1 = claim(&case, W1).await;
     case.reject(W1, &a).await;
     case.check("step 1").await;
 
@@ -369,15 +370,13 @@ async fn r07_a_failure_with_an_old_id_of_a_lost_worker_does_not_fail_the_build_o
     case.connect(W2, w_all(), &[]).await;
     let a = case.key(A).await;
 
-    let a1 = claim(&case, &[W1, W2], W1).await;
+    let a1 = claim(&case, W1).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
 
     case.disconnect(W1).await;
     case.check("step 2").await;
 
-    case.offers_delta(W2).await;
-    case.score_all(W2).await;
     let a2 = case
         .request_job(W2, JobKind::Build)
         .await
@@ -444,7 +443,7 @@ async fn r08_a_transient_failure_retries_with_backoff_then_fails_permanently() {
     case.connect(W1, w_all(), &[]).await;
     let a = case.key(A).await;
 
-    let a1 = claim(&case, &[W1], W1).await;
+    let a1 = claim(&case, W1).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
 
@@ -552,7 +551,7 @@ async fn r09_a_permanent_failure_fails_the_dependents_in_both_evaluations() {
     case.connect(W1, w_all(), &[]).await;
     let b = case.key(B).await;
 
-    let a1 = claim(&case, &[W1], W1).await;
+    let a1 = claim(&case, W1).await;
     assert_eq!(
         case.open_assignment(&b).await.map(|row| row.id),
         Some(a1),
@@ -630,7 +629,7 @@ async fn r10_a_timeout_failure_is_failed_timeout_and_fails_the_dependent() {
     case.connect(W1, w_all(), &[]).await;
     let b = case.key(B).await;
 
-    let a1 = claim(&case, &[W1], W1).await;
+    let a1 = claim(&case, W1).await;
     case.report_building(W1, &b).await;
     case.check("step 1").await;
 
@@ -682,7 +681,7 @@ async fn r11_a_second_substitute_miss_turns_the_passthrough_into_a_real_build() 
     let (a, b) = (case.key(A).await, case.key(B).await);
     let attempt = case.sb(A).await.attempt;
 
-    offered(&case, &[W1]).await;
+    case.admit_startable_moves().await;
     let a1 = substitute(&case, W1, &a).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
@@ -710,8 +709,6 @@ async fn r11_a_second_substitute_miss_turns_the_passthrough_into_a_real_build() 
         case.pending(&a).await,
         "after 3: pending(build:A) after the admission"
     );
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let a2 = substitute(&case, W1, &a).await;
     case.report_building(W1, &a).await;
     case.check("step 3").await;
@@ -787,7 +784,7 @@ async fn r12_inputs_unavailable_removes_the_missing_input_and_retries_after_it_i
     case.connect(W1, w_all(), &[]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
-    let a1 = claim(&case, &[W1], W1).await;
+    let a1 = claim(&case, W1).await;
     case.report_building(W1, &a).await;
     case.check("step 1").await;
 
@@ -853,7 +850,7 @@ async fn r13_a_canceled_build_closes_the_row_abandoned_and_requeues_without_an_a
     let a = case.key(A).await;
     let attempt = case.sb(A).await.attempt;
 
-    let a1 = claim(&case, &[W1, W2], W1).await;
+    let a1 = claim(&case, W1).await;
     case.report_building(W1, &a).await;
     case.signals(W2);
     case.check("step 1").await;
@@ -883,8 +880,6 @@ async fn r13_a_canceled_build_closes_the_row_abandoned_and_requeues_without_an_a
     case.check("step 2").await;
 
     case.admit_startable_moves().await;
-    case.offers_delta(W2).await;
-    case.score_all(W2).await;
     let taken = case.request_job(W2, JobKind::Build).await;
     assert_eq!(
         taken.as_ref().map(|j| j.job_id().to_owned()),
@@ -1015,8 +1010,6 @@ async fn a_corruption_within_the_heal_window_fails_instead_of_healing_again() {
 
 async fn evaluate_again(case: &SchedulerCase, key: &str) -> DispatchedJobId {
     case.assign_queued_evals().await;
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Flake)
         .await
@@ -1055,7 +1048,6 @@ async fn r16_status_reports_move_the_evaluation_forward_and_skip_a_backwards_mov
     case.connect(W1, w_all(), &[]).await;
     case.refresh_waiting_state().await;
     case.assign_queued_evals().await;
-    case.score_all(W1).await;
     case.request_job(W1, JobKind::Flake)
         .await
         .expect("after 0: W1 gets eval:E1");
@@ -1119,27 +1111,14 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
     case.connect(W2, w_eval(), &[]).await;
 
     case.assign_queued_evals().await;
-    let fetch_offer = case.offers_full(W1).await;
-    let eval_offer = case.offers_full(W2).await;
     assert!(case.pending(&k).await, "after 1: pending(eval:E1)");
     assert_eq!(
         case.pending_flake_job(&k).await.map(|j| j.steps),
         Some(vec![FlakeStep::FetchFlake]),
         "after 1: steps of the pending job"
     );
-    assert_eq!(
-        job_ids(&fetch_offer),
-        vec![k.clone()],
-        "after 1: offers(W1)"
-    );
-    assert_eq!(
-        job_ids(&eval_offer),
-        Vec::<String>::new(),
-        "after 1: offers(W2)"
-    );
     case.check("step 1").await;
 
-    case.score_all(W1).await;
     let nothing = case.request_job(W2, JobKind::Flake).await;
     assert!(nothing.is_none(), "after 2: W2 gets nothing");
     let fetch = case
@@ -1203,15 +1182,15 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
         },
         "after 4: source of the follow-up"
     );
-    let required: Vec<_> = follow_up
-        .required_paths
-        .iter()
-        .map(|p| p.path.as_str())
-        .collect();
     assert_eq!(
-        required,
-        vec![SOURCE],
-        "after 4: required_paths of the follow-up"
+        *follow_up.shared_direct_input_store_paths_with_probe_words_and_nar_sizes,
+        [PendingJobInputStorePath {
+            store_path_bloom_filter_probe_words: decode_store_path_hash_into_two_u64_words(
+                SOURCE_HASH
+            ),
+            nar_size: 0,
+        }],
+        "after 4: direct inputs of the follow-up"
     );
     assert_eq!(
         case.evaluation_metric(e1).await.map(|m| m.fetch_ms),
@@ -1225,13 +1204,6 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
     );
     case.check("step 4").await;
 
-    let offer = case.offers_delta(W2).await;
-    assert_eq!(
-        job_ids(&offer),
-        vec![k.clone()],
-        "after 5: offers result.candidates"
-    );
-    case.score_all(W2).await;
     let a2 = case
         .request_job(W2, JobKind::Flake)
         .await
@@ -1265,8 +1237,6 @@ async fn r18_a_completed_fetch_job_without_a_flake_source_fails_the_evaluation()
     case.connect(W2, w_eval(), &[]).await;
 
     case.assign_queued_evals().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Flake)
         .await
@@ -1741,7 +1711,7 @@ async fn r25_the_abandoned_dispatch_sweep_closes_only_old_untracked_rows() {
     case.connect(W1, w_all(), &[]).await;
     let (a, b, c) = (case.key(A).await, case.key(B).await, case.key(C).await);
 
-    let a3 = claim(&case, &[W1], W1).await;
+    let a3 = claim(&case, W1).await;
     assert_eq!(
         case.open_assignment(&c).await.map(|row| row.id),
         Some(a3),
@@ -1794,8 +1764,6 @@ async fn r26_phase_spans_are_stored_with_the_parent_on_completion_and_failure() 
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let mut taken = Vec::new();
     for _ in 0..2 {
         let assignment = case
@@ -1871,18 +1839,8 @@ async fn r26_phase_spans_are_stored_with_the_parent_on_completion_and_failure() 
     case.finish().await;
 }
 
-async fn offered(case: &SchedulerCase, workers: &[&str]) {
+async fn claim(case: &SchedulerCase, winner: &str) -> DispatchedJobId {
     case.admit_startable_moves().await;
-    for worker in workers {
-        case.offers_full(worker).await;
-    }
-    for worker in workers {
-        case.score_all(worker).await;
-    }
-}
-
-async fn claim(case: &SchedulerCase, workers: &[&str], winner: &str) -> DispatchedJobId {
-    offered(case, workers).await;
     case.request_job(winner, JobKind::Build)
         .await
         .unwrap_or_else(|| panic!("after 1: {winner} gets a build"))
@@ -1918,8 +1876,6 @@ async fn retry_after(case: &SchedulerCase, secs: f64) {
     tokio::time::sleep(Duration::from_secs_f64(secs)).await;
     case.requeue_transient_retries().await;
     case.admit_startable_moves().await;
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
 }
 
 fn transient(error: &str) -> super::Failure {

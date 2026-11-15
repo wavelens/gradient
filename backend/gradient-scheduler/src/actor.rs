@@ -16,6 +16,7 @@ use gradient_types::ids::{
 use gradient_wire::types::{
     BuildStage, CandidateScore, GradientCapabilities, JobCandidate, JobKind,
 };
+use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info, warn};
 
@@ -169,6 +170,11 @@ pub enum SchedulerMsg {
         metrics: WorkerMetrics,
         reply: RpcReplyPort<()>,
     },
+    UpdateWorkerLocalStoreBloomFilter {
+        worker: String,
+        filter: WorkerStorePathBloomFilter,
+        reply: RpcReplyPort<()>,
+    },
     CancelDraining {
         worker: String,
         reply: RpcReplyPort<bool>,
@@ -281,6 +287,7 @@ pub enum SchedulerMsg {
     Release {
         worker: String,
         job_id: String,
+        job_succeeded: bool,
         reply: RpcReplyPort<Released>,
     },
     AbortJob {
@@ -630,6 +637,7 @@ impl SchedulerCore {
             worker,
             authorized.as_ref(),
             caps.as_ref(),
+            self.pool.worker_local_store_bloom_filter(worker),
             kind,
             &*policy,
             &instance,
@@ -719,8 +727,8 @@ impl SchedulerCore {
                 let caps = self.pool.worker_caps(&s.worker);
                 self.idle.clear(&s.worker, SlotKind::from(m));
                 let mut record = self.tracker.member_record(
-                    &s.worker,
                     caps.as_ref(),
+                    self.pool.worker_local_store_bloom_filter(&s.worker),
                     &m.key,
                     &job,
                     &*policy,
@@ -839,11 +847,13 @@ impl SchedulerCore {
             .collect();
         clusters.sort_by_key(|c| (!c.prioritized(), c.queued_at, c.id));
         slots.sort_by(|a: &crate::cluster::Slot, b| (&a.worker, a.kind).cmp(&(&b.worker, b.kind)));
-        let keys: HashSet<&str> = clusters
-            .iter()
-            .flat_map(|c| c.members.iter().map(|m| m.key.as_str()))
-            .collect();
-        let scores = self.tracker.member_scores(&keys);
+        let connected = self.pool.all_workers().into_iter().map(|worker| {
+            let local_store = self.pool.worker_local_store_bloom_filter(&worker.id);
+            (worker.id, local_store)
+        });
+        let scores = crate::jobs::score_waiting_cluster_member_jobs_for_connected_workers(
+            &clusters, connected,
+        );
         crate::cluster::ClusterSnapshot {
             clusters,
             slots,
@@ -1059,6 +1069,15 @@ impl Actor for CoreActor {
                 core.pool.update_capabilities(&worker, caps);
                 let _ = reply.send(());
             }
+            SchedulerMsg::UpdateWorkerLocalStoreBloomFilter {
+                worker,
+                filter,
+                reply,
+            } => {
+                core.pool
+                    .replace_worker_local_store_bloom_filter(&worker, filter);
+                let _ = reply.send(());
+            }
             SchedulerMsg::UpdateMetrics {
                 worker,
                 metrics,
@@ -1265,6 +1284,7 @@ impl Actor for CoreActor {
             SchedulerMsg::Release {
                 worker,
                 job_id,
+                job_succeeded,
                 reply,
             } => {
                 let worker_idle = core.pool.release_job(&worker, &job_id);
@@ -1273,6 +1293,23 @@ impl Actor for CoreActor {
                     .is_active_job_on_worker(&worker, &job_id)
                     .then(|| core.tracker.remove_active(&job_id))
                     .flatten();
+                if job_succeeded && let Some(built @ PendingJob::Build(_)) = &job {
+                    let present = built
+                        .direct_inputs()
+                        .iter()
+                        .map(|input| input.store_path_bloom_filter_probe_words)
+                        .chain(
+                            built
+                                .output_path_bloom_filter_probe_words_after_store_path_mapping()
+                                .iter()
+                                .copied(),
+                        )
+                        .flatten();
+                    core.pool
+                        .add_store_path_probe_words_to_worker_local_store_bloom_filter(
+                            &worker, present,
+                        );
+                }
                 let _ = reply.send(Released { job, worker_idle });
             }
             SchedulerMsg::AbortJob {
