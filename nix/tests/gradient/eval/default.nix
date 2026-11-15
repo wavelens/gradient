@@ -160,7 +160,7 @@
       assert warm_ms * 2 < cold_ms, f"second eval was not warm: cold={cold_ms}ms warm={warm_ms}ms"
 
       banner("Assert a fetched source keeps its commit")
-      source = json.loads(machine.succeed(f"${nix} flake metadata --json {REPO}"))["path"]
+      source = json.loads(machine.succeed(f"${nix} flake archive --json {REPO}"))["path"]
       commit = machine.succeed("${git} -C /root/fixture rev-parse HEAD").strip()
       at = lambda rev: f"path:{source}?rev={rev}"
       revision, _ = drive("revision", [
