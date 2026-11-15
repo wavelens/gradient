@@ -223,6 +223,9 @@ pub(crate) fn encode_url_component(value: impl std::fmt::Display) -> String {
 
 pub(crate) async fn decode_cli_poll(res: Response) -> Result<CliPollOutcome, ConnectorError> {
     let status = res.status();
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Ok(CliPollOutcome::RateLimited);
+    }
     let bytes = res.bytes().await?;
 
     if let Ok(env) = serde_json::from_slice::<Envelope<String>>(&bytes)

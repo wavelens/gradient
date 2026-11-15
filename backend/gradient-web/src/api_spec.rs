@@ -323,6 +323,7 @@ pub fn api_spec() -> Result<Spec, SpecError> {
         .merge(routes::account_api())
         .merge(routes::optional_api())
         .merge(routes::auth_sensitive())
+        .merge(routes::cli_device_poll_routes())
         .merge(routes::username_availability_api())
         .merge(routes::webhook_routes())
         .merge(routes::open_api())

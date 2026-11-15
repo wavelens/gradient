@@ -515,8 +515,13 @@ pub(crate) fn auth_sensitive() -> OpenApiRouter<Arc<ServerState>> {
             .routes(routes!(auth::get_oidc_callback))
             .routes(routes!(login_providers::get_provider_login))
             .routes(routes!(login_providers::get_provider_callback))
-            .routes(routes!(auth::post_cli_device_start))
-            .routes(routes!(auth::post_cli_device_poll)),
+            .routes(routes!(auth::post_cli_device_start)),
+    ))
+}
+
+pub(crate) fn cli_device_poll_routes() -> OpenApiRouter<Arc<ServerState>> {
+    unsecured(enveloped(
+        OpenApiRouter::new().routes(routes!(auth::post_cli_device_poll)),
     ))
 }
 
