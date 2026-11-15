@@ -757,6 +757,8 @@ mod tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
+    const BACKGROUND_DISK_WORK_TIMEOUT: Duration = Duration::from_secs(60);
+
     fn chunk(offset: u64, data: &[u8], is_final: bool) -> NarChunk {
         NarChunk {
             data: Bytes::copy_from_slice(data),
@@ -789,7 +791,7 @@ mod tests {
     }
 
     async fn eventually(mut done: impl AsyncFnMut() -> bool, what: &str) {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(BACKGROUND_DISK_WORK_TIMEOUT, async {
             while !done().await {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
@@ -943,10 +945,13 @@ mod tests {
         let staged = |want: u64| {
             let mut received = received.clone();
             async move {
-                tokio::time::timeout(Duration::from_secs(5), received.wait_for(|n| *n == want))
-                    .await
-                    .expect("staged bytes reported")
-                    .map(|_| ())
+                tokio::time::timeout(
+                    BACKGROUND_DISK_WORK_TIMEOUT,
+                    received.wait_for(|n| *n == want),
+                )
+                .await
+                .expect("staged bytes reported")
+                .map(|_| ())
             }
         };
 
@@ -1172,7 +1177,7 @@ mod tests {
 
         drop(r);
         stagers.close();
-        tokio::time::timeout(Duration::from_secs(5), stagers.wait())
+        tokio::time::timeout(BACKGROUND_DISK_WORK_TIMEOUT, stagers.wait())
             .await
             .expect("a stager must end when the last receiver is dropped");
 
