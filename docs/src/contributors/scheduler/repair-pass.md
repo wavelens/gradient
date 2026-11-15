@@ -37,7 +37,7 @@ Run `gradient_db::graph::repair::repair_build_graph(ctx, scope)` (`backend/gradi
 
 ## Repair Steps
 
-All steps share the graph writer's transaction. The first failed step will end the pass and fail the transition. The graph writer can roll back and retry a deadlock or serialization failure.
+All steps share the transaction of the graph writer. Failures stop the pass at the first failed step and fail the transition. The graph writer can roll back the transaction and retry after a deadlock, serialization failure, or lock wait timeout.
 
 | # | Function | Effect |
 |---|---|---|
@@ -88,7 +88,7 @@ Changes to `evaluation.graph_version` can invalidate the per-entry-point status 
 
 ## Consistency Check
 
-`graph_consistency_report` (`backend/gradient-db/src/graph/consistency.rs`) can start every `metrics.graphConsistencyIntervalSecs` (300 s, `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS`). Events move the counters, and no other code can derive them. This check is their only backstop. Each step must complete before the step reading its column.
+`Graph::run_consistency_checks` (`backend/gradient-graph/src/lib.rs`) can start at every interval set in `metrics.graphConsistencyIntervalSecs` (300 seconds, `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS`). Events move the counters, and no other code can derive them. This check is their only backstop. Each step must complete before the step reading its column.
 
 | # | Step | Report field |
 |---|---|---|
@@ -106,7 +106,7 @@ Changes to `evaluation.graph_version` can invalidate the per-entry-point status 
 - **Repair scope:** pending shared builds, their direct dependencies, `fetchable` rows with `missing_runtime_deps > 0`, and terminal-success rows without a set `fetchable` flag. Every pass must log the scope size under the `scope` field.
 - Steps 1 and 2 first compare each counter with its direct inputs. The full recount can only start on a mismatch.
 - Agreeing counters already equal the recount result on the acyclic dependency graph.
-- Each chunk of 3 and 6 is its own transaction, with `lock_shared_builds` (ordered `FOR NO KEY UPDATE`) first and the recount second. A cancelled check can lose one chunk.
+- Each step is a separate transaction by the graph writer. Steps 3, 6, and 7 handle up to 8,000 derivations in one transaction. Steps 3 and 6 first use `try_lock_shared_builds` to lock each slice of 1,000 derivations. They recount that slice. Failed or canceled checks put only the in-progress transaction at risk. Committed steps stay intact.
 - A recount can read one snapshot and spread nothing. A chain of drifted rows will converge one level per interval.
 - Drift counts are rows already repaired. A warning naming only those rows is a successful self-repair.
 - Interval `0` will disable the check and the `graph-stuck-reheal` pass.

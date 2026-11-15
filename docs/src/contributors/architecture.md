@@ -133,7 +133,7 @@ The workspace root is `gradient-server`. All backend crates live under `backend/
 ## Database
 
 - PostgreSQL 18 or newer serves as the sole database. Migrations live in `backend/gradient-migration/src/` and the server applies them at startup ([Migrations](migrations.md)).
-- Deadlocks and serialization failures trigger up to three retries for graph transactions. Passes outside the graph writer get no retry and repeat on their next tick.
+- Graph transactions get up to 5 attempts after a deadlock, serialization failure, or lock wait timeout. Consistency check steps each get exactly one attempt. Background loops outside the graph writer get no retry. Each loop can repeat the work on the next tick.
 - Counter seeds and state changes stay consistent through advisory locks in namespace `643` (`gradient_db::graph::shared_build_guard`) plus hash-ordered row locks ([Shared Builds](scheduler/shared-builds.md)).
 - A `max_locks_per_transaction` value of at least 256 is required. The server logs an error below that threshold.
 - Timestamps use `NaiveDateTime` in UTC. The `NULL_TIME` value (`1970-01-01 00:00:00`) can stand for "never".
