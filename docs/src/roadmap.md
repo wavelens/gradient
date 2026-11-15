@@ -13,13 +13,22 @@ Upcoming releases with the features of each.
 
 ## v2.1.0
 
-Jobs beyond the Nix sandbox.
+Exec jobs outside the Nix sandbox and faster evaluation of large flakes.
 
 <div class="grid cards" markdown>
 
--   :material-play-network: **Exec Workers**
+-   :material-play-network: **Exec Jobs**
 
-    Workers that build outside the sandbox. Integration testing with network access, real hardware or deployment credentials.
+    Programs in a VM on a worker, outside the Nix build sandbox.
+
+    - Integration tests that need network access
+    - Test driver for NixOS
+    - Deployments with credentials
+    - VM clusters across multiple workers
+
+-   :material-graph: **Multi-Node Evaluations**
+
+    Evaluations spread across many workers. Large flakes such as nixpkgs or a fleet of NixOS hosts finish in a fraction of the time.
 
 -   :material-clipboard-list: **SBOM Support**
 
@@ -37,13 +46,13 @@ Jobs beyond the Nix sandbox.
 
 ## v2.2.0
 
-Faster evaluation of large flakes.
+Plugins extend Gradient.
 
 <div class="grid cards" markdown>
 
--   :material-graph: **Multi-Node Evaluations**
+-   :material-puzzle: **Gradient Plugins**
 
-    An evaluation split over many workers. Large flakes like nixpkgs or fleets of NixOS hosts finish in a fraction of the time.
+    Plugins written in Rust and compiled to WebAssembly. Administrators load them through the web interface. No rebuild or restart of Gradient.
 
 </div>
 
