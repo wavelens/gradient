@@ -83,7 +83,7 @@ pub(crate) async fn evict_expired_cached_paths(db: &DbContext, graph: &Graph) ->
         graph,
         deleted_claim_row_count: AtomicU64::new(0),
     };
-    let evicted = evict(&index, &db.storage.nar_storage, gradient_db::IN_CHUNK_SIZE).await?;
+    let evicted = evict(&index, &db.storage.nar_storage).await?;
     let deleted_claim_row_count = index.deleted_claim_row_count.into_inner();
     if deleted_claim_row_count == 0 && evicted == 0 {
         return Ok(0);

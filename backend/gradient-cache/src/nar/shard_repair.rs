@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::eviction::MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION;
 use anyhow::{Context, Result};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::build::BuildStatus;
@@ -146,9 +147,8 @@ async fn purge_zombie_cached_paths(
         return Ok(0);
     }
 
-    const ZOMBIE_DELETE_BATCH: usize = 8000;
     let mut purged = 0u64;
-    for chunk in zombies.chunks(ZOMBIE_DELETE_BATCH) {
+    for chunk in zombies.chunks(MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION) {
         match graph
             .gc(GcRequest::MissingNarFileCachedPathHashes {
                 hashes: chunk.to_vec(),

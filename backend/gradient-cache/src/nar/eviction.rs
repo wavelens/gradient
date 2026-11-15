@@ -18,14 +18,12 @@ pub trait CachedPathIndex: Send + Sync {
     ) -> anyhow::Result<HashSet<String>>;
 }
 
-pub async fn evict(
-    index: &dyn CachedPathIndex,
-    store: &NarStore,
-    chunk: usize,
-) -> anyhow::Result<u64> {
+pub const MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION: usize = 1_000;
+
+pub async fn evict(index: &dyn CachedPathIndex, store: &NarStore) -> anyhow::Result<u64> {
     let expired = index.expired().await?;
     let mut evicted = 0u64;
-    for keys in expired.chunks(chunk.max(1)) {
+    for keys in expired.chunks(MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION) {
         let retired = index.retire(keys).await?;
         let stored_again = index
             .filter_nar_hashes_with_cached_path_again(&retired)
@@ -97,19 +95,33 @@ mod tests {
 
     #[tokio::test]
     async fn retired_keys_leave_storage_and_refused_keys_stay() {
-        let (_dir, store) = store_with(&["aa1", "bb2", "cc3"]).await;
+        let expired: Vec<String> = (0..2 * MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION + 1)
+            .map(|i| format!("key{i}"))
+            .collect();
+        let refused = expired[1].clone();
+        let (_dir, store) =
+            store_with(&expired.iter().map(String::as_str).collect::<Vec<_>>()).await;
         let index = Index {
-            expired: vec!["aa1".into(), "bb2".into(), "cc3".into()],
-            kept: HashSet::from(["bb2".to_owned()]),
+            expired: expired.clone(),
+            kept: HashSet::from([refused.clone()]),
             uploaded_again: HashSet::new(),
             chunks: Mutex::default(),
         };
 
-        assert_eq!(evict(&index, &store, 2).await.expect("evict"), 2);
-        assert!(!store.exists("aa1").await.expect("exists"));
-        assert!(store.exists("bb2").await.expect("exists"));
-        assert!(!store.exists("cc3").await.expect("exists"));
-        assert_eq!(*index.chunks.lock().expect("lock"), vec![2, 1]);
+        let evicted = evict(&index, &store).await.expect("evict");
+
+        assert_eq!(usize::try_from(evicted).ok(), Some(expired.len() - 1));
+        for key in &expired {
+            let stays = *key == refused;
+            assert_eq!(store.exists(key).await.expect("exists"), stays, "{key}");
+        }
+        let chunks = index.chunks.lock().expect("lock").clone();
+        assert!(
+            chunks
+                .iter()
+                .all(|&len| len <= MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION)
+        );
+        assert_eq!(chunks.iter().sum::<usize>(), expired.len());
     }
 
     #[tokio::test]
@@ -122,7 +134,7 @@ mod tests {
             chunks: Mutex::default(),
         };
 
-        assert_eq!(evict(&index, &store, 10).await.expect("evict"), 2);
+        assert_eq!(evict(&index, &store).await.expect("evict"), 2);
         assert!(!store.exists("aa1").await.expect("exists"));
         assert!(store.exists("bb2").await.expect("exists"));
     }
@@ -137,7 +149,7 @@ mod tests {
             chunks: Mutex::default(),
         };
 
-        assert_eq!(evict(&index, &store, 10).await.expect("evict"), 0);
+        assert_eq!(evict(&index, &store).await.expect("evict"), 0);
         assert!(index.chunks.lock().expect("lock").is_empty());
         assert!(store.exists("aa1").await.expect("exists"));
     }
