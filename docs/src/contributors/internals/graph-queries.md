@@ -58,7 +58,7 @@ WITH RECURSIVE closure(derivation) AS (
 
 | Index | Shape | Use |
 |---|---|---|
-| `derivation_dependency_pkey` | `(derivation, dependency)` | Downward walks. The pair serves as the key, with no surrogate column |
+| `idx-derivation_dependency-pair` | `(derivation, dependency)` | Downward walks. The pair serves as the key, with no surrogate column |
 | `idx-derivation_dependency-reverse-pair` | `(dependency, derivation)` | Upward walks |
 | `idx-derivation_dependency-runtime` | `(dependency) INCLUDE (derivation) WHERE kind IN (1, 2)` | The complete-closure counter update. It goes from a dependency to the shared builds that count it |
 | `idx-build_job-created_at`, `idx-entry_point-created_at` | `created_at INCLUDE (derivation)` | The GC freshness seed |
