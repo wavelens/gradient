@@ -66,9 +66,9 @@
         [(ngModel)]="formData.retry_failed_builds"
         [binary]="true"
         [appManagedDisable]="access()"
-        label="Rebuild failed builds in each new evaluation"
+        label="Retry failed builds in new evaluation"
       />
-      <span slot="hint">Off: Builds that fail with a build error stay failed in later evaluations until Retry. Timeouts and transient failures (such as worker loss) continue to run again in every new evaluation. A single evaluation gives transient failures the number of attempts from admin settings. Timeouts get no extra attempts.</span>
+      <span slot="hint">When turned off, builds that failed with a build error are not retried in new evaluations. Timeouts and transient failures, such as worker loss, are always rertired in new evaluations. A single evaluation is then retried the number of attempts configured by the system admin. Timeouts get no extra attempts.</span>
     </gr-form-field>
 
     <gr-form-field>
