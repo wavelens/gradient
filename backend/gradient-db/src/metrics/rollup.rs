@@ -12,7 +12,7 @@ use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_util::supervision::{Pass, PassError};
 use gradient_util::telemetry::metric;
 use gradient_wire::types::JobPhase;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, Iterable};
 use tracing::{debug, warn};
 
 use crate::DbContext;
@@ -562,34 +562,55 @@ fn dispatch_wait_sql() -> String {
     )
 }
 
+fn dispatched_job_kind_series_segment(kind: DispatchedJobKind) -> &'static str {
+    match kind {
+        DispatchedJobKind::Eval => "eval",
+        DispatchedJobKind::Build => "build",
+        DispatchedJobKind::Exec => "exec",
+    }
+}
+
 fn phase_duration_sql() -> String {
-    let ms = "(p.end_ms - p.start_ms)::double precision";
     let last = JobPhase::ALL.iter().map(|p| p.as_i16()).max().unwrap_or(0);
     let names = (0..=last)
         .map(|v| format!("'{}'", JobPhase::name_of(v)))
         .collect::<Vec<_>>()
         .join(",");
+    let kinds = DispatchedJobKind::iter()
+        .map(|k| {
+            format!(
+                "WHEN {} THEN '{}'",
+                i16::from(k),
+                dispatched_job_kind_series_segment(k)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-         SELECT uuidv7(), \
-                'phase.' || CASE dj.kind WHEN 0 THEN 'eval' ELSE 'build' END || '.' || \
-                  (ARRAY[{names}])[p.phase + 1] || '.ms', \
-                {minute}, date_trunc('minute', p.created_at), \
-                jsonb_build_object('project', dj.project::text), \
-                hashtextextended(dj.project::text, 0), \
-                count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
-         FROM dispatched_job_phase p \
-         JOIN dispatched_job dj ON dj.id = p.dispatched_job \
-         WHERE p.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
-           AND p.phase BETWEEN 0 AND {last} \
-         GROUP BY date_trunc('minute', p.created_at), dj.project, dj.kind, p.phase \
+         SELECT uuidv7(), s.metric, {minute}, s.bucket_start, \
+                jsonb_build_object('project', s.project::text), \
+                hashtextextended(s.project::text, 0), \
+                count(*)::bigint, sum(s.ms), min(s.ms), max(s.ms), sum(power(s.ms, 2)), NULL \
+         FROM ( \
+           SELECT 'phase.' || CASE dj.kind {kinds} ELSE 'unknown_' || dj.kind END || '.' || \
+                    (ARRAY[{names}])[p.phase + 1] || '.ms' AS metric, \
+                  date_trunc('minute', p.created_at) AS bucket_start, \
+                  dj.project, \
+                  (p.end_ms - p.start_ms)::double precision AS ms \
+           FROM dispatched_job_phase p \
+           JOIN dispatched_job dj ON dj.id = p.dispatched_job \
+           WHERE p.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+             AND p.phase BETWEEN 0 AND {last} \
+         ) s \
+         GROUP BY s.metric, s.bucket_start, s.project \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
                        min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
         minute = i16::from(RollupGranularity::Minute),
         window = MINUTE_WINDOW,
-        ms = ms,
+        kinds = kinds,
         names = names,
         last = last,
     )
@@ -664,6 +685,7 @@ mod tests {
                 build_builds_created_per_task_rollup_sql(),
                 build_duration_attempt_sql(),
                 dispatch_wait_sql(),
+                phase_duration_sql(),
                 cache_storage_sql(),
                 upstream_latency_sql(),
                 upstream_hits_sql(),
@@ -919,6 +941,62 @@ mod tests {
                 1,
                 90_000.0
             )]
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_build_and_exec_phase_durations_rollup_writes_separate_rows_per_kind() {
+        use gradient_types::EvaluationId;
+
+        let phase = JobPhase::ALL[0];
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.kind = DispatchedJobKind::Build;
+                a.job_id = Some(a.id.to_string());
+            })
+            .phase(phase.as_i16(), 0, 100)
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.kind = DispatchedJobKind::Exec;
+                a.job_id = Some(a.id.to_string());
+            })
+            .phase(phase.as_i16(), 0, 300)
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.kind = DispatchedJobKind::Exec;
+                a.job_id = Some(a.id.to_string());
+            })
+            .phase(phase.as_i16(), 0, 500)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        conn.execute_unprepared(
+            "UPDATE dispatched_job_phase SET created_at = (now() AT TIME ZONE 'UTC')",
+        )
+        .await
+        .expect("the phases move into the rollup window");
+
+        conn.execute_unprepared(&phase_duration_sql())
+            .await
+            .expect("the phase duration rollup runs");
+
+        let mut rows: Vec<_> = db
+            .rows::<gradient_entity::metric_rollup::Entity>()
+            .await
+            .into_iter()
+            .map(|row| (row.metric, row.count, row.sum))
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        let name = phase.as_str();
+        assert_eq!(
+            rows,
+            [
+                (format!("phase.build.{name}.ms"), 1, 100.0),
+                (format!("phase.exec.{name}.ms"), 2, 800.0),
+            ]
         );
         db.finish().await;
     }
