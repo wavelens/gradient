@@ -4,9 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod other_sessions_with_old_open_transactions;
 mod schema_preparation_lock;
 mod unknown_migrations;
 mod upgrade_floor;
+
+pub use other_sessions_with_old_open_transactions::{
+    PostgresSessionWithLongTransaction, find_sessions_with_transaction_older_than,
+};
 
 use anyhow::{Context, Result};
 use gradient_migration::Migrator;

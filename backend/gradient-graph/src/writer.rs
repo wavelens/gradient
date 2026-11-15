@@ -9,13 +9,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
 use gradient_db::DbContext;
+use gradient_db::connection::find_sessions_with_transaction_older_than;
 use gradient_entity::StorePath;
 use gradient_types::DerivationId;
 use gradient_util::supervision::SupervisorHealth;
+use gradient_util::telemetry::{STATS, metric};
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::messages::{
     DemoteReport, Demotion, GcReport, GcRequest, NarCommit, NarCommitted, RecordBatch,
@@ -61,7 +63,31 @@ impl GraphWriterTransactionLimits {
             ..DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS
         }
     }
+
+    fn effective_statement_lock_wait_timeout(self) -> Duration {
+        self.statement_lock_wait_timeout.min(
+            self.transaction_wall_clock_time_limit
+                .saturating_sub(Duration::from_millis(1)),
+        )
+    }
 }
+
+#[derive(Debug)]
+struct GraphWriterTransactionWallClockTimeLimitExceededError {
+    transaction_wall_clock_time_limit: Duration,
+}
+
+impl std::fmt::Display for GraphWriterTransactionWallClockTimeLimitExceededError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "graph transaction exceeded {}s",
+            self.transaction_wall_clock_time_limit.as_secs()
+        )
+    }
+}
+
+impl std::error::Error for GraphWriterTransactionWallClockTimeLimitExceededError {}
 
 pub enum GraphMsg {
     Record(RecordBatch, Reply<RecordReport>),
@@ -511,6 +537,7 @@ where
         let started = Instant::now();
         match transact_once(ctx, limits, &work).await {
             Err(e) if attempt < limits.max_transaction_attempts && is_retryable(&e) => {
+                STATS.record(metric::GRAPH_TRANSACTION_RETRIES, limits.message_kind, 1.0);
                 warn!(
                     message_kind = limits.message_kind,
                     attempt,
@@ -526,17 +553,15 @@ where
     }
 }
 
-fn build_graph_writer_statement_timeout_and_lock_timeout_sql(
+fn build_graph_writer_transaction_timeouts_and_application_name_sql(
     limits: GraphWriterTransactionLimits,
 ) -> String {
-    let budget = limits.transaction_wall_clock_time_limit;
-    let lock_wait = limits
-        .statement_lock_wait_timeout
-        .min(budget.saturating_sub(Duration::from_millis(1)));
     format!(
-        "SET LOCAL statement_timeout = {}; SET LOCAL lock_timeout = {}",
-        budget.as_millis(),
-        lock_wait.as_millis()
+        "SET LOCAL statement_timeout = {}; SET LOCAL lock_timeout = {}; \
+         SET LOCAL application_name = 'gradient graph: {}'",
+        limits.transaction_wall_clock_time_limit.as_millis(),
+        limits.effective_statement_lock_wait_timeout().as_millis(),
+        limits.message_kind
     )
 }
 
@@ -559,8 +584,72 @@ fn is_retryable(err: &anyhow::Error) -> bool {
         .is_some_and(|code| ["40P01", "40001", "25P02", "55P03"].contains(&code.as_str()))
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
+#[tracing::instrument(level = "debug", skip_all, fields(message_kind = limits.message_kind))]
 async fn transact_once<T, F, Fut>(
+    ctx: &DbContext,
+    limits: GraphWriterTransactionLimits,
+    work: &F,
+) -> anyhow::Result<T>
+where
+    F: Fn(DbContext) -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
+{
+    let started = Instant::now();
+    let outcome = write_graph_in_transaction_once(ctx, limits, work).await;
+    STATS.record(
+        metric::GRAPH_TRANSACTION_MS,
+        limits.message_kind,
+        started.elapsed().as_secs_f64() * 1000.0,
+    );
+    if let Err(e) = &outcome {
+        let sqlstate = postgres_sqlstate_from_error_chain(e);
+        if sqlstate.as_deref() == Some("55P03") {
+            STATS.record(metric::GRAPH_LOCK_TIMEOUTS, limits.message_kind, 1.0);
+        }
+
+        if matches!(sqlstate.as_deref(), Some("55P03" | "57014"))
+            || e.is::<GraphWriterTransactionWallClockTimeLimitExceededError>()
+        {
+            log_sessions_with_transactions_older_than_lock_wait_timeout_after_graph_writer_failure(
+                ctx, limits,
+            )
+            .await;
+        }
+    }
+
+    outcome
+}
+
+async fn log_sessions_with_transactions_older_than_lock_wait_timeout_after_graph_writer_failure(
+    ctx: &DbContext,
+    limits: GraphWriterTransactionLimits,
+) {
+    let sessions = find_sessions_with_transaction_older_than(
+        &ctx.worker_db.detached(),
+        limits.effective_statement_lock_wait_timeout(),
+    )
+    .await;
+    match sessions {
+        Ok(sessions) => {
+            for session in sessions {
+                warn!(
+                    message_kind = limits.message_kind,
+                    pid = session.pid,
+                    application_name = session.application_name.as_deref(),
+                    current_transaction_age_milliseconds =
+                        session.current_transaction_age_milliseconds,
+                    state = session.state.as_deref(),
+                    wait_event_type = session.wait_event_type.as_deref(),
+                    query = session.query.as_deref(),
+                    "another database session left a transaction open past the graph lock wait timeout"
+                );
+            }
+        }
+        Err(e) => debug!(error = %e, "failed to list database sessions with old transactions"),
+    }
+}
+
+async fn write_graph_in_transaction_once<T, F, Fut>(
     ctx: &DbContext,
     limits: GraphWriterTransactionLimits,
     work: &F,
@@ -571,11 +660,11 @@ where
 {
     let budget = limits.transaction_wall_clock_time_limit;
     let tx = Arc::new(ctx.worker_db.begin().await.context("begin")?);
-    tx.execute_unprepared(&build_graph_writer_statement_timeout_and_lock_timeout_sql(
-        limits,
-    ))
+    tx.execute_unprepared(
+        &build_graph_writer_transaction_timeouts_and_application_name_sql(limits),
+    )
     .await
-    .context("statement and lock timeouts")?;
+    .context("Set the statement timeout, the lock timeout and the application name.")?;
     let scoped = ctx.in_transaction(Arc::clone(&tx));
     let startable_set = scoped.memory.startable_set.clone();
     let probe_requests = scoped.memory.probe_requests.clone();
@@ -605,7 +694,10 @@ where
                 budget_secs = budget.as_secs(),
                 "graph transaction rolled back past its budget"
             );
-            Err(anyhow!("graph transaction exceeded {}s", budget.as_secs()))
+            Err(GraphWriterTransactionWallClockTimeLimitExceededError {
+                transaction_wall_clock_time_limit: budget,
+            }
+            .into())
         }
     }
 }
@@ -773,23 +865,25 @@ mod tests {
 
     #[test]
     fn lock_timeout_never_exceeds_transaction_time_budget() {
-        let defaults = build_graph_writer_statement_timeout_and_lock_timeout_sql(
+        let defaults = build_graph_writer_transaction_timeouts_and_application_name_sql(
             DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS,
         );
-        let short = build_graph_writer_statement_timeout_and_lock_timeout_sql(
+        let short = build_graph_writer_transaction_timeouts_and_application_name_sql(
             GraphWriterTransactionLimits {
                 transaction_wall_clock_time_limit: Duration::from_millis(50),
-                ..DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS
+                ..GraphWriterTransactionLimits::for_message_kind("record")
             },
         );
 
         assert_eq!(
             defaults,
-            "SET LOCAL statement_timeout = 120000; SET LOCAL lock_timeout = 10000"
+            "SET LOCAL statement_timeout = 120000; SET LOCAL lock_timeout = 10000; \
+             SET LOCAL application_name = 'gradient graph: message'"
         );
         assert_eq!(
             short,
-            "SET LOCAL statement_timeout = 50; SET LOCAL lock_timeout = 49"
+            "SET LOCAL statement_timeout = 50; SET LOCAL lock_timeout = 49; \
+             SET LOCAL application_name = 'gradient graph: record'"
         );
     }
 

@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use gradient_db::connection::find_sessions_with_transaction_older_than;
 use gradient_db::{DbContext, MissingRow};
 use gradient_entity::StorePathError;
 use gradient_entity::build::BuildStatus;
@@ -569,4 +570,66 @@ async fn m12_graph_writer_retries_row_lock_then_fails_when_lock_never_released()
     assert_eq!(case.gv(e1).await, gv + 1, "after 2: gv(E1) +1 exactly");
     case.zero_drift("step 2").await;
     case.finish().await;
+}
+
+#[tokio::test]
+async fn m13_old_holder_transaction_is_returned_and_recent_transaction_is_not() {
+    let case = Case::start(shape()).await;
+    let transaction_age_threshold = Duration::from_secs(1);
+
+    let transaction_open_longer_than_age_threshold =
+        open_transaction_and_set_application_name(&case, "holder").await;
+    tokio::time::sleep(transaction_age_threshold * 3).await;
+    let young_open_transaction = open_transaction_and_set_application_name(&case, "young").await;
+    let postgres_session_rows_with_old_transactions =
+        find_sessions_with_transaction_older_than(&case.ctx.worker_db, transaction_age_threshold)
+            .await
+            .expect("after 1: the session query runs");
+
+    let holder = postgres_session_rows_with_old_transactions
+        .iter()
+        .find(|session| session.application_name.as_deref() == Some("holder"))
+        .expect("after 1: the holder transaction is listed");
+    assert!(
+        holder.current_transaction_age_milliseconds >= 1000,
+        "after 1: holder age {}",
+        holder.current_transaction_age_milliseconds
+    );
+    assert_eq!(
+        holder.state.as_deref(),
+        Some("idle in transaction"),
+        "after 1: holder state"
+    );
+    assert!(
+        postgres_session_rows_with_old_transactions
+            .iter()
+            .all(|session| session.application_name.as_deref() != Some("young")),
+        "after 1: the young transaction is not listed"
+    );
+    young_open_transaction
+        .rollback()
+        .await
+        .expect("young transaction rolls back");
+    transaction_open_longer_than_age_threshold
+        .rollback()
+        .await
+        .expect("holder transaction rolls back");
+    case.finish().await;
+}
+
+async fn open_transaction_and_set_application_name(
+    case: &Case,
+    application_name: &str,
+) -> DatabaseTransaction {
+    let transaction = case
+        .ctx
+        .worker_db
+        .begin()
+        .await
+        .expect("open a transaction");
+    transaction
+        .execute_unprepared(&format!("SET application_name = '{application_name}'"))
+        .await
+        .expect("set the application name");
+    transaction
 }
