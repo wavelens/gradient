@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
+use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_util::supervision::{Pass, PassError};
 use gradient_util::telemetry::metric;
@@ -114,6 +115,116 @@ const CASCADES: &[(RollupGranularity, RollupGranularity, &str)] = &[
 ];
 
 const MINUTE_WINDOW: &str = "15 minutes";
+
+struct ExecJobStatusCountMetric {
+    name: &'static str,
+    status: ExecJobStatus,
+}
+
+const FINISHED_EXEC_JOB_ROLLUP_METRICS: &[ExecJobStatusCountMetric] = &[
+    ExecJobStatusCountMetric {
+        name: metric::EXEC_COMPLETED,
+        status: ExecJobStatus::Completed,
+    },
+    ExecJobStatusCountMetric {
+        name: metric::EXEC_FAILED,
+        status: ExecJobStatus::Failed,
+    },
+];
+
+struct WorkerTimeRollupMetric {
+    name: &'static str,
+    time_counts_toward_metric_condition: &'static str,
+}
+
+const WORKER_TIME_ROLLUP_METRICS: &[WorkerTimeRollupMetric] = &[
+    WorkerTimeRollupMetric {
+        name: metric::WORKER_ASSIGNED_JOB_TIME_MS,
+        time_counts_toward_metric_condition: "s.assigned_jobs > 0",
+    },
+    WorkerTimeRollupMetric {
+        name: metric::WORKER_FULL_LOAD_TIME_MS,
+        time_counts_toward_metric_condition: "s.cpu_usage_pct > 90 \
+            OR (s.max_concurrent_builds > 0 AND s.assigned_jobs >= s.max_concurrent_builds)",
+    },
+];
+
+fn max_counted_worker_sample_gap_secs(sample_interval_secs: u64) -> u64 {
+    sample_interval_secs.saturating_mul(3).max(120)
+}
+
+fn build_recent_exec_job_status_count_rollup_sql(m: &ExecJobStatusCountMetric) -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), '{name}', {minute}, date_trunc('minute', j.finished_at), \
+                jsonb_build_object('project', t.project::text), \
+                hashtextextended(t.project::text, 0), \
+                count(*)::bigint, 0, 0, 0, 0, NULL \
+         FROM exec_job j \
+         JOIN evaluation e ON e.id = j.evaluation \
+         JOIN task t ON t.id = e.task \
+         WHERE j.finished_at >= date_trunc('minute', (now() AT TIME ZONE 'UTC') - interval '{window}') \
+           AND j.status = {status} \
+         GROUP BY date_trunc('minute', j.finished_at), t.project \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count",
+        name = m.name,
+        minute = i16::from(RollupGranularity::Minute),
+        window = MINUTE_WINDOW,
+        status = crate::sql::status::exec(m.status),
+    )
+}
+
+fn build_builds_created_per_task_rollup_sql() -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), '{name}', {minute}, date_trunc('minute', b.created_at), \
+                jsonb_build_object('project', pr.project::text, 'task', pr.id::text), \
+                hashtextextended(pr.id::text, 0), \
+                count(DISTINCT b.id)::bigint, 0, 0, 0, 0, NULL \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
+         JOIN task pr ON pr.id = ev.task \
+         WHERE b.created_at >= date_trunc('minute', (now() AT TIME ZONE 'UTC') - interval '{window}') \
+         GROUP BY date_trunc('minute', b.created_at), pr.id \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count",
+        name = metric::BUILDS_CREATED_PER_TASK,
+        minute = i16::from(RollupGranularity::Minute),
+        window = MINUTE_WINDOW,
+    )
+}
+
+fn build_worker_time_metric_rollup_sql(m: &WorkerTimeRollupMetric, max_gap_secs: u64) -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), '{name}', {minute}, date_trunc('minute', s.at), \
+                jsonb_build_object('worker', s.worker_id), hashtextextended(s.worker_id, 0), \
+                count(*)::bigint, sum(s.ms), 0, 0, 0, NULL \
+         FROM ( \
+           SELECT ws.worker_id, ws.at, ws.assigned_jobs, ws.cpu_usage_pct, ws.max_concurrent_builds, \
+                  extract(epoch from (ws.at - lag(ws.at) OVER (PARTITION BY ws.worker_id ORDER BY ws.at))) * 1000 AS ms \
+           FROM worker_sample ws \
+           WHERE ws.at >= date_trunc('minute', (now() AT TIME ZONE 'UTC') - interval '{window}') \
+                          - interval '{max_gap_secs} seconds' \
+         ) s \
+         WHERE s.at >= date_trunc('minute', (now() AT TIME ZONE 'UTC') - interval '{window}') \
+           AND s.ms IS NOT NULL AND s.ms <= {max_gap_ms} \
+           AND ({condition}) \
+         GROUP BY date_trunc('minute', s.at), s.worker_id \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
+        name = m.name,
+        minute = i16::from(RollupGranularity::Minute),
+        window = MINUTE_WINDOW,
+        max_gap_ms = max_gap_secs.saturating_mul(1000),
+        condition = m.time_counts_toward_metric_condition,
+    )
+}
 
 struct CacheTrafficMetric {
     name: &'static str,
@@ -244,11 +355,39 @@ impl Pass for Rollup {
     }
 }
 
-async fn run_rollup(ctx: &DbContext) {
+pub(crate) async fn run_rollup(ctx: &DbContext) {
     let db = &ctx.worker_db;
     for m in build_counts() {
         if let Err(e) = db.execute_unprepared(&build_count_sql(&m)).await {
             warn!(metric = m.name, error = %e, "rollup build-count failed");
+        }
+    }
+
+    if let Err(e) = db
+        .execute_unprepared(&build_builds_created_per_task_rollup_sql())
+        .await
+    {
+        warn!(metric = metric::BUILDS_CREATED_PER_TASK, error = %e, "rollup build-count failed");
+    }
+
+    for m in FINISHED_EXEC_JOB_ROLLUP_METRICS {
+        if let Err(e) = db
+            .execute_unprepared(&build_recent_exec_job_status_count_rollup_sql(m))
+            .await
+        {
+            warn!(metric = m.name, error = %e, "rollup exec-count failed");
+        }
+    }
+
+    let max_gap_secs = max_counted_worker_sample_gap_secs(
+        ctx.config.metrics_args.worker_sample_interval_secs.get(),
+    );
+    for m in WORKER_TIME_ROLLUP_METRICS {
+        if let Err(e) = db
+            .execute_unprepared(&build_worker_time_metric_rollup_sql(m, max_gap_secs))
+            .await
+        {
+            warn!(metric = m.name, error = %e, "rollup worker-time failed");
         }
     }
 
@@ -511,7 +650,18 @@ mod tests {
             .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
             .chain(eval_counts().iter().map(eval_count_sql))
             .chain(CACHE_TRAFFIC.iter().map(cache_traffic_sql))
+            .chain(
+                FINISHED_EXEC_JOB_ROLLUP_METRICS
+                    .iter()
+                    .map(build_recent_exec_job_status_count_rollup_sql),
+            )
+            .chain(
+                WORKER_TIME_ROLLUP_METRICS
+                    .iter()
+                    .map(|m| build_worker_time_metric_rollup_sql(m, 120)),
+            )
             .chain([
+                build_builds_created_per_task_rollup_sql(),
                 build_duration_attempt_sql(),
                 dispatch_wait_sql(),
                 cache_storage_sql(),
@@ -643,6 +793,133 @@ mod tests {
             .map(|row| row.count)
             .collect();
         assert_eq!(counts, [1]);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_exec_count_rollup_counts_each_finished_exec_job_once_by_final_status() {
+        use gradient_entity::exec_job;
+        use gradient_entity::ids::ExecJobId;
+        use gradient_types::EvaluationId;
+
+        let evaluation = EvaluationId::now_v7();
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(evaluation)
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv")
+            .entry_point("pkg.a")
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let point = db
+            .entry_point(evaluation, "pkg.a")
+            .await
+            .expect("the entry point");
+        let now = gradient_types::now();
+        let statuses = [
+            ExecJobStatus::Completed,
+            ExecJobStatus::Completed,
+            ExecJobStatus::Failed,
+            ExecJobStatus::Aborted,
+            ExecJobStatus::Queued,
+        ];
+        for (node_index, status) in (0_i16..).zip(statuses) {
+            crate::rows::insert::<exec_job::Entity, _>(
+                &conn,
+                exec_job::Model {
+                    id: ExecJobId::now_v7(),
+                    evaluation,
+                    entry_point: point.id,
+                    program_derivation: point.derivation,
+                    requirement: serde_json::json!({}),
+                    spec: serde_json::json!({}),
+                    status,
+                    created_at: now,
+                    finished_at: status.is_terminal().then_some(now),
+                    node_index,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the exec job is written");
+        }
+
+        for m in FINISHED_EXEC_JOB_ROLLUP_METRICS {
+            conn.execute_unprepared(&build_recent_exec_job_status_count_rollup_sql(m))
+                .await
+                .expect("the exec count rollup runs");
+        }
+
+        let mut counts: Vec<_> = db
+            .rows::<gradient_entity::metric_rollup::Entity>()
+            .await
+            .into_iter()
+            .map(|row| (row.metric, row.count))
+            .collect();
+        counts.sort();
+        assert_eq!(
+            counts,
+            [
+                (metric::EXEC_COMPLETED.to_owned(), 2),
+                (metric::EXEC_FAILED.to_owned(), 1)
+            ]
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_worker_time_rollup_ignores_intervals_longer_than_allowed_sample_gap_and_starts_at_whole_minute()
+     {
+        use chrono::{Duration as ChronoDuration, DurationRound, Timelike};
+        use gradient_entity::worker_sample;
+        use gradient_types::WorkerSampleId;
+        use sea_orm::{ActiveModelTrait, IntoActiveModel};
+
+        if chrono::Utc::now().second() >= 50 {
+            tokio::time::sleep(Duration::from_secs(11)).await;
+        }
+        let window_start = (gradient_types::now() - ChronoDuration::minutes(15))
+            .duration_trunc(ChronoDuration::minutes(1))
+            .expect("a minute truncates");
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        for offset_secs in [-60, 30, 630] {
+            worker_sample::Model {
+                id: WorkerSampleId::now_v7(),
+                worker_id: "w1".into(),
+                at: window_start + ChronoDuration::seconds(offset_secs),
+                cpu_usage_pct: Some(10.0),
+                assigned_jobs: 1,
+                max_concurrent_builds: 4,
+                capabilities: serde_json::json!({}),
+                ..Default::default()
+            }
+            .into_active_model()
+            .insert(&conn)
+            .await
+            .expect("the sample is written");
+        }
+
+        for m in WORKER_TIME_ROLLUP_METRICS {
+            conn.execute_unprepared(&build_worker_time_metric_rollup_sql(m, 120))
+                .await
+                .expect("the worker time rollup runs");
+        }
+
+        let rows: Vec<_> = db
+            .rows::<gradient_entity::metric_rollup::Entity>()
+            .await
+            .into_iter()
+            .map(|row| (row.metric, row.bucket_start, row.count, row.sum))
+            .collect();
+        assert_eq!(
+            rows,
+            [(
+                metric::WORKER_ASSIGNED_JOB_TIME_MS.to_owned(),
+                window_start,
+                1,
+                90_000.0
+            )]
+        );
         db.finish().await;
     }
 

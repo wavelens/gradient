@@ -59,11 +59,13 @@ pub struct PeriodicSpec {
     pub(crate) budget: Duration,
     pub(crate) run: PassFn,
     pub(crate) wake: Option<Arc<Notify>>,
+    pub(crate) run_at_start: bool,
 }
 
 pub trait Pass: Send + Sync + 'static {
     const NAME: &'static str;
     const BUDGET: Duration;
+    const RUN_AT_START: bool = false;
 
     fn period(&self) -> Duration;
 
@@ -97,6 +99,7 @@ impl ChildSpec {
             period: pass.period(),
             budget: P::BUDGET,
             wake: pass.wake(),
+            run_at_start: P::RUN_AT_START,
             run: Arc::new(move || {
                 let pass = Arc::clone(&pass);
                 Box::pin(async move { pass.run().await })
@@ -231,7 +234,12 @@ impl Actor for Periodic {
         myself: ActorRef<Self::Msg>,
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
-        let _ = myself.send_message(PeriodicMsg::Wait);
+        let first = if args.spec.run_at_start {
+            PeriodicMsg::Tick
+        } else {
+            PeriodicMsg::Wait
+        };
+        let _ = myself.send_message(first);
         Ok(args)
     }
 
@@ -577,6 +585,7 @@ mod tests {
             budget,
             run: Arc::new(move || Box::pin(run())),
             wake,
+            run_at_start: false,
         })
     }
 
@@ -627,6 +636,40 @@ mod tests {
         wake.notify_one();
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(calls.load(Ordering::SeqCst), 1, "the wake ran one pass");
+        shutdown.cancel_and_drain(Duration::from_secs(2)).await;
+    }
+
+    struct CountingPass {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Pass for CountingPass {
+        const NAME: &'static str = "start";
+        const BUDGET: Duration = Duration::from_secs(60);
+        const RUN_AT_START: bool = true;
+
+        fn period(&self) -> Duration {
+            Duration::from_secs(3600)
+        }
+
+        async fn run(&self) -> Result<(), PassError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn run_at_start_pass_runs_once_immediately_despite_hour_period() {
+        let shutdown = Shutdown::new();
+        let calls = Arc::new(AtomicU32::new(0));
+        shutdown
+            .supervise_now(ChildSpec::pass(CountingPass {
+                calls: Arc::clone(&calls),
+            }))
+            .await
+            .expect("supervise");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
         shutdown.cancel_and_drain(Duration::from_secs(2)).await;
     }
 

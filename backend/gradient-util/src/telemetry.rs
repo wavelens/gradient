@@ -42,6 +42,11 @@ pub mod metric {
     pub const DEPS_WAIT_MS: &str = "deps.wait_ms";
     pub const EVALS_COMPLETED: &str = "evals.completed";
     pub const EVALS_FAILED: &str = "evals.failed";
+    pub const BUILDS_CREATED_PER_TASK: &str = "builds.created_per_task";
+    pub const EXEC_COMPLETED: &str = "exec.completed";
+    pub const EXEC_FAILED: &str = "exec.failed";
+    pub const WORKER_ASSIGNED_JOB_TIME_MS: &str = "worker.assigned_job_time_ms";
+    pub const WORKER_FULL_LOAD_TIME_MS: &str = "worker.full_load_time_ms";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

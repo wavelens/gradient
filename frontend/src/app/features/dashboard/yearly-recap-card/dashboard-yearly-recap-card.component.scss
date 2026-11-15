@@ -1,0 +1,147 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+$ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+:host {
+  display: contents;
+}
+
+.banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  width: 100%;
+  min-height: 88px;
+  padding: $spacing-md $spacing-lg;
+  overflow: hidden;
+  border: 0;
+  border-radius: $border-radius-md;
+  background: var(--recap-background);
+  color: var(--recap-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 200ms ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--recap-background) 94%, var(--recap-text));
+  }
+
+  &:focus-visible {
+    outline: $focus-ring-width solid var(--gr-accent);
+    outline-offset: $focus-ring-offset;
+  }
+}
+
+.faint-background-logo {
+  position: absolute;
+  top: -55%;
+  left: 42%;
+  height: 210%;
+  aspect-ratio: 22.935 / 29.549;
+  background: currentcolor;
+  opacity: 0.09;
+  mask: url('/images/logo.svg') no-repeat center / contain;
+  transform: rotate(-12deg);
+  transition: transform 600ms $ease-out-expo;
+  pointer-events: none;
+
+  .banner:hover & {
+    transform: rotate(-10deg);
+  }
+}
+
+.text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  font-size: $font-size-xl;
+  font-weight: 700;
+  line-height: $line-height-tight;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin-top: $spacing-xs;
+  color: var(--recap-accent);
+  font-size: $font-size-sm;
+}
+
+.bands {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: min(45%, 360px);
+  transform-origin: right center;
+  transition: transform 400ms $ease-out-expo;
+
+  .banner:hover & {
+    transform: scaleX(1.04);
+  }
+}
+
+.band {
+  position: absolute;
+  right: 0;
+  height: 22%;
+  border-radius: 999px 0 0 999px;
+  transform-origin: right center;
+  animation: band-sweep 900ms $ease-out-expo backwards;
+}
+
+.band-1 {
+  top: 12%;
+  width: 70%;
+  background: var(--recap-band-1);
+}
+
+.band-2 {
+  top: 40%;
+  width: 45%;
+  background: var(--recap-band-2);
+  animation-delay: 90ms;
+}
+
+.band-3 {
+  top: 68%;
+  width: 90%;
+  background: var(--recap-band-3);
+  animation-delay: 180ms;
+}
+
+.play {
+  position: relative;
+  z-index: 1;
+  padding: $spacing-xs;
+  border-radius: 50%;
+  background: var(--recap-text);
+  color: var(--recap-background);
+}
+
+@keyframes band-sweep {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner,
+  .faint-background-logo,
+  .bands,
+  .band {
+    transition: none;
+    animation: none;
+  }
+}

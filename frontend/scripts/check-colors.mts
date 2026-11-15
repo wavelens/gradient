@@ -16,6 +16,8 @@ const PALETTE_ALLOWED = new Set([
   'src/app/shared/terminal/terminal.component.scss',
   'packages/ui/src/ui/logo/logo.component.scss',
 ]);
+// PNG exports draw the yearly recap slides onto a canvas. That canvas can't read CSS variables, so the slides keep fixed colors in every theme.
+const FIXED_COLOR_FILES = new Set(['src/app/core/yearly-instance-summary/recap-slide-color-scheme-colors.ts']);
 
 const LITERAL = /(?<![\w&/])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b|\b(?:rgba?|hsla?)\((?!var\()/;
 const NAMED = /\b(?:color|background(?:-color)?|fill|stroke|border(?:-\w+)?)\s*:[^;]*\b(?:white|black|red|green|blue|yellow|orange|gray|grey|purple|pink)\b/;
@@ -33,7 +35,7 @@ function files(dir: string): string[] {
 const problems: string[] = [];
 for (const path of SOURCES.flatMap(files)) {
   const file = relative(ROOT, path);
-  if (TOKEN_FILES.has(file)) continue;
+  if (TOKEN_FILES.has(file) || FIXED_COLOR_FILES.has(file)) continue;
   readFileSync(path, 'utf8').split('\n').forEach((line, index) => {
     if (COMMENT.test(line)) return;
     const where = `${file}:${index + 1}`;

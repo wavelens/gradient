@@ -77,10 +77,7 @@
     packages = rec {
       inherit (pkgs) gradient-nix;
       inherit gradient-report gradient-evalbench-inspector;
-      gradient = pkgs.callPackage ./nix/packages/gradient.nix {
-        inherit craneLib;
-        gitRev = self.rev or self.dirtyRev or null;
-      };
+      gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
       gradient-logo = pkgs.callPackage ./nix/packages/gradient-logo.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { inherit gradient-logo; };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {
@@ -214,6 +211,7 @@
         nixpkgs.overlays = lib.mkIf (config.services.gradient.enable || config.services.gradient.worker.enable) [
           self.overlays.default
         ];
+        services.gradient.sourceCommitHash = lib.mkDefault (self.rev or self.dirtyRev or null);
       };
 
       default = gradient;

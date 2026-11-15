@@ -29,6 +29,10 @@ pub struct ServerArgs {
     /// URL of an image to display instead of the Gradient logo on the sign-in pages, in its
     /// original colors. Set it to `null` to keep the Gradient logo.
     pub frontend_logo_url: Option<String>,
+    /// Git commit of the Gradient source on this server. The web interface can display this commit
+    /// next to the version in the footer. The NixOS module of the Gradient flake can set this value
+    /// from the flake revision. Set this value to `null` to show the version only.
+    pub source_commit_hash: Option<String>,
     /// Whether to enable TLS.
     #[arg(default_value = "true")]
     pub use_tls: bool,
@@ -58,6 +62,17 @@ pub struct ServerArgs {
     /// next connection of the same worker. Set it to `0` to keep every record forever.
     #[arg(default_value_t = 90)]
     pub retention_days: u32,
+    /// Control whether Gradient Wrapped, the yearly recap for this instance, can appear to all
+    /// users. The web interface can open the current year's recap once per user between December 1
+    /// and January 10 (UTC). Users can reopen the recap from a dashboard card. Set `false` to hide
+    /// the recap and skip creation of a new recap.
+    #[arg(default_value = "true")]
+    pub yearly_recap_enabled: bool,
+    /// Use this option to hide names of private projects, their tasks and builds and the name of
+    /// the busiest worker in Gradient Wrapped. Counts and totals still include private projects.
+    /// Recaps that already exist also respect this setting.
+    #[arg(default_value = "false")]
+    pub yearly_recap_public_projects_only: bool,
 }
 
 impl ServerArgs {

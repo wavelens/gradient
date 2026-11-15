@@ -69,6 +69,7 @@ pub mod users;
 pub mod webhooks;
 pub mod worker_names;
 pub mod worker_registrations;
+pub mod yearly_instance_summary;
 
 #[cfg(test)]
 pub(crate) mod test_ctx;

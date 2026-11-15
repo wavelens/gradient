@@ -158,6 +158,8 @@ id_newtype!(ExecJobTokenId);
 id_newtype!(ProjectSecretId);
 id_newtype!(ProjectSshHostKeyId);
 id_newtype!(WorkerSampleId);
+id_newtype!(YearlyBuildResourceRecordId);
+id_newtype!(YearlyInstanceRecapSnapshotId);
 id_newtype!(WebhookId);
 id_newtype!(WebhookDeliveryId);
 id_newtype!(TeamId);

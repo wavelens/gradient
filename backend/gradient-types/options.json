@@ -51,6 +51,16 @@
   },
   {
     "group": "",
+    "field": "source_commit_hash",
+    "flag": "source-commit-hash",
+    "env": "GRADIENT_SOURCE_COMMIT_HASH",
+    "type": "Option<String>",
+    "description": "Git commit of the Gradient source on this server. The web interface can display this commit\nnext to the version in the footer. The NixOS module of the Gradient flake can set this value\nfrom the flake revision. Set this value to `null` to show the version only.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "",
     "field": "use_tls",
     "flag": "use-tls",
     "env": "GRADIENT_USE_TLS",
@@ -117,6 +127,32 @@
     "description": "Days to keep job assignment records, finished deliveries, worker connection history,\nwebhook and task action deliveries, expired sessions and CLI logins. Finished admin\ntasks, the audit log, per-build resource samples and finished cluster jobs share the same\nlimit. Removed resource samples no longer feed build predictions. Finished cluster jobs\nwithout remaining members go on the next hourly pass. Active cluster jobs and the newest\nfinished admin task of each kind stay exempt. Open worker connections stay until the\nnext connection of the same worker. Set it to `0` to keep every record forever.",
     "default": "90",
     "values": []
+  },
+  {
+    "group": "",
+    "field": "yearly_recap_enabled",
+    "flag": "yearly-recap-enabled",
+    "env": "GRADIENT_YEARLY_RECAP_ENABLED",
+    "type": "bool",
+    "description": "Control whether Gradient Wrapped, the yearly recap for this instance, can appear to all\nusers. The web interface can open the current year's recap once per user between December 1\nand January 10 (UTC). Users can reopen the recap from a dashboard card. Set `false` to hide\nthe recap and skip creation of a new recap.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
+    "field": "yearly_recap_public_projects_only",
+    "flag": "yearly-recap-public-projects-only",
+    "env": "GRADIENT_YEARLY_RECAP_PUBLIC_PROJECTS_ONLY",
+    "type": "bool",
+    "description": "Use this option to hide names of private projects, their tasks and builds and the name of\nthe busiest worker in Gradient Wrapped. Counts and totals still include private projects.\nRecaps that already exist also respect this setting.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
   },
   {
     "group": "secrets",

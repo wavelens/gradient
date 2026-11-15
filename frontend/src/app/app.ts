@@ -18,6 +18,7 @@ import { ConfigService } from '@core/services/config.service';
 import { ThemeService } from '@core/services/theme.service';
 import { followOverscroll } from '@core/overscroll/overscroll';
 import { WhatsNewDialogComponent } from '@core/whats-new/whats-new-dialog.component';
+import { YearlyRecapFullscreenSlideshowComponent } from '@core/yearly-instance-summary/yearly-recap-fullscreen-slideshow.component';
 import { ConfirmDialogComponent } from '@shared/confirm/confirm-dialog.component';
 
 const navigationLoadingDelayMs = 300;
@@ -34,7 +35,7 @@ const FOOTER_LINKS: FooterLink[] = [
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent, ConfirmDialogComponent, ToastComponent, LoadingSpinnerComponent, EmptyStateComponent],
+  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent, YearlyRecapFullscreenSlideshowComponent, ConfirmDialogComponent, ToastComponent, LoadingSpinnerComponent, EmptyStateComponent],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.scss'

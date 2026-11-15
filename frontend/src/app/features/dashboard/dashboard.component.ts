@@ -17,6 +17,7 @@ import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.c
 import { DashboardActivityComponent } from './activity/dashboard-activity.component';
 import { DashboardRailComponent } from './rail/dashboard-rail.component';
 import { DashboardStartComponent } from './start/dashboard-start.component';
+import { DashboardYearlyRecapCardComponent } from './yearly-recap-card/dashboard-yearly-recap-card.component';
 
 @Component({
   selector: 'app-dashboard',
@@ -30,6 +31,7 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
     DashboardActivityComponent,
     DashboardRailComponent,
     DashboardStartComponent,
+    DashboardYearlyRecapCardComponent,
   ],
   templateUrl: './dashboard.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

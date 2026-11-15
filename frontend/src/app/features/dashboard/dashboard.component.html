@@ -18,6 +18,7 @@
       <button grButton size="small" [text]="true" label="Retry" (click)="retryFailedSections()"></button>
     </gr-message-banner>
   }
+  <app-dashboard-yearly-recap-card />
   <div class="layout" [class.layout--start]="newUser()">
     @if (newUser()) {
       <app-dashboard-start />

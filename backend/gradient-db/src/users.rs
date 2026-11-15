@@ -186,6 +186,31 @@ mod tests {
     use super::*;
     use gradient_fixtures::mock::{mock_db, raw_statements};
 
+    fn build_user_insert_sql_with_old_schema_columns(users: &[MUser]) -> String {
+        let rows = users
+            .iter()
+            .map(|u| {
+                format!(
+                    "('{}', '{}', '{}', '{}', '{}', '{}', {}, {}, {})",
+                    u.id,
+                    u.username,
+                    u.name,
+                    u.email,
+                    u.last_login_at,
+                    u.created_at,
+                    u.email_verified,
+                    u.managed,
+                    u.active
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "INSERT INTO \"user\" (id, username, name, email, last_login_at, created_at, \
+             email_verified, managed, active) VALUES {rows}"
+        )
+    }
+
     #[tokio::test]
     async fn email_lookup_for_claims_ignores_case() {
         let db = mock_db()
@@ -302,11 +327,8 @@ mod tests {
             account("CAROL-2", 0, false),
             account("Carol", 1, false),
         ];
-        for user in &accounts {
-            crate::rows::insert::<EUser, _>(&connection, user.clone())
-                .await
-                .expect("case variants are allowed before the migration");
-        }
+        db.execute(&build_user_insert_sql_with_old_schema_columns(&accounts))
+            .await;
 
         gradient_migration::Migrator::up(&connection, None)
             .await
@@ -422,11 +444,8 @@ mod tests {
             account("dave", "", 0, false, false),
             account("erin", "", 1, false, false),
         ];
-        for user in &accounts {
-            crate::rows::insert::<EUser, _>(&connection, user.clone())
-                .await
-                .expect("case variants are allowed before the migration");
-        }
+        db.execute(&build_user_insert_sql_with_old_schema_columns(&accounts))
+            .await;
 
         gradient_migration::Migrator::up(&connection, None)
             .await
