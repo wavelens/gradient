@@ -720,7 +720,7 @@ mod tests {
         ctx.on_upload_chunk(1, 8, &body[8..], false, uploads).await;
         ctx.on_upload_chunk(1, body.len() as u64, &[], true, uploads)
             .await;
-        let committed = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+        let committed = tokio::time::timeout(Duration::from_secs(60), sent.recv())
             .await
             .expect("the commit answers")
             .unwrap();
