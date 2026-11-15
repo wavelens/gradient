@@ -29,10 +29,12 @@ use crate::pending_job_input_store_paths::{
     PendingJobInputStorePath,
     build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping,
 };
+use crate::pending_jobs::PendingJobs;
 use gradient_graph::RamShortage;
 use gradient_pool::score::weights::REFERENCE_CORES;
 use gradient_pool::score::{
-    BuildEstimate, CoreChoice, JobContext, RamFit, RamNeed, ScoredJob, ScoringPolicy, WorkerContext,
+    BuildEstimate, CoreChoice, JobContext, RamFit, RamNeed, ScoreBreakdown, ScoredJob,
+    ScoringPolicy, WorkerContext,
 };
 use gradient_pool::{WorkerCaps, WorkerJob};
 
@@ -508,8 +510,60 @@ struct ScoredCandidate {
     vetoed: bool,
     held_for_ram: bool,
     choice: Option<CoreChoice>,
-    score_breakdown: serde_json::Value,
-    job_context: serde_json::Value,
+    rule_score_breakdown: ScoreBreakdown,
+    store_bloom_filter_missing_inputs_and_outputs_present: WorkerJobScore,
+    job_project_running_build_work_share: Option<f32>,
+    scored_at: chrono::NaiveDateTime,
+}
+
+impl ScoredCandidate {
+    fn score_breakdown_to_json(&self) -> serde_json::Value {
+        serde_json::to_value(&self.rule_score_breakdown).unwrap_or(serde_json::Value::Null)
+    }
+
+    fn build_job_context_view_json(&self, job: &PendingJob) -> serde_json::Value {
+        let ctx = build_scoring_job_context_for_pending_job(
+            job,
+            &self.store_bloom_filter_missing_inputs_and_outputs_present,
+            self.job_project_running_build_work_share,
+            self.scored_at,
+        );
+        serde_json::to_value(crate::views::JobContextView::new(&ctx, job, self.choice))
+            .unwrap_or(serde_json::Value::Null)
+    }
+}
+
+fn build_scoring_job_context_for_pending_job<'a>(
+    job: &PendingJob,
+    score: &WorkerJobScore,
+    project_work_share: Option<f32>,
+    now: chrono::NaiveDateTime,
+) -> JobContext<'a> {
+    JobContext {
+        missing_count: Some(score.missing_count),
+        missing_nar_size: Some(score.missing_nar_size),
+        outputs_present: score.outputs_present,
+        substitute_outputs: job.substitute_outputs(),
+        dependency_count: job.dependency_count(),
+        queued_at: job.queued_at(),
+        ready_at: job.ready_at(),
+        project_work_share,
+        prioritized: job.prioritized(),
+        build_request: job.build_request(),
+        ifd: job.ifd(),
+        rescore_count: job.rescore_count(),
+        now,
+        ..JobContext::default()
+    }
+}
+
+fn sort_scored_candidates_by_total_score_then_job_id(scored: &mut [(String, ScoredCandidate)]) {
+    scored.sort_by(|(id_a, a), (id_b, b)| {
+        b.total
+            .partial_cmp(&a.total)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| id_a.cmp(id_b))
+    });
 }
 
 fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
@@ -612,32 +666,22 @@ fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
 }
 
 fn exec_candidate(
-    job: &PendingJob,
     exec: &PendingExecJob,
     score: &WorkerJobScore,
     worker: &WorkerContext<'_>,
     peers: &[ExecPeer],
     now: chrono::NaiveDateTime,
 ) -> ScoredCandidate {
-    let missing_nar_size = Some(score.missing_nar_size);
-    let breakdown = exec.score_on(worker.exec, missing_nar_size, peers, now);
-    let ctx = JobContext {
-        missing_count: Some(score.missing_count),
-        missing_nar_size,
-        queued_at: exec.queued_at,
-        ready_at: exec.ready_at,
-        rescore_count: exec.rescore_count,
-        now,
-        ..JobContext::default()
-    };
+    let breakdown = exec.score_on(worker.exec, Some(score.missing_nar_size), peers, now);
     ScoredCandidate {
         total: breakdown.total,
         choice: None,
         vetoed: !breakdown.vetoes.is_empty(),
         held_for_ram: false,
-        score_breakdown: serde_json::to_value(&breakdown).unwrap_or(serde_json::Value::Null),
-        job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job, None))
-            .unwrap_or(serde_json::Value::Null),
+        rule_score_breakdown: breakdown,
+        store_bloom_filter_missing_inputs_and_outputs_present: score.clone(),
+        job_project_running_build_work_share: None,
+        scored_at: now,
     }
 }
 
@@ -670,9 +714,9 @@ fn assignment_record_for(
         score: sc.total,
         queued_at: job.queued_at(),
         ready_at: job.ready_at(),
-        score_breakdown: sc.score_breakdown.clone(),
+        score_breakdown: sc.score_breakdown_to_json(),
         worker_context,
-        job_context: sc.job_context.clone(),
+        job_context: sc.build_job_context_view_json(job),
         instance_context,
         substitute: matches!(job, PendingJob::Build(b) if b.substitute),
         output_names,
@@ -703,6 +747,18 @@ pub fn is_fetch_only(job: &FlakeJob) -> bool {
 
 pub(crate) fn is_fetch_only_job(job: &PendingJob) -> bool {
     matches!(job, PendingJob::Eval(j) if is_fetch_only(&j.job))
+}
+
+fn mark_job_prioritized_if_in_evaluation_or_shared_builds(
+    job: &mut PendingJob,
+    evaluation: Option<EvaluationId>,
+    shared_builds: &HashSet<DerivationBuildId>,
+) {
+    match job {
+        PendingJob::Eval(e) if Some(e.evaluation_id) == evaluation => e.prioritized = true,
+        PendingJob::Build(b) if shared_builds.contains(&b.derivation_build) => b.prioritized = true,
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -785,6 +841,8 @@ pub struct CandidateDetail {
 
 const DECISION_RING_CAP: usize = 200;
 const CANDIDATES_PER_DECISION: usize = 64;
+const MAX_SCORED_JOBS_PER_REQUEST: usize = 512;
+const MAX_PENDING_JOBS_VISITED_PER_WORKER_JOB_REQUEST: usize = 4 * MAX_SCORED_JOBS_PER_REQUEST;
 
 #[derive(Debug)]
 struct ActiveJob {
@@ -880,7 +938,7 @@ pub struct TrackedKeys {
 
 #[derive(Debug, Default)]
 pub struct JobTracker {
-    pending: HashMap<String, PendingJob>,
+    pending: PendingJobs,
     scores: HashMap<String, HashMap<String, WorkerJobScore>>,
     active: HashMap<String, ActiveJob>,
     decisions: VecDeque<AssignDecision>,
@@ -1046,11 +1104,13 @@ impl JobTracker {
             .as_ref()
             .filter(|(_, sc)| wins(sc))
             .map(|(id, _)| id.clone());
-        if let Some((id, alone)) = waiting
-            && let Some((_, beside)) = scored.iter_mut().find(|(scored_id, _)| *scored_id == id)
-        {
-            *beside = alone;
+        if let Some((id, alone)) = waiting {
+            match scored.iter_mut().find(|(scored_id, _)| *scored_id == id) {
+                Some((_, beside)) => *beside = alone,
+                None => scored.push((id, alone)),
+            }
         }
+        sort_scored_candidates_by_total_score_then_job_id(&mut scored);
         let winner_id = waiting_wins.or_else(|| {
             scored
                 .iter()
@@ -1207,30 +1267,24 @@ impl JobTracker {
         let shares = self.project_work_shares(policy, instance);
         let now = gradient_types::now();
 
-        let mut scored: Vec<(String, ScoredCandidate)> = self
-            .eligible_for_worker(authorized, caps)
-            .filter(|(_, j)| {
-                matches!(
-                    (kind, j),
-                    (JobKind::Flake, PendingJob::Eval(_))
-                        | (JobKind::Build, PendingJob::Build(_))
-                        | (JobKind::Exec, PendingJob::Exec(_))
-                )
-            })
-            .map(|(id, job)| {
-                let score = score_worker_job_by_missing_inputs(local_store, job);
-                let candidate = self.score_job(
-                    id, job, &score, &shares, policy, instance, worker_ctx, exec_peers, now,
-                );
-                (id.clone(), candidate)
-            })
-            .collect();
-        scored.sort_by(|(id_a, a), (id_b, b)| {
-            b.total
-                .partial_cmp(&a.total)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| id_a.cmp(id_b))
-        });
+        let mut scored = Vec::new();
+        let mut not_vetoed = 0;
+        let eligible = self
+            .pending
+            .iter_pending_jobs_for_kind_in_dispatch_order(kind)
+            .filter(|(_, job)| visible_to(job, authorized, caps))
+            .take(MAX_PENDING_JOBS_VISITED_PER_WORKER_JOB_REQUEST);
+        for (id, job) in eligible {
+            let score = score_worker_job_by_missing_inputs(local_store, job);
+            let candidate = self.score_job(
+                id, job, &score, &shares, policy, instance, worker_ctx, exec_peers, now,
+            );
+            not_vetoed += usize::from(!candidate.vetoed);
+            scored.push((id.clone(), candidate));
+            if not_vetoed == MAX_SCORED_JOBS_PER_REQUEST {
+                break;
+            }
+        }
         scored
     }
 
@@ -1252,7 +1306,7 @@ impl JobTracker {
     ) -> ScoredCandidate {
         let scored_job = match job {
             PendingJob::Exec(exec) => {
-                return exec_candidate(job, exec, score, worker_ctx, exec_peers, now);
+                return exec_candidate(exec, score, worker_ctx, exec_peers, now);
             }
             PendingJob::Eval(e) => ScoredJob::new_eval(
                 id,
@@ -1271,21 +1325,10 @@ impl JobTracker {
                 &b.estimate,
             ),
         };
+        let project_work_share = shares.share(job.project_id());
         let ctx = JobContext {
             job: &scored_job,
-            missing_count: Some(score.missing_count),
-            missing_nar_size: Some(score.missing_nar_size),
-            outputs_present: score.outputs_present,
-            substitute_outputs: job.substitute_outputs(),
-            dependency_count: job.dependency_count(),
-            queued_at: job.queued_at(),
-            ready_at: job.ready_at(),
-            project_work_share: shares.share(job.project_id()),
-            prioritized: job.prioritized(),
-            build_request: job.build_request(),
-            ifd: job.ifd(),
-            rescore_count: job.rescore_count(),
-            now,
+            ..build_scoring_job_context_for_pending_job(job, score, project_work_share, now)
         };
         let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
         let choice = worker_ctx
@@ -1299,9 +1342,10 @@ impl JobTracker {
             vetoed: !breakdown.vetoes.is_empty(),
             held_for_ram: breakdown.vetoes
                 == [gradient_pool::score::rules::ResourceSaturationRule::NAME],
-            score_breakdown: serde_json::to_value(&breakdown).unwrap_or(serde_json::Value::Null),
-            job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job, choice))
-                .unwrap_or(serde_json::Value::Null),
+            rule_score_breakdown: breakdown,
+            store_bloom_filter_missing_inputs_and_outputs_present: score.clone(),
+            job_project_running_build_work_share: project_work_share,
+            scored_at: now,
         }
     }
 
@@ -1394,8 +1438,8 @@ impl JobTracker {
                     score: sc.total,
                     won: winner == Some(id.as_str()),
                     queued_at: job.queued_at(),
-                    score_breakdown: sc.score_breakdown.clone(),
-                    job_context: sc.job_context.clone(),
+                    score_breakdown: sc.score_breakdown_to_json(),
+                    job_context: sc.build_job_context_view_json(job),
                 })
             })
             .collect();
@@ -1677,9 +1721,12 @@ impl JobTracker {
 
     pub(crate) fn learn_estimates(&mut self, estimates: Vec<(String, BuildEstimate)>) {
         for (job_id, estimate) in estimates {
-            if let Some(PendingJob::Build(build)) = self.pending.get_mut(&job_id) {
-                build.estimate.learn(estimate);
-            }
+            self.pending
+                .update_pending_job_by_id_and_resort_if_sort_key_changed(&job_id, |job| {
+                    if let PendingJob::Build(build) = job {
+                        build.estimate.learn(estimate);
+                    }
+                });
         }
     }
 
@@ -1960,17 +2007,13 @@ impl JobTracker {
         evaluation: Option<EvaluationId>,
         shared_builds: &HashSet<DerivationBuildId>,
     ) {
+        let prioritize = |job: &mut PendingJob| {
+            mark_job_prioritized_if_in_evaluation_or_shared_builds(job, evaluation, shared_builds)
+        };
+        self.pending
+            .update_all_pending_jobs_and_resort_jobs_with_changed_sort_key(prioritize);
         let active = self.active.values_mut().map(|a| &mut a.job);
-        let members = self.clusters.jobs_mut();
-        for job in self.pending.values_mut().chain(active).chain(members) {
-            match job {
-                PendingJob::Eval(e) if Some(e.evaluation_id) == evaluation => e.prioritized = true,
-                PendingJob::Build(b) if shared_builds.contains(&b.derivation_build) => {
-                    b.prioritized = true
-                }
-                _ => {}
-            }
-        }
+        active.chain(self.clusters.jobs_mut()).for_each(prioritize);
     }
 
     pub fn builds_no_worker_fits(&self, workers: &[BuildWorker]) -> Vec<RamShortage> {
@@ -1997,14 +2040,16 @@ impl JobTracker {
         checked: &HashSet<DerivationBuildId>,
         lifted: &HashSet<DerivationBuildId>,
     ) {
-        let members = self.clusters.jobs_mut();
-        for job in self.pending.values_mut().chain(members) {
+        let lift = |job: &mut PendingJob| {
             if let PendingJob::Build(b) = job
                 && checked.contains(&b.derivation_build)
             {
                 b.ifd = lifted.contains(&b.derivation_build);
             }
-        }
+        };
+        self.pending
+            .update_all_pending_jobs_and_resort_jobs_with_changed_sort_key(lift);
+        self.clusters.jobs_mut().for_each(lift);
     }
 
     pub fn prune_pending_builds(&mut self, stale: impl Fn(&PendingBuildJob) -> bool) -> usize {
@@ -2087,9 +2132,10 @@ impl JobTracker {
     }
 
     pub fn bump_rescore_counts(&mut self) {
-        for j in self.pending.values_mut() {
-            j.set_rescore_count(j.rescore_count() + 1);
-        }
+        self.pending
+            .update_all_pending_jobs_and_resort_jobs_with_changed_sort_key(|j| {
+                j.set_rescore_count(j.rescore_count() + 1)
+            });
     }
 
     #[cfg(test)]
@@ -2467,18 +2513,18 @@ mod tests {
     #[test]
     fn an_import_lift_reaches_queued_builds_and_leaves_once_the_import_finished() {
         let peer = ProjectId::now_v7();
-        let (dependency, plain, unchecked) = (
+        let (dependency, plain, mut unchecked) = (
             build_job(peer, vec![]),
             build_job(peer, vec![]),
             build_job(peer, vec![]),
         );
+        if let PendingJob::Build(b) = &mut unchecked {
+            b.ifd = true;
+        }
         let ids = [&dependency, &plain, &unchecked].map(|j| j.derivation_build().expect("build"));
         let mut tracker = JobTracker::new();
         for (key, job) in [("dep", dependency), ("plain", plain), ("new", unchecked)] {
             tracker.add_pending(key.into(), job);
-        }
-        if let Some(PendingJob::Build(b)) = tracker.pending.get_mut("new") {
-            b.ifd = true;
         }
 
         assert_eq!(tracker.pending_shared_builds().len(), 3);
@@ -2696,8 +2742,10 @@ mod tests {
             vetoed: false,
             held_for_ram: false,
             choice: None,
-            score_breakdown: serde_json::json!({}),
-            job_context: serde_json::json!({}),
+            rule_score_breakdown: ScoreBreakdown::default(),
+            store_bloom_filter_missing_inputs_and_outputs_present: WorkerJobScore::default(),
+            job_project_running_build_work_share: None,
+            scored_at: gradient_types::now(),
         };
 
         assignment_record_for(
@@ -3543,6 +3591,188 @@ mod tests {
         fn description(&self) -> &'static str {
             "test"
         }
+    }
+
+    #[derive(Debug)]
+    struct TestJobScoringRuleRejectingVetoedIdsAndPreferringPreferredId;
+
+    impl gradient_pool::score::ScoreRule
+        for TestJobScoringRuleRejectingVetoedIdsAndPreferringPreferredId
+    {
+        fn name(&self) -> &'static str {
+            "TestJobScoringRuleRejectingVetoedIdsAndPreferringPreferredId"
+        }
+        fn score(
+            &self,
+            job: &JobContext<'_>,
+            _: &WorkerContext<'_>,
+            _: &gradient_pool::score::InstanceContext,
+        ) -> f64 {
+            if job.job.job_id == "preferred" {
+                10.0
+            } else {
+                1.0
+            }
+        }
+        fn veto(
+            &self,
+            job: &JobContext<'_>,
+            _: &WorkerContext<'_>,
+            _: &gradient_pool::score::InstanceContext,
+        ) -> bool {
+            job.job.job_id.starts_with("vetoed")
+        }
+        fn description(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    fn make_pending_project_build_job_with_ready_at(
+        peer: ProjectId,
+        ready_at: chrono::NaiveDateTime,
+    ) -> PendingJob {
+        let mut job = build_job(peer, vec![]);
+        if let PendingJob::Build(build) = &mut job {
+            build.ready_at = ready_at;
+        }
+        job
+    }
+
+    fn request_one_job_id_for_w1(tracker: &mut JobTracker) -> Option<String> {
+        let p = gradient_pool::score::RulePolicy::new(
+            "test",
+            vec![Box::new(
+                TestJobScoringRuleRejectingVetoedIdsAndPreferringPreferredId,
+            )],
+            false,
+        );
+        let inst = gradient_pool::score::InstanceContext::default();
+        tracker
+            .take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[])
+            .map(|a| a.job_id().to_owned())
+    }
+
+    #[test]
+    fn build_beyond_first_512_eligible_builds_is_not_scored_until_prioritized() {
+        let mut tracker = JobTracker::new();
+        let peer = ProjectId::now_v7();
+        let first_ready = gradient_types::now() - chrono::Duration::hours(1);
+        let ready_at = |index: usize| {
+            first_ready + chrono::Duration::seconds(i64::try_from(index).expect("small index"))
+        };
+        for index in 0..=MAX_SCORED_JOBS_PER_REQUEST {
+            let job = make_pending_project_build_job_with_ready_at(peer, ready_at(index));
+            tracker.add_pending(format!("build:{index:04}"), job);
+        }
+        let preferred = make_pending_project_build_job_with_ready_at(
+            peer,
+            ready_at(MAX_SCORED_JOBS_PER_REQUEST + 1),
+        );
+        let preferred_build = preferred.derivation_build().expect("a build");
+        tracker.add_pending("preferred".into(), preferred);
+
+        assert_eq!(
+            request_one_job_id_for_w1(&mut tracker).as_deref(),
+            Some("build:0000")
+        );
+        assert_eq!(
+            request_one_job_id_for_w1(&mut tracker).as_deref(),
+            Some("build:0001")
+        );
+
+        tracker.prioritize(None, &HashSet::from([preferred_build]));
+        assert_eq!(
+            request_one_job_id_for_w1(&mut tracker).as_deref(),
+            Some("preferred")
+        );
+    }
+
+    #[test]
+    fn vetoed_builds_do_not_use_512_scoring_slots_and_2048_visited_eligible_builds_stop_walk_with_no_job()
+     {
+        let mut tracker = JobTracker::new();
+        let peer = ProjectId::now_v7();
+        let first_ready = gradient_types::now() - chrono::Duration::hours(1);
+        let ready_at = |seconds: i64| first_ready + chrono::Duration::seconds(seconds);
+        for index in 1..MAX_PENDING_JOBS_VISITED_PER_WORKER_JOB_REQUEST {
+            let seconds = i64::try_from(index).expect("small index");
+            let job = make_pending_project_build_job_with_ready_at(peer, ready_at(seconds));
+            tracker.add_pending(format!("vetoed:{index:04}"), job);
+        }
+        let valid = make_pending_project_build_job_with_ready_at(peer, ready_at(10_000));
+        tracker.add_pending("valid".into(), valid);
+
+        assert_eq!(
+            request_one_job_id_for_w1(&mut tracker).as_deref(),
+            Some("valid")
+        );
+
+        let head = make_pending_project_build_job_with_ready_at(peer, ready_at(0));
+        tracker.add_pending("vetoed:0000".into(), head);
+        let late = make_pending_project_build_job_with_ready_at(peer, ready_at(10_001));
+        tracker.add_pending("late".into(), late);
+
+        assert_eq!(request_one_job_id_for_w1(&mut tracker), None);
+        assert!(tracker.pending_job("late").is_some());
+    }
+
+    #[test]
+    fn waiting_build_outside_512_scored_jobs_is_assigned_after_ram_release_without_panic() {
+        let mut tracker = JobTracker::new();
+        let policy = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::ResourceAware);
+        let inst = gradient_pool::score::InstanceContext::default();
+        let send_job_request_from_worker_w1_with_capabilities =
+            |tracker: &mut JobTracker, caps: &WorkerCaps| {
+                tracker
+                    .take_best_of_kind(
+                        "w1",
+                        None,
+                        Some(caps),
+                        None,
+                        &JobKind::Build,
+                        &*policy,
+                        &inst,
+                        &[],
+                    )
+                    .map(|a| a.job_id().to_owned())
+            };
+        let heavy_build_ready_at_one_hour_ago = gradient_types::now() - chrono::Duration::hours(1);
+        let mut pending_build_with_60_gb_predicted_peak_ram = build_predicted(60_000);
+        if let PendingJob::Build(build) = &mut pending_build_with_60_gb_predicted_peak_ram {
+            build.ready_at = heavy_build_ready_at_one_hour_ago;
+            build.rescore_count = gradient_pool::score::weights::RESCORE_MAX_ROUNDS;
+        }
+        tracker.add_pending("heavy".into(), pending_build_with_60_gb_predicted_peak_ram);
+
+        let worker_caps_with_ram_reserved_by_assigned_jobs =
+            build_worker(128_000, 128_000, 100_000).caps;
+        assert_eq!(
+            send_job_request_from_worker_w1_with_capabilities(
+                &mut tracker,
+                &worker_caps_with_ram_reserved_by_assigned_jobs
+            ),
+            None
+        );
+        assert_eq!(tracker.waiting_builds["w1"].job_id, "heavy");
+
+        for index in 0..=MAX_SCORED_JOBS_PER_REQUEST {
+            let mut older_pending_build = build_job(ProjectId::now_v7(), vec![]);
+            if let PendingJob::Build(build) = &mut older_pending_build {
+                build.ready_at = heavy_build_ready_at_one_hour_ago - chrono::Duration::hours(1);
+                build.rescore_count = gradient_pool::score::weights::RESCORE_MAX_ROUNDS;
+            }
+            tracker.add_pending(format!("older:{index:04}"), older_pending_build);
+        }
+
+        let worker_capabilities_after_jobs_finished = build_worker(128_000, 128_000, 0).caps;
+        assert_eq!(
+            send_job_request_from_worker_w1_with_capabilities(
+                &mut tracker,
+                &worker_capabilities_after_jobs_finished
+            )
+            .as_deref(),
+            Some("heavy")
+        );
     }
 
     #[test]
