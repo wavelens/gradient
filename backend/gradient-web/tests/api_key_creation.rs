@@ -289,20 +289,20 @@ async fn non_superuser_create_api_key_with_superuser_rights_returns_403_and_list
     let res = make_test_server(db.into_connection())
         .post("/api/v1/user/keys")
         .add_header("authorization", bearer(session_id))
-        .json(&json!({ "name": "admin", "permissions": ["useSuperuserRights"] }))
+        .json(&json!({ "name": "admin", "permissions": ["readSuperuser"] }))
         .await;
 
     res.assert_status(StatusCode::FORBIDDEN);
     assert_eq!(
         res.json::<Value>()["missing_permissions"],
-        json!(["useSuperuserRights"])
+        json!(["readSuperuser", "writeSuperuser"])
     );
 }
 
 #[tokio::test]
 async fn superuser_creates_unpinned_api_key_with_use_superuser_rights_and_view_project() {
     let session_id = SessionId::now_v7();
-    let expected = mask_from(&[Permission::ViewProject, Permission::UseSuperuserRights]);
+    let expected = mask_from(&[Permission::ViewProject, Permission::ReadSuperuser]);
     let conn = with_auth_as(mock_db(), session_id, superuser())
         .append_query_results([Vec::<api::Model>::new()])
         .append_query_results([vec![api::Model {
@@ -315,7 +315,7 @@ async fn superuser_creates_unpinned_api_key_with_use_superuser_rights_and_view_p
     let res = make_test_server(conn.clone())
         .post("/api/v1/user/keys")
         .add_header("authorization", bearer(session_id))
-        .json(&json!({ "name": "admin", "permissions": ["useSuperuserRights"] }))
+        .json(&json!({ "name": "admin", "permissions": ["readSuperuser"] }))
         .await;
 
     res.assert_status_ok();
@@ -340,7 +340,7 @@ async fn api_key_pinned_to_project_cannot_have_superuser_rights() {
         .add_header("authorization", bearer(session_id))
         .json(&json!({
             "name": "deploy",
-            "permissions": ["viewProject", "useSuperuserRights"],
+            "permissions": ["viewProject", "writeSuperuser"],
             "project": "test-project",
         }))
         .await;
@@ -376,5 +376,8 @@ async fn key_permission_catalogue_hides_use_superuser_rights_from_non_superuser_
     .await;
 
     assert_eq!(regular, vec!["createProject"]);
-    assert_eq!(admin, vec!["createProject", "useSuperuserRights"]);
+    assert_eq!(
+        admin,
+        vec!["createProject", "readSuperuser", "writeSuperuser"]
+    );
 }

@@ -29,7 +29,7 @@ export class AdminService {
   }
 
   fetchGithubAppCredentials(): Observable<ManifestResult> {
-    return this.api.get<ManifestResult>('admin/github-app/credentials');
+    return this.api.post<ManifestResult>('admin/github-app/credentials', {});
   }
 
   startDeepGc(): Observable<StartDeepGcResponse> {

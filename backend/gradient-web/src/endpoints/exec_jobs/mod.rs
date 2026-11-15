@@ -94,7 +94,11 @@ impl ExecJobAccessContext {
         api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(db, job).await?;
-        if user.superuser {
+        let superuser_may_write = user.superuser
+            && api_key.is_none_or(|key| {
+                key.unpinned_key_has_superuser_permission(Permission::WriteSuperuser)
+            });
+        if superuser_may_write {
             return Ok(ctx);
         }
         let mask = load_membership_with_permissions(db, user.id, ctx.project.id, api_key)

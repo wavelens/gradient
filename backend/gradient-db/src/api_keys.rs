@@ -93,6 +93,8 @@ mod tests {
 
     const USE_SUPERUSER_RIGHTS: &str = "m20261210_000001_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions";
 
+    const ADD_READ_SUPERUSER_RIGHTS_BIT_TO_EXISTING_API_KEYS_WITH_WRITE_SUPERUSER_RIGHTS_BIT_MIGRATION_NAME: &str = "m20261214_000000_add_read_superuser_rights_bit_to_existing_api_keys_that_have_write_superuser_rights_bit";
+
     const CACHE_PERMISSION_COLUMN: &str = "m20261211_000000_add_cache_permission_column_to_api_and_move_pinned_api_key_permissions_to_cache_permission";
 
     const VIEW_AND_READ_STORE: &str =
@@ -190,7 +192,7 @@ mod tests {
     async fn running_use_superuser_rights_migration_marks_only_unpinned_keys_of_superusers_with_all_project_permissions_and_is_idempotent()
      {
         assert_eq!(admin_mask(), 32767);
-        assert_eq!(Permission::UseSuperuserRights.bit(), 65536);
+        assert_eq!(Permission::WriteSuperuser.bit(), 65536);
         let db = TestDatabase::create().await;
         let conn = db.connection();
         let admin = crate::rows::insert::<EUser, _>(&conn, rows::superuser())
@@ -211,7 +213,7 @@ mod tests {
             .await
             .expect("the project is written");
         let full = admin_mask();
-        let marked = full | Permission::UseSuperuserRights.bit();
+        let marked = full | Permission::WriteSuperuser.bit();
         let cases: [(UserId, PermissionMask, Option<ProjectId>, PermissionMask); 4] = [
             (admin.id, full, None, marked),
             (admin.id, full, Some(project.id), full),
@@ -247,6 +249,54 @@ mod tests {
         }
 
         run_migrations(&conn, &[USE_SUPERUSER_RIGHTS, USE_SUPERUSER_RIGHTS]).await;
+
+        for (id, want) in &expected {
+            let stored = db.find::<EApi>(*id).await.expect("the key exists");
+            assert_eq!(stored.permission, *want, "{}", stored.name);
+        }
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn running_superuser_read_only_permission_migration_sets_read_only_only_on_keys_with_write_superuser_permission_leaves_other_keys_unchanged_and_is_idempotent()
+     {
+        assert_eq!(Permission::WriteSuperuser.bit(), 65536);
+        assert_eq!(Permission::ReadSuperuser.bit(), 131072);
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let owner = crate::rows::insert::<EUser, _>(&conn, rows::superuser())
+            .await
+            .expect("the superuser is written");
+        let view = Permission::ViewProject.bit();
+        let write = view | Permission::WriteSuperuser.bit();
+        let both = write | Permission::ReadSuperuser.bit();
+        let cases: [(PermissionMask, PermissionMask); 3] =
+            [(write, both), (view, view), (both, both)];
+
+        let mut expected: Vec<(ApiId, PermissionMask)> = Vec::new();
+        for (index, (permission, want)) in cases.iter().enumerate() {
+            let name = format!("key-{index}");
+            let row = crate::rows::insert::<EApi, _>(
+                &conn,
+                MApi {
+                    id: ApiId::now_v7(),
+                    owned_by: owner.id,
+                    name: name.clone(),
+                    key: name,
+                    last_used_at: test_date(),
+                    created_at: test_date(),
+                    permission: *permission,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the key is written");
+            expected.push((row.id, *want));
+        }
+
+        let migration =
+            ADD_READ_SUPERUSER_RIGHTS_BIT_TO_EXISTING_API_KEYS_WITH_WRITE_SUPERUSER_RIGHTS_BIT_MIGRATION_NAME;
+        run_migrations(&conn, &[migration, migration]).await;
 
         for (id, want) in &expected {
             let stored = db.find::<EApi>(*id).await.expect("the key exists");

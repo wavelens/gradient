@@ -405,6 +405,14 @@ impl WebError {
     }
 }
 
+pub(crate) fn superuser_permission_wire_names() -> Vec<&'static str> {
+    use gradient_types::permissions::{mask_to_vec, superuser_permissions_mask};
+    mask_to_vec(superuser_permissions_mask())
+        .into_iter()
+        .map(|p| p.as_wire_name())
+        .collect()
+}
+
 pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
     if user.superuser {
         Ok(())
@@ -412,7 +420,7 @@ pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
         Err(WebError::Forbidden(
             ErrorCode::SUPERUSER_REQUIRED,
             "superuser required".into(),
-            vec![gradient_types::permissions::Permission::UseSuperuserRights.as_wire_name()],
+            superuser_permission_wire_names(),
         ))
     }
 }

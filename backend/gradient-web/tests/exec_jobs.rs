@@ -21,6 +21,7 @@ use gradient_test_support::log_storage::ReadErrorLogStorage;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, signed_in_as};
 use gradient_types::exec::{DeviceRequest, ExecSpec};
+use gradient_types::permissions::Permission;
 use gradient_types::waiting_reason::{ExecUnmet, WaitingReason};
 use sea_orm::MockDatabase;
 use serde_json::Value;
@@ -215,6 +216,41 @@ async fn a_finished_exec_job_cannot_be_aborted() {
         .await;
 
     assert_eq!(res.status_code(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_superuser_api_key_with_only_read_permission_cannot_open_a_shell_in_an_exec_job_of_a_project_the_key_owner_is_not_a_member_of()
+ {
+    use sha2::{Digest, Sha256};
+    let raw = "r".repeat(64);
+    let key = gradient_entity::api::Model {
+        id: gradient_entity::ids::ApiId::now_v7(),
+        owned_by: superuser().id,
+        name: "read-only".into(),
+        key: Sha256::digest(raw.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        last_used_at: test_date(),
+        created_at: test_date(),
+        permission: Permission::ViewProject.bit() | Permission::ReadSuperuser.bit(),
+        ..Default::default()
+    };
+    let db = mock_db()
+        .append_query_results([vec![key.clone()]])
+        .append_exec_results([gradient_fixtures::mock::exec_ok()])
+        .append_query_results([vec![key]])
+        .append_query_results([vec![superuser()]]);
+    let db = with_job(db, ExecJobStatus::Running)
+        .append_query_results([vec![project()]])
+        .append_query_results([Vec::<project_access::Model>::new()]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/shell", job_id()))
+        .add_header("authorization", format!("Bearer GRAD{raw}"))
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND, "{}", res.text());
 }
 
 #[tokio::test]

@@ -1068,7 +1068,7 @@ fn rejects_use_superuser_rights_on_api_key_of_non_superuser_but_allows_superuser
                 "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null", "superuser": {superuser} }}
             }},
             "api_keys": {{
-                "admin": {{ "name": "admin", "key_file": "/dev/null", "owned_by": "alice", "permissions": ["useSuperuserRights"] }}
+                "admin": {{ "name": "admin", "key_file": "/dev/null", "owned_by": "alice", "permissions": ["readSuperuser"] }}
             }}
         }}"#
         );

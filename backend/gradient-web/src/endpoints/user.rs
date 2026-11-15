@@ -20,6 +20,7 @@ use crate::permissions::{
     available_permissions, available_server_permissions, cache_mask_to_vec, cache_mask_to_wire,
     mask_grants, mask_to_vec, mask_with_view_project_permission, parse_cache_permission_list,
     parse_permission_list, project_permission_mask_to_wire_names, server_wide_mask,
+    superuser_permissions_mask,
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
@@ -68,10 +69,10 @@ enum UserRefusal {
     #[error("API key cannot grant project permissions that the owner does not have.")]
     GrantUnheldProjectPermissions(Vec<Permission>),
     #[error(
-        "Only keys that aren't pinned to a project can have server-wide permissions (`createProject`, `useSuperuserRights`)."
+        "Only keys that are not pinned to a project can have server-wide permissions (`createProject`, `readSuperuser`, `writeSuperuser`)."
     )]
     ServerWidePermissionOnPinnedKey,
-    #[error("Only superusers can grant `useSuperuserRights` to an API key.")]
+    #[error("Only superusers can grant `readSuperuser` or `writeSuperuser` to an API key.")]
     NonSuperuserGrantsSuperuserRightsOnApiKey,
     #[error(
         "Keys pinned to a cache can have only cache permissions. Send them in `cache_permissions` and leave `permissions` empty."
@@ -120,7 +121,7 @@ impl Refusal for UserRefusal {
                 permissions.iter().map(|p| p.as_wire_name()).collect()
             }
             Self::NonSuperuserGrantsSuperuserRightsOnApiKey => {
-                vec![Permission::UseSuperuserRights.as_wire_name()]
+                crate::error::superuser_permission_wire_names()
             }
             _ => Vec::new(),
         }
@@ -685,7 +686,7 @@ async fn reject_api_key_permissions_not_held_by_owner(
             if mask_grants(mask, Permission::CreateProject) {
                 require_create_permission(create_project, user)?;
             }
-            if mask_grants(mask, Permission::UseSuperuserRights) && !user.superuser {
+            if mask & superuser_permissions_mask() != 0 && !user.superuser {
                 return Err(UserRefusal::NonSuperuserGrantsSuperuserRightsOnApiKey.into());
             }
             Ok(mask)
@@ -756,7 +757,7 @@ async fn validate_api_key_permission_lists_against_pin_and_owner_grants_returnin
     operation_id = "getUserKeyPermissions",
     tag = "user",
     summary = "List API-key permission catalogue",
-    description = "Returns the full set of capabilities a user-managed API key may grant.\nUsed by the create / edit dialog to populate the permission checkbox list. `server_wide_permissions` lists `useSuperuserRights` only for superusers.",
+    description = "Return the full set of features that user-managed API keys can grant.\nCreate/edit dialogs use this list to fill the permission checkboxes. Only superusers see `readSuperuser` and `writeSuperuser` in `server_wide_permissions`.",
     responses((status = OK, description = "Permission catalogue", body = ApiKeyPermissionsResponse), WebError)
 )]
 pub async fn get_key_permissions(
@@ -904,7 +905,7 @@ async fn list_reachable_caches_for_unpinned_api_key(
     operation_id = "createUserKey",
     tag = "user",
     summary = "Create API key",
-    description = "Create a new API key. The caller can get the full key (with the `GRAD` prefix) once. A second request can't retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to expire the key automatically. Omit this field to create a key with no expiry. Project and server-wide permissions go in `permissions`. Cache permissions go in `cache_permissions`. A key pinned to a project can hold only `permissions`. A key pinned to a cache can hold only `cache_permissions`. An unpinned key can hold both. No key can exceed the permissions of its owner. A key pinned to a project or cache can grant only the caller's permissions at that location. A caller in a project subscribed to a cache is a read-only member of that cache. That caller can create a read-only key for the cache. Grant `viewProject` to all keys with project permissions. Use `createProject` only for unpinned keys with an owner who can create projects. Use `useSuperuserRights` only for unpinned keys whose owner is a superuser. That key can then use the superuser permissions of that owner.",
+    description = "Create a new API key. The caller can get the full key (with the `GRAD` prefix) once. A second request can't retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to expire the key automatically. Omit this field to create a key with no expiry. Project and server-wide permissions go in `permissions`. Cache permissions go in `cache_permissions`. A key pinned to a project can hold only `permissions`. A key pinned to a cache can hold only `cache_permissions`. An unpinned key can hold both. No key can exceed the permissions of its owner. A key pinned to a project or cache can grant only the caller's permissions at that location. A caller in a project subscribed to a cache is a read-only member of that cache. That caller can create a read-only key for the cache. Grant `viewProject` to all keys with project permissions. Use `createProject` only for unpinned keys with an owner who can create projects. Only unpinned keys with a superuser owner use `readSuperuser` and `writeSuperuser`. The first can let the key use the owner's superuser permissions on GET, HEAD, and OPTIONS requests. The second can let the key use those permissions on all other requests.",
     request_body = CreateApiKeyRequest,
     responses((status = OK, description = "New API key", body = String, content_type = "application/json"), WebError)
 )]

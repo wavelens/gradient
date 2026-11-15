@@ -29,7 +29,8 @@ pub enum Permission {
     ManageWebhooks,
 
     CreateProject,
-    UseSuperuserRights,
+    ReadSuperuser,
+    WriteSuperuser,
 }
 
 pub type PermissionMask = i64;
@@ -52,7 +53,8 @@ impl Permission {
         Permission::ManageTriggers,
         Permission::ManageWebhooks,
         Permission::CreateProject,
-        Permission::UseSuperuserRights,
+        Permission::ReadSuperuser,
+        Permission::WriteSuperuser,
     ];
 
     /// New permissions must be appended, and an existing one must never be renumbered.
@@ -75,7 +77,8 @@ impl Permission {
             Permission::ManageTriggers => 13,
             Permission::ManageWebhooks => 14,
             Permission::CreateProject => 15,
-            Permission::UseSuperuserRights => 16,
+            Permission::WriteSuperuser => 16,
+            Permission::ReadSuperuser => 17,
         };
         1_i64 << pos
     }
@@ -98,14 +101,15 @@ impl Permission {
             Permission::ManageTriggers => "manageTriggers",
             Permission::ManageWebhooks => "manageWebhooks",
             Permission::CreateProject => "createProject",
-            Permission::UseSuperuserRights => "useSuperuserRights",
+            Permission::ReadSuperuser => "readSuperuser",
+            Permission::WriteSuperuser => "writeSuperuser",
         }
     }
 
     pub const fn is_server_wide(self) -> bool {
         matches!(
             self,
-            Permission::CreateProject | Permission::UseSuperuserRights
+            Permission::CreateProject | Permission::ReadSuperuser | Permission::WriteSuperuser
         )
     }
 
@@ -131,8 +135,9 @@ impl Permission {
             Permission::ManageTriggers => "Pick when tasks run (e.g., on push, on schedule)",
             Permission::ManageWebhooks => "Send event notifications to an external URL.",
             Permission::CreateProject => "Create a new project on the server.",
-            Permission::UseSuperuserRights => {
-                "Use owner's superuser rights (admin API, event stream)"
+            Permission::ReadSuperuser => "Use owner's superuser rights on GET, HEAD, OPTIONS",
+            Permission::WriteSuperuser => {
+                "Use owner's superuser rights on POST, PUT, PATCH and DELETE"
             }
         }
     }
@@ -155,7 +160,8 @@ impl Permission {
             Permission::ManageTriggers => "triggers",
             Permission::ManageWebhooks => "webhooks",
             Permission::CreateProject => "create project",
-            Permission::UseSuperuserRights => "superuser rights",
+            Permission::ReadSuperuser => "superuser read",
+            Permission::WriteSuperuser => "superuser write",
         }
     }
 
@@ -193,6 +199,10 @@ pub fn server_wide_mask() -> PermissionMask {
         .iter()
         .filter(|p| p.is_server_wide())
         .fold(0, |acc, p| acc | p.bit())
+}
+
+pub fn superuser_permissions_mask() -> PermissionMask {
+    mask_from(&[Permission::ReadSuperuser, Permission::WriteSuperuser])
 }
 
 pub fn admin_mask() -> PermissionMask {

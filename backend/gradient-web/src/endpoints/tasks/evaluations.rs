@@ -961,6 +961,7 @@ pub async fn get_entry_point_download(
                 &state.jwt_secret,
                 &state.memory.last_used_stamps,
                 token_str,
+                &axum::http::Method::GET,
                 client_ip,
             )
             .await?;

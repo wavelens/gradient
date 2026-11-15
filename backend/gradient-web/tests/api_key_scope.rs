@@ -485,16 +485,20 @@ async fn anonymous_private_cache_request_returns_401_without_missing_permission_
     assert!(body.get("missing_permissions").is_none(), "{body}");
 }
 
-#[tokio::test]
-async fn a_superuser_without_superuser_rights_is_told_which_permission_is_missing() {
-    let raw = "u".repeat(64);
-    let key = key_row(&raw, admin_mask() | Permission::CreateProject.bit(), None);
+fn server_for_superuser_key(raw: &str, permission: i64) -> axum_test::TestServer {
+    let key = key_row(raw, permission, None);
     let db = mock_db()
         .append_query_results([vec![key.clone()]])
         .append_exec_results([exec_ok()])
         .append_query_results([vec![key]])
         .append_query_results([vec![gradient_fixtures::rows::superuser()]]);
-    let res = make_test_server(db.into_connection())
+    make_test_server(db.into_connection())
+}
+
+#[tokio::test]
+async fn a_superuser_without_superuser_rights_is_told_which_permission_is_missing() {
+    let raw = "u".repeat(64);
+    let res = server_for_superuser_key(&raw, admin_mask() | Permission::CreateProject.bit())
         .get("/api/v1/metrics/events")
         .add_header("authorization", bearer_key(&raw))
         .await;
@@ -503,7 +507,28 @@ async fn a_superuser_without_superuser_rights_is_told_which_permission_is_missin
     assert_eq!(body["code"], "superuser_required", "{body}");
     assert_eq!(
         body["missing_permissions"],
-        json!(["useSuperuserRights"]),
+        json!(["readSuperuser", "writeSuperuser"]),
         "{body}"
     );
+}
+
+#[tokio::test]
+async fn superuser_api_key_with_read_only_permission_allows_get_and_denies_post_on_admin_endpoints()
+{
+    let raw = "u".repeat(64);
+    let read_only = Permission::ViewProject.bit() | Permission::ReadSuperuser.bit();
+
+    let get = server_for_superuser_key(&raw, read_only)
+        .get("/api/v1/metrics/events")
+        .add_header("authorization", bearer_key(&raw))
+        .await;
+    assert_ne!(get.status_code(), StatusCode::FORBIDDEN, "{}", get.text());
+
+    let post = server_for_superuser_key(&raw, read_only)
+        .post("/api/v1/admin/maintenance/gc")
+        .add_header("authorization", bearer_key(&raw))
+        .await;
+    post.assert_status(StatusCode::FORBIDDEN);
+    let body: serde_json::Value = post.json();
+    assert_eq!(body["code"], "superuser_required", "{body}");
 }

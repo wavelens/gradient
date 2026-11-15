@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::header::SET_COOKIE;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use gradient_db::WebDb;
@@ -203,9 +203,9 @@ pub async fn authorize(
     if let DecodedRequest::Session { session } = &decoded {
         parts.extensions.insert(session.clone());
     }
-    parts
-        .extensions
-        .insert(decoded.user_with_superuser_allowed_for_credential(current_user));
+    let current_user =
+        decoded.user_with_superuser_allowed_for_credential(current_user, &parts.method);
+    parts.extensions.insert(current_user);
     parts.extensions.insert(MaybeApiKey::from(&decoded));
     parts.extensions.insert(decoded.principal());
     parts.extensions.insert(decoded.rate_limit_bucket());
@@ -232,6 +232,7 @@ async fn optional_caller(
     jwt_secret: &SecretString,
     last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
+    method: &Method,
     client_ip: IpAddr,
 ) -> WebResult<Option<(MUser, DecodedRequest)>> {
     let Some(token) = extract_bearer_or_cookie(headers) else {
@@ -242,6 +243,7 @@ async fn optional_caller(
         jwt_secret,
         last_used_stamps,
         token.to_owned(),
+        method,
         client_ip,
     )
     .await
@@ -253,6 +255,7 @@ pub async fn verify_credential_and_return_user_and_decoded_credential(
     jwt_secret: &SecretString,
     last_used_stamps: &Debounce<Uuid>,
     token: String,
+    method: &Method,
     client_ip: IpAddr,
 ) -> WebResult<(MUser, DecodedRequest)> {
     let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token)
@@ -273,7 +276,7 @@ pub async fn verify_credential_and_return_user_and_decoded_credential(
         return Err(SharedRefusal::AccountDeactivated.into());
     }
 
-    let user = decoded.user_with_superuser_allowed_for_credential(user);
+    let user = decoded.user_with_superuser_allowed_for_credential(user, method);
     Ok((user, decoded))
 }
 
@@ -306,6 +309,7 @@ pub async fn authorize_optional(
         &state.jwt_secret,
         &state.memory.last_used_stamps,
         req.headers(),
+        req.method(),
         client_ip,
     )
     .await;

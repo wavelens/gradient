@@ -112,7 +112,7 @@ async fn admin_routes_reject_non_superuser() {
     let routes = [
         (Method::GET, "/state"),
         (Method::POST, "/github-app/manifest"),
-        (Method::GET, "/github-app/credentials"),
+        (Method::POST, "/github-app/credentials"),
         (Method::POST, "/maintenance/deep-gc"),
         (Method::POST, "/draining"),
         (Method::GET, "/tasks"),
