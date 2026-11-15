@@ -28,7 +28,9 @@ mod transition;
 
 use std::sync::{Arc, OnceLock};
 
+use anyhow::Context as _;
 use gradient_db::DbContext;
+use gradient_db::graph::consistency::{ConsistencyReport, run_consistency_check_steps};
 use gradient_types::DerivationId;
 use gradient_types::events::{Event, EventBus, graph};
 use gradient_util::supervision::{ChildCtx, ChildSpec, SupervisorHealth};
@@ -223,6 +225,30 @@ impl Graph {
             prioritized: report.prioritized_shared_builds.len(),
         });
         Ok(report)
+    }
+
+    pub async fn run_consistency_checks(&self) -> anyhow::Result<ConsistencyReport> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(ConsistencyReport::default());
+        }
+        run_consistency_check_steps(move |step, progress| async move {
+            let message = Transition::RunConsistencyCheckStep { step, progress };
+            self.call(|reply| GraphMsg::Transition(message, reply))
+                .await
+                .and_then(|report| {
+                    report
+                        .consistency_check_progress
+                        .context("The graph writer did not return the progress of the consistency check")
+                })
+                .with_context(|| {
+                    format!(
+                        "Step {} of the consistency check failed. The remaining steps wait for the next interval",
+                        step.step_name()
+                    )
+                })
+        })
+        .await
     }
 
     pub async fn requeue(&self, scope: RequeueScope) -> anyhow::Result<u64> {

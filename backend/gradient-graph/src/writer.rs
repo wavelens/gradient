@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, anyhow};
 use gradient_db::DbContext;
 use gradient_db::connection::find_sessions_with_transaction_older_than;
+use gradient_db::graph::consistency::BuildGraphConsistencyCheckStep;
 use gradient_entity::StorePath;
 use gradient_types::DerivationId;
 use gradient_util::supervision::SupervisorHealth;
@@ -61,6 +62,15 @@ impl GraphWriterTransactionLimits {
         Self {
             message_kind,
             ..DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS
+        }
+    }
+
+    pub const fn for_consistency_check_step(step: BuildGraphConsistencyCheckStep) -> Self {
+        Self {
+            message_kind: step.step_name(),
+            transaction_wall_clock_time_limit: GRAPH_TX_BUDGET,
+            statement_lock_wait_timeout: Duration::from_secs(2),
+            max_transaction_attempts: 1,
         }
     }
 
@@ -196,8 +206,8 @@ impl Actor for GraphWriter {
             }
             GraphMsg::Transition(t, reply) => {
                 flush(&myself, st).await;
+                let limits = graph_writer_transaction_limits_for_transition_message(&t);
                 let t = &t;
-                let limits = GraphWriterTransactionLimits::for_message_kind("transition");
                 let result = transact(&st.ctx, limits, move |scoped| async move {
                     transition::apply(&scoped, t.clone()).await
                 })
@@ -252,6 +262,17 @@ impl Actor for GraphWriter {
         }
 
         Ok(())
+    }
+}
+
+fn graph_writer_transaction_limits_for_transition_message(
+    transition: &Transition,
+) -> GraphWriterTransactionLimits {
+    match transition {
+        Transition::RunConsistencyCheckStep { step, .. } => {
+            GraphWriterTransactionLimits::for_consistency_check_step(*step)
+        }
+        _ => GraphWriterTransactionLimits::for_message_kind("transition"),
     }
 }
 
@@ -891,6 +912,24 @@ mod tests {
     fn anything_else_does_not_retry() {
         assert!(!is_retryable(&coded("23505")));
         assert!(!is_retryable(&anyhow!("graph transaction exceeded 120s")));
+    }
+
+    #[test]
+    fn a_consistency_check_message_uses_2_second_lock_wait_once() {
+        let limits = graph_writer_transaction_limits_for_transition_message(
+            &Transition::RunConsistencyCheckStep {
+                step: BuildGraphConsistencyCheckStep::RecountWanted,
+                progress: Default::default(),
+            },
+        );
+        assert_eq!(
+            (
+                limits.message_kind,
+                limits.statement_lock_wait_timeout,
+                limits.max_transaction_attempts
+            ),
+            ("recount_wanted", Duration::from_secs(2), 1)
+        );
     }
 
     #[test]

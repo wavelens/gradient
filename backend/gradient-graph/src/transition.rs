@@ -118,9 +118,12 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             gradient_db::graph::repair::repair_build_graph(ctx, scope).await?;
             Ok(TransitionReport::default())
         }
-        Transition::ConsistencyCheck => Ok(TransitionReport {
-            consistency: Some(
-                gradient_db::graph::consistency::graph_consistency_report(ctx).await?,
+        Transition::RunConsistencyCheckStep { step, progress } => Ok(TransitionReport {
+            consistency_check_progress: Some(
+                gradient_db::graph::consistency::run_one_consistency_check_step(
+                    ctx, step, progress,
+                )
+                .await?,
             ),
             ..Default::default()
         }),

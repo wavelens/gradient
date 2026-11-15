@@ -4,21 +4,26 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use gradient_db::connection::find_sessions_with_transaction_older_than;
+use gradient_db::graph::can_start::{SWEEP_CHUNKS_PER_TRANSACTION, SWEEP_LOCK_CHUNK};
 use gradient_db::{DbContext, MissingRow};
 use gradient_entity::StorePathError;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::derivation;
 use gradient_entity::entry_point::{License, Licenses};
-use gradient_entity::ids::{DispatchedJobId, EvaluationId};
+use gradient_entity::ids::{DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId};
+use gradient_entity::{derivation, derivation_build};
 use gradient_fixtures::shape::shape;
+use gradient_fixtures::test_date;
 use gradient_wire::types::{self, DiscoveredDerivation};
-use sea_orm::{ConnectionTrait, DatabaseTransaction, TransactionTrait};
+use sea_orm::{
+    ConnectionTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, TransactionTrait,
+};
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, SOURCE, Z, Z_OUT, batch, chain, drv, nar,
@@ -35,13 +40,28 @@ const NOTE_TRANSACTIONS: &str = "
     CREATE TABLE written_in (source text, top_level text);
     CREATE FUNCTION note_transaction() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
-        INSERT INTO written_in VALUES (TG_TABLE_NAME, pg_current_xact_id()::text);
+        INSERT INTO written_in VALUES (coalesce(TG_ARGV[0], TG_TABLE_NAME), pg_current_xact_id()::text);
         RETURN NULL;
     END $$;
     CREATE TRIGGER note_derivation AFTER INSERT ON derivation
         FOR EACH ROW EXECUTE FUNCTION note_transaction();
     CREATE TRIGGER note_cached_path AFTER INSERT ON cached_path
         FOR EACH ROW EXECUTE FUNCTION note_transaction();
+";
+
+const DERIVATION_UPDATE_TRANSACTION_ID_TRIGGER_SQL: &str = "
+    CREATE TRIGGER note_top_level_transaction_on_unwalked_inputs_update
+        AFTER UPDATE OF unwalked_inputs ON derivation
+        FOR EACH ROW WHEN (OLD.unwalked_inputs <> NEW.unwalked_inputs)
+        EXECUTE FUNCTION note_transaction('unwalked_inputs');
+    CREATE TRIGGER note_wanted_change_transaction_id
+        AFTER UPDATE OF wanted ON derivation_build
+        FOR EACH ROW WHEN (OLD.wanted <> NEW.wanted)
+        EXECUTE FUNCTION note_transaction('wanted');
+    CREATE TRIGGER note_blocking_deps_change_transaction_id
+        AFTER UPDATE OF blocking_deps ON derivation_build
+        FOR EACH ROW WHEN (OLD.blocking_deps <> NEW.blocking_deps)
+        EXECUTE FUNCTION note_transaction('blocking_deps');
 ";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -152,6 +172,57 @@ fn entry_point(path: &str, output: &str, attr: &str) -> DiscoveredDerivation {
 async fn transactions_writing(case: &Case, table: &str) -> Vec<String> {
     let written = format!("SELECT top_level FROM written_in WHERE source = '{table}'");
     case.db.texts(&written).await
+}
+
+async fn distinct_top_level_transaction_ids_that_changed_counter_column(
+    case: &Case,
+    counter: &str,
+) -> BTreeSet<String> {
+    transactions_writing(case, counter)
+        .await
+        .into_iter()
+        .collect()
+}
+
+async fn insert_many_created_shared_builds_with_wrong_blocking_deps(case: &Case, count: usize) {
+    let connection = case.db.connection();
+    let derivations: Vec<derivation::Model> = (0..count)
+        .map(|i| derivation::Model {
+            id: DerivationId::now_v7(),
+            hash: format!("{i:032}"),
+            name: "bulk".into(),
+            architecture: "x86_64-linux".into(),
+            walked: true,
+            created_at: test_date(),
+            ..Default::default()
+        })
+        .collect();
+    for chunk in derivations.chunks(SWEEP_LOCK_CHUNK) {
+        let shared_builds = chunk.iter().map(|d| derivation_build::Model {
+            id: DerivationBuildId::now_v7(),
+            derivation: d.id,
+            status: BuildStatus::Created,
+            blocking_deps: 1,
+            created_at: test_date(),
+            updated_at: test_date(),
+            ..Default::default()
+        });
+        derivation::Entity::insert_many(
+            chunk
+                .iter()
+                .cloned()
+                .map(IntoActiveModel::into_active_model),
+        )
+        .exec_without_returning(&connection)
+        .await
+        .expect("insert derivation");
+        derivation_build::Entity::insert_many(
+            shared_builds.map(IntoActiveModel::into_active_model),
+        )
+        .exec_without_returning(&connection)
+        .await
+        .expect("insert shared builds");
+    }
 }
 
 #[tokio::test]
@@ -632,4 +703,84 @@ async fn open_transaction_and_set_application_name(
         .await
         .expect("set the application name");
     transaction
+}
+
+#[tokio::test]
+async fn m14_two_check_steps_repair_counters_and_a_large_scope_in_several_transactions() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(chain(e1)).await;
+    let (a, b) = (case.db.id_of(A).await, case.db.id_of(B).await);
+    case.sql(&format!(
+        "UPDATE derivation SET unwalked_inputs = 3 WHERE id = '{a}'"
+    ))
+    .await;
+    case.sql(&format!(
+        "UPDATE derivation_build SET wanted = false WHERE derivation = '{b}'"
+    ))
+    .await;
+    case.sql(NOTE_TRANSACTIONS).await;
+    case.sql(DERIVATION_UPDATE_TRANSACTION_ID_TRIGGER_SQL).await;
+
+    let report = case
+        .graph
+        .run_consistency_checks()
+        .await
+        .expect("after 1: run consistency check");
+
+    assert_eq!(
+        (report.walk_drift, report.need_drift),
+        (1, 1),
+        "after 1: {report:?}"
+    );
+    let unwalked =
+        distinct_top_level_transaction_ids_that_changed_counter_column(&case, "unwalked_inputs")
+            .await;
+    let wanted =
+        distinct_top_level_transaction_ids_that_changed_counter_column(&case, "wanted").await;
+    assert_eq!(
+        unwalked.len(),
+        1,
+        "after 1: repaired 1 transaction unwalked_inputs"
+    );
+    assert_eq!(wanted.len(), 1, "after 1: wanted = 1 repaired transaction");
+    assert!(
+        unwalked.is_disjoint(&wanted),
+        "after 1: one commit per step, each in its own transaction"
+    );
+    case.zero_drift("step 1").await;
+
+    let bulk = SWEEP_LOCK_CHUNK * SWEEP_CHUNKS_PER_TRANSACTION + 1;
+    insert_many_created_shared_builds_with_wrong_blocking_deps(&case, bulk).await;
+
+    let report = case
+        .graph
+        .run_consistency_checks()
+        .await
+        .expect("after 2: consistency check executed");
+
+    assert!(
+        report.counter_drift >= bulk as i64,
+        "after 2: all drifted counters reported: {report:?}"
+    );
+    let blocking_deps =
+        distinct_top_level_transaction_ids_that_changed_counter_column(&case, "blocking_deps")
+            .await;
+    assert!(
+        blocking_deps.len() > 1,
+        "after 2: repair the scope across multiple transactions: {blocking_deps:?}"
+    );
+    let drifted = case
+        .db
+        .texts(
+            "SELECT count(*)::text FROM derivation_build db JOIN derivation d ON d.id = db.derivation \
+             WHERE d.name = 'bulk' AND db.blocking_deps <> 0",
+        )
+        .await;
+    assert_eq!(
+        drifted,
+        ["0"],
+        "after 2: recount of blocking_deps for each inserted shared build"
+    );
+    case.zero_drift("step 2").await;
+    case.finish().await;
 }

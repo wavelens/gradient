@@ -72,7 +72,7 @@ Runtime dependencies live in `derivation_dependency` alongside build dependencie
 A lost move has one backstop: `graph_consistency_report` in `gradient-db/src/graph/consistency.rs`.
 
 - `recount_missing_runtime_deps`: recount `missing_runtime_deps` across the whole table. This also backfills the column.
-- `repair_fetchable` and `repair_can_start`: rewrite `fetchable` and `blocking_deps` over the start-condition scope. That scope covers pending shared builds and the rows they wait on.
+- `repair_fetchable` and `recount_blocking_deps_for_derivation_ids`: rewrite `fetchable` and `blocking_deps` over the start-condition scope. That scope covers pending shared builds and the rows they wait on.
 - `recount_walk_completeness` and `recount_wanted`: recount the walk bit and the needs-build mark across the whole table. `settle_skipped` then settles the queue against that mark.
 
 ## Self-Heal

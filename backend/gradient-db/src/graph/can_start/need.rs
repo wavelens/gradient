@@ -342,14 +342,25 @@ where
     Ok(moved)
 }
 
-/// Order is load-bearing on both sides.
-/// The thaw and the adoption of jobs must precede the promote, which needs a builder and a job.
-/// The skip must follow the un-promote, or it would try to settle a row still `Queued`.
-#[tracing::instrument(level = "debug", skip_all, fields(gained = moved.gained.len(), lost = moved.lost.len()))]
 pub(crate) async fn settle_need<C>(
     db: &C,
     moved: &NeedMoved,
 ) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    Ok(settle_need_with_limit(db, moved, usize::MAX).await?.changes)
+}
+
+/// Order is load-bearing on both sides.
+/// The thaw and the adoption of jobs must precede the promote, which needs a builder and a job.
+/// The skip must follow the un-promote, or it would try to settle a row still `Queued`.
+#[tracing::instrument(level = "debug", skip_all, fields(gained = moved.gained.len(), lost = moved.lost.len()))]
+async fn settle_need_with_limit<C>(
+    db: &C,
+    moved: &NeedMoved,
+    derivation_revisit_limit: usize,
+) -> Result<BudgetedNeedUpdate, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
@@ -358,14 +369,42 @@ where
         changes.extend(thaw_wanted(db, gained).await?);
         name_below_named(db, gained).await?;
     }
-    let asked_again = ask_again_about_earlier_misses(db, &moved.gained).await?;
-    for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
-        changes.extend(promote(db, gained).await?);
-    }
+    let mut forgotten = forget_misses_recorded_before_first_evaluation(db, &moved.gained).await?;
+    let deferred_rewalk_derivations =
+        forgotten.split_off(derivation_revisit_limit.min(forgotten.len()));
+    let asked_again = update_need(db, &forgotten).await?;
+    let wanted_derivation_ids_to_promote_after_deferred_rewalks =
+        if deferred_rewalk_derivations.is_empty() {
+            for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
+                changes.extend(promote(db, gained).await?);
+            }
+            Vec::new()
+        } else {
+            moved.gained.clone()
+        };
     changes.extend(settle_lost(db, &moved.lost).await?);
     changes.extend(settle_lost(db, &asked_again.lost).await?);
 
-    Ok(changes)
+    Ok(BudgetedNeedUpdate {
+        changes,
+        deferred_rewalk_derivations,
+        wanted_derivation_ids_to_promote_after_deferred_rewalks,
+    })
+}
+
+async fn forget_misses_recorded_before_first_evaluation<C: ConnectionTrait>(
+    db: &C,
+    gained: &[DerivationId],
+) -> Result<Vec<DerivationId>, DbErr> {
+    let mut forgotten = Vec::new();
+    for chunk in gained.chunks(crate::IN_CHUNK_SIZE) {
+        forgotten.extend(returned_derivations(
+            db.query_all_raw(FORGET_MISSES_FROM_BEFORE_ITS_FIRST_EVALUATION.bind([ids(chunk)]))
+                .await?,
+        ));
+    }
+
+    Ok(forgotten)
 }
 
 async fn ask_again_about_earlier_misses<C>(
@@ -375,17 +414,7 @@ async fn ask_again_about_earlier_misses<C>(
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let mut forgotten = Vec::new();
-    for chunk in gained.chunks(crate::IN_CHUNK_SIZE) {
-        forgotten.extend(returned_derivations(
-            db.query_all_raw(FORGET_MISSES_FROM_BEFORE_ITS_FIRST_EVALUATION.bind([ids(chunk)]))
-                .await?,
-        ));
-    }
-    if forgotten.is_empty() {
-        return Ok(NeedMoved::default());
-    }
-
+    let forgotten = forget_misses_recorded_before_first_evaluation(db, gained).await?;
     update_need(db, &forgotten).await
 }
 
@@ -482,6 +511,36 @@ where
     let changes = settle_batch_need(db, roots, &moved).await?;
 
     Ok(SettledNeed { moved, changes })
+}
+
+#[derive(Debug, Default)]
+pub struct BudgetedNeedUpdate {
+    pub changes: Vec<TransitionChange>,
+    pub deferred_rewalk_derivations: Vec<DerivationId>,
+    pub wanted_derivation_ids_to_promote_after_deferred_rewalks: Vec<DerivationId>,
+}
+
+pub async fn update_and_settle_need_with_advisory_key_limit<C>(
+    db: &C,
+    roots: &[DerivationId],
+    max_advisory_keys: usize,
+) -> Result<BudgetedNeedUpdate, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let moved = update_need(db, roots).await?;
+    settle_need_with_limit(db, &moved, max_advisory_keys.saturating_sub(roots.len())).await
+}
+
+pub async fn recheck_forgotten_need<C>(
+    db: &C,
+    forgotten: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let asked_again = update_need(db, forgotten).await?;
+    settle_lost(db, &asked_again.lost).await
 }
 
 #[cfg(test)]
