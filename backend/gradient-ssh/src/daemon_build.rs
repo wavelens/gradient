@@ -68,8 +68,24 @@ pub fn build_paths(
             )
         };
 
-        Ok(keyed_results(&mapper, &paths, outcome))
+        error_on_failed_build_results(keyed_results(&mapper, &paths, outcome))
     })
+}
+
+// Failures in the results of wopBuildPathsWithResults go unchecked in Nix's build-remote. Only errors come back.
+fn error_on_failed_build_results(
+    results: Vec<KeyedBuildResult>,
+) -> DaemonResult<Vec<KeyedBuildResult>> {
+    let messages: Vec<String> = results
+        .iter()
+        .filter_map(|r| r.result.failure())
+        .map(|f| String::from_utf8_lossy(&f.error_msg).into_owned())
+        .collect();
+    if messages.is_empty() {
+        Ok(results)
+    } else {
+        Err(err(messages.join("\n")))
+    }
 }
 
 pub fn build_derivation(
@@ -217,4 +233,55 @@ fn already_valid() -> BuildResultInner {
         status: SuccessStatus::AlreadyValid,
         built_outputs: BTreeMap::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harmonia_protocol::daemon::wire::types2::FailureStatus;
+    use harmonia_store_path::StorePath;
+
+    fn keyed(inner: BuildResultInner) -> KeyedBuildResult {
+        KeyedBuildResult {
+            path: DerivedPath::Opaque(
+                StorePath::from_base_path("0123456789abcdfghijklmnpqrsvwxyz-hello").expect("path"),
+            ),
+            result: build_result(inner),
+        }
+    }
+
+    fn failed(message: &str) -> BuildResultInner {
+        BuildResultInner::Failure(BuildResultFailure {
+            status: FailureStatus::PermanentFailure,
+            error_msg: message.as_bytes().to_vec(),
+            is_non_deterministic: false,
+        })
+    }
+
+    #[test]
+    fn every_failed_build_message_appears_in_the_error() {
+        let results = vec![
+            keyed(failed("first")),
+            keyed(already_valid()),
+            keyed(failed("second")),
+        ];
+
+        let message = error_on_failed_build_results(results)
+            .expect_err("failed")
+            .to_string();
+
+        assert!(
+            message.contains("first") && message.contains("second"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn all_successful_build_results_are_returned_unchanged() {
+        let results = vec![keyed(already_valid())];
+
+        let returned = error_on_failed_build_results(results.clone()).expect("succeeded");
+
+        assert_eq!(returned, results);
+    }
 }
