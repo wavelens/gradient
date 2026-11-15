@@ -137,20 +137,25 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     .context("connect to database")?;
     require_supported_pg_version(server_version_num(&db).await?)?;
     check_lock_table(&db).await;
-    Migrator::install(&db)
+    bring_database_schema_up_to_date(&db).await?;
+    Ok(db)
+}
+
+async fn bring_database_schema_up_to_date(db: &DatabaseConnection) -> Result<()> {
+    Migrator::install(db)
         .await
         .context("install seaql_migrations table")?;
-    let applied = applied_migrations(&db)
+    let applied = applied_migrations(db)
         .await
         .context("list the applied database migrations")?;
-    upgrade_floor::require_upgrade_floor(&db, &applied).await?;
+    upgrade_floor::require_upgrade_floor(db, &applied).await?;
     unknown_migrations::require_known_migrations(&applied, &known_migrations())?;
-    prune_removed_migrations(&db)
+    prune_removed_migrations(db)
         .await
         .context("prune removed-migration entries from seaql_migrations")?;
-    run_migrations(&db).await?;
-    update_db(&db).await.context("update database")?;
-    Ok(db)
+    run_migrations(db).await?;
+    update_db(db).await.context("update database")?;
+    Ok(())
 }
 
 async fn applied_migrations(db: &DatabaseConnection) -> Result<HashSet<String>> {
