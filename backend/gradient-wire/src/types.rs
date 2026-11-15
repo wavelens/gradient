@@ -772,7 +772,7 @@ pub enum WorkerReportAssignment {
     Fetch { fetch_id: String },
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub enum JobKind {
     Flake,
     Build,

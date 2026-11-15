@@ -150,14 +150,6 @@ impl WorkerPool {
         self.signal(worker_id, SessionSignal::Abort { job_id, reason })
     }
 
-    pub fn signal_active(&self, signal: SessionSignal) {
-        for slot in self.workers.values() {
-            if let WorkerSlot::Active(w) = slot {
-                w.session.signal(signal.clone());
-            }
-        }
-    }
-
     pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<ProjectId>) {
         if let Some(slot) = self.workers.get_mut(id) {
             slot.shared_mut().peer_auth = PeerAuth::from(authorized_peers);

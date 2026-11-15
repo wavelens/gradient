@@ -31,10 +31,8 @@ use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
 use super::session::on_reauth_notify;
-use super::socket::{
-    InputFetch, ProtoSocket, ProtoWriter, job_offer_chunks, send_input_fetch, send_server_msg,
-};
-use super::store_paths::{outbound_message, outbound_offer, project_mapper};
+use super::socket::{InputFetch, ProtoSocket, ProtoWriter, send_input_fetch, send_server_msg};
+use super::store_paths::{outbound_message, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{
@@ -42,6 +40,7 @@ use gradient_wire::messages::{
     RUNNING_JOBS_SINCE, ServerMessage,
 };
 use gradient_wire::session::frame::ProtoReader;
+use gradient_wire::types::JobKind;
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilterChunkCollector;
 
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
@@ -85,7 +84,6 @@ pub struct SessionState {
     reclaims_jobs: bool,
     uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
-    offers_seen: u64,
     worker_store_path_bloom_filter_chunk_collector: WorkerStorePathBloomFilterChunkCollector,
     active: ActiveJobs,
     job_events: JobEvents,
@@ -197,7 +195,6 @@ impl Actor for SessionActor {
             reclaims_jobs,
             uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
-            offers_seen: 0,
             worker_store_path_bloom_filter_chunk_collector: Default::default(),
             active,
             logs,
@@ -245,8 +242,15 @@ impl Actor for SessionActor {
                 let (mut ctx, uploads) = split_uploads(st);
                 ctx.sweep_uploads(uploads).await;
             }
-            SessionMsg::Signal(SessionSignal::Offers(generation)) => {
-                if generation > st.offers_seen && !offer_jobs(st).await {
+            SessionMsg::Signal(SessionSignal::JobsAvailableForRequestedKinds {
+                requested_job_kinds_with_new_work,
+            }) => {
+                if !answer_waiting_job_requests_and_send_assignments(
+                    st,
+                    requested_job_kinds_with_new_work,
+                )
+                .await
+                {
                     myself.stop(Some("write failed".into()));
                 }
             }
@@ -538,31 +542,19 @@ async fn outbound_to(
     Some(outbound_message(msg, &mapper))
 }
 
-#[tracing::instrument(level = "debug", skip_all, fields(candidates = tracing::field::Empty))]
-async fn offer_jobs(st: &mut SessionState) -> bool {
-    let offer = st.scheduler.get_new_job_candidates(&st.peer_id).await;
-    st.offers_seen = offer.generation;
-    let candidates = outbound_offer(offer, &st.handles.db).await;
-    tracing::Span::current().record("candidates", candidates.len());
-    if candidates.is_empty() {
-        return true;
-    }
-
-    debug!(peer_id = %st.peer_id, count = candidates.len(), "pushing job offer (delta)");
-    for chunk in job_offer_chunks(&candidates) {
-        if send_server_msg(
-            &st.writer,
-            &ServerMessage::JobOffer {
-                candidates: chunk.to_vec(),
-            },
-        )
-        .await
-        .is_err()
+async fn answer_waiting_job_requests_and_send_assignments(
+    st: &mut SessionState,
+    job_kinds: Vec<JobKind>,
+) -> bool {
+    let (mut ctx, _) = split_uploads(st);
+    for kind in job_kinds {
+        if !ctx
+            .send_assign_job_for_available_requested_job_kind(kind)
+            .await
         {
             return false;
         }
     }
-
     true
 }
 

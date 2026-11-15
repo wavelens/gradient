@@ -20,7 +20,9 @@ use gradient_wire::types::GuestChannelKind;
 use gradient_wire::types::{BuildFailureKind, ClusterPeer, ExecJob, Job, JobKind};
 
 use super::exec::{W1, W2, exec_shape, inventory, pre_warms, spec};
-use super::{SchedulerCase, SlotKind, failure, w_exec, without_offers};
+use super::{
+    SchedulerCase, SlotKind, failure, remove_jobs_available_for_requested_kinds_signals, w_exec,
+};
 use crate::GuestChannelRefusal;
 use crate::jobs::exec_job_key;
 use crate::test_jobs::allow_all;
@@ -111,13 +113,14 @@ pub(super) async fn place_pair(case: &SchedulerCase) {
 }
 
 pub(super) fn assigned_key(case: &SchedulerCase, worker: &str) -> String {
-    let assigned: Vec<String> = without_offers(case.signals(worker))
-        .into_iter()
-        .filter_map(|signal| match signal {
-            SessionSignal::ClusterAssign { job_id } => Some(job_id),
-            _ => None,
-        })
-        .collect();
+    let assigned: Vec<String> =
+        remove_jobs_available_for_requested_kinds_signals(case.signals(worker))
+            .into_iter()
+            .filter_map(|signal| match signal {
+                SessionSignal::ClusterAssign { job_id } => Some(job_id),
+                _ => None,
+            })
+            .collect();
     let [key] = assigned.as_slice() else {
         panic!("{worker} got one cluster member, got {assigned:?}");
     };
@@ -165,7 +168,7 @@ pub(super) async fn start_pair(case: &SchedulerCase) -> Vec<StartedNode> {
 }
 
 fn started_roster(signals: Vec<SessionSignal>) -> Option<Vec<ClusterPeer>> {
-    without_offers(signals)
+    remove_jobs_available_for_requested_kinds_signals(signals)
         .into_iter()
         .find_map(|signal| match signal {
             SessionSignal::StartCluster { roster, .. } => Some(roster),

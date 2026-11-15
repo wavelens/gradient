@@ -16,7 +16,6 @@ use gradient_entity::ids::{CacheId, CacheUpstreamId, DispatchedJobId, Evaluation
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_fixtures::shape::shape;
 use gradient_graph::NarCommit;
-use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildSpecKind, Job, JobKind};
 
@@ -81,11 +80,7 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
         "after 3: sb(B)"
     );
     assert!(!case.pending(&b).await, "after 3: pending(build:B)");
-    let signals = case.signals(W1);
-    assert!(
-        matches!(signals.as_slice(), [SessionSignal::Offers(_)]),
-        "after 3: signals(W1) == [Offers(_)], got {signals:?}"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 3: signals(W1)");
     case.check("step 3").await;
 
     case.report_eval_result(
@@ -655,16 +650,7 @@ async fn z05_a_core_respawn_mid_run_loses_no_job() {
     case.assign_queued_evals().await;
     assert!(case.pending(&b).await, "after 4: pending(build:B)");
     assert!(!case.pending(&eval).await, "after 4: pending(eval:E2)");
-    let signals = case.signals(W1);
-    assert!(
-        signals
-            .iter()
-            .any(|s| matches!(s, SessionSignal::Offers(_)))
-            && !signals
-                .iter()
-                .any(|s| matches!(s, SessionSignal::Abort { .. } | SessionSignal::Close { .. })),
-        "after 4: signals(W1) contain Offers, no Abort, no Close, got {signals:?}"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 4: signals(W1)");
     case.check("step 4").await;
 
     case.commit_nar(output_nar(A, A_OUT)).await;
@@ -917,14 +903,7 @@ async fn z07_a_server_drain_mid_run_pauses_admission_and_the_run_resumes() {
         "after 5: evaluation(E1).status"
     );
     assert!(case.pending(&a).await, "after 5: pending(build:A)");
-    let signals = case.signals(W1);
-    assert!(
-        matches!(
-            signals.as_slice(),
-            [SessionSignal::Offers(_), SessionSignal::Offers(_)]
-        ),
-        "after 5: signals(W1) == [Offers(_), Offers(_)], got {signals:?}"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 5: signals(W1)");
     case.check("step 5").await;
 
     let a2 = requested_build(&case, W1, &a, "after 6").await;

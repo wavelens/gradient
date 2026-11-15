@@ -5,13 +5,17 @@
  */
 
 use gradient_types::ids::ProjectId;
-use gradient_wire::types::{ClusterAddress, ClusterPeer, ImportOutcome, InputOutcome, WarmGuests};
+use gradient_wire::types::{
+    ClusterAddress, ClusterPeer, ImportOutcome, InputOutcome, JobKind, WarmGuests,
+};
 
 use crate::guest_channels::GuestChannelSignal;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSignal {
-    Offers(u64),
+    JobsAvailableForRequestedKinds {
+        requested_job_kinds_with_new_work: Vec<JobKind>,
+    },
     Draining,
     DrainCancelled,
     Reauth,

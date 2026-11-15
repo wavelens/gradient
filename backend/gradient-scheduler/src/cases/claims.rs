@@ -23,8 +23,8 @@ use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_t
 use super::{
     A, A_DEV, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase,
     SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv, drv_nar, drv_path, eval_key, failure,
-    from_now, is_recent, narinfo, output_nar, span, store_path, w_all, w_network_build, with_attr,
-    with_output,
+    from_now, is_recent, jobs_available_signal_for_one_kind, narinfo, output_nar, span, store_path,
+    w_all, w_network_build, with_attr, with_output,
 };
 use crate::jobs::Assignment;
 use crate::pending_job_input_store_paths::PendingJobInputStorePath;
@@ -43,11 +43,7 @@ async fn c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_sta
 
     case.admit_startable_moves().await;
     assert!(case.pending(&a).await, "after 1: pending(build:A)");
-    assert_eq!(
-        case.signals(W1),
-        vec![SessionSignal::Offers(1)],
-        "after 1: signals(W1)"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
     assert_eq!(
         case.sb(A).await.status,
         BuildStatus::Queued,
@@ -230,16 +226,8 @@ async fn c03_two_workers_ask_for_the_only_candidate_and_the_loser_idles() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    assert_eq!(
-        case.signals(W1),
-        vec![SessionSignal::Offers(1)],
-        "after 1: signals(W1)"
-    );
-    assert_eq!(
-        case.signals(W2),
-        vec![SessionSignal::Offers(1)],
-        "after 1: signals(W2)"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
+    assert_eq!(case.signals(W2), vec![], "after 1: signals(W2)");
     case.check("step 1").await;
 
     let won = case.request_job(W1, JobKind::Build).await;
@@ -479,11 +467,7 @@ async fn c07_a_build_that_left_queued_before_the_claim_hands_out_nothing() {
 
     case.admit_startable_moves().await;
     assert!(case.pending(&a).await, "after 1: pending(build:A)");
-    assert_eq!(
-        case.signals(W1),
-        vec![SessionSignal::Offers(1)],
-        "after 1: signals(W1)"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
     case.check("step 1").await;
 
     case.demote_path(A).await;
@@ -671,11 +655,7 @@ async fn c10_an_eval_claim_after_an_abort_on_the_second_instance_writes_no_row()
 
     case.assign_queued_evals().await;
     assert!(case.pending(&key).await, "after 1: I1.pending(eval:E1)");
-    assert_eq!(
-        case.signals(W1),
-        vec![SessionSignal::Offers(1)],
-        "after 1: signals(W1)"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
     case.check("step 1").await;
     second.check("step 1").await;
 
@@ -983,6 +963,7 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
     )
     .await;
     case.connect(W1, w_all(), &[]).await;
+    case.idle(W1, JobKind::Build).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -990,7 +971,10 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
     assert!(case.pending(&b).await, "after 1: pending(build:B)");
     assert_eq!(
         case.signals(W1),
-        vec![SessionSignal::Offers(1), SessionSignal::Offers(2)],
+        vec![
+            jobs_available_signal_for_one_kind(JobKind::Build),
+            jobs_available_signal_for_one_kind(JobKind::Build),
+        ],
         "after 1: signals(W1)"
     );
     case.check("step 1").await;
@@ -1028,7 +1012,7 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
     assert!(case.pending(&a).await, "after 5: pending(build:A)");
     assert_eq!(
         case.signals(W1),
-        vec![SessionSignal::Offers(3)],
+        vec![jobs_available_signal_for_one_kind(JobKind::Build)],
         "after 5: signals(W1)"
     );
     case.check("step 5").await;
@@ -1148,11 +1132,7 @@ async fn c16_a_resync_skips_a_build_with_an_open_row_until_the_sweep_frees_it() 
 
     case.resync_startable_set().await;
     assert!(case.pending(&a).await, "after 3: pending(build:A)");
-    let signals = case.signals(W1);
-    assert!(
-        matches!(signals.as_slice(), [SessionSignal::Offers(_)]),
-        "after 3: signals(W1), got {signals:?}"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 3: signals(W1)");
     case.check("step 3").await;
 
     case.finish().await;
@@ -1184,7 +1164,7 @@ async fn c17_a_server_drain_buffers_startable_moves_until_it_ends() {
     assert!(case.pending(&a).await, "after 5: pending(build:A)");
     assert_eq!(
         case.signals(W1),
-        vec![SessionSignal::Offers(1)],
+        vec![jobs_available_signal_for_one_kind(JobKind::Build)],
         "after 5: signals(W1)"
     );
     case.check("step 5").await;
@@ -1209,11 +1189,7 @@ async fn c18_a_draining_worker_gets_no_offers_no_job_and_no_idle_slot() {
     case.admit_startable_moves().await;
     assert!(case.pending(&a).await, "after 2: pending(build:A)");
     assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
-    assert_eq!(
-        case.signals(W2),
-        vec![SessionSignal::Offers(1)],
-        "after 2: signals(W2)"
-    );
+    assert_eq!(case.signals(W2), vec![], "after 2: signals(W2)");
     case.check("step 2").await;
 
     let refused = case.request_job(W1, JobKind::Build).await;
@@ -1472,17 +1448,18 @@ async fn c22_a_build_needing_a_feature_or_system_waits_for_matching_capabilities
 }
 
 #[tokio::test]
-async fn c23_queued_build_sends_job_list_signal_with_higher_generation() {
+async fn c23_idle_worker_receives_one_jobs_available_for_requested_kinds_signal_per_queued_build() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().chain(e1)).await;
     case.connect(W1, w_all(), &[]).await;
+    case.idle(W1, JobKind::Build).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
     assert!(case.pending(&b).await, "after 1: pending(build:B)");
     assert_eq!(
         case.signals(W1),
-        vec![SessionSignal::Offers(1)],
+        vec![jobs_available_signal_for_one_kind(JobKind::Build)],
         "after 1: signals(W1)"
     );
     case.check("step 1").await;
@@ -1521,7 +1498,7 @@ async fn c23_queued_build_sends_job_list_signal_with_higher_generation() {
     assert!(!case.pending(&b).await, "after 5: pending(build:B)");
     assert_eq!(
         case.signals(W1),
-        vec![SessionSignal::Offers(2)],
+        vec![jobs_available_signal_for_one_kind(JobKind::Build)],
         "after 5: signals(W1)"
     );
     case.check("step 5").await;

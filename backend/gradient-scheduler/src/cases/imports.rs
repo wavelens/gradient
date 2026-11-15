@@ -17,7 +17,8 @@ use gradient_wire::types::{
 
 use super::{
     CaseShapes, P, P_OUT, SchedulerCase, X, X_OUT, Y, Y_OUT, attr_of, build_output, drv, drv_path,
-    eval_key, failure, output_nar, w_all, with_attr, with_ifd, with_output, without_offers,
+    eval_key, failure, output_nar, remove_jobs_available_for_requested_kinds_signals, w_all,
+    with_attr, with_ifd, with_output,
 };
 use crate::job_handlers::import::NO_ENTRY_POINT;
 
@@ -239,7 +240,7 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
         "after 2: output(X,out).hash"
     );
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![answer(
             e1,
             "r1",
@@ -272,7 +273,7 @@ async fn f04_an_import_of_a_running_build_waits_and_answers_completed_exactly_on
     case.commit_nar(output_nar(X, X_OUT)).await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![],
         "after 3: signals(W1)"
     );
@@ -280,7 +281,7 @@ async fn f04_an_import_of_a_running_build_waits_and_answers_completed_exactly_on
 
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![answer(
             e1,
             "r1",
@@ -294,7 +295,7 @@ async fn f04_an_import_of_a_running_build_waits_and_answers_completed_exactly_on
 
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![],
         "after 5: no second ImportResult"
     );
@@ -345,7 +346,7 @@ async fn f05_an_import_of_an_aborted_build_requeues_it_and_answers_after_the_reb
         "after 2: sb(X).status"
     );
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![answer(
             e1,
             "r1",
@@ -446,7 +447,7 @@ async fn f07_two_paths_settle_when_both_are_terminal_and_the_first_failure_wins(
 
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![],
         "after 4: signals(W1)"
     );
@@ -456,7 +457,7 @@ async fn f07_two_paths_settle_when_both_are_terminal_and_the_first_failure_wins(
     case.complete(W2, &y, a3, Vec::new(), 1).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![answer(e1, "r1", failed(&case, e1, X).await)],
         "after 5: signals(W1)"
     );
@@ -503,7 +504,7 @@ async fn f08_a_transient_failure_waits_through_the_retry_and_ends_on_the_permane
         "after 3: sb(X).status"
     );
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![answer(e1, "r1", failed(&case, e1, X).await)],
         "after 3: signals(W1)"
     );
@@ -537,7 +538,7 @@ async fn f08b_a_transient_failure_with_attempts_left_keeps_the_import_waiting() 
         "after 3: sb(X).status"
     );
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![],
         "after 3: signals(W1)"
     );
@@ -558,7 +559,7 @@ async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
     let key = eval_key(e1);
 
     case.abort_evaluation(e1).await;
-    let evaluator = without_offers(case.signals(W1));
+    let evaluator = remove_jobs_available_for_requested_kinds_signals(case.signals(W1));
     assert!(
         matches!(evaluator.as_slice(), [SessionSignal::Abort { job_id, .. }] if *job_id == key),
         "after 1: signals(W1) == [Abort{{eval:E1, _}}], got {evaluator:?}"
@@ -573,7 +574,7 @@ async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
         BuildStatus::Aborted,
         "after 1: sb(X).status"
     );
-    let builder = without_offers(case.signals(W2));
+    let builder = remove_jobs_available_for_requested_kinds_signals(case.signals(W2));
     assert!(
         matches!(builder.as_slice(), [SessionSignal::Abort { job_id, .. }] if *job_id == x),
         "after 1: signals(W2) == [Abort{{build:X, _}}], got {builder:?}"
@@ -584,7 +585,7 @@ async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![],
         "after 2: signals(W1)"
     );
@@ -661,7 +662,7 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
 
     case.import_request(W3, &key, "r1", &[drv_path(X)]).await;
     assert_eq!(
-        without_offers(case.signals(W3)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W3)),
         vec![],
         "after 3: no ImportResult yet"
     );
@@ -671,7 +672,7 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        without_offers(case.signals(W3)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W3)),
         vec![answer(
             e1,
             "r1",
@@ -705,7 +706,7 @@ async fn f11_an_import_request_from_a_session_not_running_the_job_is_ignored() {
         .await;
     for worker in [W1, W2, W3] {
         assert_eq!(
-            without_offers(case.signals(worker)),
+            remove_jobs_available_for_requested_kinds_signals(case.signals(worker)),
             vec![],
             "after 1: no ImportResult to {worker}"
         );
@@ -715,7 +716,7 @@ async fn f11_an_import_request_from_a_session_not_running_the_job_is_ignored() {
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        without_offers(case.signals(W3)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W3)),
         vec![],
         "after 1: completing X sends no signal to W3"
     );
@@ -773,7 +774,7 @@ async fn f13_worker_resending_same_import_request_keeps_one_wait_and_gets_one_an
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![answer(
             e1,
             "r1",

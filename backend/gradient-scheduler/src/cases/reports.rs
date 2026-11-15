@@ -14,7 +14,6 @@ use gradient_entity::evaluation_message::MessageLevel;
 use gradient_entity::ids::{CacheId, DispatchedJobId, EvaluationId};
 use gradient_entity::pending_delivery::PendingDeliveryKind;
 use gradient_fixtures::shape::shape;
-use gradient_pool::session_port::SessionSignal;
 use gradient_types::{EvalCapability, WaitingReason};
 use gradient_wire::types::{
     BuildFailureKind, BuildMetrics, BuildSpecKind, BumpedInputWire, EvalMessageLevel,
@@ -24,8 +23,8 @@ use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_t
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, SchedulerCase, ago, attr_of, build_output, drv,
-    drv_nar, eval_key, failure, is_recent, output_nar, span, w_all, w_eval, w_network_eval,
-    with_attr, with_output,
+    drv_nar, eval_key, failure, is_recent, jobs_available_signal_for_one_kind, output_nar, span,
+    w_all, w_eval, w_network_eval, with_attr, with_output,
 };
 use crate::jobs::PendingJob;
 use crate::pending_job_input_store_paths::PendingJobInputStorePath;
@@ -934,11 +933,7 @@ async fn r14_a_canceled_eval_job_puts_the_evaluation_back_to_queued() {
 
     case.assign_queued_evals().await;
     assert!(case.pending(&k).await, "after 2: pending(eval:E1)");
-    let signals = case.signals(W1);
-    assert!(
-        matches!(signals.as_slice(), [SessionSignal::Offers(_)]),
-        "after 2: signals(W1) == [Offers(_)], got {signals:?}"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
     case.check("step 2").await;
 
     case.finish().await;
@@ -1197,10 +1192,10 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
         Some(900),
         "after 4: evaluation_metric(E1).fetch_ms"
     );
-    let signals = case.signals(W2);
-    assert!(
-        matches!(signals.as_slice(), [SessionSignal::Offers(_)]),
-        "after 4: signals(W2) == [Offers(_)], got {signals:?}"
+    assert_eq!(
+        case.signals(W2),
+        vec![jobs_available_signal_for_one_kind(JobKind::Flake)],
+        "after 4: signals(W2)"
     );
     case.check("step 4").await;
 

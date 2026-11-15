@@ -21,13 +21,15 @@ use gradient_wire::types::{BuildFailureKind, FlakeStep, Job, JobKind};
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, D, D_OUT, SchedulerCase, SlotKind, Totals, ago, eval_key,
-    failure, is_recent, output_nar, w_all, w_build, w_eval, w_network_build, w_network_eval,
+    failure, is_recent, jobs_available_signal_for_one_kind, output_nar, w_all, w_build, w_eval,
+    w_network_build, w_network_eval,
 };
 use crate::jobs::PendingJob;
 use crate::reclaim::Reclaimed;
 
 const W1: &str = "w1";
 const W2: &str = "w2";
+const W3: &str = "w3";
 const W9: &str = "w9";
 
 const DEACTIVATED: &str = "project deactivated worker";
@@ -103,11 +105,7 @@ async fn w02_a_worker_without_a_profile_is_offered_nothing_until_it_arrives() {
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    assert_eq!(
-        case.signals(W1),
-        vec![SessionSignal::Offers(1), SessionSignal::Offers(2)],
-        "after 1: signals(W1)"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
     case.check("step 1").await;
 
     let nothing = case.request_job(W1, JobKind::Build).await;
@@ -933,11 +931,7 @@ async fn w15_reattached_jobs_are_active_again_after_a_core_respawn() {
     case.assign_queued_evals().await;
     assert!(case.pending(&b).await, "after 5: pending(build:B)");
     assert!(!case.pending(&eval).await, "after 5: pending(eval:E2)");
-    let signals = case.signals(W1);
-    assert!(
-        matches!(signals.as_slice(), [SessionSignal::Offers(_)]),
-        "after 5: signals(W1) == [Offers(_)], got {signals:?}"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 5: signals(W1)");
     case.check("step 5").await;
 
     case.commit_nar(output_nar(A, A_OUT)).await;
@@ -1123,9 +1117,8 @@ async fn w18_revoking_a_project_aborts_its_active_job_and_closes_the_row() {
     assert!(
         matches!(signals.as_slice(), [
             SessionSignal::Abort { job_id, reason },
-            SessionSignal::Offers(_),
         ] if *job_id == b && reason == DEACTIVATED),
-        "after 3: signals(W1) == [Abort{{build:B, {DEACTIVATED:?}}}, Offers(_)], got {signals:?}"
+        "after 3: signals(W1) == [Abort{{build:B, {DEACTIVATED:?}}}], got {signals:?}"
     );
     case.check("step 3").await;
 
@@ -1970,6 +1963,96 @@ async fn an_admin_drain_reaches_the_worker_outlives_a_reconnect_and_can_be_cance
     case.disconnect(W1).await;
     case.connect(W1, w_all().slots(2), &[]).await;
     assert!(!case.signals(W1).contains(&SessionSignal::Draining));
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w43_a_worker_that_found_no_job_gets_a_later_build_without_asking_again_while_a_full_and_a_draining_worker_get_nothing()
+ {
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    for worker in [W1, W2, W3] {
+        case.connect(worker, w_build(), &[]).await;
+    }
+    let a = case.key(A).await;
+
+    case.admit_startable_moves().await;
+    let taken = case.request_job(W2, JobKind::Build).await;
+    assert_eq!(
+        taken.map(|j| j.job_id().to_owned()),
+        Some(a),
+        "after 1: W2 took build:A"
+    );
+    case.check("step 1").await;
+
+    for worker in [W1, W2, W3] {
+        case.idle(worker, JobKind::Build).await;
+    }
+    case.draining(W3).await;
+    drain_signals(&case, &[W1, W2, W3]);
+    case.check("step 2").await;
+
+    case.seed(shape().one(EvaluationId::now_v7(), B, B_OUT))
+        .await;
+    case.admit_startable_moves().await;
+    let b = case.key(B).await;
+    assert!(case.pending(&b).await, "after 3: pending(build:B)");
+    assert_eq!(case.signals(W2), vec![], "after 3: signals(W2)");
+    assert_eq!(case.signals(W3), vec![], "after 3: signals(W3)");
+    let answered: Vec<String> = case
+        .answer_queued_jobs_available_for_requested_kinds_signals(W1)
+        .await
+        .iter()
+        .map(|j| j.job_id().to_owned())
+        .collect();
+    assert_eq!(
+        answered,
+        vec![b],
+        "After 3: W1 received build:B with no additional request."
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w44_worker_with_two_build_slots_gets_two_jobs_available_for_requested_kinds_signals_for_two_queued_builds_but_answering_both_hands_out_one_build_and_its_next_request_job_takes_the_other()
+ {
+    let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
+    case.connect(W1, w_build().slots(2), &[]).await;
+    case.idle(W1, JobKind::Build).await;
+
+    case.admit_startable_moves().await;
+    assert_eq!(
+        case.signals(W1),
+        vec![jobs_available_signal_for_one_kind(JobKind::Build); 2],
+        "after 1: W1 received one signal for each queued build"
+    );
+    case.check("step 1").await;
+
+    let first = case
+        .fulfill_job_request_for_live_idle_slot(W1, JobKind::Build)
+        .await
+        .expect("After 2: build assignment from the first answer");
+    let second = case
+        .fulfill_job_request_for_live_idle_slot(W1, JobKind::Build)
+        .await;
+    assert!(
+        second.is_none(),
+        "W1 made only one request. The second response after 2 assigns nothing."
+    );
+    case.check("step 2").await;
+
+    let other = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 3: W1's own request can pick up the other build.");
+    assert_eq!(
+        sorted(vec![first.job_id().to_owned(), other.job_id().to_owned()]),
+        sorted(vec![case.key(A).await, case.key(B).await]),
+        "after 3: W1's own request can pick up the other build."
+    );
+    case.check("step 3").await;
+
     case.finish().await;
 }
 
