@@ -647,6 +647,7 @@ impl<'a> InboundContext<'a> {
                     .await;
                 true
             }
+            ClientMessage::WorkerLocalStoreBloomFilterChunk { .. } => true,
         }
     }
 
