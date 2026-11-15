@@ -93,12 +93,6 @@
     <gr-message-banner class="pad" type="warning">Evaluation not found. Showing the latest evaluation.</gr-message-banner>
   }
 
-  @if (newestUnselectedEvaluationAfterSelection(); as newer) {
-    <div class="pad">
-      <button type="button" class="new-run-started-pill" (click)="select(newer)">New run started: {{ evalTitle(newer) }}</button>
-    </div>
-  }
-
   @if (evaluations().length > 0) {
     <div class="strip-row">
       <button grButton class="strip-arrow strip-arrow--start" icon="chevron_left" severity="secondary" size="small" tabindex="-1"

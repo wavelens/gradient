@@ -1385,25 +1385,16 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.selected()?.id).toBe(component.evaluations()[1].id);
   });
 
-  it('keeps the newest evaluation selected when a live refresh lists a newer one and offers it as a pill', () => {
+  it('keeps the newest evaluation selected when a live refresh lists a newer one', () => {
     const trigger = { managed: false, canEdit: true, canTrigger: true };
     const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
     const component = fixture.componentInstance;
-    const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('.new-run-started-pill')).toBeNull();
     vi.spyOn(tasksService, 'getTask').mockReturnValue(of({
       ...taskFor(trigger, [], 'Completed'),
-      last_evaluations: [evalSummary('e2', 'Queued', { commit_message: 'Bump flake inputs' }), ...component.evaluations()],
+      last_evaluations: [evalSummary('e2', 'Queued'), ...component.evaluations()],
     }));
     component.loadTaskData();
-    fixture.detectChanges();
     expect(component.selected()?.id).toBe('e1');
-    const pill = root.querySelector<HTMLButtonElement>('.new-run-started-pill')!;
-    expect(pill.textContent?.trim()).toBe('New run started: Bump flake inputs');
-    pill.click();
-    fixture.detectChanges();
-    expect(component.selected()?.id).toBe('e2');
-    expect(root.querySelector('.new-run-started-pill')).toBeNull();
   });
 
   it('labels a retry and a manual re-run of a commit on its tab and in the panel', () => {

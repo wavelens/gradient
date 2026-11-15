@@ -126,9 +126,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   protected readonly staggeredRows = TaskDetailComponent.ENTRY_POINTS_PAGE;
   private barCountsByEntryPoint = new WeakMap<EntryPointSummary, BuildStatusCounts>();
   private entryPointsAppending = false;
-  // Fix the latest evaluation on first load. Live updates don't move the selection. Show newer evaluations as a pill instead.
+  // Pin the newest evaluation on first load. Live updates don't move the selection.
   selectedId = signal<string | null>(null);
-  private newestEvaluationIdAtSelection = signal<string | null>(null);
   starting = signal(false);
   runDialogOpen = signal(false);
   runScopeChoice = signal<RunDialogStartChoice>('latest-commit');
@@ -218,11 +217,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   ), { initialValue: false });
 
   latestEvaluation = computed<EvaluationSummary | null>(() => this.evaluations()[0] ?? null);
-  newestUnselectedEvaluationAfterSelection = computed<EvaluationSummary | null>(() => {
-    const latest = this.latestEvaluation();
-    if (!latest || latest.id === this.selected()?.id || latest.id === this.newestEvaluationIdAtSelection()) return null;
-    return latest;
-  });
   evaluationWildcardPatterns = computed(() => (this.task()?.wildcard ?? '').split(',').map((pattern) => pattern.trim()).filter(Boolean));
   retryOrRerunLabelByEvaluationId = computed(() => {
     const list = this.evaluations();
@@ -331,10 +325,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
     }
     const newest = task.last_evaluations[0]?.id;
-    if (newest && !this.newestEvaluationIdAtSelection()) {
-      this.newestEvaluationIdAtSelection.set(newest);
-      if (!this.selectedId()) this.selectedId.set(newest);
-    }
+    if (newest && !this.selectedId()) this.selectedId.set(newest);
     // The entry-point page walks the graph for stale histograms; on live pings
     // throttle it so a running evaluation's rapid status stream doesn't
     // hammer the backend. The cheap summary above keeps headline counts live.
@@ -383,7 +374,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   private showEvaluation(id: string): void {
     this.selectedId.set(id);
-    this.newestEvaluationIdAtSelection.set(this.latestEvaluation()?.id ?? null);
     this.crumbs.rememberEvaluation(this.projectName, this.taskName, id);
     this.loadEntryPoints(this.selected()?.id);
   }
