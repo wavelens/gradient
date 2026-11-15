@@ -73,7 +73,7 @@ enum UserRefusal {
     )]
     ServerWidePermissionOnPinnedKey,
     #[error("Only superusers can grant `readSuperuser` or `writeSuperuser` to an API key.")]
-    NonSuperuserGrantsSuperuserRightsOnApiKey,
+    NonSuperuserGrantsSuperuserRightsOnApiKey(Vec<Permission>),
     #[error(
         "Keys pinned to a cache can have only cache permissions. Send them in `cache_permissions` and leave `permissions` empty."
     )]
@@ -99,7 +99,7 @@ impl Refusal for UserRefusal {
             | Self::UsernameConfirmationMismatch
             | Self::GrantUnheldCachePermissions(_)
             | Self::GrantUnheldProjectPermissions(_)
-            | Self::NonSuperuserGrantsSuperuserRightsOnApiKey
+            | Self::NonSuperuserGrantsSuperuserRightsOnApiKey(_)
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
             | Self::ServerWidePermissionOnPinnedKey
@@ -120,8 +120,8 @@ impl Refusal for UserRefusal {
             Self::GrantUnheldProjectPermissions(permissions) => {
                 permissions.iter().map(|p| p.as_wire_name()).collect()
             }
-            Self::NonSuperuserGrantsSuperuserRightsOnApiKey => {
-                crate::error::superuser_permission_wire_names()
+            Self::NonSuperuserGrantsSuperuserRightsOnApiKey(permissions) => {
+                permissions.iter().map(|p| p.as_wire_name()).collect()
             }
             _ => Vec::new(),
         }
@@ -687,7 +687,12 @@ async fn reject_api_key_permissions_not_held_by_owner(
                 require_create_permission(create_project, user)?;
             }
             if mask & superuser_permissions_mask() != 0 && !user.superuser {
-                return Err(UserRefusal::NonSuperuserGrantsSuperuserRightsOnApiKey.into());
+                return Err(
+                    UserRefusal::NonSuperuserGrantsSuperuserRightsOnApiKey(mask_to_vec(
+                        mask & superuser_permissions_mask(),
+                    ))
+                    .into(),
+                );
             }
             Ok(mask)
         }

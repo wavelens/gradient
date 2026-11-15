@@ -429,7 +429,7 @@ pub async fn get_assign_decisions(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<AssignDecisionView>>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::ReadSuperuser)?;
 
     let decisions = scheduler.recent_decisions().await;
     let candidates = || decisions.iter().flat_map(|d| &d.candidates);
@@ -1380,7 +1380,7 @@ pub async fn get_scoring_summary(
     Extension(user): Extension<MUser>,
     Query(params): Query<ScoringParams>,
 ) -> WebResult<Json<BaseResponse<ScoringSummary>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::ReadSuperuser)?;
     let window = bounded_window_hours_from_requested(params.window_hours, 24);
     let limit = params.limit.unwrap_or(2000).min(10_000);
 
@@ -1483,7 +1483,7 @@ pub async fn get_top_projects_by_buildtime(
     Extension(user): Extension<MUser>,
     Query(params): Query<ExpensiveParams>,
 ) -> WebResult<Json<BaseResponse<Vec<TopProjectBuildTime>>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::ReadSuperuser)?;
     let window = bounded_board_window_days(params.window_days);
 
     let out = build_times::top_projects(&state.web_db, window).await?;

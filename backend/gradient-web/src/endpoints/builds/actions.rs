@@ -121,7 +121,7 @@ pub async fn post_build_prioritize(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    require_superuser(&user)?;
+    require_superuser(&user, Permission::WriteSuperuser)?;
     let ctx = BuildAccessContext::load_unguarded(&state.web_db, build_id).await?;
 
     scheduler.prioritize_build(ctx.shared_build.id).await?;

@@ -507,7 +507,7 @@ async fn a_superuser_without_superuser_rights_is_told_which_permission_is_missin
     assert_eq!(body["code"], "superuser_required", "{body}");
     assert_eq!(
         body["missing_permissions"],
-        json!(["readSuperuser", "writeSuperuser"]),
+        json!(["readSuperuser"]),
         "{body}"
     );
 }
@@ -531,4 +531,9 @@ async fn superuser_api_key_with_read_only_permission_allows_get_and_denies_post_
     post.assert_status(StatusCode::FORBIDDEN);
     let body: serde_json::Value = post.json();
     assert_eq!(body["code"], "superuser_required", "{body}");
+    assert_eq!(
+        body["missing_permissions"],
+        json!(["writeSuperuser"]),
+        "{body}"
+    );
 }

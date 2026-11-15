@@ -295,7 +295,7 @@ async fn non_superuser_create_api_key_with_superuser_rights_returns_403_and_list
     res.assert_status(StatusCode::FORBIDDEN);
     assert_eq!(
         res.json::<Value>()["missing_permissions"],
-        json!(["readSuperuser", "writeSuperuser"])
+        json!(["readSuperuser"])
     );
 }
 
