@@ -62,6 +62,7 @@ pub struct Model {
     pub failed_at: Option<NaiveDateTime>,
     #[sea_orm(column_type = "Text", nullable)]
     pub last_error: Option<String>,
+    pub revision: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

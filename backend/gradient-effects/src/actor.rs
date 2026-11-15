@@ -219,6 +219,7 @@ mod tests {
             key: n.to_string(),
             payload: serde_json::json!({}),
             attempts: 0,
+            revision: 0,
         }
     }
 

@@ -325,6 +325,7 @@ mod tests {
             key: "k".into(),
             payload,
             attempts: 0,
+            revision: 0,
         }
     }
 

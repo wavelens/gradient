@@ -24,6 +24,12 @@ crate::sql! {
          ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING",
         params = [NewUuid, Int(7), Text("pending-delivery-gate-probe"), Text("{}"), Int(900)];
 
+    PENDING_DELIVERY_UPSERT_UNSETTLED = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
+         VALUES ($1, $2::smallint, $3, $4::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')) \
+         ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL \
+         DO UPDATE SET revision = pending_delivery.revision + 1, payload = EXCLUDED.payload",
+        params = [NewUuid, Int(8), Text("pending-delivery-gate-probe"), Text("{}")];
+
     PENDING_DELIVERY_ENQUEUE_MANY = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
          SELECT r.id, $2::smallint, r.key, r.payload::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC') \
          FROM unnest($1::uuid[], $3::text[], $4::text[]) AS r(id, key, payload) \
@@ -37,12 +43,14 @@ crate::sql! {
                AND next_attempt_at <= (now() AT TIME ZONE 'UTC') \
                AND kind IN (2, 3, 4, 5, 6, 7, 8) \
              ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED) \
-         RETURNING o.id, o.kind, o.key, o.payload, o.attempts",
+         RETURNING o.id, o.kind, o.key, o.payload, o.attempts, o.revision",
         params = [Int(8), Int(CLAIM_LEASE_SECS)];
 
-    PENDING_DELIVERY_MARK_DELIVERED = "UPDATE pending_delivery SET delivered_at = (now() AT TIME ZONE 'UTC') \
+    PENDING_DELIVERY_MARK_DELIVERED = "UPDATE pending_delivery \
+         SET delivered_at = CASE WHEN revision = $2 THEN (now() AT TIME ZONE 'UTC') END, \
+             next_attempt_at = CASE WHEN revision = $2 THEN next_attempt_at ELSE (now() AT TIME ZONE 'UTC') END \
          WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
-        params = [NewUuid];
+        params = [NewUuid, Int(0)];
 
     /// The attempt count, the dead-letter decision and the next attempt are moving together.
     /// A read of `attempts` followed by a write would lose a concurrent retry of the same row.
@@ -70,6 +78,7 @@ pub struct PendingDelivery {
     pub key: String,
     pub payload: serde_json::Value,
     pub attempts: i32,
+    pub revision: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +96,23 @@ pub async fn enqueue<C: ConnectionTrait>(
     payload: serde_json::Value,
 ) -> Result<(), DbErr> {
     db.execute_raw(PENDING_DELIVERY_ENQUEUE.bind([
+        Value::Uuid(Some(PendingDeliveryId::now_v7().into_inner())),
+        Value::SmallInt(Some(i16::from(kind))),
+        Value::String(Some(key)),
+        Value::String(Some(payload.to_string())),
+    ]))
+    .await?;
+
+    Ok(())
+}
+
+pub async fn enqueue_or_increment_revision<C: ConnectionTrait>(
+    db: &C,
+    kind: PendingDeliveryKind,
+    key: String,
+    payload: serde_json::Value,
+) -> Result<(), DbErr> {
+    db.execute_raw(PENDING_DELIVERY_UPSERT_UNSETTLED.bind([
         Value::Uuid(Some(PendingDeliveryId::now_v7().into_inner())),
         Value::SmallInt(Some(i16::from(kind))),
         Value::String(Some(key)),
@@ -173,6 +199,7 @@ pub async fn claim_due<C: ConnectionTrait>(
                 key: r.try_get("", "key")?,
                 payload: r.try_get("", "payload")?,
                 attempts: r.try_get("", "attempts")?,
+                revision: r.try_get("", "revision")?,
             })
         })
         .collect()
@@ -184,9 +211,10 @@ pub async fn mark<C: ConnectionTrait>(
     outcome: &Outcome,
 ) -> Result<(), DbErr> {
     let stmt = match outcome {
-        Outcome::Delivered => {
-            PENDING_DELIVERY_MARK_DELIVERED.bind([Value::Uuid(Some(row.id.into_inner()))])
-        }
+        Outcome::Delivered => PENDING_DELIVERY_MARK_DELIVERED.bind([
+            Value::Uuid(Some(row.id.into_inner())),
+            Value::Int(Some(row.revision)),
+        ]),
         Outcome::Retry(error) => retry(row, error, MAX_ATTEMPTS, backoff(row.attempts)),
         Outcome::RetryAfterDelay(error, delay) => {
             retry(row, error, MAX_ATTEMPTS, backoff(row.attempts).max(*delay))
@@ -230,8 +258,10 @@ pub async fn pending_counts<C: ConnectionTrait>(db: &C) -> Result<(i64, i64), Db
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::pending_delivery;
+    use gradient_fixtures::database::TestDatabase;
     use gradient_fixtures::mock::{empty_db, mock_db};
-    use sea_orm::MockExecResult;
+    use sea_orm::{DatabaseConnection, MockExecResult};
     use std::collections::BTreeMap;
 
     fn norm(s: &str) -> String {
@@ -260,6 +290,7 @@ mod tests {
                     Value::Json(Some(Box::new(serde_json::json!({"a": 1})))),
                 ),
                 ("attempts".to_owned(), Value::Int(Some(0))),
+                ("revision".to_owned(), Value::Int(Some(0))),
             ])]])
             .into_connection();
 
@@ -279,7 +310,7 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.ends_with("RETURNING o.id, o.kind, o.key, o.payload, o.attempts"),
+            sql.ends_with("RETURNING o.id, o.kind, o.key, o.payload, o.attempts, o.revision"),
             "{sql}"
         );
     }
@@ -321,6 +352,7 @@ mod tests {
             key: "k".into(),
             payload: serde_json::json!({}),
             attempts: 0,
+            revision: 0,
         };
         mark(&db, &row, &Outcome::Retry("502".into()))
             .await
@@ -353,30 +385,112 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn enqueue_does_nothing_on_a_pending_duplicate_key() {
-        let db = mock_db()
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .into_connection();
+    const TEST_BUILD_PENDING_DELIVERY_KEY: &str = "task:build:7";
 
-        enqueue(
-            &db,
-            PendingDeliveryKind::Event,
-            "j:3".into(),
-            serde_json::json!({}),
+    async fn enqueue_commit_status_post_with_event_name(db: &DatabaseConnection, event: &str) {
+        enqueue_or_increment_revision(
+            db,
+            PendingDeliveryKind::TaskEventCommitStatusPost,
+            TEST_BUILD_PENDING_DELIVERY_KEY.into(),
+            serde_json::json!({ "event": event }),
         )
         .await
-        .unwrap();
+        .expect("the delivery enters the queue");
+    }
 
-        let sql = norm(&db.into_transaction_log()[0].statements()[0].sql);
+    async fn claim_due_rows_or_panic(db: &DatabaseConnection) -> Vec<PendingDelivery> {
+        claim_due(db, 8)
+            .await
+            .expect("claim_due leased a due delivery")
+    }
+
+    #[tokio::test]
+    async fn enqueue_twice_with_same_key_keeps_one_row_with_revision_one_and_second_payload() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+        enqueue_commit_status_post_with_event_name(&conn, "started").await;
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].revision, 1);
+        assert_eq!(rows[0].payload, serde_json::json!({ "event": "started" }));
+    }
+
+    #[tokio::test]
+    async fn mark_delivered_keeps_row_unsettled_when_revision_changed_since_claim_and_makes_it_due_again()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+        let claimed = claim_due_rows_or_panic(&conn).await;
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].revision, 0);
+
+        enqueue_commit_status_post_with_event_name(&conn, "started").await;
+        mark(&conn, &claimed[0], &Outcome::Delivered)
+            .await
+            .expect("mark() recorded the delivery");
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
+        assert_eq!(
+            rows[0].delivered_at, None,
+            "change during claim must trigger a repost of the row"
+        );
+        let again = claim_due_rows_or_panic(&conn).await;
+        assert_eq!(
+            again.iter().map(|r| r.revision).collect::<Vec<_>>(),
+            vec![1],
+            "the released row is due at once with the newer revision"
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_and_mark_delivered_with_unchanged_revision_sets_delivered_at() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+        let claimed = claim_due_rows_or_panic(&conn).await;
+
+        mark(&conn, &claimed[0], &Outcome::Delivered)
+            .await
+            .expect("mark() recorded the delivery");
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
         assert!(
-            sql.contains(
-                "ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING"
-            ),
-            "{sql}"
+            rows[0].delivered_at.is_some(),
+            "row settled with unchanged revision"
+        );
+        assert!(
+            claim_due_rows_or_panic(&conn).await.is_empty(),
+            "no second fetch for settled rows"
+        );
+    }
+
+    #[tokio::test]
+    async fn plain_enqueue_keeps_unsettled_row_revision_and_payload_unchanged() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+
+        for event in ["queued", "started"] {
+            enqueue(
+                &conn,
+                PendingDeliveryKind::TaskEventCommitStatusPost,
+                TEST_BUILD_PENDING_DELIVERY_KEY.into(),
+                serde_json::json!({ "event": event }),
+            )
+            .await
+            .expect("the delivery enters the queue");
+        }
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
+        assert_eq!(
+            rows.iter()
+                .map(|r| (r.revision, r.payload.clone()))
+                .collect::<Vec<_>>(),
+            vec![(0, serde_json::json!({ "event": "queued" }))],
+            "plain enqueue operations keep the first payload and revision"
         );
     }
 }

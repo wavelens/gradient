@@ -277,6 +277,7 @@ impl SchedulerCase {
                 key: row.key.clone(),
                 payload: row.payload.clone(),
                 attempts: row.attempts,
+                revision: row.revision,
             };
             pending_delivery::Model {
                 next_attempt_at: leased,
