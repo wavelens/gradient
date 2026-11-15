@@ -53,10 +53,14 @@ pub const FLAKE_INPUT_SOURCES_SINCE: u16 = 56;
 pub const GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_SINCE: u16 = 60;
 pub const DRAIN_CANCELLED_SINCE: u16 = 62;
 pub const FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS: u16 = 63;
+pub const FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK: u16 = 65;
 
 pub const GUEST_CHANNEL_CHUNK: usize = 32 * 1024;
 
 pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+pub const WORKER_LOCAL_STORE_BLOOM_FILTER_REBUILD_AND_RESEND_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(60 * 60);
 
 pub const EVAL_PROGRESS_RESEND_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 

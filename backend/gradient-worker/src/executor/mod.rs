@@ -827,6 +827,10 @@ mod tests {
         async fn add_nar(&self, _name: &str, _nar: Vec<u8>) -> Result<String> {
             Err(anyhow::anyhow!("acquire daemon connection: no such file"))
         }
+
+        async fn local_store_valid_path_hashes(&self) -> Result<Vec<String>> {
+            Err(anyhow::anyhow!("acquire daemon connection: no such file"))
+        }
     }
 
     #[tokio::test]

@@ -91,6 +91,15 @@ impl LocalNixStore {
             .map_err(|e| anyhow::anyhow!("is_valid_path failed for {store_path}: {e}"))
     }
 
+    pub async fn local_store_valid_path_hashes(&self) -> Result<Vec<String>> {
+        let mut guard = self.acquire().await?;
+        let paths = guard
+            .execute(|client| async move { client.query_all_valid_paths().await })
+            .await
+            .map_err(|e| anyhow::anyhow!("query_all_valid_paths failed: {e}"))?;
+        Ok(paths.iter().map(|path| path.hash().to_string()).collect())
+    }
+
     pub async fn nar_sizes(&self, store_paths: &[String]) -> Vec<Option<u64>> {
         stream::iter(store_paths.iter().cloned())
             .map(|path| async move {
@@ -241,6 +250,10 @@ impl WorkerStore for LocalNixStore {
         }
 
         Ok(path)
+    }
+
+    async fn local_store_valid_path_hashes(&self) -> Result<Vec<String>> {
+        self.local_store_valid_path_hashes().await
     }
 }
 
