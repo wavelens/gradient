@@ -19,6 +19,7 @@ use tracing::{debug, info, warn};
 
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{BuildStage, GradientCapabilities};
+use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
 use crate::Scheduler;
 use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, WorkerMetrics};
@@ -335,6 +336,21 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::UpdateMetrics {
                 worker,
                 metrics,
+                reply,
+            })
+            .await;
+    }
+
+    pub async fn set_worker_local_store_bloom_filter(
+        &self,
+        worker_id: &str,
+        filter: WorkerStorePathBloomFilter,
+    ) {
+        let worker = worker_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::UpdateWorkerLocalStoreBloomFilter {
+                worker,
+                filter,
                 reply,
             })
             .await;

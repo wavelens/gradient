@@ -15,6 +15,7 @@ use gradient_wire::types::{
     BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, GuestCapacity,
     GuestSize, JobKind,
 };
+use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
 use crate::worker_caps::{effective_free, effective_free_amount};
 
@@ -90,6 +91,7 @@ pub struct WorkerShared {
     pub reclaims_jobs: bool,
     pub peer_auth: PeerAuth,
     pub sent_candidates: HashSet<String>,
+    pub local_store_bloom_filter: Option<WorkerStorePathBloomFilter>,
     pub session: Arc<dyn SessionPort>,
     /// The session loop is bumping this lock-free on every inbound frame. The liveness watchdog is
     /// reading it to detect a worker that died without a clean TCP close.
@@ -263,6 +265,7 @@ impl TypedWorker<Active> {
                 reclaims_jobs: false,
                 peer_auth: PeerAuth::from(authorized_peers),
                 sent_candidates: HashSet::new(),
+                local_store_bloom_filter: None,
                 session,
                 last_seen: Arc::new(AtomicI64::new(
                     gradient_types::now().and_utc().timestamp_millis(),

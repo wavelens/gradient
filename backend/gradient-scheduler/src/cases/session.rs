@@ -12,15 +12,15 @@ use gradient_entity::dispatched_job::{self, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_wire::types::{
-    BuildFailureKind, BuildMetrics, BuildOutput, BumpedInputWire, CandidateScore,
-    DiscoveredDerivation, EvalMessageLevel, EvalStatsReport, InputOutcome, JobKind, JobPhaseSpan,
+    BuildFailureKind, BuildMetrics, BuildOutput, BumpedInputWire, DiscoveredDerivation,
+    EvalMessageLevel, EvalStatsReport, InputOutcome, JobKind, JobPhaseSpan,
 };
+use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
 use super::aliases;
 use super::shapes::{Profile, eval_key, w_all};
 use super::{SchedulerCase, Session, SessionJob, lock, new_port};
 use crate::ReportedTimeline;
-use crate::actor::{Offer, SchedulerMsg};
 use crate::job_handlers::timeline::failed_job_outcome;
 use crate::jobs::{Assignment, PendingJob, Reattached, build_job_key};
 use crate::reclaim::Reclaimed;
@@ -212,44 +212,16 @@ impl SchedulerCase {
             .expect("the scheduler core counts");
     }
 
-    pub async fn offers_full(&self, worker: &str) -> Offer {
-        self.offers(worker, false).await
-    }
-
-    pub async fn offers_delta(&self, worker: &str) -> Offer {
-        self.offers(worker, true).await
-    }
-
-    async fn offers(&self, worker: &str, only_new: bool) -> Offer {
-        let worker = worker.to_owned();
+    pub async fn install_worker_local_store_bloom_filter(
+        &self,
+        worker: &str,
+        present_store_path_hash_parts: &[&str],
+    ) {
+        let filter =
+            WorkerStorePathBloomFilter::from_store_path_hash_parts(present_store_path_hash_parts);
         self.scheduler
-            .call(|reply| SchedulerMsg::Candidates {
-                worker,
-                only_new,
-                reply,
-            })
-            .await
-            .expect("the scheduler core lists the candidates")
-    }
-
-    pub async fn score_all(&self, worker: &str) {
-        let mut offered: Vec<String> = self.sent_set(worker).await.into_iter().collect();
-        offered.sort();
-        let scores = offered
-            .iter()
-            .map(|key| (key.as_str(), 0, 0, false))
-            .collect::<Vec<_>>();
-        self.scores(worker, &scores).await;
-    }
-
-    pub async fn scores(&self, worker: &str, scores: &[(&str, u32, u64, bool)]) {
-        let scores = scores
-            .iter()
-            .map(|(key, missing, missing_nar_size, outputs_present)| {
-                aliases::candidate_score(key, *missing, *missing_nar_size, *outputs_present)
-            })
-            .collect::<Vec<CandidateScore>>();
-        aliases::store_scores(&self.scheduler, worker, scores).await;
+            .set_worker_local_store_bloom_filter(worker, filter)
+            .await;
     }
 
     pub async fn request_job(&self, worker: &str, kind: JobKind) -> Option<Assignment> {
@@ -264,8 +236,6 @@ impl SchedulerCase {
     }
 
     pub async fn idle(&self, worker: &str, kind: JobKind) {
-        self.offers_full(worker).await;
-        self.score_all(worker).await;
         let assignment = self.request_job(worker, kind).await;
         assert!(
             assignment.is_none(),
@@ -440,8 +410,6 @@ impl SchedulerCase {
             self.connect(worker, w_all(), &[]).await;
         }
         self.assign_queued_evals().await;
-        self.offers_full(worker).await;
-        self.score_all(worker).await;
         let assignment = self
             .request_job(worker, JobKind::Flake)
             .await

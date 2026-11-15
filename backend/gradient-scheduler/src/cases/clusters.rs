@@ -50,13 +50,6 @@ async fn k01_members_join_the_book_and_are_not_handed_out_as_single_jobs() {
     case.signals(W1);
     case.check("step 1").await;
 
-    let offer = case.offers_full(W1).await;
-    assert_eq!(
-        candidate_keys(&offer.candidates),
-        vec![eval.clone()],
-        "after 2: candidates"
-    );
-    case.score_all(W1).await;
     let assignment = case.request_job(W1, JobKind::Flake).await;
     assert!(assignment.is_none(), "after 2: result == nothing");
     assert!(
@@ -81,13 +74,6 @@ async fn k01_members_join_the_book_and_are_not_handed_out_as_single_jobs() {
     case.signals(W1);
     case.check("step 3").await;
 
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(
-        candidate_keys(&offer.candidates),
-        vec![build.clone()],
-        "after 4: candidates"
-    );
-    case.score_all(W1).await;
     let assignment = case.request_job(W1, JobKind::Build).await;
     assert!(assignment.is_none(), "after 4: result == nothing");
     assert!(
@@ -1018,8 +1004,6 @@ async fn k27_a_cluster_created_long_ago_but_only_now_able_to_start_is_not_aged_a
 
     case.assign_queued_evals().await;
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let busy = case.request_job(W2, JobKind::Build).await;
     assert_eq!(
         busy.as_ref().map(|a| a.job_id().to_owned()),
@@ -1529,12 +1513,6 @@ async fn assert_members_return(
         assert!(!case.pending(key).await, "{after}: pending({key})");
         assert!(case.tracked(key).await, "{after}: tracked({key})");
     }
-}
-
-fn candidate_keys(candidates: &[gradient_wire::types::JobCandidate]) -> Vec<String> {
-    let mut keys: Vec<String> = candidates.iter().map(|c| c.job_id.clone()).collect();
-    keys.sort();
-    keys
 }
 
 fn peer(role: &str, worker: &str) -> ClusterPeer {

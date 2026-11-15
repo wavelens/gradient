@@ -10,6 +10,7 @@ use gradient_util::nix_hash::nix32_decode;
 use crate::messages::ClientMessage;
 
 pub const FILTER_BITS_PER_STORE_PATH: u64 = 20;
+pub const MIN_STORE_PATH_COUNT_FOR_WORKER_STORE_PATH_BLOOM_FILTER: usize = 1024;
 pub const BLOOM_FILTER_BIT_POSITIONS_CHECKED_PER_ENTRY: u8 = 14;
 pub const MAX_BLOOM_FILTER_BYTES_PER_WIRE_CHUNK: usize = 1024 * 1024;
 pub const MAX_WORKER_STORE_PATH_BLOOM_FILTER_BIT_COUNT: u64 =
@@ -72,7 +73,9 @@ pub fn decode_store_path_hash_into_two_u64_words(path_hash: &str) -> Option<[u64
 
 impl WorkerStorePathBloomFilter {
     pub fn new_for_store_path_count(path_count: usize) -> Self {
-        let bit_count = (path_count.max(1) as u64) * FILTER_BITS_PER_STORE_PATH;
+        let bit_count = (path_count.max(MIN_STORE_PATH_COUNT_FOR_WORKER_STORE_PATH_BLOOM_FILTER)
+            as u64)
+            * FILTER_BITS_PER_STORE_PATH;
         let byte_count = usize::try_from(bit_count.div_ceil(8)).unwrap_or(usize::MAX);
         Self {
             bit_count,
@@ -127,14 +130,23 @@ impl WorkerStorePathBloomFilter {
 
     fn entry_probe_bit_positions(&self, [h1, h2]: [u64; 2]) -> impl Iterator<Item = u64> + use<> {
         let modulus = self.bit_count;
-        let step = h2 % modulus;
-        std::iter::successors(Some(h1 % modulus), move |&position| {
-            Some(
-                add_two_numbers_below_modulus_modulo_modulus_without_overflow(
-                    position, step, modulus,
-                ),
-            )
-        })
+        std::iter::successors(
+            Some((1, h1 % modulus, h2 % modulus)),
+            move |&(probe_index, position, step)| {
+                Some((
+                    probe_index + 1,
+                    add_two_numbers_below_modulus_modulo_modulus_without_overflow(
+                        position, step, modulus,
+                    ),
+                    add_two_numbers_below_modulus_modulo_modulus_without_overflow(
+                        step,
+                        probe_index % modulus,
+                        modulus,
+                    ),
+                ))
+            },
+        )
+        .map(|(_, position, _)| position)
         .take(usize::from(self.probe_count))
     }
 }
@@ -324,6 +336,17 @@ mod tests {
 
         let rate = false_positives as f64 / absent as f64;
         assert!(rate < 2e-4, "false positive rate {rate}");
+    }
+
+    #[test]
+    fn filter_from_one_store_path_reports_no_false_positive_for_10000_uninserted_hashes() {
+        let (filter, _) = build_filter_from_synthetic_store_path_hashes(1);
+
+        let false_positives = (0..10_000)
+            .filter(|&n| filter.probably_contains_probe_words(probe_words_of_absent_entry(n)))
+            .count();
+
+        assert_eq!(false_positives, 0);
     }
 
     #[test]

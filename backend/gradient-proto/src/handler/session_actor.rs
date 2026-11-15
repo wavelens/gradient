@@ -42,6 +42,7 @@ use gradient_wire::messages::{
     RUNNING_JOBS_SINCE, ServerMessage,
 };
 use gradient_wire::session::frame::ProtoReader;
+use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilterChunkCollector;
 
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
 
@@ -85,6 +86,7 @@ pub struct SessionState {
     uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
     offers_seen: u64,
+    worker_store_path_bloom_filter_chunk_collector: WorkerStorePathBloomFilterChunkCollector,
     active: ActiveJobs,
     job_events: JobEvents,
     logs: LogLane,
@@ -196,6 +198,7 @@ impl Actor for SessionActor {
             uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
             offers_seen: 0,
+            worker_store_path_bloom_filter_chunk_collector: Default::default(),
             active,
             logs,
             job_events,
@@ -222,6 +225,8 @@ impl Actor for SessionActor {
                         job_events: &st.job_events,
                         logs: &st.logs,
                         dialed: st.dialed.as_ref(),
+                        worker_store_path_bloom_filter_chunk_collector: &mut st
+                            .worker_store_path_bloom_filter_chunk_collector,
                     };
 
                     ctx.handle(msg, &mut st.uploads).await
@@ -660,6 +665,8 @@ fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSessi
             job_events: &st.job_events,
             logs: &st.logs,
             dialed: st.dialed.as_ref(),
+            worker_store_path_bloom_filter_chunk_collector: &mut st
+                .worker_store_path_bloom_filter_chunk_collector,
         },
         &mut st.uploads,
     )

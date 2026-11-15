@@ -5,6 +5,7 @@
  */
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use gradient_db::scheduling::assignment_record::EXEC_KEY_PREFIX;
 use gradient_pool::WorkerCaps;
@@ -15,9 +16,10 @@ use gradient_types::exec::{
     job_token_expiry, mint_job_token,
 };
 use gradient_types::ids::{EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId};
-use gradient_wire::types::{ExecJob, RequiredPath};
+use gradient_wire::types::ExecJob;
 
 use crate::exec_secrets::ResolvedSecretNames;
+use crate::pending_job_input_store_paths::PendingJobInputStorePath;
 
 #[derive(Debug, Clone)]
 pub struct PendingExecJob {
@@ -39,7 +41,8 @@ pub struct PendingExecJob {
     pub keep_vm_running: bool,
     pub attempts_done: u32,
     pub last_phase: Option<Phase>,
-    pub required_paths: Vec<RequiredPath>,
+    pub shared_direct_input_store_paths_with_probe_words_and_nar_sizes:
+        Arc<[PendingJobInputStorePath]>,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
     pub rescore_count: u32,

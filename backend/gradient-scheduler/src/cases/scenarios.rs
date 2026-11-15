@@ -21,8 +21,9 @@ use gradient_types::WaitingReason;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildSpecKind, Job, JobKind};
 
 use super::{
-    A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, SchedulerCase, UpstreamServer, attr_of, build_output,
-    drv, drv_nar, eval_key, failure, output_nar, w_all, with_attr, with_output, with_references,
+    A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, SchedulerCase, UpstreamServer, attr_of,
+    build_output, drv, drv_nar, eval_key, failure, output_nar, w_all, with_attr, with_output,
+    with_references,
 };
 use crate::jobs::Assignment;
 
@@ -55,8 +56,6 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     let eval = eval_key(e1);
 
     case.assign_queued_evals().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let flake = case
         .request_job(W1, JobKind::Flake)
         .await
@@ -117,8 +116,6 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     case.check("step 4").await;
 
     case.admit_startable_moves().await;
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let a2 = requested_build(&case, W1, &b, "after 5").await;
     case.report_building(W1, &b).await;
     assert!(!case.pending(&b).await, "after 5: pending(build:B)");
@@ -195,8 +192,6 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     case.check("step 7").await;
 
     case.admit_startable_moves().await;
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let a = case.key(A).await;
     let a3 = requested_build(&case, W1, &a, "after 8").await;
     case.report_building(W1, &a).await;
@@ -269,8 +264,6 @@ async fn z02_aborted_evaluation_retry_is_refused_while_shared_leaf_finishes_for_
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = requested_build(&case, W1, &b, "after 1").await;
     case.report_building(W1, &b).await;
     case.signals(W1);
@@ -322,8 +315,6 @@ async fn z02_aborted_evaluation_retry_is_refused_while_shared_leaf_finishes_for_
     case.check("step 3").await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let c = case.key(C).await;
     let a2 = requested_build(&case, W2, &c, "after 4").await;
     let commit = NarCommit {
@@ -371,20 +362,13 @@ async fn z02_aborted_evaluation_retry_is_refused_while_shared_leaf_finishes_for_
 #[tokio::test]
 async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start_with(shape().two(e1), |c| c.build.retry_backoff_secs = 1).await;
+    let seed = shape().two(e1).add_missing_cached_build_input(B, D, D_OUT);
+    let case = SchedulerCase::start_with(seed, |c| c.build.retry_backoff_secs = 1).await;
     case.connect(W1, w_all(), &[]).await;
     case.connect(W2, w_all(), &[]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.offers_full(W2).await;
-    case.scores(
-        W1,
-        &[(a.as_str(), 0, 0, false), (b.as_str(), 5, 5_000_000, false)],
-    )
-    .await;
-    case.score_all(W2).await;
     let a1 = requested_build(&case, W1, &a, "after 1").await;
     let a2 = requested_build(&case, W2, &b, "after 1").await;
     case.report_building(W1, &a).await;
@@ -445,8 +429,6 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
     case.check("step 3").await;
 
     case.connect(W3, w_all().slots(2), &[]).await;
-    case.offers_full(W3).await;
-    case.score_all(W3).await;
     let a3 = requested_build(&case, W3, &a, "after 4").await;
     build_and_complete(&case, W3, &a, a3, output_nar(A, A_OUT), 1).await;
     assert_eq!(
@@ -464,8 +446,6 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
     tokio::time::sleep(std::time::Duration::from_secs_f64(1.2)).await;
     case.requeue_transient_retries().await;
     case.admit_startable_moves().await;
-    case.offers_full(W3).await;
-    case.score_all(W3).await;
     let a4 = requested_build(&case, W3, &b, "after 5").await;
     build_and_complete(&case, W3, &b, a4, output_nar(B, B_OUT), 1).await;
     assert_eq!(
@@ -521,8 +501,6 @@ async fn z04_a_passthrough_missing_twice_becomes_a_real_build_after_its_input() 
 
     for (step, line) in [("step 1", "after 1"), ("step 2", "after 2")] {
         case.admit_startable_moves().await;
-        case.offers_full(W1).await;
-        case.score_all(W1).await;
         let assignment = case
             .request_job(W1, JobKind::Build)
             .await
@@ -562,8 +540,6 @@ async fn z04_a_passthrough_missing_twice_becomes_a_real_build_after_its_input() 
     );
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let b = case.key(B).await;
     let a3 = requested_build(&case, W1, &b, "after 3").await;
     build_and_complete(&case, W1, &b, a3, output_nar(B, B_OUT), 1).await;
@@ -580,8 +556,6 @@ async fn z04_a_passthrough_missing_twice_becomes_a_real_build_after_its_input() 
     case.check("step 3").await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -621,22 +595,18 @@ async fn z04_a_passthrough_missing_twice_becomes_a_real_build_after_its_input() 
 #[tokio::test]
 async fn z05_a_core_respawn_mid_run_loses_no_job() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let case = SchedulerCase::start(shape().two(e1).evalq(e2)).await;
+    let case = SchedulerCase::start(
+        shape()
+            .two(e1)
+            .add_missing_cached_build_input(B, D, D_OUT)
+            .evalq(e2),
+    )
+    .await;
     case.connect(W1, w_all().slots(2), &[]).await;
     let (a, b, eval) = (case.key(A).await, case.key(B).await, eval_key(e2));
 
     case.admit_startable_moves().await;
     case.assign_queued_evals().await;
-    case.offers_full(W1).await;
-    case.scores(
-        W1,
-        &[
-            (a.as_str(), 0, 0, false),
-            (b.as_str(), 5, 5_000_000, false),
-            (eval.as_str(), 0, 0, false),
-        ],
-    )
-    .await;
     let a1 = requested_build(&case, W1, &a, "after 1").await;
     case.report_building(W1, &a).await;
     let flake = case
@@ -701,8 +671,6 @@ async fn z05_a_core_respawn_mid_run_loses_no_job() {
     case.complete(W1, &a, a1, Vec::new(), 1).await;
     case.check("step 5").await;
 
-    case.offers_delta(W1).await;
-    case.score_all(W1).await;
     let a3 = requested_build(&case, W1, &b, "after 6").await;
     build_and_complete(&case, W1, &b, a3, output_nar(B, B_OUT), 1).await;
     assert_eq!(
@@ -739,10 +707,6 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
     second.resync_startable_set().await;
     case.assign_queued_evals().await;
     second.assign_queued_evals().await;
-    case.offers_full(W1).await;
-    second.offers_full(W2).await;
-    case.score_all(W1).await;
-    second.score_all(W2).await;
     case.check("step 1").await;
     second.check("step 1").await;
 
@@ -836,8 +800,6 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
 
     second.resync_startable_set().await;
     second.assign_queued_evals().await;
-    second.offers_full(W2).await;
-    second.score_all(W2).await;
     let mut taken_again = Vec::new();
     for _ in 0..2 {
         taken_again.push(
@@ -904,8 +866,6 @@ async fn z07_a_server_drain_mid_run_pauses_admission_and_the_run_resumes() {
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = requested_build(&case, W1, &b, "after 1").await;
     case.report_building(W1, &b).await;
     case.check("step 1").await;
@@ -967,8 +927,6 @@ async fn z07_a_server_drain_mid_run_pauses_admission_and_the_run_resumes() {
     );
     case.check("step 5").await;
 
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a2 = requested_build(&case, W1, &a, "after 6").await;
     let commit = with_references(output_nar(A, A_OUT), &[(B_OUT, "b")]);
     build_and_complete(&case, W1, &a, a2, commit, 1).await;

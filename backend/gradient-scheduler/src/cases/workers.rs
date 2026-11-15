@@ -20,10 +20,9 @@ use gradient_types::waiting_reason::{EvalCapability, WaitingReason};
 use gradient_wire::types::{BuildFailureKind, FlakeStep, Job, JobKind};
 
 use super::{
-    A, A_OUT, B, B_OUT, CaseShapes, SchedulerCase, SlotKind, Totals, ago, eval_key, failure,
-    is_recent, output_nar, w_all, w_build, w_eval, w_network_build, w_network_eval,
+    A, A_OUT, B, B_OUT, CaseShapes, D, D_OUT, SchedulerCase, SlotKind, Totals, ago, eval_key,
+    failure, is_recent, output_nar, w_all, w_build, w_eval, w_network_build, w_network_eval,
 };
-use crate::actor::Offer;
 use crate::jobs::PendingJob;
 use crate::reclaim::Reclaimed;
 
@@ -104,12 +103,6 @@ async fn w02_a_worker_without_a_profile_is_offered_nothing_until_it_arrives() {
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    let offer = case.offers_full(W1).await;
-    assert_eq!(
-        offered(&offer),
-        Vec::<String>::new(),
-        "after 1: result.candidates"
-    );
     assert_eq!(
         case.signals(W1),
         vec![SessionSignal::Offers(1), SessionSignal::Offers(2)],
@@ -125,17 +118,16 @@ async fn w02_a_worker_without_a_profile_is_offered_nothing_until_it_arrives() {
     case.capabilities(W1, w_all().slots(2)).await;
     case.check("step 3").await;
 
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(
-        offered(&offer),
-        sorted(vec![a, b]),
-        "after 4: offers result.candidates"
-    );
-    case.score_all(W1).await;
     let first = case.request_job(W1, JobKind::Build).await;
     let second = case.request_job(W1, JobKind::Build).await;
-    assert!(
-        first.is_some() && second.is_some(),
+    let taken: Vec<String> = [first, second]
+        .iter()
+        .flatten()
+        .map(|j| j.job_id().to_owned())
+        .collect();
+    assert_eq!(
+        sorted(taken),
+        sorted(vec![a, b]),
         "after 4: both requests give W1 a job"
     );
     let open = case
@@ -182,10 +174,6 @@ async fn w04_a_disconnect_while_building_requeues_the_build_for_another_worker()
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    for worker in [W1, W2] {
-        case.offers_full(worker).await;
-        case.score_all(worker).await;
-    }
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -255,13 +243,6 @@ async fn w04_a_disconnect_while_building_requeues_the_build_for_another_worker()
     assert_eq!(case.signals(W2), vec![], "after 3: signals(W2)");
     case.check("step 3").await;
 
-    let offer = case.offers_delta(W2).await;
-    assert_eq!(
-        offered(&offer),
-        vec![a.clone()],
-        "after 4: offers result.candidates"
-    );
-    case.score_all(W2).await;
     let a2 = case
         .request_job(W2, JobKind::Build)
         .await
@@ -295,10 +276,6 @@ async fn w05_a_disconnect_before_the_building_report_leaves_no_attempt() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    for worker in [W1, W2] {
-        case.offers_full(worker).await;
-        case.score_all(worker).await;
-    }
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -321,8 +298,6 @@ async fn w05_a_disconnect_before_the_building_report_leaves_no_attempt() {
     assert_eq!(case.attempts(A).await, vec![], "after 2: att(A) == []");
     case.check("step 2").await;
 
-    case.offers_delta(W2).await;
-    case.score_all(W2).await;
     let a2 = case
         .request_job(W2, JobKind::Build)
         .await
@@ -365,8 +340,6 @@ async fn w06_the_tenth_lost_worker_in_a_row_fails_the_build_and_the_evaluation()
     let b = case.key(B).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -430,8 +403,6 @@ async fn w07_an_attempt_closed_for_another_reason_restarts_the_lost_worker_strea
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.request_job(W1, JobKind::Build)
         .await
         .expect("after 1: W1 gets build:A");
@@ -511,8 +482,6 @@ async fn w08_a_lost_eval_worker_sends_the_evaluation_to_waiting_until_an_eval_wo
     case.check("step 4").await;
 
     case.assign_queued_evals().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let assignment = case
         .request_job(W2, JobKind::Flake)
         .await
@@ -551,8 +520,6 @@ async fn w09_ten_eval_dispatches_fail_the_evaluation_and_nine_wait_for_eval_work
     let (k1, k2) = (eval_key(e1), eval_key(e2));
 
     case.assign_queued_evals().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let mut taken = Vec::new();
     for _ in 0..2 {
         let assignment = case
@@ -635,12 +602,6 @@ async fn w10_a_worker_without_build_gets_no_substitute_job() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    let offer = case.offers_full(W1).await;
-    assert_eq!(
-        offered(&offer),
-        Vec::<String>::new(),
-        "after 1: result.candidates"
-    );
     case.check("step 1").await;
 
     let nothing = case.request_job(W1, JobKind::Build).await;
@@ -664,13 +625,6 @@ async fn w11_a_network_worker_without_build_gets_the_download_job() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    let offer = case.offers_full(W1).await;
-    assert_eq!(
-        offered(&offer),
-        vec![a.clone()],
-        "after 1: offers result.candidates"
-    );
-    case.score_all(W1).await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -688,8 +642,6 @@ async fn w12_a_draining_worker_keeps_its_job_and_gets_no_offers_and_no_new_job()
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let first = case
         .request_job(W1, JobKind::Build)
         .await
@@ -802,10 +754,6 @@ async fn w13_the_liveness_pass_drops_a_silent_worker_like_a_disconnect() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    for worker in [W1, W2] {
-        case.offers_full(worker).await;
-        case.score_all(worker).await;
-    }
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -901,26 +849,19 @@ async fn w39_a_zero_heartbeat_timeout_disables_the_liveness_pass() {
 #[tokio::test]
 async fn w15_reattached_jobs_are_active_again_after_a_core_respawn() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let case = SchedulerCase::start(shape().two(e1).evalq(e2)).await;
+    let case = SchedulerCase::start(
+        shape()
+            .two(e1)
+            .add_missing_cached_build_input(B, D, D_OUT)
+            .evalq(e2),
+    )
+    .await;
     case.connect(W1, w_all(), &[]).await;
     case.connect(W2, w_all(), &[]).await;
     let (a, b, eval) = (case.key(A).await, case.key(B).await, eval_key(e2));
 
     case.admit_startable_moves().await;
     case.assign_queued_evals().await;
-    for worker in [W1, W2] {
-        case.offers_full(worker).await;
-    }
-    case.scores(
-        W1,
-        &[
-            (a.as_str(), 0, 0, false),
-            (b.as_str(), 5, 5_000_000, false),
-            (eval.as_str(), 0, 0, false),
-        ],
-    )
-    .await;
-    case.score_all(W2).await;
     let build = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1075,8 +1016,6 @@ async fn w17_each_sampling_pass_writes_a_row_per_connected_worker() {
     let caps = serde_json::to_value(&w_all().caps).expect("the handshake flags as JSON");
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     case.request_job(W1, JobKind::Build)
         .await
         .expect("after 1: W1 gets build:A");
@@ -1139,19 +1078,19 @@ async fn w17_each_sampling_pass_writes_a_row_per_connected_worker() {
 #[tokio::test]
 async fn w18_revoking_a_project_aborts_its_active_job_and_closes_the_row() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let case = SchedulerCase::start(shape().one(e1, A, A_OUT).one(e2, B, B_OUT)).await;
+    let case = SchedulerCase::start(
+        shape()
+            .one(e1, A, A_OUT)
+            .add_missing_cached_build_input(A, D, D_OUT)
+            .one(e2, B, B_OUT),
+    )
+    .await;
     let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
     case.connect(W1, w_all().slots(1), &[p1, p2]).await;
     case.connect(W2, w_all(), &[p2]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.scores(
-        W1,
-        &[(a.as_str(), 5, 5_000_000, false), (b.as_str(), 0, 0, false)],
-    )
-    .await;
     let assignment = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1190,8 +1129,6 @@ async fn w18_revoking_a_project_aborts_its_active_job_and_closes_the_row() {
     );
     case.check("step 3").await;
 
-    case.offers_delta(W2).await;
-    case.score_all(W2).await;
     let taken = case.request_job(W2, JobKind::Build).await;
     assert_eq!(
         taken.as_ref().map(|j| j.job_id().to_owned()),
@@ -1205,8 +1142,12 @@ async fn w18_revoking_a_project_aborts_its_active_job_and_closes_the_row() {
     );
     case.check("step 4").await;
 
-    let offer = case.offers_full(W1).await;
-    assert_eq!(offered(&offer), vec![a], "after 5: result.candidates");
+    let taken = case.request_job(W1, JobKind::Build).await;
+    assert_eq!(
+        taken.as_ref().map(|j| j.job_id().to_owned()),
+        Some(a.clone()),
+        "after 5: W1 gets build:A"
+    );
     case.check("step 5").await;
 
     case.finish().await;
@@ -1217,16 +1158,10 @@ async fn w19_a_revoke_without_active_jobs_only_narrows_the_offers() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT).one(e2, B, B_OUT)).await;
     let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
-    case.connect(W1, w_all(), &[p1, p2]).await;
+    case.connect(W1, w_all().slots(2), &[p1, p2]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
-    let offer = case.offers_full(W1).await;
-    assert_eq!(
-        offered(&offer),
-        sorted(vec![a.clone(), b.clone()]),
-        "after 1: result.candidates"
-    );
     drain_signals(&case, &[W1]);
     case.check("step 1").await;
 
@@ -1236,18 +1171,16 @@ async fn w19_a_revoke_without_active_jobs_only_narrows_the_offers() {
     assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
     case.check("step 2").await;
 
-    let offer = case.offers_full(W1).await;
+    let first = case.request_job(W1, JobKind::Build).await;
+    let second = case.request_job(W1, JobKind::Build).await;
     assert_eq!(
-        offered(&offer),
-        vec![b.clone()],
-        "after 3: offers result.candidates"
-    );
-    case.score_all(W1).await;
-    let taken = case.request_job(W1, JobKind::Build).await;
-    assert_eq!(
-        taken.as_ref().map(|j| j.job_id().to_owned()),
+        first.as_ref().map(|j| j.job_id().to_owned()),
         Some(b),
-        "after 3: request result.job_id"
+        "after 3: the first request hands out B"
+    );
+    assert!(
+        second.is_none(),
+        "after 3: the second request gets nothing, A stays revoked"
     );
     case.check("step 3").await;
 
@@ -1290,24 +1223,15 @@ async fn w21_a_reauth_result_replaces_the_granted_projects() {
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT).one(e2, B, B_OUT)).await;
     let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
     case.connect(W1, w_all().slots(2), &[p1]).await;
-    let (a, b) = (case.key(A).await, case.key(B).await);
+    let b = case.key(B).await;
 
     case.admit_startable_moves().await;
-    let offer = case.offers_full(W1).await;
-    assert_eq!(offered(&offer), vec![a], "after 1: result.candidates");
     drain_signals(&case, &[W1]);
     case.check("step 1").await;
 
     case.reauth_result(W1, &[p2]).await;
     case.check("step 2").await;
 
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(
-        offered(&offer),
-        vec![b.clone()],
-        "after 3: offers result.candidates"
-    );
-    case.score_all(W1).await;
     let first = case.request_job(W1, JobKind::Build).await;
     let second = case.request_job(W1, JobKind::Build).await;
     assert_eq!(
@@ -1337,8 +1261,6 @@ async fn w22_a_reauth_result_without_a_granted_project_aborts_no_running_job() {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -1562,8 +1484,6 @@ async fn w31_running_jobs_never_reclaim_another_workers_assignment() {
     case.connect_reclaiming(W2, w_all(), &[]).await;
     let a = case.key(A).await;
     case.admit_startable_moves().await;
-    case.offers_full(W2).await;
-    case.score_all(W2).await;
     let a2 = case
         .request_job(W2, JobKind::Build)
         .await
@@ -1820,8 +1740,6 @@ async fn w37_the_grace_end_keeps_a_row_another_instance_opened_since() {
     second.disconnect(W1).await;
     second.connect_reclaiming(W2, w_all(), &[]).await;
     second.admit_startable_moves().await;
-    second.offers_full(W2).await;
-    second.score_all(W2).await;
     let a2 = second
         .request_job(W2, JobKind::Build)
         .await
@@ -1994,8 +1912,6 @@ fn reattached_keys(reclaimed: &Reclaimed) -> Vec<(String, DispatchedJobId)> {
 async fn building_on_w1(case: &SchedulerCase) -> (String, DispatchedJobId) {
     let a = case.key(A).await;
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     let a1 = case
         .request_job(W1, JobKind::Build)
         .await
@@ -2014,18 +1930,6 @@ async fn only_a_network_worker_gets(seed: Shape) {
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
-    let offline = case.offers_full(W1).await;
-    let online = case.offers_full(W2).await;
-    assert_eq!(
-        offered(&offline),
-        Vec::<String>::new(),
-        "after 1: offers(W1).candidates"
-    );
-    assert_eq!(
-        offered(&online),
-        vec![a.clone()],
-        "after 1: offers(W2).candidates"
-    );
     case.check("step 1").await;
 
     let nothing = case.request_job(W1, JobKind::Build).await;
@@ -2033,7 +1937,6 @@ async fn only_a_network_worker_gets(seed: Shape) {
     assert!(case.pending(&a).await, "after 2: pending(build:A)");
     case.check("step 2").await;
 
-    case.score_all(W2).await;
     let job = case
         .request_job(W2, JobKind::Build)
         .await
@@ -2049,8 +1952,6 @@ async fn an_admin_drain_reaches_the_worker_outlives_a_reconnect_and_can_be_cance
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
     case.connect(W1, w_all().slots(2), &[]).await;
     case.admit_startable_moves().await;
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     drain_signals(&case, &[W1]);
 
     assert!(case.scheduler.mark_worker_draining_by_admin(W1).await);
@@ -2064,8 +1965,6 @@ async fn an_admin_drain_reaches_the_worker_outlives_a_reconnect_and_can_be_cance
 
     assert!(case.scheduler.cancel_worker_admin_drain(W1).await);
     assert!(case.signals(W1).contains(&SessionSignal::DrainCancelled));
-    case.offers_full(W1).await;
-    case.score_all(W1).await;
     assert!(case.request_job(W1, JobKind::Build).await.is_some());
 
     case.disconnect(W1).await;
@@ -2083,10 +1982,6 @@ fn drain_signals(case: &SchedulerCase, workers: &[&str]) {
 fn sorted(mut keys: Vec<String>) -> Vec<String> {
     keys.sort();
     keys
-}
-
-fn offered(offer: &Offer) -> Vec<String> {
-    sorted(offer.candidates.iter().map(|c| c.job_id.clone()).collect())
 }
 
 fn closes(rows: &[dispatched_job::Model]) -> Vec<(DispatchedJobId, Option<DispatchedJobOutcome>)> {

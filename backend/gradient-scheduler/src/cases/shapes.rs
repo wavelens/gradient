@@ -203,6 +203,7 @@ fn package_of(path: &str) -> &str {
 
 pub(crate) trait CaseShapes {
     fn startable(self, path: &str, out: &str) -> Self;
+    fn add_missing_cached_build_input(self, path: &str, input: &str, input_out: &str) -> Self;
     fn one(self, evaluation: EvaluationId, path: &str, out: &str) -> Self;
     fn two(self, evaluation: EvaluationId) -> Self;
     fn chain(self, evaluation: EvaluationId) -> Self;
@@ -229,6 +230,18 @@ impl CaseShapes for Shape {
             .job()
             .output(out)
             .build_status(BuildStatus::Queued)
+    }
+
+    fn add_missing_cached_build_input(self, path: &str, input: &str, input_out: &str) -> Self {
+        self.derivation(path)
+            .depends_on(input)
+            .derivation(input)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(input_out)
+            .build_status(BuildStatus::Completed)
+            .cached_output(input)
     }
 
     fn one(self, evaluation: EvaluationId, path: &str, out: &str) -> Self {

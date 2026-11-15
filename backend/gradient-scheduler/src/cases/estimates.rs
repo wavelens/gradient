@@ -23,8 +23,6 @@ async fn start(seed: gradient_fixtures::shape::Shape) -> SchedulerCase {
 
 async fn dispatch(case: &SchedulerCase, worker: &str) -> Option<Assignment> {
     case.admit_startable_moves().await;
-    case.offers_full(worker).await;
-    case.score_all(worker).await;
     let taken = case.request_job(worker, JobKind::Build).await?;
     case.report_building(worker, taken.job_id()).await;
     Some(taken)

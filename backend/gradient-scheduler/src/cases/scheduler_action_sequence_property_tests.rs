@@ -314,8 +314,6 @@ async fn apply_action(
             if book.connected[worker] {
                 let name = ACTION_WORKER_NAMES[worker];
                 case.admit_startable_moves().await;
-                case.offers_full(name).await;
-                case.score_all(name).await;
                 if let Some(handed) = case.request_job(name, JobKind::Build).await {
                     book.assignments.push(assignment_of(
                         keys,
@@ -442,8 +440,6 @@ async fn run_liveness_check(
         case.requeue_transient_retries().await;
         answer_upstream_probe_for_each_created_build_waiting_for_probe(case, keys.len()).await;
         case.admit_startable_moves().await;
-        case.offers_full(worker).await;
-        case.score_all(worker).await;
         if let Some(handed) = case.request_job(worker, JobKind::Build).await {
             let held = assignment_of(keys, worker, handed.job_id(), handed.assignment_id());
             report_building_upload_output_and_complete_assignment(case, held).await;

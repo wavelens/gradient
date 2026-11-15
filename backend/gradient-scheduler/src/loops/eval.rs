@@ -29,7 +29,12 @@ use crate::cluster::{Membership, Route};
 use crate::full_caches::park_on_full_caches;
 use crate::instance::EvalHistory;
 use crate::jobs::{PendingEvalJob, PendingJob, continuation_job_key};
+use crate::pending_job_input_store_paths::{
+    PendingJobInputStorePath,
+    build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping,
+};
 use gradient_db::exec_jobs::continuations::{self, ContinuationRow};
+use gradient_entity::store_path_mapping::StorePathMapper;
 use gradient_wire::types::{FlakeJob, FlakeStep, NixEvaluationFetchUrlAccess, RequiredPath};
 
 pub(crate) struct EvalDispatch {
@@ -104,12 +109,7 @@ async fn assign_queued_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> 
         return Ok(());
     }
 
-    let maps = EvalAssignMaps::load(
-        &scheduler.db.worker_db,
-        &evals,
-        &scheduler.allowed_uri_prefixes,
-    )
-    .await?;
+    let maps = assign_evaluation_maps(scheduler, &evals).await?;
     let split_fetch = scheduler.has_idle_eval_only_worker().await;
     let eval_history = scheduler.scoring.eval_history.load();
 
@@ -157,12 +157,7 @@ pub(crate) async fn assign_continuations(scheduler: &Scheduler) -> anyhow::Resul
         .filter(|c| untracked.contains(&continuation_job_key(c.job)))
         .collect();
     let evals: Vec<MEvaluation> = queued.iter().map(|c| c.evaluation.clone()).collect();
-    let maps = EvalAssignMaps::load(
-        &scheduler.db.worker_db,
-        &evals,
-        &scheduler.allowed_uri_prefixes,
-    )
-    .await?;
+    let maps = assign_evaluation_maps(scheduler, &evals).await?;
     let eval_history = scheduler.scoring.eval_history.load();
 
     for continuation in queued {
@@ -204,7 +199,11 @@ fn continuation_eval_job(
     job.nix_evaluation_fetch_url_access = pending.job.nix_evaluation_fetch_url_access.clone();
     Some(PendingEvalJob {
         job,
-        required_paths,
+        shared_direct_input_store_paths_with_probe_words_and_nar_sizes: maps
+            .required_store_paths_to_pending_job_input_store_paths(
+                pending.project_id,
+                &required_paths,
+            ),
         continuation: Some(continuation.job),
         ..pending
     })
@@ -333,7 +332,8 @@ fn assemble_eval_job(
         commit_id: eval.commit,
         repository: eval.repository.clone(),
         job: flake_job,
-        required_paths,
+        shared_direct_input_store_paths_with_probe_words_and_nar_sizes: maps
+            .required_store_paths_to_pending_job_input_store_paths(project_id, &required_paths),
         queued_at: eval.updated_at,
         ready_at: eval.updated_at,
         rescore_count: 0,
@@ -354,12 +354,7 @@ pub(crate) async fn pending_eval_jobs(
         return Ok(Vec::new());
     }
 
-    let maps = EvalAssignMaps::load(
-        &scheduler.db.worker_db,
-        &evaluations,
-        &scheduler.allowed_uri_prefixes,
-    )
-    .await?;
+    let maps = assign_evaluation_maps(scheduler, &evaluations).await?;
     let eval_history = scheduler.scoring.eval_history.load();
     Ok(evaluations
         .iter()
@@ -370,6 +365,22 @@ pub(crate) async fn pending_eval_jobs(
         .collect())
 }
 
+async fn assign_evaluation_maps(
+    scheduler: &Scheduler,
+    evals: &[MEvaluation],
+) -> anyhow::Result<EvalAssignMaps> {
+    let mut maps = EvalAssignMaps::load(
+        &scheduler.db.worker_db,
+        evals,
+        &scheduler.allowed_uri_prefixes,
+    )
+    .await?;
+    maps.project_store_path_mappers = scheduler
+        .resolve_store_path_mappers_for_projects(maps.projects.values().copied())
+        .await;
+    Ok(maps)
+}
+
 struct EvalAssignMaps {
     commits: HashMap<CommitId, MCommit>,
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
@@ -377,6 +388,7 @@ struct EvalAssignMaps {
     projects: HashMap<TaskId, ProjectId>,
     fetch_url_access_by_task_id: HashMap<TaskId, NixEvaluationFetchUrlAccess>,
     build_request_tasks: HashSet<TaskId>,
+    project_store_path_mappers: HashMap<ProjectId, StorePathMapper>,
 }
 
 impl EvalAssignMaps {
@@ -467,7 +479,24 @@ impl EvalAssignMaps {
             projects,
             fetch_url_access_by_task_id,
             build_request_tasks,
+            project_store_path_mappers: HashMap::new(),
         })
+    }
+
+    fn required_store_paths_to_pending_job_input_store_paths(
+        &self,
+        project: ProjectId,
+        required: &[RequiredPath],
+    ) -> Arc<[PendingJobInputStorePath]> {
+        build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping(
+            self.project_store_path_mappers.get(&project),
+            required.iter().map(|path| {
+                (
+                    path.path.as_str(),
+                    path.cache_info.as_ref().map(|info| info.nar_size),
+                )
+            }),
+        )
     }
 }
 
