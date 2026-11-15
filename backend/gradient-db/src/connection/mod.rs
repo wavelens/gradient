@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod schema_preparation_lock;
 mod unknown_migrations;
 mod upgrade_floor;
 
@@ -142,6 +143,7 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
 }
 
 async fn bring_database_schema_up_to_date(db: &DatabaseConnection) -> Result<()> {
+    let _lock = schema_preparation_lock::take_schema_preparation_lock(db).await?;
     Migrator::install(db)
         .await
         .context("install seaql_migrations table")?;
