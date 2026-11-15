@@ -19,6 +19,8 @@ pub trait WorkerStore: Send + Sync {
     async fn has_path(&self, store_path: &str) -> Result<bool>;
 
     async fn add_nar(&self, name: &str, nar: Vec<u8>) -> Result<String>;
+
+    async fn local_store_valid_path_hashes(&self) -> Result<Vec<String>>;
 }
 
 #[async_trait]

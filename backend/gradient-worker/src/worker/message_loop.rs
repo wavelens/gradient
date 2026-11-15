@@ -14,7 +14,8 @@ use anyhow::{Context as _, Result};
 use gradient_vm::{AddressLease, VmStateChange};
 use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
-    GuestChannelKind, Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage, VM_STATE_SINCE,
+    FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK, GuestChannelKind, Job,
+    JobCandidate, JobKind, JobPhaseSpan, ServerMessage, VM_STATE_SINCE,
 };
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -36,6 +37,7 @@ use gradient_worker_client::correlation::AssignmentHandle;
 
 use super::cluster::{ClusterChannels, ClusterHolds, ClusterStart, HeldJob};
 use super::jobs::{Readoption, WorkerJobs, report_when_drained};
+use super::local_store_path_bloom_filter_sender::BloomFilterRebuildLastStartAndRunningTaskHandle;
 use super::scoring::spawn_scoring_task;
 
 const STOP_BUDGET: Duration = Duration::from_secs(5);
@@ -178,6 +180,7 @@ pub(super) struct MessageLoopState {
     stopping: bool,
     refused: bool,
     exiting: bool,
+    hourly_store_bloom_filter_resend_scheduler: BloomFilterRebuildLastStartAndRunningTaskHandle,
 }
 
 impl MessageLoopState {
@@ -211,6 +214,8 @@ impl MessageLoopState {
             stopping: false,
             refused: false,
             exiting: false,
+            hourly_store_bloom_filter_resend_scheduler:
+                BloomFilterRebuildLastStartAndRunningTaskHandle::new(),
         }
     }
 
@@ -674,6 +679,12 @@ impl MessageLoopState {
         let expired = self.holds.expired(std::time::Instant::now());
         self.report_released(expired, "cluster start timed out")
             .await?;
+        if self.writer.version()
+            >= FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK
+        {
+            self.hourly_store_bloom_filter_resend_scheduler
+                .start_rebuild_and_send_if_due_and_not_running(&self.executor.store, &self.writer);
+        }
         if self.draining {
             return Ok(());
         }

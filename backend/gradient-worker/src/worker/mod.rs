@@ -7,6 +7,7 @@
 pub(crate) mod cluster;
 mod id;
 mod jobs;
+mod local_store_path_bloom_filter_sender;
 mod message_loop;
 mod scoring;
 mod vm_report;
@@ -15,7 +16,11 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_wire::messages::{ClientMessage, JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
+use gradient_wire::messages::{
+    ClientMessage, FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK, JobKind,
+    RUNNING_JOBS_SINCE, RunningAssignment,
+};
+use gradient_wire::traits::WorkerStore;
 use tracing::{info, warn};
 
 use crate::config::WorkerConfig;
@@ -32,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) use id::load_or_generate_id;
 use jobs::WorkerJobs;
+use local_store_path_bloom_filter_sender::build_local_store_bloom_filter_chunks;
 
 pub(crate) use jobs::clear_job_logs;
 
@@ -63,6 +69,7 @@ impl Worker<Connected> {
             Side::Inbound,
             Vec::new(),
             executor.exec.as_deref(),
+            &*executor.store,
         )
         .await?;
         Ok(Self {
@@ -100,6 +107,7 @@ impl Worker<Disconnected> {
             Side::Outbound,
             self.jobs.running_assignments(),
             self.executor.exec.as_deref(),
+            &*self.executor.store,
         )
         .await?;
         Ok(conn)
@@ -248,6 +256,7 @@ async fn perform_setup(
     side: Side,
     running: Vec<RunningAssignment>,
     exec: Option<&ExecHost>,
+    store: &(impl WorkerStore + ?Sized),
 ) -> Result<()> {
     let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
         .context("load or generate persistent worker ID")?;
@@ -317,6 +326,15 @@ async fn perform_setup(
         })
         .await?;
     }
+    if handshake.version >= FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK {
+        for chunk in build_local_store_bloom_filter_chunks(store)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            conn.send(chunk.into()).await?;
+        }
+    }
     conn.send(ClientMessage::RequestJobList).await?;
     conn.send(ClientMessage::RequestJob {
         kind: JobKind::Flake,
@@ -370,8 +388,13 @@ fn test_executor(gcroots: &std::path::Path) -> JobExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_test_support::prelude::MockProtoServer;
+    use gradient_test_support::prelude::{FakeWorkerStore, MockProtoServer};
+    use gradient_util::nix_hash::nix32_encode;
     use gradient_wire::messages::{BuildFailureKind, GradientCapabilities, ServerMessage};
+    use gradient_wire::worker_store_path_bloom_filter::{
+        BloomFilterBitArrayChunk, WorkerStorePathBloomFilterChunkCollector,
+        decode_store_path_hash_into_two_u64_words,
+    };
     use jobs::Registered;
 
     fn disconnected_worker(base: &std::path::Path) -> Worker<Disconnected> {
@@ -405,6 +428,63 @@ mod tests {
             worker.connect(server.url())
         );
         (sc, worker.into_connected(conn.unwrap()))
+    }
+
+    #[tokio::test]
+    async fn test_worker_sends_final_bloom_filter_chunk_before_first_request_job_and_reassembled_filter_contains_all_fake_store_paths()
+     {
+        let base = tempfile::tempdir().unwrap();
+        let config = WorkerConfig {
+            base_dir: base.path().to_owned(),
+            ..WorkerConfig::default()
+        };
+        let hashes: Vec<String> = (0u8..50).map(|n| nix32_encode(&[n; 20])).collect();
+        let store = FakeWorkerStore::new().with_present_paths(
+            hashes
+                .iter()
+                .map(|hash| format!("/nix/store/{hash}-fake-output")),
+        );
+        let server = MockProtoServer::bind().await;
+        let (mut sc, conn) = tokio::join!(server.accept(), ProtoConnection::open(server.url()));
+        let mut conn = conn.unwrap();
+
+        let script = async {
+            sc.handshake(GradientCapabilities::default()).await.unwrap();
+            let mut collector = WorkerStorePathBloomFilterChunkCollector::default();
+            sc.recv_until(|msg| match msg {
+                ClientMessage::WorkerLocalStoreBloomFilterChunk {
+                    bit_count,
+                    probe_count,
+                    offset,
+                    bits,
+                    is_final,
+                } => collector
+                    .add_chunk_and_return_complete_filter_if_final_chunk(BloomFilterBitArrayChunk {
+                        bit_count,
+                        probe_count,
+                        offset,
+                        bits,
+                        is_final,
+                    })
+                    .unwrap(),
+                ClientMessage::RequestJob { kind } => {
+                    panic!("RequestJob {kind:?} before the final Bloom filter chunk")
+                }
+                _ => None,
+            })
+            .await
+            .unwrap()
+        };
+        let (setup, filter) = tokio::join!(
+            perform_setup(&mut conn, &config, Side::Outbound, Vec::new(), None, &store),
+            script
+        );
+        setup.unwrap();
+
+        for hash in &hashes {
+            let words = decode_store_path_hash_into_two_u64_words(hash).unwrap();
+            assert!(filter.probably_contains_probe_words(words), "{hash}");
+        }
     }
 
     #[tokio::test]

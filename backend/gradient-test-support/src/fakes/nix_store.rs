@@ -59,4 +59,10 @@ impl WorkerStore for FakeNixStoreProvider {
         self.present.lock().unwrap().insert(path.clone());
         Ok(path)
     }
+
+    async fn local_store_valid_path_hashes(&self) -> Result<Vec<String>> {
+        Ok(super::worker_store::fake_store_path_hashes(
+            &self.present.lock().unwrap(),
+        ))
+    }
 }

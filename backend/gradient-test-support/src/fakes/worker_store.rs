@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_util::store_path::strip_store_prefix;
 use gradient_wire::traits::WorkerStore;
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -56,6 +57,18 @@ impl WorkerStore for FakeWorkerStore {
         self.present.lock().unwrap().insert(path.clone());
         Ok(path)
     }
+
+    async fn local_store_valid_path_hashes(&self) -> Result<Vec<String>> {
+        Ok(fake_store_path_hashes(&self.present.lock().unwrap()))
+    }
+}
+
+pub(crate) fn fake_store_path_hashes(paths: &HashSet<String>) -> Vec<String> {
+    paths
+        .iter()
+        .filter_map(|path| strip_store_prefix(path).split_once('-'))
+        .map(|(hash, _)| hash.to_owned())
+        .collect()
 }
 
 /// The path is following from the bytes like the daemon's would, without nix hashing. The hash slot
