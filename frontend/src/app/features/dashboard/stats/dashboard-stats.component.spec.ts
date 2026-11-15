@@ -15,7 +15,7 @@ const STATS: DashboardStats = {
   cpu_time_ms_7d: 0,
   builds_completed: 1_284_000,
   cache_size_bytes: 2.4 * 1024 ** 4,
-  workers: { online: 7, busy_pct: 72 },
+  workers: { used_build_slot_count: 5, total_build_slots: 32 },
   queue_wait_p50_ms: 38_000,
 };
 
@@ -42,9 +42,9 @@ describe('DashboardStatsComponent', () => {
     const root = render(() => of(STATS)).root;
     expect(cards(root)).toEqual({
       'CPU time': '18.4 y',
-      'Completed builds': '1.28M',
+      'Builds': '1.28M',
       'Total cached': '2.4 TiB',
-      'Worker load': '72%',
+      'Worker slots': '5 / 32',
       'Queue wait': '38.0 s',
     });
     expect(root.querySelectorAll('gr-stat-card .stat-label-explanation-button').length).toBe(5);
@@ -52,7 +52,7 @@ describe('DashboardStatsComponent', () => {
 
   it('lays out every labelled card with a placeholder value until the stats arrive', () => {
     const root = render(() => NEVER).root;
-    expect(Object.keys(cards(root))).toEqual(['Completed builds', 'Total cached', 'Worker load', 'Queue wait']);
+    expect(Object.keys(cards(root))).toEqual(['Builds', 'Total cached', 'Worker slots', 'Queue wait']);
     expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(4);
   });
 
@@ -73,9 +73,5 @@ describe('DashboardStatsComponent', () => {
 
   it('leaves out the CPU time card while the server has no CPU time', () => {
     expect(Object.keys(cards(render(() => of({ ...STATS, cpu_time_ms: null })).root))).not.toContain('CPU time');
-  });
-
-  it('shows a dash for worker load when no worker is online', () => {
-    expect(cards(render(() => of({ ...STATS, workers: { online: 0, busy_pct: 0 } })).root)['Worker load']).toBe('0 online');
   });
 });
