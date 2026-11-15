@@ -279,6 +279,15 @@ pub enum ClientMessage {
         assignment: WorkerReportAssignment,
         observations: Vec<GitSshHostKeyObservation>,
     },
+
+    #[proto(65)]
+    WorkerLocalStoreBloomFilterChunk {
+        bit_count: u64,
+        probe_count: u8,
+        offset: u64,
+        bits: Bytes,
+        is_final: bool,
+    },
 }
 
 impl ClientMessage {
@@ -352,6 +361,9 @@ impl ClientMessage {
             ClientMessage::CloseGuestChannel { .. } => "CloseGuestChannel",
             ClientMessage::VmState { .. } => "VmState",
             ClientMessage::SshHostKeyObservations { .. } => "SshHostKeyObservations",
+            ClientMessage::WorkerLocalStoreBloomFilterChunk { .. } => {
+                "WorkerLocalStoreBloomFilterChunk"
+            }
         }
     }
 

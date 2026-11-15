@@ -898,3 +898,30 @@ fn ssh_host_keys_credential_round_trips_at_version_63() {
     );
     assert!(to_bytes(&msg, since - 1).is_err());
 }
+
+#[test]
+fn worker_local_store_bloom_filter_chunk_round_trips_at_version_65_and_is_refused_at_version_64() {
+    use crate::codec::{EncodeError, from_bytes, to_bytes};
+    use crate::messages::ClientMessage;
+    use crate::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
+
+    let since = 65;
+    let chunks = WorkerStorePathBloomFilter::from_store_path_hash_parts(&[
+        "0c7q1jlbdfyipxcsdn4j6vzjvyqxjzra",
+    ])
+    .into_wire_chunks_of_at_most_max_chunk_size_with_last_final();
+    let msg = ClientMessage::from(chunks[0].clone());
+    assert!(matches!(
+        msg,
+        ClientMessage::WorkerLocalStoreBloomFilterChunk { is_final: true, .. }
+    ));
+
+    assert_eq!(
+        from_bytes::<ClientMessage>(to_bytes(&msg, since).unwrap(), since).unwrap(),
+        msg
+    );
+    assert!(matches!(
+        to_bytes(&msg, since - 1),
+        Err(EncodeError::NewerThanPeer { .. })
+    ));
+}
