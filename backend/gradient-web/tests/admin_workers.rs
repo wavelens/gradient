@@ -232,6 +232,89 @@ async fn the_admin_worker_list_requires_a_superuser() {
 }
 
 #[tokio::test]
+async fn an_admin_drain_of_offline_team_and_project_workers_marks_both_requested_by_admin_and_repeating_it_returns_the_same_list()
+ {
+    let area = admin_area(true).await;
+
+    let res = area.drain("/api/v1/admin/workers", true).await;
+    res.assert_status_ok();
+    let drained = res.json::<Value>()["message"].clone();
+    let flags: Vec<_> = drained
+        .as_array()
+        .expect("a worker list")
+        .iter()
+        .map(|worker| {
+            (
+                worker["worker_id"].clone(),
+                worker["requested_by_admin"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        [
+            (json!(TEAM_WORKER), json!(true)),
+            (json!(PROJECT_WORKER), json!(true))
+        ]
+    );
+
+    let again = area.drain("/api/v1/admin/workers", true).await;
+    again.assert_status_ok();
+    assert_eq!(again.json::<Value>()["message"], drained);
+    area.db.finish().await;
+}
+
+#[tokio::test]
+async fn bulk_undrain_clears_requested_by_admin_on_both_workers() {
+    let area = admin_area(true).await;
+    area.drain("/api/v1/admin/workers", true)
+        .await
+        .assert_status_ok();
+
+    let res = area.drain("/api/v1/admin/workers", false).await;
+    res.assert_status_ok();
+
+    for worker in res.json::<Value>()["message"]
+        .as_array()
+        .expect("a worker list")
+    {
+        assert_eq!(worker["requested_by_admin"], false, "{worker}");
+    }
+    assert_eq!(area.worker(TEAM_WORKER).await["requested_by_admin"], false);
+    assert_eq!(
+        area.worker(PROJECT_WORKER).await["requested_by_admin"],
+        false
+    );
+    area.db.finish().await;
+}
+
+#[tokio::test]
+async fn test_bulk_undrain_succeeds_when_no_worker_has_admin_drain_and_leaves_all_undrained() {
+    let area = admin_area(true).await;
+
+    let res = area.drain("/api/v1/admin/workers", false).await;
+    res.assert_status_ok();
+
+    let workers = res.json::<Value>()["message"].clone();
+    let workers = workers.as_array().expect("a worker list");
+    assert_eq!(workers.len(), 2);
+    for worker in workers {
+        assert_eq!(worker["requested_by_admin"], false, "{worker}");
+    }
+    area.db.finish().await;
+}
+
+#[tokio::test]
+async fn the_admin_worker_bulk_drain_requires_a_superuser() {
+    let area = admin_area(false).await;
+
+    area.drain("/api/v1/admin/workers", true)
+        .await
+        .assert_status(StatusCode::FORBIDDEN);
+    area.db.finish().await;
+}
+
+#[tokio::test]
 async fn a_team_admin_drains_a_team_worker_on_the_team_page() {
     let area = admin_area(true).await;
 

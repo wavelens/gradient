@@ -114,6 +114,7 @@ include-operation-id = [
   "patchUserKey",
   "revokeUserKey",
   "rotateCacheKey",
+  "setAllWorkersDraining",
   "setDraining",
   "startDeepGc",
   "startGcRound",

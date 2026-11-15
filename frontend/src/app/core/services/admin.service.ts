@@ -60,6 +60,10 @@ export class AdminService {
     return this.api.patch<AdminWorkerListEntry>(`admin/workers/${encodeURIComponent(worker)}`, { draining });
   }
 
+  setAllWorkersDraining(draining: boolean): Observable<AdminWorkerListEntry[]> {
+    return this.api.patch<AdminWorkerListEntry[]>('admin/workers', { draining });
+  }
+
   getDiskAndStorageUsageByCacheProjectAndTask(): Observable<AdminStorageResponse> {
     return this.api.get<AdminStorageResponse>('admin/storage');
   }

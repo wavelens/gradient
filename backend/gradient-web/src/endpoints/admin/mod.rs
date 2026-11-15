@@ -62,7 +62,10 @@ pub fn admin_router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(draining::set_draining))
         .routes(routes!(tasks::list_tasks))
         .routes(routes!(tasks::get_task))
-        .routes(routes!(workers::get_workers))
+        .routes(routes!(
+            workers::get_workers,
+            workers::set_all_workers_draining
+        ))
         .routes(routes!(workers::get_worker, workers::update_worker))
         .nest("/webhooks", webhooks::router(WebhookMount::Instance))
         .route_layer(from_fn(superuser_only))

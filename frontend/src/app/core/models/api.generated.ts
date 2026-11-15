@@ -3132,6 +3132,10 @@ export interface UpdateActionRequest {
   active?: boolean | null;
 }
 
+export interface UpdateAllWorkersRequest {
+  draining: boolean;
+}
+
 export interface UpdateCacheSubscriptionRequest {
   sign_outputs: boolean;
 }

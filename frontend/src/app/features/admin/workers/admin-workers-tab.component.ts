@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { finalize } from 'rxjs';
 import { BadgeComponent, ButtonComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { AdminService } from '@core/services/admin.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AdminWorkerListEntry } from '@core/models';
 import { confirmAndDrainWorker, formatEntityLabel, WorkerDrainingBadgeComponent } from '@shared/ui';
+
+type AllWorkersBulkAction = 'drain' | 'undrain';
 
 export function getWorkerOwnerDisplayName(worker: AdminWorkerListEntry): string {
   return worker.team ? formatEntityLabel(worker.team) : worker.registrations.map((r) => formatEntityLabel(r.project)).join(', ');
@@ -21,6 +24,16 @@ export function getWorkerOwnerDisplayName(worker: AdminWorkerListEntry): string 
   standalone: true,
   imports: [BadgeComponent, ButtonComponent, LoadStateComponent, TableComponent, WorkerDrainingBadgeComponent],
   template: `
+    @if (!loadError()) {
+    <div class="actions">
+      <button grButton severity="danger" size="small" icon="pause" label="Drain All"
+        [loading]="runningBulkAction() === 'drain'" [disabled]="drainButtonsDisabled()"
+        [disabledReason]="drainAllButtonDisabledReason()" (click)="confirmAndStartAllWorkersDrain()"></button>
+      <button grButton severity="secondary" size="small" icon="play_arrow" label="Undrain All"
+        [loading]="runningBulkAction() === 'undrain'" [disabled]="drainButtonsDisabled()"
+        [disabledReason]="undrainAllButtonDisabledReason()" (click)="cancelAllAdminWorkerDrains()"></button>
+    </div>
+    }
     <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="workers().length === 0"
                    loadingMessage="Loading workers..." errorTitle="Failed to load workers"
                    emptyIcon="construction" emptyTitle="No workers registered"
@@ -53,10 +66,11 @@ export function getWorkerOwnerDisplayName(worker: AdminWorkerListEntry): string 
               <td class="actions-cell">
                 @if (worker.requested_by_admin) {
                   <button grButton label="Undrain" icon="play_arrow" severity="secondary" size="small"
-                    [loading]="busy() === worker.worker_id" (click)="cancelAdminRequestedWorkerDrain(worker)"></button>
+                    [loading]="busy() === worker.worker_id" [disabled]="runningBulkAction() !== null"
+                    (click)="cancelAdminRequestedWorkerDrain(worker)"></button>
                 } @else if (worker.live && !worker.live.draining) {
                   <button grButton label="Drain" icon="pause" severity="secondary" size="small"
-                    [disabled]="busy() === worker.worker_id" (click)="confirmAndStartWorkerDrain(worker)"></button>
+                    [disabled]="busy() === worker.worker_id || runningBulkAction() !== null" (click)="confirmAndStartWorkerDrain(worker)"></button>
                 }
               </td>
             </tr>
@@ -80,6 +94,19 @@ export class AdminWorkersTabComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   busy = signal<string | null>(null);
+  runningBulkAction = signal<AllWorkersBulkAction | null>(null);
+
+  readonly drainButtonsDisabled = computed(() => this.loading() || this.busy() !== null || this.runningBulkAction() !== null);
+  readonly drainAllButtonDisabledReason = computed(() => {
+    if (this.loading()) return null;
+    if (this.workers().length === 0) return 'The worker list is empty.';
+    if (this.workers().every((w) => w.requested_by_admin)) return 'All workers already have an admin drain.';
+    return null;
+  });
+  readonly undrainAllButtonDisabledReason = computed(() =>
+    this.loading() || this.workers().some((w) => w.requested_by_admin)
+      ? null
+      : 'No workers have a drain that an admin set. Workers that drain themselves stop draining on restart.');
 
   ngOnInit(): void {
     this.load();
@@ -105,9 +132,45 @@ export class AdminWorkersTabComponent implements OnInit {
   }
 
   confirmAndStartWorkerDrain(worker: AdminWorkerListEntry): void {
-    confirmAndDrainWorker(this.confirm, worker.display_name ?? worker.worker_id, () => this.admin.setWorkerDraining(worker.worker_id, true)).subscribe((updated) => {
+    confirmAndDrainWorker(this.confirm, worker.display_name ?? worker.worker_id, () => {
+      this.busy.set(worker.worker_id);
+      return this.admin.setWorkerDraining(worker.worker_id, true).pipe(finalize(() => this.busy.set(null)));
+    }).subscribe((updated) => {
       this.replace(updated);
       this.notify.success('Drain started');
+    });
+  }
+
+  confirmAndStartAllWorkersDrain(): void {
+    this.confirm.confirm({
+      title: 'Drain All Workers',
+      target: 'All workers on this instance',
+      consequence: 'Running jobs finish. These workers receive no new jobs until Undrain All. Offline workers start to drain when they connect. Server restarts end the drain.',
+      confirmLabel: 'Drain All',
+      failure: 'Failed to drain all workers',
+      severity: 'danger',
+      action: () => {
+        this.runningBulkAction.set('drain');
+        return this.admin.setAllWorkersDraining(true).pipe(finalize(() => this.runningBulkAction.set(null)));
+      },
+    }).subscribe((workers) => {
+      this.workers.set(workers);
+      this.notify.success('Started drain on all workers');
+    });
+  }
+
+  cancelAllAdminWorkerDrains(): void {
+    this.runningBulkAction.set('undrain');
+    this.admin.setAllWorkersDraining(false).subscribe({
+      next: (workers) => {
+        this.runningBulkAction.set(null);
+        this.workers.set(workers);
+        this.notify.success('All admin drains stopped');
+      },
+      error: (error: unknown) => {
+        this.runningBulkAction.set(null);
+        this.notify.failure('Failed to stop all drains', error);
+      },
     });
   }
 

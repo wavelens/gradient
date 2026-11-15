@@ -115,6 +115,7 @@ async fn admin_routes_reject_non_superuser() {
         (Method::POST, "/github-app/credentials"),
         (Method::POST, "/maintenance/deep-gc"),
         (Method::POST, "/draining"),
+        (Method::PATCH, "/workers"),
         (Method::GET, "/tasks"),
         (Method::GET, "/tasks/00000000-0000-0000-0000-000000000000"),
         (Method::GET, "/webhooks"),

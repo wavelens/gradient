@@ -62,6 +62,11 @@ pub struct UpdateWorkerRequest {
     pub draining: Option<bool>,
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct UpdateAllWorkersRequest {
+    pub draining: bool,
+}
+
 struct WorkerRows {
     team_workers: Vec<(MTeamWorker, MTeam)>,
     registrations: Vec<MWorkerRegistration>,
@@ -218,6 +223,33 @@ pub async fn get_workers(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<AdminWorkerListEntry>>>> {
+    Ok(ok_json(
+        load_full_admin_worker_list(&state.web_db, &scheduler).await?,
+    ))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/workers",
+    operation_id = "setAllWorkersDraining",
+    tag = "admin",
+    summary = "Drain all workers or undrain them",
+    description = "Start an admin drain on all workers of `listWorkers` that don't have an admin drain yet (`draining: true`). Include offline workers. These workers drain on connect. Cancel all admin drains (`draining: false`). Workers that drain by themselves continue to drain. Repeated calls leave state unchanged. Treat an empty list as success. Return the full list as `listWorkers`. Require `superuser`.",
+    request_body = UpdateAllWorkersRequest,
+    responses((status = OK, description = "Worker List", body = Vec<AdminWorkerListEntry>), WebError)
+)]
+pub async fn set_all_workers_draining(
+    State(state): State<Arc<ServerState>>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+    JsonBody(body): JsonBody<UpdateAllWorkersRequest>,
+) -> WebResult<Json<BaseResponse<Vec<AdminWorkerListEntry>>>> {
+    let workers = load_full_admin_worker_list(&state.web_db, &scheduler).await?;
+    for worker in workers
+        .iter()
+        .filter(|worker| worker.requested_by_admin != body.draining)
+    {
+        start_or_cancel_worker_admin_drain(&scheduler, &worker.worker_id, body.draining).await;
+    }
     Ok(ok_json(
         load_full_admin_worker_list(&state.web_db, &scheduler).await?,
     ))
