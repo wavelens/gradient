@@ -60,7 +60,7 @@
       />
     </gr-form-field>
 
-    <gr-form-field hint="Turn off the option to stop retries of builds that fail with a build error in a new evaluation. Transient failures always retry in a new evaluation. Examples are a timeout or a lost worker. Evaluations retry transient failures up to the attempt count in admin settings. Timeouts get no extra attempt.">
+    <gr-form-field hint="When turned off, builds that failed with a build error are not retried in new evaluations. Timeouts and transient failures, such as worker loss, are always retried in new evaluations. A single evaluation is then retried the number of attempts configured by the system admin. Timeouts get no extra attempts.">
       <gr-checkbox
         inputId="task-retry-failed-builds"
         [(ngModel)]="formData.retry_failed_builds"
