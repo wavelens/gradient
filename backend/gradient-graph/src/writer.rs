@@ -31,6 +31,13 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// The rollback is waiting for the running statement and cannot bound it alone.
 pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
 pub const GRAPH_TX_ATTEMPTS: u32 = 5;
+pub const DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS: GraphWriterTransactionLimits =
+    GraphWriterTransactionLimits {
+        message_kind: "message",
+        transaction_wall_clock_time_limit: GRAPH_TX_BUDGET,
+        statement_lock_wait_timeout: Duration::from_secs(10),
+        max_transaction_attempts: GRAPH_TX_ATTEMPTS,
+    };
 const GRAPH_TX_RETRY_DELAY: Duration = Duration::from_millis(250);
 pub const RECORD_ROW_BUDGET: usize = 5000;
 pub const NAR_COMMIT_BUDGET: usize = 128;
@@ -38,6 +45,23 @@ pub const NAR_FLUSH_TIME: Duration = Duration::from_millis(100);
 pub const HEALTH_NAME: &str = "graph";
 
 type Reply<T> = RpcReplyPort<anyhow::Result<T>>;
+
+#[derive(Clone, Copy, Debug)]
+pub struct GraphWriterTransactionLimits {
+    pub message_kind: &'static str,
+    pub transaction_wall_clock_time_limit: Duration,
+    pub statement_lock_wait_timeout: Duration,
+    pub max_transaction_attempts: u32,
+}
+
+impl GraphWriterTransactionLimits {
+    pub const fn for_message_kind(message_kind: &'static str) -> Self {
+        Self {
+            message_kind,
+            ..DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS
+        }
+    }
+}
 
 pub enum GraphMsg {
     Record(RecordBatch, Reply<RecordReport>),
@@ -121,7 +145,8 @@ impl Actor for GraphWriter {
             GraphMsg::UpstreamHits(hits, reply) => {
                 flush(&myself, st).await;
                 let hits = &hits;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                let limits = GraphWriterTransactionLimits::for_message_kind("upstream_hits");
+                let result = transact(&st.ctx, limits, move |scoped| async move {
                     record::apply_upstream_hits(&scoped, hits).await
                 })
                 .await;
@@ -131,7 +156,8 @@ impl Actor for GraphWriter {
             GraphMsg::UpstreamProbed(shared_builds, reply) => {
                 flush(&myself, st).await;
                 let shared_builds = &shared_builds;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                let limits = GraphWriterTransactionLimits::for_message_kind("upstream_probed");
+                let result = transact(&st.ctx, limits, move |scoped| async move {
                     record::mark_probed(&scoped, shared_builds).await
                 })
                 .await;
@@ -145,7 +171,8 @@ impl Actor for GraphWriter {
             GraphMsg::Transition(t, reply) => {
                 flush(&myself, st).await;
                 let t = &t;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                let limits = GraphWriterTransactionLimits::for_message_kind("transition");
+                let result = transact(&st.ctx, limits, move |scoped| async move {
                     transition::apply(&scoped, t.clone()).await
                 })
                 .await;
@@ -155,7 +182,8 @@ impl Actor for GraphWriter {
             GraphMsg::Requeue(scope, reply) => {
                 flush(&myself, st).await;
                 let scope = &scope;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                let limits = GraphWriterTransactionLimits::for_message_kind("requeue");
+                let result = transact(&st.ctx, limits, move |scoped| async move {
                     requeue::apply(&scoped, *scope).await
                 })
                 .await;
@@ -167,7 +195,8 @@ impl Actor for GraphWriter {
                 let object_present =
                     demote::check_nar_object_exists_in_object_storage(&st.ctx, &demotion).await;
                 let demotion = &demotion;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                let limits = GraphWriterTransactionLimits::for_message_kind("demote");
+                let result = transact(&st.ctx, limits, move |scoped| async move {
                     demote::apply(&scoped, demotion.clone(), object_present).await
                 })
                 .await;
@@ -186,7 +215,8 @@ impl Actor for GraphWriter {
             GraphMsg::Gc(request, reply) => {
                 flush(&myself, st).await;
                 let request = &request;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                let limits = GraphWriterTransactionLimits::for_message_kind("gc");
+                let result = transact(&st.ctx, limits, move |scoped| async move {
                     gc::apply(&scoped, request.clone()).await
                 })
                 .await;
@@ -226,7 +256,8 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
         std::mem::take(&mut st.nars).into_iter().unzip();
     st.queued_rows = 0;
     let (groups_ref, commits_ref) = (&groups, &commits);
-    let written = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+    let limits = GraphWriterTransactionLimits::for_message_kind("flush");
+    let written = transact(&st.ctx, limits, move |scoped| async move {
         let mut recorded = Vec::with_capacity(groups_ref.len());
         for group in groups_ref {
             recorded.push(escalate_retryable(record_one(&scoped, group).await)?);
@@ -309,15 +340,17 @@ async fn write_record_groups_then_nar_commits_separately_after_failed_flush(
     commits: &[NarCommit],
 ) -> (Vec<anyhow::Result<RecordReport>>, NarCommitOutcomes) {
     let mut outcomes = Vec::with_capacity(groups.len());
+    let limits = GraphWriterTransactionLimits::for_message_kind("record");
     for group in groups {
-        let outcome = transact(ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+        let outcome = transact(ctx, limits, move |scoped| async move {
             record_one(&scoped, group).await
         })
         .await;
         outcomes.push(outcome);
     }
 
-    let committed = transact(ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+    let limits = GraphWriterTransactionLimits::for_message_kind("commit_nar");
+    let committed = transact(ctx, limits, move |scoped| async move {
         let committed = commit_nars(&scoped, commits).await?;
         claim_landed_paths(&scoped, commits, &committed).await?;
         Ok(committed)
@@ -464,16 +497,27 @@ where
 /// Postgres is breaking the rare resulting cycle by aborting one, and `work` is retried.
 /// Board events and probe requests of a failed attempt are not recalled.
 /// A retry is sending them again.
-pub async fn transact<T, F, Fut>(ctx: &DbContext, budget: Duration, work: F) -> anyhow::Result<T>
+pub async fn transact<T, F, Fut>(
+    ctx: &DbContext,
+    limits: GraphWriterTransactionLimits,
+    work: F,
+) -> anyhow::Result<T>
 where
     F: Fn(DbContext) -> Fut,
     Fut: Future<Output = anyhow::Result<T>>,
 {
     let mut attempt = 1;
     loop {
-        match transact_once(ctx, budget, &work).await {
-            Err(e) if attempt < GRAPH_TX_ATTEMPTS && is_retryable(&e) => {
-                warn!(attempt, error = %e, "graph transaction retried");
+        let started = Instant::now();
+        match transact_once(ctx, limits, &work).await {
+            Err(e) if attempt < limits.max_transaction_attempts && is_retryable(&e) => {
+                warn!(
+                    message_kind = limits.message_kind,
+                    attempt,
+                    failed_attempt_duration_milliseconds = started.elapsed().as_millis(),
+                    error = %e,
+                    "graph transaction retried"
+                );
                 tokio::time::sleep(GRAPH_TX_RETRY_DELAY * attempt).await;
                 attempt += 1;
             }
@@ -482,37 +526,56 @@ where
     }
 }
 
-fn statement_timeout(budget: Duration) -> String {
-    format!("SET LOCAL statement_timeout = {}", budget.as_millis())
+fn build_graph_writer_statement_timeout_and_lock_timeout_sql(
+    limits: GraphWriterTransactionLimits,
+) -> String {
+    let budget = limits.transaction_wall_clock_time_limit;
+    let lock_wait = limits
+        .statement_lock_wait_timeout
+        .min(budget.saturating_sub(Duration::from_millis(1)));
+    format!(
+        "SET LOCAL statement_timeout = {}; SET LOCAL lock_timeout = {}",
+        budget.as_millis(),
+        lock_wait.as_millis()
+    )
 }
 
-fn is_retryable(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let Some(
-            sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
-            | sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(e))
-            | sea_orm::DbErr::Conn(sea_orm::RuntimeErr::SqlxError(e)),
-        ) = cause.downcast_ref::<sea_orm::DbErr>()
+pub(crate) fn postgres_sqlstate_from_error_chain(err: &anyhow::Error) -> Option<String> {
+    err.chain().find_map(|cause| {
+        let (sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
+        | sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(e))
+        | sea_orm::DbErr::Conn(sea_orm::RuntimeErr::SqlxError(e))) =
+            cause.downcast_ref::<sea_orm::DbErr>()?
         else {
-            return false;
+            return None;
         };
 
-        e.as_database_error()
-            .and_then(|d| d.code())
-            .is_some_and(|c| c == "40P01" || c == "40001" || c == "25P02")
+        e.as_database_error()?.code().map(|code| code.into_owned())
     })
 }
 
+fn is_retryable(err: &anyhow::Error) -> bool {
+    postgres_sqlstate_from_error_chain(err)
+        .is_some_and(|code| ["40P01", "40001", "25P02", "55P03"].contains(&code.as_str()))
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
-async fn transact_once<T, F, Fut>(ctx: &DbContext, budget: Duration, work: &F) -> anyhow::Result<T>
+async fn transact_once<T, F, Fut>(
+    ctx: &DbContext,
+    limits: GraphWriterTransactionLimits,
+    work: &F,
+) -> anyhow::Result<T>
 where
     F: Fn(DbContext) -> Fut,
     Fut: Future<Output = anyhow::Result<T>>,
 {
+    let budget = limits.transaction_wall_clock_time_limit;
     let tx = Arc::new(ctx.worker_db.begin().await.context("begin")?);
-    tx.execute_unprepared(&statement_timeout(budget))
-        .await
-        .context("statement timeout")?;
+    tx.execute_unprepared(&build_graph_writer_statement_timeout_and_lock_timeout_sql(
+        limits,
+    ))
+    .await
+    .context("statement and lock timeouts")?;
     let scoped = ctx.in_transaction(Arc::clone(&tx));
     let startable_set = scoped.memory.startable_set.clone();
     let probe_requests = scoped.memory.probe_requests.clone();
@@ -703,9 +766,31 @@ mod tests {
 
     #[test]
     fn a_deadlock_and_a_serialization_failure_retry_through_context() {
-        for code in ["40P01", "40001", "25P02"] {
+        for code in ["40P01", "40001", "25P02", "55P03"] {
             assert!(is_retryable(&coded(code).context("seed")), "{code}");
         }
+    }
+
+    #[test]
+    fn lock_timeout_never_exceeds_transaction_time_budget() {
+        let defaults = build_graph_writer_statement_timeout_and_lock_timeout_sql(
+            DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS,
+        );
+        let short = build_graph_writer_statement_timeout_and_lock_timeout_sql(
+            GraphWriterTransactionLimits {
+                transaction_wall_clock_time_limit: Duration::from_millis(50),
+                ..DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS
+            },
+        );
+
+        assert_eq!(
+            defaults,
+            "SET LOCAL statement_timeout = 120000; SET LOCAL lock_timeout = 10000"
+        );
+        assert_eq!(
+            short,
+            "SET LOCAL statement_timeout = 50; SET LOCAL lock_timeout = 49"
+        );
     }
 
     #[test]

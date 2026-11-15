@@ -28,7 +28,6 @@ mod writer;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use gradient_db::DbContext;
 use gradient_db::evaluations::counters::eval_counters;
@@ -64,7 +63,7 @@ use crate::test_ctx::{
     Batch, BatchReport, apply_in, claim_build, ctx_with_crypt_file, secret_file, send, signing_key,
     worker_loss,
 };
-use crate::writer::{GraphMsg, transact};
+use crate::writer::{GraphMsg, GraphWriterTransactionLimits, transact};
 use crate::{Graph, testing};
 
 pub(crate) use shared::*;
@@ -380,12 +379,16 @@ impl Case {
         apply_in(scoped, batch).await
     }
 
-    pub async fn with_budget_ms<T, F, Fut>(&self, budget_ms: u64, work: F) -> anyhow::Result<T>
+    pub async fn run_in_transaction_with_limits<T, F, Fut>(
+        &self,
+        limits: GraphWriterTransactionLimits,
+        work: F,
+    ) -> anyhow::Result<T>
     where
         F: Fn(DbContext) -> Fut,
         Fut: Future<Output = anyhow::Result<T>>,
     {
-        transact(&self.ctx, Duration::from_millis(budget_ms), work).await
+        transact(&self.ctx, limits, work).await
     }
 
     pub async fn commit_nar_outside_tx(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
@@ -1020,6 +1023,21 @@ mod shared {
             .drv_cached()
             .output(B_OUT)
             .build_status(BuildStatus::Queued)
+    }
+
+    pub(crate) fn walked_a_above_a_stub(evaluation: EvaluationId) -> Shape {
+        shape()
+            .evaluation(evaluation)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(B)
+            .derivation(B)
+            .job()
     }
 
     pub(crate) fn chain_done(evaluation: EvaluationId) -> Shape {

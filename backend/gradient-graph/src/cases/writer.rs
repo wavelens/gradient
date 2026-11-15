@@ -5,6 +5,7 @@
  */
 
 use std::ops::RangeInclusive;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -16,15 +17,18 @@ use gradient_entity::entry_point::{License, Licenses};
 use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use gradient_fixtures::shape::shape;
 use gradient_wire::types::{self, DiscoveredDerivation};
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, DatabaseTransaction, TransactionTrait};
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, SOURCE, Z, Z_OUT, batch, chain, drv, nar,
-    with_attr, with_output, with_references,
+    walked_a_above_a_stub, with_attr, with_output, with_references,
 };
 use crate::messages::{NarCommit, Transition};
 use crate::test_ctx::{Batch, BatchReport};
-use crate::writer::{GRAPH_TX_ATTEMPTS, GRAPH_TX_BUDGET};
+use crate::writer::{
+    DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS, GRAPH_TX_ATTEMPTS,
+    GraphWriterTransactionLimits, postgres_sqlstate_from_error_chain,
+};
 
 const NOTE_TRANSACTIONS: &str = "
     CREATE TABLE written_in (source text, top_level text);
@@ -71,20 +75,22 @@ where
         &format!("DO $$ BEGIN RAISE EXCEPTION 'injected' USING ERRCODE = '{sqlstate}'; END $$");
     let attempts = &AtomicU32::new(0);
     let (work, on_attempts) = (&work, &on_attempts);
-    let budget_ms = u64::try_from(GRAPH_TX_BUDGET.as_millis()).expect("the budget fits");
     let result = case
-        .with_budget_ms(budget_ms, move |scoped| async move {
-            let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
-            let done = work(scoped.clone()).await?;
-            if on_attempts.contains(&attempt) {
-                let raised = scoped.worker_db.execute_unprepared(raise).await;
-                if injection == Injection::Returned {
-                    raised?;
+        .run_in_transaction_with_limits(
+            DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS,
+            move |scoped| async move {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                let done = work(scoped.clone()).await?;
+                if on_attempts.contains(&attempt) {
+                    let raised = scoped.worker_db.execute_unprepared(raise).await;
+                    if injection == Injection::Returned {
+                        raised?;
+                    }
                 }
-            }
 
-            Ok(done)
-        })
+                Ok(done)
+            },
+        )
         .await;
 
     Injected {
@@ -109,6 +115,31 @@ async fn walk_with_error(
         |scoped| async move { Case::walk_in(&scoped, batch).await },
     )
     .await
+}
+
+async fn open_second_transaction_and_lock_derivation_build_row(
+    case: &Case,
+    path: &str,
+) -> DatabaseTransaction {
+    let derivation = case.db.id_of(path).await;
+    let lock =
+        format!("SELECT 1 FROM derivation_build WHERE derivation = '{derivation}' FOR UPDATE");
+    let holder = case
+        .ctx
+        .worker_db
+        .begin()
+        .await
+        .expect("open a second transaction");
+    let locked = holder
+        .execute_unprepared(&lock)
+        .await
+        .map(|done| done.rows_affected());
+    assert_eq!(
+        locked.as_ref().ok(),
+        Some(&1),
+        "one lock on one shared build row for {path}"
+    );
+    holder
 }
 
 fn entry_point(path: &str, output: &str, attr: &str) -> DiscoveredDerivation {
@@ -253,12 +284,20 @@ async fn m05_a_transaction_past_its_budget_is_rolled_back_completely() {
     let gv = case.gv(e1).await;
     let walk = &case.tasked(e1, vec![entry_point(A, A_OUT, "pkg.a")]).await;
 
+    let graph_writer_transaction_limits_with_50_ms_total_time_budget =
+        GraphWriterTransactionLimits {
+            transaction_wall_clock_time_limit: Duration::from_millis(50),
+            ..DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS
+        };
     let slow = case
-        .with_budget_ms(50, |scoped| async move {
-            Case::walk_in(&scoped, walk).await?;
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            Ok(())
-        })
+        .run_in_transaction_with_limits(
+            graph_writer_transaction_limits_with_50_ms_total_time_budget,
+            |scoped| async move {
+                Case::walk_in(&scoped, walk).await?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                Ok(())
+            },
+        )
         .await;
 
     let error = slow.expect_err("after 1: the transaction is past its budget");
@@ -448,5 +487,86 @@ async fn m11_a_bad_batch_fails_the_whole_group_of_its_evaluation_and_every_reply
     assert_eq!(case.gv(e1).await, gv1, "after 1: gv(E1) unchanged");
     assert_eq!(case.gv(e2).await, gv2 + 1, "after 1: gv(E2) +1");
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn m12_graph_writer_retries_row_lock_then_fails_when_lock_never_released() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(walked_a_above_a_stub(e1)).await;
+    let gv = case.gv(e1).await;
+    let walk_of_b = &case.tasked(e1, vec![with_output(drv(B, &[]), B_OUT)]).await;
+    let graph_writer_transaction_limits_with_50ms_lock_wait_timeout =
+        GraphWriterTransactionLimits {
+            statement_lock_wait_timeout: Duration::from_millis(50),
+            ..DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS
+        };
+
+    let derivation_b_build_row_lock_transaction =
+        open_second_transaction_and_lock_derivation_build_row(&case, B).await;
+    let attempts = &AtomicU32::new(0);
+    let never_released = case
+        .run_in_transaction_with_limits(
+            graph_writer_transaction_limits_with_50ms_lock_wait_timeout,
+            |scoped| async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Case::walk_in(&scoped, walk_of_b).await
+            },
+        )
+        .await;
+
+    let error = never_released.expect_err("after 1: error");
+    assert_eq!(
+        postgres_sqlstate_from_error_chain(&error).as_deref(),
+        Some("55P03"),
+        "after 1: root cause is a lock timeout: {error:#}"
+    );
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        GRAPH_TX_ATTEMPTS,
+        "after 1: error once every attempt failed"
+    );
+    let b = case.derivation(B).await;
+    assert!(!b.walked, "after 1: derivation(B) is still a stub");
+    assert_eq!(case.gv(e1).await, gv, "after 1: gv(E1) unchanged");
+    derivation_b_build_row_lock_transaction
+        .rollback()
+        .await
+        .expect("second transaction releases that lock");
+    case.zero_drift("step 1").await;
+
+    let derivation_b_build_row_lock_transaction = &Mutex::new(Some(
+        open_second_transaction_and_lock_derivation_build_row(&case, B).await,
+    ));
+    let attempts = &AtomicU32::new(0);
+    let released = case
+        .run_in_transaction_with_limits(
+            graph_writer_transaction_limits_with_50ms_lock_wait_timeout,
+            |scoped| async move {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                if attempt == 3 {
+                    let holder = derivation_b_build_row_lock_transaction
+                        .lock()
+                        .expect("holder mutex poisoned")
+                        .take();
+                    if let Some(holder) = holder {
+                        holder.rollback().await?;
+                    }
+                }
+                Case::walk_in(&scoped, walk_of_b).await
+            },
+        )
+        .await;
+
+    released.expect("after 2: ok");
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        3,
+        "after 2: commit on the third attempt"
+    );
+    let b = case.derivation(B).await;
+    assert!(b.walked, "after 2: derivation(B) walked");
+    assert_eq!(case.gv(e1).await, gv + 1, "after 2: gv(E1) +1 exactly");
+    case.zero_drift("step 2").await;
     case.finish().await;
 }

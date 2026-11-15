@@ -13,12 +13,12 @@ use gradient_entity::ids::{CacheId, DerivationId, EvaluationId};
 use gradient_entity::{
     build_job, derivation, derivation_build, derivation_dependency, derivation_output, evaluation,
 };
-use gradient_fixtures::shape::{Shape, shape};
+use gradient_fixtures::shape::shape;
 use gradient_fixtures::test_date;
 
 use super::{
-    A, A_OUT, B, B_OUT, Case, GraphRows, as_set, chain, chain_done, drv, nar, narinfo, with_attr,
-    with_output, with_references,
+    A, A_OUT, B, B_OUT, Case, GraphRows, as_set, chain, chain_done, drv, nar, narinfo,
+    walked_a_above_a_stub, with_attr, with_output, with_references,
 };
 use crate::messages::{Demotion, GcRequest, NarCommit};
 
@@ -133,21 +133,6 @@ async fn overlapping_walks(e1_first: bool) -> EndState {
     case.finish().await;
 
     (vec![without_identity(a), without_identity(b)], counters)
-}
-
-fn walked_a_above_a_stub(evaluation: EvaluationId) -> Shape {
-    shape()
-        .evaluation(evaluation)
-        .derivation(A)
-        .walked()
-        .entry_point("pkg.a")
-        .job()
-        .probed()
-        .drv_cached()
-        .output(A_OUT)
-        .depends_on(B)
-        .derivation(B)
-        .job()
 }
 
 async fn state(case: &Case, evaluation: EvaluationId) -> (GraphRows, Option<i64>) {
