@@ -20,7 +20,7 @@ macro_rules! owner_endpoints {
         };
         use crate::endpoints::membership::Owner;
         use crate::error::{WebError, WebResult};
-        use crate::json_body::JsonBody;
+        use crate::extractors::JsonBody;
         use axum::Json;
         use axum::extract::State;
         use gradient_core::ServerState;
@@ -73,9 +73,9 @@ macro_rules! owner_endpoint {
             scope: <$owner as Owner>::ManageMembersScope,
             state: State<Arc<ServerState>>,
             audit: Audit,
-            Json(body): Json<AddMemberRequest>,
+            JsonBody(body): JsonBody<AddMemberRequest>,
         ) -> WebResult<Json<BaseResponse<String>>> {
-            members::add::<$owner>(scope, state, audit, Json(body)).await
+            members::add::<$owner>(scope, state, audit, body).await
         }
     };
     (change_role, $owner:tt, $params:tt, $role_owner:tt, $tag:tt, {
@@ -97,9 +97,9 @@ macro_rules! owner_endpoint {
         pub async fn change_role(
             scope: <$owner as Owner>::ManageMembersScope,
             audit: Audit,
-            Json(body): Json<ChangeMemberRoleRequest>,
+            JsonBody(body): JsonBody<ChangeMemberRoleRequest>,
         ) -> WebResult<Json<BaseResponse<String>>> {
-            members::change_role::<$owner>(scope, audit, Json(body)).await
+            members::change_role::<$owner>(scope, audit, body).await
         }
     };
     (remove_member, $owner:tt, $params:tt, $role_owner:tt, $tag:tt, {
@@ -121,9 +121,9 @@ macro_rules! owner_endpoint {
         pub async fn remove_member(
             scope: <$owner as Owner>::ManageMembersScope,
             audit: Audit,
-            Json(body): Json<RemoveMemberRequest>,
+            JsonBody(body): JsonBody<RemoveMemberRequest>,
         ) -> WebResult<Json<BaseResponse<String>>> {
-            members::remove::<$owner>(scope, audit, Json(body)).await
+            members::remove::<$owner>(scope, audit, body).await
         }
     };
     (list_invitations, $owner:tt, $params:tt, $role_owner:tt, $tag:tt, {
@@ -166,9 +166,9 @@ macro_rules! owner_endpoint {
         pub async fn revoke_invitation(
             scope: <$owner as Owner>::ManageMembersScope,
             audit: Audit,
-            Json(body): Json<RevokeInvitationRequest>,
+            JsonBody(body): JsonBody<RevokeInvitationRequest>,
         ) -> WebResult<Json<BaseResponse<String>>> {
-            invitations::revoke::<$owner>(scope, audit, Json(body)).await
+            invitations::revoke::<$owner>(scope, audit, body).await
         }
     };
     (list_roles, $owner:tt, $params:tt, $role_owner:tt, $tag:tt, {

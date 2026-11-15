@@ -11,12 +11,13 @@ use crate::audit::Audit;
 use crate::endpoints::git_host_connections::GitHostConnectionRefusal;
 use crate::endpoints::webhooks::{ActionDeliveryItem, DeliveryDetail, DeliveryListItem};
 use crate::error::{ErrorCode, WebError, WebResult};
+use crate::extractors::JsonBody;
+use crate::extractors::Query;
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use crate::scope::{Member, Requires, TaskScope, can};
 use anyhow::Context;
 use axum::Json;
-use axum::extract::Query;
 use axum::extract::State;
 use chrono::Utc;
 use gradient_ci::actions::encrypt_action_secret;
@@ -288,7 +289,7 @@ pub async fn create_action(
     }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
-    Json(body): Json<CreateActionRequest>,
+    JsonBody(body): JsonBody<CreateActionRequest>,
 ) -> WebResult<Json<BaseResponse<CreateActionResponse>>> {
     if matches!(body.config, ActionConfig::SendMail { .. }) && !state.email.is_enabled() {
         return Err(TaskRefusal::SmtpNotConfigured.into());
@@ -417,7 +418,7 @@ pub async fn update_action(
     }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
-    Json(body): Json<UpdateActionRequest>,
+    JsonBody(body): JsonBody<UpdateActionRequest>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
     let id: TaskActionId = params.param("id")?;
 

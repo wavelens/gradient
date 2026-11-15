@@ -7,12 +7,13 @@
 use super::helpers::{CacheContext, cache_client_ip};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Path;
 use crate::helpers::OptionExt;
 use crate::resource::Resource;
 use crate::store_paths::original_text;
 use anyhow::Context;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use gradient_core::ServerState;
 use gradient_db::WebDb;

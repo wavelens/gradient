@@ -9,8 +9,9 @@ use super::rank::{
 };
 use crate::endpoints::evals::task_run_history::get_last_n_evaluation_runs_by_latest_evaluation_id;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Query;
 use crate::helpers::ok_json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::dashboard::{entry_point_outcomes, task_facts};

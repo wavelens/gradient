@@ -67,7 +67,7 @@
   pointer-events: none;
 }
 
-.row.is-link :is(.row-info, .row-actions) ::ng-deep :is(a, button) {
+.row.is-link :is(.row-info, .row-actions) ::ng-deep :is(a, button, input, label) {
   pointer-events: auto;
 }
 

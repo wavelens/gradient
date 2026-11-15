@@ -10,6 +10,7 @@ use crate::api_spec::ProjectPath;
 use crate::audit::Audit;
 use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, can};
@@ -531,7 +532,7 @@ pub async fn patch_project_subscribe_cache(
         params,
         ..
     }: ProjectScope<Requires<can::ManageSubscriptions>>,
-    Json(body): Json<UpdateCacheSubscriptionRequest>,
+    JsonBody(body): JsonBody<UpdateCacheSubscriptionRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache: String = params.param("cache")?;
     let cache = load_cache(

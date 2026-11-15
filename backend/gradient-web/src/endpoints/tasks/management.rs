@@ -17,14 +17,14 @@ use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::evals::task_run_history::get_last_n_evaluation_runs_by_latest_evaluation_id;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Path, Query};
 use crate::helpers::{CreatedEntityResponse, OptionExt, ok_json, paginate};
-use crate::json_body::JsonBody;
 use crate::names::{TaskDisplayName, TaskName};
 use crate::permissions::Permission;
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, TaskScope, can};
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_db::WebDb;
 use gradient_types::actions::ActionConfig;
@@ -869,7 +869,7 @@ pub async fn post_task_transfer(
         ..
     }: TaskScope<Member>,
     audit: Audit,
-    Json(body): Json<TransferOwnershipRequest>,
+    JsonBody(body): JsonBody<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
 

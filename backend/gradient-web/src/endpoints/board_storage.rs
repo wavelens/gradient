@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::endpoints::board_metrics::WindowParams;
+use crate::endpoints::board_metrics::{WindowParams, bounded_window_hours_from_requested};
 use crate::error::{WebError, WebResult, require_superuser};
+use crate::extractors::Query;
 use crate::helpers::ok_json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_entity::metric_rollup::RollupGranularity;
@@ -58,7 +59,7 @@ pub async fn get_board_storage(
     Query(params): Query<WindowParams>,
 ) -> WebResult<Json<BaseResponse<BoardStorage>>> {
     require_superuser(&user)?;
-    let window = params.window_hours.unwrap_or(6).clamp(1, 24 * 90);
+    let window = bounded_window_hours_from_requested(params.window_hours, 6);
     let granularity = granularity_for(window);
     let series = SeriesReader {
         db: &state.web_db,

@@ -106,7 +106,7 @@ pub async fn list<O: Owner>(
 pub async fn revoke<O: Owner>(
     scope: O::ManageMembersScope,
     audit: Audit,
-    Json(body): Json<RevokeInvitationRequest>,
+    body: RevokeInvitationRequest,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let owner = scope.id();
     let db = &scope.db().web_db;

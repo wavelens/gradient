@@ -6,10 +6,11 @@
 
 use super::refusal::AdminRefusal;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Query};
 use crate::helpers::ok_json;
 use crate::refusal::SharedRefusal;
 use anyhow::Context;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::response::Redirect;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -82,7 +83,7 @@ pub fn clean_github_enterprise_host(raw: &str) -> Result<String, WebError> {
 pub async fn request_manifest(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Json(body): Json<GithubAppManifestRequest>,
+    JsonBody(body): JsonBody<GithubAppManifestRequest>,
 ) -> WebResult<Json<BaseResponse<GithubAppManifestResponse>>> {
     let host = clean_github_enterprise_host(&body.host.unwrap_or_else(default_host))?;
 

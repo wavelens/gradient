@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::extractors::Path;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, State};
 use axum::response::Response;
 use std::sync::Arc;
 

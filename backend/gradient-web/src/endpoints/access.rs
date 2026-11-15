@@ -11,6 +11,7 @@ use crate::endpoints::membership::{
     MemberTable, Owner, OwnerScope, RoleTable, TeamMembershipRoleGrant, find_user_by_username,
 };
 use crate::error::{WebError, WebResult, require_superuser};
+use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::permissions::PermissionMask;
 use crate::scope::{CacheScope, ProjectScope, Readable, Requires, can};
@@ -433,7 +434,7 @@ pub async fn get_own_access(
 pub async fn get_user_access(
     state: State<Arc<ServerState>>,
     Extension(caller): Extension<MUser>,
-    axum::extract::Path(username): axum::extract::Path<String>,
+    Path(username): Path<String>,
 ) -> WebResult<Json<BaseResponse<UserAccessSummary>>> {
     require_superuser(&caller)?;
     let user = find_user_by_username(&state.web_db, &username).await?;
@@ -453,7 +454,7 @@ pub async fn get_user_access(
 pub async fn post_revoke_user_access(
     state: State<Arc<ServerState>>,
     Extension(caller): Extension<MUser>,
-    axum::extract::Path(username): axum::extract::Path<String>,
+    Path(username): Path<String>,
 ) -> WebResult<Json<BaseResponse<RevokedUserAccessCounts>>> {
     require_superuser(&caller)?;
     let user = find_user_by_username(&state.web_db, &username).await?;

@@ -221,26 +221,26 @@ mod tests {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
     }
 
-    #[test]
-    fn polling_jitter_within_ten_percent_bound() {
-        let last = dt("2026-05-06 10:00:00");
-        let interval = 600;
-        let max = interval / 10;
-        for _ in 0..1000 {
-            let j = polling_jitter_secs(TaskTriggerId::now_v7(), last, interval);
-            assert!(j <= max, "jitter {j} exceeded 10% bound {max}");
-        }
-    }
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig {
+            failure_persistence: None,
+            ..proptest::prelude::ProptestConfig::default()
+        })]
 
-    #[test]
-    fn polling_jitter_is_deterministic_per_cycle() {
-        let id = TaskTriggerId::now_v7();
-        let last = dt("2026-05-06 10:00:00");
-        assert_eq!(
-            next_poll_time_with_jitter(id, last, 600),
-            next_poll_time_with_jitter(id, last, 600),
-            "same (trigger_id, last_fired_at) must yield same jitter"
-        );
+        #[test]
+        fn next_poll_time_with_jitter_is_deterministic_and_within_bounds(
+            id in proptest::prelude::any::<u128>(),
+            last_secs in 0_i64..=4_102_444_800,
+            interval in proptest::prelude::any::<u32>(),
+        ) {
+            let id = TaskTriggerId::new(uuid::Uuid::from_u128(id));
+            let last = chrono::DateTime::from_timestamp(last_secs, 0).unwrap().naive_utc();
+            let next = next_poll_time_with_jitter(id, last, interval);
+            let waited = (next - last).num_seconds();
+            proptest::prop_assert_eq!(next, next_poll_time_with_jitter(id, last, interval));
+            proptest::prop_assert!(waited >= i64::from(interval));
+            proptest::prop_assert!(waited <= i64::from(interval) + i64::from(interval / 10));
+        }
     }
 
     #[test]

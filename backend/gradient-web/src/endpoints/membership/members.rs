@@ -162,7 +162,7 @@ pub async fn add<O: Owner>(
     scope: O::ManageMembersScope,
     state: State<Arc<ServerState>>,
     audit: Audit,
-    Json(body): Json<AddMemberRequest>,
+    body: AddMemberRequest,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let owner = scope.id();
     let user = scope.user();
@@ -253,7 +253,7 @@ pub async fn add<O: Owner>(
 pub async fn change_role<O: Owner>(
     scope: O::ManageMembersScope,
     audit: Audit,
-    Json(body): Json<ChangeMemberRoleRequest>,
+    body: ChangeMemberRoleRequest,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let owner = scope.id();
     let db = &scope.db().web_db;
@@ -288,7 +288,7 @@ pub async fn change_role<O: Owner>(
 pub async fn remove<O: Owner>(
     scope: O::ManageMembersScope,
     audit: Audit,
-    Json(body): Json<RemoveMemberRequest>,
+    body: RemoveMemberRequest,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let owner = scope.id();
     let db = &scope.db().web_db;

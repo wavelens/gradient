@@ -9,6 +9,7 @@ use super::types::ManifestEntry;
 use crate::access::has_permission;
 use crate::authorization::{MaybeApiKey, Principal};
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Path};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::permissions::Permission;
@@ -16,7 +17,7 @@ use crate::resource::Resource;
 use anyhow::Context;
 use axum::Extension;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_db::caches::capacity::project_caches_all_full;
@@ -84,7 +85,7 @@ pub async fn post_dispatch(
     Extension(api_key): Extension<MaybeApiKey>,
     principal: Option<Extension<Principal>>,
     Path(session_id): Path<UploadSessionId>,
-    Json(body): Json<DispatchRequest>,
+    JsonBody(body): JsonBody<DispatchRequest>,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
     let session = require::<EUploadSession>(&state.web_db, session_id).await?;
 

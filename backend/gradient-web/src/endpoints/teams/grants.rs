@@ -13,12 +13,13 @@ use crate::audit::Audit;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
 use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_workers};
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Path};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{CachePermission, Permission};
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use crate::scope::{CacheScope, ProjectScope, Requires, RequiresUnmanaged, can};
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
@@ -264,7 +265,7 @@ pub async fn post_project_team(
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(project): Path<String>,
-    Json(body): Json<GrantProjectRequest>,
+    JsonBody(body): JsonBody<GrantProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
     if !body.users && !body.workers {
@@ -385,7 +386,7 @@ pub async fn patch_project_team(
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((project, team)): Path<(String, String)>,
-    Json(body): Json<PatchProjectGrantRequest>,
+    JsonBody(body): JsonBody<PatchProjectGrantRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
     let permissions = required_permissions_for_team_project_grant_patch(&body);
@@ -637,7 +638,7 @@ pub async fn post_cache_team(
         ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     audit: Audit,
-    Json(body): Json<GrantCacheRequest>,
+    JsonBody(body): JsonBody<GrantCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let team = find_team(&db.web_db, &body.team).await?;
     let role = cache_role(&db.web_db, cache.id, &body.role).await?;
@@ -713,7 +714,7 @@ pub async fn patch_cache_team(
         cache, db, params, ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     audit: Audit,
-    Json(body): Json<PatchCacheGrantRequest>,
+    JsonBody(body): JsonBody<PatchCacheGrantRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let team: String = params.param("team")?;
 

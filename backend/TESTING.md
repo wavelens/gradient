@@ -34,6 +34,14 @@ The graph writer and the scheduler have tests on a real Postgres 18 database.
 - Tests end with `finish()`. Tests without `finish()` panic on drop and failing tests leave the database behind.
 - `SchedulerCase::check(after)` can wait for detached tasks, expect zero drift and assert the invariants listed in the tests page.
 
+## Property Tests
+
+- Use `proptest` to generate inputs for pure logic. Put those inputs next to the example tests. The same crate can also generate inputs for random action sequences in `gradient-scheduler/src/cases/scheduler_action_sequence_property_tests.rs`.
+- Properties describe rules for the code. Round-trip conversions and agreement with a simpler reference are examples. Properties never copy the implementation.
+- Keep generators inside their test module.
+- The files for failure persistence stay disabled. Turn a failing input from the output of CI into a named example test.
+- Property tests for the scheduler catch panics in the step sequence, delete the database and pass the failure to proptest. Panics during setup or inside finish() leave the database in place.
+
 ## Other Suites
 
 - HTTP handler suites in `gradient-*/tests/` use a mocked database through `gradient_fixtures::mock`.

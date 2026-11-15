@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use axum::extract::{Path, Query, State};
+use crate::extractors::{Path, Query};
+use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use badgelib::{Badge, Color, Style};
 use gradient_db::WebDb;

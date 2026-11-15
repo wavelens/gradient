@@ -6,10 +6,11 @@
 
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Path};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
@@ -146,7 +147,7 @@ pub async fn post_ssh_key(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Json(body): Json<CreateSshKeyRequest>,
+    JsonBody(body): JsonBody<CreateSshKeyRequest>,
 ) -> WebResult<Json<BaseResponse<SshKeyInfo>>> {
     require_ssh(&state.config)?;
     let name = body.name.trim();

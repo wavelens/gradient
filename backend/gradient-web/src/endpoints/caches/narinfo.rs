@@ -7,9 +7,10 @@
 use super::helpers::{CacheContext, JsonFlag, cache_client_ip, get_nar_by_hash};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{Path, Query};
 use crate::resource::Resource;
 use anyhow::Context;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;

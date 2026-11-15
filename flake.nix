@@ -153,6 +153,9 @@
       EXTRA_CCFLAGS = "-I/usr/include";
       RUST_BACKTRACE = 1;
 
+      PLAYWRIGHT_BROWSERS_PATH = "${playwright-driver.browsers}";
+      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = true;
+
       GRADIENT_SERVE_URL = "http://localhost:3000";
       GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
       GRADIENT_WORKER_EVAL_MAX_CONCURRENT = 1;

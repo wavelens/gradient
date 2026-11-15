@@ -10,6 +10,7 @@ use crate::api_spec::TaskPath;
 use crate::audit::Audit;
 use crate::authorization::Principal;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
 use crate::refusal::{Refusal, RefusalStatus};
 use crate::scope::{Requires, TaskScope, can};
@@ -91,7 +92,7 @@ pub async fn post_task_pull_request(
     TaskScope { task, db, .. }: TaskScope<Requires<can::TriggerEvaluation>>,
     principal: Option<Extension<Principal>>,
     audit: Audit,
-    Json(body): Json<CreatePullRequestRequest>,
+    JsonBody(body): JsonBody<CreatePullRequestRequest>,
 ) -> WebResult<Json<BaseResponse<PullRequestResponse>>> {
     let job = principal.and_then(|Extension(principal)| principal.job().map(|job| job.job));
     if let Some(branch) = &body.branch {

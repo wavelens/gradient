@@ -227,6 +227,7 @@ tonic-prost-build = { version = "0.14", default-features = false }
 # Test utilities
 axum-test = { version = "21.0", default-features = false }
 mockall   = { version = "0.15", default-features = false }
+proptest  = { version = "1.12", default-features = false, features = ["std"] }
 wiremock  = { version = "0.6", default-features = false }
 
 # Each `tests/*.rs` file in `web` is its own binary that links the full crate

@@ -6,10 +6,11 @@
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
+use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::resource::Resource;
 use crate::store_paths::original_text;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::lookup::by_id;

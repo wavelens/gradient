@@ -17,14 +17,14 @@
   __structuredAttrs = true;
 
   src = lib.cleanSourceWith {
-    filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) [".github" "target" "node_modules" "dist" ".angular"]);
+    filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) [".github" "target" "node_modules" "dist" ".angular" "playwright-tests"]);
     src = lib.cleanSource ../../frontend;
   };
 
   pnpmDeps = fetchPnpmDeps {
     inherit pnpm pname version src;
     fetcherVersion = 4;
-    hash = "sha256-kcdU0LaXioOj8+YMooStCiIOEafWjVpQ3rkskGXgVRU=";
+    hash = "sha256-HQbbsttU5Gy5ZWS2wuQBakme5nzz1DU0dinKxOSfkoE=";
   };
 
   nativeBuildInputs = [

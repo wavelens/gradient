@@ -9,9 +9,10 @@ use crate::endpoints::metrics::{
     HttpRouteStat, ProcessStat, collect, http_snapshot, process_snapshot,
 };
 use crate::error::{WebError, WebResult, require_superuser};
+use crate::extractors::Query;
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::metrics::worker_load::{self, LoadHours};
@@ -30,8 +31,19 @@ pub struct WindowParams {
     pub window_hours: Option<i64>,
 }
 
+pub(crate) const MAX_BOARD_STATISTICS_LOOKBACK_DAYS: i64 = 90;
+
+pub(crate) fn bounded_window_hours_from_requested(
+    requested: Option<i64>,
+    default_window_hours: i64,
+) -> i64 {
+    requested
+        .unwrap_or(default_window_hours)
+        .clamp(1, 24 * MAX_BOARD_STATISTICS_LOOKBACK_DAYS)
+}
+
 pub(crate) fn window_clause(p: &WindowParams) -> i64 {
-    p.window_hours.unwrap_or(24).clamp(1, 24 * 90)
+    bounded_window_hours_from_requested(p.window_hours, 24)
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

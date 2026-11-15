@@ -7,6 +7,7 @@
 use gradient_db::{DbContext, WebDb};
 use std::sync::Arc;
 
+use crate::extractors::JsonBody;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -144,7 +145,7 @@ pub async fn post_connection(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Json(body): Json<ConnectionRequest>,
+    JsonBody(body): JsonBody<ConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<ConnectionResponse>>> {
     if !state.config.gradient_ci.enable {
         return Err(GradientCiConnectionRefusal::GradientCiDisabled.into());

@@ -13,6 +13,7 @@ use crate::endpoints::projects::workers::{
 };
 use crate::endpoints::worker_setup::WorkerRegistrationResponse;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -176,7 +177,7 @@ pub async fn post_team_worker(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Json(body): Json<RegisterWorkerRequest>,
+    JsonBody(body): JsonBody<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<WorkerRegistrationResponse>>> {
     let token = crate::endpoints::worker_tokens::issue();
     let registration = WorkerRegistrationResponse::new(
@@ -252,7 +253,7 @@ pub async fn patch_team_worker(
     }: TeamScope<Admin>,
     audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Json(body): Json<PatchWorkerRequest>,
+    JsonBody(body): JsonBody<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let worker_id: String = params.param("worker_id")?;
 

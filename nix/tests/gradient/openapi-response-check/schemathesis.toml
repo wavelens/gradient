@@ -1,0 +1,136 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+seed = 20261115
+rate-limit = "5/s"
+workers = 1
+
+[generation]
+database = "none"
+
+[auth.openapi.bearerAuth]
+bearer = "${SCHEMATHESIS_TEST_BEARER_TOKEN}"
+
+[phases.coverage.generation]
+mode = "positive"
+
+[phases.fuzzing.generation]
+max-examples = 5
+
+[phases.stateful]
+enabled = false
+
+# Known issues remain. Timestamps are NaiveDateTime values from chrono with no UTC offset. The specification label for these values is RFC 3339 date-time. Format checks stay off until the server can send an offset. Some operations reject input that conforms to the schema. No rules for those inputs exist in the schema. These operations cover checks for resource names, display names, URL schemes for workers, names of webhook events, version strings, integer ranges, cross-field checks, and saved state. The schema does not include name rules. Builds of the CLI client for that specification fail at tag `pattern`.
+[checks.response_schema_conformance]
+validate-formats = false
+
+[[operations]]
+include-operation-id = [
+  "createCache",
+  "createCacheWebhook",
+  "createGithubAppManifest",
+  "createInstanceGitHostConnection",
+  "createInstanceWebhook",
+  "createProject",
+  "createProjectWebhook",
+  "createTask",
+  "createTaskAction",
+  "createTeam",
+  "createTeamWebhook",
+  "createUserKey",
+  "createUserSshKey",
+  "duplicateTask",
+  "exportState",
+  "grantProjectTeam",
+  "listEvaluationBuilds",
+  "patchInstanceGitHostConnection",
+  "patchTeamGitHostConnection",
+  "patchUserSettings",
+  "putUserSeenVersion",
+  "registerProjectWorker",
+  "revokeTeamInvitation",
+  "updateCacheWebhook",
+  "updateInstanceWebhook",
+  "updateProjectWebhook",
+  "updateTeamWebhook",
+]
+checks.positive_data_acceptance.enabled = false
+
+# - WebSocket upgrades and streaming responses
+# - Requests that reach hosts outside the VM (Git hosts, upstream caches, webhooks, OAuth providers)
+# - Login and signup routes (rate limit: 5 requests per 30 seconds)
+# - Operations that end the session for this run, delete the user for this run, or stop the server from processing requests.
+# - Routes that use a separate auth scheme (SCIM, metrics, Nix binary cache protocol)
+# - Uploads that this check does not cover
+
+[[operations]]
+enabled = false
+include-operation-id = [
+  "boardCacheLive",
+  "boardLive",
+  "buildLive",
+  "evaluationLive",
+  "execJobConsole",
+  "execJobForward",
+  "execJobShell",
+  "getEventsFirehose",
+  "streamBuildLog",
+  "streamEvaluationLogs",
+  "taskLive",
+]
+
+[[operations]]
+enabled = false
+include-path-regex = "^/api/v1/hooks/"
+include-operation-id-regex = "^test[A-Z]"
+include-operation-id = [
+  "addUpstreamCache",
+  "checkProjectRepository",
+  "checkTaskRepository",
+  "connectGradientCi",
+  "gitHostOAuthCallback",
+  "githubAppManifestCallback",
+  "installTaskRepositoryDeployKey",
+  "installTaskRepositoryWebhook",
+  "openTaskPullRequest",
+  "postBuildRequestDispatch",
+  "postBuildRequestManifest",
+  "postBuildRequestUrl",
+  "scanProjectSshHostKey",
+  "triggerEvaluation",
+]
+
+[[operations]]
+enabled = false
+include-path-regex = "^/api/v1/auth/"
+
+[[operations]]
+enabled = false
+include-operation-id = [
+  "deleteUser",
+  "deleteUserKey",
+  "deleteUserSession",
+  "patchUserKey",
+  "revokeUserKey",
+  "rotateCacheKey",
+  "setDraining",
+  "startDeepGc",
+  "startGcRound",
+]
+
+[[operations]]
+enabled = false
+include-path-regex = "^/(scim/|cache/|metrics$|proto$)"
+
+[[operations]]
+enabled = false
+include-operation-id = [
+  "finalizeCacheNarUpload",
+  "postBuildRequestBlobs",
+  "postBuildRequestSource",
+  "postBuildRequestSourceFinalize",
+  "putBuildRequestSourceChunk",
+  "uploadCacheNar",
+  "uploadCacheNarChunk",
+]

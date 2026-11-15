@@ -10,12 +10,13 @@ use crate::api_spec::{ProjectPath, TaskPath};
 use crate::audit::Audit;
 use crate::endpoints::git_host_connections::check_task_repository_url_can_use_git_host_connection;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
+use crate::extractors::Query;
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, TaskScope, can};
 use anyhow::Context;
-use axum::extract::Query;
 use axum::{Extension, Json};
 use chrono::Utc;
 use gradient_ci::trigger::InputUpdateOutcome;
@@ -185,7 +186,7 @@ pub async fn list(
 pub async fn create(
     TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
     audit: Audit,
-    Json(body): Json<CreateTriggerRequest>,
+    JsonBody(body): JsonBody<CreateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let config = validate_trigger_config_and_return_config_to_store(body.config)?;
     let trigger = build_task_trigger_row_from_config_and_flags(
@@ -279,7 +280,7 @@ pub async fn update(
         ..
     }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
     audit: Audit,
-    Json(body): Json<UpdateTriggerRequest>,
+    JsonBody(body): JsonBody<UpdateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
 

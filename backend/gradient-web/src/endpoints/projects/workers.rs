@@ -7,6 +7,7 @@
 use crate::access::has_permission;
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
+use crate::extractors::JsonBody;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::State;
@@ -253,7 +254,7 @@ pub async fn post_project_worker(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Json(body): Json<RegisterWorkerRequest>,
+    JsonBody(body): JsonBody<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<WorkerRegistrationResponse>>> {
     if let Some(url) = body.url.as_deref().filter(|u| !u.trim().is_empty()) {
         gradient_util::http_validation::validate_worker_websocket_url(
@@ -605,7 +606,7 @@ pub async fn patch_project_worker(
     }: ProjectScope<Requires<can::ManageWorkers>>,
     audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Json(body): Json<PatchWorkerRequest>,
+    JsonBody(body): JsonBody<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let worker_id: String = params.param("worker_id")?;
 

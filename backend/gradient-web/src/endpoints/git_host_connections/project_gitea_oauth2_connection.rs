@@ -12,13 +12,14 @@ use crate::authorization::{
 };
 use crate::endpoints::auth::{csrf_clear_cookie, csrf_set_cookie};
 use crate::error::{WebError, WebResult, is_unique_violation};
+use crate::extractors::Query;
 use crate::names::GitHostConnectionName;
 use crate::permissions::Permission;
 use crate::resource::Resource;
 use crate::scope::{ProjectScope, RequiresUnmanaged, can};
 use anyhow::Context;
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};

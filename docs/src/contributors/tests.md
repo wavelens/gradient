@@ -14,11 +14,14 @@ Test structure and the patterns new tests follow. The source tree is the catalog
 | Backend unit | `#[cfg(test)] mod tests` next to the code | Pure logic with no I/O |
 | Backend integration | `backend/gradient-*/tests/*.rs` | Real router and handlers on top of a mocked database |
 | Shape tests | `backend/gradient-graph/src/cases/`, `backend/gradient-scheduler/src/cases/` | Graph writer and scheduler on a real Postgres 18 database ([Shape Tests](#shape-tests)) |
+| Property tests | `proptest` next to the code it covers, `backend/gradient-scheduler/src/cases/scheduler_action_sequence_property_tests.rs` | Codec, attribute patterns, permission masks, polling jitter and random action sequences on the scheduler with its invariant checks |
 | Test support | `backend/gradient-fixtures/`, `backend/gradient-test-support/` | Test database, shape builder, fakes and fixtures for all suites ([Test Support](#test-support)) |
 | CLI | `cli/tests/*.rs` | The `gradient` binary against a stubbed HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | Components and services under vitest |
+| Frontend browser | `frontend/playwright-tests/*.spec.ts`, `nix/tests/gradient/web_ui_browser/` | User flows in Chromium against the packaged frontend and a real server |
 | Report inspector | `nix/tools/report-inspector/tests/` | Inspector commands on a report fixture built during the test |
 | NixOS VM | `nix/tests/gradient/<name>/`, `nix/tests/harness/` | A booted machine with the packaged server, or a module against a scripted API |
+| API conformance | `nix/tests/gradient/openapi-response-check/` | Schemathesis requests generated from `docs/gradient-api.yaml` against a booted server, checked against the documented status codes, content types and response schemas |
 | SQL plan check | `backend/src/sql_gate/`, started by the e2e VM test | The plan of every registered statement at production scale |
 | Mock daemon | `backend/gradient-daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/`, `nix/tests/gradient/cluster/` | Scheduler and workers against a scripted Nix store |
 | Eval benchmark | `nix/tests/bench/evalbench/`, on request | Evaluation speed per stage, with a capture bundle per round ([Eval Benchmark](eval-benchmark.md)) |
@@ -34,8 +37,10 @@ Test structure and the patterns new tests follow. The source tree is the catalog
 | `nix build .#checks.x86_64-linux.unittest` | Backend tests (nextest, followed by doc tests) against a disposable Postgres 18 |
 | `nix build .#checks.x86_64-linux.cli-unittest` | CLI tests |
 | `nix build .#checks.x86_64-linux.gradient-<name>` | A single VM test |
+| `nix build .#checks.x86_64-linux.gradient-openapi-response-check` | Schemathesis run against the API, about 13 minutes at the server rate limit of 5 requests per second |
 | `nix build .#gradient-evalbench` | The eval benchmark, kept outside `nix flake check` |
 | `pnpm -C frontend exec ng test --watch=false` | Frontend tests |
+| `pnpm -C frontend run test:browser` | Run browser tests for the frontend against `GRADIENT_WEB_UI_BASE_URL` from the dev shell (default `http://localhost:4200`). Sign in as `stateadmin` and `statemember`. Both accounts come from the state of the `api` VM test |
 
 !!! warning
     A full `cargo test` or `cargo nextest` run over the backend workspace can exhaust the memory of a typical workstation. The Nix checks are the supported path.

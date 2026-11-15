@@ -39,12 +39,12 @@ fn glob_covers(glob: &str, name: &str) -> bool {
     let mut backtrack: Option<(usize, usize)> = None;
 
     while s < subject.len() {
-        if p < pattern.len() && pattern[p] == subject[s] {
-            p += 1;
-            s += 1;
-        } else if p < pattern.len() && pattern[p] == b'*' {
+        if p < pattern.len() && pattern[p] == b'*' {
             backtrack = Some((p, s));
             p += 1;
+        } else if p < pattern.len() && pattern[p] == subject[s] {
+            p += 1;
+            s += 1;
         } else if let Some((star, at)) = backtrack {
             p = star + 1;
             s = at + 1;
@@ -1150,5 +1150,73 @@ mod tests {
         let rendered = segments_to_pattern(&dotted);
         assert_eq!(rendered, r#"packages.x86_64-linux."python3.12""#);
         assert_eq!(parse_pattern(&rendered).1, dotted);
+    }
+
+    #[test]
+    fn leading_wildcard_glob_covers_name_with_literal_star() {
+        assert!(glob_covers("*a", "*ba"));
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn recursive_glob_match(glob: &[u8], name: &[u8]) -> bool {
+        match glob.split_first() {
+            None => name.is_empty(),
+            Some((b'*', rest)) => {
+                recursive_glob_match(rest, name)
+                    || (!name.is_empty() && recursive_glob_match(glob, &name[1..]))
+            }
+            Some((byte, rest)) => {
+                name.first() == Some(byte) && recursive_glob_match(rest, &name[1..])
+            }
+        }
+    }
+
+    fn nonempty_attribute_path_segments_strategy_without_double_quote_or_leading_exclamation_mark()
+    -> impl Strategy<Value = Vec<String>> {
+        (
+            "([a-z0-9_.*-][a-z0-9_.*!-]{0,5})?",
+            proptest::collection::vec("[a-z0-9_.*!-]{0,6}", 0..5),
+        )
+            .prop_map(|(first, rest)| std::iter::once(first).chain(rest).collect())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        })]
+
+        #[test]
+        fn collapse_deep_wildcards_is_idempotent_and_leaves_no_adjacent_deep_wildcards(
+            segs in proptest::collection::vec(prop_oneof![Just("**"), Just("*"), Just("a")], 0..10)
+        ) {
+            let segs: Vec<String> = segs.into_iter().map(str::to_owned).collect();
+            let collapsed = collapse_deep(&segs);
+            prop_assert_eq!(collapse_deep(&collapsed), collapsed.clone());
+            prop_assert!(!collapsed.windows(2).any(|pair| pair[0] == "**" && pair[1] == "**"));
+        }
+
+        #[test]
+        fn glob_covers_agrees_with_recursive_reference_for_random_globs_and_names(
+            glob in "[ab*]{0,6}",
+            name in "[ab.*]{0,8}",
+        ) {
+            prop_assert_eq!(
+                glob_covers(&glob, &name),
+                recursive_glob_match(glob.as_bytes(), name.as_bytes())
+            );
+        }
+
+        #[test]
+        fn segments_to_pattern_and_parse_pattern_round_trip_preserves_segments(
+            segs in nonempty_attribute_path_segments_strategy_without_double_quote_or_leading_exclamation_mark()
+        ) {
+            prop_assert_eq!(parse_pattern(&segments_to_pattern(&segs)), (false, segs));
+        }
     }
 }

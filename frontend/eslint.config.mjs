@@ -8,9 +8,9 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', '.angular/**'] },
+  { ignores: ['dist/**', 'node_modules/**', '.angular/**', 'playwright-tests/test-results/**'] },
   {
-    files: ['src/**/*.ts', 'packages/ui/src/**/*.ts'],
+    files: ['src/**/*.ts', 'packages/ui/src/**/*.ts', 'playwright-tests/**/*.ts'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     rules: {
       // The design system has one entry point; reaching past it re-creates the tangle

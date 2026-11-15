@@ -8,10 +8,11 @@
 //! where anonymous browsing is allowed.
 
 use crate::api_spec::Binary;
+use crate::extractors::{Path, Query};
 use anyhow::Context;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, body::Body};

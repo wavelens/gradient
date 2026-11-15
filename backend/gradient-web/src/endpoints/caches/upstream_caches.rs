@@ -11,6 +11,7 @@ use crate::access::{
 use crate::api_spec::CachePath;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
 use crate::resource::Resource;
@@ -263,7 +264,7 @@ pub async fn put_cache_upstream(
         ..
     }: CacheScope<RequiresUnmanaged<can::ManageUpstreamCaches>>,
     state: State<Arc<ServerState>>,
-    Json(body): Json<AddUpstreamRequest>,
+    JsonBody(body): JsonBody<AddUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<CacheUpstreamId>>> {
     let record = match body {
         AddUpstreamRequest::Internal {
@@ -374,7 +375,7 @@ pub async fn patch_cache_upstream(
         params,
         ..
     }: CacheScope<Requires<can::ManageUpstreamCaches>>,
-    Json(body): Json<PatchUpstreamRequest>,
+    JsonBody(body): JsonBody<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let upstream_id: CacheUpstreamId = params.param("id")?;
 

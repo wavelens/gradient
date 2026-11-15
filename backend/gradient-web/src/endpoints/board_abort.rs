@@ -5,9 +5,10 @@
  */
 
 use crate::error::{ErrorCode, WebError, WebResult, require_superuser};
+use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::lookup::require;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::scheduling::assignment_record::shared_build_of_key;

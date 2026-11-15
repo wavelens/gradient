@@ -3116,7 +3116,10 @@ paths:
         in: query
         required: false
         schema:
-          $ref: '#/components/schemas/BuildLogOutputFormat'
+          type: string
+          enum:
+          - ansi
+          - plain
       - name: attempt
         in: query
         description: Number of the build attempt to read. Attempt numbers begin at 1. See `GET /builds/{build}/attempts` for the list. The default value is the latest attempt. Requests for an attempt number that the build doesn't have return 404.
@@ -7634,7 +7637,7 @@ paths:
       parameters:
       - name: name
         in: query
-        required: true
+        required: false
         schema:
           type: string
       responses:
@@ -11286,11 +11289,19 @@ paths:
         '200':
           description: Number of deleted evaluations
           content:
-            text/plain:
+            application/json:
               schema:
-                type: integer
-                format: int64
-                minimum: 0
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: integer
+                    format: int64
+                    minimum: 0
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -14016,7 +14027,7 @@ paths:
       parameters:
       - name: q
         in: query
-        required: true
+        required: false
         schema:
           type: string
       responses:
@@ -17808,6 +17819,7 @@ components:
           type: string
         url:
           type: string
+          format: uri
         events:
           type: array
           items:
@@ -24648,6 +24660,7 @@ components:
           type:
           - string
           - 'null'
+          format: uri
         events:
           type:
           - array

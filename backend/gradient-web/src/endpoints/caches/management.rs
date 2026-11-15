@@ -12,8 +12,8 @@ use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentica
 use crate::endpoints::access::{TeamNameAndDisplayName, team_names};
 use crate::endpoints::teams::management::lookup_owner_team_id_and_check_user_is_member_or_admin;
 use crate::error::{WebError, WebResult, require_create_permission};
+use crate::extractors::{JsonBody, Query};
 use crate::helpers::{CreatedEntityResponse, ok_json};
-use crate::json_body::JsonBody;
 use crate::names::{CacheDisplayName, CacheName};
 use crate::permissions::{
     CachePermission, Permission, cache_mask_grants, cache_mask_to_vec, mask_grants,
@@ -23,7 +23,7 @@ use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
 use axum::Extension;
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::access::CacheRoleAndPermissionMask;

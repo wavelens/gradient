@@ -13,11 +13,12 @@ use super::scope::{Verb, WebhookOwner};
 use crate::audit::Audit;
 use crate::endpoints::tasks::DeletedResponse;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Query};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
@@ -37,6 +38,7 @@ type ApiState = State<Arc<ServerState>>;
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateWebhookRequest {
     pub name: String,
+    #[schema(format = "uri")]
     pub url: String,
     #[serde(default)]
     pub events: Vec<String>,
@@ -47,6 +49,7 @@ pub struct CreateWebhookRequest {
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct UpdateWebhookRequest {
     pub name: Option<String>,
+    #[schema(format = "uri")]
     pub url: Option<String>,
     pub events: Option<Vec<String>>,
     pub active: Option<bool>,
@@ -145,7 +148,7 @@ pub async fn create_webhook(
     State(state): ApiState,
     audit: Audit,
     owner: WebhookOwner,
-    Json(body): Json<CreateWebhookRequest>,
+    JsonBody(body): JsonBody<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<CreateWebhookResponse>>> {
     check_url(&body.url)?;
     check_events(&body.events)?;
@@ -234,7 +237,7 @@ pub async fn update_webhook(
     State(state): ApiState,
     audit: Audit,
     owner: WebhookOwner,
-    Json(body): Json<UpdateWebhookRequest>,
+    JsonBody(body): JsonBody<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let row = owned_webhook(&state.web_db, &owner).await?;
     if let Some(url) = &body.url {

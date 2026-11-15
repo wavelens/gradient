@@ -10,8 +10,8 @@ use super::{
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
-use crate::json_body::JsonBody;
 use crate::lookup::{require, require_for_delete};
 use crate::names::RoleName;
 use crate::permissions::PermissionEntry;
