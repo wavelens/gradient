@@ -97,6 +97,7 @@ A worker can stop at any time. That includes a worker with disposable VMs. Jobs 
 - Running jobs end at a worker stop. Those jobs go back into the server queue for other workers.
 - exec jobs continue inside the guest under `exec.stopGuestsWithWorker = false` and resume after a restart of the worker.
 - An administrator can also drain one worker from **Administration > Workers** or `gradient administration worker drain <id>`. The worker can keep the connection and receive jobs again after **Undrain**.
+- Use **Drain All** on the same page to drain all workers at once. **Undrain All** on that page can end all drains that an administrator started.
 - A team admin can drain a worker from the team workers page or with `gradient team worker edit <TEAM> <WORKER_ID> --draining true`. Use **Deactivate** instead to abort running jobs immediately.
 
 ## Related

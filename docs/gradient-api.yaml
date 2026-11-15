@@ -986,6 +986,39 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+    patch:
+      tags:
+      - admin
+      summary: Drain all workers or undrain them
+      description: 'Start an admin drain on all workers of `listWorkers` that don''t have an admin drain yet (`draining: true`). Include offline workers. These workers drain on connect. Cancel all admin drains (`draining: false`). Workers that drain by themselves continue to drain. Repeated calls leave state unchanged. Treat an empty list as success. Return the full list as `listWorkers`. Require `superuser`.'
+      operationId: setAllWorkersDraining
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAllWorkersRequest'
+        required: true
+      responses:
+        '200':
+          description: Worker List
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminWorkerListEntry'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/admin/workers/{worker}:
     get:
       tags:
@@ -24764,6 +24797,13 @@ components:
           type:
           - boolean
           - 'null'
+    UpdateAllWorkersRequest:
+      type: object
+      required:
+      - draining
+      properties:
+        draining:
+          type: boolean
     UpdateCacheSubscriptionRequest:
       type: object
       required:

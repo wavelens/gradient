@@ -10,7 +10,7 @@ Superusers open **Admin** in the header. Operations and lists in this area affec
 | Tab | Content | Actions |
 |---|---|---|
 | Overview | Pending jobs, connected and draining workers, free disk space, running maintenance tasks. Open each tile to view the list. | **Run Deep GC**, **Enable Draining** |
-| Workers | Registered workers each have a team or project, connection status, running jobs and drain status. | **Drain**, **Undrain** |
+| Workers | Registered workers each have a team or project, connection status, running jobs and drain status. | **Drain**, **Undrain**, **Drain All**, **Undrain All** |
 | Storage | Free disk space, stored size for each cache, project and task, evaluations retained for each task and the items that the last deep GC deleted | **Run GC Now**, **Run Deep GC** |
 | Git hosts | GitHub App registrations and instance Git host connections. One connection for each GitHub App installation, plus the Gitea, Forgejo, GitLab connections added here. All projects can use them. | **Create on GitHub**, add, edit and delete connections |
 | Settings | All server options, their flags, environment variables, values and source. Secret values stay hidden. | None. Change the option in the NixOS module or environment, then restart the server. |
@@ -20,6 +20,10 @@ Superusers open **Admin** in the header. Operations and lists in this area affec
 Instance draining can block distribution of new jobs and allow running evaluations to finish. A server restart can clear this flag. Stopping without draining is safe. The server can re-queue interrupted work on the next startup.
 
 Start **Drain** on a single worker. That worker can finish the jobs in flight and receive no new jobs. The worker can keep its connection open. Use **Undrain** to end the drain. Team administrators can use the same button on the workers page for their team. A worker can also start a drain after `SIGTERM`. The **Draining** badge can show that state. The UI can omit the **Undrain** button. Worker restarts end the drain.
+
+Use **Drain All** above the worker list to drain all workers in the instance at once, including offline workers. Offline workers can drain on connect.
+
+Use **Undrain All** to end all drains that an admin started. It cannot end drains that workers started themselves.
 
 **Deactivate** can stop a worker right away on the worker pages for a team and a project. The same action can abort running jobs. The confirmation message can suggest a drain first.
 
