@@ -16,8 +16,8 @@ use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
-    BuildJobId, CEntryPoint, EBuildJob, EDerivationBuild, EEntryPoint, EEvaluation, EExecJob,
-    EvaluationId, ExecJobId,
+    BuildJobId, CEntryPoint, EBuildJob, EDerivation, EDerivationBuild, EEntryPoint, EEvaluation,
+    EExecJob, EvaluationId, ExecJobId,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
@@ -94,6 +94,11 @@ pub(crate) async fn build_ci_reports_from_payload(
 
     let (evaluation, build_job) = load_subject(ctx, payload).await?;
     let kind = reporting::check_context_kind_for_event(event);
+    if kind == Some(reporting::CheckContextKind::Build)
+        && !will_evaluation_build_derivation(ctx, &evaluation, build_job.as_ref()).await?
+    {
+        return Ok(Vec::new());
+    }
     let status = match status {
         CiStatus::Pending | CiStatus::Running => load_current_ci_status_from_database(
             ctx,
@@ -260,6 +265,20 @@ async fn load_current_ci_status_from_database(
         }
         Some(reporting::CheckContextKind::Approval) => None,
     })
+}
+
+async fn will_evaluation_build_derivation(
+    ctx: &CiContext,
+    evaluation: &gradient_types::MEvaluation,
+    build_job: Option<&gradient_types::MBuildJob>,
+) -> Result<bool> {
+    let Some(job) = build_job.filter(|_| evaluation.only_evaluate) else {
+        return Ok(true);
+    };
+    Ok(by_id::<EDerivation, _>(&ctx.db.worker_db, job.derivation)
+        .await
+        .context("load derivation")?
+        .is_some_and(|derivation| derivation.ifd))
 }
 
 async fn build_job_entry_point(
