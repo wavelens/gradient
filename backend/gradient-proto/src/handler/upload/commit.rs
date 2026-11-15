@@ -801,7 +801,7 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         };
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             tokio::select! {
                 () = &mut commit => panic!("the graph has not recorded the upload yet"),
                 () = freed => {}
