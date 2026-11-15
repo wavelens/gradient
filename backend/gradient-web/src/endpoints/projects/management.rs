@@ -14,15 +14,15 @@ use crate::endpoints::access::{TeamNameAndDisplayName, team_names};
 use crate::endpoints::teams::grants::{apply_owner_team_grant_change_to_workers, grant_workers};
 use crate::endpoints::teams::management::lookup_owner_team_id_and_check_user_is_member_or_admin;
 use crate::error::{WebError, WebResult, require_create_permission};
+use crate::extractors::{JsonBody, Query};
 use crate::helpers::{CreatedEntityResponse, ok_json, paginate};
-use crate::json_body::JsonBody;
 use crate::names::{ProjectDisplayName, ProjectName};
 use crate::permissions::{Permission, PermissionMask, mask_to_vec};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
 use anyhow::Context;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -193,7 +193,7 @@ impl ProjectResponse {
     tag = "projects",
     summary = "Check project name availability",
     description = "Returns `true` if no project with the given name exists, `false` if it is already taken.",
-    params(("name" = String, Query)),
+    params(("name" = Option<String>, Query)),
     responses((status = OK, description = "Availability result", body = bool, content_type = "application/json"), WebError)
 )]
 pub async fn get_project_name_available(

@@ -7,10 +7,11 @@
 use crate::authorization::{LiveStreamAuthToken, MaybeApiKey};
 use crate::endpoints::live::revoked_session_or_api_key_close_message;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{Path, Query};
 use axum::Extension;
+use axum::extract::State;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use gradient_core::ServerState;
@@ -358,7 +359,7 @@ mod tests {
     #[test]
     fn the_shell_query_picks_attach_or_a_new_shell() {
         let parse = |uri: &str| {
-            Query::<TerminalQuery>::try_from_uri(&uri.parse::<Uri>().unwrap())
+            axum::extract::Query::<TerminalQuery>::try_from_uri(&uri.parse::<Uri>().unwrap())
                 .unwrap()
                 .0
         };

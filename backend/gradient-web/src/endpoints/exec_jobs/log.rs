@@ -6,9 +6,10 @@
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
+use crate::extractors::{Path, Query};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::exec_jobs::log_key;

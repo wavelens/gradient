@@ -15,8 +15,8 @@ use crate::endpoints::git_host_connections::{
 };
 use crate::endpoints::git_host_hooks::repo_identity;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
-use crate::json_body::JsonBody;
 use crate::permissions::{Permission, mask_grants};
 use crate::scope::{Member, RequiresUnmanaged, TaskScope, can};
 use axum::Json;

@@ -13,13 +13,14 @@ use crate::api_spec::Binary;
 use crate::authorization::{MaybeApiKey, Principal};
 use crate::endpoints::ChunkReceived;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Path, Query};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Multipart, Path, Query, State};
+use axum::extract::{Multipart, State};
 use gradient_core::ServerState;
 use gradient_storage::PartialStore;
 use gradient_storage::source_nar::source_nar_from_bytes;
@@ -234,7 +235,7 @@ pub async fn source_finalize(
     principal: Option<Extension<Principal>>,
     Path(upload): Path<String>,
     Query(query): Query<SourceQuery>,
-    Json(body): Json<SourceFinalize>,
+    JsonBody(body): JsonBody<SourceFinalize>,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
     require_safe_upload_id(&upload)?;
 

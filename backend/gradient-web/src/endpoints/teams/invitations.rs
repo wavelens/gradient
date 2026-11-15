@@ -10,6 +10,7 @@ use crate::audit::Audit;
 use crate::endpoints::membership::find_user_by_username;
 use crate::endpoints::membership::invitations::{PendingInvitationItem, RevokeInvitationRequest};
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
 use crate::refusal::SharedRefusal;
 use crate::scope::{Admin, TeamScope};
@@ -63,7 +64,7 @@ pub async fn get_team_invitations(
 pub async fn delete_team_invitation(
     TeamScope { team, db, .. }: TeamScope<Admin>,
     audit: Audit,
-    Json(body): Json<RevokeInvitationRequest>,
+    JsonBody(body): JsonBody<RevokeInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&db.web_db, &body.user).await?;
 

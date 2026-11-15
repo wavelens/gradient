@@ -18,6 +18,7 @@ use crate::endpoints::evals::types::EvaluationAbortReplacementRetryPhaseStartsAn
 use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
+use crate::extractors::{Path, Query};
 use crate::helpers::{CreatedEntityResponse, OptionExt, ok_json};
 use crate::lookup::require;
 use crate::refusal::SharedRefusal;
@@ -25,7 +26,7 @@ use crate::resource::Resource;
 use crate::scope::{Readable, Requires, TaskScope, can};
 use crate::store_paths::original_text;
 use anyhow::Context;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -531,7 +532,7 @@ pub struct DeleteEvaluationsBeforeQuery {
     summary = "Delete old evaluations",
     description = "Delete completed evaluations of a task created before `before`, together with their builds and the cached outputs that only those evaluations referenced. Running evaluations and the latest completed evaluation stay. The response body is the number of deleted evaluations. Callers need permission to edit the task.",
     params(TaskPath, DeleteEvaluationsBeforeQuery),
-    responses((status = OK, description = "Number of deleted evaluations", body = u64), WebError)
+    responses((status = OK, description = "Number of deleted evaluations", body = u64, content_type = "application/json"), WebError)
 )]
 pub async fn delete_finished_evaluations_before_date(
     TaskScope {

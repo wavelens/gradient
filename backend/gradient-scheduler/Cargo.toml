@@ -52,5 +52,6 @@ tempfile    = { workspace = true }
 gradient-fixtures = { workspace = true }
 gradient-graph = { workspace = true, features = ["testing"] }
 gradient-test-support = { workspace = true }
+proptest    = { workspace = true }
 tokio       = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
 wiremock    = { workspace = true }

@@ -9,6 +9,7 @@ use super::refusal::TaskRefusal;
 use crate::api_spec::TaskPath;
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -146,7 +147,7 @@ pub async fn list(
 pub async fn create(
     TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     audit: Audit,
-    Json(body): Json<CreateFlakeInputOverrideRequest>,
+    JsonBody(body): JsonBody<CreateFlakeInputOverrideRequest>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     validate_input_name(&body.input_name)?;
     validate_url(&body.input_name, body.url.as_deref())?;
@@ -231,7 +232,7 @@ pub async fn update(
         ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     audit: Audit,
-    Json(body): Json<UpdateFlakeInputOverrideRequest>,
+    JsonBody(body): JsonBody<UpdateFlakeInputOverrideRequest>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     let id: FlakeInputOverrideId = params.param("id")?;
 

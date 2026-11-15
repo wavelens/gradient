@@ -9,6 +9,7 @@ use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::membership::find_user_by_username;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
 use crate::invite_policy::invitation_expiry;
 use crate::refusal::SharedRefusal;
@@ -132,7 +133,7 @@ pub async fn post_team_members(
     TeamScope { team, user, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
     audit: Audit,
-    Json(body): Json<AddTeamMemberRequest>,
+    JsonBody(body): JsonBody<AddTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&state.web_db, &body.user).await?;
 
@@ -237,7 +238,7 @@ pub async fn post_team_members(
 pub async fn patch_team_members(
     TeamScope { team, db, .. }: TeamScope<Admin>,
     audit: Audit,
-    Json(body): Json<TeamMemberRequest>,
+    JsonBody(body): JsonBody<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&db.web_db, &body.user).await?;
     let tx = db.web_db.inner().begin().await?;
@@ -281,7 +282,7 @@ pub async fn patch_team_members(
 pub async fn delete_team_members(
     TeamScope { team, db, .. }: TeamScope<Admin>,
     audit: Audit,
-    Json(body): Json<RemoveTeamMemberRequest>,
+    JsonBody(body): JsonBody<RemoveTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&db.web_db, &body.user).await?;
     let tx = db.web_db.inner().begin().await?;

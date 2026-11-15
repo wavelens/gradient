@@ -6,9 +6,10 @@
 
 use super::refusal::AdminRefusal;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Query;
 use crate::helpers::ok_json;
 use anyhow::Context;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;

@@ -10,8 +10,8 @@ use crate::authorization::{
     oidc_login_verify, renew_session_expiry_and_sign_token, session_claims, update_last_login,
 };
 use crate::error::{ErrorCode, WebError, WebResult};
+use crate::extractors::{JsonBody, Query};
 use crate::helpers::{OptionExt, ok_json};
-use crate::json_body::JsonBody;
 use crate::names::UserDisplayName;
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
@@ -19,7 +19,7 @@ use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use gradient_db::WebDb;
@@ -320,7 +320,7 @@ async fn send_registration_attempt_email_to_existing_account_owner(
 pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
     audit: Audit,
-    Json(body): Json<MakeLoginRequest>,
+    JsonBody(body): JsonBody<MakeLoginRequest>,
 ) -> WebResult<Response> {
     if !state.login_methods().password_login() {
         return Err(WebError::oauth_required());
@@ -720,7 +720,7 @@ pub async fn post_logout(
 )]
 pub async fn post_check_username(
     state: State<Arc<ServerState>>,
-    Json(body): Json<CheckUsernameRequest>,
+    JsonBody(body): JsonBody<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if let Err(e) = validate_username(&body.username) {
         return Ok(Json(BaseResponse {
@@ -804,7 +804,7 @@ pub async fn get_verify_email(
 )]
 pub async fn post_resend_verification(
     state: State<Arc<ServerState>>,
-    Json(body): Json<CheckUsernameRequest>,
+    JsonBody(body): JsonBody<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state
         .config
@@ -1002,7 +1002,7 @@ pub async fn post_cli_device_start(
 )]
 pub async fn post_cli_device_poll(
     state: State<Arc<ServerState>>,
-    Json(body): Json<CliDevicePollRequest>,
+    JsonBody(body): JsonBody<CliDevicePollRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let hash = hash_device_code(&body.device_code);
     let row = gradient_db::cli_device_authorizations::by_device_code_hash(&state.web_db, &hash)
@@ -1084,7 +1084,7 @@ pub async fn post_cli_device_authorize(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Json(body): Json<CliDeviceAuthorizeRequest>,
+    JsonBody(body): JsonBody<CliDeviceAuthorizeRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     use sea_orm::TransactionTrait;
 
@@ -1134,7 +1134,7 @@ pub async fn post_cli_device_authorize(
 pub async fn post_cli_device_deny(
     state: State<Arc<ServerState>>,
     audit: Audit,
-    Json(body): Json<CliDeviceAuthorizeRequest>,
+    JsonBody(body): JsonBody<CliDeviceAuthorizeRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let row = find_active_user_code(&state.web_db, &body.user_code).await?;
 

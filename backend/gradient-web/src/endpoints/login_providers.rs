@@ -12,11 +12,12 @@ use crate::authorization::{
     provider_callback, session_claims, sign_in_external,
 };
 use crate::error::{WebError, WebResult};
+use crate::extractors::{Path, Query};
 use crate::helpers::ok_json;
 use crate::refusal::{Refusal, RefusalStatus};
 use anyhow::Context;
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::{Extension, Json};

@@ -12,6 +12,7 @@ use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::{MaybeApiKey, Principal};
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
@@ -58,7 +59,7 @@ pub async fn post_url(
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     principal: Option<Extension<Principal>>,
-    Json(body): Json<UrlRequest>,
+    JsonBody(body): JsonBody<UrlRequest>,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
     let project = load_project(
         &state.0.db(),

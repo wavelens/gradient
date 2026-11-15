@@ -10,6 +10,7 @@ use crate::endpoints::caches::subscriptions::{
 };
 use crate::endpoints::teams::requests::{TeamRequestItem, build_team_request_items_for_team_ids};
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::{ok_json, role_names};
 use crate::invite_policy::{
     InviteDecision, InviteItem, InviteKind, evaluate_invite, merge_invites,
@@ -348,7 +349,7 @@ pub async fn post_accept_invite(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Json(body): Json<InviteTokenRequest>,
+    JsonBody(body): JsonBody<InviteTokenRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let invitation = claim_invitation(&state.web_db, &user, &body.token).await?;
     let tx = state.web_db.inner().begin().await?;
@@ -488,7 +489,7 @@ pub async fn post_decline_invite(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Json(body): Json<InviteTokenRequest>,
+    JsonBody(body): JsonBody<InviteTokenRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let invitation = claim_invitation(&state.web_db, &user, &body.token).await?;
 

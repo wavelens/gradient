@@ -9,6 +9,7 @@ use super::types::ManifestEntry;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use anyhow::Context;
@@ -50,7 +51,7 @@ pub async fn post_manifest(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Json(body): Json<ManifestRequest>,
+    JsonBody(body): JsonBody<ManifestRequest>,
 ) -> WebResult<Json<BaseResponse<ManifestResponse>>> {
     let project = load_project(
         &state.0.db(),

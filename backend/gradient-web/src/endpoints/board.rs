@@ -12,16 +12,20 @@ use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
 use super::exec_jobs::timeline::with_reported_phases;
 use crate::access::{can_view_project, key_limited_project_mask};
 use crate::authorization::{ApiKeyContext, LiveStreamAuthToken, MaybeApiKey, MaybeUser};
+use crate::endpoints::board_metrics::{
+    MAX_BOARD_STATISTICS_LOOKBACK_DAYS, bounded_window_hours_from_requested,
+};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
+use crate::extractors::{Path, Query};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::metrics_scope::MetricsScope;
 use crate::permissions::{Permission, mask_to_vec};
 use crate::resource::Resource;
 use crate::store_paths::original_text;
+use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -1258,6 +1262,12 @@ pub async fn get_board_worker_load(
     )))
 }
 
+fn bounded_board_window_days(requested: Option<i64>) -> i64 {
+    requested
+        .unwrap_or(30)
+        .clamp(1, MAX_BOARD_STATISTICS_LOOKBACK_DAYS)
+}
+
 #[derive(Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ExpensiveParams {
@@ -1288,7 +1298,7 @@ pub async fn get_expensive_jobs(
         return Ok(ok_json(vec![]));
     }
 
-    let window = params.window_days.unwrap_or(30).max(1);
+    let window = bounded_board_window_days(params.window_days);
 
     let out =
         build_times::expensive_builds(&state.web_db, window, project_filter.as_deref()).await?;
@@ -1371,7 +1381,7 @@ pub async fn get_scoring_summary(
     Query(params): Query<ScoringParams>,
 ) -> WebResult<Json<BaseResponse<ScoringSummary>>> {
     require_superuser(&user)?;
-    let window = params.window_hours.unwrap_or(24).max(1);
+    let window = bounded_window_hours_from_requested(params.window_hours, 24);
     let limit = params.limit.unwrap_or(2000).min(10_000);
 
     let rows =
@@ -1474,7 +1484,7 @@ pub async fn get_top_projects_by_buildtime(
     Query(params): Query<ExpensiveParams>,
 ) -> WebResult<Json<BaseResponse<Vec<TopProjectBuildTime>>>> {
     require_superuser(&user)?;
-    let window = params.window_days.unwrap_or(30).max(1);
+    let window = bounded_board_window_days(params.window_days);
 
     let out = build_times::top_projects(&state.web_db, window).await?;
 
@@ -1514,7 +1524,7 @@ pub async fn get_expensive_by_resource(
         return Ok(ok_json(vec![]));
     }
 
-    let window = params.window_days.unwrap_or(30).max(1);
+    let window = bounded_board_window_days(params.window_days);
 
     let out = resource_usage::expensive_derivations(
         &state.web_db,
@@ -1652,7 +1662,7 @@ pub async fn get_expensive_evals_by_resource(
         return Ok(ok_json(vec![]));
     }
 
-    let window = params.window_days.unwrap_or(30).max(1);
+    let window = bounded_board_window_days(params.window_days);
 
     let out = resource_usage::expensive_evaluations(
         &state.web_db,
@@ -2096,5 +2106,18 @@ mod tests {
         assert_eq!(node.kind, "derivation");
         assert!(node.is_derivation);
         assert_eq!(node.drv_path.as_deref(), Some("abc-hello.drv"));
+    }
+
+    #[test]
+    fn board_windows_stay_within_the_lookback_limit() {
+        assert_eq!(bounded_board_window_days(None), 30);
+        assert_eq!(bounded_board_window_days(Some(-5)), 1);
+        assert_eq!(bounded_board_window_days(Some(i64::MAX - 1)), 90);
+        assert_eq!(bounded_window_hours_from_requested(None, 6), 6);
+        assert_eq!(bounded_window_hours_from_requested(Some(0), 24), 1);
+        assert_eq!(
+            bounded_window_hours_from_requested(Some(i64::MAX - 1), 24),
+            24 * 90
+        );
     }
 }

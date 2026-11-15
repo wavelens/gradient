@@ -8,12 +8,13 @@ use super::refusal::EvaluationRefusal;
 use crate::access::require_project_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
+use crate::extractors::{JsonBody, Path};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::permissions::Permission;
 use crate::resource::Resource;
 use anyhow::Context;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::lookup::by_id;
@@ -74,7 +75,7 @@ pub async fn post_evaluation(
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(evaluation_id): Path<EvaluationId>,
-    Json(body): Json<MakeEvaluationRequest>,
+    JsonBody(body): JsonBody<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx = load_abortable_evaluation(&state.web_db, &user, &api_key, evaluation_id).await?;
 

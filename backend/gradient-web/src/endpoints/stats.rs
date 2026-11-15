@@ -6,10 +6,11 @@
 
 use crate::api_spec::CachePath;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Query;
 use crate::helpers::ok_json;
 use crate::scope::{CacheScope, Readable};
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_db::metrics::cache_traffic;
 use gradient_db::metrics::cache_traffic::CacheTraffic;

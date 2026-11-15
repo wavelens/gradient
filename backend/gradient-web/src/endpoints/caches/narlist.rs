@@ -6,10 +6,11 @@
 use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Path;
 use crate::store_paths::stored_hash;
 use anyhow::Context;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt as _;

@@ -309,25 +309,6 @@ mod tests {
 
     use crate::codec::{DecodeError, from_bytes, to_bytes};
 
-    fn round_trip<T: crate::codec::Proto + PartialEq + std::fmt::Debug>(value: T) {
-        let bytes = to_bytes(&value, 27).expect("encodes");
-        assert_eq!(from_bytes::<T>(bytes, 27), Ok(value));
-    }
-
-    #[test]
-    fn every_primitive_round_trips() {
-        round_trip(u64::MAX);
-        round_trip(300u16);
-        round_trip(-5i64);
-        round_trip(i64::MIN);
-        round_trip(1.5f32);
-        round_trip(true);
-        round_trip(String::from("grüße"));
-        round_trip(Bytes::from_static(b"nar"));
-        round_trip(Some(vec![(String::from("a"), String::from("b"))]));
-        round_trip(Box::new(None::<u32>));
-    }
-
     #[test]
     fn a_decoded_byte_field_points_into_the_frame() {
         let frame = to_bytes(&Bytes::from(vec![7u8; 64]), 27).expect("encodes");

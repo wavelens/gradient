@@ -6,11 +6,12 @@
 
 use crate::endpoints::builds::closure::sum_output_sizes;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Query;
 use crate::helpers::ok_json;
 use crate::resource::Resource;
 use crate::scope::{Readable, TaskScope};
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::graph::{

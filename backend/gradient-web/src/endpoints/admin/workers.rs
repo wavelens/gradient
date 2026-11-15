@@ -7,7 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use crate::extractors::{JsonBody, Path};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
@@ -257,7 +258,7 @@ pub async fn update_worker(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(worker): Path<String>,
-    Json(body): Json<UpdateWorkerRequest>,
+    JsonBody(body): JsonBody<UpdateWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<AdminWorkerListEntry>>> {
     find_admin_worker(&state.web_db, &scheduler, &worker).await?;
     if let Some(draining) = body.draining {

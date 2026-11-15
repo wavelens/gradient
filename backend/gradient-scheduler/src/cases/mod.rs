@@ -22,6 +22,7 @@ mod probe;
 mod readers;
 mod reports;
 mod scenarios;
+mod scheduler_action_sequence_property_tests;
 mod scoring;
 mod session;
 mod shapes;
@@ -351,6 +352,24 @@ impl SchedulerCase {
             .await
             .expect("the graph writer stops");
         self.check_rows("the last step").await;
+
+        let Self {
+            db,
+            ctx,
+            scheduler,
+            graph,
+            probe,
+            ..
+        } = self;
+        drop((ctx, scheduler, graph, probe));
+        drop_database_if_last(db).await;
+    }
+
+    pub async fn stop_actors_and_delete_test_database_without_final_checks(self) {
+        let core = lock(&self.core).clone();
+        let _ = tokio::time::timeout(SETTLE_TIMEOUT, core.stop_and_wait(None, None)).await;
+        let writer = lock(&self.writer).clone();
+        let _ = tokio::time::timeout(SETTLE_TIMEOUT, writer.stop_and_wait(None, None)).await;
 
         let Self {
             db,

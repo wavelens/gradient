@@ -6,9 +6,10 @@
 
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Path;
 use crate::lookup::require;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_types::*;

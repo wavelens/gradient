@@ -498,15 +498,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn masks_round_trip_through_vectors() {
-        let write = write_mask();
-        assert_eq!(mask_from(&mask_to_vec(write)), write);
-        let cache_write = cache_write_mask();
-        assert_eq!(
-            cache_mask_from(&cache_mask_to_vec(cache_write)),
-            cache_write
-        );
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig {
+            failure_persistence: None,
+            ..proptest::prelude::ProptestConfig::default()
+        })]
+
+        #[test]
+        fn permission_masks_round_trip_through_vectors(
+            mask in proptest::prelude::any::<i64>(),
+            granted in proptest::sample::subsequence(Permission::ALL, 0..=Permission::ALL.len()),
+            cache_granted in proptest::sample::subsequence(
+                CachePermission::ALL,
+                0..=CachePermission::ALL.len(),
+            ),
+        ) {
+            proptest::prop_assert_eq!(
+                mask_from(&mask_to_vec(mask)),
+                mask & mask_from(Permission::ALL)
+            );
+            proptest::prop_assert_eq!(
+                cache_mask_from(&cache_mask_to_vec(mask)),
+                mask & cache_mask_from(CachePermission::ALL)
+            );
+            proptest::prop_assert_eq!(mask_to_vec(mask_from(&granted)), granted);
+            proptest::prop_assert_eq!(
+                cache_mask_to_vec(cache_mask_from(&cache_granted)),
+                cache_granted
+            );
+        }
     }
 
     #[test]

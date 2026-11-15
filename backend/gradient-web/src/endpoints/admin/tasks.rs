@@ -5,13 +5,11 @@
  */
 
 use crate::error::{WebError, WebResult};
+use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::resource::Resource;
 use anyhow::Context;
-use axum::{
-    Json,
-    extract::{Path, State},
-};
+use axum::{Json, extract::State};
 use gradient_core::ServerState;
 use gradient_db::maintenance::admin_tasks;
 use gradient_entity::ids::{AdminTaskId, UserId};

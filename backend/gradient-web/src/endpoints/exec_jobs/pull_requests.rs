@@ -6,8 +6,9 @@
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
+use crate::extractors::Path;
 use crate::helpers::ok_json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;

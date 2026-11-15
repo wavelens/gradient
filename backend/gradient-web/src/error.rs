@@ -8,7 +8,7 @@ use crate::names::NameError;
 use crate::resource::Resource;
 use anyhow::Error as AnyhowError;
 use axum::Json;
-use axum::extract::rejection::JsonRejection;
+use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use sea_orm::{DbErr, RuntimeErr, sqlx};
@@ -217,8 +217,26 @@ impl From<gradient_types::MappingError> for WebError {
     }
 }
 
+impl From<PathRejection> for WebError {
+    fn from(err: PathRejection) -> Self {
+        if err.status().is_server_error() {
+            return Self::Internal(AnyhowError::new(err));
+        }
+        Self::BadRequest(ErrorCode::BAD_REQUEST, err.body_text())
+    }
+}
+
+impl From<QueryRejection> for WebError {
+    fn from(err: QueryRejection) -> Self {
+        Self::BadRequest(ErrorCode::BAD_REQUEST, err.body_text())
+    }
+}
+
 impl From<JsonRejection> for WebError {
     fn from(err: JsonRejection) -> Self {
+        if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            return Self::PayloadTooLarge(ErrorCode::PAYLOAD_TOO_LARGE, err.body_text());
+        }
         let text = err.to_string();
         match NameError::find_in(&text) {
             Some(name_error) => name_error.into(),

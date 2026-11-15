@@ -7,10 +7,11 @@
 use crate::access::can_view_project;
 use crate::authorization::MaybeApiKey;
 use crate::error::WebError;
+use crate::extractors::Path;
 use crate::resource::Resource;
 use async_stream::stream;
 use axum::Extension;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
 use gradient_db::WebDb;

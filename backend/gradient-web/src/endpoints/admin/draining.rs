@@ -7,6 +7,7 @@
 use anyhow::Context;
 use std::sync::Arc;
 
+use crate::extractors::JsonBody;
 use axum::{Extension, Json, extract::State};
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
@@ -40,7 +41,7 @@ pub struct DrainingResponse {
 pub async fn set_draining(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Json(req): Json<SetDrainingRequest>,
+    JsonBody(req): JsonBody<SetDrainingRequest>,
 ) -> WebResult<Json<BaseResponse<DrainingResponse>>> {
     scheduler.draining.set(req.enabled).await;
 

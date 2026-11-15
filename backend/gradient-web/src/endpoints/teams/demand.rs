@@ -6,10 +6,10 @@
 
 use crate::api_spec::TeamPath;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Query;
 use crate::helpers::ok_json;
 use crate::scope::{Admin, TeamScope};
 use axum::Json;
-use axum::extract::Query;
 use gradient_db::WebDb;
 use gradient_db::teams::demand::TeamDemand;
 use gradient_types::*;

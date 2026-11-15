@@ -10,9 +10,9 @@ use crate::authorization::{
     MaybeUser, can_disconnect, generate_api_key, hash_api_key, session_claims,
 };
 use crate::error::{WebError, WebResult, require_create_permission, unique_violation};
+use crate::extractors::{JsonBody, Path, Query};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::ip_allowlist::normalize_allowed_ips;
-use crate::json_body::JsonBody;
 use crate::lookup::require;
 use crate::names::UserDisplayName;
 use crate::permissions::{
@@ -23,7 +23,7 @@ use crate::permissions::{
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
 use gradient_core::LoginMethods;
@@ -402,7 +402,7 @@ impl From<MUser> for UserSearchResult {
     tag = "user",
     summary = "Search users by username",
     description = "The endpoint can return up to 10 users with usernames that contain the specified query string. No users match an empty query. The member and ownership dialogs use this endpoint for autocomplete.",
-    params(("q" = String, Query)),
+    params(("q" = Option<String>, Query)),
     responses((status = OK, description = "Matching users", body = Vec<UserSearchResult>), WebError)
 )]
 pub async fn get_search(
@@ -492,7 +492,7 @@ pub async fn delete(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Json(body): Json<DeleteUserRequest>,
+    JsonBody(body): JsonBody<DeleteUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if user.managed {
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::User).into());
@@ -912,7 +912,7 @@ pub async fn post_keys(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Json(body): Json<CreateApiKeyRequest>,
+    JsonBody(body): JsonBody<CreateApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
     if body.cache.is_some() && body.project.is_some() {
@@ -996,7 +996,7 @@ pub async fn patch_key(
     audit: Audit,
     Extension(user): Extension<MUser>,
     Path(api_id): Path<ApiId>,
-    Json(body): Json<PatchApiKeyRequest>,
+    JsonBody(body): JsonBody<PatchApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<ApiKeyInfo>>> {
     let db = state.db();
     let api_key = require::<EApi>(&state.web_db, api_id).await?;
@@ -1104,7 +1104,7 @@ pub async fn delete_keys(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Json(body): Json<ApiKeyRequest>,
+    JsonBody(body): JsonBody<ApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key = gradient_db::api_keys::by_owner_and_name(&state.web_db, user.id, &body.name)
         .await?

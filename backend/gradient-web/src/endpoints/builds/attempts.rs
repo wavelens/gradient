@@ -6,8 +6,9 @@
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
+use crate::extractors::Path;
 use crate::helpers::ok_json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::scheduling::build_attempt::load_build_attempts_with_worker_ids;

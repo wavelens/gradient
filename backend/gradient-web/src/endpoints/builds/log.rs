@@ -6,10 +6,11 @@
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
+use crate::extractors::{Path, Query};
 use crate::helpers::ok_json;
 use async_stream::stream;
 use axum::Extension;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum_streams::StreamBodyAs;
@@ -36,6 +37,7 @@ pub enum BuildLogOutputFormat {
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct BuildLogQuery {
+    #[param(inline)]
     format: Option<BuildLogOutputFormat>,
 }
 

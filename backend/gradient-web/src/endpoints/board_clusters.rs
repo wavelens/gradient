@@ -7,10 +7,11 @@
 use super::board_subjects::{BoardExecJob, JobSubject, JobSubjects, WorkerNames, board_projects};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::scheduling::assignment_record::{exec_job_of_key, shared_build_of_key};

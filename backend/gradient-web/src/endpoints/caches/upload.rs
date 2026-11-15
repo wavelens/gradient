@@ -9,11 +9,12 @@ use crate::api_spec::{Binary, CachePath};
 use crate::audit::Audit;
 use crate::endpoints::ChunkReceived;
 use crate::error::{WebError, WebResult};
+use crate::extractors::{JsonBody, Query};
 use crate::helpers::ok_json;
 use crate::scope::{CacheScope, Requires, can};
 use anyhow::Context;
 use axum::body::Bytes;
-use axum::extract::{Multipart, Query, State};
+use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use gradient_core::ServerState;
@@ -409,7 +410,7 @@ pub async fn nar_finalize(
     CacheScope { cache, params, .. }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
-    axum::Json(narinfo): axum::Json<NarinfoPart>,
+    JsonBody(narinfo): JsonBody<NarinfoPart>,
 ) -> WebResult<impl IntoResponse> {
     let mapper = state.cache_mapper(cache.id);
     let store_hash = stored_segment(&params.param::<String>("hash")?, &mapper)?;

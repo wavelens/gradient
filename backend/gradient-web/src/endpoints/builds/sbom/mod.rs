@@ -6,10 +6,11 @@
 
 mod document;
 
+use crate::extractors::Path;
 use anyhow::Context;
 use axum::Extension;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use gradient_core::ServerState;

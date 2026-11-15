@@ -11,8 +11,8 @@ use super::{
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
+use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
-use crate::json_body::JsonBody;
 use crate::scope::{Admin, AdminUnmanaged, Member, TeamScope};
 use axum::Json;
 use axum::extract::State;

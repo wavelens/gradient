@@ -22,12 +22,13 @@ pub use response::{
     WebhookTriggerOutcome,
 };
 
+use crate::extractors::Path;
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use gradient_ci::CiContext;
 use gradient_ci::actions::decrypt_secret_with_file;
