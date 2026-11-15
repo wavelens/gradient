@@ -41,7 +41,7 @@ crate::sql! {
              SELECT id FROM pending_delivery \
              WHERE delivered_at IS NULL AND failed_at IS NULL \
                AND next_attempt_at <= (now() AT TIME ZONE 'UTC') \
-               AND kind IN (2, 3, 4, 5, 6, 7, 8) \
+               AND kind IN (2, 3, 4, 5, 6, 7, 8, 9) \
              ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED) \
          RETURNING o.id, o.kind, o.key, o.payload, o.attempts, o.revision",
         params = [Int(8), Int(CLAIM_LEASE_SECS)];
@@ -59,6 +59,12 @@ crate::sql! {
          next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int) \
          WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
         params = [NewUuid, Text("probe"), Int(MAX_ATTEMPTS as i64), Int(30)];
+
+    PENDING_DELIVERY_RECORD_FAILED_ATTEMPT_AND_MARK_FAILED_IF_REVISION_UNCHANGED_OR_ATTEMPT_CAP_REACHED_ELSE_MAKE_DUE = "UPDATE pending_delivery SET attempts = attempts + 1, last_error = $2, \
+         failed_at = CASE WHEN revision = $3 OR attempts + 1 >= $4 THEN (now() AT TIME ZONE 'UTC') END, \
+         next_attempt_at = (now() AT TIME ZONE 'UTC') \
+         WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
+        params = [NewUuid, Text("probe"), Int(0), Int(MAX_ATTEMPTS as i64)];
 
     PENDING_DELIVERY_PENDING_COUNTS = "SELECT count(*) FILTER (WHERE delivered_at IS NULL AND failed_at IS NULL) AS pending, \
          count(*) FILTER (WHERE failed_at IS NOT NULL) AS failed FROM pending_delivery",
@@ -215,29 +221,35 @@ pub async fn mark<C: ConnectionTrait>(
             Value::Uuid(Some(row.id.into_inner())),
             Value::Int(Some(row.revision)),
         ]),
-        Outcome::Retry(error) => retry(row, error, MAX_ATTEMPTS, backoff(row.attempts)),
+        Outcome::Retry(error) => retry(row, error, backoff(row.attempts)),
         Outcome::RetryAfterDelay(error, delay) => {
-            retry(row, error, MAX_ATTEMPTS, backoff(row.attempts).max(*delay))
+            retry(row, error, backoff(row.attempts).max(*delay))
         }
-        Outcome::PermanentFailure(error) => retry(row, error, 0, Duration::ZERO),
+        Outcome::PermanentFailure(error) => {
+            PENDING_DELIVERY_RECORD_FAILED_ATTEMPT_AND_MARK_FAILED_IF_REVISION_UNCHANGED_OR_ATTEMPT_CAP_REACHED_ELSE_MAKE_DUE.bind([
+                Value::Uuid(Some(row.id.into_inner())),
+                Value::String(Some(truncate_delivery_error_message(error))),
+                Value::Int(Some(row.revision)),
+                Value::Int(Some(MAX_ATTEMPTS)),
+            ])
+        }
     };
     db.execute_raw(stmt).await?;
 
     Ok(())
 }
 
-fn retry(
-    row: &PendingDelivery,
-    error: &str,
-    max_attempts: i32,
-    delay: Duration,
-) -> sea_orm::Statement {
+fn retry(row: &PendingDelivery, error: &str, delay: Duration) -> sea_orm::Statement {
     PENDING_DELIVERY_MARK_RETRY.bind([
         Value::Uuid(Some(row.id.into_inner())),
-        Value::String(Some(error.chars().take(4000).collect())),
-        Value::Int(Some(max_attempts)),
+        Value::String(Some(truncate_delivery_error_message(error))),
+        Value::Int(Some(MAX_ATTEMPTS)),
         Value::BigInt(Some(delay.as_secs() as i64)),
     ])
+}
+
+fn truncate_delivery_error_message(error: &str) -> String {
+    error.chars().take(4000).collect()
 }
 
 pub async fn pending_counts<C: ConnectionTrait>(db: &C) -> Result<(i64, i64), DbErr> {
@@ -283,7 +295,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![BTreeMap::from([
                 ("id".to_owned(), Value::from(id.into_inner())),
-                ("kind".to_owned(), Value::SmallInt(Some(3))),
+                ("kind".to_owned(), Value::SmallInt(Some(9))),
                 ("key".to_owned(), Value::from("k")),
                 (
                     "payload".to_owned(),
@@ -297,7 +309,7 @@ mod tests {
         let rows = claim_due(&db, 8).await.unwrap();
 
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].kind, PendingDeliveryKind::ActionDelivery);
+        assert_eq!(rows[0].kind, PendingDeliveryKind::CommitStatusCheckDelivery);
         let sql = norm(&db.into_transaction_log()[0].statements()[0].sql);
         assert!(
             sql.starts_with(
@@ -390,7 +402,7 @@ mod tests {
     async fn enqueue_commit_status_post_with_event_name(db: &DatabaseConnection, event: &str) {
         enqueue_or_increment_revision(
             db,
-            PendingDeliveryKind::TaskEventCommitStatusPost,
+            PendingDeliveryKind::CommitStatusCheckDelivery,
             TEST_BUILD_PENDING_DELIVERY_KEY.into(),
             serde_json::json!({ "event": event }),
         )
@@ -447,6 +459,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mark_failed_does_not_dead_letter_row_when_revision_changed_since_claim_and_makes_it_due_again()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+        let claimed = claim_due_rows_or_panic(&conn).await;
+
+        enqueue_commit_status_post_with_event_name(&conn, "started").await;
+        mark(&conn, &claimed[0], &Outcome::PermanentFailure("422".into()))
+            .await
+            .expect("mark() recorded a permanent failure");
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
+        assert_eq!(
+            (
+                rows[0].failed_at,
+                rows[0].attempts,
+                rows[0].last_error.as_deref()
+            ),
+            (None, 1, Some("422")),
+            "Post the newer state for a change after claim. Don't abandon."
+        );
+        let again = claim_due_rows_or_panic(&conn).await;
+        assert_eq!(
+            again.iter().map(|r| r.revision).collect::<Vec<_>>(),
+            vec![1],
+            "the released row is due at once with the newer revision"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_failed_dead_letters_row_when_revision_changed_since_claim_and_attempt_cap_reached()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+        let claimed = claim_due_rows_or_panic(&conn).await;
+        for _ in 0..MAX_ATTEMPTS - 1 {
+            mark(&conn, &claimed[0], &Outcome::Retry("502".into()))
+                .await
+                .expect("Retries before the limit leave that row unsettled.");
+        }
+
+        enqueue_commit_status_post_with_event_name(&conn, "started").await;
+        mark(&conn, &claimed[0], &Outcome::PermanentFailure("401".into()))
+            .await
+            .expect("mark() recorded a permanent failure");
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
+        assert_eq!(
+            (
+                rows[0].revision,
+                rows[0].attempts,
+                rows[0].failed_at.is_some()
+            ),
+            (1, MAX_ATTEMPTS, true),
+            "A changed row is still dead-letter at the attempt cap."
+        );
+    }
+
+    #[tokio::test]
     async fn claim_and_mark_delivered_with_unchanged_revision_sets_delivered_at() {
         let db = TestDatabase::create().await;
         let conn = db.connection();
@@ -476,7 +549,7 @@ mod tests {
         for event in ["queued", "started"] {
             enqueue(
                 &conn,
-                PendingDeliveryKind::TaskEventCommitStatusPost,
+                PendingDeliveryKind::CommitStatusCheckDelivery,
                 TEST_BUILD_PENDING_DELIVERY_KEY.into(),
                 serde_json::json!({ "event": event }),
             )
