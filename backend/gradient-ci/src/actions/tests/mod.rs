@@ -250,6 +250,75 @@ fn a_failed_attribute_reddens_the_evaluation_check_and_gets_its_own_build_check(
 }
 
 #[test]
+fn build_event_for_only_evaluate_task_posts_no_commit_status_for_regular_entry_point_and_build_check_for_import_from_derivation_entry_point()
+ {
+    use gradient_entity::build::BuildStatus;
+    use gradient_types::{
+        BuildJobId, DerivationBuildId, DerivationId, EvaluationId, MBuildJob, MCommit, MDerivation,
+        MDerivationBuild, MEntryPoint, MEvaluation, MTask, TaskId,
+    };
+
+    run(async {
+        for ifd in [false, true] {
+            let evaluation_id = EvaluationId::now_v7();
+            let task = TaskId::now_v7();
+            let build_job = MBuildJob {
+                id: BuildJobId::now_v7(),
+                evaluation: evaluation_id,
+                derivation: DerivationId::now_v7(),
+                derivation_build: DerivationBuildId::now_v7(),
+                ..Default::default()
+            };
+            let db = mock_db()
+                .append_query_results([vec![build_job.clone()]])
+                .append_query_results([vec![MEvaluation {
+                    id: evaluation_id,
+                    task: Some(task),
+                    only_evaluate: true,
+                    ..Default::default()
+                }]])
+                .append_query_results([vec![MDerivation {
+                    id: build_job.derivation,
+                    ifd,
+                    ..Default::default()
+                }]])
+                .append_query_results([vec![MDerivationBuild {
+                    id: build_job.derivation_build,
+                    status: BuildStatus::Created,
+                    ..Default::default()
+                }]])
+                .append_query_results([vec![MTask {
+                    id: task,
+                    name: "hosts".into(),
+                    repository: "https://git.example.com/acme/infra".into(),
+                    only_evaluate: true,
+                    ..Default::default()
+                }]])
+                .append_query_results([vec![MCommit {
+                    hash: vec![0xab, 0xcd],
+                    ..Default::default()
+                }]])
+                .append_query_results([Vec::<gradient_types::MProject>::new()])
+                .append_query_results([vec![MEntryPoint {
+                    evaluation: evaluation_id,
+                    derivation: build_job.derivation,
+                    eval: "nixosConfigurations.a.config.system.build.toplevel".into(),
+                    ..Default::default()
+                }]]);
+            let ctx = make_ctx_with(db);
+            let payload = json!({ "build_id": build_job.id.to_string() });
+
+            let reports =
+                build_ci_reports_from_payload(&ctx, "build.created", &payload, CiStatus::Pending)
+                    .await
+                    .unwrap();
+
+            assert_eq!(reports.len(), usize::from(ifd), "{reports:?}");
+        }
+    });
+}
+
+#[test]
 fn an_input_update_reaches_open_pr() {
     let actions = vec![
         open_pr(gradient_types::VerifyGate::Build),
