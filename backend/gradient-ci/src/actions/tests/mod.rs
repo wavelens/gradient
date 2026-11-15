@@ -8,57 +8,16 @@ mod chat;
 mod fixtures;
 mod summary;
 
-use super::matchers::{git_host_status_for_event, matches_event};
+use super::matchers::matches_event;
 use super::matching_actions;
-use super::payload::git_host_status_payload;
-use super::report::build_ci_reports_from_payload;
+use super::report::build_ci_reports_from_commit_status_check_rows;
 use super::truncate;
-use fixtures::{action_with, make_ctx, make_ctx_with, run};
+use crate::reporting::CommitStatusCheckWithIds;
+use fixtures::{action_with, make_ctx_with, run};
 use gradient_fixtures::mock::mock_db;
 use gradient_git_host::reporter::CiStatus;
 use gradient_types::ActionType;
 use serde_json::json;
-
-#[test]
-fn git_host_status_mapping() {
-    assert!(matches!(
-        git_host_status_for_event("build.created"),
-        Some(CiStatus::Pending)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("build.started"),
-        Some(CiStatus::Running)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("build.completed"),
-        Some(CiStatus::Success)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("build.failed"),
-        Some(CiStatus::Failure)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("evaluation.queued"),
-        Some(CiStatus::Pending)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("evaluation.building"),
-        Some(CiStatus::Success)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("evaluation.completed"),
-        Some(CiStatus::Success)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("evaluation.failed"),
-        Some(CiStatus::Failure)
-    ));
-    assert!(matches!(
-        git_host_status_for_event("evaluation.action_required"),
-        Some(CiStatus::ActionRequired)
-    ));
-    assert!(git_host_status_for_event("evaluation.waiting").is_none());
-}
 
 #[test]
 fn matches_event_send_mail_filters_by_stored_events() {
@@ -112,140 +71,234 @@ fn truncate_respects_max() {
     assert_eq!(truncate("short".into(), 50), "short");
 }
 
-#[test]
-fn git_host_status_payload_includes_required_fields() {
-    let p = git_host_status_payload("acme", "widgets", "deadbeef", "ctx", None, None, None);
-    assert_eq!(p["owner"], "acme");
-    assert_eq!(p["repo"], "widgets");
-    assert_eq!(p["sha"], "deadbeef");
-    assert_eq!(p["context"], "ctx");
-    assert!(p.get("description").is_none());
+fn append_task_commit_and_empty_project_result_to_mock_database(
+    db: sea_orm::MockDatabase,
+    task: gradient_types::TaskId,
+) -> sea_orm::MockDatabase {
+    use gradient_types::{MCommit, MTask};
+
+    db.append_query_results([vec![MTask {
+        id: task,
+        name: "hosts".into(),
+        repository: "https://git.example.com/acme/infra".into(),
+        ..Default::default()
+    }]])
+    .append_query_results([vec![MCommit {
+        hash: vec![0xab, 0xcd],
+        ..Default::default()
+    }]])
+    .append_query_results([Vec::<gradient_types::MProject>::new()])
 }
 
-#[test]
-fn git_host_status_payload_includes_optional_fields() {
-    let p = git_host_status_payload(
-        "o",
-        "r",
-        "s",
-        "c",
-        Some("desc"),
-        Some("https://x"),
-        Some(42),
-    );
-    assert_eq!(p["description"], "desc");
-    assert_eq!(p["details_url"], "https://x");
-    assert_eq!(p["check_run_id"], 42);
-}
+fn build_event_test_case_with_build_status(
+    status: gradient_entity::build::BuildStatus,
+    task: gradient_types::TaskId,
+) -> (gradient_types::Event, sea_orm::MockDatabase, String) {
+    use gradient_entity::build::BuildStatus;
+    use gradient_types::events::build;
+    use gradient_types::{
+        BuildJobId, DerivationBuildId, DerivationId, EvaluationId, Event, MBuildJob,
+        MDerivationBuild, MEntryPoint, MEvaluation,
+    };
 
-#[test]
-fn build_ci_report_fast_path_uses_payload_fields() {
-    run(async {
-        let ctx = make_ctx();
-        let payload = json!({
-            "owner": "acme",
-            "repo": "widgets",
-            "sha": "deadbeef",
-            "context": "gradient/my-pkg",
-            "description": "Building…",
-            "details_url": "https://example.com/log/1",
-            "check_run_id": 99,
-        });
-        let reports =
-            build_ci_reports_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
-                .await
-                .expect("fast path should succeed");
-        let [report] = reports.as_slice() else {
-            panic!("fast path emits exactly the payload's report: {reports:?}");
-        };
-        assert_eq!(report.owner, "acme");
-        assert_eq!(report.repo, "widgets");
-        assert_eq!(report.sha, "deadbeef");
-        assert_eq!(report.context, "gradient/my-pkg");
-        assert_eq!(report.description.as_deref(), Some("Building…"));
-        assert_eq!(report.existing_check_id, Some(99));
+    let evaluation_id = EvaluationId::now_v7();
+    let build_job = MBuildJob {
+        id: BuildJobId::now_v7(),
+        evaluation: evaluation_id,
+        derivation: DerivationId::now_v7(),
+        derivation_build: DerivationBuildId::now_v7(),
+        ..Default::default()
+    };
+    let event = Event::from(build::Reported {
+        build_id: build_job.id,
+        evaluation_id,
+        status: i16::from(status),
+        ..Default::default()
     });
+    let db = mock_db()
+        .append_query_results([vec![MEvaluation {
+            id: evaluation_id,
+            task: Some(task),
+            ..Default::default()
+        }]])
+        .append_query_results([vec![build_job.clone()]])
+        .append_query_results([vec![MDerivationBuild {
+            id: build_job.derivation_build,
+            status: BuildStatus::Completed,
+            ..Default::default()
+        }]])
+        .append_query_results([vec![MEntryPoint {
+            evaluation: evaluation_id,
+            derivation: build_job.derivation,
+            eval: "packages.x86_64-linux.hello".into(),
+            ..Default::default()
+        }]]);
+    (
+        event,
+        db,
+        crate::build_check_context("hosts", "packages.x86_64-linux.hello"),
+    )
 }
 
-#[test]
-fn build_ci_report_errors_when_payload_empty() {
-    run(async {
-        let ctx = make_ctx();
-        let err =
-            build_ci_reports_from_payload(&ctx, "build.started", &json!({}), CiStatus::Running)
-                .await
-                .unwrap_err();
-        assert!(err.to_string().contains("build_id"), "error: {err}");
+fn build_exec_job_event_test_case(
+    status: gradient_entity::exec_job::ExecJobStatus,
+    task: gradient_types::TaskId,
+) -> (gradient_types::Event, sea_orm::MockDatabase, String) {
+    use gradient_entity::exec_job::ExecJobStatus;
+    use gradient_types::events::exec_job;
+    use gradient_types::{EvaluationId, Event, ExecJobId, MEvaluation, MExecJob};
+
+    let evaluation_id = EvaluationId::now_v7();
+    let job = ExecJobId::now_v7();
+    let event = Event::from(exec_job::Reported {
+        job,
+        evaluation: evaluation_id,
+        status: i16::from(status),
+        entry_point_name: Some("apps.x86_64-linux.update".into()),
+        ..Default::default()
     });
+    let db = mock_db()
+        .append_query_results([vec![MEvaluation {
+            id: evaluation_id,
+            task: Some(task),
+            ..Default::default()
+        }]])
+        .append_query_results([vec![MExecJob {
+            id: job,
+            status: ExecJobStatus::Completed,
+            ..Default::default()
+        }]]);
+    (
+        event,
+        db,
+        crate::build_check_context("hosts", "apps.x86_64-linux.update"),
+    )
 }
 
 #[test]
-fn build_ci_report_errors_on_invalid_build_id() {
-    run(async {
-        let ctx = make_ctx();
-        let payload = json!({ "build_id": "not-a-uuid" });
-        let err = build_ci_reports_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("invalid build_id"), "error: {err}");
-    });
-}
-
-#[test]
-fn a_failed_attribute_reddens_the_evaluation_check_and_gets_its_own_build_check() {
-    use gradient_entity::evaluation_message::MessageLevel;
-    use gradient_types::{EvaluationId, MCommit, MEvaluation, MEvaluationMessage, MTask, TaskId};
+fn completed_build_or_exec_job_reports_exactly_one_success_commit_status_for_any_requested_event() {
+    use gradient_entity::build::BuildStatus;
+    use gradient_entity::exec_job::ExecJobStatus;
+    use gradient_types::TaskId;
 
     run(async {
-        let evaluation_id = EvaluationId::now_v7();
         let task = TaskId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![MEvaluation {
-                id: evaluation_id,
-                task: Some(task),
-                building_started_at: Some(gradient_types::now()),
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MTask {
-                id: task,
-                name: "hosts".into(),
-                repository: "https://git.example.com/acme/infra".into(),
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MCommit {
-                hash: vec![0xab, 0xcd],
-                ..Default::default()
-            }]])
-            .append_query_results([Vec::<gradient_types::MProject>::new()])
-            .append_query_results([vec![MEvaluationMessage {
-                evaluation: evaluation_id,
-                level: MessageLevel::Error,
-                source: Some("nix-eval:nixosConfigurations.c".into()),
-                message: "failed to evaluate 'nixosConfigurations.c': boom".into(),
-                ..Default::default()
-            }]]);
-        let ctx = make_ctx_with(db);
-        let payload = json!({ "evaluation_id": evaluation_id.to_string() });
+        let build_cases = [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+            BuildStatus::FailedPermanent,
+            BuildStatus::Completed,
+        ]
+        .map(|status| build_event_test_case_with_build_status(status, task));
+        let exec_job_cases = [
+            ExecJobStatus::Running,
+            ExecJobStatus::Completed,
+            ExecJobStatus::Failed,
+            ExecJobStatus::Aborted,
+        ]
+        .map(|status| build_exec_job_event_test_case(status, task));
 
-        let reports =
-            build_ci_reports_from_payload(&ctx, "evaluation.building", &payload, CiStatus::Success)
+        for (event, db, context) in build_cases.into_iter().chain(exec_job_cases) {
+            let check = CommitStatusCheckWithIds::commit_status_check_from_event_name_and_content(
+                &event.name(),
+                &event.content(),
+            )
+            .unwrap()
+            .unwrap();
+            let ctx = make_ctx_with(
+                append_task_commit_and_empty_project_result_to_mock_database(db, task),
+            );
+
+            let reports = build_ci_reports_from_commit_status_check_rows(&ctx, &check)
                 .await
                 .unwrap();
 
-        let checks: Vec<(&str, &CiStatus)> = reports
-            .iter()
-            .map(|r| (r.context.as_str(), &r.status))
-            .collect();
-        assert_eq!(
-            checks,
-            vec![
-                ("gradient/hosts: Evaluation", &CiStatus::Failure),
-                (
-                    "gradient/hosts: Build nixosConfigurations.c",
-                    &CiStatus::Failure
-                ),
-            ]
-        );
+            let [report] = reports.as_slice() else {
+                panic!("{}: {reports:?}", event.name());
+            };
+            assert_eq!(report.context, context);
+            assert_eq!(report.sha, "abcd");
+            assert_eq!(report.status, CiStatus::Success, "{}", event.name());
+        }
+    });
+}
+
+#[test]
+fn commit_status_check_with_deleted_evaluation_row_has_no_report_and_settles_delivery() {
+    use gradient_types::{EvaluationId, MEvaluation};
+
+    run(async {
+        let ctx = make_ctx_with(mock_db().append_query_results([Vec::<MEvaluation>::new()]));
+        let check = CommitStatusCheckWithIds::Evaluation {
+            evaluation: EvaluationId::now_v7(),
+        };
+
+        let reports = build_ci_reports_from_commit_status_check_rows(&ctx, &check)
+            .await
+            .unwrap();
+
+        assert!(reports.is_empty(), "{reports:?}");
+    });
+}
+
+#[test]
+fn evaluation_check_reports_success_when_no_attribute_failed_and_failure_with_failed_attribute_build_check()
+ {
+    use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_entity::evaluation_message::MessageLevel;
+    use gradient_types::{EvaluationId, MEvaluation, MEvaluationMessage, TaskId};
+
+    run(async {
+        for attribute_failed in [false, true] {
+            let evaluation_id = EvaluationId::now_v7();
+            let task = TaskId::now_v7();
+            let db = mock_db().append_query_results([vec![MEvaluation {
+                id: evaluation_id,
+                task: Some(task),
+                status: EvaluationStatus::Building,
+                building_started_at: Some(gradient_types::now()),
+                ..Default::default()
+            }]]);
+            let messages: Vec<MEvaluationMessage> = attribute_failed
+                .then(|| MEvaluationMessage {
+                    evaluation: evaluation_id,
+                    level: MessageLevel::Error,
+                    source: Some("nix-eval:nixosConfigurations.c".into()),
+                    message: "failed to evaluate 'nixosConfigurations.c': boom".into(),
+                    ..Default::default()
+                })
+                .into_iter()
+                .collect();
+            let ctx = make_ctx_with(
+                append_task_commit_and_empty_project_result_to_mock_database(db, task)
+                    .append_query_results([messages]),
+            );
+            let check = CommitStatusCheckWithIds::Evaluation {
+                evaluation: evaluation_id,
+            };
+
+            let reports = build_ci_reports_from_commit_status_check_rows(&ctx, &check)
+                .await
+                .unwrap();
+
+            let checks: Vec<(&str, &CiStatus)> = reports
+                .iter()
+                .map(|r| (r.context.as_str(), &r.status))
+                .collect();
+            let expected = if attribute_failed {
+                vec![
+                    ("gradient/hosts: Evaluation", &CiStatus::Failure),
+                    (
+                        "gradient/hosts: Build nixosConfigurations.c",
+                        &CiStatus::Failure,
+                    ),
+                ]
+            } else {
+                vec![("gradient/hosts: Evaluation", &CiStatus::Success)]
+            };
+            assert_eq!(checks, expected);
+        }
     });
 }
 
@@ -254,8 +307,8 @@ fn build_event_for_only_evaluate_task_posts_no_commit_status_for_regular_entry_p
  {
     use gradient_entity::build::BuildStatus;
     use gradient_types::{
-        BuildJobId, DerivationBuildId, DerivationId, EvaluationId, MBuildJob, MCommit, MDerivation,
-        MDerivationBuild, MEntryPoint, MEvaluation, MTask, TaskId,
+        BuildJobId, DerivationBuildId, DerivationId, EvaluationId, MBuildJob, MDerivation,
+        MDerivationBuild, MEntryPoint, MEvaluation, TaskId,
     };
 
     run(async {
@@ -270,13 +323,13 @@ fn build_event_for_only_evaluate_task_posts_no_commit_status_for_regular_entry_p
                 ..Default::default()
             };
             let db = mock_db()
-                .append_query_results([vec![build_job.clone()]])
                 .append_query_results([vec![MEvaluation {
                     id: evaluation_id,
                     task: Some(task),
                     only_evaluate: true,
                     ..Default::default()
                 }]])
+                .append_query_results([vec![build_job.clone()]])
                 .append_query_results([vec![MDerivation {
                     id: build_job.derivation,
                     ifd,
@@ -287,34 +340,70 @@ fn build_event_for_only_evaluate_task_posts_no_commit_status_for_regular_entry_p
                     status: BuildStatus::Created,
                     ..Default::default()
                 }]])
-                .append_query_results([vec![MTask {
-                    id: task,
-                    name: "hosts".into(),
-                    repository: "https://git.example.com/acme/infra".into(),
-                    only_evaluate: true,
-                    ..Default::default()
-                }]])
-                .append_query_results([vec![MCommit {
-                    hash: vec![0xab, 0xcd],
-                    ..Default::default()
-                }]])
-                .append_query_results([Vec::<gradient_types::MProject>::new()])
                 .append_query_results([vec![MEntryPoint {
                     evaluation: evaluation_id,
                     derivation: build_job.derivation,
                     eval: "nixosConfigurations.a.config.system.build.toplevel".into(),
                     ..Default::default()
                 }]]);
-            let ctx = make_ctx_with(db);
-            let payload = json!({ "build_id": build_job.id.to_string() });
+            let ctx = make_ctx_with(
+                append_task_commit_and_empty_project_result_to_mock_database(db, task),
+            );
+            let check = CommitStatusCheckWithIds::Build {
+                evaluation: evaluation_id,
+                build_job: build_job.id,
+            };
 
-            let reports =
-                build_ci_reports_from_payload(&ctx, "build.created", &payload, CiStatus::Pending)
-                    .await
-                    .unwrap();
+            let reports = build_ci_reports_from_commit_status_check_rows(&ctx, &check)
+                .await
+                .unwrap();
 
             assert_eq!(reports.len(), usize::from(ifd), "{reports:?}");
+            assert!(reports.iter().all(|r| r.status == CiStatus::Pending));
         }
+    });
+}
+
+#[test]
+fn transient_derivation_build_failure_yields_no_commit_status_report() {
+    use gradient_entity::build::BuildStatus;
+    use gradient_types::{
+        BuildJobId, DerivationBuildId, EvaluationId, MBuildJob, MDerivationBuild, MEvaluation,
+        TaskId,
+    };
+
+    run(async {
+        let evaluation_id = EvaluationId::now_v7();
+        let build_job = MBuildJob {
+            id: BuildJobId::now_v7(),
+            evaluation: evaluation_id,
+            derivation_build: DerivationBuildId::now_v7(),
+            ..Default::default()
+        };
+        let ctx = make_ctx_with(
+            mock_db()
+                .append_query_results([vec![MEvaluation {
+                    id: evaluation_id,
+                    task: Some(TaskId::now_v7()),
+                    ..Default::default()
+                }]])
+                .append_query_results([vec![build_job.clone()]])
+                .append_query_results([vec![MDerivationBuild {
+                    id: build_job.derivation_build,
+                    status: BuildStatus::FailedTransient,
+                    ..Default::default()
+                }]]),
+        );
+        let check = CommitStatusCheckWithIds::Build {
+            evaluation: evaluation_id,
+            build_job: build_job.id,
+        };
+
+        let reports = build_ci_reports_from_commit_status_check_rows(&ctx, &check)
+            .await
+            .unwrap();
+
+        assert!(reports.is_empty(), "{reports:?}");
     });
 }
 
@@ -539,113 +628,6 @@ fn start_evaluation_refuses_a_task_of_another_project() {
             refused.to_string(),
             "the task to start belongs to another project"
         );
-    });
-}
-
-#[test]
-fn exec_events_report_one_status_per_entry_point() {
-    use gradient_types::{EvaluationId, ExecJobId, MCommit, MEvaluation, MTask, TaskId};
-
-    for (event, status) in [
-        ("exec_job.started", CiStatus::Running),
-        ("exec_job.completed", CiStatus::Success),
-        ("exec_job.failed", CiStatus::Failure),
-        ("exec_job.aborted", CiStatus::Error),
-    ] {
-        assert_eq!(git_host_status_for_event(event), Some(status), "{event}");
-    }
-
-    run(async {
-        let evaluation_id = EvaluationId::now_v7();
-        let task = TaskId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![MEvaluation {
-                id: evaluation_id,
-                task: Some(task),
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MTask {
-                id: task,
-                name: "master".into(),
-                repository: "https://git.example.com/acme/infra".into(),
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MCommit {
-                hash: vec![0xab, 0xcd],
-                ..Default::default()
-            }]])
-            .append_query_results([Vec::<gradient_types::MProject>::new()]);
-        let ctx = make_ctx_with(db);
-        let payload = json!({
-            "job": ExecJobId::now_v7().to_string(),
-            "evaluation": evaluation_id.to_string(),
-            "entry_point_name": "apps.x86_64-linux.update",
-        });
-
-        let reports =
-            build_ci_reports_from_payload(&ctx, "exec_job.completed", &payload, CiStatus::Success)
-                .await
-                .unwrap();
-
-        let [report] = reports.as_slice() else {
-            panic!("one report per exec job: {reports:?}");
-        };
-        assert_eq!(
-            report.context,
-            crate::build_check_context("master", "apps.x86_64-linux.update")
-        );
-        assert_eq!(report.sha, "abcd");
-        assert_eq!(report.status, CiStatus::Success);
-    });
-}
-
-#[test]
-fn a_late_start_event_reports_the_result_of_the_finished_exec_job() {
-    use gradient_entity::exec_job::ExecJobStatus;
-    use gradient_types::{EvaluationId, ExecJobId, MCommit, MEvaluation, MExecJob, MTask, TaskId};
-
-    run(async {
-        let evaluation_id = EvaluationId::now_v7();
-        let task = TaskId::now_v7();
-        let job = ExecJobId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![MEvaluation {
-                id: evaluation_id,
-                task: Some(task),
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MExecJob {
-                id: job,
-                status: ExecJobStatus::Completed,
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MTask {
-                id: task,
-                name: "master".into(),
-                repository: "https://git.example.com/acme/infra".into(),
-                ..Default::default()
-            }]])
-            .append_query_results([vec![MCommit {
-                hash: vec![0xab, 0xcd],
-                ..Default::default()
-            }]])
-            .append_query_results([Vec::<gradient_types::MProject>::new()]);
-        let ctx = make_ctx_with(db);
-        let payload = json!({
-            "job": job.to_string(),
-            "evaluation": evaluation_id.to_string(),
-            "entry_point_name": "apps.x86_64-linux.update",
-        });
-
-        let reports =
-            build_ci_reports_from_payload(&ctx, "exec_job.started", &payload, CiStatus::Running)
-                .await
-                .unwrap();
-
-        let [report] = reports.as_slice() else {
-            panic!("{reports:?}");
-        };
-        assert_eq!(report.status, CiStatus::Success);
     });
 }
 

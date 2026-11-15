@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_ci::actions::{git_host_status_payload, matches_event};
+use gradient_ci::actions::matches_event;
 use gradient_types::{ActionType, MTaskAction, TaskActionId, TaskId, UserId};
 use serde_json::json;
 use uuid::Uuid;
@@ -42,32 +42,4 @@ fn matches_event_send_web_request_filters_by_events() {
     let action = action_with(ActionType::SendWebRequest, json!(["evaluation.completed"]));
     assert!(matches_event(&action, "evaluation.completed"));
     assert!(!matches_event(&action, "build.completed"));
-}
-
-#[test]
-fn git_host_status_payload_round_trip_required_fields() {
-    let p = git_host_status_payload("acme", "widgets", "deadbeef", "ctx", None, None, None);
-    assert_eq!(p["owner"], "acme");
-    assert_eq!(p["repo"], "widgets");
-    assert_eq!(p["sha"], "deadbeef");
-    assert_eq!(p["context"], "ctx");
-    assert!(p.get("description").is_none());
-    assert!(p.get("details_url").is_none());
-    assert!(p.get("check_run_id").is_none());
-}
-
-#[test]
-fn git_host_status_payload_carries_optional_fields() {
-    let p = git_host_status_payload(
-        "o",
-        "r",
-        "s",
-        "c",
-        Some("desc"),
-        Some("https://example.com/log"),
-        Some(7),
-    );
-    assert_eq!(p["description"], "desc");
-    assert_eq!(p["details_url"], "https://example.com/log");
-    assert_eq!(p["check_run_id"], 7);
 }

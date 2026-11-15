@@ -8,7 +8,6 @@ pub(crate) mod crypto;
 pub(crate) mod evaluation_rows;
 mod executor;
 mod matchers;
-mod payload;
 pub(crate) mod report;
 pub(crate) mod send;
 pub(crate) mod summary;
@@ -25,8 +24,7 @@ pub use crypto::{
     encrypt_secret_with_file,
 };
 pub use executor::{execute_action, test_git_host_action};
-pub use matchers::{GIT_HOST_STATUS_EVENTS, git_host_status_for_event, matches_event};
-pub use payload::git_host_status_payload;
+pub use matchers::matches_event;
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 

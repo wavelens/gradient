@@ -6,17 +6,18 @@
 
 //! The task can post commit statuses only with report_status on and status reporting enabled on the connection to the Git host. The task can omit statuses for input_update evaluations. The commit for an input_update evaluation is empty before the push of the pull request.
 
-use crate::actions::git_host_status_for_event;
-use crate::actions::report::{build_ci_reports_from_payload, persist_evaluation_check_id};
+use crate::actions::report::{
+    build_ci_reports_from_commit_status_check_rows, persist_evaluation_check_id,
+};
 use crate::context::CiContext;
 use crate::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token;
+use crate::reporting::CommitStatusCheckWithIds;
 use anyhow::{Context, Result, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_entity::task_commit_status_post_attempt as post_attempt;
 use gradient_git_host::reporter::{CiReport, CiReporter, CiStatus, GithubAppReporter};
 use gradient_types::ids::TaskCommitStatusPostAttemptId;
 use gradient_types::*;
-use serde_json::Value as JsonValue;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -182,11 +183,11 @@ async fn record_attempt(
     Ok(attempt)
 }
 
-pub async fn post_commit_statuses_for_task_event_and_record_attempt(
+pub async fn post_commit_status_reports_for_task_check_event_and_record_attempt(
     ctx: &CiContext,
     task_id: TaskId,
     event: &str,
-    payload: &JsonValue,
+    check: &CommitStatusCheckWithIds,
 ) -> Result<()> {
     let Some((task, connection)) = load_task_git_host_connection(ctx, task_id).await? else {
         return Ok(());
@@ -194,24 +195,22 @@ pub async fn post_commit_statuses_for_task_event_and_record_attempt(
     if !task_should_post_commit_statuses(&task, &connection) {
         return Ok(());
     }
-    let Some(status) = git_host_status_for_event(event) else {
-        return Ok(());
-    };
-    let reports = build_ci_reports_from_payload(ctx, event, payload, status).await?;
+    let reports = build_ci_reports_from_commit_status_check_rows(ctx, check).await?;
     if reports.is_empty() {
         return Ok(());
     }
-    let evaluation_id = payload
-        .get("evaluation_id")
-        .or_else(|| payload.get("evaluation"))
-        .and_then(|v| v.as_str())
-        .and_then(|eid| eid.parse::<EvaluationId>().ok());
 
     let started = Instant::now();
     let outcome = async {
         let reporter =
             build_commit_status_reporter_from_git_host_connection_row(ctx, &connection).await?;
-        post_reports(ctx, reporter.as_ref(), &reports, evaluation_id).await
+        post_reports(
+            ctx,
+            reporter.as_ref(),
+            &reports,
+            Some(check.evaluation_id()),
+        )
+        .await
     }
     .await;
     record_attempt(ctx, task.id, connection.id, event, started, &outcome).await?;
