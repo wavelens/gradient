@@ -47,6 +47,9 @@ pub mod metric {
     pub const EXEC_FAILED: &str = "exec.failed";
     pub const WORKER_ASSIGNED_JOB_TIME_MS: &str = "worker.assigned_job_time_ms";
     pub const WORKER_FULL_LOAD_TIME_MS: &str = "worker.full_load_time_ms";
+    pub const GRAPH_TRANSACTION_MS: &str = "graph.transaction_ms";
+    pub const GRAPH_TRANSACTION_RETRIES: &str = "graph.transaction_retries";
+    pub const GRAPH_LOCK_TIMEOUTS: &str = "graph.lock_timeouts";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
