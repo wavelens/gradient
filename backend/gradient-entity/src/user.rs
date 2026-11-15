@@ -31,6 +31,7 @@ pub struct Model {
     #[sea_orm(unique, indexed)]
     pub scim_external_id: Option<String>,
     pub last_seen_version: Option<String>,
+    pub last_opened_yearly_recap_year: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

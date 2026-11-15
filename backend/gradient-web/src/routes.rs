@@ -341,6 +341,10 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(stars::put_cache_star, stars::delete_cache_star))
                 .routes(routes!(user::get_key_permissions))
                 .routes(routes!(user::put_seen_version))
+                .routes(routes!(
+                    yearly_instance_summary::get_current_year_recap,
+                    yearly_instance_summary::put_mark_current_yearly_recap_opened
+                ))
                 .routes(routes!(events::firehose_ws))
                 .routes(routes!(events::get_catalog))
                 .nest(

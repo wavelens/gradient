@@ -71,6 +71,7 @@ pub enum Resource {
     Webhook,
     Worker,
     WorkerRegistration,
+    YearlyRecap,
 }
 
 impl Resource {
@@ -139,6 +140,7 @@ impl Resource {
             Self::Webhook => "Event notification",
             Self::Worker => "Worker",
             Self::WorkerRegistration => "Worker registration",
+            Self::YearlyRecap => "Yearly recap",
         }
     }
 }

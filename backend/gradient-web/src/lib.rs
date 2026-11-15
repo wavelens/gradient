@@ -493,6 +493,11 @@ async fn start_background_services(
             state.db(),
         )),
         ChildSpec::pass(gradient_db::metrics::rollup::Rollup::new(state.db())),
+        ChildSpec::pass(
+            gradient_db::yearly_instance_summary::YearlyInstanceRecapSnapshotCreationJob::new(
+                state.db(),
+            ),
+        ),
         ChildSpec::pass(gradient_db::metrics::cache_traffic::CacheMetricFlush::new(
             state.db(),
             Arc::clone(&state.memory.cache_traffic),

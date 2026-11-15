@@ -45,6 +45,7 @@ pub mod user_ssh_keys;
 pub mod webhooks;
 pub mod worker_setup;
 pub mod worker_tokens;
+pub mod yearly_instance_summary;
 
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};
@@ -215,7 +216,7 @@ pub async fn get_config(
         error: false,
         message: ServerConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            commit: option_env!("GRADIENT_GIT_REV").map(str::to_owned),
+            commit: state.config.server.source_commit_hash.clone(),
             oidc_enabled: state.config.oidc.is_some(),
             login_providers: state
                 .extensions

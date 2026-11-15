@@ -1263,10 +1263,19 @@ async fn record_metrics(
         .flatten()
         .unwrap_or_default(),
         created_at: now(),
-    }
-    .into_active_model();
+    };
 
-    if let Err(e) = metric.insert(&ctx.worker_db).await {
+    if let Err(e) = gradient_db::yearly_instance_summary::upsert_yearly_build_resource_record_if_build_beats_longest_time_or_peak_ram_or_cpu(
+        &ctx.worker_db,
+        &metric,
+        shared_build.id,
+    )
+    .await
+    {
+        warn!(%derivation_id, error = %e, "failed to update the yearly build records");
+    }
+
+    if let Err(e) = metric.into_active_model().insert(&ctx.worker_db).await {
         warn!(%derivation_id, error = %e, "failed to record derivation_metric");
     }
 }

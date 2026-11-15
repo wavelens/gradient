@@ -200,12 +200,12 @@ mod tests {
         .expect("migration after reverting the integration table");
         let inbound_integration_id = uuid::Uuid::now_v7();
         let outbound_integration_id_before_migration = uuid::Uuid::now_v7();
-        crate::rows::insert::<gradient_entity::user::Entity, _>(
-            &connection,
-            gradient_fixtures::rows::user(),
-        )
-        .await
-        .expect("the old schema can save users");
+        db.execute(&format!(
+            "INSERT INTO \"user\" (id, username, name, email, last_login_at, created_at) VALUES \
+             ('{user}', 'testuser', 'Test User', 'test@example.com', now(), now())",
+            user = user_id(),
+        ))
+        .await;
         crate::rows::insert::<gradient_entity::project::Entity, _>(
             &connection,
             gradient_fixtures::rows::project(),

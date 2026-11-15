@@ -14,12 +14,14 @@ import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
 import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
+import { YearlyRecapAutoOpenService } from '@core/yearly-instance-summary/yearly-recap-auto-open.service';
+import type { YearlyRecapResponse } from '@core/models';
 
 type RailStub = { projects: unknown[]; caches: unknown[] };
 
 let service: Record<'rail' | 'stats' | 'tasks' | 'activity', Mock>;
 
-function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0) {
+function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0, recap: YearlyRecapResponse | null = null) {
   service = {
     rail: vi.fn(() => (rail instanceof Observable ? rail : of(rail))),
     stats: vi.fn(() => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { online: 0, busy_pct: 0 }, queue_wait_p50_ms: 0 })),
@@ -34,6 +36,7 @@ function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0) {
       { provide: StarsService, useValue: { set: () => of(true), changed$: NEVER } },
       { provide: DashboardService, useValue: service },
       { provide: AuthService, useValue: { user: signal(null) } },
+      { provide: YearlyRecapAutoOpenService, useValue: { recap: signal(recap), reopenRecapSlideShowFromDashboardCard: () => undefined } },
     ],
   });
   const f = TestBed.createComponent(DashboardComponent);
@@ -136,5 +139,13 @@ describe('DashboardComponent', () => {
 
   it('shows no requests banner without pending requests', () => {
     expect(render({ projects: [], caches: [] }).querySelector('.pending-requests')).toBeNull();
+  });
+
+  it('Display the Gradient Wrapped card while a recap is present', () => {
+    expect(render({ projects: [], caches: [] }).querySelector('app-dashboard-yearly-recap-card section')).toBeNull();
+    TestBed.resetTestingModule();
+    const recap = { year: 2026, created_at: '2026-12-01T00:00:00', data_since: '2026-01-01', opened: true, statistics: {} };
+    const root = render({ projects: [], caches: [] }, 0, recap);
+    expect(root.querySelector('app-dashboard-yearly-recap-card')?.textContent).toContain('Your Gradient Wrapped 2026');
   });
 });

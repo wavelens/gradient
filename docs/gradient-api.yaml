@@ -14532,6 +14532,59 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/user/yearly-recap:
+    get:
+      tags:
+      - user
+      summary: Get current Gradient Wrapped
+      description: Return Gradient Wrapped while public. Gradient Wrapped is the yearly summary for this instance. The publication window is December 1 of the ending year to January 10 (UTC). Use `opened` to show whether the caller already opened the recap. Return `null` outside this window, with server option `yearly_recap_enabled` off, or before creation of the summary. Names of private projects, their tasks and builds and the name of the busiest worker are empty with `yearly_recap_public_projects_only`.
+      operationId: getCurrentYearRecap
+      responses:
+        '200':
+          description: The current recap, or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    oneOf:
+                    - $ref: '#/components/schemas/YearlyRecapResponse'
+                    - type: 'null'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - user
+      summary: Mark Gradient Wrapped as opened
+      description: Record that the caller opened the current Gradient Wrapped. Web clients open the summary once automatically and send this request when the user closes it. The response is `404` when no summary is revealed.
+      operationId: putMarkCurrentYearlyRecapOpened
+      responses:
+        '200':
+          description: Marked the summary as opened
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/users/{user}/access:
     get:
       tags:
@@ -16850,6 +16903,36 @@ components:
           type: array
           items:
             type: string
+    BusiestDay:
+      type: object
+      properties:
+        day:
+          type: string
+          format: date
+          default: 1970-01-01
+        value:
+          type: integer
+          format: int64
+          default: 0
+    BusiestTask:
+      type: object
+      properties:
+        project:
+          $ref: '#/components/schemas/RecapProject'
+          default:
+            display_name: null
+            id: null
+            name: null
+            public: false
+        task:
+          type:
+          - string
+          - 'null'
+          default: null
+        builds:
+          type: integer
+          format: int64
+          default: 0
     Cache:
       type: object
       required:
@@ -20231,6 +20314,18 @@ components:
           type: integer
           format: int64
           minimum: 0
+    HardestWorkingWorkerMachineTime:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+          default: null
+        machine_time_ms:
+          type: integer
+          format: int64
+          default: 0
     HeatmapBand:
       type: object
       required:
@@ -21169,6 +21264,20 @@ components:
         avg:
           type: number
           format: double
+    MostBuiltProject:
+      type: object
+      properties:
+        project:
+          $ref: '#/components/schemas/RecapProject'
+          default:
+            display_name: null
+            id: null
+            name: null
+            public: false
+        builds:
+          type: integer
+          format: int64
+          default: 0
     NameRequest:
       type: object
       properties:
@@ -22810,6 +22919,51 @@ components:
           oneOf:
           - $ref: '#/components/schemas/EvaluationStatus'
           - type: 'null'
+    RecapBuildRecord:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/YearlyBuildRecordMetric'
+          default: build_time
+        value:
+          type: integer
+          format: int64
+          default: 0
+        derivation_name:
+          type:
+          - string
+          - 'null'
+          default: null
+        project:
+          oneOf:
+          - $ref: '#/components/schemas/RecapProject'
+          - type: 'null'
+          default: null
+        recorded_at:
+          type: string
+          format: date-time
+          default: 1970-01-01T00:00:00
+    RecapProject:
+      type: object
+      properties:
+        id:
+          oneOf:
+          - $ref: '#/components/schemas/ProjectId'
+          - type: 'null'
+          default: null
+        name:
+          type:
+          - string
+          - 'null'
+          default: null
+        display_name:
+          type:
+          - string
+          - 'null'
+          default: null
+        public:
+          type: boolean
+          default: false
     RegisterWorkerRequest:
       type: object
       required:
@@ -25490,6 +25644,145 @@ components:
           type: boolean
         message:
           type: string
+    WorkerTotals:
+      type: object
+      properties:
+        machine_time_ms:
+          type: integer
+          format: int64
+          default: 0
+        full_load_time_ms:
+          type: integer
+          format: int64
+          default: 0
+        hardest_working:
+          oneOf:
+          - $ref: '#/components/schemas/HardestWorkingWorkerMachineTime'
+          - type: 'null'
+          default: null
+        since:
+          type:
+          - string
+          - 'null'
+          format: date
+          default: null
+    YearlyBinaryCacheTotals:
+      type: object
+      properties:
+        nars_served:
+          type: integer
+          format: int64
+          default: 0
+        bytes_served:
+          type: integer
+          format: int64
+          default: 0
+        builds_substituted:
+          type: integer
+          format: int64
+          default: 0
+    YearlyBuildRecordMetric:
+      type: string
+      enum:
+      - build_time
+      - peak_ram
+      - cpu_time
+    YearlyEvaluationBuildTimeAndExecJobTotals:
+      type: object
+      properties:
+        evaluations:
+          type: integer
+          format: int64
+          default: 0
+        builds:
+          type: integer
+          format: int64
+          default: 0
+        build_time_ms:
+          type: integer
+          format: int64
+          default: 0
+        exec_jobs:
+          type: integer
+          format: int64
+          default: 0
+        exec_jobs_since:
+          type:
+          - string
+          - 'null'
+          format: date
+          default: null
+    YearlyRecapResponse:
+      type: object
+      required:
+      - year
+      - created_at
+      - data_since
+      - opened
+      - statistics
+      properties:
+        year:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
+        data_since:
+          type: string
+          format: date
+        opened:
+          type: boolean
+        statistics:
+          $ref: '#/components/schemas/YearlyRecapStatistics'
+    YearlyRecapStatistics:
+      type: object
+      properties:
+        totals:
+          $ref: '#/components/schemas/YearlyEvaluationBuildTimeAndExecJobTotals'
+          default:
+            build_time_ms: 0
+            builds: 0
+            evaluations: 0
+            exec_jobs: 0
+            exec_jobs_since: null
+        most_built_project:
+          oneOf:
+          - $ref: '#/components/schemas/MostBuiltProject'
+          - type: 'null'
+          default: null
+        busiest_task:
+          oneOf:
+          - $ref: '#/components/schemas/BusiestTask'
+          - type: 'null'
+          default: null
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecapBuildRecord'
+          default: []
+        cache:
+          $ref: '#/components/schemas/YearlyBinaryCacheTotals'
+          default:
+            builds_substituted: 0
+            bytes_served: 0
+            nars_served: 0
+        busiest_build_day:
+          oneOf:
+          - $ref: '#/components/schemas/BusiestDay'
+          - type: 'null'
+          default: null
+        busiest_evaluation_day:
+          oneOf:
+          - $ref: '#/components/schemas/BusiestDay'
+          - type: 'null'
+          default: null
+        workers:
+          $ref: '#/components/schemas/WorkerTotals'
+          default:
+            full_load_time_ms: 0
+            hardest_working: null
+            machine_time_ms: 0
+            since: null
   responses:
     Error:
       description: Refused or failed request, with the reason in `code` and `message`

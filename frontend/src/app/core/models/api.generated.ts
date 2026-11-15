@@ -427,6 +427,17 @@ export interface BuildWithOutputs {
   entry_points: string[];
 }
 
+export interface BusiestDay {
+  day?: string;
+  value?: number;
+}
+
+export interface BusiestTask {
+  project?: RecapProject;
+  task?: string | null;
+  builds?: number;
+}
+
 export interface Cache {
   id: CacheId;
   name: string;
@@ -1573,6 +1584,11 @@ export interface GuestSize {
   disk_mb: number;
 }
 
+export interface HardestWorkingWorkerMachineTime {
+  name?: string | null;
+  machine_time_ms?: number;
+}
+
 export interface HeatmapBand {
   band: string;
   counts: number[];
@@ -1898,6 +1914,11 @@ export interface MetricPoint {
   min: number;
   max: number;
   avg: number;
+}
+
+export interface MostBuiltProject {
+  project?: RecapProject;
+  builds?: number;
 }
 
 export interface NameRequest {
@@ -2450,6 +2471,21 @@ export interface RailTask {
   name: string;
   display_name: string;
   status?: EvaluationStatus | null;
+}
+
+export interface RecapBuildRecord {
+  kind?: YearlyBuildRecordMetric;
+  value?: number;
+  derivation_name?: string | null;
+  project?: RecapProject | null;
+  recorded_at?: string;
+}
+
+export interface RecapProject {
+  id?: ProjectId | null;
+  name?: string | null;
+  display_name?: string | null;
+  public?: boolean;
 }
 
 export interface RegisterWorkerRequest {
@@ -3393,4 +3429,46 @@ export interface WorkerTestResponse {
   connected: boolean;
   authorized_for_project: boolean;
   message: string;
+}
+
+export interface WorkerTotals {
+  machine_time_ms?: number;
+  full_load_time_ms?: number;
+  hardest_working?: HardestWorkingWorkerMachineTime | null;
+  since?: string | null;
+}
+
+export interface YearlyBinaryCacheTotals {
+  nars_served?: number;
+  bytes_served?: number;
+  builds_substituted?: number;
+}
+
+export type YearlyBuildRecordMetric = "build_time" | "peak_ram" | "cpu_time";
+
+export interface YearlyEvaluationBuildTimeAndExecJobTotals {
+  evaluations?: number;
+  builds?: number;
+  build_time_ms?: number;
+  exec_jobs?: number;
+  exec_jobs_since?: string | null;
+}
+
+export interface YearlyRecapResponse {
+  year: number;
+  created_at: string;
+  data_since: string;
+  opened: boolean;
+  statistics: YearlyRecapStatistics;
+}
+
+export interface YearlyRecapStatistics {
+  totals?: YearlyEvaluationBuildTimeAndExecJobTotals;
+  most_built_project?: MostBuiltProject | null;
+  busiest_task?: BusiestTask | null;
+  records?: RecapBuildRecord[];
+  cache?: YearlyBinaryCacheTotals;
+  busiest_build_day?: BusiestDay | null;
+  busiest_evaluation_day?: BusiestDay | null;
+  workers?: WorkerTotals;
 }

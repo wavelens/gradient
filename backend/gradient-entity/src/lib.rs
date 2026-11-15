@@ -126,3 +126,5 @@ pub mod webhook;
 pub mod webhook_delivery;
 pub mod worker_connection;
 pub mod worker_sample;
+pub mod yearly_build_resource_record;
+pub mod yearly_instance_recap_snapshot;
