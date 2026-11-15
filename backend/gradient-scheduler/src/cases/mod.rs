@@ -49,7 +49,7 @@ use gradient_test_support::state::TestState;
 use gradient_types::ids::ProjectId;
 use gradient_types::{BuildArgs, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
-use gradient_wire::types::GradientCapabilities;
+use gradient_wire::types::{GradientCapabilities, JobKind};
 use ractor::ActorRef;
 use tempfile::NamedTempFile;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -457,11 +457,19 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub(crate) fn without_offers(signals: Vec<SessionSignal>) -> Vec<SessionSignal> {
+pub(crate) fn remove_jobs_available_for_requested_kinds_signals(
+    signals: Vec<SessionSignal>,
+) -> Vec<SessionSignal> {
     signals
         .into_iter()
-        .filter(|signal| !matches!(signal, SessionSignal::Offers(_)))
+        .filter(|signal| !matches!(signal, SessionSignal::JobsAvailableForRequestedKinds { .. }))
         .collect()
+}
+
+pub(crate) fn jobs_available_signal_for_one_kind(kind: JobKind) -> SessionSignal {
+    SessionSignal::JobsAvailableForRequestedKinds {
+        requested_job_kinds_with_new_work: vec![kind],
+    }
 }
 
 fn new_port() -> (Arc<dyn SessionPort>, UnboundedReceiver<SessionSignal>) {

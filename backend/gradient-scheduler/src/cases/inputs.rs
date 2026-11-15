@@ -11,8 +11,8 @@ use gradient_pool::session_port::SessionSignal;
 use gradient_wire::types::{InputOutcome, JobKind};
 
 use super::{
-    A, A_OUT, CaseShapes, Profile, SchedulerCase, eval_key, output_nar, w_all, w_network_eval,
-    w_network_secrets, without_offers,
+    A, A_OUT, CaseShapes, Profile, SchedulerCase, eval_key, output_nar,
+    remove_jobs_available_for_requested_kinds_signals, w_all, w_network_eval, w_network_secrets,
 };
 
 const W1: &str = "w1";
@@ -79,12 +79,12 @@ async fn i02_two_evaluations_share_one_fetch() {
     case.input_fetched(W3, &fetches[0].fetch_id, fetched())
         .await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![result(e1, "r1", fetched())],
         "after 2: signals(W1)"
     );
     assert_eq!(
-        without_offers(case.signals(W2)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W2)),
         vec![result(e2, "r2", fetched())],
         "after 2: signals(W2)"
     );
@@ -150,12 +150,12 @@ async fn i03_a_failed_fetch_answers_every_waiter() {
     case.input_fetched(W3, &fetch.fetch_id, failed.clone())
         .await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![result(e1, "r1", failed.clone())],
         "after 2: signals(W1)"
     );
     assert_eq!(
-        without_offers(case.signals(W2)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W2)),
         vec![result(e2, "r2", failed)],
         "after 2: signals(W2)"
     );
@@ -189,7 +189,7 @@ async fn i04_a_lost_fetch_worker_hands_the_fetch_to_another() {
 
     case.input_fetched(W2, &first.fetch_id, fetched()).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![],
         "after 3: the late answer of W2 is ignored"
     );
@@ -197,7 +197,7 @@ async fn i04_a_lost_fetch_worker_hands_the_fetch_to_another() {
 
     case.input_fetched(W3, &second.fetch_id, fetched()).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![result(e1, "r1", fetched())],
         "after 4: signals(W1)"
     );
@@ -233,7 +233,7 @@ async fn i05_an_abort_drops_the_input_wait() {
         "after 3: no FetchInput for an aborted evaluation"
     );
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![],
         "after 3: no InputResult"
     );
@@ -297,7 +297,7 @@ async fn i07_an_input_request_from_a_build_job_is_dropped() {
     case.input_request(W1, build.job_id(), "r1", SSH_REQUEST)
         .await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![SessionSignal::InputResult {
             job_id: build.job_id().to_owned(),
             request_id: "r1".into(),
@@ -332,12 +332,12 @@ async fn i08_fetch_progress_reaches_every_waiting_evaluation() {
     case.input_fetch_progress(&first.worker, &first.fetch_id, 512, Some(1024))
         .await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![progress(e1, "r1", 512, Some(1024))],
         "after 2: signals(W1)"
     );
     assert_eq!(
-        without_offers(case.signals(W2)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W2)),
         vec![progress(e2, "r2", 512, Some(1024))],
         "after 2: signals(W2)"
     );
@@ -350,7 +350,7 @@ async fn i08_fetch_progress_reaches_every_waiting_evaluation() {
         .await;
     for worker in [W1, W2] {
         assert_eq!(
-            without_offers(case.signals(worker)),
+            remove_jobs_available_for_requested_kinds_signals(case.signals(worker)),
             vec![],
             "after 3: progress of the replaced fetch reaches no {worker}"
         );
@@ -358,7 +358,7 @@ async fn i08_fetch_progress_reaches_every_waiting_evaluation() {
     case.input_fetch_progress(&second.worker, &second.fetch_id, 64, None)
         .await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![progress(e1, "r1", 64, None)],
         "after 3: signals(W1)"
     );
@@ -410,6 +410,7 @@ async fn i10_a_running_fetch_takes_a_build_slot() {
     let case = SchedulerCase::start(shape().evalq(e1).one(e2, A, A_OUT)).await;
     evaluating(&case, W1, e1).await;
     case.connect(W2, w_all(), &[]).await;
+    case.idle(W2, JobKind::Build).await;
 
     case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
         .await;
@@ -420,6 +421,11 @@ async fn i10_a_running_fetch_takes_a_build_slot() {
     case.check("step 1").await;
 
     case.admit_startable_moves().await;
+    assert_eq!(
+        case.signals(W2),
+        vec![],
+        "After 2: fetch took W2's only build slot. No signal reached W2."
+    );
     let taken = case.request_job(W2, JobKind::Build).await;
     assert!(
         taken.is_none(),
@@ -430,7 +436,7 @@ async fn i10_a_running_fetch_takes_a_build_slot() {
 
     case.input_fetched(W2, fetch_id, fetched()).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![result(e1, "r1", fetched())],
         "after 3: signals(W1)"
     );
@@ -469,7 +475,7 @@ async fn i11_an_unplaced_fetch_goes_to_another_worker() {
 
     case.input_fetched(W3, &second.fetch_id, fetched()).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![result(e1, "r1", fetched())],
         "after 3: the evaluation gets the result of W3"
     );
@@ -537,7 +543,7 @@ async fn i13_duplicate_input_request_keeps_one_waiting_request_and_answers_once(
 
     case.input_fetched(W2, &fetch.fetch_id, fetched()).await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![result(e1, "r1", fetched())],
         "after 2: one answer to W1"
     );
@@ -596,7 +602,7 @@ async fn evaluating(case: &SchedulerCase, worker: &str, evaluation: EvaluationId
 fn fetches_of(case: &SchedulerCase, workers: &[&str]) -> Vec<Fetch> {
     let mut fetches = Vec::new();
     for worker in workers {
-        for signal in without_offers(case.signals(worker)) {
+        for signal in remove_jobs_available_for_requested_kinds_signals(case.signals(worker)) {
             match signal {
                 SessionSignal::FetchInput {
                     fetch_id,

@@ -10,7 +10,6 @@ use gradient_entity::commit;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::{Shape, shape};
-use gradient_pool::session_port::SessionSignal;
 use gradient_types::vec_to_hex;
 use gradient_types::waiting_reason::{EvalCapability, UnmetRequirement, WaitingReason};
 use gradient_wire::types::{
@@ -44,11 +43,7 @@ async fn q01_a_queued_evaluation_becomes_one_pending_job_with_wildcards_and_over
 
     case.assign_queued_evals().await;
     assert!(case.pending(&key).await, "after 1: pending(eval:E1)");
-    assert_eq!(
-        case.signals(W1),
-        vec![SessionSignal::Offers(1)],
-        "after 1: signals(W1)"
-    );
+    assert_eq!(case.signals(W1), vec![], "after 1: signals(W1)");
     assert_eq!(case.assignments(&key).await, vec![], "after 1: dj == []");
     case.check("step 1").await;
 

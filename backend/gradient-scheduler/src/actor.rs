@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
@@ -64,7 +64,6 @@ pub struct WorkerMetrics {
 pub struct Offer {
     pub candidates: Vec<JobCandidate>,
     pub projects: HashMap<String, ProjectId>,
-    pub generation: u64,
 }
 
 #[allow(
@@ -75,6 +74,12 @@ pub enum AssignOutcome {
     AtCapacity,
     Nothing,
     Assigned(Assignment),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobRequestOrigin {
+    WorkerRequestedJob,
+    ServerSessionAnswersWaitingJobRequestAfterJobsAvailableSignal,
 }
 
 pub struct Released {
@@ -271,6 +276,7 @@ pub enum SchedulerMsg {
     Assign {
         worker: String,
         kind: JobKind,
+        origin: JobRequestOrigin,
         instance: Arc<InstanceContext>,
         reply: RpcReplyPort<AssignOutcome>,
     },
@@ -432,7 +438,6 @@ pub struct CoreArgs {
 pub struct SchedulerCore {
     pool: WorkerPool,
     tracker: JobTracker,
-    offers: u64,
     policy: Arc<dyn ScoringPolicy>,
     idle: crate::cluster::IdleSlots,
     reservation: Option<crate::cluster::Reservation>,
@@ -441,9 +446,32 @@ pub struct SchedulerCore {
 }
 
 impl SchedulerCore {
-    fn bump_offers(&mut self) {
-        self.offers = self.offers.wrapping_add(1);
-        self.pool.signal_active(SessionSignal::Offers(self.offers));
+    fn send_jobs_available_signal_to_workers_with_free_capacity(&mut self) {
+        let waiting = self.job_kinds_by_worker_with_idle_slot_and_free_capacity(Instant::now());
+        for (worker, requested_job_kinds_with_new_work) in waiting {
+            self.pool.signal(
+                &worker,
+                SessionSignal::JobsAvailableForRequestedKinds {
+                    requested_job_kinds_with_new_work,
+                },
+            );
+        }
+    }
+
+    fn job_kinds_by_worker_with_idle_slot_and_free_capacity(
+        &self,
+        now: Instant,
+    ) -> BTreeMap<String, Vec<JobKind>> {
+        let mut live: Vec<_> = self.idle.live(now).collect();
+        live.sort_unstable();
+        let mut by_worker: BTreeMap<String, Vec<JobKind>> = BTreeMap::new();
+        for (worker, slot) in live {
+            let kind = slot.job_kind();
+            if self.pool.has_capacity(worker, &kind) {
+                by_worker.entry(worker.to_owned()).or_default().push(kind);
+            }
+        }
+        by_worker
     }
 
     fn abort_running(&mut self, keep: impl Fn(&str, &PendingJob) -> bool) -> Vec<(String, String)> {
@@ -605,11 +633,36 @@ impl SchedulerCore {
         Offer {
             candidates: offered.into_iter().map(|(c, _)| c).collect(),
             projects,
-            generation: self.offers,
         }
     }
 
     fn assign(
+        &mut self,
+        worker: &str,
+        kind: &JobKind,
+        instance: &InstanceContext,
+    ) -> AssignOutcome {
+        let outcome = self.try_assign_best_pending_job_to_worker(worker, kind, instance);
+        if matches!(outcome, AssignOutcome::Nothing) {
+            self.record_worker_waiting_for_job_kind_when_capabilities_accept(worker, kind);
+        }
+        outcome
+    }
+
+    fn assign_for_waiting_job_request(
+        &mut self,
+        worker: &str,
+        kind: &JobKind,
+        instance: &InstanceContext,
+    ) -> AssignOutcome {
+        let slot = crate::cluster::SlotKind::from(kind);
+        if !self.idle.is_idle(worker, slot, Instant::now()) {
+            return AssignOutcome::Nothing;
+        }
+        self.try_assign_best_pending_job_to_worker(worker, kind, instance)
+    }
+
+    fn try_assign_best_pending_job_to_worker(
         &mut self,
         worker: &str,
         kind: &JobKind,
@@ -627,7 +680,7 @@ impl SchedulerCore {
             .as_ref()
             .is_some_and(|r| r.holds(worker, slot))
         {
-            return self.idle(worker, slot, caps.as_ref());
+            return AssignOutcome::Nothing;
         }
         let policy = Arc::clone(&self.policy);
         let instance = self.with_live_transfers(instance);
@@ -661,20 +714,23 @@ impl SchedulerCore {
                 }
                 AssignOutcome::Assigned(assignment)
             }
-            None => self.idle(worker, slot, caps.as_ref()),
+            None => AssignOutcome::Nothing,
         }
     }
 
-    fn idle(
+    fn record_worker_waiting_for_job_kind_when_capabilities_accept(
         &mut self,
         worker: &str,
-        slot: crate::cluster::SlotKind,
-        caps: Option<&WorkerCaps>,
-    ) -> AssignOutcome {
-        if caps.is_some_and(|c| c.takes_jobs_of(&slot.job_kind())) {
-            self.idle.record(worker, slot, Instant::now());
+        kind: &JobKind,
+    ) {
+        if self
+            .pool
+            .worker_caps(worker)
+            .is_some_and(|c| c.takes_jobs_of(kind))
+        {
+            self.idle
+                .record(worker, crate::cluster::SlotKind::from(kind), Instant::now());
         }
-        AssignOutcome::Nothing
     }
 
     fn take_placement(
@@ -918,7 +974,6 @@ impl Actor for CoreActor {
         Ok(SchedulerCore {
             pool: WorkerPool::with_job_policy(args.job_policy),
             tracker,
-            offers: 0,
             policy: args.policy,
             idle: Default::default(),
             reservation: None,
@@ -1056,7 +1111,7 @@ impl Actor for CoreActor {
                 }
                 core.return_to_pending(&job_ids);
                 if !job_ids.is_empty() {
-                    core.bump_offers();
+                    core.send_jobs_available_signal_to_workers_with_free_capacity();
                 }
                 let _ = reply.send(jobs);
             }
@@ -1116,7 +1171,7 @@ impl Actor for CoreActor {
             SchedulerMsg::Enqueue { job_id, job, reply } => {
                 core.tracker.add_pending(job_id.clone(), job);
                 core.pool.remove_sent_candidate(&job_id);
-                core.bump_offers();
+                core.send_jobs_available_signal_to_workers_with_free_capacity();
                 let _ = reply.send(());
             }
             SchedulerMsg::EnqueueMember {
@@ -1127,7 +1182,7 @@ impl Actor for CoreActor {
             } => {
                 core.tracker.add_member(of, key.clone(), job);
                 core.pool.remove_sent_candidate(&key);
-                core.bump_offers();
+                core.send_jobs_available_signal_to_workers_with_free_capacity();
                 let _ = reply.send(());
             }
             SchedulerMsg::ClusterSnapshot { reply } => {
@@ -1156,7 +1211,7 @@ impl Actor for CoreActor {
                 reply,
             } => {
                 core.restore_placement(cluster, &seats);
-                core.bump_offers();
+                core.send_jobs_available_signal_to_workers_with_free_capacity();
                 let _ = reply.send(());
             }
             SchedulerMsg::DropWaiting { cluster, reply } => {
@@ -1202,7 +1257,7 @@ impl Actor for CoreActor {
                     .is_some_and(|r| r.cluster() == cluster)
                 {
                     core.reservation = None;
-                    core.bump_offers();
+                    core.send_jobs_available_signal_to_workers_with_free_capacity();
                 }
             }
             SchedulerMsg::Reservation { reply } => {
@@ -1254,10 +1309,17 @@ impl Actor for CoreActor {
             SchedulerMsg::Assign {
                 worker,
                 kind,
+                origin,
                 instance,
                 reply,
             } => {
-                let _ = reply.send(core.assign(&worker, &kind, &instance));
+                let outcome = match origin {
+                    JobRequestOrigin::WorkerRequestedJob => core.assign(&worker, &kind, &instance),
+                    JobRequestOrigin::ServerSessionAnswersWaitingJobRequestAfterJobsAvailableSignal => {
+                        core.assign_for_waiting_job_request(&worker, &kind, &instance)
+                    }
+                };
+                let _ = reply.send(outcome);
             }
             SchedulerMsg::RecordScores {
                 worker,
@@ -1493,7 +1555,7 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::ReOffer => {
                 if core.tracker.has_pending() {
-                    core.bump_offers();
+                    core.send_jobs_available_signal_to_workers_with_free_capacity();
                 }
             }
         }
@@ -1531,7 +1593,6 @@ mod tests {
         let mut core = SchedulerCore {
             pool: WorkerPool::new(),
             tracker: JobTracker::new(),
-            offers: 0,
             policy: gradient_pool::score::policy_for(gradient_types::ScoringPolicy::ResourceAware),
             idle: Default::default(),
             reservation: None,
@@ -1563,6 +1624,39 @@ mod tests {
             AssignOutcome::Assigned(a) => Some(a.job_id().to_owned()),
             _ => None,
         }
+    }
+
+    #[test]
+    fn assign_for_waiting_job_request_keeps_idle_slot_timestamp_and_clears_slot_when_a_job_is_assigned()
+     {
+        use crate::cluster::{IDLE_SLOT_TTL, SlotKind};
+        let mut core = core_with_a_128_gb_worker();
+        let asked_at = Instant::now() - Duration::from_secs(10);
+        core.idle.record("w1", SlotKind::Build, asked_at);
+        let answer = |core: &mut SchedulerCore| {
+            core.assign_for_waiting_job_request("w1", &JobKind::Build, &InstanceContext::default())
+        };
+
+        assert!(matches!(answer(&mut core), AssignOutcome::Nothing));
+        let expires_at = asked_at + IDLE_SLOT_TTL;
+        assert!(
+            core.idle.is_idle("w1", SlotKind::Build, expires_at),
+            "empty queue: slot from the worker's own request still present"
+        );
+        assert!(
+            !core
+                .idle
+                .is_idle("w1", SlotKind::Build, expires_at + Duration::from_secs(1)),
+            "An answer with no result can't extend the slot past 25 seconds after the worker request."
+        );
+
+        pending_heavy_build(&mut core, 1_000);
+        pending_heavy_build(&mut core, 1_000);
+        assert!(matches!(answer(&mut core), AssignOutcome::Assigned(_)));
+        assert!(
+            matches!(answer(&mut core), AssignOutcome::Nothing),
+            "no waiting request left for the second response. the first response consumed that request."
+        );
     }
 
     #[test]
@@ -1694,7 +1788,6 @@ mod tests {
         let mut core = SchedulerCore {
             pool: WorkerPool::new(),
             tracker: JobTracker::new(),
-            offers: 0,
             policy: gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
             idle: Default::default(),
             reservation: None,

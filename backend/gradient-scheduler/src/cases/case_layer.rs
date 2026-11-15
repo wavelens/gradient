@@ -126,6 +126,7 @@ async fn a_seeded_queued_build_is_pending_after_admission() {
 async fn signals_are_taken_once() {
     let case = SchedulerCase::start(shape()).await;
     case.connect(W, w_eval(), &[]).await;
+    case.idle(W, JobKind::Flake).await;
     let project = ProjectId::now_v7();
 
     for key in ["eval-1", "eval-2"] {
@@ -139,7 +140,10 @@ async fn signals_are_taken_once() {
     assert!(
         matches!(
             first.as_slice(),
-            [SessionSignal::Offers(_), SessionSignal::Offers(_)]
+            [
+                SessionSignal::JobsAvailableForRequestedKinds { .. },
+                SessionSignal::JobsAvailableForRequestedKinds { .. }
+            ]
         ),
         "first call: {first:?}"
     );

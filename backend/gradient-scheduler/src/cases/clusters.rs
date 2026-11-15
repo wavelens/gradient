@@ -23,7 +23,8 @@ use gradient_wire::types::{
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, ClusterAssignment, D, D_OUT, SchedulerCase, SlotKind, ago,
-    eval_key, failure, output_nar, w_all, w_eval, w_network_eval, without_offers,
+    eval_key, failure, output_nar, remove_jobs_available_for_requested_kinds_signals, w_all,
+    w_eval, w_network_eval,
 };
 
 const W1: &str = "w1";
@@ -174,14 +175,14 @@ async fn k02_a_planning_pass_claims_the_attempt_and_both_member_rows() {
         "after 3: cluster_job(C)"
     );
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![SessionSignal::ClusterAssign {
             job_id: eval.clone()
         }],
         "after 3: signals(W1)"
     );
     assert_eq!(
-        without_offers(case.signals(W2)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W2)),
         vec![SessionSignal::ClusterAssign {
             job_id: build.clone()
         }],
@@ -257,12 +258,12 @@ async fn k03_the_last_acceptance_starts_the_attempt_and_sends_the_roster() {
         roster: vec![peer("head", W1), peer("node", W2)],
     };
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![start.clone()],
         "after 2: signals(W1)"
     );
     assert_eq!(
-        without_offers(case.signals(W2)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W2)),
         vec![start],
         "after 2: signals(W2)"
     );
@@ -385,14 +386,14 @@ async fn k05_a_prepare_that_times_out_is_closed_by_the_next_planning_pass() {
     case.signals(W2);
     case.plan_clusters().await;
     assert_eq!(
-        without_offers(case.signals(W1)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
         vec![SessionSignal::ClusterAssign {
             job_id: eval.clone()
         }],
         "after 1: signals(W1)"
     );
     assert_eq!(
-        without_offers(case.signals(W2)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W2)),
         vec![SessionSignal::ClusterAssign {
             job_id: build.clone()
         }],
@@ -839,7 +840,7 @@ async fn k17_aborting_a_member_evaluation_aborts_the_attempt_and_the_survivors()
         EvaluationStatus::Aborted,
         "after 1: evaluation(E1).status"
     );
-    let signals = without_offers(case.signals(W1));
+    let signals = remove_jobs_available_for_requested_kinds_signals(case.signals(W1));
     assert!(
         matches!(signals.as_slice(), [SessionSignal::Abort { job_id, .. }] if *job_id == eval),
         "after 1: signals(W1) == [Abort{{eval:E1, _}}], got {signals:?}"
@@ -856,7 +857,7 @@ async fn k17_aborting_a_member_evaluation_aborts_the_attempt_and_the_survivors()
         "after 1: cluster_job(C).status"
     );
     assert_eq!(
-        without_offers(case.signals(W2)),
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W2)),
         vec![],
         "after 1: signals(W2)"
     );
@@ -1299,7 +1300,7 @@ async fn k34_a_split_cluster_retried_after_its_place_deadline_is_not_dissolved()
     case.plan_clusters().await;
     let mut seated = Vec::new();
     for worker in [W1, W2] {
-        let key = without_offers(case.signals(worker))
+        let key = remove_jobs_available_for_requested_kinds_signals(case.signals(worker))
             .into_iter()
             .find_map(|signal| match signal {
                 SessionSignal::ClusterAssign { job_id } => Some(job_id),
@@ -1528,7 +1529,7 @@ fn peer(role: &str, worker: &str) -> ClusterPeer {
 fn aborts_cluster(signals: &[SessionSignal], attempt: ClusterAttemptId) -> bool {
     let attempt = attempt.to_string();
     matches!(
-        without_offers(signals.to_vec()).as_slice(),
+        remove_jobs_available_for_requested_kinds_signals(signals.to_vec()).as_slice(),
         [SessionSignal::AbortCluster { attempt: aborted, .. }] if *aborted == attempt
     )
 }

@@ -1019,6 +1019,21 @@ impl<'a> InboundContext<'a> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
+    pub(super) async fn send_assign_job_for_available_requested_job_kind(
+        &mut self,
+        kind: JobKind,
+    ) -> bool {
+        match self
+            .scheduler
+            .fulfill_job_request_for_live_idle_slot(self.peer_id, kind)
+            .await
+        {
+            Some(assignment) => self.hand_out(assignment, None).await,
+            None => true,
+        }
+    }
+
     pub(super) async fn hand_out(
         &mut self,
         assignment: Assignment,

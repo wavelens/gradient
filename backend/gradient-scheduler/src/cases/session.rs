@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use gradient_entity::dispatched_job::{self, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
+use gradient_pool::session_port::SessionSignal;
 use gradient_wire::types::{
     BuildFailureKind, BuildMetrics, BuildOutput, BumpedInputWire, DiscoveredDerivation,
     EvalMessageLevel, EvalStatsReport, InputOutcome, JobKind, JobPhaseSpan,
@@ -226,6 +227,45 @@ impl SchedulerCase {
 
     pub async fn request_job(&self, worker: &str, kind: JobKind) -> Option<Assignment> {
         let assignment = self.scheduler.request_job(worker, kind).await?;
+        self.remember(
+            worker,
+            assignment.job_id(),
+            assignment.assignment_id(),
+            assignment.pending.clone(),
+        );
+        Some(assignment)
+    }
+
+    pub async fn answer_queued_jobs_available_for_requested_kinds_signals(
+        &self,
+        worker: &str,
+    ) -> Vec<Assignment> {
+        let mut assignments = Vec::new();
+        for signal in self.signals(worker) {
+            if let SessionSignal::JobsAvailableForRequestedKinds {
+                requested_job_kinds_with_new_work,
+            } = signal
+            {
+                for kind in requested_job_kinds_with_new_work {
+                    assignments.extend(
+                        self.fulfill_job_request_for_live_idle_slot(worker, kind)
+                            .await,
+                    );
+                }
+            }
+        }
+        assignments
+    }
+
+    pub async fn fulfill_job_request_for_live_idle_slot(
+        &self,
+        worker: &str,
+        kind: JobKind,
+    ) -> Option<Assignment> {
+        let assignment = self
+            .scheduler
+            .fulfill_job_request_for_live_idle_slot(worker, kind)
+            .await?;
         self.remember(
             worker,
             assignment.job_id(),

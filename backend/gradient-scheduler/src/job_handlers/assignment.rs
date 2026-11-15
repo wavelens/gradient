@@ -17,21 +17,46 @@ use gradient_types::*;
 use gradient_wire::types::{CandidateScore, JobKind};
 
 use crate::Scheduler;
-use crate::actor::{AssignOutcome, SchedulerMsg};
+use crate::actor::{AssignOutcome, JobRequestOrigin, SchedulerMsg};
 use crate::jobs::{Assignment, AssignmentRecord};
 
 const CLAIM_ATTEMPTS: usize = 3;
 
 impl Scheduler {
-    #[tracing::instrument(level = "debug", skip_all, fields(?kind))]
     pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
+        self.request_and_claim_assignment(worker_id, kind, JobRequestOrigin::WorkerRequestedJob)
+            .await
+    }
+
+    pub async fn fulfill_job_request_for_live_idle_slot(
+        &self,
+        worker_id: &str,
+        kind: JobKind,
+    ) -> Option<Assignment> {
+        self.request_and_claim_assignment(
+            worker_id,
+            kind,
+            JobRequestOrigin::ServerSessionAnswersWaitingJobRequestAfterJobsAvailableSignal,
+        )
+        .await
+    }
+
+    #[tracing::instrument(level = "debug", skip_all, fields(?kind, ?origin))]
+    async fn request_and_claim_assignment(
+        &self,
+        worker_id: &str,
+        kind: JobKind,
+        origin: JobRequestOrigin,
+    ) -> Option<Assignment> {
         let instance = self.scoring.instance.load_full();
         for attempt in 0..CLAIM_ATTEMPTS {
-            let a = match self.try_assign(worker_id, &kind, &instance).await {
+            let a = match self.try_assign(worker_id, &kind, origin, &instance).await {
                 AssignOutcome::Assigned(a) => a,
                 AssignOutcome::AtCapacity => return None,
                 AssignOutcome::Nothing => {
-                    self.cluster.wake.notify_one();
+                    if origin == JobRequestOrigin::WorkerRequestedJob {
+                        self.cluster.wake.notify_one();
+                    }
                     return None;
                 }
             };
@@ -113,6 +138,7 @@ impl Scheduler {
         &self,
         worker_id: &str,
         kind: &JobKind,
+        origin: JobRequestOrigin,
         instance: &Arc<gradient_pool::score::InstanceContext>,
     ) -> AssignOutcome {
         let worker = worker_id.to_owned();
@@ -122,6 +148,7 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::Assign {
                 worker,
                 kind,
+                origin,
                 instance,
                 reply,
             })
