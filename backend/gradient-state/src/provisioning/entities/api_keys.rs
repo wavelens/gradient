@@ -12,7 +12,7 @@ use anyhow::Result;
 use gradient_entity::*;
 use gradient_types::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_from, mask_from,
-    mask_with_view_project_permission,
+    mask_with_view_project_permission, superuser_permissions_mask,
 };
 use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
@@ -117,11 +117,10 @@ fn warn_if_declared_permissions_remove_use_superuser_rights(
     stored_mask: PermissionMask,
     declared_mask: PermissionMask,
 ) {
-    let use_superuser_rights = Permission::UseSuperuserRights.bit();
-    if stored_mask & use_superuser_rights != 0 && declared_mask & use_superuser_rights == 0 {
+    if stored_mask & !declared_mask & superuser_permissions_mask() != 0 {
         tracing::warn!(
             name = %state_api_key.name,
-            "Declared permissions that lack useSuperuserRights remove superuser access from this key. Add useSuperuserRights to the permissions list to keep that access."
+            "The declared permissions remove superuser rights from this key. Add readSuperuser and writeSuperuser to the permission list to keep superuser access."
         );
     }
 }

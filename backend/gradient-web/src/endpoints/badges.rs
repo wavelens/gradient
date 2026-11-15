@@ -142,6 +142,7 @@ async fn resolve_badge_user(
                     jwt_secret,
                     last_used_stamps,
                     tok,
+                    &http::Method::GET,
                     client_ip,
                 )
                 .await?;

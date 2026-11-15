@@ -2260,7 +2260,7 @@ export interface PendingUserDecisionsResponse {
   team_requests: TeamGrantRequestInboxEntry[];
 }
 
-export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks" | "createProject" | "useSuperuserRights";
+export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks" | "createProject" | "readSuperuser" | "writeSuperuser";
 
 export interface PermissionEntry {
   id: string;

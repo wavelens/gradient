@@ -10,7 +10,7 @@ A Nix setup can declare users, projects, tasks and caches under `services.gradie
 **Requirements:**
 
 - A running instance, see [Quick Start](../get-started/quick-start.md)
-- A superuser's API key from **Settings -> API Keys** with every permission, including `useSuperuserRights`, and no pin to a project or cache.
+- A superuser's API key from **Settings -> API Keys** with every permission, including `readSuperuser` and `writeSuperuser`, and no pin to a project or cache.
 
 ## 1. Export the Running State
 
@@ -50,7 +50,7 @@ The NixOS build runs `state.validate` on the state. This check is on by default.
     `state.delete` is on by default. Once users, projects or caches disappear from the configuration, Gradient removes them from the database.
 
 !!! note
-    Upgrading from a release without `useSuperuserRights`: API keys from `services.gradient.state` that relied on listing every permission lose superuser access on the next start. Add `useSuperuserRights` to their `permissions`. The server logs a warning for each such key.
+    Upgrade from a release without superuser permissions for API keys. `services.gradient.state` API keys that relied on enumerating all permissions lose superuser access on the next startup. Add `readSuperuser` and `writeSuperuser` to their `permissions`. Logs on the server contain a warning for each such key.
 
 ## Verify Deployment
 

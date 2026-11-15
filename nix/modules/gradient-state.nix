@@ -1197,7 +1197,7 @@
         default = [ ];
         example = [ "viewProject" "triggerEvaluation" ];
         description = ''
-          The key can grant permissions as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask`, or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. All of them appear in `GET /user/keys/permissions`. Permission sets in Gradient always include `viewProject`. The key can create projects through `createProject`, if `project = null` is present and not otherwise. The key can use the owner's superuser rights through `useSuperuserRights` alone. Both `project = null` on the key and `superuser = true` on the owner are necessary for that use.
+          The key can grant permissions as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask`, or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. All of them appear in `GET /user/keys/permissions`. Permission sets in Gradient always include `viewProject`. The key can create projects through `createProject`, if `project = null` is present and not otherwise. A key can use the superuser permissions of the owner through `readSuperuser` for GET, HEAD, and OPTIONS requests. A key can use those permissions through `writeSuperuser` for all other requests. Both `project = null` on the key and `superuser = true` on the owner are necessary for that use.
         '';
       };
 

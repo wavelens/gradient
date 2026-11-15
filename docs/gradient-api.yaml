@@ -395,7 +395,7 @@ paths:
           $ref: '#/components/responses/Error'
       security: []
   /api/v1/admin/github-app/credentials:
-    get:
+    post:
       tags:
       - admin
       summary: Fetch pending GitHub App credentials
@@ -13794,7 +13794,7 @@ paths:
       tags:
       - user
       summary: Create API key
-      description: 'Create a new API key. The caller can get the full key (with the `GRAD` prefix) once. A second request can''t retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to expire the key automatically. Omit this field to create a key with no expiry. Project and server-wide permissions go in `permissions`. Cache permissions go in `cache_permissions`. A key pinned to a project can hold only `permissions`. A key pinned to a cache can hold only `cache_permissions`. An unpinned key can hold both. No key can exceed the permissions of its owner. A key pinned to a project or cache can grant only the caller''s permissions at that location. A caller in a project subscribed to a cache is a read-only member of that cache. That caller can create a read-only key for the cache. Grant `viewProject` to all keys with project permissions. Use `createProject` only for unpinned keys with an owner who can create projects. Use `useSuperuserRights` only for unpinned keys whose owner is a superuser. That key can then use the superuser permissions of that owner.'
+      description: 'Create a new API key. The caller can get the full key (with the `GRAD` prefix) once. A second request can''t retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to expire the key automatically. Omit this field to create a key with no expiry. Project and server-wide permissions go in `permissions`. Cache permissions go in `cache_permissions`. A key pinned to a project can hold only `permissions`. A key pinned to a cache can hold only `cache_permissions`. An unpinned key can hold both. No key can exceed the permissions of its owner. A key pinned to a project or cache can grant only the caller''s permissions at that location. A caller in a project subscribed to a cache is a read-only member of that cache. That caller can create a read-only key for the cache. Grant `viewProject` to all keys with project permissions. Use `createProject` only for unpinned keys with an owner who can create projects. Only unpinned keys with a superuser owner use `readSuperuser` and `writeSuperuser`. The first can let the key use the owner''s superuser permissions on GET, HEAD, and OPTIONS requests. The second can let the key use those permissions on all other requests.'
       operationId: createUserKey
       requestBody:
         content:
@@ -13858,8 +13858,8 @@ paths:
       - user
       summary: List API-key permission catalogue
       description: |-
-        Returns the full set of capabilities a user-managed API key may grant.
-        Used by the create / edit dialog to populate the permission checkbox list. `server_wide_permissions` lists `useSuperuserRights` only for superusers.
+        Return the full set of features that user-managed API keys can grant.
+        Create/edit dialogs use this list to fill the permission checkboxes. Only superusers see `readSuperuser` and `writeSuperuser` in `server_wide_permissions`.
       operationId: getUserKeyPermissions
       responses:
         '200':
@@ -22344,7 +22344,8 @@ components:
       - manageTriggers
       - manageWebhooks
       - createProject
-      - useSuperuserRights
+      - readSuperuser
+      - writeSuperuser
     PermissionEntry:
       type: object
       required:

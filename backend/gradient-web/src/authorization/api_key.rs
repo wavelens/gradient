@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::permissions::{Permission, PermissionMask, mask_grants};
+use crate::permissions::{
+    Permission, PermissionMask, mask_grants, superuser_permission_for_http_method,
+};
+use axum::http::Method;
 use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 use gradient_types::ids::CacheId;
 use gradient_types::{
@@ -21,10 +24,12 @@ pub struct ApiKeyContext {
 }
 
 impl ApiKeyContext {
-    pub fn has_full_account_access(&self) -> bool {
-        self.project.is_none()
-            && self.cache_pin.is_none()
-            && mask_grants(self.mask, Permission::UseSuperuserRights)
+    pub fn may_use_owner_superuser_rights_for_method(&self, method: &Method) -> bool {
+        self.unpinned_key_has_superuser_permission(superuser_permission_for_http_method(method))
+    }
+
+    pub fn unpinned_key_has_superuser_permission(&self, permission: Permission) -> bool {
+        self.project.is_none() && self.cache_pin.is_none() && mask_grants(self.mask, permission)
     }
 
     pub fn may_create_projects(&self) -> bool {
@@ -134,10 +139,16 @@ impl DecodedRequest {
         }
     }
 
-    pub fn user_with_superuser_allowed_for_credential(&self, mut user: MUser) -> MUser {
+    pub fn user_with_superuser_allowed_for_credential(
+        &self,
+        mut user: MUser,
+        method: &Method,
+    ) -> MUser {
         user.superuser &= match self {
             DecodedRequest::Session { .. } => true,
-            DecodedRequest::ApiKey { context, .. } => context.has_full_account_access(),
+            DecodedRequest::ApiKey { context, .. } => {
+                context.may_use_owner_superuser_rights_for_method(method)
+            }
             DecodedRequest::Job { .. } => false,
         };
         user
@@ -202,47 +213,77 @@ mod tests {
             },
         };
 
-        assert!(
-            !job.user_with_superuser_allowed_for_credential(superuser())
-                .superuser
-        );
+        for method in [Method::GET, Method::POST] {
+            assert!(
+                !job.user_with_superuser_allowed_for_credential(superuser(), &method)
+                    .superuser
+            );
+        }
     }
 
-    fn keeps_superuser(key: ApiKeyContext) -> bool {
+    fn keeps_superuser(key: ApiKeyContext, method: Method) -> bool {
         DecodedRequest::ApiKey {
             key: ApiId::now_v7(),
             user_id: UserId::now_v7(),
             context: key,
         }
-        .user_with_superuser_allowed_for_credential(superuser())
+        .user_with_superuser_allowed_for_credential(superuser(), &method)
         .superuser
     }
 
-    #[test]
-    fn an_api_key_with_use_superuser_rights_keeps_owner_superuser() {
-        assert!(keeps_superuser(ApiKeyContext {
-            mask: Permission::UseSuperuserRights.bit() | Permission::ViewProject.bit(),
+    fn key_with(permission: Permission) -> ApiKeyContext {
+        ApiKeyContext {
+            mask: permission.bit() | Permission::ViewProject.bit(),
             ..full_key()
-        }));
+        }
+    }
+
+    #[test]
+    fn read_only_superuser_api_key_keeps_superuser_on_get_and_head_but_loses_it_on_post_and_delete()
+    {
+        let key = key_with(Permission::ReadSuperuser);
+        assert!(keeps_superuser(key.clone(), Method::GET));
+        assert!(keeps_superuser(key.clone(), Method::HEAD));
+        assert!(!keeps_superuser(key.clone(), Method::POST));
+        assert!(!keeps_superuser(key, Method::DELETE));
+    }
+
+    #[test]
+    fn api_key_with_only_write_superuser_permission_keeps_superuser_on_post_and_delete_but_not_get()
+    {
+        let key = key_with(Permission::WriteSuperuser);
+        assert!(keeps_superuser(key.clone(), Method::POST));
+        assert!(keeps_superuser(key.clone(), Method::DELETE));
+        assert!(!keeps_superuser(key, Method::GET));
     }
 
     #[test]
     fn api_key_with_all_project_permissions_without_superuser_rights_loses_owner_superuser_flag() {
-        assert!(!keeps_superuser(ApiKeyContext {
+        let key = ApiKeyContext {
             mask: admin_mask() | Permission::CreateProject.bit(),
             ..full_key()
-        }));
+        };
+        assert!(!keeps_superuser(key.clone(), Method::GET));
+        assert!(!keeps_superuser(key, Method::POST));
     }
 
     #[test]
     fn pinned_api_key_loses_superuser_even_with_use_superuser_rights() {
-        assert!(!keeps_superuser(ApiKeyContext {
-            cache_pin: Some(CacheId::now_v7()),
-            ..full_key()
-        }));
-        assert!(!keeps_superuser(ApiKeyContext {
-            project: Some(ProjectId::now_v7()),
-            ..full_key()
-        }));
+        for method in [Method::GET, Method::POST] {
+            assert!(!keeps_superuser(
+                ApiKeyContext {
+                    cache_pin: Some(CacheId::now_v7()),
+                    ..full_key()
+                },
+                method.clone(),
+            ));
+            assert!(!keeps_superuser(
+                ApiKeyContext {
+                    project: Some(ProjectId::now_v7()),
+                    ..full_key()
+                },
+                method,
+            ));
+        }
     }
 }

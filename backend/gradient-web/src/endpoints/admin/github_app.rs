@@ -137,7 +137,7 @@ pub async fn callback(
 }
 
 #[utoipa::path(
-    get,
+    post,
     path = "/github-app/credentials",
     operation_id = "getGithubAppCredentials",
     tag = "admin",

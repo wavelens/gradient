@@ -8,7 +8,16 @@ pub use gradient_types::permissions::*;
 
 use crate::error::WebResult;
 use crate::refusal::{Refusal, RefusalStatus};
+use axum::http::Method;
 use serde::Serialize;
+
+pub fn superuser_permission_for_http_method(method: &Method) -> Permission {
+    if method.is_safe() {
+        Permission::ReadSuperuser
+    } else {
+        Permission::WriteSuperuser
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 enum PermissionRefusal {
@@ -75,7 +84,7 @@ pub fn available_server_permissions(signed_in_user_is_superuser: bool) -> Vec<Pe
         .iter()
         .copied()
         .filter(|p| p.is_server_wide())
-        .filter(|p| signed_in_user_is_superuser || *p != Permission::UseSuperuserRights)
+        .filter(|p| signed_in_user_is_superuser || !mask_grants(superuser_permissions_mask(), *p))
         .map(PermissionEntry::from)
         .collect()
 }
