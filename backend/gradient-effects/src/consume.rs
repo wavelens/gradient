@@ -9,6 +9,7 @@
 //! branch. A log finalize is replacing the chunk index.
 
 use anyhow::{Context, Result, anyhow};
+use gradient_ci::CiContext;
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
 use gradient_ci::pull_request_summary::update_pull_request_summary_on_terminal;
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
@@ -18,7 +19,9 @@ use gradient_ci::task_commit_status_posting::{
     post_commit_status_reports_for_task_check_event_and_record_attempt,
     task_should_post_commit_statuses,
 };
-use gradient_db::deliveries::pending::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
+use gradient_db::deliveries::pending::{
+    Outcome, PendingDelivery, PendingDeliveryKind, enqueue, enqueue_or_increment_revision,
+};
 use gradient_db::deliveries::trigger_fire::TriggerFire;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
@@ -39,7 +42,10 @@ pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
         PendingDeliveryKind::WebhookDelivery => deliver_webhook(ctx, row).await,
         PendingDeliveryKind::TriggerFire => fire_trigger(ctx, row).await,
         PendingDeliveryKind::EvalCacheCompact => compact_eval_cache(ctx, row).await,
-        PendingDeliveryKind::TaskEventCommitStatusPost => post_commit_status(ctx, row).await,
+        PendingDeliveryKind::TaskEventCommitStatusPost => {
+            requeue_legacy_task_event_commit_status_post_as_check(ctx, row).await
+        }
+        PendingDeliveryKind::CommitStatusCheckDelivery => post_commit_status(ctx, row).await,
     };
 
     match result {
@@ -112,14 +118,14 @@ fn plan_deliveries(
     envelope: &Envelope,
     actions: &[MTaskAction],
     hooks: &[MWebhook],
-    commit_status_task: Option<TaskId>,
+    commit_status: Option<&(TaskId, CommitStatusCheckWithIds)>,
     parent: &str,
 ) -> Vec<(PendingDeliveryKind, String, JsonValue)> {
     let name = envelope.event.name();
-    let to_commit_status = commit_status_task.map(|task| {
+    let to_commit_status = commit_status.map(|(task, check)| {
         (
-            PendingDeliveryKind::TaskEventCommitStatusPost,
-            format!("{task}:{name}:{parent}"),
+            PendingDeliveryKind::CommitStatusCheckDelivery,
+            task_commit_status_check_delivery_queue_key(*task, check),
             serde_json::json!({
                 "task": task,
                 "event": name,
@@ -171,18 +177,20 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
         .filter(|h| gradient_ci::webhooks::routes_to(h, &owner, &name, envelope.event.personal()))
         .collect();
 
-    let commit_status_task = match owner.task {
-        Some(task) if posts_commit_status_for(&name, &envelope.event.content()) => {
-            load_task_git_host_connection(&ci, task)
-                .await
-                .context("load the task's git host connection")?
-                .filter(|(task, connection)| task_should_post_commit_statuses(task, connection))
-                .map(|(task, _)| task.id)
+    let commit_status = match owner.task {
+        Some(task) if check_context_kind_for_event(&name).is_some() => {
+            load_task_commit_status_check_for_event_name_and_content(
+                &ci,
+                task,
+                &name,
+                &envelope.event.content(),
+            )
+            .await?
         }
         _ => None,
     };
 
-    let plan = plan_deliveries(envelope, &actions, &hooks, commit_status_task, parent);
+    let plan = plan_deliveries(envelope, &actions, &hooks, commit_status.as_ref(), parent);
     if plan.is_empty() {
         return Ok(());
     }
@@ -193,9 +201,13 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
         .await
         .context("begin the delivery expansion")?;
     for (kind, key, payload) in plan {
-        enqueue(&txn, kind, key, payload)
-            .await
-            .context("enqueue a delivery")?;
+        match kind {
+            PendingDeliveryKind::CommitStatusCheckDelivery => {
+                enqueue_or_increment_revision(&txn, kind, key, payload).await
+            }
+            _ => enqueue(&txn, kind, key, payload).await,
+        }
+        .context("enqueue a delivery")?;
     }
     txn.commit()
         .await
@@ -204,20 +216,68 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
     Ok(())
 }
 
-fn posts_commit_status_for(event: &str, content: &JsonValue) -> bool {
-    check_context_kind_for_event(event).is_some()
-        && content.get("evaluation_kind").and_then(|v| v.as_str()) != Some("input_update")
+async fn load_task_commit_status_check_for_event_name_and_content(
+    ci: &CiContext,
+    task: TaskId,
+    event: &str,
+    content: &JsonValue,
+) -> Result<Option<(TaskId, CommitStatusCheckWithIds)>> {
+    let Some((task, _)) = load_task_git_host_connection(ci, task)
+        .await
+        .context("load the task's git host connection")?
+        .filter(|(task, connection)| task_should_post_commit_statuses(task, connection))
+    else {
+        return Ok(None);
+    };
+    Ok(
+        commit_status_check_updated_by_event_name_and_content(event, content)?
+            .map(|check| (task.id, check)),
+    )
 }
 
-async fn post_commit_status(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
+fn commit_status_check_updated_by_event_name_and_content(
+    event: &str,
+    content: &JsonValue,
+) -> Result<Option<CommitStatusCheckWithIds>> {
+    if content.get("evaluation_kind").and_then(|v| v.as_str()) == Some("input_update") {
+        return Ok(None);
+    }
+    CommitStatusCheckWithIds::commit_status_check_from_event_name_and_content(event, content)
+}
+
+fn task_commit_status_check_delivery_queue_key(
+    task: TaskId,
+    check: &CommitStatusCheckWithIds,
+) -> String {
+    match check {
+        CommitStatusCheckWithIds::Approval { evaluation } => {
+            format!("{task}:approval:{evaluation}")
+        }
+        CommitStatusCheckWithIds::Evaluation { evaluation } => {
+            format!("{task}:evaluation:{evaluation}")
+        }
+        CommitStatusCheckWithIds::Build { build_job, .. } => format!("{task}:build:{build_job}"),
+        CommitStatusCheckWithIds::ExecJob { job, .. } => format!("{task}:exec_job:{job}"),
+    }
+}
+
+fn read_task_event_and_content_from_payload(
+    row: &PendingDelivery,
+) -> Result<(TaskId, &str, JsonValue)> {
     let task = TaskId::new(uuid_field(row, "task")?);
     let event = field(row, "event")?
         .as_str()
         .ok_or_else(|| anyhow!("pending delivery payload event is not a string"))?;
-    let envelope = field(row, "envelope")?;
-    let content = envelope.get("content").cloned().unwrap_or_default();
-    let Some(check) =
-        CommitStatusCheckWithIds::commit_status_check_from_event_name_and_content(event, &content)?
+    let content = field(row, "envelope")?
+        .get("content")
+        .cloned()
+        .unwrap_or_default();
+    Ok((task, event, content))
+}
+
+async fn post_commit_status(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
+    let (task, event, content) = read_task_event_and_content_from_payload(row)?;
+    let Some(check) = commit_status_check_updated_by_event_name_and_content(event, &content)?
     else {
         return Ok(());
     };
@@ -228,6 +288,25 @@ async fn post_commit_status(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<(
         &check,
     )
     .await
+}
+
+async fn requeue_legacy_task_event_commit_status_post_as_check(
+    ctx: &EffectsCtx,
+    row: &PendingDelivery,
+) -> Result<()> {
+    let (task, event, content) = read_task_event_and_content_from_payload(row)?;
+    let Some(check) = commit_status_check_updated_by_event_name_and_content(event, &content)?
+    else {
+        return Ok(());
+    };
+    enqueue_or_increment_revision(
+        &ctx.db().worker_db,
+        PendingDeliveryKind::CommitStatusCheckDelivery,
+        task_commit_status_check_delivery_queue_key(task, &check),
+        row.payload.clone(),
+    )
+    .await
+    .context("requeue commit status deliveries from an old instance per check")
 }
 
 async fn live_webhook<C: ConnectionTrait>(
@@ -327,7 +406,7 @@ mod tests {
     use super::*;
     use gradient_db::deliveries::pending::PendingDelivery;
     use gradient_fixtures::mock::mock_db;
-    use gradient_types::ids::PendingDeliveryId;
+    use gradient_types::ids::{BuildJobId, EvaluationId, PendingDeliveryId};
 
     fn row(payload: JsonValue) -> PendingDelivery {
         PendingDelivery {
@@ -438,19 +517,139 @@ mod tests {
             id: WebhookId::now_v7(),
             ..Default::default()
         }];
-        let plan = plan_deliveries(&env, &actions, &hooks, Some(TaskId::now_v7()), "parent");
+        let commit_status_check_with_task_id =
+            commit_status_check_updated_by_event_name_and_content(
+                &env.event.name(),
+                &env.event.content(),
+            )
+            .unwrap()
+            .map(|check| (TaskId::now_v7(), check));
+        let plan = plan_deliveries(
+            &env,
+            &actions,
+            &hooks,
+            commit_status_check_with_task_id.as_ref(),
+            "parent",
+        );
         let kinds: Vec<_> = plan.iter().map(|(kind, _, _)| *kind).collect();
         assert_eq!(
             kinds,
             vec![
                 PendingDeliveryKind::ActionDelivery,
                 PendingDeliveryKind::WebhookDelivery,
-                PendingDeliveryKind::TaskEventCommitStatusPost
+                PendingDeliveryKind::CommitStatusCheckDelivery
             ]
         );
         assert!(
-            plan.iter()
+            plan[..2]
+                .iter()
                 .all(|(_, key, _)| key.ends_with(":build.completed:parent"))
+        );
+    }
+
+    fn planned_delivery_queue_keys_for_kind(
+        plan: &[(PendingDeliveryKind, String, JsonValue)],
+        kind: PendingDeliveryKind,
+    ) -> Vec<String> {
+        plan.iter()
+            .filter(|(planned, _, _)| *planned == kind)
+            .map(|(_, key, _)| key.clone())
+            .collect()
+    }
+
+    #[test]
+    fn build_queued_and_completed_plan_same_commit_status_queue_key_but_different_action_delivery_keys()
+     {
+        let task = TaskId::now_v7();
+        let actions = vec![MTaskAction {
+            id: TaskActionId::now_v7(),
+            ..Default::default()
+        }];
+        let build = gradient_types::events::build::Reported {
+            build_id: BuildJobId::now_v7(),
+            evaluation_id: EvaluationId::now_v7(),
+            ..Default::default()
+        };
+        let delivery_plan_for_build_status = |status| {
+            let env = Envelope::now(
+                gradient_types::events::build::Reported {
+                    status,
+                    ..build.clone()
+                }
+                .into(),
+            );
+            let check = commit_status_check_updated_by_event_name_and_content(
+                &env.event.name(),
+                &env.event.content(),
+            )
+            .unwrap()
+            .map(|check| (task, check));
+            plan_deliveries(&env, &actions, &[], check.as_ref(), "parent")
+        };
+
+        let queued = delivery_plan_for_build_status(1);
+        let completed = delivery_plan_for_build_status(3);
+
+        let status_keys = planned_delivery_queue_keys_for_kind(
+            &queued,
+            PendingDeliveryKind::CommitStatusCheckDelivery,
+        );
+        assert_eq!(status_keys.len(), 1);
+        assert_eq!(
+            status_keys,
+            planned_delivery_queue_keys_for_kind(
+                &completed,
+                PendingDeliveryKind::CommitStatusCheckDelivery
+            )
+        );
+        assert_ne!(
+            planned_delivery_queue_keys_for_kind(&queued, PendingDeliveryKind::ActionDelivery),
+            planned_delivery_queue_keys_for_kind(&completed, PendingDeliveryKind::ActionDelivery)
+        );
+    }
+
+    #[test]
+    fn evaluation_action_required_and_queued_map_to_checks_but_input_update_maps_to_none() {
+        let evaluation_id = EvaluationId::now_v7();
+        let build_evaluation_event_and_return_commit_status_check =
+            |phase, evaluation_kind: Option<&str>| {
+                let env = Envelope::now(
+                    evaluation::Reported {
+                        evaluation_id,
+                        phase,
+                        evaluation_kind: evaluation_kind.map(str::to_owned),
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+                commit_status_check_updated_by_event_name_and_content(
+                    &env.event.name(),
+                    &env.event.content(),
+                )
+                .unwrap()
+            };
+
+        assert_eq!(
+            build_evaluation_event_and_return_commit_status_check(
+                evaluation::Phase::ActionRequired,
+                None
+            ),
+            Some(CommitStatusCheckWithIds::Approval {
+                evaluation: evaluation_id
+            })
+        );
+        assert_eq!(
+            build_evaluation_event_and_return_commit_status_check(evaluation::Phase::Queued, None),
+            Some(CommitStatusCheckWithIds::Evaluation {
+                evaluation: evaluation_id
+            })
+        );
+        assert_eq!(
+            build_evaluation_event_and_return_commit_status_check(
+                evaluation::Phase::Queued,
+                Some("input_update")
+            ),
+            None
         );
     }
 
@@ -487,14 +686,6 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(posts_commit_status_for(
-            "evaluation.completed",
-            &env.event.content()
-        ));
-        assert!(!posts_commit_status_for(
-            "evaluation.completed",
-            &serde_json::json!({ "evaluation_kind": "input_update" })
-        ));
         assert!(task_should_post_commit_statuses(
             &build_task_with_report_status(true),
             &make_git_host_connection_with_reports_status(true)
@@ -510,7 +701,7 @@ mod tests {
         assert!(
             plan_deliveries(&env, &[], &[], None, "parent")
                 .iter()
-                .all(|(kind, _, _)| *kind != PendingDeliveryKind::TaskEventCommitStatusPost)
+                .all(|(kind, _, _)| *kind != PendingDeliveryKind::CommitStatusCheckDelivery)
         );
     }
 }

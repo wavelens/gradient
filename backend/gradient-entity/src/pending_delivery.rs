@@ -44,6 +44,8 @@ pub enum PendingDeliveryKind {
     EvalCacheCompact = 7,
     #[sea_orm(num_value = 8)]
     TaskEventCommitStatusPost = 8,
+    #[sea_orm(num_value = 9)]
+    CommitStatusCheckDelivery = 9,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
