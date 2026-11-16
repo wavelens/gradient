@@ -8133,6 +8133,106 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/git/https-credentials:
+    get:
+      tags:
+      - projects
+      summary: List Credentials for Git over HTTPS
+      description: List the HTTPS credentials for cloning git repositories in this project, one per host. Read the host, user name and last modified time from the response. Passwords never appear in the response.
+      operationId: listProjectGitHttpsCredentials
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Saved Credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitHttpsCredentialResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - projects
+      summary: Save Credentials for Git over HTTPS
+      description: Create or replace the credentials for a host. Use a bare hostname for the host, with an optional port (for example `github.com` or `git.example:8443`). IPv6 addresses are invalid. Gradient does password encryption before storage. These credentials apply to every clone of a repository over HTTPS from that host. Gradient does not accept an empty username or password. Requests need the `manageSshKey` permission on the project. Projects in declarative state reject this request.
+      operationId: saveProjectGitHttpsCredential
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveGitHttpsCredentialRequestBody'
+        required: true
+      responses:
+        '200':
+          description: Credentials saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHttpsCredentialResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/git/https-credentials/{credential}:
+    delete:
+      tags:
+      - projects
+      summary: Delete credentials for Git over HTTPS
+      description: Delete the stored HTTPS credentials. Clones from that host then run without credentials. The `manageSshKey` permission on the project is necessary.
+      operationId: deleteProjectGitHttpsCredential
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: credential
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Credentials deleted
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/invitations:
     get:
       tags:
@@ -20171,6 +20271,23 @@ components:
           type: boolean
         can_manage:
           type: boolean
+    GitHttpsCredentialResponse:
+      type: object
+      required:
+      - id
+      - host
+      - username
+      - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/ProjectGitHttpsCredentialId'
+        host:
+          type: string
+        username:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
     GitSshHostKeyResponse:
       type: object
       required:
@@ -22483,6 +22600,9 @@ components:
           - integer
           - 'null'
           format: int64
+    ProjectGitHttpsCredentialId:
+      type: string
+      format: uuid
     ProjectId:
       type: string
       format: uuid
@@ -23280,6 +23400,19 @@ components:
             type: integer
             format: int32
             minimum: 0
+    SaveGitHttpsCredentialRequestBody:
+      type: object
+      required:
+      - host
+      - username
+      - password
+      properties:
+        host:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
     SaveHostKeyRequestBody:
       type: object
       required:
