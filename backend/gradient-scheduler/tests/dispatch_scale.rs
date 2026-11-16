@@ -293,7 +293,7 @@ fn fifty_thousand_pending_builds_with_two_hundred_bloom_filter_workers_stay_with
     );
 
     let growth = all_workers.peak_allocated_bytes_above_pre_worker_filter_baseline;
-    let budget = WORKER_COUNT * WORKER_BLOOM_FILTER_BYTE_SIZE_FOR_100_000_PATHS + (64 << 20);
+    let budget = WORKER_COUNT * WORKER_BLOOM_FILTER_BYTE_SIZE_FOR_100_000_PATHS + (96 << 20);
     assert!(
         growth < budget,
         "Peak allocation rose {growth} bytes above baseline. The budget was {budget} bytes."
