@@ -218,21 +218,29 @@ pub async fn settle_after_delete(
 }
 
 fn evaluations_to_gc(newest_first: &[EvaluationStatus], keep: usize) -> Vec<usize> {
-    let mut terminal = (0..newest_first.len()).filter(|&i| newest_first[i].is_terminal());
-    // Cleanup jobs never remove the latest terminal evaluation, even when it failed. The task page can still show the latest result.
-    if keep == 0 || terminal.next().is_none() {
+    let terminal: Vec<usize> = (0..newest_first.len())
+        .filter(|&i| newest_first[i].is_terminal())
+        .collect();
+    let excess = terminal.len().saturating_sub(keep);
+    if keep == 0 || excess == 0 {
         return Vec::new();
     }
 
-    let (completed, unsuccessful): (Vec<usize>, Vec<usize>) =
-        terminal.partition(|&i| newest_first[i] == EvaluationStatus::Completed);
-    let mut room = keep - 1;
-    let mut delete = Vec::new();
-    for older in [completed, unsuccessful] {
-        let kept = older.len().min(room);
-        room -= kept;
-        delete.extend_from_slice(&older[kept..]);
-    }
+    let newest_completed = terminal
+        .iter()
+        .copied()
+        .find(|&i| newest_first[i] == EvaluationStatus::Completed);
+    let (aborted, rest): (Vec<usize>, Vec<usize>) = terminal
+        .into_iter()
+        .rev()
+        .partition(|&i| newest_first[i] == EvaluationStatus::Aborted);
+    let mut delete: Vec<usize> = aborted
+        .into_iter()
+        .chain(rest)
+        .take(excess)
+        // Keep the newest evaluation of a task and its newest completed evaluation past `keep`. A pointer to the last evaluation of the task can remain valid. Successful results remain visible.
+        .filter(|&i| i != 0 && Some(i) != newest_completed)
+        .collect();
 
     delete.sort_unstable();
     delete
@@ -282,30 +290,39 @@ mod tests {
 
     #[test]
     fn an_active_evaluation_neither_blocks_gc_nor_counts_toward_keep() {
-        assert_eq!(gc(&[Building, Completed, Failed, Completed], 2), vec![2]);
+        assert_eq!(gc(&[Building, Completed, Failed, Completed], 2), vec![3]);
         assert_eq!(gc(&[Completed, Building, Completed, Completed], 2), vec![3]);
     }
 
     #[test]
-    fn failed_and_aborted_evaluations_go_before_completed_ones() {
+    fn aborted_evaluations_are_deleted_before_completed_or_failed_ones_over_keep_evaluations() {
         assert_eq!(
             gc(&[Completed, Failed, Aborted, Completed, Completed], 3),
-            vec![1, 2]
+            vec![2, 4]
         );
+        assert_eq!(gc(&[Building, Aborted, Completed], 1), vec![1]);
     }
 
     #[test]
-    fn the_newest_terminal_evaluation_is_kept_even_when_it_failed() {
-        assert_eq!(gc(&[Failed, Completed, Completed, Failed], 2), vec![2, 3]);
-        assert_eq!(gc(&[Building, Aborted, Completed], 1), vec![2]);
-    }
-
-    #[test]
-    fn failures_fill_the_rest_when_too_few_evaluations_completed() {
+    fn oldest_finished_evaluations_are_deleted_first() {
+        assert_eq!(gc(&[Completed, Failed, Completed, Failed], 2), vec![2, 3]);
         assert_eq!(
-            gc(&[Failed, Aborted, Completed, Failed, Failed], 4),
-            vec![4]
+            gc(&[Failed, Aborted, Completed, Failed, Failed], 3),
+            vec![1, 4]
         );
+    }
+
+    #[test]
+    fn newest_successful_evaluation_is_kept_even_when_outside_the_keep_limit() {
+        assert!(gc(&[Failed, Completed], 1).is_empty());
+        assert_eq!(gc(&[Failed, Failed, Completed, Completed], 2), vec![3]);
+        assert_eq!(gc(&[Failed, Aborted, Failed], 1), vec![1, 2]);
+    }
+
+    #[test]
+    fn newest_aborted_evaluation_is_kept_even_when_outside_the_keep_limit() {
+        assert_eq!(gc(&[Aborted, Failed, Failed], 1), vec![2]);
+        assert_eq!(gc(&[Aborted, Aborted, Completed], 1), vec![1]);
     }
 
     #[test]
@@ -320,7 +337,7 @@ mod tests {
             .map(|i| task[i])
             .collect();
 
-        assert_eq!(survivors, vec![Building, Failed, Completed, Completed]);
+        assert_eq!(survivors, vec![Building, Failed, Failed, Failed, Completed]);
     }
 
     #[test]

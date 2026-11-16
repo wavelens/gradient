@@ -185,5 +185,5 @@ Gradient prevent an unbacked terminal-success output instead of repairing one. O
 | Orphan NAR files | Stored NARs referenced by no row, probed in batches of 5000 and older than `gc.narUploadGraceHours` (24) |
 
 - Keep the `.drv` and input-source NARs of any derivation with a shared build, regardless of status. Only an evaluation can re-push them.
-- Active evaluations never block GC for their own task. GC can never delete them. They never count toward `keep_evaluations`. GC keeps the newest terminal evaluation even when it failed. Completed evaluations take the rest of `keep_evaluations` before `Failed` or `Aborted` ones.
+- Active evaluations never block GC for the task that owns them. The GC pass can never delete them. These evaluations never count toward `keep_evaluations`. The first GC step is deletion of `Aborted` evaluations. The second GC step is deletion of the oldest terminal evaluations. The latest evaluation of a task and its latest `Completed` evaluation remain even if they exceed `keep_evaluations`.
 - Inside the graph writer, always re-check roots created since the Derivation GC scan. Un-walk surviving derivations that need a deleted derivation.

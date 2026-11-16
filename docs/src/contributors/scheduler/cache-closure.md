@@ -97,7 +97,7 @@ The `cache-maintenance` pass in `gradient-cache/src/schedule.rs` runs on a sched
 
 | Pass | Reclaimed | Bound |
 |---|---|---|
-| Evaluation GC | Terminal evaluations beyond the task's `keep_evaluations`. Failed and aborted ones go before completed ones | The newest terminal evaluation stays. Active evaluations stay and never count toward the limit |
+| Evaluation GC | Finished evaluations past task `keep_evaluations`. Cancelled first, then oldest | The latest evaluation of the task and the latest successful evaluation remain. Active evaluations remain and don't count toward the limit |
 | Derivation GC | `derivation` rows outside the keep-set, their attempt logs | Created before `gc.orphanDerivationHours` (24) |
 | Stale-path eviction | Each cache's `cached_path_signature` rows on paths outside `live_cached_paths_cte`, then `cached_path` rows left without a claim and their objects | That cache's last fetch (or the claim's creation) older than `max(gc.narTtlHours, gc.narUploadGraceHours)` (336 h). Claims with `pinned_at` set don't expire, so pinned paths stay valid. |
 | Zombie purge | Confirmed rows with the object missing from storage | Storage probe per row. A probe error will preserve the row |

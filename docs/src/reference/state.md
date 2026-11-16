@@ -88,7 +88,7 @@ services.gradient.state = {
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |
 | `git_host_connection` | null or string | `null` | Name of the Git host connection for the task. A reference can check the task project first, then the owner team of the project, then the instance. The triggers for pushes and pull requests and `report_status` use this name. |
-| `keep_evaluations` | int | `30` | Count of finished evaluations to keep for metrics and history, regardless of result. Active evaluations don't block GC and don't count toward this number. The most recent finished evaluation stays, even a failed one. Remaining slots go to completed evaluations before failed or aborted ones. Set this number to at least 1 and at most `eval.maxKeep`. |
+| `keep_evaluations` | int | `30` | Finished evaluations stay regardless of result, up to this number. Active evaluations don't block GC and don't count toward this number. Aborted evaluations go first during GC, then the oldest evaluations. The most recent evaluation and the most recent completed evaluation always stay, even above this number. Set this number in the range 1 to `eval.maxKeep`. |
 | `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
 | `only_evaluate` | bool | `false` | Set to `true` to evaluate the task only. Evaluations end after evaluation. No build. No exec jobs run. |
