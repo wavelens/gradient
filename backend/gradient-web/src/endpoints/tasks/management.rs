@@ -281,6 +281,7 @@ pub async fn put(
         None => vec![TriggerConfig::Polling {
             interval_secs: 300,
             branch: None,
+            path_filter: ChangedFilePathFilter::default(),
         }],
         Some(configs) => configs
             .into_iter()

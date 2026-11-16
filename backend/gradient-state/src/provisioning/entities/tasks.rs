@@ -451,6 +451,7 @@ pub(crate) fn build_trigger_config(t: &StateTrigger) -> anyhow::Result<TriggerCo
                     .get("branch")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_owned()),
+                path_filter: ChangedFilePathFilter::default(),
             }
         }
         TT::ReporterPush | TT::ReporterPullRequest => {
@@ -476,6 +477,7 @@ pub(crate) fn build_trigger_config(t: &StateTrigger) -> anyhow::Result<TriggerCo
                         .get("include_flake_inputs")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false),
+                    path_filter: ChangedFilePathFilter::default(),
                 }
             } else {
                 TriggerConfig::ReporterPullRequest {
@@ -496,6 +498,7 @@ pub(crate) fn build_trigger_config(t: &StateTrigger) -> anyhow::Result<TriggerCo
                         .get("require_approval")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true),
+                    path_filter: ChangedFilePathFilter::default(),
                 }
             }
         }
@@ -795,7 +798,7 @@ where
 mod trigger_helper_tests {
     use super::{build_trigger_config, trigger_key};
     use crate::StateTrigger;
-    use gradient_types::triggers::{TriggerConfig, TriggerType};
+    use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig, TriggerType};
 
     pub(crate) fn polling_trigger(interval_secs: u64) -> StateTrigger {
         StateTrigger {
@@ -814,7 +817,8 @@ mod trigger_helper_tests {
             cfg,
             TriggerConfig::Polling {
                 interval_secs: 60,
-                branch: None
+                branch: None,
+                path_filter: ChangedFilePathFilter::default(),
             }
         );
     }
@@ -832,7 +836,8 @@ mod trigger_helper_tests {
             cfg,
             TriggerConfig::Polling {
                 interval_secs: 300,
-                branch: None
+                branch: None,
+                path_filter: ChangedFilePathFilter::default(),
             }
         );
     }
@@ -917,6 +922,7 @@ mod trigger_helper_tests {
                 tags: vec![],
                 releases_only: false,
                 include_flake_inputs: true,
+                path_filter: ChangedFilePathFilter::default(),
             }
         );
     }
@@ -926,6 +932,7 @@ mod trigger_helper_tests {
         let polling = TriggerConfig::Polling {
             interval_secs: 60,
             branch: None,
+            path_filter: ChangedFilePathFilter::default(),
         };
         let time = TriggerConfig::Time {
             cron: "0 0 * * * *".into(),

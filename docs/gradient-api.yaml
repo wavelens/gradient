@@ -17445,6 +17445,19 @@ components:
           type: string
         role:
           type: string
+    ChangedFilePathFilter:
+      type: object
+      properties:
+        include_paths:
+          type: array
+          items:
+            type: string
+          default: []
+        exclude_paths:
+          type: array
+          items:
+            type: string
+          default: []
     CheckRepositoryRequest:
       type: object
       properties:
@@ -24781,61 +24794,74 @@ components:
           type: string
     TriggerConfig:
       oneOf:
-      - type: object
-        required:
-        - interval_secs
-        - type
-        properties:
-          interval_secs:
-            type: integer
-            format: int32
-            minimum: 0
-          branch:
+      - allOf:
+        - $ref: '#/components/schemas/ChangedFilePathFilter'
+        - type: object
+          required:
+          - interval_secs
+          properties:
+            interval_secs:
+              type: integer
+              format: int32
+              minimum: 0
+            branch:
+              type:
+              - string
+              - 'null'
+        - type: object
+          required:
+          - type
+          properties:
             type:
-            - string
-            - 'null'
-          type:
-            type: string
-            enum:
-            - polling
-      - type: object
-        required:
-        - type
-        properties:
-          branches:
-            type: array
-            items:
               type: string
-          tags:
-            type: array
-            items:
+              enum:
+              - polling
+      - allOf:
+        - $ref: '#/components/schemas/ChangedFilePathFilter'
+        - type: object
+          properties:
+            branches:
+              type: array
+              items:
+                type: string
+            tags:
+              type: array
+              items:
+                type: string
+            releases_only:
+              type: boolean
+            include_flake_inputs:
+              type: boolean
+        - type: object
+          required:
+          - type
+          properties:
+            type:
               type: string
-          releases_only:
-            type: boolean
-          include_flake_inputs:
-            type: boolean
-          type:
-            type: string
-            enum:
-            - reporter_push
-      - type: object
-        required:
-        - type
-        properties:
-          branches:
-            type: array
-            items:
+              enum:
+              - reporter_push
+      - allOf:
+        - $ref: '#/components/schemas/ChangedFilePathFilter'
+        - type: object
+          properties:
+            branches:
+              type: array
+              items:
+                type: string
+            actions:
+              type: array
+              items:
+                type: string
+            require_approval:
+              type: boolean
+        - type: object
+          required:
+          - type
+          properties:
+            type:
               type: string
-          actions:
-            type: array
-            items:
-              type: string
-          require_approval:
-            type: boolean
-          type:
-            type: string
-            enum:
-            - reporter_pull_request
+              enum:
+              - reporter_pull_request
       - type: object
         required:
         - cron

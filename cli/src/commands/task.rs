@@ -353,6 +353,8 @@ async fn build_optional_task_create_trigger_configs(
             CommandLineTrigger::Polling => TriggerConfig::Polling {
                 interval_secs: DEFAULT_POLLING_INTERVAL_SECS,
                 branch: branch.clone(),
+                include_paths: Vec::new(),
+                exclude_paths: Vec::new(),
             },
             CommandLineTrigger::Cron(cron) => TriggerConfig::Time {
                 cron,

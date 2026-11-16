@@ -568,6 +568,11 @@ export interface ChangeMemberRoleRequest {
   role: string;
 }
 
+export interface ChangedFilePathFilter {
+  include_paths?: string[];
+  exclude_paths?: string[];
+}
+
 export interface CheckRepositoryRequest {
   repository?: string | null;
 }
@@ -3099,20 +3104,23 @@ export interface TransferOwnershipRequest {
   project: string;
 }
 
-export type TriggerConfig = {
+export type TriggerConfig = ChangedFilePathFilter & {
   interval_secs: number;
   branch?: string | null;
+} & {
   type: "polling";
-} | {
+} | ChangedFilePathFilter & {
   branches?: string[];
   tags?: string[];
   releases_only?: boolean;
   include_flake_inputs?: boolean;
+} & {
   type: "reporter_push";
-} | {
+} | ChangedFilePathFilter & {
   branches?: string[];
   actions?: string[];
   require_approval?: boolean;
+} & {
   type: "reporter_pull_request";
 } | {
   cron: string;

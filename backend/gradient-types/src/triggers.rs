@@ -22,6 +22,8 @@ pub enum TriggerConfig {
         interval_secs: u32,
         #[serde(default)]
         branch: Option<String>,
+        #[serde(flatten)]
+        path_filter: ChangedFilePathFilter,
     },
     ReporterPush {
         #[serde(default)]
@@ -32,6 +34,8 @@ pub enum TriggerConfig {
         releases_only: bool,
         #[serde(default)]
         include_flake_inputs: bool,
+        #[serde(flatten)]
+        path_filter: ChangedFilePathFilter,
     },
     ReporterPullRequest {
         #[serde(default)]
@@ -40,12 +44,35 @@ pub enum TriggerConfig {
         actions: Vec<String>,
         #[serde(default = "default_require_approval")]
         require_approval: bool,
+        #[serde(flatten)]
+        path_filter: ChangedFilePathFilter,
     },
     Time {
         cron: String,
         #[serde(default)]
         branch: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default)]
+pub struct ChangedFilePathFilter {
+    pub include_paths: Vec<String>,
+    pub exclude_paths: Vec<String>,
+}
+
+impl ChangedFilePathFilter {
+    pub fn validate(&self) -> Result<(), TriggerConfigError> {
+        for pattern in self.include_paths.iter().chain(&self.exclude_paths) {
+            if pattern.is_empty() {
+                return Err(TriggerConfigError::EmptyPathFilterPattern);
+            }
+            if pattern.starts_with('/') {
+                return Err(TriggerConfigError::PathFilterNotRelative(pattern.clone()));
+            }
+        }
+        Ok(())
+    }
 }
 
 fn default_pr_actions() -> Vec<String> {
@@ -62,6 +89,10 @@ pub enum TriggerConfigError {
     PollingIntervalTooSmall,
     #[error("invalid cron expression: {0}")]
     InvalidCron(String),
+    #[error("patterns of a path filter can't be empty")]
+    EmptyPathFilterPattern,
+    #[error("The pattern '{0}' for the path filter needs to be relative to the repository root")]
+    PathFilterNotRelative(String),
     #[error("malformed config: {0}")]
     Malformed(#[from] serde_json::Error),
 }
@@ -92,14 +123,24 @@ impl TriggerConfig {
     pub fn validate(&self) -> Result<(), TriggerConfigError> {
         match self {
             Self::Polling { interval_secs, .. } if *interval_secs < 10 => {
-                Err(TriggerConfigError::PollingIntervalTooSmall)
+                return Err(TriggerConfigError::PollingIntervalTooSmall);
             }
             Self::Time { cron, .. } => {
                 cron.parse::<cron::Schedule>()
                     .map_err(|e| TriggerConfigError::InvalidCron(e.to_string()))?;
-                Ok(())
             }
-            _ => Ok(()),
+            _ => {}
+        }
+        self.path_filter()
+            .map_or(Ok(()), ChangedFilePathFilter::validate)
+    }
+
+    pub fn path_filter(&self) -> Option<&ChangedFilePathFilter> {
+        match self {
+            Self::Polling { path_filter, .. }
+            | Self::ReporterPush { path_filter, .. }
+            | Self::ReporterPullRequest { path_filter, .. } => Some(path_filter),
+            Self::Time { .. } => None,
         }
     }
 
@@ -129,9 +170,14 @@ impl TriggerConfig {
 
     pub fn with_branch(self, branch: String) -> Self {
         match self {
-            Self::Polling { interval_secs, .. } => Self::Polling {
+            Self::Polling {
+                interval_secs,
+                path_filter,
+                ..
+            } => Self::Polling {
                 interval_secs,
                 branch: Some(branch),
+                path_filter,
             },
             Self::Time { cron, .. } => Self::Time {
                 cron,
@@ -141,21 +187,25 @@ impl TriggerConfig {
                 tags,
                 releases_only,
                 include_flake_inputs,
+                path_filter,
                 ..
             } => Self::ReporterPush {
                 branches: vec![branch],
                 tags,
                 releases_only,
                 include_flake_inputs,
+                path_filter,
             },
             Self::ReporterPullRequest {
                 actions,
                 require_approval,
+                path_filter,
                 ..
             } => Self::ReporterPullRequest {
                 branches: vec![branch],
                 actions,
                 require_approval,
+                path_filter,
             },
         }
     }
@@ -266,6 +316,7 @@ mod tests {
         let cfg = TriggerConfig::Polling {
             interval_secs: 60,
             branch: None,
+            path_filter: ChangedFilePathFilter::default(),
         };
         let db = cfg.to_db_json();
         assert!(
@@ -281,6 +332,7 @@ mod tests {
         let cfg = TriggerConfig::Polling {
             interval_secs: 120,
             branch: Some("develop".into()),
+            path_filter: ChangedFilePathFilter::default(),
         };
         let db = cfg.to_db_json();
         assert_eq!(db["branch"], serde_json::json!("develop"));
@@ -295,6 +347,7 @@ mod tests {
             tags: vec![],
             releases_only: false,
             include_flake_inputs: false,
+            path_filter: ChangedFilePathFilter::default(),
         };
         assert_eq!(cfg.trigger_branch(), Some("develop"));
     }
@@ -305,6 +358,7 @@ mod tests {
             branches: vec!["*".into()],
             actions: vec![],
             require_approval: true,
+            path_filter: ChangedFilePathFilter::default(),
         };
         assert_eq!(cfg.trigger_branch(), None);
     }
@@ -314,6 +368,7 @@ mod tests {
         let cfg = TriggerConfig::Polling {
             interval_secs: 5,
             branch: None,
+            path_filter: ChangedFilePathFilter::default(),
         };
         assert!(matches!(
             cfg.validate(),
@@ -415,11 +470,86 @@ mod tests {
     }
 
     #[test]
+    fn rows_stored_before_path_filters_read_as_unfiltered() {
+        let legacy_push = serde_json::json!({
+            "branches": ["main"],
+            "tags": [],
+            "releases_only": false,
+        });
+        let legacy_polling = serde_json::json!({ "interval_secs": 60 });
+        for (trigger_type, row) in [
+            (TriggerType::ReporterPush, legacy_push),
+            (TriggerType::Polling, legacy_polling),
+        ] {
+            let parsed = TriggerConfig::parse_row(trigger_type, &row).unwrap();
+            assert_eq!(
+                parsed.path_filter(),
+                Some(&ChangedFilePathFilter::default())
+            );
+        }
+    }
+
+    #[test]
+    fn path_filters_round_trip_through_the_stored_row() {
+        let cfg = TriggerConfig::ReporterPullRequest {
+            branches: vec![],
+            actions: vec!["opened".into()],
+            require_approval: false,
+            path_filter: ChangedFilePathFilter {
+                include_paths: vec!["packages/kernel/**".into()],
+                exclude_paths: vec!["*.md".into()],
+            },
+        };
+        let db = cfg.to_db_json();
+        assert_eq!(
+            db["include_paths"],
+            serde_json::json!(["packages/kernel/**"])
+        );
+        assert_eq!(db["exclude_paths"], serde_json::json!(["*.md"]));
+        let parsed = TriggerConfig::parse_row(TriggerType::ReporterPullRequest, &db).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn absolute_and_empty_path_patterns_rejected() {
+        let absolute = serde_json::json!({ "interval_secs": 60, "include_paths": ["/abs"] });
+        assert!(matches!(
+            TriggerConfig::parse_row(TriggerType::Polling, &absolute),
+            Err(TriggerConfigError::PathFilterNotRelative(p)) if p == "/abs"
+        ));
+        let empty = serde_json::json!({ "branches": [], "exclude_paths": [""] });
+        assert!(matches!(
+            TriggerConfig::parse_row(TriggerType::ReporterPush, &empty),
+            Err(TriggerConfigError::EmptyPathFilterPattern)
+        ));
+    }
+
+    #[test]
+    fn with_branch_keeps_the_path_filter() {
+        let path_filter = ChangedFilePathFilter {
+            include_paths: vec!["src/*".into()],
+            exclude_paths: vec!["src/vendor/*".into()],
+        };
+        let push = TriggerConfig::ReporterPush {
+            branches: vec!["main".into()],
+            tags: vec![],
+            releases_only: false,
+            include_flake_inputs: false,
+            path_filter: path_filter.clone(),
+        };
+        assert_eq!(
+            push.with_branch("release".into()).path_filter(),
+            Some(&path_filter)
+        );
+    }
+
+    #[test]
     fn with_branch_replaces_the_branch_of_every_kind() {
         let release = || "release".to_owned();
         let polling = TriggerConfig::Polling {
             interval_secs: 60,
             branch: None,
+            path_filter: ChangedFilePathFilter::default(),
         };
         let time = TriggerConfig::Time {
             cron: "0 0 3 * * *".into(),
@@ -430,6 +560,7 @@ mod tests {
             tags: vec!["v*".into()],
             releases_only: false,
             include_flake_inputs: true,
+            path_filter: ChangedFilePathFilter::default(),
         };
         for cfg in [polling, time, push] {
             let moved = cfg.with_branch(release());
@@ -447,6 +578,7 @@ mod tests {
             branches: vec![],
             actions: vec![],
             require_approval: true,
+            path_filter: ChangedFilePathFilter::default(),
         };
         assert_eq!(
             push.branch_names_or_patterns_for_task_header(),
@@ -455,6 +587,7 @@ mod tests {
         let polling = TriggerConfig::Polling {
             interval_secs: 60,
             branch: None,
+            path_filter: ChangedFilePathFilter::default(),
         };
         assert_eq!(
             polling.branch_names_or_patterns_for_task_header(),

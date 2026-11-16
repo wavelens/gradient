@@ -18,7 +18,7 @@ use gradient_fixtures::rows::worker_registration;
 use gradient_test_support::state::TestState;
 use gradient_types::GitHostType;
 use gradient_types::ids::*;
-use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
+use gradient_types::triggers::{ChangedFilePathFilter, ConcurrencyPolicy, TriggerConfig};
 use gradient_web::create_router;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{MockDatabase, MockExecResult};
@@ -295,6 +295,7 @@ fn reporter_push_trigger(branches: Vec<&str>) -> TriggerConfig {
         tags: vec![],
         releases_only: false,
         include_flake_inputs: false,
+        path_filter: ChangedFilePathFilter::default(),
     }
 }
 
@@ -304,6 +305,7 @@ fn reporter_push_releases_only_trigger() -> TriggerConfig {
         tags: vec![],
         releases_only: true,
         include_flake_inputs: false,
+        path_filter: ChangedFilePathFilter::default(),
     }
 }
 
@@ -312,6 +314,7 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
         branches: vec![],
         actions: actions.into_iter().map(String::from).collect(),
         require_approval: false,
+        path_filter: ChangedFilePathFilter::default(),
     }
 }
 

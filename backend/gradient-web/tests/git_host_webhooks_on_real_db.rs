@@ -19,7 +19,7 @@ use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
 use gradient_types::GitHostType;
 use gradient_types::ids::*;
-use gradient_types::triggers::TriggerConfig;
+use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig};
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
@@ -97,6 +97,7 @@ async fn create_test_database_with_user_project_task_gitea_webhook_secret_push_t
         tags: vec![],
         releases_only: false,
         include_flake_inputs: false,
+        path_filter: ChangedFilePathFilter::default(),
     };
     gradient_db::triggers::insert(
         &conn,

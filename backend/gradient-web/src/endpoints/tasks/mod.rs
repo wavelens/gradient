@@ -571,6 +571,7 @@ mod repository_fetch_tests {
 #[cfg(test)]
 mod trigger_summary_tests {
     use super::*;
+    use gradient_types::triggers::ChangedFilePathFilter;
 
     fn at(s: &str) -> chrono::NaiveDateTime {
         chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
@@ -601,6 +602,7 @@ mod trigger_summary_tests {
                 TriggerConfig::Polling {
                     interval_secs: 300,
                     branch: None,
+                    path_filter: ChangedFilePathFilter::default(),
                 },
                 true,
             ),
@@ -617,6 +619,7 @@ mod trigger_summary_tests {
                 TriggerConfig::Polling {
                     interval_secs: 300,
                     branch: Some("paused".into()),
+                    path_filter: ChangedFilePathFilter::default(),
                 },
                 false,
             ),
@@ -641,6 +644,7 @@ mod trigger_summary_tests {
             TriggerConfig::Polling {
                 interval_secs: 100,
                 branch: None,
+                path_filter: ChangedFilePathFilter::default(),
             },
             true,
         );
