@@ -36,6 +36,7 @@ thiserror  = { workspace = true }
 tokio      = { workspace = true, features = ["macros", "sync"] }
 tracing    = { workspace = true }
 utoipa     = { workspace = true }
+url        = { workspace = true }
 uuid       = { workspace = true }
 
 cron       = { workspace = true }
