@@ -784,3 +784,65 @@ async fn m14_two_check_steps_repair_counters_and_a_large_scope_in_several_transa
     case.zero_drift("step 2").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn row_lock_timeout_in_first_step_still_repairs_wanted_counter_of_other_build() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(chain(e1)).await;
+    let (a, b) = (case.db.id_of(A).await, case.db.id_of(B).await);
+    case.sql(&format!(
+        "UPDATE derivation SET unwalked_inputs = 3 WHERE id = '{a}'"
+    ))
+    .await;
+    case.sql(&format!(
+        "UPDATE derivation_build SET wanted = false WHERE derivation = '{b}'"
+    ))
+    .await;
+    let holder = case
+        .ctx
+        .worker_db
+        .begin()
+        .await
+        .expect("open a second transaction");
+    let locked = holder
+        .execute_unprepared(&format!(
+            "SELECT 1 FROM derivation WHERE id = '{a}' FOR UPDATE"
+        ))
+        .await
+        .map(|done| done.rows_affected());
+    assert_eq!(
+        locked.as_ref().ok(),
+        Some(&1),
+        "One lock on the derivation row for A"
+    );
+
+    let report = case
+        .graph
+        .run_consistency_checks()
+        .await
+        .expect("After 1: skip the locked step and end the check");
+
+    assert_eq!(
+        (report.walk_drift, report.need_drift),
+        (0, 1),
+        "after 1: {report:?}"
+    );
+    holder
+        .rollback()
+        .await
+        .expect("second transaction releases that lock");
+
+    let report = case
+        .graph
+        .run_consistency_checks()
+        .await
+        .expect("after 2: run consistency check");
+
+    assert_eq!(
+        (report.walk_drift, report.need_drift),
+        (1, 0),
+        "after 2: {report:?}"
+    );
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}

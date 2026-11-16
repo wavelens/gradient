@@ -93,7 +93,7 @@ pub async fn try_lock_shared_builds<'txn>(
     }
 }
 
-fn lock_unavailable(err: &DbErr) -> bool {
+pub(crate) fn lock_unavailable(err: &DbErr) -> bool {
     let (DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e))) = err
     else {
         return false;
