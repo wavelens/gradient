@@ -43,6 +43,7 @@
       else if lib.hasPrefix "NonZero" name then lib.types.ints.positive
       else if lib.elem name [ "u32" "u64" "usize" ] then lib.types.ints.unsigned
       else if lib.elem name [ "i32" "i64" ] then lib.types.int
+      else if name == "f64" then lib.types.float
       else if name == "PathBuf" then lib.types.path
       else if name == "Vec<String>" then lib.types.listOf lib.types.str
       else if name == "Vec<PathBuf>" then lib.types.listOf lib.types.path
@@ -54,6 +55,7 @@
     else if lib.hasPrefix "Vec<" spec.type then lib.optionals (spec.default != null) (lib.splitString "," spec.default)
     else if spec.default == null then null
     else if isInteger spec then lib.toInt spec.default
+    else if valueType spec == "f64" then builtins.fromJSON spec.default
     else spec.default;
 
   optionOf = spec: lib.mkOption ({

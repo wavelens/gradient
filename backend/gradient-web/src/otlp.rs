@@ -87,7 +87,7 @@ pub fn build_otlp_exporter_child_spec(
         .with_reader(reader)
         .with_resource(
             opentelemetry_sdk::Resource::builder()
-                .with_service_name("gradient")
+                .with_service_name(state.config.metrics_args.otlp_service_name.clone())
                 .build(),
         )
         .build();

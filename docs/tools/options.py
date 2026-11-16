@@ -24,6 +24,7 @@ TYPES = [
     (r"positive integer, meaning >0", "positive int"),
     (r"unsigned integer, meaning >=0", "unsigned int"),
     (r"signed integer", "int"),
+    (r"floating point number", "float"),
     (r"integer between (\d+) and (\d+) \(both inclusive\)", r"int from \1 to \2"),
     (r"absolute path", "path"),
     (r"boolean", "bool"),
