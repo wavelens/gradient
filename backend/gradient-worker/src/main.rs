@@ -48,21 +48,24 @@ fn main() -> Result<()> {
     // Logs are going to stderr because eval-worker subprocesses are using stdout for rkyv frames. A
     // tracing line on stdout would corrupt the frame stream.
     let overrides = log_overrides(&config);
-    gradient_util::logging::init(&LogSetup {
-        level: &config.log.level_default,
-        overrides: &overrides,
-        quiet: &[],
-        honor_rust_log: false,
-        writer: LogWriter::Stderr,
-        trace: config.log.trace_dir.as_deref().map(|dir| TraceSetup {
-            dir,
-            process: if config.eval_subprocess {
-                "eval"
-            } else {
-                "worker"
-            },
-        }),
-    });
+    gradient_util::logging::init(
+        &LogSetup {
+            level: &config.log.level_default,
+            overrides: &overrides,
+            quiet: &[],
+            honor_rust_log: false,
+            writer: LogWriter::Stderr,
+            trace: config.log.trace_dir.as_deref().map(|dir| TraceSetup {
+                dir,
+                process: if config.eval_subprocess {
+                    "eval"
+                } else {
+                    "worker"
+                },
+            }),
+        },
+        None,
+    );
 
     if let Some(dir) = &config.guest_supervisor {
         return gradient_vm::run_supervisor(dir, config.exec.supervisor_config());

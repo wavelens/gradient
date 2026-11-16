@@ -12,13 +12,17 @@ use std::path::Path;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 use crate::trace_file;
 
 pub const NOISY_DEPS: &[&str] = &[
     "hyper", "h2", "sqlx", "sea_orm", "tower", "reqwest", "rustls",
 ];
+
+pub type AdditionalTracingLayer = Box<dyn Layer<Registry> + Send + Sync>;
 
 pub enum LogWriter {
     Stdout,
@@ -66,7 +70,7 @@ pub fn effective_directive(setup: &LogSetup<'_>, rust_log: Option<&str>) -> Stri
         .map_or_else(|| directive(setup), str::to_owned)
 }
 
-pub fn init(setup: &LogSetup<'_>) {
+pub fn init(setup: &LogSetup<'_>, extra_tracing_layer: Option<AdditionalTracingLayer>) {
     #[expect(
         clippy::disallowed_methods,
         reason = "RUST_LOG is the conventional override of the tracing filter, not an option of Gradient"
@@ -95,7 +99,9 @@ pub fn init(setup: &LogSetup<'_>) {
         console.boxed()
     };
 
-    let registry = tracing_subscriber::registry().with(console.with_filter(filter));
+    let registry = tracing_subscriber::registry()
+        .with(extra_tracing_layer)
+        .with(console.with_filter(filter));
     match setup.trace.as_ref().and_then(trace_layer) {
         Some(trace) => registry.with(trace).init(),
         None => registry.init(),

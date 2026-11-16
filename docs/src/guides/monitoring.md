@@ -41,15 +41,22 @@ The endpoint rate limit will refill one request per second, with a burst of 5.
 services.gradient.metrics.otlp = {
   endpoint = "http://collector.example.com:4318/v1/metrics"; # (1)!
   pushIntervalSecs = 30;
+  tracesEndpoint = "http://collector.example.com:4318/v1/traces"; # (2)!
+  serviceName = "gradient"; # (3)!
+  tracesSampleRatio = 1.0; # (4)!
 };
 ```
 
-1. The endpoint uses OTLP over HTTP with protobuf encoding and must include the `/v1/metrics` path. Metrics get reported under the service name `gradient`.
+1. The endpoint protocol is OTLP over HTTP, with protobuf encoding. The path needs `/v1/metrics`. Metrics report the service name set in `serviceName`.
+2. Always include the path `/v1/traces` in the URL. The server can send spans to the exact URL. A URL without this path can lose all spans with no error. The server can export its own spans to that URL. These spans capture the duration of a step on the server. Examples include transactions from the graph writer and the handling of worker messages. Spans for dependencies such as `hyper` stay out of the export.
+3. All instances report with the same service name. The collector can then show spans from every instance as one service.
+4. The fraction of traces to export. From `0.0` (none) to `1.0` (all). A heavily loaded instance can lower the fraction to `0.1`, for example, to reduce the number of spans.
 
 ## Verify Deployment
 
 - Prometheus: confirm the `gradient` target shows **UP**. The `gradient_workers_connected` metric reports the count of connected workers.
-- OpenTelemetry: check the server log for `OTLP metric push enabled`. The collector then receives `gradient_jobs_pending`.
+- OpenTelemetry: check the server log for `OTLP metric push enabled`. Collectors receive `gradient_jobs_pending` afterward.
+- OpenTelemetry traces: check the server log for `OTLP span export enabled`. The collector can then receive spans such as `transact_once`.
 
 ## Metrics
 
