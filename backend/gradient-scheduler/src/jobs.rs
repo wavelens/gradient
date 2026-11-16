@@ -56,6 +56,7 @@ pub struct PendingEvalJob {
     pub prioritized: bool,
     pub build_request: bool,
     pub continuation: Option<ExecJobId>,
+    pub flake_fetch_needs_secrets: bool,
 }
 
 impl PendingEvalJob {
@@ -548,7 +549,7 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     c.allowed_jobs.contains(job.worker_job())
         && match job {
             PendingJob::Exec(j) => j.fits(c),
-            PendingJob::Eval(j) => c.can_eval(&j.job),
+            PendingJob::Eval(j) => c.can_eval(&j.job, j.flake_fetch_needs_secrets),
             PendingJob::Build(j) => c.can_run_build(&j.job),
         }
 }
@@ -2376,6 +2377,7 @@ mod tests {
             walk_mode: Default::default(),
             eval_index: 0,
             continuation: None,
+            flake_fetch_needs_secrets: false,
         })
     }
 
@@ -2414,6 +2416,7 @@ mod tests {
             walk_mode: Default::default(),
             eval_index: 0,
             continuation: None,
+            flake_fetch_needs_secrets: true,
         })
     }
 
@@ -2805,15 +2808,27 @@ mod tests {
             ..flake_job(vec![FlakeStep::FetchFlake])
         };
 
-        assert!(!fetch_only.can_eval(&bundled), "fetch-only lacks eval");
-        assert!(!eval_only.can_eval(&bundled), "eval-only lacks fetch");
-        assert!(both.can_eval(&bundled));
-        assert!(eval_only.can_eval(&cached_eval));
-        assert!(!fetch_only.can_eval(&cached_eval), "cached eval needs eval");
-        assert!(fetch_only.can_eval(&fetch));
-        assert!(!eval_only.can_eval(&fetch), "fetch step needs network");
         assert!(
-            !network_only.can_eval(&fetch),
+            !fetch_only.can_eval(&bundled, false),
+            "fetch-only lacks eval"
+        );
+        assert!(
+            !eval_only.can_eval(&bundled, false),
+            "eval-only lacks fetch"
+        );
+        assert!(both.can_eval(&bundled, false));
+        assert!(eval_only.can_eval(&cached_eval, false));
+        assert!(
+            !fetch_only.can_eval(&cached_eval, false),
+            "cached eval needs eval"
+        );
+        assert!(fetch_only.can_eval(&fetch, true));
+        assert!(
+            !eval_only.can_eval(&fetch, true),
+            "fetch step needs network"
+        );
+        assert!(
+            !network_only.can_eval(&fetch, true),
             "fetch step of an ssh repository needs secrets"
         );
     }

@@ -5,7 +5,11 @@
  */
 
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, DbErr, FromQueryResult, Value};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter, QuerySelect,
+    Value,
+};
+use std::collections::HashSet;
 
 crate::sql! {
     SELECT_PROJECT_GIT_HTTPS_CREDENTIALS = "SELECT * FROM project_git_https_credential \
@@ -57,6 +61,26 @@ pub async fn one_for_project_and_host<C: ConnectionTrait>(
     )
     .one(db)
     .await
+}
+
+pub async fn list_project_host_pairs_with_https_git_credential_for_project_ids<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    projects: &[ProjectId],
+) -> Result<HashSet<(ProjectId, String)>, DbErr> {
+    let pairs = crate::fetch_in_chunks(projects, |chunk| async move {
+        EProjectGitHttpsCredential::find()
+            .select_only()
+            .column(CProjectGitHttpsCredential::Project)
+            .column(CProjectGitHttpsCredential::Host)
+            .filter(CProjectGitHttpsCredential::Project.is_in(chunk))
+            .into_tuple::<(ProjectId, String)>()
+            .all(db)
+            .await
+    })
+    .await?;
+    Ok(pairs.into_iter().collect())
 }
 
 pub async fn upsert<C: ConnectionTrait>(

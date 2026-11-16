@@ -23,6 +23,8 @@ use super::{
 };
 
 const SSH_REPOSITORY: &str = "git+ssh://git@example.invalid/repo.git";
+const HTTPS_REPOSITORY_URL_WITH_STORED_PROJECT_CREDENTIAL: &str =
+    "https://example.invalid/repo.git";
 
 const W1: &str = "w1";
 const W2: &str = "w2";
@@ -966,6 +968,53 @@ async fn recoveries_of(
 async fn q18_a_fetch_step_of_an_ssh_repository_needs_secrets() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1).repository(SSH_REPOSITORY)).await;
+    case.connect(W1, w_network(), &[]).await;
+    case.connect(W2, w_network_secrets(), &[]).await;
+    case.connect(W3, w_eval(), &[]).await;
+    let key = eval_key(e1);
+
+    case.assign_queued_evals().await;
+    case.check("step 1").await;
+
+    let evaluator = case.request_job(W3, JobKind::Flake).await;
+    assert!(evaluator.is_none(), "after 2: W3 gets nothing");
+    let without_secrets = case.request_job(W1, JobKind::Flake).await;
+    assert!(without_secrets.is_none(), "after 2: W1 gets nothing");
+    case.check("step 2").await;
+
+    let fetch = case
+        .request_job(W2, JobKind::Flake)
+        .await
+        .expect("after 3: W2 gets the fetch job of E1");
+    assert_eq!(fetch.job_id(), key, "after 3: the fetch job of E1");
+    case.report_flake_source(W2, &key, &store_path(S_OUT, "s"))
+        .await;
+    case.complete(W2, &key, fetch.assignment_id(), Vec::new(), 1)
+        .await;
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn https_repository_flake_job_needs_worker_with_secrets() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evalq(e1)
+            .repository(HTTPS_REPOSITORY_URL_WITH_STORED_PROJECT_CREDENTIAL),
+    )
+    .await;
+    gradient_db::project_git_https_credentials::upsert(
+        &case.db.connection(),
+        case.db.project_of(e1).await,
+        "example.invalid",
+        "x-access-token",
+        "encrypted".into(),
+        None,
+    )
+    .await
+    .unwrap();
     case.connect(W1, w_network(), &[]).await;
     case.connect(W2, w_network_secrets(), &[]).await;
     case.connect(W3, w_eval(), &[]).await;

@@ -82,6 +82,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
         walk_mode: Default::default(),
         eval_index: 0,
         continuation: None,
+        flake_fetch_needs_secrets: false,
     }
 }
 
