@@ -426,7 +426,7 @@ mod tests {
             (breakdown.total - total).abs() < 1e-9,
             "total must match score()"
         );
-        assert_eq!(breakdown.rules.len(), 6, "simple policy has 6 rules");
+        assert_eq!(breakdown.rules.len(), 5, "The simple policy has 5 rules.");
         assert!(breakdown.rules.contains_key("EstimatedTimeRule"));
         assert!(breakdown.rules.contains_key("QosRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
