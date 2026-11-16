@@ -26,7 +26,7 @@ use tracing::{debug, info, warn};
 
 use super::SessionHandles;
 use super::dialed::{DialedSession, refresh_dialed_peers};
-use super::guest_channel::{WORKER_TOO_OLD, outbound_guest_channel};
+use super::guest_channel::outbound_guest_channel;
 use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
@@ -35,10 +35,7 @@ use super::socket::{InputFetch, ProtoSocket, ProtoWriter, send_input_fetch, send
 use super::store_paths::{outbound_message, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
-use gradient_wire::messages::{
-    ClientMessage, DRAIN_CANCELLED_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, GradientCapabilities,
-    RUNNING_JOBS_SINCE, ServerMessage,
-};
+use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::ProtoReader;
 use gradient_wire::types::JobKind;
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilterChunkCollector;
@@ -121,10 +118,7 @@ impl Actor for SessionActor {
         )
         .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
         let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
-        let reclaims_jobs = dialed.is_none()
-            && socket
-                .version()
-                .is_some_and(|version| version >= RUNNING_JOBS_SINCE);
+        let reclaims_jobs = dialed.is_none() && socket.version().is_some();
         let registered = match scheduler
             .register_worker(
                 &peer_id,
@@ -418,19 +412,9 @@ impl Actor for SessionActor {
                 }
             }
             SessionMsg::Signal(SessionSignal::GuestChannel(signal)) => {
-                match outbound_guest_channel(signal, st.writer.version()) {
-                    Ok(Some(msg)) => {
-                        if send_server_msg(&st.writer, &msg).await.is_err() {
-                            myself.stop(Some("write failed".into()));
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(channel_id) => st.scheduler.guest_channels.closed_by_worker(
-                        &st.peer_id,
-                        channel_id,
-                        None,
-                        Some(WORKER_TOO_OLD.into()),
-                    ),
+                let msg = outbound_guest_channel(signal);
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
                 }
             }
             SessionMsg::Signal(SessionSignal::Draining) => {
@@ -443,10 +427,6 @@ impl Actor for SessionActor {
                 }
             }
             SessionMsg::Signal(SessionSignal::DrainCancelled) => {
-                if st.writer.version() < DRAIN_CANCELLED_SINCE {
-                    st.scheduler.mark_worker_draining(&st.peer_id).await;
-                    return Ok(());
-                }
                 info!(peer_id = %st.peer_id, "sending DrainCancelled to worker");
                 if send_server_msg(&st.writer, &ServerMessage::DrainCancelled)
                     .await
@@ -459,10 +439,6 @@ impl Actor for SessionActor {
                 job_id,
                 keep_vm_running,
             }) => {
-                if st.writer.version() < EXEC_KEEP_VM_RUNNING_SINCE {
-                    debug!(peer_id = %st.peer_id, %job_id, "the worker is too old to keep a VM running");
-                    return Ok(());
-                }
                 let msg = ServerMessage::ExecKeepVmRunning {
                     job_id,
                     keep_vm_running,

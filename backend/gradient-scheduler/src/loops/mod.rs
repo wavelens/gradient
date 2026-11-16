@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The tracker is a per-instance cache of candidates and scores. Nothing in it is deciding a
-//! hand-out. The claim in Postgres is the arbiter
-//! (`gradient_db::scheduling::assignment_record::claim_assignment`).
+//! Postgres claims decide every job hand-out (`gradient_db::scheduling::assignment_record::claim_assignment`), not the in-memory tracker.
 
 use std::sync::Arc;
 use std::time::Duration;

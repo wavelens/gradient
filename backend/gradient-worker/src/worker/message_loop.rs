@@ -14,8 +14,7 @@ use anyhow::{Context as _, Result};
 use gradient_vm::{AddressLease, VmStateChange};
 use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
-    FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK, GuestChannelKind, Job,
-    JobCandidate, JobKind, JobPhaseSpan, ServerMessage, VM_STATE_SINCE,
+    GuestChannelKind, Job, JobKind, JobPhaseSpan, ServerMessage,
 };
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -31,14 +30,12 @@ use crate::executor::{AbortSignal, JobExecutor};
 use crate::exit_clock;
 use crate::proto::credentials::{CredentialStore, JobCredentials};
 use crate::proto::job::JobUpdater;
-use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::AssignmentHandle;
 
 use super::cluster::{ClusterChannels, ClusterHolds, ClusterStart, HeldJob};
 use super::jobs::{Readoption, WorkerJobs, report_when_drained};
 use super::local_store_path_bloom_filter_sender::BloomFilterRebuildLastStartAndRunningTaskHandle;
-use super::scoring::spawn_scoring_task;
 
 const STOP_BUDGET: Duration = Duration::from_secs(5);
 
@@ -168,7 +165,6 @@ pub(super) struct MessageLoopState {
     max_eval: u32,
     max_build: u32,
     credentials: CredentialStore,
-    scorer: JobScorer,
     executor: JobExecutor,
     downloader: Arc<dyn InputDownloader>,
     fetches: tokio::task::JoinSet<()>,
@@ -189,7 +185,6 @@ impl MessageLoopState {
         jobs: &Arc<WorkerJobs>,
         config: WorkerConfig,
         executor: JobExecutor,
-        scorer: JobScorer,
     ) -> Self {
         let channels = ClusterChannels::new(writer.clone());
         Self {
@@ -200,7 +195,6 @@ impl MessageLoopState {
             max_eval: config.eval.max_concurrent.get(),
             max_build: config.build.max_concurrent.get(),
             credentials: CredentialStore::default(),
-            scorer,
             downloader: Arc::new(SubprocessDownloader(
                 executor.evaluator.resolver().config().clone(),
             )),
@@ -221,16 +215,13 @@ impl MessageLoopState {
 
     fn vm_changes(&self) -> Option<broadcast::Receiver<VmStateChange>> {
         let exec = self.executor.exec.as_ref()?;
-        (self.writer.version() >= VM_STATE_SINCE).then(|| exec.pool.states().subscribe())
+        Some(exec.pool.states().subscribe())
     }
 
     async fn report_live_vms(&self) {
         let Some(exec) = &self.executor.exec else {
             return;
         };
-        if self.writer.version() < VM_STATE_SINCE {
-            return;
-        }
         for change in exec.pool.states().live() {
             self.report_vm_state(change).await;
         }
@@ -341,15 +332,6 @@ impl MessageLoopState {
 
     async fn route(&mut self, msg: ServerMessage) -> Result<()> {
         match msg {
-            ServerMessage::JobListChunk {
-                candidates,
-                is_final,
-            } => {
-                self.on_job_list_chunk(candidates, is_final);
-            }
-            ServerMessage::JobOffer { candidates } => {
-                self.on_job_offer(candidates);
-            }
             ServerMessage::AssignJob {
                 job_id,
                 assignment_id,
@@ -679,12 +661,8 @@ impl MessageLoopState {
         let expired = self.holds.expired(std::time::Instant::now());
         self.report_released(expired, "cluster start timed out")
             .await?;
-        if self.writer.version()
-            >= FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK
-        {
-            self.hourly_store_bloom_filter_resend_scheduler
-                .start_rebuild_and_send_if_due_and_not_running(&self.executor.store, &self.writer);
-        }
+        self.hourly_store_bloom_filter_resend_scheduler
+            .start_rebuild_and_send_if_due_and_not_running(&self.executor.store, &self.writer);
         if self.draining {
             return Ok(());
         }
@@ -727,45 +705,6 @@ impl MessageLoopState {
         }
 
         Ok(())
-    }
-
-    fn on_job_list_chunk(&mut self, cands: Vec<JobCandidate>, is_final: bool) {
-        debug!(count = cands.len(), is_final, "received job list chunk");
-        if self.draining {
-            return;
-        }
-        spawn_scoring_task(
-            self.scorer,
-            Arc::clone(&self.executor.store),
-            self.writer.clone(),
-            cands,
-            is_final,
-            Vec::new(),
-        );
-    }
-
-    #[tracing::instrument(level = "debug", skip_all, fields(candidates = cands.len()))]
-    fn on_job_offer(&mut self, cands: Vec<JobCandidate>) {
-        debug!(count = cands.len(), "received job offer");
-        if self.draining || cands.is_empty() {
-            return;
-        }
-        let request_after: Vec<JobKind> = [
-            (JobKind::Build, self.max_build),
-            (JobKind::Flake, self.max_eval),
-        ]
-        .into_iter()
-        .filter(|(kind, max)| self.occupied(kind.clone()) < *max)
-        .map(|(kind, _)| kind)
-        .collect();
-        spawn_scoring_task(
-            self.scorer,
-            Arc::clone(&self.executor.store),
-            self.writer.clone(),
-            cands,
-            true,
-            request_after,
-        );
     }
 
     async fn on_assign_job(
@@ -1416,7 +1355,6 @@ mod tests {
             &jobs,
             config,
             super::super::test_executor(gcroots.path()),
-            JobScorer::new(),
         );
         state.downloader = Arc::new(OfflineDownloader);
         let _running = state.jobs.register(
@@ -1484,7 +1422,6 @@ mod tests {
             &jobs,
             config,
             super::super::test_executor(gcroots.path()),
-            JobScorer::new(),
         );
         state.downloader = Arc::new(StalledDownloader);
         let _running = state.jobs.register(

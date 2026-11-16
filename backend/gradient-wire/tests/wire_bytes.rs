@@ -13,15 +13,11 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn assert_pinned(message: ClientMessage, oldest: &str, newest: &str) {
-    for (version, expected) in [(41, oldest), (61, newest)] {
-        let bytes = to_bytes(&message, version).expect("encodes");
-        assert_eq!(hex(&bytes), expected, "protocol {version}");
-        assert_eq!(
-            from_bytes::<ClientMessage>(bytes, version),
-            Ok(message.clone())
-        );
-    }
+fn assert_pinned(message: ClientMessage, expected: &str) {
+    let version = 65;
+    let bytes = to_bytes(&message, version).expect("encodes");
+    assert_eq!(hex(&bytes), expected, "protocol {version}");
+    assert_eq!(from_bytes::<ClientMessage>(bytes, version), Ok(message));
 }
 
 #[test]
@@ -35,8 +31,7 @@ fn a_cache_query_keeps_its_baseline_bytes() {
             nar_sizes: vec![None, Some(300)],
             external: true,
         },
-        "15016a017102022f61022f6201020001ac0201",
-        "15016a017102022f61022f6201020001ac0201",
+        "13016a017102022f61022f6201020001ac0201",
     );
 }
 
@@ -53,7 +48,6 @@ fn worker_metrics_keep_their_baseline_bytes() {
             lifetime_left_secs: None,
             exec: None,
         },
-        "050000c03f800101000000c0000000",
         "050000c03f800101000000c00000000000",
     );
 }

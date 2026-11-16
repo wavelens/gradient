@@ -8,13 +8,12 @@ use std::convert::Infallible;
 
 use gradient_db::DbContext;
 use gradient_entity::StorePathError;
-use gradient_scheduler::actor::Offer;
 use gradient_types::ids::ProjectId;
 use gradient_types::{MappingError, StorePathMapper};
 use gradient_wire::messages::{BuildFailureKind, ClientMessage, ServerMessage};
 use gradient_wire::types::{
-    EvalShardOutcome, FlakeSource, ImportOutcome, InputOutcome, Job, JobCandidate, JobUpdateKind,
-    Realisation, UploadMetadata, UploadObject,
+    EvalShardOutcome, FlakeSource, ImportOutcome, InputOutcome, Job, JobUpdateKind, Realisation,
+    UploadMetadata, UploadObject,
 };
 use serde_json::Value;
 
@@ -229,11 +228,6 @@ fn outbound_fields(
                 }
             }
         },
-        ServerMessage::JobOffer { candidates } | ServerMessage::JobListChunk { candidates, .. } => {
-            for candidate in candidates {
-                outbound_candidate_fields(candidate, paths)?;
-            }
-        }
         ServerMessage::CacheStatus { cached, .. } => {
             for entry in cached {
                 paths.path(&mut entry.path)?;
@@ -283,38 +277,6 @@ fn outbound_realisations(
     Ok(())
 }
 
-pub(super) fn outbound_candidate(
-    mut candidate: JobCandidate,
-    mapper: &StorePathMapper,
-) -> JobCandidate {
-    let Ok(()) = outbound_candidate_fields(&mut candidate, &outbound(mapper));
-    candidate
-}
-
-fn outbound_candidate_fields(
-    candidate: &mut JobCandidate,
-    paths: &TextMapper<Infallible>,
-) -> Result<(), Infallible> {
-    for required in &mut candidate.required_paths {
-        paths.path(&mut required.path)?;
-    }
-    paths.paths(&mut candidate.drv_paths)?;
-    paths.paths(&mut candidate.output_paths)
-}
-
-pub(super) async fn outbound_offer(offer: Offer, db: &DbContext) -> Vec<JobCandidate> {
-    let mut candidates = Vec::with_capacity(offer.candidates.len());
-    for candidate in offer.candidates {
-        let Some(&project) = offer.projects.get(&candidate.job_id) else {
-            continue;
-        };
-        if let Some(mapper) = project_mapper(db, project).await {
-            candidates.push(outbound_candidate(candidate, &mapper));
-        }
-    }
-    candidates
-}
-
 pub(super) fn unmapped_project(error: &MappingError) -> String {
     format!("the project's store paths cannot be mapped: {error}")
 }
@@ -335,8 +297,7 @@ mod tests {
     use gradient_wire::messages::ServerMessage;
     use gradient_wire::types::{
         BuildJob, BuildOutput, BuildProduct, BuildSpec, DerivationOutput, DiscoveredDerivation,
-        ExecJob, Job, JobCandidate, JobContext, JobUpdateKind, NarUploadMetadata, RequiredPath,
-        UploadMetadata,
+        ExecJob, Job, JobContext, JobUpdateKind, NarUploadMetadata, UploadMetadata,
     };
     use std::sync::Arc;
 
@@ -609,27 +570,6 @@ mod tests {
                 path: format!("/nix/store/{O}-dep"),
             }]
         );
-    }
-
-    #[test]
-    fn an_offered_candidate_names_original_paths() {
-        let candidate = JobCandidate {
-            job_id: "j1".into(),
-            required_paths: vec![RequiredPath {
-                path: format!("/nix/store/{S}-dep"),
-                cache_info: None,
-            }],
-            drv_paths: vec![format!("/nix/store/{S}-a.drv")],
-            output_paths: vec![format!("/nix/store/{S}-a")],
-            requirement: None,
-        };
-        let candidate = outbound_candidate(candidate, &mapper());
-        assert_eq!(
-            candidate.required_paths[0].path,
-            format!("/nix/store/{O}-dep")
-        );
-        assert_eq!(candidate.drv_paths, vec![format!("/nix/store/{O}-a.drv")]);
-        assert_eq!(candidate.output_paths, vec![format!("/nix/store/{O}-a")]);
     }
 
     fn assigned_exec_repository(repository: String) -> String {

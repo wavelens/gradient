@@ -9,15 +9,14 @@ use gradient_secret::SecretString;
 
 use crate::codec::Proto;
 use crate::types::{
-    BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
-    EvalMessageLevel, EvalProgress, EvalShardSpec, ExecInventory, FinishedShard,
-    GitSshHostKeyObservation, GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan,
-    JobUpdateKind, QueryMode, RunningAssignment, UploadMetadata, UploadObject, VmStateKind,
-    WorkerReportAssignment,
+    BuildFailureKind, BuildMetrics, BuildProgressPhase, ClusterAddress, EvalMessageLevel,
+    EvalProgress, EvalShardSpec, ExecInventory, FinishedShard, GitSshHostKeyObservation,
+    GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
+    RunningAssignment, UploadMetadata, UploadObject, VmStateKind, WorkerReportAssignment,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 41)]
+#[proto(oldest = 65)]
 pub enum ClientMessage {
     InitConnection {
         capabilities: GradientCapabilities,
@@ -60,13 +59,6 @@ pub enum ClientMessage {
         lifetime_left_secs: Option<u64>,
         #[proto(43, default)]
         exec: Option<Box<ExecInventory>>,
-    },
-
-    RequestJobList,
-
-    RequestJobChunk {
-        scores: Vec<CandidateScore>,
-        is_final: bool,
     },
 
     AssignJobResponse {
@@ -326,8 +318,6 @@ impl ClientMessage {
             ClientMessage::Reject { .. } => "Reject",
             ClientMessage::WorkerCapabilities { .. } => "WorkerCapabilities",
             ClientMessage::WorkerMetrics { .. } => "WorkerMetrics",
-            ClientMessage::RequestJobList => "RequestJobList",
-            ClientMessage::RequestJobChunk { .. } => "RequestJobChunk",
             ClientMessage::AssignJobResponse { .. } => "AssignJobResponse",
             ClientMessage::JobUpdate { .. } => "JobUpdate",
             ClientMessage::JobCompleted { .. } => "JobCompleted",
@@ -386,7 +376,7 @@ mod job_id_tests {
             paths: vec![],
         };
         assert_eq!(m.job_id(), Some("j1"));
-        assert_eq!(ClientMessage::RequestJobList.job_id(), None);
+        assert_eq!(ClientMessage::Draining.job_id(), None);
 
         let progress = ClientMessage::EvalProgress {
             job_id: "j".into(),

@@ -63,8 +63,6 @@ pub(crate) trait SplitServer: Send + Sync {
         finished: Option<FinishedShard>,
         held: Vec<String>,
     ) -> Result<EvalShardOutcome>;
-
-    fn shards_in_flight(&self) -> usize;
 }
 
 #[async_trait]
@@ -91,14 +89,6 @@ impl SplitServer for JobUpdater {
         held: Vec<String>,
     ) -> Result<EvalShardOutcome> {
         self.request_eval_shard(have_source, finished, held).await
-    }
-
-    fn shards_in_flight(&self) -> usize {
-        if self.server_keeps_held_eval_shards() {
-            SHARDS_IN_FLIGHT
-        } else {
-            1
-        }
     }
 }
 
@@ -143,7 +133,6 @@ type Listed = (String, Result<Vec<EvalShardSpec>>);
 struct ShardTaker<'a> {
     server: &'a dyn SplitServer,
     work: &'a dyn ShardWork,
-    slots: usize,
     running: FuturesUnordered<BoxFuture<'a, Listed>>,
     listed: VecDeque<Listed>,
     held: Vec<String>,
@@ -154,7 +143,6 @@ impl<'a> ShardTaker<'a> {
         Self {
             server,
             work,
-            slots: server.shards_in_flight().max(1),
             running: FuturesUnordered::new(),
             listed: VecDeque::new(),
             held: Vec::new(),
@@ -167,7 +155,7 @@ impl<'a> ShardTaker<'a> {
             let room = match reply {
                 EvalShardOutcome::Shard(shard) => {
                     self.start(shard);
-                    self.running.len() < self.slots
+                    self.running.len() < SHARDS_IN_FLIGHT
                 }
                 EvalShardOutcome::Wait { retry_after_ms } if !busy => {
                     wait(retry_after_ms).await;
@@ -481,7 +469,6 @@ mod tests {
         requests: Mutex<Vec<Request>>,
         plans: Mutex<Vec<Vec<EvalShardSpec>>>,
         events: Arc<Mutex<Vec<&'static str>>>,
-        slots: usize,
     }
 
     impl ScriptedServer {
@@ -511,10 +498,6 @@ mod tests {
             self.events.lock().push("request");
             let reply = self.replies.lock().pop_front();
             reply.ok_or_else(|| anyhow::anyhow!("no reply scripted"))
-        }
-
-        fn shards_in_flight(&self) -> usize {
-            self.slots
         }
     }
 
@@ -606,7 +589,14 @@ mod tests {
     #[tokio::test]
     async fn the_taker_reports_deferred_sets_with_the_next_request() {
         let events = Arc::default();
-        let server = ScriptedServer::new(vec![shard("s1"), EvalShardOutcome::Finished], &events);
+        let server = ScriptedServer::new(
+            vec![
+                shard("s1"),
+                EvalShardOutcome::Finished,
+                EvalShardOutcome::Finished,
+            ],
+            &events,
+        );
         let mut work = ScriptedWork {
             deferred: Mutex::new(vec![python_set()]),
             corrupt: false,
@@ -615,18 +605,20 @@ mod tests {
 
         take_shards(&server, &mut work).await.expect("taken");
 
-        let requests = server.requests.lock();
-        assert_eq!(requests[0], (true, None, Vec::new()));
         assert_eq!(
-            requests[1],
-            (
-                true,
-                Some(FinishedShard {
-                    id: "s1".into(),
-                    deferred: vec![python_set()],
-                }),
-                Vec::new()
-            )
+            *server.requests.lock(),
+            vec![
+                (true, None, Vec::new()),
+                (true, None, vec!["s1".to_owned()]),
+                (
+                    true,
+                    Some(FinishedShard {
+                        id: "s1".into(),
+                        deferred: vec![python_set()],
+                    }),
+                    Vec::new()
+                ),
+            ]
         );
     }
 
@@ -637,6 +629,7 @@ mod tests {
             vec![
                 EvalShardOutcome::Plan,
                 shard("s1"),
+                EvalShardOutcome::Finished,
                 EvalShardOutcome::Finished,
             ],
             &events,
@@ -662,7 +655,14 @@ mod tests {
     #[tokio::test]
     async fn a_corrupt_cache_fails_the_member_not_the_evaluation() {
         let events = Arc::default();
-        let server = ScriptedServer::new(vec![shard("s1"), shard("s2")], &events);
+        let server = ScriptedServer::new(
+            vec![
+                shard("s1"),
+                EvalShardOutcome::Finished,
+                EvalShardOutcome::Finished,
+            ],
+            &events,
+        );
         let mut work = ScriptedWork {
             deferred: Mutex::default(),
             corrupt: true,
@@ -674,10 +674,16 @@ mod tests {
             .expect_err("the member fails");
 
         assert!(corrupt_cache_in(&error).is_some(), "{error:#}");
-        assert_eq!(*server.requests.lock(), vec![(true, None, Vec::new())]);
+        assert_eq!(
+            *server.requests.lock(),
+            vec![
+                (true, None, Vec::new()),
+                (true, None, vec!["s1".to_owned()])
+            ]
+        );
         let events = events.lock().clone();
-        let listed = events.iter().position(|e| *e == "shard").expect("a shard");
-        assert_eq!(events[listed..], ["shard", "drop cache"]);
+        assert_eq!(events.iter().filter(|e| **e == "shard").count(), 1);
+        assert_eq!(events.last(), Some(&"drop cache"));
     }
 
     struct SlowWork {
@@ -733,19 +739,16 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn the_next_shard_is_taken_while_a_slow_one_is_still_listed() {
         let events = Arc::default();
-        let server = ScriptedServer {
-            slots: 2,
-            ..ScriptedServer::new(
-                vec![
-                    shard("slow"),
-                    shard("fast"),
-                    EvalShardOutcome::Wait { retry_after_ms: 0 },
-                    EvalShardOutcome::Finished,
-                    EvalShardOutcome::Finished,
-                ],
-                &events,
-            )
-        };
+        let server = ScriptedServer::new(
+            vec![
+                shard("slow"),
+                shard("fast"),
+                EvalShardOutcome::Wait { retry_after_ms: 0 },
+                EvalShardOutcome::Finished,
+                EvalShardOutcome::Finished,
+            ],
+            &events,
+        );
         let started = tokio::time::Instant::now();
 
         take_shards(&server, &mut TimedWork).await.expect("taken");
@@ -766,21 +769,18 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_wait_while_a_shard_runs_is_asked_again_after_the_retry_delay() {
         let events = Arc::default();
-        let server = ScriptedServer {
-            slots: 2,
-            ..ScriptedServer::new(
-                vec![
-                    shard("slow"),
-                    EvalShardOutcome::Wait {
-                        retry_after_ms: 1000,
-                    },
-                    shard("fast"),
-                    EvalShardOutcome::Finished,
-                    EvalShardOutcome::Finished,
-                ],
-                &events,
-            )
-        };
+        let server = ScriptedServer::new(
+            vec![
+                shard("slow"),
+                EvalShardOutcome::Wait {
+                    retry_after_ms: 1000,
+                },
+                shard("fast"),
+                EvalShardOutcome::Finished,
+                EvalShardOutcome::Finished,
+            ],
+            &events,
+        );
         let started = tokio::time::Instant::now();
 
         take_shards(&server, &mut TimedWork).await.expect("taken");
@@ -801,7 +801,14 @@ mod tests {
     #[tokio::test]
     async fn a_shard_request_no_longer_waits_for_a_flush() {
         let events = Arc::default();
-        let server = ScriptedServer::new(vec![shard("s1"), EvalShardOutcome::Finished], &events);
+        let server = ScriptedServer::new(
+            vec![
+                shard("s1"),
+                EvalShardOutcome::Finished,
+                EvalShardOutcome::Finished,
+            ],
+            &events,
+        );
         let mut work = ScriptedWork {
             deferred: Mutex::default(),
             corrupt: false,
@@ -830,27 +837,6 @@ mod tests {
         );
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn an_older_server_gets_one_shard_at_a_time() {
-        let events = Arc::default();
-        let server = ScriptedServer::new(
-            vec![shard("slow"), shard("fast"), EvalShardOutcome::Finished],
-            &events,
-        );
-        let started = tokio::time::Instant::now();
-
-        take_shards(&server, &mut TimedWork).await.expect("taken");
-
-        assert_eq!(started.elapsed(), Duration::from_secs(4));
-        assert!(
-            server
-                .requests
-                .lock()
-                .iter()
-                .all(|(_, _, held)| held.is_empty())
-        );
-    }
-
     struct EventSink(Arc<Mutex<Vec<&'static str>>>);
 
     #[async_trait]
@@ -864,7 +850,14 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn the_taker_reports_thunks_while_a_shard_is_listed() {
         let events = Arc::default();
-        let server = ScriptedServer::new(vec![shard("s1"), EvalShardOutcome::Finished], &events);
+        let server = ScriptedServer::new(
+            vec![
+                shard("s1"),
+                EvalShardOutcome::Finished,
+                EvalShardOutcome::Finished,
+            ],
+            &events,
+        );
         let thunks = Arc::new(AtomicU64::new(0));
         let mut work = SlowWork {
             thunks: Arc::clone(&thunks),

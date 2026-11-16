@@ -24,7 +24,7 @@ use tracing::{Instrument as _, debug, debug_span, error, info, warn};
 use gradient_wire::messages::JobUpdateKind;
 
 use super::eval_split::handle_eval_shard_request;
-use super::socket::{ProtoWriter, push_pending_candidates};
+use super::socket::ProtoWriter;
 
 const JOB_EVENT_QUEUE: usize = 64;
 const SLOW_JOB_EVENT: Duration = Duration::from_secs(5);
@@ -344,7 +344,6 @@ impl SchedulerJobEvents {
                 {
                     error!(%peer_id, %job_id, error = %e, "handle_eval_result failed");
                 }
-                push_pending_candidates(&self.writer, scheduler, peer_id).await;
             }
             JobUpdateKind::Building { build_id } => {
                 scheduler
@@ -424,7 +423,6 @@ impl SchedulerJobEvents {
         if let Err(e) = self.scheduler.handle_job_completed(peer_id, &job_id).await {
             error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
         }
-        push_pending_candidates(&self.writer, &self.scheduler, peer_id).await;
     }
 
     async fn import_request(
@@ -442,7 +440,6 @@ impl SchedulerJobEvents {
         {
             error!(%peer_id, %job_id, error = %e, "handle_import_request failed");
         }
-        push_pending_candidates(&self.writer, &self.scheduler, peer_id).await;
     }
 
     async fn failed(
@@ -461,7 +458,6 @@ impl SchedulerJobEvents {
         {
             error!(%peer_id, %job_id, error = %e, "handle_job_failed failed");
         }
-        push_pending_candidates(&self.writer, &self.scheduler, peer_id).await;
     }
 }
 

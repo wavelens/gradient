@@ -11,7 +11,7 @@ use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
     EvalCachePullOutcome, EvalShardOutcome, GitServerSshHostKey, GradientCapabilities, GrantTarget,
-    GuestChannelKind, ImportOutcome, InputOutcome, Job, JobCandidate, UploadOutcome, WarmGuests,
+    GuestChannelKind, ImportOutcome, InputOutcome, Job, UploadOutcome, WarmGuests,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -21,7 +21,7 @@ pub struct FailedPeer {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 41)]
+#[proto(oldest = 65)]
 pub enum ServerMessage {
     AuthChallenge {
         peers: Vec<String>,
@@ -49,15 +49,6 @@ pub enum ServerMessage {
     },
 
     Draining,
-
-    JobListChunk {
-        candidates: Vec<JobCandidate>,
-        is_final: bool,
-    },
-
-    JobOffer {
-        candidates: Vec<JobCandidate>,
-    },
 
     AssignJob {
         job_id: String,
@@ -275,8 +266,6 @@ impl ServerMessage {
             ServerMessage::Reject { .. } => "Reject",
             ServerMessage::Error { .. } => "Error",
             ServerMessage::Draining => "Draining",
-            ServerMessage::JobListChunk { .. } => "JobListChunk",
-            ServerMessage::JobOffer { .. } => "JobOffer",
             ServerMessage::AssignJob { .. } => "AssignJob",
             ServerMessage::AbortJob { .. } => "AbortJob",
             ServerMessage::StartCluster { .. } => "StartCluster",

@@ -166,10 +166,6 @@ impl ReconnectingWriter {
         Ok(())
     }
 
-    pub fn version(&self) -> Option<u16> {
-        self.inner.session.borrow().version
-    }
-
     pub fn queued_final_reports(&self) -> Vec<String> {
         match &*self.inner.state.lock() {
             State::Detached { queue } => queue

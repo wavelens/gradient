@@ -9,17 +9,13 @@ mod id;
 mod jobs;
 mod local_store_path_bloom_filter_sender;
 mod message_loop;
-mod scoring;
 mod vm_report;
 
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_wire::messages::{
-    ClientMessage, FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK, JobKind,
-    RUNNING_JOBS_SINCE, RunningAssignment,
-};
+use gradient_wire::messages::{ClientMessage, JobKind, RunningAssignment};
 use gradient_wire::traits::WorkerStore;
 use tracing::{info, warn};
 
@@ -29,7 +25,6 @@ use crate::exec::host::ExecHost;
 use crate::exec::reattach::ResumedJob;
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
-use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::ProtoConnection;
 use gradient_worker_client::connection::handshake::{perform_dialed_handshake, perform_handshake};
 use gradient_worker_client::reconnect::RunOutcome;
@@ -48,7 +43,6 @@ const NO_JOB_SESSION: u64 = 0;
 pub struct Worker<S> {
     config: WorkerConfig,
     executor: JobExecutor,
-    scorer: JobScorer,
     jobs: Arc<WorkerJobs>,
     conn_state: S,
     _marker: PhantomData<S>,
@@ -76,7 +70,6 @@ impl Worker<Connected> {
             jobs: Arc::new(WorkerJobs::new(&config)),
             config,
             executor,
-            scorer: JobScorer::new(),
             conn_state: Connected { conn },
             _marker: PhantomData,
         })
@@ -92,7 +85,6 @@ impl Worker<Disconnected> {
         Self {
             config,
             executor,
-            scorer: JobScorer::new(),
             jobs,
             conn_state: Disconnected,
             _marker: PhantomData,
@@ -117,7 +109,6 @@ impl Worker<Disconnected> {
         let Worker {
             config,
             executor,
-            scorer,
             jobs,
             ..
         } = self;
@@ -125,7 +116,6 @@ impl Worker<Disconnected> {
         Worker {
             config,
             executor,
-            scorer,
             jobs,
             conn_state: Connected { conn },
             _marker: PhantomData,
@@ -138,14 +128,12 @@ impl Worker<Connected> {
         let Worker {
             config,
             executor,
-            scorer,
             jobs,
             conn_state: Connected { conn },
             ..
         } = self;
 
         let (writer, reader, flush) = conn.split();
-        let version = writer.version();
         let job_session = jobs
             .start_session(writer.clone())
             .await
@@ -153,16 +141,11 @@ impl Worker<Connected> {
                 warn!(error = %e, "the new session closed before the queued job reports went out");
                 NO_JOB_SESSION
             });
-        let state = message_loop::MessageLoopState::new(
-            writer,
-            &jobs,
-            config.clone(),
-            executor.clone(),
-            scorer,
-        );
+        let state =
+            message_loop::MessageLoopState::new(writer, &jobs, config.clone(), executor.clone());
         let outcome =
             message_loop::run_message_loop(state, reader, job_session, stop.clone()).await;
-        jobs.end_session(version);
+        jobs.end_session();
 
         // Only background tasks can still hold a writer clone at this point.
         // A stopping worker must see its last reports leave the queue.
@@ -176,7 +159,6 @@ impl Worker<Connected> {
         let disconnected = Worker {
             config,
             executor,
-            scorer,
             jobs,
             conn_state: Disconnected,
             _marker: PhantomData,
@@ -283,12 +265,10 @@ async fn perform_setup(
     if let Some(exec) = exec {
         exec.start_session();
     }
-    if handshake.version >= RUNNING_JOBS_SINCE {
-        conn.send(ClientMessage::RunningJobs {
-            assignments: running,
-        })
-        .await?;
-    }
+    conn.send(ClientMessage::RunningJobs {
+        assignments: running,
+    })
+    .await?;
     let exec = exec.filter(|_| handshake.negotiated.exec);
     if handshake.negotiated.build || exec.is_some() {
         let architectures = if config.system.architectures.is_empty() {
@@ -326,16 +306,13 @@ async fn perform_setup(
         })
         .await?;
     }
-    if handshake.version >= FIRST_WORKER_PROTOCOL_VERSION_WITH_LOCAL_STORE_BLOOM_FILTER_CHUNK {
-        for chunk in build_local_store_bloom_filter_chunks(store)
-            .await
-            .into_iter()
-            .flatten()
-        {
-            conn.send(chunk.into()).await?;
-        }
+    for chunk in build_local_store_bloom_filter_chunks(store)
+        .await
+        .into_iter()
+        .flatten()
+    {
+        conn.send(chunk.into()).await?;
     }
-    conn.send(ClientMessage::RequestJobList).await?;
     conn.send(ClientMessage::RequestJob {
         kind: JobKind::Flake,
     })
@@ -405,7 +382,6 @@ mod tests {
         Worker {
             jobs: Arc::new(WorkerJobs::new(&config)),
             executor: test_executor(base),
-            scorer: JobScorer::new(),
             config,
             conn_state: Disconnected,
             _marker: PhantomData,

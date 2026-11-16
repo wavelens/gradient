@@ -6,8 +6,7 @@
 
 use anyhow::{Context, Result};
 use gradient_wire::messages::{
-    BuildFailureKind, CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate,
-    JobKind, ServerMessage,
+    BuildFailureKind, ClientMessage, GradientCapabilities, Job, JobKind, ServerMessage,
 };
 use gradient_wire::session::handshake::HandshakeResult;
 use gradient_wire::testing::{MockProtoServer, MockServerConn, SCRIPT_TIMEOUT};
@@ -157,34 +156,6 @@ impl ProtoPeer {
         .context("the authority never sent the message the script waits for")?
     }
 
-    pub async fn candidates(&mut self) -> Result<Vec<JobCandidate>> {
-        self.send(ClientMessage::RequestJobList).await?;
-        let mut all = Vec::new();
-        loop {
-            let (candidates, is_final) = self
-                .recv_until(|msg| match msg {
-                    ServerMessage::JobListChunk {
-                        candidates,
-                        is_final,
-                    } => Some((candidates, is_final)),
-                    _ => None,
-                })
-                .await?;
-            all.extend(candidates);
-            if is_final {
-                return Ok(all);
-            }
-        }
-    }
-
-    pub async fn score(&self, scores: Vec<CandidateScore>) -> Result<()> {
-        self.send(ClientMessage::RequestJobChunk {
-            scores,
-            is_final: true,
-        })
-        .await
-    }
-
     pub async fn claim(&mut self, kind: JobKind) -> Result<Assignment> {
         self.send(ClientMessage::RequestJob { kind }).await?;
         let assignment = self
@@ -284,7 +255,7 @@ pub async fn mock_session() -> MockSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_wire::messages::{BuildJob, RequiredPath};
+    use gradient_wire::messages::BuildJob;
     use gradient_wire::testing::{MockProtoServer, MockServerConn};
 
     const PATH: &str = "/nix/store/0c0f6hb8s2q2wbdrhl5ch9fwr8v2rq7x-peer";
@@ -335,36 +306,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_job_goes_offer_score_claim_complete() {
+    async fn a_job_goes_claim_complete() {
         let (mut conn, mut peer) = pair(PeerSpec::default()).await;
-        let candidate = JobCandidate {
-            job_id: "build:1".into(),
-            required_paths: vec![RequiredPath {
-                path: PATH.into(),
-                cache_info: None,
-            }],
-            drv_paths: vec![],
-            output_paths: vec![],
-            requirement: None,
-        };
-
-        let (served, seen) = tokio::join!(
-            conn.serve_job_list(vec![candidate.clone()]),
-            peer.candidates()
-        );
-        served.unwrap();
-        assert_eq!(seen.unwrap(), vec![candidate]);
-
-        let score = CandidateScore {
-            job_id: "build:1".into(),
-            missing_count: 1,
-            missing_nar_size: 42,
-            outputs_present: false,
-        };
-        let (sent, scores) = tokio::join!(peer.score(vec![score.clone()]), conn.scores());
-        sent.unwrap();
-        assert_eq!(scores.unwrap(), vec![score]);
-
         let job = Job::Build(BuildJob {
             build: gradient_wire::types::BuildSpec::default(),
             requirement: Default::default(),

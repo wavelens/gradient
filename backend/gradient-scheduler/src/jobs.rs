@@ -17,8 +17,7 @@ use gradient_types::ids::{
     DispatchedJobId, EvaluationId, ExecJobId, ProjectId, TaskId,
 };
 use gradient_wire::types::{
-    BuildJob, BuildSpecKind, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate,
-    JobKind,
+    BuildJob, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, Job, JobKind,
 };
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
@@ -245,30 +244,6 @@ impl PendingJob {
             PendingJob::Eval(j) => j.project_id,
             PendingJob::Build(j) => j.project_id,
             PendingJob::Exec(j) => j.project_id,
-        }
-    }
-
-    pub fn as_candidate(&self, job_id: &str) -> JobCandidate {
-        let (drv_paths, output_paths, requirement) = match self {
-            PendingJob::Build(j) => (
-                vec![j.job.build.drv_path.clone()],
-                j.job
-                    .build
-                    .outputs
-                    .iter()
-                    .filter(|o| !o.path.is_empty())
-                    .map(|o| o.path.clone())
-                    .collect(),
-                Some(j.job.requirement.clone()),
-            ),
-            PendingJob::Eval(_) | PendingJob::Exec(_) => (Vec::new(), Vec::new(), None),
-        };
-        JobCandidate {
-            job_id: job_id.to_owned(),
-            required_paths: Vec::new(),
-            drv_paths,
-            output_paths,
-            requirement,
         }
     }
 
@@ -939,7 +914,6 @@ pub struct TrackedKeys {
 #[derive(Debug, Default)]
 pub struct JobTracker {
     pending: PendingJobs,
-    scores: HashMap<String, HashMap<String, WorkerJobScore>>,
     active: HashMap<String, ActiveJob>,
     decisions: VecDeque<AssignDecision>,
     clusters: ClusterBook,
@@ -967,57 +941,13 @@ impl JobTracker {
         }
     }
 
-    pub fn add_pending(&mut self, job_id: String, job: PendingJob) -> JobCandidate {
-        let candidate = job.as_candidate(&job_id);
+    pub fn add_pending(&mut self, job_id: String, job: PendingJob) {
         // Two dispatch passes both clear the `contains_job` filter ahead of the enqueue. Jobs
         // already pending or active stay as they are under the tracker write lock.
         if self.pending.contains_key(&job_id) || self.active.contains_key(&job_id) {
-            return candidate;
+            return;
         }
         self.pending.insert(job_id, job);
-        candidate
-    }
-
-    pub fn candidates_for_worker(
-        &self,
-        authorized: Option<&HashSet<ProjectId>>,
-        caps: Option<&WorkerCaps>,
-    ) -> Vec<(JobCandidate, ProjectId)> {
-        let members = self
-            .clusters
-            .jobs()
-            .filter(|(_, job)| visible_to(job, authorized, caps));
-        self.eligible_for_worker(authorized, caps)
-            .chain(members)
-            .map(|(id, job)| (job.as_candidate(id), job.project_id()))
-            .collect()
-    }
-
-    fn eligible_for_worker<'s>(
-        &'s self,
-        authorized: Option<&'s HashSet<ProjectId>>,
-        caps: Option<&'s WorkerCaps>,
-    ) -> impl Iterator<Item = (&'s String, &'s PendingJob)> {
-        self.pending
-            .iter()
-            .filter(move |(_, job)| visible_to(job, authorized, caps))
-    }
-
-    pub fn record_scores(&mut self, worker_id: &str, scores: Vec<CandidateScore>) {
-        let worker_scores = self.scores.entry(worker_id.to_owned()).or_default();
-        let offered = scores.into_iter().filter(|score| {
-            self.pending.contains_key(&score.job_id) || self.clusters.contains(&score.job_id)
-        });
-        for score in offered {
-            worker_scores.insert(
-                score.job_id.clone(),
-                WorkerJobScore {
-                    missing_count: score.missing_count,
-                    missing_nar_size: score.missing_nar_size,
-                    outputs_present: score.outputs_present,
-                },
-            );
-        }
     }
 
     fn push_decision(&mut self, decision: AssignDecision) {
@@ -1614,11 +1544,7 @@ impl JobTracker {
     }
 
     pub fn drop_cluster(&mut self, id: ClusterJobId) -> Option<PendingCluster> {
-        let cluster = self.clusters.drop_cluster(id)?;
-        for member in &cluster.members {
-            self.forget_job_scores(&member.key);
-        }
-        Some(cluster)
+        self.clusters.drop_cluster(id)
     }
 
     pub fn drop_cluster_members(
@@ -1626,10 +1552,7 @@ impl JobTracker {
         id: ClusterJobId,
         members: &[ClusterMemberId],
     ) -> Option<PendingCluster> {
-        for key in self.clusters.drop_members(id, members) {
-            self.forget_job_scores(&key);
-        }
-
+        self.clusters.drop_members(id, members);
         self.clusters.get(id).cloned()
     }
 
@@ -1657,7 +1580,6 @@ impl JobTracker {
         members: Vec<(String, String, DispatchedJobId, PendingJob)>,
     ) {
         for (worker, key, assignment_id, job) in members {
-            self.forget_job_scores(&key);
             self.clusters.release(&key);
             self.active.insert(
                 key,
@@ -1674,14 +1596,7 @@ impl JobTracker {
     }
 
     pub fn remove_active(&mut self, job_id: &str) -> Option<PendingJob> {
-        self.forget_job_scores(job_id);
         self.active.remove(job_id).map(|a| a.job)
-    }
-
-    fn forget_job_scores(&mut self, job_id: &str) {
-        for ws in self.scores.values_mut() {
-            ws.remove(job_id);
-        }
     }
 
     pub fn active_job(&self, job_id: &str) -> Option<&PendingJob> {
@@ -1759,7 +1674,6 @@ impl JobTracker {
     }
 
     pub fn worker_disconnected(&mut self, worker_id: &str) -> Disconnected {
-        self.scores.remove(worker_id);
         self.waiting_builds.remove(worker_id);
         let orphaned: Vec<String> = self
             .active
@@ -1796,7 +1710,6 @@ impl JobTracker {
         deadline: Instant,
         observed_peak_ram_mb: &HashMap<String, u64>,
     ) -> Disconnected {
-        self.scores.remove(worker_id);
         self.waiting_builds.remove(worker_id);
         let held: Vec<String> = self
             .active
@@ -1904,7 +1817,6 @@ impl JobTracker {
     }
 
     pub fn remove_job(&mut self, job_id: &str) {
-        self.forget_job_scores(job_id);
         self.pending.remove(job_id);
         self.active.remove(job_id);
         self.clusters.forget(job_id);
@@ -1931,7 +1843,6 @@ impl JobTracker {
         overdue
             .into_iter()
             .filter_map(|job_id| {
-                self.forget_job_scores(&job_id);
                 let active = self.active.remove(&job_id)?;
                 Some((active.worker, job_id))
             })
@@ -1986,7 +1897,6 @@ impl JobTracker {
             .collect();
         for id in &pending {
             self.pending.remove(id);
-            self.forget_job_scores(id);
         }
         let members: Vec<String> = self
             .clusters
@@ -1996,7 +1906,6 @@ impl JobTracker {
             .collect();
         for key in &members {
             self.clusters.forget(key);
-            self.forget_job_scores(key);
         }
         self.awaiting_reclaim
             .retain(|_, held| !held.job.as_ref().is_some_and(|job| aborted.contains(job)));
@@ -2061,7 +1970,6 @@ impl JobTracker {
             .collect();
         for id in &pruned {
             self.pending.remove(id);
-            self.forget_job_scores(id);
         }
         let members: Vec<String> = self
             .clusters
@@ -2071,7 +1979,6 @@ impl JobTracker {
             .collect();
         for key in &members {
             self.clusters.forget(key);
-            self.forget_job_scores(key);
         }
 
         pruned.len() + members.len()
@@ -2807,21 +2714,6 @@ mod tests {
         })
     }
 
-    #[test]
-    fn a_build_offer_carries_its_requirement_and_an_evaluation_offer_none() {
-        let peer = ProjectId::now_v7();
-        let build = build_job_arch(peer, vec![], "aarch64-linux", vec!["kvm".into()]);
-
-        assert_eq!(
-            build.as_candidate("build:1").requirement,
-            Some(BuildRequirement {
-                architecture: "aarch64-linux".into(),
-                required_features: vec!["kvm".into()],
-            })
-        );
-        assert_eq!(eval_job(peer).as_candidate("eval:1").requirement, None);
-    }
-
     fn build_caps(architectures: &[&str], features: &[&str]) -> WorkerCaps {
         WorkerCaps {
             architectures: architectures.iter().map(|a| (*a).into()).collect(),
@@ -3011,56 +2903,27 @@ mod tests {
     }
 
     #[test]
-    fn test_add_pending_and_candidates() {
-        let mut tracker = JobTracker::new();
-        let peer = ProjectId::now_v7();
-        tracker.add_pending("j1".into(), eval_job(peer));
-        tracker.add_pending("j2".into(), eval_job(peer));
-        tracker.add_pending("j3".into(), build_job(peer, vec![]));
-
-        let candidates = tracker.candidates_for_worker(None, None);
-        assert_eq!(candidates.len(), 3);
-        assert_eq!(tracker.pending_count(), 3);
-    }
-
-    #[test]
-    fn test_candidates_filtered_by_peer() {
-        let mut tracker = JobTracker::new();
+    fn pending_job_visible_only_to_authorized_peer() {
         let peer_a = ProjectId::now_v7();
         let peer_b = ProjectId::now_v7();
-        tracker.add_pending("ja".into(), eval_job(peer_a));
-        tracker.add_pending("jb".into(), eval_job(peer_b));
+        let authorized = HashSet::from([peer_a]);
 
-        let mut authorized = HashSet::new();
-        authorized.insert(peer_a);
-
-        let candidates = tracker.candidates_for_worker(Some(&authorized), None);
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].0.job_id, "ja");
+        assert!(visible_to(&eval_job(peer_a), Some(&authorized), None));
+        assert!(!visible_to(&eval_job(peer_b), Some(&authorized), None));
     }
 
     #[test]
-    fn test_candidates_filtered_by_architecture() {
-        let mut tracker = JobTracker::new();
+    fn build_job_requires_worker_architecture_and_builtin_is_visible_to_all() {
         let peer = ProjectId::now_v7();
-        tracker.add_pending(
-            "x86".into(),
-            build_job_arch(peer, vec![], "x86_64-linux", vec![]),
-        );
-        tracker.add_pending(
-            "arm".into(),
-            build_job_arch(peer, vec![], "aarch64-linux", vec![]),
-        );
-        tracker.add_pending(
-            "any".into(),
-            build_job_arch(peer, vec![], "builtin", vec![]),
-        );
-
         let x86_caps = build_caps(&["x86_64-linux"], &[]);
-        let candidates = tracker.candidates_for_worker(None, Some(&x86_caps));
-        let mut ids: Vec<_> = candidates.iter().map(|(c, _)| c.job_id.clone()).collect();
-        ids.sort();
-        assert_eq!(ids, vec!["any".to_string(), "x86".to_string()]);
+        let visible = |architecture: &str| {
+            let job = build_job_arch(peer, vec![], architecture, vec![]);
+            visible_to(&job, None, Some(&x86_caps))
+        };
+
+        assert!(visible("x86_64-linux"));
+        assert!(visible("builtin"));
+        assert!(!visible("aarch64-linux"));
     }
 
     #[test]
@@ -3376,87 +3239,6 @@ mod tests {
             tracker
                 .candidate_detail(DispatchedJobId::now_v7())
                 .is_none()
-        );
-    }
-
-    #[test]
-    fn terminal_job_removal_prunes_scores_across_all_workers() {
-        let mut tracker = JobTracker::new();
-        let peer = ProjectId::now_v7();
-        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
-        let inst = gradient_pool::score::InstanceContext::default();
-
-        tracker.add_pending("build:j1".into(), build_job(peer, vec![]));
-        for w in ["w1", "w2"] {
-            tracker.record_scores(
-                w,
-                vec![CandidateScore {
-                    job_id: "build:j1".into(),
-                    missing_count: 0,
-                    missing_nar_size: 0,
-                    outputs_present: false,
-                }],
-            );
-        }
-        tracker.take_best_of_kind("w1", None, None, None, &JobKind::Build, &*p, &inst, &[]);
-
-        tracker.remove_active("build:j1");
-        assert!(
-            tracker
-                .scores
-                .values()
-                .all(|ws| !ws.contains_key("build:j1")),
-            "a completed job must not leak score entries"
-        );
-
-        tracker.add_pending("build:j2".into(), build_job(peer, vec![]));
-        tracker.record_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "build:j2".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-                outputs_present: false,
-            }],
-        );
-        tracker.remove_job("build:j2");
-        assert!(
-            tracker
-                .scores
-                .values()
-                .all(|ws| !ws.contains_key("build:j2")),
-            "an aborted job must not leak score entries"
-        );
-    }
-
-    #[test]
-    fn aborting_an_evaluation_prunes_its_pending_scores() {
-        let mut tracker = JobTracker::new();
-        let peer = ProjectId::now_v7();
-        let job = build_job(peer, vec![]);
-        let eval_id = job.evaluation_id();
-        let shared_build = job.derivation_build().expect("a build job");
-
-        tracker.add_pending("build:j1".into(), job);
-        tracker.record_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "build:j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-                outputs_present: false,
-            }],
-        );
-        tracker.remove_waiting_jobs(&AbortedJobs {
-            evaluation: eval_id,
-            shared_builds: HashSet::from([shared_build]),
-        });
-        assert!(
-            tracker
-                .scores
-                .values()
-                .all(|ws| !ws.contains_key("build:j1")),
-            "aborting an evaluation must not leak its pending jobs' score entries"
         );
     }
 
@@ -3799,23 +3581,6 @@ mod tests {
     }
 
     #[test]
-    fn test_worker_scores_for_non_pending_or_non_member_jobs_are_not_stored() {
-        let mut tracker = JobTracker::new();
-        tracker.add_pending("build:j1".into(), build_job(ProjectId::now_v7(), vec![]));
-        let score = |job_id: &str| CandidateScore {
-            job_id: job_id.into(),
-            missing_count: 0,
-            missing_nar_size: 0,
-            outputs_present: false,
-        };
-
-        tracker.record_scores("w1", vec![score("build:j1"), score("build:unknown")]);
-
-        let stored: Vec<&String> = tracker.scores["w1"].keys().collect();
-        assert_eq!(stored, vec!["build:j1"]);
-    }
-
-    #[test]
     fn test_release_to_pending_after_rejection() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
@@ -3832,9 +3597,6 @@ mod tests {
         tracker.release_to_pending("j1");
         assert_eq!(tracker.pending_count(), 1);
         assert_eq!(tracker.active_count(), 0);
-
-        let candidates = tracker.candidates_for_worker(None, None);
-        assert_eq!(candidates.len(), 1);
     }
 
     #[test]
@@ -4203,7 +3965,7 @@ mod tests {
     }
 
     #[test]
-    fn members_are_offered_for_scoring_but_never_assigned_singly() {
+    fn pending_cluster_member_is_tracked_but_never_offered_to_single_worker_request() {
         let peer = ProjectId::now_v7();
         let mut tracker = JobTracker::new();
         tracker.add_member(
@@ -4212,9 +3974,6 @@ mod tests {
             eval_job(peer),
         );
 
-        let offered = tracker.candidates_for_worker(None, None);
-        assert_eq!(offered.len(), 1);
-        assert_eq!(offered[0].0.job_id, "m1");
         assert!(tracker.contains_job("m1"));
 
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);

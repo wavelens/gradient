@@ -25,9 +25,8 @@ use gradient_wire::PROTO_VERSIONS;
 use gradient_wire::codec::{from_bytes, to_bytes};
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::types::{
-    BuildOutput, CandidateScore, DerivationOutput, DiscoveredDerivation, GrantTarget, Job,
-    JobCandidate, JobKind, JobUpdateKind, NarUploadMetadata, QueryMode, UploadMetadata,
-    UploadObject, UploadOutcome,
+    BuildOutput, DerivationOutput, DiscoveredDerivation, GrantTarget, Job, JobKind, JobUpdateKind,
+    NarUploadMetadata, QueryMode, UploadMetadata, UploadObject, UploadOutcome,
 };
 use ractor::Actor;
 use ractor::rpc::CallResult;
@@ -111,71 +110,40 @@ impl Worker {
             .expect("the server answers in time")
     }
 
-    async fn candidates(&mut self) -> Vec<JobCandidate> {
-        self.send(ClientMessage::RequestJobList).await;
-        let mut all = Vec::new();
-        loop {
-            let (candidates, is_final) = self
-                .next(|msg| match msg {
-                    ServerMessage::JobListChunk {
-                        candidates,
-                        is_final,
-                    } => Some((candidates.clone(), *is_final)),
+    async fn claim(&mut self, kind: JobKind, wanted: impl Fn(&Claimed) -> bool) -> Claimed {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        while tokio::time::Instant::now() < deadline {
+            self.send(ClientMessage::RequestJob { kind: kind.clone() })
+                .await;
+            let assigned = self
+                .next_within(Duration::from_secs(2), |msg| match msg {
+                    ServerMessage::AssignJob {
+                        job_id,
+                        assignment_id,
+                        job,
+                        ..
+                    } => Some(Claimed {
+                        job_id: job_id.clone(),
+                        assignment_id: assignment_id.clone(),
+                        job: job.clone(),
+                    }),
                     _ => None,
                 })
                 .await;
-            all.extend(candidates);
-            if is_final {
-                return all;
+            let Some(claimed) = assigned else {
+                continue;
+            };
+            let accepted = wanted(&claimed);
+            self.send(ClientMessage::AssignJobResponse {
+                job_id: claimed.job_id.clone(),
+                accepted,
+                reason: None,
+                endpoint: None,
+            })
+            .await;
+            if accepted {
+                return claimed;
             }
-        }
-    }
-
-    async fn claim(&mut self, kind: JobKind, wanted: impl Fn(&JobCandidate) -> bool) -> Claimed {
-        let deadline = tokio::time::Instant::now() + WAIT;
-        while tokio::time::Instant::now() < deadline {
-            let candidates = self.candidates().await;
-            if let Some(candidate) = candidates.iter().find(|c| wanted(c)) {
-                let scores = vec![CandidateScore {
-                    job_id: candidate.job_id.clone(),
-                    missing_count: 0,
-                    missing_nar_size: 0,
-                    outputs_present: false,
-                }];
-                self.send(ClientMessage::RequestJobChunk {
-                    scores,
-                    is_final: true,
-                })
-                .await;
-                self.send(ClientMessage::RequestJob { kind: kind.clone() })
-                    .await;
-                let assigned = self
-                    .next_within(Duration::from_secs(2), |msg| match msg {
-                        ServerMessage::AssignJob {
-                            job_id,
-                            assignment_id,
-                            job,
-                            ..
-                        } => Some(Claimed {
-                            job_id: job_id.clone(),
-                            assignment_id: assignment_id.clone(),
-                            job: job.clone(),
-                        }),
-                        _ => None,
-                    })
-                    .await;
-                if let Some(claimed) = assigned {
-                    self.send(ClientMessage::AssignJobResponse {
-                        job_id: claimed.job_id.clone(),
-                        accepted: true,
-                        reason: None,
-                        endpoint: None,
-                    })
-                    .await;
-                    return claimed;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
         }
         panic!("no {kind:?} job was handed out");
     }
@@ -467,7 +435,10 @@ async fn after_an_evaluation_build_and_upload_no_original_hash_is_stored() {
 
     let original_a_drv = store_path(A_DRV, "a.drv");
     let build = worker
-        .claim(JobKind::Build, |c| c.drv_paths.contains(&original_a_drv))
+        .claim(
+            JobKind::Build,
+            |c| matches!(&c.job, Job::Build(job) if job.build.drv_path == original_a_drv),
+        )
         .await;
     let Job::Build(job) = &build.job else {
         panic!("a build job, got {:?}", build.job);

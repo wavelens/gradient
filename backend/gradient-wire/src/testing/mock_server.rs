@@ -8,8 +8,7 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{from_bytes, to_bytes};
 use crate::constants::BULK_CHUNK_SIZE;
 use crate::messages::{
-    CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate, JobKind,
-    PROTO_VERSIONS, ServerMessage,
+    ClientMessage, GradientCapabilities, Job, JobKind, PROTO_VERSIONS, ServerMessage,
 };
 use crate::types::{GrantTarget, NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use anyhow::{Context, Result};
@@ -171,36 +170,6 @@ impl MockServerConn {
         })
         .await?;
         Ok(id)
-    }
-
-    pub async fn serve_job_list(&mut self, candidates: Vec<JobCandidate>) -> Result<()> {
-        self.recv_until(|msg| matches!(msg, ClientMessage::RequestJobList).then_some(()))
-            .await?;
-        self.send(ServerMessage::JobListChunk {
-            candidates,
-            is_final: true,
-        })
-        .await
-    }
-
-    pub async fn offer(&mut self, candidates: Vec<JobCandidate>) -> Result<()> {
-        self.send(ServerMessage::JobOffer { candidates }).await
-    }
-
-    pub async fn scores(&mut self) -> Result<Vec<CandidateScore>> {
-        let mut all = Vec::new();
-        loop {
-            let (scores, is_final) = self
-                .recv_until(|msg| match msg {
-                    ClientMessage::RequestJobChunk { scores, is_final } => Some((scores, is_final)),
-                    _ => None,
-                })
-                .await?;
-            all.extend(scores);
-            if is_final {
-                return Ok(all);
-            }
-        }
     }
 
     pub async fn job_request(&mut self) -> Result<JobKind> {
@@ -414,32 +383,6 @@ mod tests {
         );
         assert_eq!(claimed.unwrap(), "peer-1");
         assert_eq!(result.unwrap().negotiated, negotiated);
-    }
-
-    #[tokio::test]
-    async fn scores_accumulate_until_the_final_chunk() {
-        let (mut conn, mut socket) = connected().await;
-        let score = |job: &str| CandidateScore {
-            job_id: job.into(),
-            missing_count: 0,
-            missing_nar_size: 0,
-            outputs_present: false,
-        };
-        for (scores, is_final) in [(vec![score("a")], false), (vec![score("b")], true)] {
-            socket
-                .send_client_msg(&ClientMessage::RequestJobChunk { scores, is_final })
-                .await
-                .unwrap();
-        }
-
-        let ids: Vec<_> = conn
-            .scores()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|s| s.job_id)
-            .collect();
-        assert_eq!(ids, ["a", "b"]);
     }
 
     #[tokio::test]

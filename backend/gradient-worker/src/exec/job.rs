@@ -66,7 +66,7 @@ const STORE_FAILURE_CONSOLE_BYTES: u64 = 16 * 1024;
 pub trait ExecReport: Send {
     async fn program_started(&mut self) -> Result<()>;
     async fn program_exited(&mut self, code: i32) -> Result<()>;
-    async fn abort_requested(&mut self) -> Result<bool>;
+    async fn abort_requested(&mut self) -> Result<()>;
     async fn output(&mut self, data: Vec<u8>) -> Result<()>;
     async fn output_dropped(&mut self, bytes: u64) -> Result<()>;
     async fn phase(&mut self, name: String, payload: Vec<u8>) -> Result<()>;
@@ -103,7 +103,7 @@ impl ExecReport for JobUpdater {
         self.report_program_exited(code).await
     }
 
-    async fn abort_requested(&mut self) -> Result<bool> {
+    async fn abort_requested(&mut self) -> Result<()> {
         self.report_abort_requested().await
     }
 
@@ -517,13 +517,9 @@ async fn end_on_guest_shutdown<R: ExecReport>(
     if let Err(e) = reporter.note(GUEST_SHUTDOWN_NOTE).await {
         warn!(error = %e, "could not log the guest shutdown");
     }
-    match reporter.abort_requested().await {
-        Ok(true) => {}
-        Ok(false) => return guest_shut_down(),
-        Err(e) => {
-            warn!(error = %e, "could not ask the server to abort the job");
-            return guest_shut_down();
-        }
+    if let Err(e) = reporter.abort_requested().await {
+        warn!(error = %e, "could not ask the server to abort the job");
+        return guest_shut_down();
     }
     match tokio::time::timeout(SHUTDOWN_ABORT_WAIT, abort.aborted()).await {
         Ok(()) => Followed::Stopped(Stop::Aborted),
@@ -1068,12 +1064,12 @@ mod tests {
             Ok(())
         }
 
-        async fn abort_requested(&mut self) -> Result<bool> {
+        async fn abort_requested(&mut self) -> Result<()> {
             self.0.push(Reported::AbortRequested);
             if let Some(abort) = &self.2 {
                 abort.send_replace(true);
             }
-            Ok(true)
+            Ok(())
         }
 
         async fn output(&mut self, data: Vec<u8>) -> Result<()> {

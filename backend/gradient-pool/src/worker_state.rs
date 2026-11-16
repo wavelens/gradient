@@ -90,7 +90,6 @@ pub struct WorkerShared {
     pub observes_build_ram: bool,
     pub reclaims_jobs: bool,
     pub peer_auth: PeerAuth,
-    pub sent_candidates: HashSet<String>,
     pub local_store_bloom_filter: Option<WorkerStorePathBloomFilter>,
     pub session: Arc<dyn SessionPort>,
     /// The session loop is bumping this lock-free on every inbound frame. The liveness watchdog is
@@ -264,7 +263,6 @@ impl TypedWorker<Active> {
                 observes_build_ram: false,
                 reclaims_jobs: false,
                 peer_auth: PeerAuth::from(authorized_peers),
-                sent_candidates: HashSet::new(),
                 local_store_bloom_filter: None,
                 session,
                 last_seen: Arc::new(AtomicI64::new(

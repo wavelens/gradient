@@ -22,8 +22,8 @@ use gradient_scheduler::jobs::{Assignment, PendingJob, Reattached};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{
-    BuildFailureKind, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership,
-    JobKind, JobUpdateKind, RunningAssignment, ServerMessage,
+    BuildFailureKind, CACHE_QUERY_BUDGET, ClientMessage, ClusterMembership, JobKind, JobUpdateKind,
+    RunningAssignment, ServerMessage,
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
@@ -43,12 +43,8 @@ use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::{LogLane, LogTarget};
 use super::nar_serve::{ServeSlot, serve_nar_request};
 use super::refusal::refuse;
-use super::socket::{
-    ProtoWriter, job_offer_chunks, send_credentials_for_job, send_error, send_server_msg,
-};
-use super::store_paths::{
-    inbound_or_refuse, outbound_message, outbound_offer, project_mapper, unmapped_project,
-};
+use super::socket::{ProtoWriter, send_credentials_for_job, send_error, send_server_msg};
+use super::store_paths::{inbound_or_refuse, outbound_message, project_mapper, unmapped_project};
 use super::upload::UploadSession;
 use gradient_db::cache_paths::project_read_caches;
 
@@ -277,7 +273,6 @@ impl<'a> InboundContext<'a> {
                 });
                 true
             }
-            ClientMessage::RequestJobList => self.on_request_job_list().await,
             ClientMessage::RequestJob { kind } => self.on_request_job(kind).await,
             ClientMessage::ClusterSignal {
                 attempt,
@@ -287,10 +282,6 @@ impl<'a> InboundContext<'a> {
                 self.scheduler
                     .forward_cluster_signal(self.peer_id, &attempt, to, payload.into())
                     .await;
-                true
-            }
-            ClientMessage::RequestJobChunk { scores, is_final } => {
-                self.on_request_job_chunk(scores, is_final).await;
                 true
             }
             ClientMessage::AssignJobResponse {
@@ -968,48 +959,6 @@ impl<'a> InboundContext<'a> {
             .await;
     }
 
-    async fn on_request_job_list(&mut self) -> bool {
-        debug!(peer_id = %self.peer_id, "RequestJobList");
-        let offer = self.scheduler.get_job_candidates(self.peer_id).await;
-        self.send_job_list_chunks(outbound_offer(offer, &self.handles.db).await)
-            .await
-    }
-
-    async fn send_job_list_chunks(
-        &mut self,
-        candidates: Vec<gradient_wire::messages::JobCandidate>,
-    ) -> bool {
-        use gradient_wire::messages::ServerMessage;
-        let chunks = job_offer_chunks(&candidates);
-        let total = chunks.len();
-        for (i, chunk) in chunks.into_iter().enumerate() {
-            if send_server_msg(
-                self.writer,
-                &ServerMessage::JobListChunk {
-                    candidates: chunk.to_vec(),
-                    is_final: i + 1 == total,
-                },
-            )
-            .await
-            .is_err()
-            {
-                return false;
-            }
-        }
-        if total == 0 {
-            return send_server_msg(
-                self.writer,
-                &ServerMessage::JobListChunk {
-                    candidates: vec![],
-                    is_final: true,
-                },
-            )
-            .await
-            .is_ok();
-        }
-        true
-    }
-
     #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
         trace!(peer_id = %self.peer_id, ?kind, "RequestJob");
@@ -1106,12 +1055,6 @@ impl<'a> InboundContext<'a> {
             warn!(peer_id = %self.peer_id, %job_id, error = %e, "releasing an unmappable job failed");
         }
         true
-    }
-
-    #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len(), is_final))]
-    async fn on_request_job_chunk(&mut self, scores: Vec<CandidateScore>, is_final: bool) {
-        trace!(peer_id = %self.peer_id, count = scores.len(), is_final, "RequestJobChunk");
-        self.scheduler.record_scores(self.peer_id, scores).await;
     }
 
     async fn on_assign_job_response(

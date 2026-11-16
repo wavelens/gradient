@@ -267,7 +267,7 @@ mod tests {
             })
             .is_some()
         );
-        assert!(rejection_for(&ClientMessage::RequestJobList).is_some());
+        assert!(rejection_for(&ClientMessage::Draining).is_some());
         assert!(
             rejection_for(&ClientMessage::JobFailed {
                 job_id: "job".into(),
