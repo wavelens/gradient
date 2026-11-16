@@ -7,7 +7,9 @@
 mod checkout;
 mod commit_info;
 mod context;
+mod git_credentials;
 mod git_network_limits;
+mod https_credentials_for_operation_host;
 mod pktline;
 mod remote;
 mod ssh;
@@ -24,7 +26,11 @@ use tracing::instrument;
 
 pub use checkout::{checkout_commit, checkout_commit_into};
 pub use commit_info::HeadCommit;
-pub use context::{load_ssh_private_key_and_known_hosts, save_observed_project_ssh_host_keys};
+pub use context::{
+    load_project_git_credentials_for_repository_url, repository_url_may_need_stored_credentials,
+    save_observed_project_ssh_host_keys,
+};
+pub use git_credentials::{GitOperationCredentials, HttpsGitCredential};
 pub use remote::BranchHead;
 pub use ssh::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
 
@@ -95,12 +101,12 @@ pub async fn resolve_remote_ref(
     url: &str,
     branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
-    let ssh = load_ssh_private_key_and_known_hosts(ctx, project, url).await?;
+    let credentials = load_project_git_credentials_for_repository_url(ctx, project, url).await?;
     list_remote_refs_find_branch_head_and_save_host_keys(
         &ctx.worker_db,
         project.id,
         url,
-        ssh,
+        credentials,
         branch,
     )
     .await
@@ -110,27 +116,36 @@ async fn list_remote_refs_find_branch_head_and_save_host_keys<C: ConnectionTrait
     db: &C,
     project: ProjectId,
     url: &str,
-    ssh: Option<SshGitPrivateKeyKnownHostsAndObservations>,
+    credentials: GitOperationCredentials,
     branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
-    let (url, branch, blocking_ssh) = (url.to_owned(), branch.map(str::to_owned), ssh.clone());
+    let (url, branch, blocking_credentials) = (
+        url.to_owned(),
+        branch.map(str::to_owned),
+        credentials.clone(),
+    );
     let head = tokio::task::spawn_blocking(move || {
-        remote::ls_remote_head(&url, blocking_ssh.as_ref(), branch.as_deref())
+        remote::ls_remote_head(&url, &blocking_credentials, branch.as_deref())
     })
     .await
     .map_err(|e| SourceError::GitExecution {
         error: e.to_string(),
     });
-    save_observed_project_ssh_host_keys(db, project, ssh.as_ref()).await;
+    save_observed_project_ssh_host_keys(
+        db,
+        project,
+        credentials.ssh_git_private_key_and_known_hosts.as_ref(),
+    )
+    .await;
     Ok(head??.commit)
 }
 
 pub(crate) fn remote_ref_commit(
     url: &str,
     ref_: Option<&str>,
-    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    credentials: &GitOperationCredentials,
 ) -> Result<String, SourceError> {
-    let refs = remote::list_remote_refs(url, ssh)?;
+    let refs = remote::list_remote_refs(url, credentials)?;
     remote::ref_commit(&refs, ref_).map(|commit| vec_to_hex(&commit))
 }
 

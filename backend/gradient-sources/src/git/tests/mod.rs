@@ -5,9 +5,11 @@
  */
 
 mod fixtures;
+mod https_credentials_for_operation_host;
 
 use super::checkout::{checkout_commit, checkout_commit_into};
 use super::commit_info::{fetch_commit, head_refspec};
+use super::git_credentials::GitOperationCredentials;
 use super::pktline::{MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT, read_advertised_refs};
 use super::remote::{
     AdvertisedRef, BranchHead, branch_head, list_remote_refs, ls_remote_head, ref_commit,
@@ -366,13 +368,23 @@ fn the_head_commit_is_the_tip_of_the_ref_asked_for() {
     let feature = commit_on(&repo, "feature", "on feature");
     let url = format!("file://{}", dir.path().display());
 
-    let head = fetch_commit(&url, None, &head_refspec(None)).unwrap();
+    let head = fetch_commit(
+        &url,
+        &GitOperationCredentials::default(),
+        &head_refspec(None),
+    )
+    .unwrap();
     assert_eq!(head.hash, main.as_bytes());
     assert_eq!(head.message, "second\n\nbody");
     assert_eq!(head.author_name, "Ada");
     assert_eq!(head.author_email.as_deref(), Some("ada@example.com"));
 
-    let branch = fetch_commit(&url, None, &head_refspec(Some("feature"))).unwrap();
+    let branch = fetch_commit(
+        &url,
+        &GitOperationCredentials::default(),
+        &head_refspec(Some("feature")),
+    )
+    .unwrap();
     assert_eq!(branch.hash, feature.as_bytes());
 }
 
@@ -386,7 +398,7 @@ fn the_default_branch_of_a_local_remote_follows_head() {
     repo.set_head("refs/heads/main").unwrap();
     let url = format!("file://{}", dir.path().display());
 
-    let head = ls_remote_head(&url, None, None).unwrap();
+    let head = ls_remote_head(&url, &GitOperationCredentials::default(), None).unwrap();
     assert_eq!(head.branch, "refs/heads/main");
     assert_eq!(head.commit, main.as_bytes());
 }
@@ -403,7 +415,7 @@ fn an_annotated_tag_on_a_local_remote_resolves_to_the_tagged_commit() {
     repo.tag("v1.0", &target, &sig, "v1.0", false).unwrap();
     let url = format!("file://{}", dir.path().display());
 
-    let refs = list_remote_refs(&url, None).unwrap();
+    let refs = list_remote_refs(&url, &GitOperationCredentials::default()).unwrap();
     assert_eq!(tag_commit(&refs, "v1.0").unwrap(), tagged.as_bytes());
 }
 
@@ -416,7 +428,12 @@ fn a_pinned_commit_below_the_tip_is_fetched_by_its_hash() {
     commit_on(&repo, "main", "tip");
     let url = format!("file://{}", dir.path().display());
 
-    let commit = fetch_commit(&url, None, &pinned.to_string()).unwrap();
+    let commit = fetch_commit(
+        &url,
+        &GitOperationCredentials::default(),
+        &pinned.to_string(),
+    )
+    .unwrap();
     assert_eq!(commit.hash, pinned.as_bytes());
     assert_eq!(commit.message, "pinned\n\nbody");
 }
@@ -437,7 +454,12 @@ fn commit_file(repo: &git2::Repository, refname: &str, contents: &str) -> git2::
 }
 
 fn checked_out_file(url: &str, commit: git2::Oid) -> String {
-    let checkout = checkout_commit(url, &commit.to_string(), None).unwrap();
+    let checkout = checkout_commit(
+        url,
+        &commit.to_string(),
+        &GitOperationCredentials::default(),
+    )
+    .unwrap();
     std::fs::read_to_string(checkout.path().join("file")).unwrap()
 }
 
@@ -478,7 +500,13 @@ fn a_commit_lands_in_the_given_directory() {
     let work = tempfile::TempDir::new().unwrap();
     let url = format!("file://{}", origin.path().display());
 
-    checkout_commit_into(work.path(), &url, &sha.to_string(), None).unwrap();
+    checkout_commit_into(
+        work.path(),
+        &url,
+        &sha.to_string(),
+        &GitOperationCredentials::default(),
+    )
+    .unwrap();
 
     assert_eq!(
         std::fs::read_to_string(work.path().join("flake.nix")).unwrap(),
@@ -535,7 +563,8 @@ fn a_branch_tip_is_fetched_shallow_from_a_server_refusing_fetches_by_hash() {
     let tip = commit_file(&repo, "refs/heads/main", "tip");
     let (_daemon, url) = start_git_daemon(base.path());
 
-    let checkout = checkout_commit(&url, &tip.to_string(), None).unwrap();
+    let checkout =
+        checkout_commit(&url, &tip.to_string(), &GitOperationCredentials::default()).unwrap();
     assert_eq!(
         std::fs::read_to_string(checkout.path().join("file")).unwrap(),
         "tip"
@@ -585,7 +614,7 @@ async fn resolve_remote_ref_saves_the_key_of_an_unknown_host() {
         &db,
         gradient_types::ids::ProjectId::now_v7(),
         &url,
-        Some(ssh),
+        GitOperationCredentials::from(Some(ssh)),
         None,
     )
     .await

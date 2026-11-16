@@ -9,24 +9,18 @@ mod target;
 #[cfg(test)]
 pub(crate) mod tests;
 
-use super::git_network_limits::set_libgit2_connect_and_read_timeouts_once;
+use super::git_credentials::CURRENT_THREAD_GIT_CREDENTIALS;
 use connection::SshCommandStream;
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream, Transport};
 use gradient_types::SecretString;
 use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
 use russh::keys::PublicKey;
-use std::cell::RefCell;
 use std::sync::{Arc, Mutex, Once, PoisonError};
 use target::SshTarget;
 
 pub use connection::fetch_ssh_host_key;
 
 const SCHEMES: [&str; 3] = ["ssh", "ssh+git", "git+ssh"];
-
-thread_local! {
-    static CURRENT_THREAD_SSH_CREDENTIALS: RefCell<Option<SshGitPrivateKeyKnownHostsAndObservations>> =
-        const { RefCell::new(None) };
-}
 
 #[derive(Clone, Debug)]
 pub struct SshGitPrivateKeyKnownHostsAndObservations {
@@ -80,26 +74,7 @@ impl SshGitPrivateKeyKnownHostsAndObservations {
     }
 }
 
-pub(crate) fn run_with_ssh_credentials<T>(
-    credentials: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
-    operation: impl FnOnce() -> T,
-) -> T {
-    register();
-    set_libgit2_connect_and_read_timeouts_once();
-    let previous = CURRENT_THREAD_SSH_CREDENTIALS.replace(credentials.cloned());
-    let _restore = Restore(previous);
-    operation()
-}
-
-struct Restore(Option<SshGitPrivateKeyKnownHostsAndObservations>);
-
-impl Drop for Restore {
-    fn drop(&mut self) {
-        CURRENT_THREAD_SSH_CREDENTIALS.set(self.0.take());
-    }
-}
-
-fn register() {
+pub(super) fn register() {
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
         for scheme in SCHEMES {
@@ -112,7 +87,8 @@ fn register() {
 }
 
 fn transport(remote: &git2::Remote<'_>) -> Result<Transport, git2::Error> {
-    let credentials = CURRENT_THREAD_SSH_CREDENTIALS.with_borrow(Clone::clone);
+    let credentials = CURRENT_THREAD_GIT_CREDENTIALS
+        .with_borrow(|credentials| credentials.ssh_git_private_key_and_known_hosts.clone());
     Transport::smart(remote, false, SshSubtransport { credentials })
 }
 

@@ -5,8 +5,10 @@
  */
 
 use super::context::{TaskGitContext, save_observed_project_ssh_host_keys};
+use super::git_credentials::{
+    GitOperationCredentials, run_blocking_libgit2_operation_with_git_credentials,
+};
 use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
-use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, run_with_ssh_credentials};
 use super::url::git_transport_url;
 use crate::SourceError;
 use gradient_types::input::vec_to_hex;
@@ -22,10 +24,12 @@ pub struct HeadCommit {
 
 pub(crate) fn fetch_commit(
     url: &str,
-    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    credentials: &GitOperationCredentials,
     refspec: &str,
 ) -> Result<HeadCommit, SourceError> {
-    run_with_ssh_credentials(ssh, || fetch_commit_into_temp_repo(url, refspec))
+    run_blocking_libgit2_operation_with_git_credentials(credentials, || {
+        fetch_commit_into_temp_repo(url, refspec)
+    })
 }
 
 fn fetch_commit_into_temp_repo(url: &str, refspec: &str) -> Result<HeadCommit, SourceError> {
@@ -79,10 +83,10 @@ impl TaskGitContext<'_> {
 
     async fn fetch_commit(&self, refspec: String) -> Result<HeadCommit, SourceError> {
         let url = git_transport_url(&self.task.repository).to_string();
-        let ssh = self.ssh.clone();
+        let credentials = self.credentials.clone();
 
         let fetched =
-            tokio::task::spawn_blocking(move || fetch_commit(&url, ssh.as_ref(), &refspec))
+            tokio::task::spawn_blocking(move || fetch_commit(&url, &credentials, &refspec))
                 .await
                 .map_err(|e| SourceError::GitExecution {
                     error: e.to_string(),
@@ -90,7 +94,9 @@ impl TaskGitContext<'_> {
         save_observed_project_ssh_host_keys(
             &self.ctx.worker_db,
             self.task.project,
-            self.ssh.as_ref(),
+            self.credentials
+                .ssh_git_private_key_and_known_hosts
+                .as_ref(),
         )
         .await;
         fetched?

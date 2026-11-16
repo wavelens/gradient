@@ -6,7 +6,10 @@
 
 mod git_protocol;
 
-use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, run_with_ssh_credentials};
+use super::git_credentials::{
+    GitOperationCredentials, run_blocking_libgit2_operation_with_git_credentials,
+};
+use super::https_credentials_for_operation_host::remote_callbacks_for_url_with_thread_https_credentials;
 use super::url::git_transport_url;
 use crate::SourceError;
 use git_protocol::list_refs_git_protocol;
@@ -27,22 +30,22 @@ pub(in crate::git) struct AdvertisedRef {
 
 pub(in crate::git) fn ls_remote_head(
     url: &str,
-    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    credentials: &GitOperationCredentials,
     branch: Option<&str>,
 ) -> Result<BranchHead, SourceError> {
-    branch_head(&list_remote_refs(url, ssh)?, branch)
+    branch_head(&list_remote_refs(url, credentials)?, branch)
 }
 
 pub(in crate::git) fn list_remote_refs(
     url: &str,
-    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    credentials: &GitOperationCredentials,
 ) -> Result<Vec<AdvertisedRef>, SourceError> {
     let url = git_transport_url(url);
-    if url.starts_with("git://") && ssh.is_none() {
+    if url.starts_with("git://") && credentials.ssh_git_private_key_and_known_hosts.is_none() {
         return list_refs_git_protocol(url);
     }
 
-    run_with_ssh_credentials(ssh, || list_refs_libgit2(url))
+    run_blocking_libgit2_operation_with_git_credentials(credentials, || list_refs_libgit2(url))
 }
 
 fn list_refs_libgit2(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {
@@ -52,7 +55,11 @@ fn list_refs_libgit2(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {
     let mut remote =
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
     let conn = remote
-        .connect_auth(Direction::Fetch, None, None)
+        .connect_auth(
+            Direction::Fetch,
+            Some(remote_callbacks_for_url_with_thread_https_credentials(url)),
+            None,
+        )
         .map_err(git_error)?;
     Ok(advertised(conn.list().map_err(git_error)?))
 }

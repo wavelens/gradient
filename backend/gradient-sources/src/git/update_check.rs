@@ -78,10 +78,10 @@ impl TaskGitContext<'_> {
         F: FnOnce(&[AdvertisedRef]) -> Result<T, SourceError> + Send + 'static,
     {
         let url = self.task.repository.clone();
-        let ssh = self.ssh.clone();
+        let credentials = self.credentials.clone();
 
         let selected =
-            tokio::task::spawn_blocking(move || select(&list_remote_refs(&url, ssh.as_ref())?))
+            tokio::task::spawn_blocking(move || select(&list_remote_refs(&url, &credentials)?))
                 .await
                 .map_err(|e| SourceError::GitExecution {
                     error: e.to_string(),
@@ -89,7 +89,9 @@ impl TaskGitContext<'_> {
         save_observed_project_ssh_host_keys(
             &self.ctx.worker_db,
             self.task.project,
-            self.ssh.as_ref(),
+            self.credentials
+                .ssh_git_private_key_and_known_hosts
+                .as_ref(),
         )
         .await;
         selected?

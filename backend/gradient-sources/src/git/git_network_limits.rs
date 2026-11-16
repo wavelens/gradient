@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::https_credentials_for_operation_host::remote_callbacks_for_url_with_thread_https_credentials;
 use super::url::set_shallow_unless_local;
-use git2::{FetchOptions, RemoteCallbacks};
+use git2::FetchOptions;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 use tracing::{error, warn};
@@ -19,7 +20,7 @@ pub(super) fn build_fetch_options_with_time_and_size_limits_and_optional_shallow
     shallow: bool,
 ) -> FetchOptions<'static> {
     let started = Instant::now();
-    let mut callbacks = RemoteCallbacks::new();
+    let mut callbacks = remote_callbacks_for_url_with_thread_https_credentials(url);
     callbacks.transfer_progress(move |progress| {
         let reason = if started.elapsed() > FETCH_DEADLINE {
             "fetch deadline exceeded"
