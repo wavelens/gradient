@@ -27,7 +27,7 @@ crate::sql! {
     PENDING_DELIVERY_UPSERT_UNSETTLED = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
          VALUES ($1, $2::smallint, $3, $4::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')) \
          ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL \
-         DO UPDATE SET revision = pending_delivery.revision + 1, payload = EXCLUDED.payload",
+         DO UPDATE SET revision = pending_delivery.revision + 1, payload = EXCLUDED.payload, attempts = 0",
         params = [NewUuid, Int(8), Text("pending-delivery-gate-probe"), Text("{}")];
 
     PENDING_DELIVERY_ENQUEUE_MANY = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
@@ -56,9 +56,10 @@ crate::sql! {
     /// A read of `attempts` followed by a write would lose a concurrent retry of the same row.
     PENDING_DELIVERY_MARK_RETRY = "UPDATE pending_delivery SET attempts = attempts + 1, last_error = $2, \
          failed_at = CASE WHEN attempts + 1 >= $3 THEN (now() AT TIME ZONE 'UTC') ELSE NULL END, \
-         next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int) \
+         next_attempt_at = CASE WHEN revision = $5 THEN (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int) \
+             ELSE (now() AT TIME ZONE 'UTC') END \
          WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
-        params = [NewUuid, Text("probe"), Int(MAX_ATTEMPTS as i64), Int(30)];
+        params = [NewUuid, Text("probe"), Int(MAX_ATTEMPTS as i64), Int(30), Int(0)];
 
     PENDING_DELIVERY_RECORD_FAILED_ATTEMPT_AND_MARK_FAILED_IF_REVISION_UNCHANGED_OR_ATTEMPT_CAP_REACHED_ELSE_MAKE_DUE = "UPDATE pending_delivery SET attempts = attempts + 1, last_error = $2, \
          failed_at = CASE WHEN revision = $3 OR attempts + 1 >= $4 THEN (now() AT TIME ZONE 'UTC') END, \
@@ -245,6 +246,7 @@ fn retry(row: &PendingDelivery, error: &str, delay: Duration) -> sea_orm::Statem
         Value::String(Some(truncate_delivery_error_message(error))),
         Value::Int(Some(MAX_ATTEMPTS)),
         Value::BigInt(Some(delay.as_secs() as i64)),
+        Value::Int(Some(row.revision)),
     ])
 }
 
@@ -385,7 +387,7 @@ mod tests {
         );
         assert!(
             sql.contains(
-                "next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int)"
+                "next_attempt_at = CASE WHEN revision = $5 THEN (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int)"
             ),
             "{sql}"
         );
@@ -428,6 +430,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].revision, 1);
         assert_eq!(rows[0].payload, serde_json::json!({ "event": "started" }));
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -456,6 +459,7 @@ mod tests {
             vec![1],
             "the released row is due at once with the newer revision"
         );
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -487,6 +491,7 @@ mod tests {
             vec![1],
             "the released row is due at once with the newer revision"
         );
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -496,13 +501,13 @@ mod tests {
         let conn = db.connection();
         enqueue_commit_status_post_with_event_name(&conn, "queued").await;
         let claimed = claim_due_rows_or_panic(&conn).await;
+        enqueue_commit_status_post_with_event_name(&conn, "started").await;
         for _ in 0..MAX_ATTEMPTS - 1 {
             mark(&conn, &claimed[0], &Outcome::Retry("502".into()))
                 .await
                 .expect("Retries before the limit leave that row unsettled.");
         }
 
-        enqueue_commit_status_post_with_event_name(&conn, "started").await;
         mark(&conn, &claimed[0], &Outcome::PermanentFailure("401".into()))
             .await
             .expect("mark() recorded a permanent failure");
@@ -517,6 +522,60 @@ mod tests {
             (1, MAX_ATTEMPTS, true),
             "A changed row is still dead-letter at the attempt cap."
         );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn failed_retry_with_new_revision_does_not_mark_row_failed_because_new_payload_has_zero_attempts()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+        let claimed = claim_due_rows_or_panic(&conn).await;
+        for _ in 0..MAX_ATTEMPTS - 1 {
+            mark(&conn, &claimed[0], &Outcome::Retry("502".into()))
+                .await
+                .expect("Retries before the limit leave that row unsettled.");
+        }
+
+        enqueue_commit_status_post_with_event_name(&conn, "completed").await;
+        let newer = PendingDelivery {
+            revision: 1,
+            attempts: 0,
+            ..claimed[0].clone()
+        };
+        mark(&conn, &newer, &Outcome::Retry("502".into()))
+            .await
+            .expect("Expected `mark()` to record the retry");
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
+        assert_eq!(
+            (rows[0].attempts, rows[0].failed_at.is_some()),
+            (1, false),
+            "A newer payload can start with a fresh retry budget."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_retry_is_due_immediately_after_revision_bump() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+        let claimed = claim_due_rows_or_panic(&conn).await;
+
+        enqueue_commit_status_post_with_event_name(&conn, "started").await;
+        mark(&conn, &claimed[0], &Outcome::Retry("502".into()))
+            .await
+            .expect("Expected `mark()` to record the retry");
+
+        let again = claim_due_rows_or_panic(&conn).await;
+        assert_eq!(
+            again.iter().map(|r| r.revision).collect::<Vec<_>>(),
+            vec![1],
+            "Retries of an old claim set the newer payload due immediately."
+        );
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -539,6 +598,7 @@ mod tests {
             claim_due_rows_or_panic(&conn).await.is_empty(),
             "no second fetch for settled rows"
         );
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -565,5 +625,6 @@ mod tests {
             vec![(0, serde_json::json!({ "event": "queued" }))],
             "plain enqueue operations keep the first payload and revision"
         );
+        db.finish().await;
     }
 }
