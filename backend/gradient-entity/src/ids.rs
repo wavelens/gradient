@@ -157,6 +157,7 @@ id_newtype!(ExecJobPullRequestId);
 id_newtype!(ExecJobTokenId);
 id_newtype!(ProjectSecretId);
 id_newtype!(ProjectSshHostKeyId);
+id_newtype!(ProjectGitHttpsCredentialId);
 id_newtype!(WorkerSampleId);
 id_newtype!(YearlyBuildResourceRecordId);
 id_newtype!(YearlyInstanceRecapSnapshotId);

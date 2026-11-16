@@ -85,6 +85,7 @@ mod m20261213_000000_create_yearly_recap_snapshot_and_record_tables_add_user_las
 mod m20261214_000000_add_read_superuser_rights_bit_to_existing_api_keys_that_have_write_superuser_rights_bit;
 mod m20261215_000000_add_references_are_claimed_to_cached_path_signature;
 mod m20261216_000000_add_revision_to_pending_delivery;
+mod m20261217_000000_create_project_git_https_credential_table;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -197,6 +198,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261214_000000_add_read_superuser_rights_bit_to_existing_api_keys_that_have_write_superuser_rights_bit::Migration),
             Box::new(m20261215_000000_add_references_are_claimed_to_cached_path_signature::Migration),
             Box::new(m20261216_000000_add_revision_to_pending_delivery::Migration),
+            Box::new(m20261217_000000_create_project_git_https_credential_table::Migration),
         ]
     }
 }

@@ -48,6 +48,7 @@ pub mod maintenance;
 pub mod memberships;
 pub mod metrics;
 pub mod pool;
+pub mod project_git_https_credentials;
 pub mod project_secrets;
 pub mod project_ssh_host_keys;
 pub mod projects;

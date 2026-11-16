@@ -73,6 +73,7 @@ pub mod pending_delivery;
 pub mod project;
 pub mod project_access;
 pub mod project_cache;
+pub mod project_git_https_credential;
 pub mod project_invitation;
 pub mod project_secret;
 pub mod project_ssh_host_key;
