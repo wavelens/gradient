@@ -34,6 +34,12 @@ pub(crate) enum ProjectRefusal {
     EmptyGitServerHostName,
     #[error("failed to read host key: {reason}")]
     GitServerSshHostKeyReadFailed { reason: String },
+    #[error(
+        "\"{host}\" is not a host name with an optional port, like github.com or git.example:8443."
+    )]
+    GitCredentialHostIsNotBareHost { host: String },
+    #[error("Username and password can't be empty.")]
+    EmptyGitCredentialUserNameOrPassword,
 }
 
 impl Refusal for ProjectRefusal {
@@ -45,7 +51,9 @@ impl Refusal for ProjectRefusal {
             | Self::SecretValueTooLarge
             | Self::InvalidWorkerUrl { .. }
             | Self::InvalidSshHostPublicKey { .. }
-            | Self::EmptyGitServerHostName => RefusalStatus::BadRequest,
+            | Self::EmptyGitServerHostName
+            | Self::GitCredentialHostIsNotBareHost { .. }
+            | Self::EmptyGitCredentialUserNameOrPassword => RefusalStatus::BadRequest,
             Self::GitServerSshHostKeyReadFailed { .. } => RefusalStatus::BadGateway,
             Self::TeamWorkerManagedOnTeamPage
             | Self::ProjectWorkerPageCannotDrainWorkerOnSharedMachine

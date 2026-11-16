@@ -1511,6 +1511,13 @@ export interface GitHostConnectionSummary {
   can_manage: boolean;
 }
 
+export interface GitHttpsCredentialResponse {
+  id: ProjectGitHttpsCredentialId;
+  host: string;
+  username: string;
+  updated_at: string;
+}
+
 export interface GitSshHostKeyResponse {
   id: ProjectSshHostKeyId;
   host: string;
@@ -2299,6 +2306,8 @@ export interface ProductArtefact {
   size?: number | null;
 }
 
+export type ProjectGitHttpsCredentialId = string;
+
 export type ProjectId = string;
 
 export interface ProjectReadinessResponse {
@@ -2593,6 +2602,12 @@ export interface RunOptions {
   labels?: string[] | null;
   timeout_secs?: number | null;
   ports?: number[];
+}
+
+export interface SaveGitHttpsCredentialRequestBody {
+  host: string;
+  username: string;
+  password: string;
 }
 
 export interface SaveHostKeyRequestBody {

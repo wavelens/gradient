@@ -16,8 +16,13 @@ pub fn https_host_from_repository_url(url: &str) -> Option<String> {
 
 pub fn normalize_bare_https_git_host(host: &str) -> Option<String> {
     let normalized = https_host_from_repository_url(&format!("https://{host}"))?;
-    host_text_matches_normalized_host_ignoring_ascii_case_and_default_https_port(host, &normalized)
-        .then_some(normalized)
+    let is_ipv6 = normalized.starts_with('[');
+    (!is_ipv6
+        && host_text_matches_normalized_host_ignoring_ascii_case_and_default_https_port(
+            host,
+            &normalized,
+        ))
+    .then_some(normalized)
 }
 
 fn parsed_https_url_host_and_port(url: &str) -> Option<String> {
@@ -147,13 +152,19 @@ mod tests {
             ("GitHub.com", "github.com"),
             ("git.example:8443", "git.example:8443"),
             ("git.example:443", "git.example"),
-            ("[::1]:8443", "[::1]:8443"),
         ] {
             assert_eq!(
                 normalize_bare_https_git_host(host).as_deref(),
                 Some(expected),
                 "{host}"
             );
+        }
+    }
+
+    #[test]
+    fn rejects_bare_ipv6_hosts_because_libgit2_strips_url_brackets_before_credentials_callback() {
+        for host in ["[::1]", "[::1]:8443", "[2001:db8::1]:443"] {
+            assert_eq!(normalize_bare_https_git_host(host), None, "{host}");
         }
     }
 
