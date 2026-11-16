@@ -18,7 +18,7 @@ use crate::graph::can_start::{
 };
 use crate::graph::predicates::output_needed_predicate;
 use crate::graph::runtime_can_start::{
-    complete_among, reset_uncached_producers, ripple_shared_builds_incomplete,
+    complete_among, lost_completeness, reset_uncached_producers,
 };
 use crate::scheduling::assignment_record::{build_job_key_sql, no_open_assignment_predicate};
 use crate::status::TransitionChange;
@@ -187,24 +187,6 @@ async fn settle_forgotten(
     changes.extend(recount_build_parents(txn, forgotten).await?);
 
     Ok(changes)
-}
-
-async fn lost_completeness(
-    txn: &DatabaseTransaction,
-    forgotten: &[DerivationId],
-    was_complete: &BTreeSet<DerivationId>,
-) -> Result<Vec<DerivationId>, DbErr> {
-    let still: BTreeSet<DerivationId> = complete_among(txn, forgotten).await?.into_iter().collect();
-    let lost: Vec<DerivationId> = forgotten
-        .iter()
-        .copied()
-        .filter(|d| was_complete.contains(d) && !still.contains(d))
-        .collect();
-
-    let mut incomplete = lost.clone();
-    incomplete.extend(ripple_shared_builds_incomplete(txn, lost).await?);
-
-    Ok(incomplete)
 }
 
 /// The ripples move parents only over edges free of unneeded outputs, so the parents of a

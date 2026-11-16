@@ -12,8 +12,8 @@ use gradient_entity::ids::{CacheId, EvaluationId};
 use gradient_fixtures::shape::shape;
 
 use super::{
-    A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, F_OUT, F1, F2, P, P_OUT, UNKNOWN_OUT, X, X_OUT,
-    as_set, chain, chain_done, commit_of, drv, drv_nar, pass, with_output,
+    A, A_OUT, B, B_OUT, B_OUT2, C, C_OUT, Case, D, D_OUT, F_OUT, F1, F2, P, P_OUT, UNKNOWN_OUT, X,
+    X_OUT, as_set, chain, chain_done, commit_of, drv, drv_nar, pass, with_output,
 };
 use crate::messages::{Demotion, NarCommit};
 
@@ -522,6 +522,52 @@ async fn r09_a_retire_while_the_producer_is_building_leaves_its_attempt_alone() 
     assert!(!stored, "after 1: cached_path(output(B,out).hash) stored");
     let a = case.queue_state(A).await;
     assert_eq!(a, (Created, 1), "after 1: sb(A)");
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn r10_demoting_a_stored_unneeded_output_of_a_complete_shared_build_counts_one_missing_runtime_dependency()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(D)
+            .walked()
+            .entry_point("pkg.d")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(D_OUT)
+            .cached_output(D)
+            .build_status(Completed)
+            .runtime_depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .cached_output(B)
+            .unneeded_output(B_OUT2, "dev")
+            .cached_path(B_OUT2, "b-dev")
+            .build_status(Completed),
+    )
+    .await;
+    let d = case.closure_state(D).await;
+    assert_eq!(d, (true, 0), "after the seed: sb(D) fetchable, missing");
+
+    case.demote(path_demotion(B_OUT2)).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.fetchable, b.unneeded_outputs),
+        (false, Vec::<String>::new()),
+        "after 1: sb(B) fetchable, unneeded_outputs"
+    );
+    let d = case.closure_state(D).await;
+    assert_eq!(d, (false, 1), "after 1: sb(D) fetchable, missing");
     case.zero_drift("step 1").await;
     case.finish().await;
 }
