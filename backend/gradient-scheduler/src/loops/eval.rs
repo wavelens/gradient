@@ -14,7 +14,8 @@ use gradient_entity::dispatched_job::{
     Column as CDispatchedJob, DispatchedJobKind, Entity as EDispatchedJob,
 };
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::input::vec_to_hex;
+use gradient_types::https_git_url_host::https_host_from_repository_url;
+use gradient_types::input::{check_repository_url_is_ssh, vec_to_hex};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError};
@@ -28,6 +29,7 @@ use crate::Scheduler;
 use crate::cluster::{Membership, Route};
 use crate::full_caches::park_on_full_caches;
 use crate::instance::EvalHistory;
+use crate::job_handlers::input::fetch_needs_secrets_capability;
 use crate::jobs::{PendingEvalJob, PendingJob, continuation_job_key};
 use crate::pending_job_input_store_paths::{
     PendingJobInputStorePath,
@@ -324,6 +326,12 @@ fn assemble_eval_job(
         .unwrap_or_default();
 
     let estimate = eval_history.for_job(task_id, &flake_job.steps);
+    let flake_fetch_needs_secrets = fetch_needs_secrets_capability(
+        project_id,
+        check_repository_url_is_ssh(&eval.repository),
+        https_host_from_repository_url(&eval.repository).as_deref(),
+        &maps.project_ids_and_repository_hosts_with_https_git_credential,
+    );
 
     Some(PendingEvalJob {
         evaluation_id: eval.id,
@@ -343,6 +351,7 @@ fn assemble_eval_job(
         walk_mode: eval.walk_mode,
         eval_index: 0,
         continuation: None,
+        flake_fetch_needs_secrets,
     })
 }
 
@@ -388,6 +397,7 @@ struct EvalAssignMaps {
     projects: HashMap<TaskId, ProjectId>,
     fetch_url_access_by_task_id: HashMap<TaskId, NixEvaluationFetchUrlAccess>,
     build_request_tasks: HashSet<TaskId>,
+    project_ids_and_repository_hosts_with_https_git_credential: HashSet<(ProjectId, String)>,
     project_store_path_mappers: HashMap<ProjectId, StorePathMapper>,
 }
 
@@ -471,6 +481,18 @@ impl EvalAssignMaps {
             .filter(|t| gradient_db::build_request_task::is_build_request_task(t))
             .map(|t| t.id)
             .collect();
+        let project_ids: Vec<ProjectId> = projects
+            .values()
+            .copied()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let project_ids_and_repository_hosts_with_https_git_credential =
+            gradient_db::project_git_https_credentials::list_project_host_pairs_with_https_git_credential_for_project_ids(
+                db,
+                &project_ids,
+            )
+            .await?;
 
         Ok(Self {
             commits,
@@ -479,6 +501,7 @@ impl EvalAssignMaps {
             projects,
             fetch_url_access_by_task_id,
             build_request_tasks,
+            project_ids_and_repository_hosts_with_https_git_credential,
             project_store_path_mappers: HashMap::new(),
         })
     }

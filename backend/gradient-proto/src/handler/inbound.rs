@@ -1590,6 +1590,7 @@ pub(in crate::handler) mod fixture {
             prioritized: false,
             build_request: false,
             continuation: None,
+            flake_fetch_needs_secrets: false,
         })
     }
 

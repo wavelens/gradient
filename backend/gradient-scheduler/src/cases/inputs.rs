@@ -100,6 +100,7 @@ async fn https_git_input_with_stored_https_credential_is_assigned_only_to_secret
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     let project = case.db.project_of(e1).await;
+    evaluating(&case, W1, e1).await;
     gradient_db::project_git_https_credentials::upsert(
         &case.db.connection(),
         project,
@@ -110,7 +111,6 @@ async fn https_git_input_with_stored_https_credential_is_assigned_only_to_secret
     )
     .await
     .unwrap();
-    evaluating(&case, W1, e1).await;
     case.connect(W2, super::w_network(), &[]).await;
     case.connect(W3, w_fetch(), &[]).await;
 
@@ -216,6 +216,8 @@ async fn two_projects_fetching_one_pinned_https_git_input_with_stored_credential
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
     let (credentialed, public) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
+    evaluating(&case, W1, e1).await;
+    evaluating(&case, W2, e2).await;
     gradient_db::project_git_https_credentials::upsert(
         &case.db.connection(),
         credentialed,
@@ -226,8 +228,6 @@ async fn two_projects_fetching_one_pinned_https_git_input_with_stored_credential
     )
     .await
     .unwrap();
-    evaluating(&case, W1, e1).await;
-    evaluating(&case, W2, e2).await;
     case.connect(W3, w_fetch(), &[]).await;
     case.connect(W4, w_fetch(), &[]).await;
 

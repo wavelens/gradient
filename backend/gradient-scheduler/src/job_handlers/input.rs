@@ -92,19 +92,22 @@ impl Scheduler {
         project: ProjectId,
         request: &InputRequest,
     ) -> Result<bool, sea_orm::DbErr> {
-        if request.needs_secrets {
-            return Ok(true);
-        }
-        let Some(host) = request.https_git_host.as_deref() else {
-            return Ok(false);
+        let pairs = match request.https_git_host {
+            Some(_) if !request.needs_secrets => {
+                gradient_db::project_git_https_credentials::list_project_host_pairs_with_https_git_credential_for_project_ids(
+                    &self.db.worker_db,
+                    &[project],
+                )
+                .await?
+            }
+            _ => HashSet::new(),
         };
-        let stored = gradient_db::project_git_https_credentials::one_for_project_and_host(
-            &self.db.worker_db,
+        Ok(fetch_needs_secrets_capability(
             project,
-            host,
-        )
-        .await?;
-        Ok(stored.is_some())
+            request.needs_secrets,
+            request.https_git_host.as_deref(),
+            &pairs,
+        ))
     }
 
     pub async fn handle_input_fetched(
@@ -327,6 +330,15 @@ impl Scheduler {
             .collect();
         self.signal_workers(signals).await;
     }
+}
+
+pub(crate) fn fetch_needs_secrets_capability(
+    project: ProjectId,
+    url_is_ssh: bool,
+    https_git_host: Option<&str>,
+    pairs: &HashSet<(ProjectId, String)>,
+) -> bool {
+    url_is_ssh || https_git_host.is_some_and(|host| pairs.contains(&(project, host.to_owned())))
 }
 
 fn can_ever_fetch(worker: &WorkerInfo, fetch: &UnassignedFetch) -> bool {

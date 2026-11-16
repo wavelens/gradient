@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::input::check_repository_url_is_ssh;
-
 use gradient_wire::types::{
-    BuildJob, BuildSpecKind, DeviceClass, ExecInventory, ExecRequirement, FlakeJob, FlakeSource,
-    FlakeStep, JobKind, ResourceAmount,
+    BuildJob, BuildSpecKind, DeviceClass, ExecInventory, ExecRequirement, FlakeJob, FlakeStep,
+    JobKind, ResourceAmount,
 };
 
 use crate::exec_fit::ExecFit;
@@ -99,19 +97,15 @@ impl WorkerCaps {
         runs_here && (!needs_network || self.capabilities.network)
     }
 
-    pub fn can_eval(&self, job: &FlakeJob) -> bool {
+    pub fn can_eval(&self, job: &FlakeJob, flake_fetch_needs_secrets: bool) -> bool {
         let needs_eval = job
             .steps
             .iter()
             .any(|t| matches!(t, FlakeStep::EvaluateFlake | FlakeStep::EvaluateDerivations));
 
-        (!job.steps.contains(&FlakeStep::FetchFlake) || self.can_fetch(&job.source))
+        (!job.steps.contains(&FlakeStep::FetchFlake)
+            || self.can_fetch_input(flake_fetch_needs_secrets))
             && (!needs_eval || self.capabilities.eval)
-    }
-
-    pub fn can_fetch(&self, source: &FlakeSource) -> bool {
-        let needs_secrets = matches!(source, FlakeSource::Repository { url, .. } if check_repository_url_is_ssh(url));
-        self.can_fetch_input(needs_secrets)
     }
 
     pub fn can_fetch_input(&self, needs_secrets: bool) -> bool {
@@ -215,15 +209,8 @@ mod tests {
         }
     }
 
-    fn repository(url: &str) -> FlakeSource {
-        FlakeSource::Repository {
-            url: url.into(),
-            commit: "abc123".into(),
-        }
-    }
-
     #[test]
-    fn an_ssh_repository_needs_secrets_and_a_public_one_only_network() {
+    fn test_worker_with_network_capability_fetches_only_inputs_without_secrets() {
         let network_only = WorkerCaps {
             capabilities: GradientCapabilities {
                 network: true,
@@ -231,9 +218,9 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(network_only.can_fetch(&repository("https://example.com/repo")));
-        assert!(!network_only.can_fetch(&repository("git+ssh://git@example.com/repo")));
-        assert!(!WorkerCaps::default().can_fetch(&repository("https://example.com/repo")));
+        assert!(network_only.can_fetch_input(false));
+        assert!(!network_only.can_fetch_input(true));
+        assert!(!WorkerCaps::default().can_fetch_input(false));
     }
 
     fn exec_worker() -> WorkerCaps {

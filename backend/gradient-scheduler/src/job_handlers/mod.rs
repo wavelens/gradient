@@ -14,7 +14,7 @@ pub(crate) mod exec_status;
 mod flake_input_sources;
 pub(crate) mod guest_channel;
 pub(crate) mod import;
-mod input;
+pub(crate) mod input;
 mod priority;
 mod queue;
 pub(crate) mod timeline;
