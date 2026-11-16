@@ -343,24 +343,6 @@ impl WorkerPool {
         }
     }
 
-    pub fn set_sent_candidates(&mut self, worker_id: &str, job_ids: HashSet<String>) {
-        if let Some(slot) = self.workers.get_mut(worker_id) {
-            slot.shared_mut().sent_candidates = job_ids;
-        }
-    }
-
-    pub fn remove_sent_candidate(&mut self, job_id: &str) {
-        for slot in self.workers.values_mut() {
-            slot.shared_mut().sent_candidates.remove(job_id);
-        }
-    }
-
-    pub fn sent_candidates_for(&self, worker_id: &str) -> Option<&HashSet<String>> {
-        self.workers
-            .get(worker_id)
-            .map(|slot| &slot.shared().sent_candidates)
-    }
-
     pub fn has_capacity(&self, worker_id: &str, kind: &JobKind) -> bool {
         match self.workers.get(worker_id) {
             Some(WorkerSlot::Active(w)) => match kind {
@@ -932,19 +914,6 @@ mod tests {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
         assert!(matches!(pool.peer_auth_for("w1").unwrap(), PeerAuth::Open));
-    }
-
-    #[test]
-    fn remove_sent_candidate_allows_reoffer() {
-        let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.set_sent_candidates("w1", HashSet::from(["build:a".into(), "build:b".into()]));
-        assert!(pool.sent_candidates_for("w1").unwrap().contains("build:a"));
-
-        pool.remove_sent_candidate("build:a");
-        let sent = pool.sent_candidates_for("w1").unwrap();
-        assert!(!sent.contains("build:a"), "cleared job is re-offerable");
-        assert!(sent.contains("build:b"), "other jobs stay sent");
     }
 
     #[test]

@@ -1250,11 +1250,11 @@ mod agreement_tests {
         let (mut accepted, mut dialing) = loopback().await;
         let (received, sent) = tokio::join!(
             accepted.recv_msg(),
-            dialing.send_client_msg(&ClientMessage::RequestJobList),
+            dialing.send_client_msg(&ClientMessage::Draining),
         );
 
         assert_eq!(sent, Ok(()));
-        assert_eq!(received, Some(ClientMessage::RequestJobList));
+        assert_eq!(received, Some(ClientMessage::Draining));
         assert_eq!(accepted.version(), Some(*PROTO_VERSIONS.end()));
         assert_eq!(dialing.version(), Some(*PROTO_VERSIONS.end()));
     }

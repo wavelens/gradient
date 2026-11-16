@@ -409,23 +409,6 @@ pub struct RequiredPath {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
-pub struct JobCandidate {
-    pub job_id: String,
-    pub required_paths: Vec<RequiredPath>,
-    pub drv_paths: Vec<String>,
-    pub output_paths: Vec<String>,
-    pub requirement: Option<BuildRequirement>,
-}
-
-#[derive(Proto, Debug, Clone, PartialEq)]
-pub struct CandidateScore {
-    pub job_id: String,
-    pub missing_count: u32,
-    pub missing_nar_size: u64,
-    pub outputs_present: bool,
-}
-
-#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct DiscoveredDerivation {
     pub attr: String,
     pub drv_path: String,

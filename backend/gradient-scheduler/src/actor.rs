@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
@@ -13,9 +13,7 @@ use gradient_pool::score::{InstanceContext, ScoringPolicy};
 use gradient_types::ids::{
     ClusterAttemptId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId, ProjectId,
 };
-use gradient_wire::types::{
-    BuildStage, CandidateScore, GradientCapabilities, JobCandidate, JobKind,
-};
+use gradient_wire::types::{BuildStage, GradientCapabilities, JobKind};
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info, warn};
@@ -58,12 +56,6 @@ pub struct WorkerMetrics {
     pub build_peak_ram_mb: Option<Vec<(String, u64)>>,
     pub exits_at: Option<Instant>,
     pub exec: Option<gradient_wire::types::ExecInventory>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Offer {
-    pub candidates: Vec<JobCandidate>,
-    pub projects: HashMap<String, ProjectId>,
 }
 
 #[allow(
@@ -268,22 +260,12 @@ pub enum SchedulerMsg {
         attempt: ClusterAttemptId,
         reply: RpcReplyPort<()>,
     },
-    Candidates {
-        worker: String,
-        only_new: bool,
-        reply: RpcReplyPort<Offer>,
-    },
     Assign {
         worker: String,
         kind: JobKind,
         origin: JobRequestOrigin,
         instance: Arc<InstanceContext>,
         reply: RpcReplyPort<AssignOutcome>,
-    },
-    RecordScores {
-        worker: String,
-        scores: Vec<CandidateScore>,
-        reply: RpcReplyPort<()>,
     },
     Rejected {
         worker: String,
@@ -406,11 +388,6 @@ pub enum SchedulerMsg {
         reply: RpcReplyPort<Option<String>>,
     },
     #[cfg(test)]
-    SentCandidates {
-        worker: String,
-        reply: RpcReplyPort<Option<HashSet<String>>>,
-    },
-    #[cfg(test)]
     WaitingCluster {
         cluster: gradient_types::ids::ClusterJobId,
         reply: RpcReplyPort<Option<crate::cluster::PendingCluster>>,
@@ -504,7 +481,6 @@ impl SchedulerCore {
     fn return_to_pending(&mut self, job_ids: &[String]) {
         for job_id in job_ids {
             self.tracker.release_to_pending(job_id);
-            self.pool.remove_sent_candidate(job_id);
         }
     }
 
@@ -560,9 +536,6 @@ impl SchedulerCore {
 
     fn return_unreclaimed(&mut self, unreclaimed: &[(String, AwaitingReclaim)]) {
         self.tracker.return_unreclaimed(unreclaimed);
-        for (job_id, _) in unreclaimed {
-            self.pool.remove_sent_candidate(job_id);
-        }
     }
 
     fn with_live_transfers(&self, instance: &InstanceContext) -> InstanceContext {
@@ -614,26 +587,6 @@ impl SchedulerCore {
 
         self.ram_shortages
             .lasting(current, now, crate::ram_shortage::RAM_SHORTAGE_GRACE)
-    }
-
-    fn candidates(&mut self, worker: &str, only_new: bool) -> Offer {
-        let (authorized, caps) = self.auth_and_caps(worker);
-        let mut offered = self
-            .tracker
-            .candidates_for_worker(authorized.as_ref(), caps.as_ref());
-        let visible: HashSet<String> = offered.iter().map(|(c, _)| c.job_id.clone()).collect();
-        if only_new && let Some(sent) = self.pool.sent_candidates_for(worker) {
-            offered.retain(|(c, _)| !sent.contains(&c.job_id));
-        }
-        self.pool.set_sent_candidates(worker, visible);
-        let projects = offered
-            .iter()
-            .map(|(c, project)| (c.job_id.clone(), *project))
-            .collect();
-        Offer {
-            candidates: offered.into_iter().map(|(c, _)| c).collect(),
-            projects,
-        }
     }
 
     fn assign(
@@ -1169,8 +1122,7 @@ impl Actor for CoreActor {
                 stage,
             } => core.pool.enter_stage(&worker, &job_id, stage),
             SchedulerMsg::Enqueue { job_id, job, reply } => {
-                core.tracker.add_pending(job_id.clone(), job);
-                core.pool.remove_sent_candidate(&job_id);
+                core.tracker.add_pending(job_id, job);
                 core.send_jobs_available_signal_to_workers_with_free_capacity();
                 let _ = reply.send(());
             }
@@ -1180,8 +1132,7 @@ impl Actor for CoreActor {
                 job,
                 reply,
             } => {
-                core.tracker.add_member(of, key.clone(), job);
-                core.pool.remove_sent_candidate(&key);
+                core.tracker.add_member(of, key, job);
                 core.send_jobs_available_signal_to_workers_with_free_capacity();
                 let _ = reply.send(());
             }
@@ -1299,13 +1250,6 @@ impl Actor for CoreActor {
                     .release_job(&worker, &crate::input_waits::input_fetch_key(&fetch_id));
                 let _ = reply.send(());
             }
-            SchedulerMsg::Candidates {
-                worker,
-                only_new,
-                reply,
-            } => {
-                let _ = reply.send(core.candidates(&worker, only_new));
-            }
             SchedulerMsg::Assign {
                 worker,
                 kind,
@@ -1320,14 +1264,6 @@ impl Actor for CoreActor {
                     }
                 };
                 let _ = reply.send(outcome);
-            }
-            SchedulerMsg::RecordScores {
-                worker,
-                scores,
-                reply,
-            } => {
-                core.tracker.record_scores(&worker, scores);
-                let _ = reply.send(());
             }
             SchedulerMsg::Rejected {
                 worker,
@@ -1536,10 +1472,6 @@ impl Actor for CoreActor {
                 let _ = reply.send(core.tracker.active_worker(&job_id));
             }
             #[cfg(test)]
-            SchedulerMsg::SentCandidates { worker, reply } => {
-                let _ = reply.send(core.pool.sent_candidates_for(&worker).cloned());
-            }
-            #[cfg(test)]
             SchedulerMsg::WaitingCluster { cluster, reply } => {
                 let _ = reply.send(core.tracker.waiting_cluster(cluster).cloned());
             }
@@ -1566,7 +1498,7 @@ impl Actor for CoreActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_jobs::{build_job, eval_job, eval_worker_caps, port};
+    use crate::test_jobs::{build_job, port};
 
     fn pending_heavy_build(core: &mut SchedulerCore, predicted_peak_ram_mb: u64) -> String {
         pending_build(core, predicted_peak_ram_mb, |_| {})
@@ -1781,31 +1713,6 @@ mod tests {
             ),
             "the requeued build reserves at least its observed peak"
         );
-    }
-
-    #[test]
-    fn a_job_that_left_the_pending_set_leaves_every_sent_set() {
-        let mut core = SchedulerCore {
-            pool: WorkerPool::new(),
-            tracker: JobTracker::new(),
-            policy: gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
-            idle: Default::default(),
-            reservation: None,
-            unmeasured_build_ram_mb: 0,
-            ram_shortages: Default::default(),
-        };
-        core.pool
-            .register("w1".into(), eval_worker_caps(), HashSet::new(), port().0);
-        let job = eval_job(ProjectId::now_v7());
-        let job_id = crate::jobs::eval_job_key(job.evaluation_id, 0);
-        core.tracker
-            .add_pending(job_id.clone(), PendingJob::Eval(job));
-        assert_eq!(core.candidates("w1", true).candidates.len(), 1);
-
-        core.tracker.remove_job(&job_id);
-        core.candidates("w1", true);
-
-        assert!(core.pool.sent_candidates_for("w1").unwrap().is_empty());
     }
 
     #[test]

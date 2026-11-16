@@ -14,7 +14,7 @@ use tracing::{Instrument as _, info, warn};
 use gradient_db::DbContext;
 use gradient_graph::{Graph, Transition};
 use gradient_types::*;
-use gradient_wire::types::{CandidateScore, JobKind};
+use gradient_wire::types::JobKind;
 
 use crate::Scheduler;
 use crate::actor::{AssignOutcome, JobRequestOrigin, SchedulerMsg};
@@ -98,18 +98,6 @@ impl Scheduler {
                 worker,
                 job_id,
                 job_succeeded: false,
-                reply,
-            })
-            .await;
-    }
-
-    #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len()))]
-    pub async fn record_scores(&self, worker_id: &str, scores: Vec<CandidateScore>) {
-        let worker = worker_id.to_owned();
-        let _ = self
-            .call(|reply| SchedulerMsg::RecordScores {
-                worker,
-                scores,
                 reply,
             })
             .await;

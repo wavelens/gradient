@@ -57,16 +57,16 @@ mod tests {
     fn a_received_message_is_published_as_a_proto_event() {
         let bus = EventBus::new(4);
         let mut rx = bus.subscribe_firehose();
-        tap(&bus).observe(&ClientMessage::RequestJobList, 1);
+        tap(&bus).observe(&ClientMessage::Draining, 1);
         let env = rx.try_recv().unwrap();
-        assert_eq!(env.event.name(), "proto.client.request_job_list");
+        assert_eq!(env.event.name(), "proto.client.draining");
     }
 
     #[test]
     fn without_a_firehose_nothing_is_built() {
         let bus = EventBus::new(4);
         let mut live = bus.subscribe();
-        tap(&bus).observe(&ClientMessage::RequestJobList, 1);
+        tap(&bus).observe(&ClientMessage::Draining, 1);
         assert!(live.try_recv().is_err());
     }
 

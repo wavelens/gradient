@@ -13,50 +13,25 @@ use tracing::{debug, warn};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::exec_secrets::server_secret_values;
 use gradient_scheduler::jobs::{Assignment, PendingJob};
-use gradient_wire::messages::{
-    FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, GitServerSshHostKey, ServerMessage,
-};
+use gradient_wire::messages::{GitServerSshHostKey, ServerMessage};
 use gradient_wire::types::{CredentialKind, Job};
 
-use super::store_paths::{outbound_message, outbound_offer, project_mapper};
+use super::store_paths::{outbound_message, project_mapper};
 
 pub use gradient_wire::session::frame::{
     BULK_CHUNK_SIZE, HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, recv_client_msg, send_error,
     send_server_msg,
 };
-pub use gradient_wire::session::job_offer::job_offer_chunks;
-
-pub(super) async fn push_pending_candidates(
-    writer: &ProtoWriter,
-    scheduler: &Scheduler,
-    peer_id: &str,
-) {
-    let offer = scheduler.get_new_job_candidates(peer_id).await;
-    let candidates = outbound_offer(offer, &scheduler.db).await;
-    if candidates.is_empty() {
-        return;
-    }
-    debug!(%peer_id, count = candidates.len(), "pushing job offer (delta) after message processing");
-    for chunk in job_offer_chunks(&candidates) {
-        let _ = send_server_msg(
-            writer,
-            &ServerMessage::JobOffer {
-                candidates: chunk.to_vec(),
-            },
-        )
-        .await;
-    }
-}
 
 pub(super) async fn send_credentials_for_job(
     writer: &ProtoWriter,
     db: &DbContext,
-    scheduler: &gradient_scheduler::Scheduler,
+    scheduler: &Scheduler,
     worker_id: &str,
     assignment: &Assignment,
 ) -> Result<(), String> {
     let caps = scheduler.worker_gradient_caps(worker_id).await;
-    if sends_ssh_key(writer.version(), caps.as_ref(), &assignment.job) {
+    if sends_ssh_key(caps.as_ref(), &assignment.job) {
         send_ssh_key_credential(writer, db, assignment.project_id).await;
     }
 
@@ -102,14 +77,12 @@ fn job_secret_credentials(job_id: &str, values: Vec<(String, SecretBytes)>) -> V
 }
 
 fn sends_ssh_key(
-    version: u16,
     caps: Option<&gradient_wire::types::GradientCapabilities>,
     job: &gradient_wire::types::Job,
 ) -> bool {
     use gradient_wire::types::{FlakeStep, Job};
 
-    version >= FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS
-        && caps.is_some_and(|c| c.secrets)
+    caps.is_some_and(|c| c.secrets)
         && match job {
             Job::Flake(flake_job) => flake_job.steps.contains(&FlakeStep::FetchFlake),
             Job::Exec(_) => true,
@@ -128,7 +101,7 @@ pub(super) async fn send_input_fetch(
         return Ok(());
     };
     let caps = scheduler.worker_gradient_caps(worker_id).await;
-    let credentials = if sends_input_ssh_key(writer.version(), caps.as_ref(), &fetch.request) {
+    let credentials = if sends_input_ssh_key(caps.as_ref(), &fetch.request) {
         load_project_ssh_key_and_saved_git_server_ssh_host_keys(db, fetch.project).await
     } else {
         None
@@ -151,12 +124,10 @@ pub(super) struct InputFetch {
 }
 
 fn sends_input_ssh_key(
-    version: u16,
     caps: Option<&gradient_wire::types::GradientCapabilities>,
     request: &str,
 ) -> bool {
-    version >= FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS
-        && caps.is_some_and(|c| c.secrets)
+    caps.is_some_and(|c| c.secrets)
         && gradient_pool::InputRequest::parse(request).is_ok_and(|r| r.needs_secrets)
 }
 
@@ -259,41 +230,14 @@ mod tests {
             eval: true,
             ..Default::default()
         };
-        assert!(!sends_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            Some(&network_only),
-            &fetch_job()
-        ));
-        assert!(!sends_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            None,
-            &fetch_job()
-        ));
+        assert!(!sends_ssh_key(Some(&network_only), &fetch_job()));
+        assert!(!sends_ssh_key(None, &fetch_job()));
 
         let with_secrets = GradientCapabilities {
             secrets: true,
             ..network_only
         };
-        assert!(sends_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            Some(&with_secrets),
-            &fetch_job()
-        ));
-    }
-
-    #[test]
-    fn workers_below_version_63_receive_no_ssh_key() {
-        let with_secrets = GradientCapabilities {
-            secrets: true,
-            ..Default::default()
-        };
-        let ssh =
-            r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.com/r"}}"#;
-
-        assert!(!sends_ssh_key(62, Some(&with_secrets), &fetch_job()));
-        assert!(sends_ssh_key(63, Some(&with_secrets), &fetch_job()));
-        assert!(!sends_input_ssh_key(62, Some(&with_secrets), ssh));
-        assert!(sends_input_ssh_key(63, Some(&with_secrets), ssh));
+        assert!(sends_ssh_key(Some(&with_secrets), &fetch_job()));
     }
 
     fn exec_job() -> Job {
@@ -329,21 +273,9 @@ mod tests {
             exec: true,
             ..Default::default()
         };
-        assert!(sends_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            Some(&with_secrets),
-            &exec_job()
-        ));
-        assert!(!sends_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            Some(&without),
-            &exec_job()
-        ));
-        assert!(!sends_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            None,
-            &exec_job()
-        ));
+        assert!(sends_ssh_key(Some(&with_secrets), &exec_job()));
+        assert!(!sends_ssh_key(Some(&without), &exec_job()));
+        assert!(!sends_ssh_key(None, &exec_job()));
     }
 
     #[test]
@@ -398,25 +330,9 @@ mod tests {
             ..network_only
         };
 
-        assert!(!sends_input_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            Some(&network_only),
-            ssh
-        ));
-        assert!(!sends_input_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            None,
-            ssh
-        ));
-        assert!(!sends_input_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            Some(&with_secrets),
-            https
-        ));
-        assert!(sends_input_ssh_key(
-            FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS,
-            Some(&with_secrets),
-            ssh
-        ));
+        assert!(!sends_input_ssh_key(Some(&network_only), ssh));
+        assert!(!sends_input_ssh_key(None, ssh));
+        assert!(!sends_input_ssh_key(Some(&with_secrets), https));
+        assert!(sends_input_ssh_key(Some(&with_secrets), ssh));
     }
 }

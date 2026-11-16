@@ -12,9 +12,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 use gradient_util::sync::Mutex;
-use gradient_wire::messages::{
-    ClientMessage, GuestChannelKind, JobKind, RUNNING_JOBS_SINCE, RunningAssignment,
-};
+use gradient_wire::messages::{ClientMessage, GuestChannelKind, JobKind, RunningAssignment};
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::correlation::{
@@ -273,10 +271,6 @@ impl JobRegistry {
             Some(job) => job.abort.send(true).is_ok(),
             None => false,
         }
-    }
-
-    pub(super) fn abort_all(&self) -> usize {
-        self.aborting(|_| true)
     }
 
     pub(super) fn abort_for_stop(&self, keep_exec_jobs: bool) -> usize {
@@ -570,20 +564,12 @@ impl WorkerJobs {
         Ok(session)
     }
 
-    pub(crate) fn end_session(&self, agreed_version: u16) {
+    pub(crate) fn end_session(&self) {
         self.writer.detach();
         let mut registry = self.registry.lock();
         registry.close_guest_channels();
         let members = registry.abort_cluster_members();
-        let all = if agreed_version < RUNNING_JOBS_SINCE {
-            registry.abort_all()
-        } else {
-            0
-        };
-        debug!(
-            members,
-            all, agreed_version, "session ended; running jobs continue"
-        );
+        debug!(members, "session ended; running jobs continue");
     }
 }
 
@@ -821,7 +807,7 @@ mod tests {
             None,
         );
 
-        jobs.end_session(RUNNING_JOBS_SINCE);
+        jobs.end_session();
 
         assert!(!registered.abort.is_aborted());
         assert_eq!(
@@ -831,21 +817,6 @@ mod tests {
                 kind: JobKind::Build,
             }]
         );
-    }
-
-    #[tokio::test]
-    async fn an_older_server_session_end_aborts_every_job() {
-        let (jobs, _base) = worker_jobs();
-        let registered = jobs.register(
-            "job-1".to_owned(),
-            JobKind::Build,
-            "dispatch-1".to_owned(),
-            None,
-        );
-
-        jobs.end_session(RUNNING_JOBS_SINCE - 1);
-
-        assert!(registered.abort.is_aborted());
     }
 
     #[tokio::test]
@@ -864,7 +835,7 @@ mod tests {
             Some("a1".to_owned()),
         );
 
-        jobs.end_session(RUNNING_JOBS_SINCE);
+        jobs.end_session();
 
         assert!(!single.abort.is_aborted());
         assert!(member.abort.is_aborted());
@@ -913,7 +884,7 @@ mod tests {
         jobs.start_session(session.writer.clone()).await.unwrap();
         jobs.send_final_report(JobKind::Build, completed("build:1", "dispatch-1"))
             .await;
-        jobs.end_session(RUNNING_JOBS_SINCE);
+        jobs.end_session();
     }
 
     #[tokio::test]
@@ -1037,7 +1008,7 @@ mod tests {
         let mut a = jobs.register("exec:a".to_owned(), JobKind::Exec, "d-a".to_owned(), None);
         let mut b = jobs.register("exec:b".to_owned(), JobKind::Exec, "d-b".to_owned(), None);
 
-        jobs.end_session(RUNNING_JOBS_SINCE);
+        jobs.end_session();
 
         assert_eq!(
             a.exec_inbox.channels.try_recv().ok(),

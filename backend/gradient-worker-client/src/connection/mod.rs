@@ -179,11 +179,6 @@ mod tests {
             .await
             .expect("the server must see the socket close, not wait on a dead session");
         assert!(seen.is_err());
-        assert!(
-            background
-                .send(ClientMessage::RequestJobList)
-                .await
-                .is_err()
-        );
+        assert!(background.send(ClientMessage::Draining).await.is_err());
     }
 }

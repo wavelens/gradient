@@ -13,4 +13,3 @@ pub mod job_log;
 pub(crate) mod nar_daemon_import;
 pub(crate) mod prefetch;
 pub(crate) mod progress;
-pub mod scorer;

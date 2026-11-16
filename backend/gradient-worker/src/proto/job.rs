@@ -13,10 +13,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
-    EXEC_ABORT_REQUEST_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, EvalCachePullOutcome, EvalMessageLevel,
-    EvalStatsReport, FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, FLAKE_INPUT_SOURCES_SINCE,
-    GitSshHostKeyObservation, HELD_EVAL_SHARDS_SINCE, JobPhase, JobUpdateKind, QueryMode,
-    WorkerReportAssignment,
+    EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, GitSshHostKeyObservation, JobPhase,
+    JobUpdateKind, QueryMode, WorkerReportAssignment,
 };
 use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
@@ -401,12 +399,6 @@ impl JobUpdater {
         self.eval_shard_replies.wait(&self.job_id, replied).await
     }
 
-    pub fn server_keeps_held_eval_shards(&self) -> bool {
-        self.writer
-            .version()
-            .is_some_and(|version| version >= HELD_EVAL_SHARDS_SINCE)
-    }
-
     async fn send_eval_cache(
         &self,
         request_id: u64,
@@ -680,23 +672,12 @@ impl JobUpdater {
     }
 
     pub async fn report_program_exited(&self, code: i32) -> Result<()> {
-        if self.server_older_than(EXEC_KEEP_VM_RUNNING_SINCE) {
-            return Ok(());
-        }
         self.send_update(JobUpdateKind::ProgramExited { code })
             .await
     }
 
-    pub async fn report_abort_requested(&self) -> Result<bool> {
-        if self.server_older_than(EXEC_ABORT_REQUEST_SINCE) {
-            return Ok(false);
-        }
-        self.send_update(JobUpdateKind::AbortRequested).await?;
-        Ok(true)
-    }
-
-    fn server_older_than(&self, since: u16) -> bool {
-        self.writer.version().is_some_and(|version| version < since)
+    pub async fn report_abort_requested(&self) -> Result<()> {
+        self.send_update(JobUpdateKind::AbortRequested).await
     }
 
     pub async fn send_job_phase(&self, name: String, payload: Vec<u8>) -> Result<()> {
@@ -812,9 +793,6 @@ impl JobReporter for JobUpdater {
         &mut self,
         sources: Vec<gradient_wire::messages::FlakeInputSourceWire>,
     ) -> Result<()> {
-        if self.server_older_than(FLAKE_INPUT_SOURCES_SINCE) {
-            return Ok(());
-        }
         self.send_update(JobUpdateKind::InputSources { sources })
             .await
     }
@@ -823,9 +801,7 @@ impl JobReporter for JobUpdater {
         &mut self,
         observations: Vec<GitSshHostKeyObservation>,
     ) -> Result<()> {
-        if observations.is_empty()
-            || self.server_older_than(FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS)
-        {
+        if observations.is_empty() {
             return Ok(());
         }
         self.writer

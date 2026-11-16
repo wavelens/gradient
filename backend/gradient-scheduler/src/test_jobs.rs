@@ -132,13 +132,6 @@ pub(crate) fn build_job(
     }
 }
 
-pub(crate) fn eval_worker_caps() -> GradientCapabilities {
-    GradientCapabilities {
-        eval: true,
-        ..GradientCapabilities::default()
-    }
-}
-
 pub(crate) fn exec_job(spec: ExecSpec) -> PendingExecJob {
     PendingExecJob {
         exec_job: ExecJobId::now_v7(),

@@ -15,8 +15,8 @@ use gradient_eval::pool::{DownloadSink, EvalPoolConfig, EvalWorker};
 use gradient_types::SecretString;
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
-    ClientMessage, FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, GitServerSshHostKey,
-    GitSshHostKeyObservation, PROGRESS_INTERVAL, WorkerReportAssignment,
+    ClientMessage, GitServerSshHostKey, GitSshHostKeyObservation, PROGRESS_INTERVAL,
+    WorkerReportAssignment,
 };
 use gradient_wire::traits::JobReporter;
 use gradient_wire::types::InputOutcome;
@@ -109,9 +109,7 @@ impl FetchReport for UpdaterFetchReport {
         &self,
         observations: Vec<GitSshHostKeyObservation>,
     ) -> Result<()> {
-        if observations.is_empty()
-            || self.session.version() < FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS
-        {
+        if observations.is_empty() {
             return Ok(());
         }
         self.session

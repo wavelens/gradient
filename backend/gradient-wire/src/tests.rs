@@ -25,7 +25,7 @@ fn max_proto_message_size_is_sane() {
 #[test]
 fn held_shards_reach_only_a_server_of_version_55() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{ClientMessage, HELD_EVAL_SHARDS_SINCE};
+    use crate::messages::ClientMessage;
 
     let request = |held: Vec<String>| ClientMessage::EvalShardRequest {
         job_id: "eval:e:1".into(),
@@ -34,7 +34,7 @@ fn held_shards_reach_only_a_server_of_version_55() {
         held,
     };
     let sent = request(vec!["s1".into()]);
-    let since = HELD_EVAL_SHARDS_SINCE;
+    let since = 55;
 
     let bytes = to_bytes(&sent, since).unwrap();
     assert_eq!(from_bytes::<ClientMessage>(bytes, since).unwrap(), sent);
@@ -48,9 +48,7 @@ fn held_shards_reach_only_a_server_of_version_55() {
 #[test]
 fn flake_input_sources_reach_only_a_server_of_version_56() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{
-        ClientMessage, FLAKE_INPUT_SOURCES_SINCE, FlakeInputSourceWire, JobUpdateKind,
-    };
+    use crate::messages::{ClientMessage, FlakeInputSourceWire, JobUpdateKind};
 
     let sent = ClientMessage::JobUpdate {
         job_id: "eval:e".into(),
@@ -63,7 +61,7 @@ fn flake_input_sources_reach_only_a_server_of_version_56() {
             }],
         },
     };
-    let since = FLAKE_INPUT_SOURCES_SINCE;
+    let since = 56;
 
     let bytes = to_bytes(&sent, since).unwrap();
     assert_eq!(from_bytes::<ClientMessage>(bytes, since).unwrap(), sent);
@@ -138,21 +136,19 @@ fn split_evaluation_messages_encode_and_decode_at_oldest_supported_protocol_vers
 #[test]
 fn running_jobs_round_trips_and_is_refused_to_an_older_peer() {
     use crate::codec::{EncodeError, from_bytes, to_bytes};
-    use crate::messages::{ClientMessage, JobKind, RUNNING_JOBS_SINCE, RunningAssignment};
+    use crate::messages::{ClientMessage, JobKind, RunningAssignment};
 
+    let since = 42;
     let msg = ClientMessage::RunningJobs {
         assignments: vec![RunningAssignment {
             assignment_id: "a1".into(),
             kind: JobKind::Build,
         }],
     };
-    let bytes = to_bytes(&msg, RUNNING_JOBS_SINCE).unwrap();
-    assert_eq!(
-        from_bytes::<ClientMessage>(bytes, RUNNING_JOBS_SINCE).unwrap(),
-        msg
-    );
+    let bytes = to_bytes(&msg, since).unwrap();
+    assert_eq!(from_bytes::<ClientMessage>(bytes, since).unwrap(), msg);
     assert!(matches!(
-        to_bytes(&msg, RUNNING_JOBS_SINCE - 1),
+        to_bytes(&msg, since - 1),
         Err(EncodeError::NewerThanPeer { .. })
     ));
 }
@@ -160,7 +156,7 @@ fn running_jobs_round_trips_and_is_refused_to_an_older_peer() {
 #[test]
 fn worker_metrics_from_an_older_peer_carry_no_lifetime() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{ClientMessage, RUNNING_JOBS_SINCE};
+    use crate::messages::ClientMessage;
 
     let metrics = |lifetime_left_secs| ClientMessage::WorkerMetrics {
         cpu_usage_pct: 1.0,
@@ -172,7 +168,7 @@ fn worker_metrics_from_an_older_peer_carry_no_lifetime() {
         lifetime_left_secs,
         exec: None,
     };
-    let old = RUNNING_JOBS_SINCE - 1;
+    let old = 41;
     let decoded =
         from_bytes::<ClientMessage>(to_bytes(&metrics(Some(60)), old).unwrap(), old).unwrap();
     assert_eq!(decoded, metrics(None));
@@ -310,8 +306,9 @@ fn a_worker_before_version_54_hears_only_the_pre_warm_total() {
 #[test]
 fn guest_channel_messages_round_trip_and_stay_off_older_sessions() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{ClientMessage, GUEST_CHANNELS_SINCE, GuestChannelKind, ServerMessage};
+    use crate::messages::{ClientMessage, GuestChannelKind, ServerMessage};
 
+    let since = 44;
     let open = ServerMessage::OpenGuestChannel {
         job_id: "exec:x".into(),
         channel_id: 7,
@@ -319,14 +316,10 @@ fn guest_channel_messages_round_trip_and_stay_off_older_sessions() {
         max_unread_output_bytes: None,
     };
     assert_eq!(
-        from_bytes::<ServerMessage>(
-            to_bytes(&open, GUEST_CHANNELS_SINCE).unwrap(),
-            GUEST_CHANNELS_SINCE
-        )
-        .unwrap(),
+        from_bytes::<ServerMessage>(to_bytes(&open, since).unwrap(), since).unwrap(),
         open
     );
-    assert!(to_bytes(&open, GUEST_CHANNELS_SINCE - 1).is_err());
+    assert!(to_bytes(&open, since - 1).is_err());
     assert_eq!(open.job_id(), Some("exec:x"));
     let closed = ClientMessage::CloseGuestChannel {
         channel_id: 7,
@@ -334,11 +327,7 @@ fn guest_channel_messages_round_trip_and_stay_off_older_sessions() {
         message: None,
     };
     assert_eq!(
-        from_bytes::<ClientMessage>(
-            to_bytes(&closed, GUEST_CHANNELS_SINCE).unwrap(),
-            GUEST_CHANNELS_SINCE
-        )
-        .unwrap(),
+        from_bytes::<ClientMessage>(to_bytes(&closed, since).unwrap(), since).unwrap(),
         closed
     );
 }
@@ -636,25 +625,18 @@ fn a_spec_from_before_version_52_starts_by_itself() {
 #[test]
 fn abort_requests_and_program_exits_cross_the_wire_since_version_52() {
     use crate::codec::{EncodeError, from_bytes, to_bytes};
-    use crate::messages::{
-        ClientMessage, EXEC_ABORT_REQUEST_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, JobUpdateKind,
-    };
+    use crate::messages::{ClientMessage, JobUpdateKind};
 
     let update = |update| ClientMessage::JobUpdate {
         job_id: "exec:x".into(),
         assignment_id: "a1".into(),
         update,
     };
-    for (since, sent) in [
-        (
-            EXEC_ABORT_REQUEST_SINCE,
-            update(JobUpdateKind::AbortRequested),
-        ),
-        (
-            EXEC_KEEP_VM_RUNNING_SINCE,
-            update(JobUpdateKind::ProgramExited { code: 3 }),
-        ),
+    for sent in [
+        update(JobUpdateKind::AbortRequested),
+        update(JobUpdateKind::ProgramExited { code: 3 }),
     ] {
+        let since = 52;
         assert_eq!(
             from_bytes::<ClientMessage>(to_bytes(&sent, since).unwrap(), since).unwrap(),
             sent
@@ -669,10 +651,10 @@ fn abort_requests_and_program_exits_cross_the_wire_since_version_52() {
 #[test]
 fn the_keep_vm_running_switch_reaches_only_a_worker_of_version_52() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{EXEC_KEEP_VM_RUNNING_SINCE, ServerMessage};
+    use crate::messages::ServerMessage;
     use crate::types::ExecJob;
 
-    let since = EXEC_KEEP_VM_RUNNING_SINCE;
+    let since = 52;
     let switch = ServerMessage::ExecKeepVmRunning {
         job_id: "exec:x".into(),
         keep_vm_running: true,
@@ -728,11 +710,9 @@ fn a_guest_shutdown_needs_the_sixth_guest_version() {
 #[test]
 fn guest_output_flow_control_needs_protocol_60_older_peers_skip_allowance() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{
-        GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_SINCE, GuestChannelKind, ServerMessage,
-    };
+    use crate::messages::{GuestChannelKind, ServerMessage};
 
-    let since = GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_SINCE;
+    let since = 60;
     let open = |max_unread_output_bytes| ServerMessage::OpenGuestChannel {
         job_id: "exec:x".into(),
         channel_id: 7,
@@ -825,10 +805,10 @@ fn elektrat_host_key() -> crate::types::GitServerSshHostKey {
 #[test]
 fn ssh_host_key_observations_round_trip_at_version_63() {
     use crate::codec::{EncodeError, from_bytes, to_bytes};
-    use crate::messages::{ClientMessage, FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS};
+    use crate::messages::ClientMessage;
     use crate::types::{GitSshHostKeyObservation, WorkerReportAssignment};
 
-    let since = FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS;
+    let since = 63;
     let msg = ClientMessage::SshHostKeyObservations {
         assignment: WorkerReportAssignment::Fetch {
             fetch_id: "f1".into(),
@@ -856,9 +836,9 @@ fn ssh_host_key_observations_round_trip_at_version_63() {
 #[test]
 fn fetch_input_drops_ssh_host_keys_below_version_63() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, ServerMessage};
+    use crate::messages::ServerMessage;
 
-    let since = FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS;
+    let since = 63;
     let msg = ServerMessage::FetchInput {
         fetch_id: "f1".into(),
         project: "p".into(),
@@ -881,11 +861,9 @@ fn fetch_input_drops_ssh_host_keys_below_version_63() {
 #[test]
 fn ssh_host_keys_credential_round_trips_at_version_63() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{
-        CredentialKind, FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS, ServerMessage,
-    };
+    use crate::messages::{CredentialKind, ServerMessage};
 
-    let since = FIRST_WORKER_PROTOCOL_VERSION_WITH_SSH_HOST_KEYS;
+    let since = 63;
     let msg = ServerMessage::Credential {
         kind: CredentialKind::SshHostKeys {
             keys: vec![elektrat_host_key()],

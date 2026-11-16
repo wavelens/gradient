@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use crate::Scheduler;
-use crate::actor::{Offer, SchedulerMsg};
+use crate::actor::SchedulerMsg;
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
 use gradient_entity::store_path_mapping::StorePathMapper;
 use gradient_pool::WorkerInfo;
@@ -116,28 +116,6 @@ impl Scheduler {
             reply,
         })
         .await
-    }
-
-    pub async fn get_job_candidates(&self, worker_id: &str) -> Offer {
-        let worker = worker_id.to_owned();
-        self.call(|reply| SchedulerMsg::Candidates {
-            worker,
-            only_new: false,
-            reply,
-        })
-        .await
-        .unwrap_or_default()
-    }
-
-    pub async fn get_new_job_candidates(&self, worker_id: &str) -> Offer {
-        let worker = worker_id.to_owned();
-        self.call(|reply| SchedulerMsg::Candidates {
-            worker,
-            only_new: true,
-            reply,
-        })
-        .await
-        .unwrap_or_default()
     }
 
     pub async fn worker_gradient_caps(&self, worker_id: &str) -> Option<GradientCapabilities> {
