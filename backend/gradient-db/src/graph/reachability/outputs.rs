@@ -12,6 +12,11 @@ crate::sql! {
     PRODUCERS_OF_HASHES = "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
         params = [CachedPathHashes(64)];
 
+    PRODUCERS_OF_HASHES_WITHOUT_UNNEEDED_OUTPUTS = "SELECT DISTINCT o.derivation FROM derivation_output o \
+         JOIN derivation_build db ON db.derivation = o.derivation \
+         WHERE o.hash = ANY($1) AND o.name <> ALL(db.unneeded_outputs)",
+        params = [CachedPathHashes(64)];
+
     INHERIT_NAMES = "INSERT INTO build_job \
          (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) \
          SELECT uuidv7(), $2, bj.derivation, bj.derivation_build, 0, '{}'::jsonb, \
@@ -43,12 +48,34 @@ pub async fn producers_of_hashes<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
 ) -> Result<Vec<DerivationId>, DbErr> {
+    query_distinct_producer_derivation_ids_for_hashes(db, &PRODUCERS_OF_HASHES, hashes).await
+}
+
+pub async fn producers_of_hashes_with_output_not_in_shared_build_unneeded_outputs<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    hashes: &[String],
+) -> Result<Vec<DerivationId>, DbErr> {
+    query_distinct_producer_derivation_ids_for_hashes(
+        db,
+        &PRODUCERS_OF_HASHES_WITHOUT_UNNEEDED_OUTPUTS,
+        hashes,
+    )
+    .await
+}
+
+async fn query_distinct_producer_derivation_ids_for_hashes<C: ConnectionTrait>(
+    db: &C,
+    query: &crate::sql::Query,
+    hashes: &[String],
+) -> Result<Vec<DerivationId>, DbErr> {
     if hashes.is_empty() {
         return Ok(Vec::new());
     }
 
     let rows = db
-        .query_all_raw(PRODUCERS_OF_HASHES.bind([hashes.to_vec().into()]))
+        .query_all_raw(query.bind([hashes.to_vec().into()]))
         .await?;
 
     Ok(rows

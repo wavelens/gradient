@@ -62,13 +62,17 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         gradient_db::status::emit_transition_effects(ctx, &settled.changes).await?;
     }
 
-    let (freshly_present, recounted): (&[DerivationId], &[DerivationId]) = if was_backed {
-        (&[], &producers)
+    let freshly_present = if was_backed {
+        Vec::new()
     } else {
-        (&producers, &[])
+        gradient_db::graph::reachability::producers_of_hashes_with_output_not_in_shared_build_unneeded_outputs(
+            txn,
+            &[sp.hash().to_owned()],
+        )
+        .await?
     };
     let seeded =
-        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, freshly_present, recounted)
+        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &freshly_present, &producers)
             .await?;
     let owners = if was_backed {
         Vec::new()
@@ -127,18 +131,21 @@ pub(crate) async fn commit_batch(
     let upserted = upsert_cached_paths(db, commits, &paths).await?;
     let recorded: Vec<NarCommit> = upserted.iter().map(|u| u.recorded.clone()).collect();
     let commits = recorded.as_slice();
-    let (backed, fresh): (Vec<_>, Vec<_>) = hashes
+    let fresh: Vec<String> = hashes
         .iter()
         .zip(&upserted)
-        .partition(|(_, u)| u.was_backed);
-    let backed: Vec<String> = backed.into_iter().map(|(h, _)| h.clone()).collect();
-    let fresh: Vec<String> = fresh.into_iter().map(|(h, _)| h.clone()).collect();
+        .filter(|(_, u)| !u.was_backed)
+        .map(|(h, _)| h.clone())
+        .collect();
 
     commit_runtime_dependencies(ctx, txn, commits, &hashes).await?;
 
     let freshly_present =
-        gradient_db::graph::reachability::producers_of_hashes(txn, &fresh).await?;
-    let recounted = gradient_db::graph::reachability::producers_of_hashes(txn, &backed).await?;
+        gradient_db::graph::reachability::producers_of_hashes_with_output_not_in_shared_build_unneeded_outputs(
+            txn, &fresh,
+        )
+        .await?;
+    let recounted = gradient_db::graph::reachability::producers_of_hashes(txn, &hashes).await?;
     let seeded =
         gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &freshly_present, &recounted)
             .await?;

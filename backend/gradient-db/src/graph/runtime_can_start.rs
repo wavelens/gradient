@@ -10,7 +10,7 @@
 //! A freshly present dependency still counts as missing for a referrer in the same seed, since its own ripple subtracts it.
 //! A re-push of an already backed path must not count as fresh.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
@@ -327,7 +327,8 @@ pub async fn retire_outputs(
         .await?;
 
     let gone = crate::graph::reachability::producers_of_hashes(txn, hashes).await?;
-    let was_complete = complete_among(txn, &gone).await?;
+    let was_complete: BTreeSet<DerivationId> =
+        complete_among(txn, &gone).await?.into_iter().collect();
 
     let deleted: Vec<String> = txn
         .query_all_raw(DELETE_CACHED_PATHS.bind([hashes.to_vec().into()]))
@@ -336,8 +337,7 @@ pub async fn retire_outputs(
         .filter_map(|r| r.try_get::<String>("", "hash").ok())
         .collect();
 
-    let mut incomplete = was_complete.clone();
-    incomplete.extend(ripple_shared_builds_incomplete(txn, was_complete).await?);
+    let incomplete = lost_completeness(txn, &gone, &was_complete).await?;
     let transitions = retire_shared_builds(txn, &gone, &incomplete, &owners).await?;
 
     Ok(Retired {
@@ -345,6 +345,31 @@ pub async fn retire_outputs(
         incomplete,
         transitions,
     })
+}
+
+pub(crate) async fn lost_completeness(
+    txn: &DatabaseTransaction,
+    changed_shared_build_derivation_ids: &[DerivationId],
+    was_complete: &BTreeSet<DerivationId>,
+) -> Result<Vec<DerivationId>, DbErr> {
+    let candidates: Vec<DerivationId> = changed_shared_build_derivation_ids
+        .iter()
+        .copied()
+        .filter(|d| was_complete.contains(d))
+        .collect();
+    let still: BTreeSet<DerivationId> = complete_among(txn, &candidates)
+        .await?
+        .into_iter()
+        .collect();
+    let lost: Vec<DerivationId> = candidates
+        .into_iter()
+        .filter(|d| !still.contains(d))
+        .collect();
+
+    let mut incomplete = lost.clone();
+    incomplete.extend(ripple_shared_builds_incomplete(txn, lost).await?);
+
+    Ok(incomplete)
 }
 
 async fn retire_shared_builds(

@@ -669,6 +669,48 @@ async fn n13_a_dependency_landing_in_the_same_flush_as_its_referrer_counts_for_i
 }
 
 #[tokio::test]
+async fn n14_committing_nar_of_unneeded_output_keeps_missing_runtime_dep_count_of_referencing_complete_shared_build_at_zero()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(D)
+            .walked()
+            .entry_point("pkg.d")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(D_OUT)
+            .cached_output(D)
+            .build_status(Completed)
+            .runtime_depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .cached_output(B)
+            .unneeded_output(B_OUT2, "dev")
+            .build_status(Completed),
+    )
+    .await;
+    let d = case.closure_state(D).await;
+    assert_eq!(d, (true, 0), "after the seed: sb(D) fetchable, missing");
+
+    case.commit_nar(commit_of(B_OUT2, "b-dev", &[(B_OUT2, "b-dev")]))
+        .await;
+
+    let b = case.closure_state(B).await;
+    assert_eq!(b, (true, 0), "after 1: sb(B) fetchable, missing");
+    let d = case.closure_state(D).await;
+    assert_eq!(d, (true, 0), "after 1: sb(D) fetchable, missing");
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn the_cached_path_row_is_read_under_a_row_lock() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(chain_done(e1)).await;
