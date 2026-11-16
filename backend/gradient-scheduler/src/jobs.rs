@@ -3277,8 +3277,8 @@ mod tests {
      {
         let hashes = [
             "0123456789abcdfghijklmnpqrsvwxyz",
-            "1123456789abcdfghijklmnpqrsvwxyz",
-            "2123456789abcdfghijklmnpqrsvwxyz",
+            "zyxwvsrqpnmlkjihgfdcba9876543210",
+            "abcdfghijklmnpqrsvwxyz0123456789",
         ];
         let inputs = hashes
             .iter()
