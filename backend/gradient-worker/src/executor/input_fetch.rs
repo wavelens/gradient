@@ -529,7 +529,8 @@ mod tests {
             let read = |option| path(option).and_then(|p| std::fs::read_to_string(p).ok());
             let (private_key, known_hosts) = (read("-i"), read("UserKnownHostsFile="));
             let git_credential_store = variable("GIT_CONFIG_VALUE_1")
-                .and_then(|helper| helper.strip_prefix("store --file="))
+                .and_then(|helper| helper.strip_prefix("store --file='"))
+                .and_then(|path| path.strip_suffix('\''))
                 .and_then(read_owner_only_file_with_mode);
             if let (Some(line), Some(known_hosts)) = (
                 &self.known_hosts_line_to_append,
