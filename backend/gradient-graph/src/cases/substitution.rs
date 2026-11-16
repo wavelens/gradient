@@ -476,6 +476,58 @@ async fn s10_a_producer_whose_every_output_our_cache_already_holds_is_not_built(
 }
 
 #[tokio::test]
+async fn s11_a_shared_build_whose_output_our_cache_already_holds_becomes_available_to_fetch_and_an_already_complete_referring_shared_build_outside_the_probe_keeps_zero_missing_runtime_deps_and_stays_fetchable()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .drv_cached()
+            .output(B_OUT)
+            .cached_output(B)
+            .derivation(D)
+            .walked()
+            .drv_cached()
+            .output(D_OUT)
+            .cached_output(D)
+            .build_status(BuildStatus::Completed)
+            .runtime_depends_on(B),
+    )
+    .await;
+    assert_eq!(
+        case.closure_state(D).await,
+        (true, 0),
+        "after the seed: sb(D) fetchable, missing_runtime_deps"
+    );
+
+    case.upstream_probed(&[B]).await;
+
+    assert!(
+        case.sb(B).await.cache_available,
+        "after 1: sb(B).cache_available"
+    );
+    assert_eq!(
+        case.closure_state(D).await,
+        (true, 0),
+        "after 1: sb(D) fetchable, missing_runtime_deps"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn s12_a_missing_output_needed_while_the_fetch_result_is_pending_turns_its_producer_after_the_result()
  {
     let e1 = EvaluationId::now_v7();

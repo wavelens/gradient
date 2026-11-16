@@ -1318,21 +1318,6 @@ struct Substitutable {
     unneeded: Vec<(DerivationId, String)>,
 }
 
-fn held_here(
-    outputs: &[MDerivationOutput],
-    stored_here: impl Fn(&MDerivationOutput) -> bool,
-) -> BTreeSet<DerivationId> {
-    let mut every_output_stored: BTreeMap<DerivationId, bool> = BTreeMap::new();
-    for o in outputs {
-        *every_output_stored.entry(o.derivation).or_insert(true) &= stored_here(o);
-    }
-
-    every_output_stored
-        .into_iter()
-        .filter_map(|(derivation, stored)| stored.then_some(derivation))
-        .collect()
-}
-
 enum Found<'a> {
     UpstreamHits(&'a HashMap<String, UpstreamHit>),
     HeldBeforeTheProbe,
@@ -1564,16 +1549,14 @@ async fn substitute_available(
     let needed = gradient_db::graph::needed_outputs::needed_outputs(db, &partial)
         .await
         .context("find the outputs a wanted parent needs")?;
-    let held_here = held_here(&outputs, stored_here);
     let flipped = flip_cache_available(db, substitutable(&outputs, available, &needed)).await?;
 
-    let mut present = flipped.partly.clone();
-    present.extend(flipped.all.iter().filter(|d| held_here.contains(d)));
-    present.sort_unstable();
-    present.dedup();
-    let seeded =
-        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &present, shared_builds)
-            .await?;
+    let seeded = gradient_db::graph::runtime_can_start::seed_runtime_deps(
+        txn,
+        &flipped.partly,
+        shared_builds,
+    )
+    .await?;
     if !seeded.complete.is_empty() {
         let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
         let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
