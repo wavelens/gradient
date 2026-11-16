@@ -70,13 +70,9 @@ async fn clone_commit(
     credentials: &JobCredentials,
     updater: &mut JobUpdater,
 ) -> Result<()> {
-    let ssh = credentials.ssh_git_private_key_known_hosts_and_observations();
-    let (dir, url, commit, git_credentials) = (
-        work.to_path_buf(),
-        url.to_owned(),
-        commit.to_owned(),
-        GitOperationCredentials::from(ssh.clone()),
-    );
+    let git_credentials = credentials.git_credentials_for_clone_and_fetch();
+    let ssh = git_credentials.ssh_git_private_key_and_known_hosts.clone();
+    let (dir, url, commit) = (work.to_path_buf(), url.to_owned(), commit.to_owned());
     let cloned = tokio::task::spawn_blocking(move || {
         gradient_sources::checkout_commit_into(&dir, &url, &commit, &git_credentials)
     })

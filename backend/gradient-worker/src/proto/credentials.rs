@@ -6,15 +6,19 @@
 
 //! Credentials never land on disk. They arrive as separate frames right before the job assignment that they belong to. CredentialStore can buffer them for a single connection. Each job assignment can retrieve its own set, so a completed job won't delete credentials of another job. SecretBytes can lock memory pages with mlock(2) and zero them on drop.
 
-use gradient_sources::SshGitPrivateKeyKnownHostsAndObservations;
+use gradient_sources::{
+    GitOperationCredentials, HttpsGitCredential, SshGitPrivateKeyKnownHostsAndObservations,
+};
 use gradient_types::{SecretBytes, SecretString};
 use gradient_wire::messages::{CredentialKind, GitServerSshHostKey};
 use std::collections::BTreeMap;
+use tracing::warn;
 
 #[derive(Default)]
 pub struct CredentialStore {
     ssh_key: Option<SecretBytes>,
     ssh_host_keys: Vec<GitServerSshHostKey>,
+    https_git_credentials: Vec<HttpsGitCredential>,
     job_secrets: BTreeMap<(String, String), SecretBytes>,
 }
 
@@ -30,6 +34,18 @@ impl CredentialStore {
             CredentialKind::SshHostKeys { keys } => {
                 self.ssh_host_keys = keys;
             }
+            CredentialKind::GitHttpsCredential { host, username } => {
+                match SecretString::from_utf8(data) {
+                    Some(password) => self.https_git_credentials.push(HttpsGitCredential {
+                        host,
+                        username,
+                        password,
+                    }),
+                    None => {
+                        warn!(%host, %username, "Workers discard the HTTPS Git credential. The password bytes are not valid UTF-8.")
+                    }
+                }
+            }
         }
     }
 
@@ -41,6 +57,7 @@ impl CredentialStore {
         JobCredentials {
             ssh_key: self.ssh_key.take(),
             ssh_host_keys: std::mem::take(&mut self.ssh_host_keys),
+            https_git_credentials: std::mem::take(&mut self.https_git_credentials),
             secrets: own
                 .into_iter()
                 .map(|((_, name), value)| (name, value))
@@ -53,11 +70,20 @@ impl CredentialStore {
 pub struct JobCredentials {
     ssh_key: Option<SecretBytes>,
     ssh_host_keys: Vec<GitServerSshHostKey>,
+    https_git_credentials: Vec<HttpsGitCredential>,
     secrets: BTreeMap<String, SecretBytes>,
 }
 
 impl JobCredentials {
-    pub fn ssh_git_private_key_known_hosts_and_observations(
+    pub fn git_credentials_for_clone_and_fetch(&self) -> GitOperationCredentials {
+        GitOperationCredentials {
+            ssh_git_private_key_and_known_hosts: self
+                .ssh_git_private_key_known_hosts_and_observations(),
+            https_git_credentials: self.https_git_credentials.clone(),
+        }
+    }
+
+    fn ssh_git_private_key_known_hosts_and_observations(
         &self,
     ) -> Option<SshGitPrivateKeyKnownHostsAndObservations> {
         let private_key = SecretString::from_utf8(self.ssh_key.clone()?)?;
@@ -108,6 +134,38 @@ mod tests {
         let _first = store.take_credentials_for_job("exec:1");
 
         assert!(store.take_credentials_for_job("exec:2").ssh_key.is_none());
+    }
+
+    #[test]
+    fn a_later_job_without_https_credentials_gets_none_of_the_previous_job() {
+        let mut store = CredentialStore::default();
+        store.store(
+            CredentialKind::GitHttpsCredential {
+                host: "github.com".into(),
+                username: "x-access-token".into(),
+            },
+            b"ghp-secret".to_vec().into(),
+        );
+
+        let first = store
+            .take_credentials_for_job("eval:1")
+            .git_credentials_for_clone_and_fetch();
+        let second = store
+            .take_credentials_for_job("eval:2")
+            .git_credentials_for_clone_and_fetch();
+
+        let [held] = first.https_git_credentials.as_slice() else {
+            panic!("the first job holds exactly its credential");
+        };
+        assert_eq!(
+            (
+                held.host.as_str(),
+                held.username.as_str(),
+                held.password.expose()
+            ),
+            ("github.com", "x-access-token", "ghp-secret")
+        );
+        assert!(second.https_git_credentials.is_empty());
     }
 
     #[test]

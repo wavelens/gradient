@@ -11,7 +11,8 @@ use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
     EvalCachePullOutcome, EvalShardOutcome, GitServerSshHostKey, GradientCapabilities, GrantTarget,
-    GuestChannelKind, ImportOutcome, InputOutcome, Job, UploadOutcome, WarmGuests,
+    GuestChannelKind, HttpsGitCredential, ImportOutcome, InputOutcome, Job, UploadOutcome,
+    WarmGuests,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -173,6 +174,8 @@ pub enum ServerMessage {
         ssh_key: Option<SecretString>,
         #[proto(63, default)]
         ssh_host_keys: Vec<GitServerSshHostKey>,
+        #[proto(65, default)]
+        https_git_credentials: Vec<HttpsGitCredential>,
     },
 
     InputProgress {
@@ -303,16 +306,17 @@ impl ServerMessage {
     }
 
     pub fn carries_secret(&self) -> bool {
-        matches!(
-            self,
+        match self {
             ServerMessage::Authenticate { .. }
-                | ServerMessage::Credential { .. }
-                | ServerMessage::GuestChannelData { .. }
-                | ServerMessage::FetchInput {
-                    ssh_key: Some(_),
-                    ..
-                }
-        )
+            | ServerMessage::Credential { .. }
+            | ServerMessage::GuestChannelData { .. } => true,
+            ServerMessage::FetchInput {
+                ssh_key,
+                https_git_credentials,
+                ..
+            } => ssh_key.is_some() || !https_git_credentials.is_empty(),
+            _ => false,
+        }
     }
 }
 

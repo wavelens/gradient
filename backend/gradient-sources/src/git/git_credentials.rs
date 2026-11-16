@@ -6,7 +6,7 @@
 
 use super::git_network_limits::set_libgit2_connect_and_read_timeouts_once;
 use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, register};
-use gradient_types::SecretString;
+pub use gradient_wire::types::HttpsGitCredential;
 use std::cell::RefCell;
 
 thread_local! {
@@ -27,13 +27,6 @@ impl From<Option<SshGitPrivateKeyKnownHostsAndObservations>> for GitOperationCre
             https_git_credentials: Vec::new(),
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct HttpsGitCredential {
-    pub host: String,
-    pub username: String,
-    pub password: SecretString,
 }
 
 pub(crate) fn run_blocking_libgit2_operation_with_git_credentials<T>(

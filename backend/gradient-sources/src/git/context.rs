@@ -8,7 +8,7 @@ use super::git_credentials::{GitOperationCredentials, HttpsGitCredential};
 use super::ssh::SshGitPrivateKeyKnownHostsAndObservations;
 use crate::SourceError;
 use gradient_db::DbContext;
-use gradient_db::project_git_https_credentials::one_for_project_and_host;
+use gradient_db::project_git_https_credentials::{list, one_for_project_and_host};
 use gradient_db::project_ssh_host_keys::{
     apply_project_ssh_host_key_observations, list_project_ssh_host_keys_for_git_connections,
 };
@@ -94,18 +94,48 @@ async fn load_decrypted_project_https_credentials_for_repository_url_host(
     let Some(host) = https_host_from_repository_url(url) else {
         return Ok(Vec::new());
     };
-    let Some(stored) = one_for_project_and_host(&ctx.worker_db, project.id, &host)
+    Ok(
+        load_decrypted_project_git_https_credential(ctx, project.id, &host)
+            .await?
+            .into_iter()
+            .collect(),
+    )
+}
+
+pub async fn load_decrypted_project_git_https_credential(
+    ctx: &DbContext,
+    project: ProjectId,
+    host: &str,
+) -> Result<Option<HttpsGitCredential>, SourceError> {
+    one_for_project_and_host(&ctx.worker_db, project, host)
         .await
         .map_err(database_error)?
-    else {
-        return Ok(Vec::new());
-    };
+        .map(|stored| decrypt_project_git_https_credential_row(ctx, stored))
+        .transpose()
+}
+
+pub async fn load_project_https_git_credentials(
+    ctx: &DbContext,
+    project: ProjectId,
+) -> Result<Vec<HttpsGitCredential>, SourceError> {
+    list(&ctx.worker_db, project)
+        .await
+        .map_err(database_error)?
+        .into_iter()
+        .map(|stored| decrypt_project_git_https_credential_row(ctx, stored))
+        .collect()
+}
+
+fn decrypt_project_git_https_credential_row(
+    ctx: &DbContext,
+    stored: MProjectGitHttpsCredential,
+) -> Result<HttpsGitCredential, SourceError> {
     let password = crate::secret::decrypt_secret(&ctx.config.secrets.crypt_file, &stored.password)?;
-    Ok(vec![HttpsGitCredential {
+    Ok(HttpsGitCredential {
         host: stored.host,
         username: stored.username,
         password,
-    }])
+    })
 }
 
 pub async fn save_observed_project_ssh_host_keys<C: ConnectionTrait>(

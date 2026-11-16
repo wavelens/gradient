@@ -357,12 +357,14 @@ impl Actor for SessionActor {
                 fetch_id,
                 project,
                 request,
+                needs_secrets,
             }) => {
                 st.active.insert_fetch(fetch_id.clone(), project);
                 let fetch = InputFetch {
                     fetch_id,
                     project,
                     request,
+                    needs_secrets,
                 };
                 if send_input_fetch(
                     &st.writer,

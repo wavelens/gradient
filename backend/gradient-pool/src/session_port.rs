@@ -64,6 +64,7 @@ pub enum SessionSignal {
         fetch_id: String,
         project: ProjectId,
         request: String,
+        needs_secrets: bool,
     },
     PreWarmVms {
         count: u32,

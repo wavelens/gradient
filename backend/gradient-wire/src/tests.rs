@@ -845,6 +845,7 @@ fn fetch_input_drops_ssh_host_keys_below_version_63() {
         request: "{}".into(),
         ssh_key: None,
         ssh_host_keys: vec![elektrat_host_key()],
+        https_git_credentials: Vec::new(),
     };
     assert_eq!(
         from_bytes::<ServerMessage>(to_bytes(&msg, since).unwrap(), since).unwrap(),
@@ -902,4 +903,38 @@ fn worker_local_store_bloom_filter_chunk_round_trips_at_version_65_and_is_refuse
         to_bytes(&msg, since - 1),
         Err(EncodeError::NewerThanPeer { .. })
     ));
+}
+
+#[test]
+fn https_git_credentials_round_trip_at_version_65() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{CredentialKind, HttpsGitCredential, ServerMessage};
+
+    let version = 65;
+    let credential = ServerMessage::Credential {
+        kind: CredentialKind::GitHttpsCredential {
+            host: "git.example.org:8443".into(),
+            username: "x-access-token".into(),
+        },
+        data: b"ghp-secret".as_slice().into(),
+    };
+    let fetch = ServerMessage::FetchInput {
+        fetch_id: "f1".into(),
+        project: "p".into(),
+        request: "{}".into(),
+        ssh_key: None,
+        ssh_host_keys: Vec::new(),
+        https_git_credentials: vec![HttpsGitCredential {
+            host: "git.example.org:8443".into(),
+            username: "x-access-token".into(),
+            password: "ghp-secret".into(),
+        }],
+    };
+    assert!(fetch.carries_secret());
+    for msg in [credential, fetch] {
+        assert_eq!(
+            from_bytes::<ServerMessage>(to_bytes(&msg, version).unwrap(), version).unwrap(),
+            msg
+        );
+    }
 }

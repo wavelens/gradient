@@ -56,8 +56,22 @@ impl Scheduler {
                 return Ok(());
             }
         };
+        let needs_secrets = match self
+            .input_fetch_needs_secrets_capable_worker(job.project_id, &parsed)
+            .await
+        {
+            Ok(needs_secrets) => needs_secrets,
+            Err(e) => {
+                let message = format!(
+                    "Server failed to query the HTTPS Git credentials of the project for the input host: {e}"
+                );
+                self.answer_inputs(vec![waiter], InputOutcome::Failed { message })
+                    .await;
+                return Ok(());
+            }
+        };
 
-        let fetch_key = if parsed.needs_secrets && !parsed.store_path_pins_content {
+        let fetch_key = if needs_secrets && !parsed.store_path_pins_content {
             format!("{}/{}", job.project_id, parsed.fetch_key)
         } else {
             parsed.fetch_key
@@ -66,11 +80,31 @@ impl Scheduler {
             fetch_key,
             request,
             project: job.project_id,
-            needs_secrets: parsed.needs_secrets,
+            needs_secrets,
             waiter,
         });
         self.dispatch_input_fetches().await;
         Ok(())
+    }
+
+    async fn input_fetch_needs_secrets_capable_worker(
+        &self,
+        project: ProjectId,
+        request: &InputRequest,
+    ) -> Result<bool, sea_orm::DbErr> {
+        if request.needs_secrets {
+            return Ok(true);
+        }
+        let Some(host) = request.https_git_host.as_deref() else {
+            return Ok(false);
+        };
+        let stored = gradient_db::project_git_https_credentials::one_for_project_and_host(
+            &self.db.worker_db,
+            project,
+            host,
+        )
+        .await?;
+        Ok(stored.is_some())
     }
 
     pub async fn handle_input_fetched(
@@ -207,6 +241,7 @@ impl Scheduler {
                 fetch_id: fetch_id.clone(),
                 project: fetch.project,
                 request: fetch.request.clone(),
+                needs_secrets: fetch.needs_secrets,
             };
             let claimed = self
                 .call(|reply| SchedulerMsg::ClaimInputFetch {

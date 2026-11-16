@@ -734,6 +734,18 @@ pub enum CredentialKind {
     SshHostKeys {
         keys: Vec<GitServerSshHostKey>,
     },
+    #[proto(65)]
+    GitHttpsCredential {
+        host: String,
+        username: String,
+    },
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub struct HttpsGitCredential {
+    pub host: String,
+    pub username: String,
+    pub password: gradient_secret::SecretString,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]

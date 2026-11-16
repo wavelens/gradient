@@ -43,8 +43,7 @@ pub async fn fetch_repository(
     store: &dyn WorkerStore,
     abort: AbortSignal,
 ) -> Result<FetchOutcome> {
-    let ssh = credentials.ssh_git_private_key_known_hosts_and_observations();
-    let git_credentials = GitOperationCredentials::from(ssh.clone());
+    let git_credentials = credentials.git_credentials_for_clone_and_fetch();
     let fetched = clone_job_repository_and_update_inputs_with_git_credentials(
         job,
         updater,
@@ -53,7 +52,7 @@ pub async fn fetch_repository(
         abort,
     )
     .await;
-    if let Some(ssh) = &ssh {
+    if let Some(ssh) = &git_credentials.ssh_git_private_key_and_known_hosts {
         send_ssh_host_key_observations_or_log_warning(updater, ssh).await;
     }
     fetched
