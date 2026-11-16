@@ -4,6 +4,7 @@
 
 seed = 20261115
 rate-limit = "5/s"
+request-timeout = 60
 workers = 1
 
 [generation]
