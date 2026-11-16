@@ -70,6 +70,8 @@ tokio         = { workspace = true, features = ["process", "signal", "macros"] }
 tokio-util    = { workspace = true, features = ["io"] }
 tonic         = { workspace = true }
 tracing       = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
 url           = { workspace = true }
 utoipa        = { workspace = true, features = ["axum_extras"] }
 utoipa-axum   = { workspace = true }
@@ -102,5 +104,5 @@ tokio-test   = { workspace = true }
 tonic        = { workspace = true, features = ["transport"] }
 tokio-tungstenite = { workspace = true }
 tower        = { workspace = true }
-tracing-subscriber = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 zstd         = { workspace = true }

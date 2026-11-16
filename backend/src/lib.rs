@@ -6,8 +6,11 @@
 
 use gradient_core::{ServerExtensions, init_state};
 use gradient_types::Cli;
-use gradient_types::cli::{EffectiveConfigOption, LogArgs};
+use gradient_types::cli::{EffectiveConfigOption, LogArgs, MetricsArgs};
 use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS, TraceSetup};
+use gradient_web::otlp::{
+    OtlpTracerProviderShutdownOnDrop, build_otlp_http_span_export_layer_and_guard,
+};
 use std::sync::Arc;
 use tracing::info;
 
@@ -23,19 +26,35 @@ fn log_overrides(log: &LogArgs) -> [(&'static str, Option<&str>); 7] {
     ]
 }
 
-fn init_logging(log: &LogArgs) {
+fn init_logging(
+    log: &LogArgs,
+    metrics: &MetricsArgs,
+) -> std::io::Result<Option<OtlpTracerProviderShutdownOnDrop>> {
     let overrides = log_overrides(log);
-    gradient_util::logging::init(&LogSetup {
-        level: &log.level_default,
-        overrides: &overrides,
-        quiet: NOISY_DEPS,
-        honor_rust_log: true,
-        writer: LogWriter::Stdout,
-        trace: log.trace_dir.as_deref().map(|dir| TraceSetup {
-            dir,
-            process: "server",
-        }),
-    });
+    let (otlp_span_export_layer, otlp_tracer_provider_shutdown_guard) =
+        build_otlp_http_span_export_layer_and_guard(metrics)
+            .map_err(|e| {
+                std::io::Error::other(format!("failed to build the span exporter for OTLP: {e}"))
+            })?
+            .unzip();
+    gradient_util::logging::init(
+        &LogSetup {
+            level: &log.level_default,
+            overrides: &overrides,
+            quiet: NOISY_DEPS,
+            honor_rust_log: true,
+            writer: LogWriter::Stdout,
+            trace: log.trace_dir.as_deref().map(|dir| TraceSetup {
+                dir,
+                process: "server",
+            }),
+        },
+        otlp_span_export_layer,
+    );
+    if otlp_tracer_provider_shutdown_guard.is_some() {
+        info!("OTLP span export enabled");
+    }
+    Ok(otlp_tracer_provider_shutdown_guard)
 }
 
 pub async fn run(
@@ -43,7 +62,7 @@ pub async fn run(
     effective_options: Vec<EffectiveConfigOption>,
     extensions: ServerExtensions,
 ) -> std::io::Result<()> {
-    init_logging(&cli.log);
+    let otlp_tracer_provider_shutdown_guard = init_logging(&cli.log, &cli.metrics)?;
 
     if cli.state.validate {
         return validate_state_and_exit(cli.state.file.as_deref());
@@ -62,6 +81,7 @@ pub async fn run(
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "server bootstrap failed");
+            drop(otlp_tracer_provider_shutdown_guard);
             std::process::exit(1);
         }
     };

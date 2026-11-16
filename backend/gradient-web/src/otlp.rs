@@ -12,10 +12,68 @@ use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
 use gradient_storage::admission::UploadAdmission;
+use gradient_types::cli::MetricsArgs;
+use gradient_util::logging::AdditionalTracingLayer;
 use gradient_util::supervision::{ChildSpec, Pass, PassError};
 use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
-use tracing::info;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, SpanExporter};
+use tracing::{info, warn};
+use tracing_subscriber::Layer;
+
+pub struct OtlpTracerProviderShutdownOnDrop(SdkTracerProvider);
+
+impl Drop for OtlpTracerProviderShutdownOnDrop {
+    fn drop(&mut self) {
+        if let Err(error) = self.0.shutdown() {
+            warn!(%error, "Failed to flush final OTLP spans at exit");
+        }
+    }
+}
+
+pub fn build_otlp_http_span_export_layer_and_guard(
+    metrics: &MetricsArgs,
+) -> Result<
+    Option<(AdditionalTracingLayer, OtlpTracerProviderShutdownOnDrop)>,
+    opentelemetry_otlp::ExporterBuildError,
+> {
+    let Some(endpoint) = metrics.otlp_traces_endpoint.clone() else {
+        return Ok(None);
+    };
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_http()
+        .with_endpoint(endpoint)
+        .build()?;
+    Ok(Some(build_span_export_layer_and_guard(
+        exporter,
+        metrics.otlp_service_name.clone(),
+        metrics.otlp_traces_sample_ratio,
+    )))
+}
+
+fn build_span_export_layer_and_guard(
+    exporter: impl SpanExporter + 'static,
+    service_name: String,
+    sample_ratio: f64,
+) -> (AdditionalTracingLayer, OtlpTracerProviderShutdownOnDrop) {
+    let provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_sampler(Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(
+            sample_ratio,
+        ))))
+        .with_resource(
+            opentelemetry_sdk::Resource::builder()
+                .with_service_name(service_name)
+                .build(),
+        )
+        .build();
+    let layer = tracing_opentelemetry::layer()
+        .with_tracer(provider.tracer("gradient"))
+        .with_filter(gradient_util::trace_file::filter())
+        .boxed();
+    (layer, OtlpTracerProviderShutdownOnDrop(provider))
+}
 
 #[derive(Default, Clone, Copy)]
 struct Snapshot {
@@ -124,4 +182,97 @@ pub fn build_otlp_exporter_child_spec(
         snapshot: snap,
         period: interval,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::Key;
+    use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SpanData};
+    use tracing_subscriber::Registry;
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    #[derive(Debug, Clone, Default)]
+    struct ResourceRecordingInMemorySpanExporter {
+        spans: InMemorySpanExporter,
+        resource: Arc<Mutex<Option<Resource>>>,
+    }
+
+    impl SpanExporter for ResourceRecordingInMemorySpanExporter {
+        async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+            self.spans.export(batch).await
+        }
+
+        fn set_resource(&mut self, resource: &Resource) {
+            *self.resource.lock().unwrap() = Some(resource.clone());
+        }
+    }
+
+    fn record_spans_with_sample_ratio_and_return_exporter(
+        sample_ratio: f64,
+        emit_spans: impl FnOnce(),
+    ) -> ResourceRecordingInMemorySpanExporter {
+        let exporter = ResourceRecordingInMemorySpanExporter::default();
+        let (layer, guard) = build_span_export_layer_and_guard(
+            exporter.clone(),
+            "gradient-test".to_owned(),
+            sample_ratio,
+        );
+        tracing::subscriber::with_default(Registry::default().with(layer), emit_spans);
+        drop(guard);
+        exporter
+    }
+
+    fn span_names_received_by_recording_exporter(
+        exporter: &ResourceRecordingInMemorySpanExporter,
+    ) -> Vec<String> {
+        exporter
+            .spans
+            .get_finished_spans()
+            .unwrap()
+            .into_iter()
+            .map(|span| span.name.into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn debug_span_with_gradient_target_is_exported_with_configured_service_name() {
+        let exporter = record_spans_with_sample_ratio_and_return_exporter(1.0, || {
+            tracing::debug_span!(target: "gradient_graph::writer", "transact_once").in_scope(|| {});
+        });
+
+        assert_eq!(
+            span_names_received_by_recording_exporter(&exporter),
+            ["transact_once"]
+        );
+        let resource = exporter.resource.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            resource.get(&Key::new("service.name")),
+            Some("gradient-test".into())
+        );
+    }
+
+    #[test]
+    fn hyper_span_is_not_exported_but_gradient_span_is() {
+        let exporter = record_spans_with_sample_ratio_and_return_exporter(1.0, || {
+            tracing::debug_span!(target: "hyper::proto", "parse_headers").in_scope(|| {});
+            tracing::debug_span!(target: "gradient_web::otlp", "handle_request").in_scope(|| {});
+        });
+
+        assert_eq!(
+            span_names_received_by_recording_exporter(&exporter),
+            ["handle_request"]
+        );
+    }
+
+    #[test]
+    fn no_spans_exported_when_trace_sample_ratio_is_zero() {
+        let exporter = record_spans_with_sample_ratio_and_return_exporter(0.0, || {
+            tracing::debug_span!(target: "gradient_graph::writer", "transact_once").in_scope(|| {});
+        });
+
+        assert!(span_names_received_by_recording_exporter(&exporter).is_empty());
+    }
 }
