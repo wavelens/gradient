@@ -18,7 +18,9 @@ import {
   SubscribableCache,
   ProjectResponse,
   MakeProjectRequest,
+  GitHttpsCredentialResponse,
   GitSshHostKeyResponse,
+  SaveGitHttpsCredentialRequestBody,
   SaveHostKeyRequestBody,
   ScannedHostKey,
   PatchProjectRequest,
@@ -141,6 +143,18 @@ export class ProjectsService {
 
   deleteSavedHostKey(project: string, id: string): Observable<boolean> {
     return this.api.delete<boolean>(`projects/${project}/ssh/host-keys/${id}`);
+  }
+
+  listSavedHTTPSGitCredentials(project: string): Observable<GitHttpsCredentialResponse[]> {
+    return this.api.get<GitHttpsCredentialResponse[]>(`projects/${project}/git/https-credentials`);
+  }
+
+  saveHttpsGitCredential(project: string, body: SaveGitHttpsCredentialRequestBody): Observable<GitHttpsCredentialResponse> {
+    return this.api.put<GitHttpsCredentialResponse>(`projects/${project}/git/https-credentials`, body);
+  }
+
+  deleteSavedHttpsGitCredential(project: string, id: string): Observable<boolean> {
+    return this.api.delete<boolean>(`projects/${project}/git/https-credentials/${id}`);
   }
 
   checkProjectNameAvailable(name: string): Observable<boolean> {

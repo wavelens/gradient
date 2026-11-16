@@ -33,6 +33,7 @@ Open **Settings** from the project page.
 |---|---|---|
 | General | Name, display name, description, visibility | Edit. **Hide Build Requests task** removes the task holding `gradient build` evaluations from task lists. The evaluations themselves continue to run |
 | SSH Key | Public key used for cloning the project's repositories | Copy and add it as a deploy key on the Git host |
+| HTTPS Credentials for Git | Host, username and last modified timestamp of each credential for Git fetch over HTTPS. The system does not display the password. | **Add Credential** and **Replace** take a host, a user name and either a password or an access token. **Delete** asks for confirmation first. Changes require the `manageSshKey` permission. Projects from a [Nix declaration](../reference/state.md) show a read-only list. |
 | Danger Zone | | **Regenerate Key** invalidates the old key immediately. **Delete Project** removes the project |
 
 The project settings pages share a side navigation. Navigation items include General, Members, Workers, Cache Subscriptions, Git host connections, Secrets and Event notifications. Only pages that a user can open appear in that list.

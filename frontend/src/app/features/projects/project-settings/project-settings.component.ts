@@ -18,6 +18,7 @@ import {
   ButtonComponent,
   CheckboxComponent,
   CopyFieldComponent,
+  DialogComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
@@ -31,11 +32,11 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { AccessService, ManagedDisableDirective, SettingsAccessStateBadgeComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
+import { AccessService, ManagedDisableDirective, ServerConfigurationManagedLockButtonComponent, SettingsAccessStateBadgeComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
-import { GitSshHostKeyResponse, PatchProjectRequest, ProjectResponse, accessTo } from '@core/models';
+import { GitHttpsCredentialResponse, GitSshHostKeyResponse, PatchProjectRequest, ProjectResponse, accessTo } from '@core/models';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
 import { ProjectSettingsNavigationComponent } from '../project-settings-navigation/project-settings-navigation.component';
@@ -63,8 +64,9 @@ interface ProjectForm {
     InputDirective,
     CopyFieldComponent,
     CheckboxComponent,
+    DialogComponent,
     LoadStateComponent,
-    ManagedDisableDirective, SettingsAccessStateBadgeComponent, ProjectSettingsNavigationComponent,
+    ManagedDisableDirective, ServerConfigurationManagedLockButtonComponent, SettingsAccessStateBadgeComponent, ProjectSettingsNavigationComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,
@@ -109,10 +111,28 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   sshHostKeysLoading = signal(true);
   gitSshHostKeysLoadError = signal<unknown>(null);
   hostKeyIdBeingScanned = signal<string | null>(null);
+  httpsGitCredentialsLoading = signal(true);
+  httpsGitCredentialsLoadError = signal<unknown>(null);
 
   project = signal<ProjectResponse | null>(null);
   sshKey = signal<string>('');
   sshHostKeys = signal<GitSshHostKeyResponse[]>([]);
+  httpsGitCredentials = signal<GitHttpsCredentialResponse[]>([]);
+
+  isHttpsGitCredentialDialogOpen = signal(false);
+  replacing = signal(false);
+  httpsCredentialDialogHost = signal('');
+  httpsCredentialDialogUsername = signal('');
+  httpsCredentialPasswordInput = signal('');
+  isSavingHttpsCredential = signal(false);
+  httpsCredentialSaveError = signal<string | null>(null);
+  canSubmitHttpsCredentialDialog = computed(
+    () =>
+      !this.isSavingHttpsCredential() &&
+      [this.httpsCredentialDialogHost(), this.httpsCredentialDialogUsername(), this.httpsCredentialPasswordInput()].every(
+        (field) => field.trim() !== '',
+      ),
+  );
 
   saveError = signal<string | null>(null);
 
@@ -146,6 +166,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     this.loadProject();
     this.loadSSHKey();
     this.loadSSHHostKeys();
+    this.loadHTTPSGitCredentials();
   }
 
   loadProject(): void {
@@ -199,6 +220,21 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       error: (error) => {
         this.gitSshHostKeysLoadError.set(error);
         this.sshHostKeysLoading.set(false);
+      },
+    });
+  }
+
+  loadHTTPSGitCredentials(): void {
+    this.httpsGitCredentialsLoading.set(true);
+    this.httpsGitCredentialsLoadError.set(null);
+    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.listSavedHTTPSGitCredentials(this.projectName)).subscribe({
+      next: (credentials) => {
+        this.httpsGitCredentials.set(credentials);
+        this.httpsGitCredentialsLoading.set(false);
+      },
+      error: (error) => {
+        this.httpsGitCredentialsLoadError.set(error);
+        this.httpsGitCredentialsLoading.set(false);
       },
     });
   }
@@ -327,6 +363,65 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
         this.notify.success('Host key deleted');
         this.loadSSHHostKeys();
       });
+  }
+
+  openHttpsCredentialDialogForNewHost(): void {
+    this.fillHttpsCredentialDialogAndOpen('', '', false);
+  }
+
+  openHttpsCredentialDialogForExistingCredential(credential: GitHttpsCredentialResponse): void {
+    this.fillHttpsCredentialDialogAndOpen(credential.host, credential.username, true);
+  }
+
+  saveHttpsCredentialThenCloseAndReloadList(): void {
+    if (!this.canSubmitHttpsCredentialDialog()) return;
+    this.isSavingHttpsCredential.set(true);
+    this.httpsCredentialSaveError.set(null);
+    this.projectsService
+      .saveHttpsGitCredential(this.projectName, {
+        host: this.httpsCredentialDialogHost().trim(),
+        username: this.httpsCredentialDialogUsername().trim(),
+        password: this.httpsCredentialPasswordInput(),
+      })
+      .pipe(finalize(() => this.isSavingHttpsCredential.set(false)))
+      .subscribe({
+        next: () => {
+          this.closeHttpsCredentialDialogAndClearPassword();
+          this.notify.success('HTTPS credential saved');
+          this.loadHTTPSGitCredentials();
+        },
+        error: (error: unknown) => this.httpsCredentialSaveError.set(apiErrorMessage(error, 'Failed to save the HTTPS credential.')),
+      });
+  }
+
+  closeHttpsCredentialDialogAndClearPassword(): void {
+    this.isHttpsGitCredentialDialogOpen.set(false);
+    this.httpsCredentialPasswordInput.set('');
+  }
+
+  confirmAndDeleteHttpsGitCredential(credential: GitHttpsCredentialResponse): void {
+    this.confirm
+      .confirm({
+        title: 'Delete HTTPS credential',
+        target: credential.host,
+        consequence: 'Fetches of repositories from this host by Gradient now use HTTPS without credentials. Private repository fetches fail.',
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete HTTPS credentials.',
+        action: () => this.projectsService.deleteSavedHttpsGitCredential(this.projectName, credential.id),
+      })
+      .subscribe(() => {
+        this.notify.success('HTTPS credential deleted');
+        this.loadHTTPSGitCredentials();
+      });
+  }
+
+  private fillHttpsCredentialDialogAndOpen(host: string, username: string, replacing: boolean): void {
+    this.httpsCredentialDialogHost.set(host);
+    this.httpsCredentialDialogUsername.set(username);
+    this.httpsCredentialPasswordInput.set('');
+    this.replacing.set(replacing);
+    this.httpsCredentialSaveError.set(null);
+    this.isHttpsGitCredentialDialogOpen.set(true);
   }
 
   private showSSHKey(key: string): void {

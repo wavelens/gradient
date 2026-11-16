@@ -15,12 +15,18 @@ import { ProjectsService } from '@core/services/projects.service';
 import { EVERY_PERMISSION, projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState } from '@core/models/access.model';
 import type { Permission } from '@core/models';
-import { GitSshHostKeyResponse, ProjectResponse } from '@core/models';
+import { GitHttpsCredentialResponse, GitSshHostKeyResponse, ProjectResponse } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 
 const notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
+const githubCredential: GitHttpsCredentialResponse = {
+  id: 'c1',
+  host: 'github.com',
+  username: 'x-access-token',
+  updated_at: '2026-01-01T00:00:00',
+};
 
 function projectFor(access: AccessState): ProjectResponse {
   return {
@@ -64,6 +70,7 @@ function setup(access: AccessState, permissions?: Permission[], fields: Partial<
           getProject: () => of(projectFor(access)),
           getSSHKey: () => of('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEd25519 acme'),
           listSSHHostKeys: () => of([]),
+          listSavedHTTPSGitCredentials: () => of([githubCredential]),
         },
       },
       { provide: NotifyService, useValue: notify },
@@ -371,5 +378,74 @@ describe('ProjectSettingsComponent - confirmed actions', () => {
     fixture.componentInstance.scanHostConfirmFingerprintAndSave(changedKey);
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ consequence: expect.stringContaining('SHA256:new') }));
     expect(saveHostKey).toHaveBeenCalledWith('acme', { host: 'git.example.com', port: 22, public_key: 'ssh-ed25519 AAAB' });
+  });
+});
+
+describe('ProjectSettingsComponent - HTTPS credentials for Git', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  function credentialRow(fixture: ComponentFixture<ProjectSettingsComponent>): HTMLElement {
+    const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row')) as HTMLElement[];
+    return rows.find((row) => row.textContent?.includes('github.com'))!;
+  }
+
+  function dialogField(id: string): HTMLInputElement {
+    return document.body.querySelector(`.gr-dialog #${id}`) as HTMLInputElement;
+  }
+
+  it('never fills the password from the API and sends only the typed one on replace', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    const saveHttpsGitCredential = vi.fn(() => of(githubCredential));
+    Object.assign(TestBed.inject(ProjectsService), {
+      listSavedHTTPSGitCredentials: () => of([{ ...githubCredential, password: 'ghp-leaked-token' }]),
+      saveHttpsGitCredential,
+    });
+    fixture.componentInstance.loadHTTPSGitCredentials();
+    await settled(fixture);
+    findByText(credentialRow(fixture), 'replace')!.click();
+    await settled(fixture);
+
+    expect(dialogField('https-credential-host').value).toBe('github.com');
+    expect(dialogField('https-credential-host').disabled).toBe(true);
+    expect(dialogField('https-credential-username').value).toBe('x-access-token');
+    expect(dialogField('https-credential-password').value).toBe('');
+    expect(document.body.textContent).not.toContain('ghp-leaked-token');
+
+    const password = dialogField('https-credential-password');
+    password.value = 'ghp-new-token';
+    password.dispatchEvent(new Event('input'));
+    await settled(fixture);
+    findByText(document.body.querySelector('.gr-dialog')!, 'save')!.click();
+    expect(saveHttpsGitCredential).toHaveBeenCalledWith('acme', { host: 'github.com', username: 'x-access-token', password: 'ghp-new-token' });
+    expect(fixture.componentInstance.httpsCredentialPasswordInput()).toBe('');
+  });
+
+  it('shows host and username but no edit controls to a member without the SSH key permission', async () => {
+    const fixture = setup(admin, ['viewProject', 'manageProjectSettings']);
+    await settled(fixture);
+    const row = credentialRow(fixture);
+    expect(row.textContent).toContain('x-access-token');
+    expect(row.querySelector('[grButton]')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'add credential')).toBeNull();
+  });
+
+  it('shows the credentials of a managed project read-only with the managed hint', async () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const row = credentialRow(fixture);
+    expect(row.querySelector('app-server-configuration-managed-lock-button')).not.toBeNull();
+    expect(row.querySelector('[grButton]')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'add credential')).toBeNull();
+  });
+
+  it('asks before deleting a credential, naming its host', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    const deleteSavedHttpsGitCredential = vi.fn(() => of(true));
+    Object.assign(TestBed.inject(ProjectsService), { deleteSavedHttpsGitCredential });
+    findByText(credentialRow(fixture), 'delete')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete HTTPS credential', target: 'github.com' }));
+    expect(deleteSavedHttpsGitCredential).toHaveBeenCalledWith('acme', 'c1');
   });
 });

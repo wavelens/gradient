@@ -67,7 +67,7 @@ Roles map to individual permissions. Each permission covers one area of the proj
 | `manageMembers`, `manageRoles` | Inviting members, editing custom roles |
 | `manageIntegrations`, `manageWebhooks` | Git host connections and webhooks for the project. Connection selections on a task need only `editTask`. |
 | `manageWorkers`, `manageSubscriptions` | Workers and cache subscriptions |
-| `manageSshKey` | Regenerate the SSH key |
+| `manageSshKey` | Regenerate SSH keys, manage keys for Git hosts, and manage credentials for HTTPS Git |
 | `createTask`, `editTask` | Creating and editing tasks |
 | `manageTriggers`, `manageActions` | Triggers and actions on tasks |
 | `triggerEvaluation` | Starting and aborting evaluations |
