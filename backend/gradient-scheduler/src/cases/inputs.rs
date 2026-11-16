@@ -23,6 +23,7 @@ const W4: &str = "w4";
 const SSH_REQUEST: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.invalid/input.git","rev":"abc"},"storePath":"/nix/store/aaaa-input"}"#;
 const SSH_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.invalid/input.git","ref":"main"}}"#;
 const HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+https://example.invalid/input.git","ref":"main"}}"#;
+const HTTPS_GIT_FETCH_TREE_REQUEST_WITH_STORE_PATH: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+https://example.invalid/input.git","rev":"abc"},"storePath":"/nix/store/aaaa-input"}"#;
 const FETCHED: &str = r#"{"storePath":"/nix/store/aaaa-input"}"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,7 +141,8 @@ async fn https_git_input_with_stored_https_credential_is_assigned_only_to_secret
 #[tokio::test]
 async fn i02_two_evaluations_share_one_fetch() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
+    let case =
+        SchedulerCase::start(shape().evalq(e1).evalq(e2).same_task_as(e1).branch("other")).await;
     evaluating(&case, W1, e1).await;
     evaluating(&case, W2, e2).await;
     case.connect(W3, w_fetch(), &[]).await;
@@ -209,9 +211,58 @@ async fn two_projects_fetching_one_unpinned_ssh_input_get_separate_fetches() {
 }
 
 #[tokio::test]
-async fn i03_a_failed_fetch_answers_every_waiter() {
+async fn two_projects_fetching_one_pinned_https_git_input_with_stored_credential_in_one_project_get_separate_fetches()
+ {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
+    let (credentialed, public) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
+    gradient_db::project_git_https_credentials::upsert(
+        &case.db.connection(),
+        credentialed,
+        "example.invalid",
+        "x-access-token",
+        "encrypted".into(),
+        None,
+    )
+    .await
+    .unwrap();
+    evaluating(&case, W1, e1).await;
+    evaluating(&case, W2, e2).await;
+    case.connect(W3, w_fetch(), &[]).await;
+    case.connect(W4, w_fetch(), &[]).await;
+
+    case.input_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        HTTPS_GIT_FETCH_TREE_REQUEST_WITH_STORE_PATH,
+    )
+    .await;
+    case.input_request(
+        W2,
+        &eval_key(e2),
+        "r2",
+        HTTPS_GIT_FETCH_TREE_REQUEST_WITH_STORE_PATH,
+    )
+    .await;
+    let mut fetches = fetches_of(&case, &[W1, W2, W3, W4])
+        .into_iter()
+        .map(|fetch| (fetch.project, fetch.needs_secrets))
+        .collect::<Vec<_>>();
+    let mut expected = vec![(credentialed, true), (public, false)];
+    fetches.sort();
+    expected.sort();
+    assert_eq!(fetches, expected, "after 1: one FetchInput per project");
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn i03_a_failed_fetch_answers_every_waiter() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case =
+        SchedulerCase::start(shape().evalq(e1).evalq(e2).same_task_as(e1).branch("other")).await;
     evaluating(&case, W1, e1).await;
     evaluating(&case, W2, e2).await;
     case.connect(W3, w_fetch(), &[]).await;
@@ -395,7 +446,8 @@ async fn i07_an_input_request_from_a_build_job_is_dropped() {
 #[tokio::test]
 async fn i08_fetch_progress_reaches_every_waiting_evaluation() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let case = SchedulerCase::start(shape().evalq(e1).evalq(e2)).await;
+    let case =
+        SchedulerCase::start(shape().evalq(e1).evalq(e2).same_task_as(e1).branch("other")).await;
     evaluating(&case, W1, e1).await;
     evaluating(&case, W2, e2).await;
     case.connect(W3, w_fetch(), &[]).await;
