@@ -58,11 +58,11 @@ The `claim_cluster` function in `backend/gradient-db/src/scheduling/cluster/clai
 |---|---|---|
 | Can start | Cluster book, under its own key | The eval and build assignment passes fetch each batch's memberships with one query (`cluster_membership`). Members of a `Queued` cluster enter the book. Members of any other cluster wait for that cluster. Non-members queue as before. |
 | Waiting | Cluster book | A cluster can start only after every member arrived. A member key in the book count as tracked. A member that can no longer run (resync removal, evaluation cancel) hold its cluster back until the feed bring the member back. |
-| Offered | Job offers | Workers score members under their own key. Single assignment (`take_best_of_kind`) never see them. |
 | Running | Active jobs, marked with its attempt | A reject, a revoked peer or a disconnect can never requeue a member as a single job. |
 
 - Member evaluations always run in one job, never as a split fetch-only job. A split job can place its follow-up outside the cluster. Companions of a [split evaluation](#split-evaluations) evaluate from the source the primary fetched.
 - An empty answer to `RequestJob` record an idle slot `(worker, kind)` for the worker. An assignment, a full worker or a disconnect clear the slot. The planner can ignore entries older than 25 s (two worker heartbeats). Idle slots give the planner the only view of free capacity.
+- The placement pass can score members against the [store summary](../proto/capabilities-and-dispatch.md#store-summary) of each connected worker. The function for single-job assignment (`take_best_of_kind`) cannot select a member.
 
 ## Placement
 
@@ -71,7 +71,7 @@ The `cluster-dispatch` pass can run every 5 s. It can also run whenever `Request
 - A worker can seat a member when three conditions hold. It must have an idle slot of the member's kind, match the member's `pin`, and be able to run the job (capabilities, project access).
 - Bipartite matching: each member sits on its own worker, one worker per member.
 - Under `same_zone`, all members sit in one zone. Workers without a zone form a zone of their own.
-- Among zones able to seat every member, pick the one with the lowest summed missing NAR size.
+- Use [store summaries](../proto/capabilities-and-dispatch.md#store-summary) to choose the zone where the sum of missing NAR sizes is smallest. Consider only zones that can hold all members.
 - Once the pass seats a worker for one cluster, it cannot offer that worker to the next cluster.
 - A cluster that cannot fill all seats must wait. Single assignment follow separate rules and remain unchanged.
 

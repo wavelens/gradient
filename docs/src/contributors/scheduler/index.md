@@ -41,7 +41,7 @@ flowchart LR
 
 -   :material-timer-sand: **[Waiting and Recovery](waiting-and-recovery.md)**
 
-    Split flake jobs, parked evaluations, re-offered jobs and startup recovery.
+    Splitting flake jobs, parked evaluations, returned jobs, recovery at startup.
 
 -   :material-scale-balance: **[Scoring](scoring.md)**
 

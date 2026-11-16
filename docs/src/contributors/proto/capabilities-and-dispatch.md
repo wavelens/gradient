@@ -5,17 +5,17 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Capabilities and Assignment
 
-Worker capabilities, job offers and the server's job choice for each free slot. Assignment is pull-based. The server will only assign a job in answer to `RequestJob`.
+Worker capabilities, the store summary of each worker, and job selection for each free slot form the topic of this section. Assignment is pull-based. The server can assign a job only in response to `RequestJob`.
 
 ```mermaid
 sequenceDiagram
     participant W as Worker
     participant S as Server
     W->>S: WorkerCapabilities
-    W->>S: RequestJobList
-    S->>W: JobListChunk ... (is_final)
-    W->>S: RequestJobChunk { scores }
+    W->>S: WorkerLocalStoreBloomFilterChunk ... (is_final)
     W->>S: RequestJob { kind }
+    Note over S: No jobs fit, request open for 25 seconds
+    Note over S: New job entered the queue
     S->>W: AssignJob { job_id, assignment_id, job }
     W->>S: AssignJobResponse { accepted }
 ```
@@ -38,7 +38,7 @@ After the handshake, workers with the `build` capability send a `WorkerCapabilit
 - List every system and feature the worker must accept in an override.
 - A build can match a worker when the worker's `architectures` contain the build's system and its `system_features` contain every required feature.
 - Every `builtin` build will bypass the system check.
-- A later `WorkerCapabilities` message will replace the fields and start job assignment again. Running jobs and existing offers remain in place.
+- A later `WorkerCapabilities` message can replace the fields. Job assignment can resume. Jobs in progress stay as they are.
 
 ## Metrics and Liveness
 
@@ -50,26 +50,34 @@ After the handshake, workers with the `build` capability send a `WorkerCapabilit
 - Workers send `Draining` with `SIGTERM` and abort all running jobs. See [Worker Stop](jobs.md#worker-stop).
 - Drains of one worker by admins make the server send `Draining`. Cancellations of that drain by admins make the server send `DrainCancelled` (protocol 60). Workers then request jobs again.
 
-## Offers
+## Store Summary
 
-| Message | When |
+A worker can publish a store summary. This summary is a Bloom filter over store paths in the local Nix store. The server can score the inputs and outputs of each job against this summary. See [Scoring](../scheduler/scoring.md#contexts).
+
+| Property | Value |
 |---|---|
-| `JobListChunk` | The server replies to `RequestJobList` with the full candidate list, split into pages of 1 000. The final page has `is_final` set. |
-| `JobOffer` | The server offers the worker jobs it has not received before, up to 1 000 per message. This also covers requeued jobs that the server offers again. |
+| Message | `WorkerLocalStoreBloomFilterChunk`, split into chunks of at most 1 MiB. The last chunk has `is_final` set. |
+| Sent | The worker can rebuild the summary every hour and send the summary again. The first rebuild can come right after the handshake, before the first `RequestJob`. |
+| Size | 20 bits per store path, a size for at least 1,024 paths. |
+| Probes | The 14 bit positions per path come from enhanced double hashing over the first 16 bytes of the hash of the store path. |
+| Server limit | 16 million paths (320 million bits). Workers with a larger store don't send a summary. |
 
-- Candidates represent evaluations or build jobs that the worker can run and has authorization for.
-- Every `JobCandidate` message includes `required_paths` (with NAR sizes for cached paths), `drv_paths` and `output_paths`.
-- Build candidates and their `BuildJob` messages include a `requirement` with the Nix system and the required system features. Evaluations omit this field.
-- Workers do not cache candidates.
-- Workers compare each offered candidate against the local store and score it.
-- The worker then replies with a `RequestJobChunk` message. Set `missing_count`, `missing_nar_size` and `outputs_present` in that reply.
+- The latest complete summary is in server memory. Chunks with a wrong offset or a changed size discard only the chunks received so far.
+- All inputs count as missing on that worker without a summary.
+- Bloom filter false positives can count inputs or outputs as present on a worker without them.
+- The summary can lag behind the store by up to one hour. Garbage collection can remove a path. The summary can still list the path as present until the next rebuild. Stale entries make a job look cheaper on that worker. The build can still fetch or build missing paths.
+- False positives or stale summaries can mark all outputs of a build as present on a worker. That mark can remove the time and RAM estimates for the build. The scheduler can then ignore the estimates and reserve 0 MB of RAM for that job.
 
 ## Assignment
 
 - A worker sends `RequestJob { kind }` for each free slot.
-- While slots remain open, the worker repeats the request after every `AssignJob`, and every 10 s while idle.
-- The server records an unanswered request as an idle slot for [cluster placement](../scheduler/clusters.md#tracking), not as a queued request.
-- On each `RequestJob` message, the server scores every pending job of that kind for that worker.
+- While slots remain open, the worker repeats the request after every `AssignJob` and every 10 s while idle.
+- Unanswered requests leave an idle slot valid for 25 seconds. That slot can act as a standing request. [Cluster placement](../scheduler/clusters.md#tracking) can read the same slot.
+- New work arrivals cause the scheduler to send `SessionSignal::JobsAvailableForRequestedKinds` to each worker session with free capacity for that kind and a live idle slot. Signals stay inside the server. No new messages travel over the transport.
+- The session can request a job from `Scheduler::fulfill_job_request_for_live_idle_slot` afterward. Expired slots get no assignment. The scheduler cannot extend an expired slot. Only the next `RequestJob` from the worker can refresh the slot.
+- The server can scan pending jobs of that kind in dispatch order on request. Priority jobs come first, then the oldest `ready_at`, then the job ID. Jobs that the worker can't run or access never appear in that scan.
+- A build job and its `BuildJob` message carry a `requirement` with the Nix system and required system features. Evaluation jobs for flakes leave out this field.
+- The server can score at most 2,048 of the remaining jobs. It can stop after 512 jobs without a veto (`MAX_SCORED_JOBS_PER_REQUEST`). The rest wait for a later request.
 - The [scheduling policy](../../reference/scheduler-policies.md) provides the score, and the server picks the highest. Ties go to the smaller job ID.
 - Jobs below the assignment floor of 0 never leave the queue.
 - The server claims the winner by inserting a new `dispatched_job` row.
@@ -79,7 +87,7 @@ After the handshake, workers with the `build` capability send a `WorkerCapabilit
 - The worker reports through `JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress` and `EvalProgress`.
 - The server discards reports with a stale ID.
 - The worker answers with an `AssignJobResponse` message.
-- On a decline (worker draining or full), the server re-queues the job and offers it again.
+- The server can requeue a job after a decline (workers drain or are full).
 - An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md).
 - Instead of answering a `RequestJob` message, the server pushes such a job.
 - The worker keeps the slot and runs nothing until the `StartCluster` message.

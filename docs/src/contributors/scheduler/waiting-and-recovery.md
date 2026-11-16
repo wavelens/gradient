@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Waiting and Recovery
 
-The scheduler covers four recovery cases: it splits a flake job across several workers, parks an evaluation that makes no progress, re-offers a job a worker returned, and cleans up leftover state after a server restart.
+Four recovery cases exist for the scheduler. The scheduler can split a flake job across multiple workers. Evaluations that make no progress go to the Waiting state. Jobs that workers return go back to the queue. The scheduler can clean up leftover state after a server restart.
 
 ```mermaid
 flowchart LR
@@ -69,15 +69,15 @@ A `workers` verdict with an empty `unmet` set triggers the heal. `attempt_graph_
 
 - **Lost `.drv`:** `recover_drv_stuck_evals` checks evaluations stuck in `graph_stuck` for over 120 s. The target is a walked shared build that needs a build and is not available in a cache. Such a build has every dependency done and no `.drv` NAR. `trigger_drv_recovery` starts a `DrvRecovery` evaluation of the same commit for it. A `DrvRecovery` evaluation stuck the same way fails.
 
-## Re-Offering Returned Jobs
+## Returned Jobs
 
-An offer carries only a delta: the server sends a worker only the candidates absent from its `sent_candidates` set. Score every offered candidate. Each offer replaces the set with the candidates currently visible to the worker. Claimed, finished and aborted jobs drop out of the set. Returning a job to the pool clears its sent flag.
+Returned jobs go back to the pending jobs. The server can score such a job again at the next request of any worker. Workers keep no job list of their own.
 
 | Event | Mechanism |
 |---|---|
-| Enqueue | `SchedulerMsg::Enqueue` calling `remove_sent_candidate` for every worker, also for the cached follow-up reusing `eval:{id}` |
-| Reject | `SchedulerMsg::Rejected` returning the job to pending and clearing its sent flag |
-| Assignment pass | `SchedulerMsg::ReOffer` bumping the offer generation while any job is pending. Sessions then pull the delta |
+| Enqueue | `SchedulerMsg::Enqueue` can add the job to pending jobs and signal workers with live idle slots. Cached follow-ups that reuse `eval:{id}` take the same path |
+| Reject | `SchedulerMsg::Rejected` returning the job to pending jobs |
+| Assignment pass | `SchedulerMsg::ReOffer` message to wake workers with live idle slots while a job is pending |
 
 ## Startup Recovery
 
@@ -91,6 +91,5 @@ At server start, `gradient-web/src/lib.rs` runs `recover_interrupted_work` (`gra
 
 - Jobs with an open assignment skip steps 2-4. They keep their status and attempt.
 - Kept assignments wait in the scheduler for `proto.assignmentReclaimGraceSecs`. Rows with no reclaim inside the grace return to the queue as a lost worker.
-- A worker below protocol 42 can never reclaim. Its kept rows return to the queue as a lost worker at registration.
 - `Queued` evaluations come back from the eval assignment pass. The waiting pass returns `Waiting` ones.
 - Recovery omits the live effects of `update_evaluation_status` calls. The rows stay consistent on their own.

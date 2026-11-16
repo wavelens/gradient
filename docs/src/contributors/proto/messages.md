@@ -18,8 +18,6 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `Reject` | Decline the session and close it | `code`, `reason` |
 | `Error` | Protocol error | `code`, `message` |
 | `Draining` | Session will end soon. Send no more job requests | - |
-| `JobListChunk` | Complete candidate list, sent in reply to `RequestJobList` | `candidates`, `is_final` |
-| `JobOffer` | New candidates, at most 1 000 per message | `candidates` |
 | `AssignJob` | Hand a job to the worker. `cluster` marks one member of a cluster attempt and hold it until `StartCluster` | `job_id`, `assignment_id`, `job`, `cluster` |
 | `AbortJob` | Cancel a job | `job_id`, `reason` |
 | `StartCluster` | All members accepted. Run the held jobs | `attempt`, `roster` |
@@ -59,9 +57,8 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `WorkerCapabilities` | Describes the worker: systems, features, slots, CPU, RAM, core score, zone, endpoint | `architectures`, `system_features`, `max_concurrent_builds`, `zone`, `endpoint`, ... |
 | `RunningJobs` | Lists the jobs still running from an earlier session, right after the handshake. An empty list is valid | `assignments` (`assignment_id`, `kind`) (since 42) |
 | `WorkerMetrics` | Heartbeat with current load. `lifetime_left_secs` caps the [reclaim grace](jobs.md#abort-and-lost-workers) | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `build_peak_ram_mb` (since 33), `lifetime_left_secs` (since 42) |
-| `RequestJobList` | Requests the full candidate list | - |
-| `RequestJobChunk` | Carries score deltas | `scores`, `is_final` |
-| `RequestJob` | Claims one free slot of a given kind. A worker repeats this every 10 s while idle | `kind` (`Flake` or `Build`) |
+| `WorkerLocalStoreBloomFilterChunk` | One chunk of the store summary: a Bloom filter for store paths in a worker's local Nix store, max 1 MiB per chunk. Workers send the chunk after handshake, then resend hourly. | `bit_count`, `probe_count`, `offset`, `bits`, `is_final` |
+| `RequestJob` | Reserve one free slot of the specified kind. Unanswered requests stay open for 25 seconds as standing requests. Workers repeat this every 10 seconds while idle. | `kind` (`Flake`, `Build` or `Exec`) |
 | `AssignJobResponse` | Accepts or declines an `AssignJob` | `job_id`, `accepted`, `reason` |
 | `ClusterSignal` | Sends a control message to a single member (`to` set) or to all other members (`to` unset) of a started attempt | `attempt`, `to`, `payload` |
 | `JobUpdate` | Reports job progress | `job_id`, `assignment_id`, `update` |

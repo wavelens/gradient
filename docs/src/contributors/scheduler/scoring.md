@@ -5,11 +5,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Scoring
 
-To pick a job for a worker, the scheduler scores every eligible pending job with a `ScoringPolicy` implementation and picks the top candidate. The scoring code is in `backend/gradient-pool/src/score`. The scheduler in `backend/gradient-scheduler` fills in the inputs. For the rule list and weights, see [Scheduler Policies](../../reference/scheduler-policies.md).
+The scheduler can score a shortlist of eligible pending jobs with the `ScoringPolicy` implementation and choose the top candidate for the worker. The scoring code is in `backend/gradient-pool/src/score`. The scheduler in `backend/gradient-scheduler` fills in the inputs. For the rule list and weights, see [Scheduler Policies](../../reference/scheduler-policies.md).
 
 ```mermaid
 flowchart LR
-    W[Worker offer scores] --> J[JobContext]
+    W[Worker store summary] --> J[JobContext]
     D["Assignment pass: history, closure size"] --> J
     H[Heartbeat metrics] --> K[WorkerContext]
     I[instance-metrics pass] --> C[InstanceContext]
@@ -41,7 +41,7 @@ flowchart LR
 | `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `running_builds`, `ram_reserved_mb`, `ram_reserved_unused_mb`, `ram_reserved_for_waiting_build_mb` | `WorkerCapabilities` (static), the 10 s `WorkerMetrics` heartbeat, the build stages, the assigned jobs and the waiting build (live) |
 | `InstanceContext` | 13 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean`, `upload_speed_mean_mbps`, `download_speed_mean_mbps`, `storage_read_mbps`, `storage_write_mbps`, `compression_ratio`, `per_path_secs`, `substitute_cost`, `download_slots`, `upload_slots`, `downloads_in_flight`, `uploads_in_flight` | `instance_metrics_pass`, see below. The two in-flight counts come from the build stages at assignment time |
 
-- Three fields, `missing_count`, `missing_nar_size` and `outputs_present`, are per worker. Each worker scores every offered candidate against its own store and reports a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). Until that report, the values stay `None`.
+- Three fields `missing_count`, `missing_nar_size`, `outputs_present` are per worker. The server can compare the direct inputs and outputs of each job against the store summary for that worker (see [Store Summary](../proto/capabilities-and-dispatch.md#store-summary)). The server can count every input as missing and every output as absent for a worker with no summary.
 - `dependency_count` counts direct input derivations (`derivation_dependency` rows without runtime-only edges), not builds needing the derivation.
 - `ready_at` marks the moment the dependencies finished. `WaitTimeRule` measures from that moment, not from `queued_at`.
 - `ifd` marks a build of an imported derivation and its unfinished dependencies while evaluations wait on the import. `import_lifted_shared_builds` can walk that set from the builds of the open import requests.
@@ -150,9 +150,9 @@ Every `metrics.instanceIntervalSecs` (30 s), `instance_metrics_pass` can run and
 
 ## Assignment Floor and Vetoes
 
-- The scheduler can sort candidates by `total` value, and the smaller job id will break ties.
+- The scheduler can sort the scored candidate list by the value of `total`. Ties resolve to the smaller job ID. Find the cap of the candidate list with [Assignment](../proto/capabilities-and-dispatch.md#assignment).
 - The scheduler will assign the first candidate passing `wins` as its check. A passing candidate is unvetoed, with `total >= ASSIGN_FLOOR` (0.0). A vetoed higher candidate will stay pending. The worker will idle this round without a passing candidate.
-- A veto is a hold independent of the sum. Large bonuses cannot outvote the veto. `RescoreWaitRule` and `ResourceSaturationRule` are the vetoing rules. `RescoreWaitRule` will score 0 and hold a build while `missing_nar_size` is `None` and `rescore_count < 4` holds.
+- Vetoes can keep a job pending regardless of total score. A large bonus cannot override a veto. `ResourceSaturationRule` is the only rule that can issue a veto.
 - Every decision, rejected candidates included, will go into a 200-entry ring for the [Job Board](../../ui/job-board.md#job-inspection).
 
 ## Worker Speed Signals
@@ -185,4 +185,4 @@ Every `metrics.instanceIntervalSecs` (30 s), `instance_metrics_pass` can run and
 ## Related
 
 - [Scheduler Policies](../../reference/scheduler-policies.md): all rules with their weights
-- [Capabilities and Assignment](../proto/capabilities-and-dispatch.md): offers, candidate scores and assignment
+- [Capabilities and Assignment](../proto/capabilities-and-dispatch.md): store summary, shortlist, and assignment

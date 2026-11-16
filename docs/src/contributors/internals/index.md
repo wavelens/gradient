@@ -49,7 +49,7 @@ flowchart LR
 | Evaluation steps, fetch and walk | [Jobs](../proto/jobs.md), [Eval Worker Setup](../eval-worker.md) |
 | Batch import, shared builds | [Shared Builds](../scheduler/shared-builds.md) |
 | Queueing, start conditions, failure cascade | [Queueing and Counters](../scheduler/queueing-and-counters.md) |
-| Offers, assignment, scoring | [Capabilities and Assignment](../proto/capabilities-and-dispatch.md), [Scoring](../scheduler/scoring.md) |
+| Store summary, assignment, scoring | [Capabilities and Assignment](../proto/capabilities-and-dispatch.md), [Scoring](../scheduler/scoring.md) |
 | Uploads and downloads | [Transfer](../proto/transfer.md) |
 | Complete closures, cache access | [Cache Closure](../scheduler/cache-closure.md) |
 | Worker registration and auth | [Connection](../proto/connection.md) |

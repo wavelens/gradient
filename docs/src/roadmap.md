@@ -40,6 +40,10 @@ Exec jobs outside the Nix sandbox and faster evaluation of large flakes.
 
 </div>
 
+!!! warning "Upgrade"
+
+    Servers reject workers older than protocol 65. Workers reject servers older than protocol 65. Upgrade both in one maintenance window.
+
 </div>
 
 <div class="timeline-item next" markdown>
