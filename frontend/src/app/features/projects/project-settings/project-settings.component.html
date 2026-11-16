@@ -179,6 +179,65 @@
       </gr-row-list>
     </gr-load-state>
   </gr-settings-section>
+
+  <gr-settings-section title="HTTPS Credentials for Git">
+    <p class="text-secondary">Gradient can send these credentials to fetch repositories for this project over HTTPS from the matching host. Passwords stay encrypted at rest. Gradient does not show them again.</p>
+    <gr-load-state
+      flat
+      [loading]="httpsGitCredentialsLoading()"
+      [error]="httpsGitCredentialsLoadError()"
+      [empty]="httpsGitCredentials().length === 0"
+      loadingMessage="Loading HTTPS credentials..."
+      errorTitle="Failed to load HTTPS credentials"
+      emptyIcon="key"
+      emptyTitle="No HTTPS credentials yet"
+      [emptyMessage]="accessService.isWritable(sshKeyAccess()) ? 'Add an access token to fetch private repositories over HTTPS. Use the username x-access-token on GitHub and oauth2 on GitLab. Many other Git hosts accept any non-empty username and a token.' : 'No HTTPS credentials for this project.'"
+      (retry)="loadHTTPSGitCredentials()"
+    >
+      @if (accessService.isWritable(sshKeyAccess())) {
+        <button slot="empty-action" grButton label="Add Credential" icon="add" severity="secondary" (click)="openHttpsCredentialDialogForNewHost()"></button>
+      }
+      <gr-row-list>
+        @for (credential of httpsGitCredentials(); track credential.id) {
+          <gr-row icon="key">
+            {{ credential.host }}
+            @if (project.managed) {
+              <app-server-configuration-managed-lock-button />
+            }
+            <span slot="meta">
+              <code>{{ credential.username }}</code>
+              Updated <span [title]="credential.updated_at | serverDate">{{ credential.updated_at | relativeTime }}</span>
+            </span>
+            @if (accessService.isWritable(sshKeyAccess())) {
+              <div slot="actions" class="phone-icon-buttons">
+                <button
+                  grButton
+                  label="Replace"
+                  icon="edit"
+                  severity="secondary"
+                  size="small"
+                  (click)="openHttpsCredentialDialogForExistingCredential(credential)"
+                ></button>
+                <button
+                  grButton
+                  label="Delete"
+                  icon="delete"
+                  severity="danger"
+                  size="small"
+                  (click)="confirmAndDeleteHttpsGitCredential(credential)"
+                ></button>
+              </div>
+            }
+          </gr-row>
+        }
+      </gr-row-list>
+    </gr-load-state>
+    @if (accessService.isWritable(sshKeyAccess()) && httpsGitCredentials().length > 0) {
+      <div class="gr-form-actions">
+        <button grButton label="Add Credential" icon="add" severity="secondary" (click)="openHttpsCredentialDialogForNewHost()"></button>
+      </div>
+    }
+  </gr-settings-section>
   }
 
   <!-- Danger Zone -->
@@ -218,3 +277,49 @@
 }
 </gr-load-state>
 </gr-page-layout>
+
+<gr-dialog
+  [header]="replacing() ? 'Replace HTTPS Credential' : 'Add HTTPS Credential'"
+  [visible]="isHttpsGitCredentialDialogOpen()"
+  (visibleChange)="$event || closeHttpsCredentialDialogAndClearPassword()"
+  [error]="httpsCredentialSaveError()"
+  [busy]="isSavingHttpsCredential()"
+  width="520px"
+>
+  <gr-form-field label="Host" for="https-credential-host" hint="Hostname with optional port (e.g. git.example.com:8443). URLs and paths don't work here.">
+    <input
+      grInput
+      id="https-credential-host"
+      autocomplete="off"
+      placeholder="github.com"
+      [disabled]="replacing()"
+      [ngModel]="httpsCredentialDialogHost()"
+      (ngModelChange)="httpsCredentialDialogHost.set($event)"
+    />
+  </gr-form-field>
+  <gr-form-field label="Username" for="https-credential-username">
+    <input
+      grInput
+      id="https-credential-username"
+      autocomplete="off"
+      [ngModel]="httpsCredentialDialogUsername()"
+      (ngModelChange)="httpsCredentialDialogUsername.set($event)"
+    />
+  </gr-form-field>
+  <gr-form-field label="Password or Token" for="https-credential-password">
+    <span slot="hint">Stored encrypted, never shown again</span>
+    <input
+      grInput
+      id="https-credential-password"
+      type="password"
+      autocomplete="new-password"
+      [ngModel]="httpsCredentialPasswordInput()"
+      (ngModelChange)="httpsCredentialPasswordInput.set($event)"
+      (keyup.enter)="saveHttpsCredentialThenCloseAndReloadList()"
+    />
+  </gr-form-field>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="closeHttpsCredentialDialogAndClearPassword()" [disabled]="isSavingHttpsCredential()"></button>
+    <button grButton label="Save" icon="check" (click)="saveHttpsCredentialThenCloseAndReloadList()" [loading]="isSavingHttpsCredential()" [disabled]="!canSubmitHttpsCredentialDialog()"></button>
+  </div>
+</gr-dialog>
