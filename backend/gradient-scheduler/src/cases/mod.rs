@@ -252,6 +252,7 @@ impl SchedulerCase {
     pub async fn seed(&self, shape: Shape) {
         let declared = shape.declared_statuses();
         shape.insert_into(&self.db.connection()).await;
+        testing::settle_seed(&self.ctx, &self.db, declared.clone()).await;
         enter_queued_builds(&self.ctx, &self.db, Some(declared)).await;
     }
 
