@@ -38,7 +38,7 @@ pub struct HttpRevisionResolver {
     client: reqwest::Client,
     github_token: Option<String>,
     gitlab_token: Option<String>,
-    ssh_key: Option<crate::git::SshGitPrivateKeyKnownHostsAndObservations>,
+    git_credentials: crate::git::GitOperationCredentials,
 }
 
 impl std::fmt::Debug for HttpRevisionResolver {
@@ -47,7 +47,7 @@ impl std::fmt::Debug for HttpRevisionResolver {
         f.debug_struct("HttpRevisionResolver")
             .field("github_token", &redact(&self.github_token))
             .field("gitlab_token", &redact(&self.gitlab_token))
-            .field("ssh_key", &self.ssh_key)
+            .field("git_credentials", &self.git_credentials)
             .finish_non_exhaustive()
     }
 }
@@ -58,7 +58,7 @@ impl HttpRevisionResolver {
             client,
             github_token: None,
             gitlab_token: None,
-            ssh_key: None,
+            git_credentials: crate::git::GitOperationCredentials::default(),
         }
     }
 
@@ -72,11 +72,11 @@ impl HttpRevisionResolver {
         self
     }
 
-    pub fn with_ssh_key(
+    pub fn with_git_credentials(
         mut self,
-        key: Option<crate::git::SshGitPrivateKeyKnownHostsAndObservations>,
+        credentials: crate::git::GitOperationCredentials,
     ) -> Self {
-        self.ssh_key = key;
+        self.git_credentials = credentials;
         self
     }
 
@@ -161,9 +161,9 @@ impl HttpRevisionResolver {
     async fn resolve_git(&self, url: &str, ref_: &Option<String>) -> Result<ResolvedRev> {
         let url = url.to_owned();
         let ref_owned = ref_.clone();
-        let ssh_key = self.ssh_key.clone();
+        let git_credentials = self.git_credentials.clone();
         let (rev, last_modified, tmp) = tokio::task::spawn_blocking(move || {
-            git_checkout(&url, ref_owned.as_deref(), ssh_key.as_ref())
+            git_checkout(&url, ref_owned.as_deref(), &git_credentials)
         })
         .await
         .context("git checkout task panicked")??;
@@ -269,11 +269,11 @@ fn url_with_percent_encoded_path_segments(base: &Url, segments: &[&str]) -> Resu
 fn git_checkout(
     url: &str,
     ref_: Option<&str>,
-    ssh_key: Option<&crate::git::SshGitPrivateKeyKnownHostsAndObservations>,
+    git_credentials: &crate::git::GitOperationCredentials,
 ) -> Result<(String, i64, tempfile::TempDir)> {
-    let rev = crate::git::remote_ref_commit(url, ref_, ssh_key)
+    let rev = crate::git::remote_ref_commit(url, ref_, git_credentials)
         .with_context(|| format!("Resolve git ref `{}` for {url}", ref_.unwrap_or("HEAD")))?;
-    let tmp = crate::git::checkout_commit(url, &rev, ssh_key)?;
+    let tmp = crate::git::checkout_commit(url, &rev, git_credentials)?;
     let last_modified = commit_time(tmp.path(), &rev)?;
     std::fs::remove_dir_all(tmp.path().join(".git")).ok();
 
@@ -388,7 +388,8 @@ mod tests {
     fn git_checkout_fetches_file_url() {
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
-        let (rev, _, checkout) = git_checkout(&url, None, None).unwrap();
+        let (rev, _, checkout) =
+            git_checkout(&url, None, &crate::git::GitOperationCredentials::default()).unwrap();
         assert_eq!(rev, git(&repo, &["rev-parse", "main"]));
         assert!(checkout.path().join("f").exists());
         assert!(!checkout.path().join(".git").exists());
@@ -402,7 +403,12 @@ mod tests {
         git(&repo, &["checkout", "main"]);
         let url = format!("file://{}", repo.display());
 
-        let (rev, last_modified, checkout) = git_checkout(&url, Some("feature"), None).unwrap();
+        let (rev, last_modified, checkout) = git_checkout(
+            &url,
+            Some("feature"),
+            &crate::git::GitOperationCredentials::default(),
+        )
+        .unwrap();
 
         assert_eq!(rev, git(&repo, &["rev-parse", "feature"]));
         assert_eq!(
@@ -420,7 +426,11 @@ mod tests {
             "-----BEGIN OPENSSH PRIVATE KEY-----\n".into(),
             Vec::new(),
         );
-        let out = git_checkout(&url, None, Some(&ssh));
+        let out = git_checkout(
+            &url,
+            None,
+            &crate::git::GitOperationCredentials::from(Some(ssh)),
+        );
         assert!(
             out.is_ok(),
             "file:// clone with an ssh key failed: {:?}",

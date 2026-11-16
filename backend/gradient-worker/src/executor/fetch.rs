@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_sources::SshGitPrivateKeyKnownHostsAndObservations;
+use gradient_sources::{GitOperationCredentials, SshGitPrivateKeyKnownHostsAndObservations};
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{FlakeJob, FlakeSource};
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter, WorkerStore};
@@ -44,9 +44,15 @@ pub async fn fetch_repository(
     abort: AbortSignal,
 ) -> Result<FetchOutcome> {
     let ssh = credentials.ssh_git_private_key_known_hosts_and_observations();
-    let fetched =
-        fetch_repository_with_optional_ssh_credentials(job, updater, ssh.as_ref(), store, abort)
-            .await;
+    let git_credentials = GitOperationCredentials::from(ssh.clone());
+    let fetched = clone_job_repository_and_update_inputs_with_git_credentials(
+        job,
+        updater,
+        &git_credentials,
+        store,
+        abort,
+    )
+    .await;
     if let Some(ssh) = &ssh {
         send_ssh_host_key_observations_or_log_warning(updater, ssh).await;
     }
@@ -65,10 +71,10 @@ pub(crate) async fn send_ssh_host_key_observations_or_log_warning(
     }
 }
 
-async fn fetch_repository_with_optional_ssh_credentials(
+async fn clone_job_repository_and_update_inputs_with_git_credentials(
     job: &FlakeJob,
     updater: &mut dyn JobReporter,
-    ssh_key: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    git_credentials: &GitOperationCredentials,
     store: &dyn WorkerStore,
     mut abort: AbortSignal,
 ) -> Result<FetchOutcome> {
@@ -81,15 +87,20 @@ async fn fetch_repository_with_optional_ssh_credentials(
     let (source_path, flake_root, _checkout) = match &job.source {
         FlakeSource::Repository { url, commit } => {
             let (url, commit) = (url.clone(), commit.clone());
-            debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
+            debug!(
+                %url,
+                %commit,
+                has_ssh_key = git_credentials.ssh_git_private_key_and_known_hosts.is_some(),
+                "fetching repository"
+            );
 
-            let ssh_key_for_clone = ssh_key.cloned();
+            let git_credentials_for_clone = git_credentials.clone();
             let commit_for_clone = commit.clone();
             let clone_task = tokio::task::spawn_blocking(move || {
                 gradient_sources::checkout_commit(
                     &url,
                     &commit_for_clone,
-                    ssh_key_for_clone.as_ref(),
+                    &git_credentials_for_clone,
                 )
             });
 
@@ -106,14 +117,14 @@ async fn fetch_repository_with_optional_ssh_credentials(
             let flake_root = flake_root(checkout.path(), job.flake_dir.as_deref())?;
 
             if let Some(spec) = &job.input_update {
-                run_input_update(spec, &flake_root, ssh_key, updater, &mut abort).await?;
+                run_input_update(spec, &flake_root, git_credentials, updater, &mut abort).await?;
             }
 
             let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;
             (source_path, flake_root, Some(checkout))
         }
         FlakeSource::Cached { store_path, .. } => {
-            debug!(%store_path, has_ssh_key = ssh_key.is_some(), "using the cached build source");
+            debug!(%store_path, "using the cached build source");
             let flake_root = flake_root(Path::new(store_path), job.flake_dir.as_deref())?;
             (store_path.clone(), flake_root, None)
         }
@@ -466,7 +477,7 @@ async fn fetch_inputs(
 async fn run_input_update(
     spec: &gradient_wire::messages::InputUpdateSpec,
     flake_root: &Path,
-    ssh_key: Option<&gradient_sources::SshGitPrivateKeyKnownHostsAndObservations>,
+    git_credentials: &GitOperationCredentials,
     updater: &mut dyn JobReporter,
     abort: &mut AbortSignal,
 ) -> Result<()> {
@@ -495,7 +506,8 @@ async fn run_input_update(
 
     report_input_sources(&spec.inputs, flake_root, updater).await;
     let sink = updater.eval_progress_sink();
-    let Some(patch) = resolve_newest_revisions(spec, flake_root, ssh_key, &*sink, abort).await?
+    let Some(patch) =
+        resolve_newest_revisions(spec, flake_root, git_credentials, &*sink, abort).await?
     else {
         return Ok(());
     };
@@ -565,7 +577,7 @@ async fn read_input_sources(
 async fn resolve_newest_revisions(
     spec: &gradient_wire::messages::InputUpdateSpec,
     flake_root: &Path,
-    ssh_key: Option<&gradient_sources::SshGitPrivateKeyKnownHostsAndObservations>,
+    git_credentials: &GitOperationCredentials,
     sink: &dyn EvalProgressSink,
     abort: &mut AbortSignal,
 ) -> Result<Option<gradient_sources::flake_lock::Patch>> {
@@ -574,7 +586,7 @@ async fn resolve_newest_revisions(
     let resolver = gradient_sources::flake_lock::HttpRevisionResolver::new(
         gradient_worker_client::http::download_client().clone(),
     )
-    .with_ssh_key(ssh_key.cloned());
+    .with_git_credentials(git_credentials.clone());
     let generator = gradient_sources::flake_lock::FlakeLockGenerator::new(resolver);
     let tracked: Vec<gradient_sources::flake_lock::InputName> =
         spec.inputs.iter().cloned().map(Into::into).collect();

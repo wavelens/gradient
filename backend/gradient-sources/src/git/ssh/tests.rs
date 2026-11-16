@@ -8,6 +8,7 @@
 
 use super::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
 use crate::git::commit_info::{fetch_commit, head_refspec};
+use crate::git::git_credentials::GitOperationCredentials;
 use crate::git::remote::ls_remote_head;
 use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
 use russh::keys::{Algorithm, EcdsaCurve, PrivateKey, PublicKey};
@@ -187,9 +188,21 @@ async fn a_repository_is_listed_and_fetched_over_ssh_with_the_project_key() {
         let ssh = ssh.clone();
         move || {
             (
-                ls_remote_head(&ssh_url, Some(&ssh), None),
-                fetch_commit(&ssh_url, Some(&ssh), &head_refspec(None)),
-                ls_remote_head(&ssh_url, Some(&foreign), None),
+                ls_remote_head(
+                    &ssh_url,
+                    &GitOperationCredentials::from(Some(ssh.clone())),
+                    None,
+                ),
+                fetch_commit(
+                    &ssh_url,
+                    &GitOperationCredentials::from(Some(ssh.clone())),
+                    &head_refspec(None),
+                ),
+                ls_remote_head(
+                    &ssh_url,
+                    &GitOperationCredentials::from(Some(foreign.clone())),
+                    None,
+                ),
             )
         }
     })
@@ -219,7 +232,13 @@ async fn an_unknown_host_is_accepted_and_reported_as_learned() {
 
     let head = tokio::task::spawn_blocking({
         let ssh = ssh.clone();
-        move || ls_remote_head(&ssh_url, Some(&ssh), None)
+        move || {
+            ls_remote_head(
+                &ssh_url,
+                &GitOperationCredentials::from(Some(ssh.clone())),
+                None,
+            )
+        }
     })
     .await
     .unwrap();
@@ -254,8 +273,16 @@ async fn a_saved_host_key_is_accepted_silently() {
         let ssh = ssh.clone();
         move || {
             (
-                ls_remote_head(&ssh_url, Some(&ssh), None),
-                fetch_commit(&ssh_url, Some(&ssh), &head_refspec(None)),
+                ls_remote_head(
+                    &ssh_url,
+                    &GitOperationCredentials::from(Some(ssh.clone())),
+                    None,
+                ),
+                fetch_commit(
+                    &ssh_url,
+                    &GitOperationCredentials::from(Some(ssh.clone())),
+                    &head_refspec(None),
+                ),
             )
         }
     })
@@ -284,7 +311,13 @@ async fn a_different_host_key_is_refused_and_reported_as_changed() {
 
     let head = tokio::task::spawn_blocking({
         let ssh = ssh.clone();
-        move || ls_remote_head(&ssh_url, Some(&ssh), None)
+        move || {
+            ls_remote_head(
+                &ssh_url,
+                &GitOperationCredentials::from(Some(ssh.clone())),
+                None,
+            )
+        }
     })
     .await
     .unwrap();
@@ -325,7 +358,13 @@ async fn a_saved_ecdsa_key_still_matches_when_the_host_also_offers_ed25519() {
 
     let head = tokio::task::spawn_blocking({
         let ssh = ssh.clone();
-        move || ls_remote_head(&ssh_url, Some(&ssh), None)
+        move || {
+            ls_remote_head(
+                &ssh_url,
+                &GitOperationCredentials::from(Some(ssh.clone())),
+                None,
+            )
+        }
     })
     .await
     .unwrap();

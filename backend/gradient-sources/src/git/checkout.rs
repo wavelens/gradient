@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::git_credentials::{
+    GitOperationCredentials, run_blocking_libgit2_operation_with_git_credentials,
+};
 use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
-use super::ssh::{SshGitPrivateKeyKnownHostsAndObservations, run_with_ssh_credentials};
+use super::https_credentials_for_operation_host::remote_callbacks_for_url_with_thread_https_credentials;
 use super::url::git_transport_url;
 use anyhow::{Context, Result};
 use git2::{Direction, Oid, Remote, Repository};
@@ -16,13 +19,13 @@ use tracing::debug;
 pub fn checkout_commit(
     url: &str,
     commit: &str,
-    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    credentials: &GitOperationCredentials,
 ) -> Result<TempDir> {
     let checkout = tempfile::Builder::new()
         .prefix("gradient-fetch-")
         .tempdir()
         .context("create the checkout directory")?;
-    checkout_commit_into(checkout.path(), url, commit, ssh)?;
+    checkout_commit_into(checkout.path(), url, commit, credentials)?;
     Ok(checkout)
 }
 
@@ -30,9 +33,11 @@ pub fn checkout_commit_into(
     dir: &Path,
     url: &str,
     commit: &str,
-    ssh: Option<&SshGitPrivateKeyKnownHostsAndObservations>,
+    credentials: &GitOperationCredentials,
 ) -> Result<()> {
-    run_with_ssh_credentials(ssh, || check_out_into(dir, git_transport_url(url), commit))
+    run_blocking_libgit2_operation_with_git_credentials(credentials, || {
+        check_out_into(dir, git_transport_url(url), commit)
+    })
 }
 
 fn check_out_into(dir: &Path, url: &str, commit: &str) -> Result<()> {
@@ -81,7 +86,10 @@ impl<'a> Origin<'a> {
     }
 
     fn ref_pointing_at(&mut self, oid: Oid) -> Result<Option<String>, git2::Error> {
-        let connection = self.remote.connect_auth(Direction::Fetch, None, None)?;
+        let callbacks = remote_callbacks_for_url_with_thread_https_credentials(self.url);
+        let connection = self
+            .remote
+            .connect_auth(Direction::Fetch, Some(callbacks), None)?;
         Ok(connection
             .list()?
             .iter()

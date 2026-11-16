@@ -23,9 +23,10 @@ pub use self::daemon::*;
 pub use self::error::StoreDaemonError;
 pub use self::evaluator::*;
 pub use self::git::{
-    BranchHead, HeadCommit, SshGitPrivateKeyKnownHostsAndObservations, check_task_updates,
-    checkout_commit, checkout_commit_into, fetch_ssh_host_key, get_commit_info, head_commit,
-    remote_branch_head, remote_tag_commit, resolve_remote_ref,
+    BranchHead, GitOperationCredentials, HeadCommit, HttpsGitCredential,
+    SshGitPrivateKeyKnownHostsAndObservations, check_task_updates, checkout_commit,
+    checkout_commit_into, fetch_ssh_host_key, get_commit_info, head_commit, remote_branch_head,
+    remote_tag_commit, resolve_remote_ref,
 };
 pub use self::secret::{decrypt_secret, encrypt_secret};
 pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};
@@ -137,7 +138,9 @@ impl SourceError {
 fn readable_reason_for_git_transport_error(message: &str) -> &'static str {
     let message = message.to_lowercase();
     let mentions = |patterns: &[&str]| patterns.iter().any(|p| message.contains(p));
-    if mentions(&[
+    if mentions(&["redirect to another host blocked"]) {
+        "The server redirected to a different host. Gradient blocked the redirect, so the HTTPS credentials stored for the project remain with the original host."
+    } else if mentions(&[
         "repository not found",
         "could not be found",
         "does not appear to be a git repository",
@@ -210,5 +213,17 @@ mod short_reason_tests {
             .short_reason_for_user()
             .contains("pool")
         );
+    }
+
+    #[test]
+    fn tls_guard_refused_redirect_to_other_host_short_reason_says_redirect_refused() {
+        let refused = reason(
+            "Refused connection to evil.example: redirect to another host blocked. The stored HTTPS credentials are for github.com only.; class=Callback (26)",
+        );
+        assert!(
+            refused.starts_with("The server redirected to a different host."),
+            "{refused}"
+        );
+        assert!(!refused.contains("evil.example"), "{refused}");
     }
 }

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use git2::ErrorClass;
+use gradient_sources::GitOperationCredentials;
 use gradient_types::RepositoryLocation;
 use gradient_wire::types::JobContext;
 use tokio_util::sync::CancellationToken;
@@ -70,14 +71,14 @@ async fn clone_commit(
     updater: &mut JobUpdater,
 ) -> Result<()> {
     let ssh = credentials.ssh_git_private_key_known_hosts_and_observations();
-    let (dir, url, commit, ssh_for_clone) = (
+    let (dir, url, commit, git_credentials) = (
         work.to_path_buf(),
         url.to_owned(),
         commit.to_owned(),
-        ssh.clone(),
+        GitOperationCredentials::from(ssh.clone()),
     );
     let cloned = tokio::task::spawn_blocking(move || {
-        gradient_sources::checkout_commit_into(&dir, &url, &commit, ssh_for_clone.as_ref())
+        gradient_sources::checkout_commit_into(&dir, &url, &commit, &git_credentials)
     })
     .await
     .context("checkout task panicked")?;
@@ -195,7 +196,7 @@ mod tests {
             work.path(),
             &source.path().to_string_lossy(),
             NO_COMMIT,
-            None,
+            &GitOperationCredentials::default(),
         )
         .unwrap_err();
         assert_eq!(git_failure(error).kind, BuildFailureKind::Permanent);
