@@ -34,7 +34,16 @@ const WORKER_NAME_FOR_FINISHING_REMAINING_WORK: &str = "w9";
 #[derive(Clone, Debug)]
 struct GeneratedDerivationDependencyAndActionTestInput {
     derivation_dependency_indices: Vec<Vec<usize>>,
+    runtime_output_reference_derivation_dependency_indices: Vec<Vec<usize>>,
+    generated_starting_states_by_derivation_index: Vec<InitialDerivationState>,
     actions_to_run: Vec<GeneratedSchedulerAction>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum InitialDerivationState {
+    DerivationNotBuiltAndAlreadyProbed,
+    OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated,
+    SharedBuildAlreadyCompletedAndOutputStoredInCache,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -66,19 +75,52 @@ struct WorkerJobAssignment {
     worker_reported_build_started: bool,
 }
 
-fn derivation_dependency_lists_for_one_to_six_derivations() -> impl Strategy<Value = Vec<Vec<usize>>>
-{
+fn generated_graph_and_actions()
+-> impl Strategy<Value = GeneratedDerivationDependencyAndActionTestInput> {
+    use InitialDerivationState::*;
     (1..=SIX_DERIVATION_STORE_PATHS_AND_OUTPUT_HASHES.len()).prop_flat_map(|count| {
-        proptest::collection::vec(proptest::collection::vec(any::<bool>(), count), count).prop_map(
-            move |edges| {
-                edges
-                    .iter()
-                    .enumerate()
-                    .map(|(from, row)| (from + 1..count).filter(|&to| row[to]).collect())
-                    .collect()
-            },
+        (
+            acyclic_dependency_index_lists_strategy_for_derivation_count(count),
+            acyclic_dependency_index_lists_strategy_for_derivation_count(count),
+            prop_oneof![
+                3 => Just(DerivationNotBuiltAndAlreadyProbed),
+                1 => Just(OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated),
+            ],
+            proptest::collection::vec(
+                prop_oneof![
+                    3 => Just(DerivationNotBuiltAndAlreadyProbed),
+                    1 => Just(OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated),
+                    1 => Just(SharedBuildAlreadyCompletedAndOutputStoredInCache),
+                ],
+                count - 1,
+            ),
+            proptest::collection::vec(action_strategy(), 0..=40),
         )
+            .prop_map(|(build, runtime, first, rest, actions_to_run)| {
+                GeneratedDerivationDependencyAndActionTestInput {
+                    derivation_dependency_indices: build,
+                    runtime_output_reference_derivation_dependency_indices: runtime,
+                    generated_starting_states_by_derivation_index: std::iter::once(first)
+                        .chain(rest)
+                        .collect(),
+                    actions_to_run,
+                }
+            })
     })
+}
+
+fn acyclic_dependency_index_lists_strategy_for_derivation_count(
+    count: usize,
+) -> impl Strategy<Value = Vec<Vec<usize>>> {
+    proptest::collection::vec(proptest::collection::vec(any::<bool>(), count), count).prop_map(
+        move |edges| {
+            edges
+                .iter()
+                .enumerate()
+                .map(|(from, row)| (from + 1..count).filter(|&to| row[to]).collect())
+                .collect()
+        },
+    )
 }
 
 fn action_strategy() -> impl Strategy<Value = GeneratedSchedulerAction> {
@@ -109,10 +151,33 @@ fn action_strategy() -> impl Strategy<Value = GeneratedSchedulerAction> {
 
 fn build_test_database_shape_from_dependency_lists(
     evaluation: EvaluationId,
-    dependencies: &[Vec<usize>],
+    input: &GeneratedDerivationDependencyAndActionTestInput,
 ) -> Shape {
+    use InitialDerivationState::*;
+    let dependencies = &input.derivation_dependency_indices;
+    let states = &input.generated_starting_states_by_derivation_index;
+    let not_built = |at: usize| matches!(states[at], DerivationNotBuiltAndAlreadyProbed);
+    let runtime_dependency_indices_with_cached_output_to_uncached_output_edges_removed: Vec<
+        Vec<usize>,
+    > = input
+        .runtime_output_reference_derivation_dependency_indices
+        .iter()
+        .enumerate()
+        .map(|(at, list)| {
+            list.iter()
+                .copied()
+                .filter(|&dependency| not_built(at) || !not_built(dependency))
+                .collect()
+        })
+        .collect();
+    let runtime = &runtime_dependency_indices_with_cached_output_to_uncached_output_edges_removed;
     let has_dependent: Vec<bool> = (0..dependencies.len())
-        .map(|at| dependencies.iter().any(|list| list.contains(&at)))
+        .map(|at| {
+            dependencies
+                .iter()
+                .enumerate()
+                .any(|(from, list)| list.contains(&at) && not_built(from))
+        })
         .collect();
     let seed = shape()
         .evaluation(evaluation)
@@ -122,18 +187,52 @@ fn build_test_database_shape_from_dependency_lists(
         .enumerate()
         .fold(seed, |seed, (at, list)| {
             let (path, out) = SIX_DERIVATION_STORE_PATHS_AND_OUTPUT_HASHES[at];
-            let mut seed = seed.derivation(path).walked().probed().drv_cached();
+            let state = states[at];
+            let mut seed = seed.derivation(path).walked().drv_cached();
+            if !matches!(
+                state,
+                OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated
+            ) {
+                seed = seed.probed();
+            }
             if !has_dependent[at] {
                 seed = seed.entry_point(&attr_of(path));
             }
             seed = seed.job().output(out);
-            for &dependency in list {
-                seed = seed.depends_on(SIX_DERIVATION_STORE_PATHS_AND_OUTPUT_HASHES[dependency].0);
+            for (dependency, (dependency_path, _)) in SIX_DERIVATION_STORE_PATHS_AND_OUTPUT_HASHES
+                [..dependencies.len()]
+                .iter()
+                .enumerate()
+            {
+                seed = match (
+                    list.contains(&dependency),
+                    runtime[at].contains(&dependency),
+                ) {
+                    (true, true) => seed.both_depends_on(dependency_path),
+                    (true, false) => seed.depends_on(dependency_path),
+                    (false, true) => seed.runtime_depends_on(dependency_path),
+                    (false, false) => seed,
+                };
             }
-            if list.is_empty() {
-                seed = seed.build_status(BuildStatus::Queued);
+            match state {
+                DerivationNotBuiltAndAlreadyProbed
+                    if list.iter().all(|&dependency| {
+                        matches!(
+                            states[dependency],
+                            SharedBuildAlreadyCompletedAndOutputStoredInCache
+                        )
+                    }) =>
+                {
+                    seed.build_status(BuildStatus::Queued)
+                }
+                DerivationNotBuiltAndAlreadyProbed => seed,
+                OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated => {
+                    seed.cached_output(path)
+                }
+                SharedBuildAlreadyCompletedAndOutputStoredInCache => seed
+                    .cached_output(path)
+                    .build_status(BuildStatus::Completed),
             }
-            seed
         })
 }
 
@@ -141,10 +240,7 @@ async fn run_generated_input_catch_panic_and_delete_test_database(
     input: GeneratedDerivationDependencyAndActionTestInput,
 ) -> Result<(), TestCaseError> {
     let evaluation = EvaluationId::now_v7();
-    let seed = build_test_database_shape_from_dependency_lists(
-        evaluation,
-        &input.derivation_dependency_indices,
-    );
+    let seed = build_test_database_shape_from_dependency_lists(evaluation, &input);
     let case = SchedulerCase::start_with(seed, |config| config.build.retry_backoff_secs = 0).await;
     let outcome = AssertUnwindSafe(
         apply_all_actions_check_invariants_after_each_then_finish_remaining(
@@ -375,17 +471,7 @@ fn test_random_action_sequences_on_random_derivation_graphs_preserve_scheduler_i
         failure_persistence: None,
         ..ProptestConfig::default()
     });
-    let strategy = (
-        derivation_dependency_lists_for_one_to_six_derivations(),
-        proptest::collection::vec(action_strategy(), 0..=40),
-    )
-        .prop_map(|(derivation_dependency_indices, actions_to_run)| {
-            GeneratedDerivationDependencyAndActionTestInput {
-                derivation_dependency_indices,
-                actions_to_run,
-            }
-        });
-    if let Err(failure) = runner.run(&strategy, |input| {
+    if let Err(failure) = runner.run(&generated_graph_and_actions(), |input| {
         runtime.block_on(run_generated_input_catch_panic_and_delete_test_database(
             input,
         ))
