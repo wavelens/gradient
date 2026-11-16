@@ -12,6 +12,15 @@
     skipDirectories = false;
   };
 
+  gitHttpsPassword = "s3cret@pass/1";
+  gitHttpsPasswordInUrl = "s3cret%40pass%2F1";
+  gitHttpsTls = pkgs.runCommand "gradient-e2e-git-https-tls" { nativeBuildInputs = [ pkgs.minica ]; } ''
+    mkdir $out && cd $out
+    minica --domains server
+  '';
+  gitHttpsHtpasswd = pkgs.writeText "gradient-e2e-git-htpasswd" "gradient:{PLAIN}${gitHttpsPassword}
+";
+
   workerToken = "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
   workerIds = {
     builder = "a0000000-0000-0000-0000-000000000001";
@@ -22,6 +31,8 @@
     imports = [ ../../../modules/gradient-worker ];
 
     virtualisation.additionalPaths = [ testStore ];
+
+    security.pki.certificateFiles = [ "${gitHttpsTls}/minica.pem" ];
 
     nix.settings = {
       trusted-users = [
@@ -81,6 +92,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       nix.settings.substituters = lib.mkForce [ ];
 
       virtualisation.additionalPaths = [ pkgs.busybox.debug ];
+
+      security.pki.certificateFiles = [ "${gitHttpsTls}/minica.pem" ];
 
       environment = {
         variables.TEST_PKGS = [ self.inputs.nixpkgs ];
@@ -215,6 +228,19 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
                   }
                 ];
               };
+
+              private-https = {
+                project = "project";
+                repository = "https://server/git/private.git";
+                created_by = "admin";
+                triggers = [
+                  {
+                    type = "polling";
+                    active = false;
+                    config = { interval_secs = 10; };
+                  }
+                ];
+              };
             };
 
             caches = {
@@ -242,15 +268,45 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
           };
         };
 
-        nginx.virtualHosts."gradient.local" = {
-          enableACME = lib.mkForce false;
-          forceSSL = lib.mkForce false;
-          locations = {
-            "/upstream/" = {
-              alias = "/srv/upstream/";
-              extraConfig = "autoindex off;";
+        nginx.virtualHosts = {
+          "gradient.local" = {
+            enableACME = lib.mkForce false;
+            forceSSL = lib.mkForce false;
+            locations = {
+              "/upstream/" = {
+                alias = "/srv/upstream/";
+                extraConfig = "autoindex off;";
+              };
+              "= /nixpkgs.tar.gz".alias = nixpkgsTarball;
             };
-            "= /nixpkgs.tar.gz".alias = nixpkgsTarball;
+          };
+
+          "server" = {
+            onlySSL = true;
+            sslCertificate = "${gitHttpsTls}/server/cert.pem";
+            sslCertificateKey = "${gitHttpsTls}/server/key.pem";
+            locations."~ ^/git(/.*)$".extraConfig = ''
+              auth_basic "git";
+              auth_basic_user_file ${gitHttpsHtpasswd};
+              fastcgi_pass unix:${config.services.fcgiwrap.instances.git-https.socket.address};
+              include ${config.services.nginx.package}/conf/fastcgi_params;
+              fastcgi_param SCRIPT_FILENAME ${pkgs.git}/libexec/git-core/git-http-backend;
+              fastcgi_param GIT_PROJECT_ROOT /srv/git-https;
+              fastcgi_param GIT_HTTP_EXPORT_ALL "";
+              fastcgi_param PATH_INFO $1;
+              fastcgi_param REMOTE_USER $remote_user;
+            '';
+          };
+        };
+
+        fcgiwrap.instances.git-https = {
+          process = {
+            user = "git";
+            group = "git";
+          };
+          socket = {
+            user = config.services.nginx.user;
+            group = config.services.nginx.group;
           };
         };
 
@@ -281,6 +337,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       systemd.tmpfiles.rules = [
         "d /var/lib/git 0755 git git"
         "d /srv/upstream 0755 nginx nginx"
+        "d /srv/git-https 0755 git git"
         "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
         "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
         "L+ /var/lib/git/flake-busywrap.nix 0755 git git - ${./flake_repository_busywrap.nix}"
@@ -288,6 +345,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "L+ /var/lib/git/flake-slow.nix 0755 git git - ${./flake_repository_slow.nix}"
         "L+ /var/lib/git/flake-input.nix 0755 git git - ${./flake_repository_input.nix}"
         "L+ /var/lib/git/flake-input.lock 0755 git git - ${./flake_repository_input.lock}"
+        "L+ /var/lib/git/flake-https.nix 0755 git git - ${./flake_repository_https.nix}"
       ];
     };
 
@@ -2541,6 +2599,79 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
         restart_with_caps(builder, {})
         restart_with_caps(builder2, {})
+
+    banner("Phase 10o: Worker Git credentials fetch a private Git input over HTTPS")
+    https_input = "/root/https-input"
+    https_flake = "/root/https-private"
+    server.succeed(
+        f"mkdir -p {https_input} && printf https-fetched > {https_input}/value"
+        f" && {GIT} -C {https_input} init -q && {GIT} -C {https_input} add value"
+        f" && {GIT} -C {https_input} commit -qm input"
+        f" && {GIT} clone -q --bare {https_input} /srv/git-https/input.git"
+        f" && mkdir -p {https_flake} && cp /var/lib/git/flake-https.nix {https_flake}/flake.nix"
+        f" && {GIT} -C {https_flake} init -q && {GIT} -C {https_flake} add flake.nix"
+        " && chown -R git:git /srv/git-https"
+    )
+    server.fail(f"{CURL} -sf 'https://server/git/input.git/info/refs?service=git-upload-pack'")
+    server.succeed(
+        f"{GIT} config --global credential.helper store"
+        " && printf '%s\\n' 'https://gradient:${gitHttpsPasswordInUrl}@server' > /root/.git-credentials"
+        f" && cd {https_flake} && PATH=${pkgs.git}/bin:$PATH {NIX} --extra-experimental-features 'nix-command flakes' flake lock"
+        f" && {GIT} config --global --unset credential.helper && rm /root/.git-credentials"
+    )
+    https_input_hash = server.succeed(f"{JQ} -rj .nodes.extra.locked.narHash {https_flake}/flake.lock")
+    https_input_base32 = server.succeed(
+        f"{NIX} --extra-experimental-features nix-command hash convert --to nix32 {https_input_hash}"
+    ).strip()
+    https_input_path = server.succeed(
+        f"{NIX}-store --print-fixed-path --recursive sha256 {https_input_base32} source"
+    ).strip()
+    server.succeed(f"{NIX}-store --delete {https_input_path}")
+    https_input_narinfo = https_input_path.removeprefix("/nix/store/").split("-", 1)[0] + ".narinfo"
+    server.fail(f"{CURL} -sf {CACHE}/{https_input_narinfo}")
+    server.succeed(
+        f"{GIT} -C {https_flake} add flake.lock && {GIT} -C {https_flake} commit -qm private"
+        f" && {GIT} clone -q --bare {https_flake} /srv/git-https/private.git && chown -R git:git /srv/git-https"
+    )
+
+    sql("UPDATE project SET managed = false WHERE name = 'project';")
+    server.succeed(
+        f"{CURL} -sf -X PUT -H 'Authorization: Bearer {token}' -H 'Content-Type: application/json' "
+        "-d '{\"host\": \"server\", \"username\": \"gradient\", \"password\": \"${gitHttpsPassword}\"}' "
+        f"{API}/projects/project/git/https-credentials"
+    )
+    sql("UPDATE project SET managed = true WHERE name = 'project';")
+
+    https_since = int(server.succeed("date +%s").strip()) - 5
+    server.succeed(
+        f'{CURL} -sf -X POST -H "Authorization: Bearer {token}" '
+        f'-H "Content-Type: application/json" -d \'{{}}\' {API}/tasks/project/private-https/evaluate'
+    )
+    https_evals = "FROM evaluation e JOIN task t ON t.id = e.task WHERE t.name = 'private-https'"
+    for _ in range(600):
+        status = sql(f"SELECT coalesce(string_agg(e.status::text, ','), \'\') {https_evals};")
+        if status in ("5", "6", "7"):
+            break
+        server.sleep(1)
+    if status != "5":
+        logs = "".join(
+            f"\n{node.name}:\n"
+            + node.succeed(f"journalctl -u {unit} --no-pager --since=@{https_since} | tail -n 80")
+            for node, unit in fleet_units()
+        )
+        raise Exception(f"evaluation of the private HTTPS flake ended with {status!r}: {logs}")
+    server.succeed(f"{CURL} -sf {CACHE}/{https_input_narinfo}")
+    assert any(
+        node.execute(
+            f"journalctl -u {unit} --no-pager --since=@{https_since} | grep -q 'fetching an input'"
+        )[0] == 0
+        for node, unit in fleet_units()
+    ), "no worker fetched the HTTPS input"
+    for node, unit in [(server, "gradient-server"), *fleet_units()]:
+        for searched_password_form in ["${gitHttpsPassword}", "${gitHttpsPasswordInUrl}"]:
+            assert node.execute(
+                f"journalctl -u {unit} --no-pager | grep -qF '{searched_password_form}'"
+            )[0] != 0, f"password for git credentials over HTTPS can appear in journal of {node.name}"
 
     banner("Phase 11: every supervised loop is running; SIGTERM stops the server")
     health = json.loads(api_get(token, "board/health"))["message"]

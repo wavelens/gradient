@@ -473,7 +473,7 @@ impl MessageLoopState {
                 request,
                 ssh_key,
                 ssh_host_keys,
-                https_git_credentials: _,
+                https_git_credentials,
             } => {
                 self.on_fetch_input(InputFetchJob {
                     fetch_id,
@@ -481,6 +481,7 @@ impl MessageLoopState {
                     request,
                     ssh_key,
                     ssh_host_keys,
+                    https_git_credentials,
                 });
             }
             ServerMessage::OpenGuestChannel {
@@ -1307,7 +1308,7 @@ mod tests {
         async fn download(
             &self,
             _request: String,
-            _git_ssh_command: Option<String>,
+            _git_subprocess_environment: Vec<(String, String)>,
             _sink: Arc<dyn gradient_eval::pool::DownloadSink>,
         ) -> Result<String> {
             std::future::pending().await
@@ -1321,7 +1322,7 @@ mod tests {
         async fn download(
             &self,
             _request: String,
-            _git_ssh_command: Option<String>,
+            _git_subprocess_environment: Vec<(String, String)>,
             _sink: Arc<dyn gradient_eval::pool::DownloadSink>,
         ) -> Result<String> {
             Err(anyhow::anyhow!("offline"))

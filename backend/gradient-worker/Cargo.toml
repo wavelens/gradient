@@ -52,6 +52,7 @@ hex                   = { workspace = true }
 libc                  = { workspace = true }
 nix                   = { workspace = true }
 nix-bindings          = { workspace = true, features = ["store"] }
+percent-encoding      = { workspace = true }
 rand                  = { workspace = true }
 reqwest               = { workspace = true }
 rkyv                  = { workspace = true }
@@ -68,6 +69,7 @@ tokio                 = { workspace = true, features = ["macros", "process", "fs
 tokio-tungstenite     = { workspace = true }
 tokio-util            = { workspace = true, features = ["rt", "io-util"] }
 tracing               = { workspace = true }
+url                   = { workspace = true }
 uuid                  = { workspace = true }
 xz2                   = { workspace = true }
 zstd                  = { workspace = true }

@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use git2::ErrorClass;
-use gradient_sources::GitOperationCredentials;
 use gradient_types::RepositoryLocation;
 use gradient_wire::types::JobContext;
 use tokio_util::sync::CancellationToken;
@@ -152,6 +151,7 @@ fn git_failure(error: anyhow::Error) -> BuildError {
 
 #[cfg(test)]
 mod tests {
+    use gradient_sources::GitOperationCredentials;
     use gradient_wire::messages::BuildFailureKind;
 
     use super::*;

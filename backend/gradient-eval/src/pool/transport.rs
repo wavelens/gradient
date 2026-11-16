@@ -476,7 +476,7 @@ impl EvalWorker {
     pub async fn fetch(
         &mut self,
         request: String,
-        git_ssh_command: Option<String>,
+        git_subprocess_environment: Vec<(String, String)>,
         sink: Arc<dyn DownloadSink>,
     ) -> Result<String> {
         *lock(&self.downloads) = Some(sink);
@@ -484,7 +484,7 @@ impl EvalWorker {
             .call(
                 EvalRequest::FetchInput {
                     request,
-                    git_ssh_command,
+                    git_subprocess_environment,
                 },
                 "FetchInput",
                 &RefuseDependencies("an input fetch"),

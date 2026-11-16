@@ -133,7 +133,7 @@ pub enum EvalRequest {
     FetchInput {
         request: String,
         #[serde(default)]
-        git_ssh_command: Option<String>,
+        git_subprocess_environment: Vec<(String, String)>,
     },
     BuildDone {
         #[serde(default)]
@@ -344,12 +344,26 @@ mod tests {
         let req = EvalRequest::FetchInput {
             request: r#"{"builtin":"fetchTree","args":{"type":"github","owner":"o","repo":"r"}}"#
                 .into(),
-            git_ssh_command: Some("ssh -i key".into()),
+            git_subprocess_environment: vec![
+                ("GIT_SSH_COMMAND".into(), "ssh -i key".into()),
+                ("GIT_CONFIG_VALUE_0".into(), String::new()),
+            ],
         };
         let back = decode_request(&encode_request(&req).unwrap()).unwrap();
-        assert!(
-            matches!(back, EvalRequest::FetchInput { ref request, ref git_ssh_command }
-            if request.contains("github") && git_ssh_command.as_deref() == Some("ssh -i key"))
+        let EvalRequest::FetchInput {
+            request,
+            git_subprocess_environment,
+        } = back
+        else {
+            panic!("not a fetch request: {back:?}");
+        };
+        assert!(request.contains("github"));
+        assert_eq!(
+            git_subprocess_environment,
+            [
+                ("GIT_SSH_COMMAND".to_owned(), "ssh -i key".to_owned()),
+                ("GIT_CONFIG_VALUE_0".to_owned(), String::new()),
+            ]
         );
 
         let stats = EvalResponse::Stats {
