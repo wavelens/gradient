@@ -523,7 +523,8 @@ gradient_db::sql! {
                  SUM(p.end_ms - p.start_ms) FILTER (WHERE p.phase = $4 AND p.parent_seq IS NULL) AS fetch_ms,
                  BOOL_OR(p.phase IN ($5, $6)) AS evaluated
           FROM dispatched_job d
-          JOIN dispatched_job_phase p ON p.dispatched_job = d.id
+          JOIN dispatched_job_phase p
+            ON p.dispatched_job = d.id AND p.phase IN ($4, $5, $6)
           WHERE d.kind = $2 AND d.outcome = $3 AND d.dispatched_at >= $1
             AND d.task IS NOT NULL AND d.worker_elapsed_ms IS NOT NULL
           GROUP BY d.id, d.task, d.worker_elapsed_ms
