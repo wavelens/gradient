@@ -583,7 +583,8 @@ impl Shape {
             return;
         }
         self.tasks.remove(at);
-        self.projects.remove(at);
+        let project = self.projects.remove(at).id;
+        self.project_caches.retain(|link| link.project != project);
         for index in self.task_of.iter_mut().filter(|index| **index > at) {
             *index -= 1;
         }

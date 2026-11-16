@@ -71,7 +71,7 @@ impl Scheduler {
             }
         };
 
-        let fetch_key = if needs_secrets && !parsed.store_path_pins_content {
+        let fetch_key = if needs_secrets {
             format!("{}/{}", job.project_id, parsed.fetch_key)
         } else {
             parsed.fetch_key
