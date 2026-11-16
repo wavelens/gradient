@@ -57,4 +57,52 @@ pub struct MetricsArgs {
     /// Seconds between OTLP metric pushes.
     #[arg(default_value = "30")]
     pub otlp_push_interval_secs: NonZeroU64,
+
+    /// OTLP collector endpoint to push traces to. Set it to `null` to disable trace export.
+    pub otlp_traces_endpoint: Option<String>,
+
+    /// The service name that OTLP metrics and traces report.
+    #[arg(default_value = "gradient")]
+    pub otlp_service_name: String,
+
+    /// Ratio of traces to export, from `0.0` (none) to `1.0` (all).
+    #[arg(value_parser = parse_otlp_traces_sample_ratio, default_value = "1.0")]
+    pub otlp_traces_sample_ratio: f64,
+}
+
+fn parse_otlp_traces_sample_ratio(value: &str) -> Result<f64, String> {
+    let ratio = value.parse::<f64>().map_err(|error| error.to_string())?;
+    if (0.0..=1.0).contains(&ratio) {
+        Ok(ratio)
+    } else {
+        Err("Set the sample ratio of traces to a value between 0.0 and 1.0.".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Cli;
+    use clap::{CommandFactory, error::ErrorKind};
+
+    fn parse_ratio(value: &str) -> Result<Option<f64>, ErrorKind> {
+        Cli::command()
+            .mut_args(|arg| arg.env(None))
+            .try_get_matches_from([
+                "gradient-server".to_owned(),
+                format!("--metrics-otlp-traces-sample-ratio={value}"),
+            ])
+            .map(|matches| {
+                matches
+                    .get_one::<f64>("metrics-otlp-traces-sample-ratio")
+                    .copied()
+            })
+            .map_err(|error| error.kind())
+    }
+
+    #[test]
+    fn rejects_metrics_otlp_traces_sample_ratio_out_of_range() {
+        assert_eq!(parse_ratio("1.5"), Err(ErrorKind::ValueValidation));
+        assert_eq!(parse_ratio("-0.1"), Err(ErrorKind::ValueValidation));
+        assert_eq!(parse_ratio("0.25"), Ok(Some(0.25)));
+    }
 }

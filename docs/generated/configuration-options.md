@@ -163,6 +163,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `metrics.labelTopn` | unsigned int | `20` | `GRADIENT_METRICS_LABEL_TOPN` | Maximum distinct label values per rollup dimension, by activity. |
 | `metrics.otlp.endpoint` | null or string | `null` | `GRADIENT_METRICS_OTLP_ENDPOINT` | OTLP collector endpoint to push metrics to. Set it to `null` to disable OTLP export. |
 | `metrics.otlp.pushIntervalSecs` | positive int | `30` | `GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS` | Seconds between OTLP metric pushes. |
+| `metrics.otlp.serviceName` | string | `"gradient"` | `GRADIENT_METRICS_OTLP_SERVICE_NAME` | The service name that OTLP metrics and traces report. |
+| `metrics.otlp.tracesEndpoint` | null or string | `null` | `GRADIENT_METRICS_OTLP_TRACES_ENDPOINT` | OTLP collector endpoint to push traces to. Set it to `null` to disable trace export. |
+| `metrics.otlp.tracesSampleRatio` | float | `1.0` | `GRADIENT_METRICS_OTLP_TRACES_SAMPLE_RATIO` | Ratio of traces to export, from `0.0` (none) to `1.0` (all). |
 | `metrics.retention.rawDays` | unsigned int | `14` | `GRADIENT_METRICS_RETENTION_RAW_DAYS` | Days to keep raw phase and worker samples and the per-minute cache and upstream traffic counters. Set it to `0` to keep them forever. |
 | `metrics.retention.rollupDays` | unsigned int | `400` | `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | Days to keep minute and hour rollups. Day and week rollups stay forever. Set it to `0` to keep every rollup forever. |
 | `metrics.rollupIntervalSecs` | positive int | `60` | `GRADIENT_METRICS_ROLLUP_INTERVAL_SECS` | Seconds between metric rollup passes. |

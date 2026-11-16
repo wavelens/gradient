@@ -1070,6 +1070,36 @@
     "values": []
   },
   {
+    "group": "metrics",
+    "field": "otlp_traces_endpoint",
+    "flag": "metrics-otlp-traces-endpoint",
+    "env": "GRADIENT_METRICS_OTLP_TRACES_ENDPOINT",
+    "type": "Option<String>",
+    "description": "OTLP collector endpoint to push traces to. Set it to `null` to disable trace export.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "otlp_service_name",
+    "flag": "metrics-otlp-service-name",
+    "env": "GRADIENT_METRICS_OTLP_SERVICE_NAME",
+    "type": "String",
+    "description": "The service name that OTLP metrics and traces report.",
+    "default": "gradient",
+    "values": []
+  },
+  {
+    "group": "metrics",
+    "field": "otlp_traces_sample_ratio",
+    "flag": "metrics-otlp-traces-sample-ratio",
+    "env": "GRADIENT_METRICS_OTLP_TRACES_SAMPLE_RATIO",
+    "type": "f64",
+    "description": "Ratio of traces to export, from `0.0` (none) to `1.0` (all).",
+    "default": "1.0",
+    "values": []
+  },
+  {
     "group": "log",
     "field": "level_default",
     "flag": "log-level-default",
