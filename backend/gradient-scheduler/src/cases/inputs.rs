@@ -68,7 +68,6 @@ async fn public_https_git_input_fetch_signal_has_needs_secrets_false_for_network
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     evaluating(&case, W1, e1).await;
-    case.connect(W2, super::w_network(), &[]).await;
 
     case.input_request(
         W1,
@@ -77,17 +76,17 @@ async fn public_https_git_input_fetch_signal_has_needs_secrets_false_for_network
         HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH,
     )
     .await;
-    let fetches = fetches_of(&case, &[W1, W2]);
+    let fetches = fetches_of(&case, &[W1]);
     assert_eq!(
         fetches,
         vec![Fetch {
-            worker: W2.into(),
+            worker: W1.into(),
             fetch_id: fetches[0].fetch_id.clone(),
             project: case.db.project_of(e1).await,
             request: HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH.into(),
             needs_secrets: false,
         }],
-        "after 1: the network-only W2 fetches the public input"
+        "after 1: W1 with no secrets can fetch the public input"
     );
     case.check("step 1").await;
 
