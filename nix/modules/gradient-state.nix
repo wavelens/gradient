@@ -302,11 +302,7 @@
         type = types.ints.positive;
         default = 30;
         description = ''
-          Retain this number of finished evaluations for metrics and history. Active evaluations
-          never block garbage collection and stay outside this count. Always keep the most recent
-          finished evaluation, whatever its result. The remaining slots go first to the most recent
-          completed evaluations, then to the most recent failed or aborted evaluations. Set this to
-          at least 1 and at most {option}`services.gradient.eval.maxKeep`.
+          Keep this many finished evaluations for metrics and history. Active evaluations don't block garbage collection and don't count toward this number. Garbage collection can remove aborted evaluations first, then the oldest evaluations. The newest evaluation and the newest completed evaluation always stay, even beyond this number. Set the option to a value from 1 to {option}`services.gradient.eval.maxKeep`.
         '';
       };
 
