@@ -19,9 +19,7 @@ fn holds_download(job: &JobContext<'_>, instance: &InstanceContext) -> bool {
     let mean_bytes = instance.nar_size_mb.w1h.unwrap_or(0.0) * BYTES_PER_MIB;
     !job.outputs_present
         && slots_full(instance.downloads_in_flight, instance.download_slots)
-        && job
-            .missing_nar_size
-            .is_some_and(|bytes| bytes as f64 > mean_bytes)
+        && job.missing_nar_size as f64 > mean_bytes
 }
 
 fn holds_upload(job: &JobContext<'_>, instance: &InstanceContext) -> bool {
@@ -99,8 +97,8 @@ mod tests {
     fn ctx<'a>(job: &'a ScoredJob<'a>, missing_nar_size: u64) -> JobContext<'a> {
         JobContext {
             job,
-            missing_count: Some(0),
-            missing_nar_size: Some(missing_nar_size),
+            missing_count: 0,
+            missing_nar_size,
             ..Default::default()
         }
     }

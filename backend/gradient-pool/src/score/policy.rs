@@ -7,8 +7,8 @@
 use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::rules::{
-    EstimatedTimeRule, FairShareRule, QosRule, RescoreWaitRule, ReserveFetchWorkersRule,
-    ResourceSaturationRule, TransferLimitRule, WaitTimeRule,
+    EstimatedTimeRule, FairShareRule, QosRule, ReserveFetchWorkersRule, ResourceSaturationRule,
+    TransferLimitRule, WaitTimeRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -125,7 +125,6 @@ fn spec(enabled: bool, rule: Box<dyn ScoreRule>) -> RuleSpec {
 fn simple_table() -> Vec<RuleSpec> {
     vec![
         spec(true, Box::new(EstimatedTimeRule::default())),
-        spec(true, Box::new(RescoreWaitRule::default())),
         spec(true, Box::new(WaitTimeRule::default())),
         spec(true, Box::new(ReserveFetchWorkersRule::default())),
         spec(true, Box::new(TransferLimitRule::default())),
@@ -256,8 +255,8 @@ mod tests {
         let j_fresh = scored_job("x86_64-linux");
         let c_fresh = JobContext {
             job: &j_fresh,
-            missing_count: Some(0),
-            missing_nar_size: Some(0),
+            missing_count: 0,
+            missing_nar_size: 0,
             ..Default::default()
         };
 
@@ -297,8 +296,8 @@ mod tests {
         );
         let on = |missing_count, missing_nar_size| JobContext {
             job: &j,
-            missing_count: Some(missing_count),
-            missing_nar_size: Some(missing_nar_size),
+            missing_count,
+            missing_nar_size,
             ..Default::default()
         };
         let with_cores = |cpu_core_score| WorkerContext {
@@ -342,8 +341,8 @@ mod tests {
         );
         let on = |outputs_present, missing_count, missing_nar_size| JobContext {
             job: &j,
-            missing_count: Some(missing_count),
-            missing_nar_size: Some(missing_nar_size),
+            missing_count,
+            missing_nar_size,
             outputs_present,
             ..Default::default()
         };
@@ -382,8 +381,8 @@ mod tests {
         let j_ready = scored_job("x86_64-linux");
         let c_ready = JobContext {
             job: &j_ready,
-            missing_count: Some(0),
-            missing_nar_size: Some(0),
+            missing_count: 0,
+            missing_nar_size: 0,
             queued_at: n,
             ready_at: n,
             ..Default::default()
@@ -392,8 +391,8 @@ mod tests {
         let j_costly = scored_job("builtin");
         let c_costly = JobContext {
             job: &j_costly,
-            missing_count: Some(5),
-            missing_nar_size: Some(50_000_000),
+            missing_count: 5,
+            missing_nar_size: 50_000_000,
             queued_at: n,
             ready_at: n,
             ..Default::default()
@@ -414,8 +413,8 @@ mod tests {
         let j = scored_job("x86_64-linux");
         let c = JobContext {
             job: &j,
-            missing_count: Some(0),
-            missing_nar_size: Some(0),
+            missing_count: 0,
+            missing_nar_size: 0,
             dependency_count: 2,
             ..Default::default()
         };
@@ -456,7 +455,6 @@ mod tests {
         let expected = [
             "EstimatedTimeRule",
             "QosRule",
-            "RescoreWaitRule",
             "ReserveFetchWorkersRule",
             "ResourceSaturationRule",
             "TransferLimitRule",
@@ -477,8 +475,8 @@ mod tests {
         let j = scored_job("x86_64-linux");
         let waited = |secs| JobContext {
             job: &j,
-            missing_count: Some(0),
-            missing_nar_size: Some(4 << 30),
+            missing_count: 0,
+            missing_nar_size: 4 << 30,
             queued_at: now() - chrono::Duration::seconds(secs),
             ready_at: now() - chrono::Duration::seconds(secs),
             ..Default::default()
@@ -491,23 +489,6 @@ mod tests {
 
         assert!(policy.score(&waited(0), &w, &full) < crate::score::weights::ASSIGN_FLOOR);
         assert!(policy.score(&waited(36_000), &w, &full) >= crate::score::weights::ASSIGN_FLOOR);
-    }
-
-    #[test]
-    fn unmeasured_build_is_vetoed_not_penalized() {
-        let policy = policy_for(gradient_types::ScoringPolicy::Simple);
-        let archs = vec!["x86_64-linux".to_string()];
-        let feats: Vec<String> = vec![];
-        let w = worker_ctx(&archs, &feats);
-        let j = scored_job("x86_64-linux");
-        let held = JobContext {
-            job: &j,
-            ..Default::default()
-        };
-
-        let breakdown = policy.score_detailed(&held, &w, &InstanceContext::default());
-        assert_eq!(breakdown.vetoes, vec!["RescoreWaitRule".to_string()]);
-        assert_eq!(breakdown.rules["RescoreWaitRule"], 0.0);
     }
 
     #[test]

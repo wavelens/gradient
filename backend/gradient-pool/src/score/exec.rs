@@ -47,7 +47,7 @@ pub const CATALOG: [(&str, &str); 5] = [
 #[derive(Clone, Copy, Debug)]
 pub struct ExecCandidate<'a> {
     pub requirement: &'a ExecRequirement,
-    pub missing_nar_size: Option<u64>,
+    pub missing_nar_size: u64,
     pub waited_secs: i64,
     pub rescore_count: u32,
     pub warm_guest_elsewhere: bool,
@@ -88,11 +88,8 @@ fn warm_guest(requirement: &ExecRequirement, worker: &ExecInventory) -> f64 {
     }
 }
 
-fn program_cached(missing_nar_size: Option<u64>) -> f64 {
-    let Some(bytes) = missing_nar_size else {
-        return 0.0;
-    };
-    let transfer_secs = bytes as f64 / (EXEC_PROGRAM_TRANSFER_MBPS * 1_000_000.0);
+fn program_cached(missing_nar_size: u64) -> f64 {
+    let transfer_secs = missing_nar_size as f64 / (EXEC_PROGRAM_TRANSFER_MBPS * 1_000_000.0);
     (EXEC_PROGRAM_TRANSFER_CAP_SECS - transfer_secs).max(0.0)
 }
 
@@ -177,7 +174,7 @@ mod tests {
     fn candidate(requirement: &ExecRequirement) -> ExecCandidate<'_> {
         ExecCandidate {
             requirement,
-            missing_nar_size: None,
+            missing_nar_size: 0,
             waited_secs: 0,
             rescore_count: 0,
             warm_guest_elsewhere: false,
@@ -266,11 +263,11 @@ mod tests {
             )
         };
 
-        assert!(at(Some(0)) > at(Some(5_000_000_000)));
-        assert!(at(Some(5_000_000_000)) > at(Some(500_000_000_000)));
+        assert!(at(0) > at(5_000_000_000));
+        assert!(at(5_000_000_000) > at(500_000_000_000));
         assert_eq!(
-            at(Some(500_000_000_000)),
-            at(None),
+            at(500_000_000_000),
+            at(u64::MAX),
             "the bonus bottoms out at zero"
         );
     }
@@ -321,7 +318,7 @@ mod tests {
     fn every_placement_clears_the_assign_floor() {
         let custom_image = requirement(|r| r.custom_image = true);
         let job = ExecCandidate {
-            missing_nar_size: Some(u64::MAX),
+            missing_nar_size: u64::MAX,
             waited_secs: -5,
             ..candidate(&custom_image)
         };

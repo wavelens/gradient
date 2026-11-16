@@ -159,7 +159,7 @@ impl PendingExecJob {
     pub fn score_on(
         &self,
         worker: Option<&ExecInventory>,
-        missing_nar_size: Option<u64>,
+        missing_nar_size: u64,
         peers: &[ExecPeer],
         now: chrono::NaiveDateTime,
     ) -> ScoreBreakdown {

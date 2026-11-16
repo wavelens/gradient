@@ -11,7 +11,7 @@ pub mod qos;
 pub mod resource;
 pub mod transfer_limit;
 
-pub use builtin::{RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule};
+pub use builtin::{ReserveFetchWorkersRule, WaitTimeRule};
 pub use estimated_time::EstimatedTimeRule;
 pub use fair_share::FairShareRule;
 pub use qos::QosRule;

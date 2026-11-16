@@ -86,8 +86,8 @@ impl EstimateView {
 pub struct JobContextView {
     pub kind: &'static str,
     pub architecture: String,
-    pub missing_count: Option<u32>,
-    pub missing_nar_size: Option<u64>,
+    pub missing_count: u32,
+    pub missing_nar_size: u64,
     pub outputs_present: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub substitute_outputs: Option<u32>,
@@ -231,8 +231,8 @@ mod tests {
         let now = gradient_types::now();
         let ctx = JobContext {
             job: &scored,
-            missing_count: Some(2),
-            missing_nar_size: Some(100),
+            missing_count: 2,
+            missing_nar_size: 100,
             outputs_present: false,
             substitute_outputs: None,
             dependency_count: 3,
