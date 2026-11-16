@@ -50,6 +50,7 @@ The Nix store never uses secret material. Each `*_file` option points to a path 
 |---|---|---|
 | `users.<name>.password_file` | Argon2id hash of the password | `gradient hash > alice-password` |
 | `projects.<name>.private_key_file` | SSH private key for cloning | `ssh-keygen -t ed25519 -N "" -C gradient-acme -f acme-ssh-key` |
+| `projects.<name>.git_https_credentials.*.password_file` | Password or access token for Git over HTTPS | From the Git host |
 | `caches.<name>.signing_key_file` | Nix signing key, base64 only | `nix-store --generate-binary-cache-key main main-key main-key.pub`, then `sed -i 's/^[^:]*://' main-key` |
 | `api_keys.<name>.key_file` | SHA-256 hex digest of the token, without `GRAD` | See [API Key Files](#api-key-files) |
 | `workers.<name>.token_file` | Worker registration token | `openssl rand -base64 48` |

@@ -7,6 +7,7 @@
 mod api_keys;
 mod caches;
 mod git_host_connections;
+mod project_git_https_credentials;
 mod project_secrets;
 mod projects;
 mod roles;

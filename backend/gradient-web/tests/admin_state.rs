@@ -105,6 +105,7 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<gradient_entity::task_action::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project_secret::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_git_https_credential::Model>::new()])
 }
 
 #[tokio::test]

@@ -37,6 +37,8 @@ pub struct StateProject {
     pub private_key_file: String,
     #[serde(default)]
     pub secret_files: BTreeMap<String, String>,
+    #[serde(default)]
+    pub git_https_credentials: Vec<StateHostLoginEntry>,
     pub public: bool,
     #[serde(default)]
     pub hide_build_requests: bool,
@@ -52,6 +54,13 @@ pub struct StateProject {
     pub teams: Vec<StateProjectTeam>,
     #[serde(default)]
     pub owner_team: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateHostLoginEntry {
+    pub host: String,
+    pub username: String,
+    pub password_file: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

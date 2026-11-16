@@ -192,6 +192,13 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             projects = {
               project = {
                 private_key_file = "/etc/gradient/secrets/corp_ssh_key";
+                git_https_credentials = [
+                  {
+                    host = "server";
+                    username = "gradient";
+                    password_file = toString (pkgs.writeText "git-https-password" gitHttpsPassword);
+                  }
+                ];
                 created_by = "admin";
               };
             };
@@ -2633,14 +2640,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"{GIT} -C {https_flake} add flake.lock && {GIT} -C {https_flake} commit -qm private"
         f" && {GIT} clone -q --bare {https_flake} /srv/git-https/private.git && chown -R git:git /srv/git-https"
     )
-
-    sql("UPDATE project SET managed = false WHERE name = 'project';")
-    server.succeed(
-        f"{CURL} -sf -X PUT -H 'Authorization: Bearer {token}' -H 'Content-Type: application/json' "
-        "-d '{\"host\": \"server\", \"username\": \"gradient\", \"password\": \"${gitHttpsPassword}\"}' "
-        f"{API}/projects/project/git/https-credentials"
-    )
-    sql("UPDATE project SET managed = true WHERE name = 'project';")
 
     https_since = int(server.succeed("date +%s").strip()) - 5
     server.succeed(

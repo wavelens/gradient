@@ -23,6 +23,7 @@ gradient-types  = { workspace = true }
 gradient-util   = { workspace = true }
 gradient-db     = { workspace = true }
 gradient-ci     = { workspace = true }
+gradient-sources = { workspace = true }
 
 anyhow        = { workspace = true }
 base64        = { workspace = true }
@@ -42,3 +43,4 @@ ssh-key = { workspace = true }
 
 [dev-dependencies]
 gradient-fixtures = { workspace = true }
+tempfile          = { workspace = true }

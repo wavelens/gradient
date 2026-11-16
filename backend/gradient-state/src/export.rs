@@ -7,8 +7,9 @@
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheProject, StateCacheRoleEntry,
     StateCacheTeam, StateConfiguration, StateFlakeInputOverride, StateGitHostConnection,
-    StateNewProjectGrant, StateProject, StateProjectMemberEntry, StateProjectTeam, StateRole,
-    StateTask, StateTeam, StateTeamMember, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateHostLoginEntry, StateNewProjectGrant, StateProject, StateProjectMemberEntry,
+    StateProjectTeam, StateRole, StateTask, StateTeam, StateTeamMember, StateTrigger,
+    StateUpstream, StateUser, StateWorker,
 };
 use gradient_db::git_host_connections::GitHostConnectionOwnerByDatabaseId;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
@@ -89,6 +90,9 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .filter(gradient_entity::project_secret::Column::Managed.eq(true))
         .all(db)
         .await?;
+    let git_https_credentials = gradient_entity::project_git_https_credential::Entity::find()
+        .all(db)
+        .await?;
 
     let username = id_name_map(users.iter().map(|u| (u.id, u.username.clone())));
     let project_name = id_name_map(projects.iter().map(|o| (o.id, o.name.clone())));
@@ -153,6 +157,15 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             .iter()
             .filter(|s| s.project == o.id)
             .map(|s| (s.name.clone(), String::new()))
+            .collect();
+        project.git_https_credentials = git_https_credentials
+            .iter()
+            .filter(|credential| credential.project == o.id)
+            .map(|credential| StateHostLoginEntry {
+                host: credential.host.clone(),
+                username: credential.username.clone(),
+                password_file: String::new(),
+            })
             .collect();
         config.projects.insert(o.name.clone(), project);
     }
@@ -413,6 +426,7 @@ fn export_project(
         description: opt(&project.description),
         private_key_file: String::new(),
         secret_files: Default::default(),
+        git_https_credentials: Vec::new(),
         public: project.public,
         hide_build_requests: project.hide_build_requests,
         allow_exec_in_build_requests: project.allow_exec_in_build_requests,

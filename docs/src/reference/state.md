@@ -50,6 +50,10 @@ services.gradient.state = {
 | `created_by` | string | - | Name of the user who created the project. |
 | `description` | null or string | `null` | Free-text description of the project. |
 | `display_name` | string | `name` | Name shown for the project in the UI. |
+| `git_https_credentials` | list of submodule | `[ ]` | Credentials for cloning Git repositories over HTTPS. One entry per host. State apply operations delete a credential that is no longer in this list at the next apply. The REST API does not allow creating, changing or deleting credentials for projects managed by declarative state. |
+| `git_https_credentials.*.host` | string | - | A bare hostname with an optional port (for example `github.com` or `git.example.com:8443`). URLs, usernames, paths and IPv6 addresses are invalid. |
+| `git_https_credentials.*.password_file` | string | - | File with a password or access token. Passwords stay encrypted on the server. |
+| `git_https_credentials.*.username` | string | - | The username on the host. Forges that authenticate with a token accept any non-empty name in many cases. Examples include `x-access-token` on GitHub and `oauth2` on GitLab. |
 | `allow_exec_in_build_requests` | bool | `false` | Build requests from `gradient build` and `gradient run` start the exec jobs that match them. The instance and worker switches still apply. |
 | `hide_build_requests` | bool | `false` | Set to `true` to keep the project's automatic `build-request` task out of task listings in the web UI. |
 | `id` | null or string | `null` | UUID of the project. |
