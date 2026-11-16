@@ -21,24 +21,27 @@ use gradient_util::shutdown::Shutdown;
 
 /// Probing is HTTP and must stay out of the graph writer's transaction.
 /// A channel is keeping the network round trip off the one writer to the graph.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ProbeRequests {
-    sender: Option<mpsc::UnboundedSender<Vec<DerivationId>>>,
+    sender: mpsc::UnboundedSender<Vec<DerivationId>>,
     inbox: Arc<Mutex<Option<mpsc::UnboundedReceiver<Vec<DerivationId>>>>>,
     staged: Option<Arc<Mutex<Vec<DerivationId>>>>,
     wake: Arc<Notify>,
 }
 
-impl ProbeRequests {
-    pub fn channel() -> Self {
+impl Default for ProbeRequests {
+    fn default() -> Self {
         let (sender, inbox) = mpsc::unbounded_channel();
         Self {
-            sender: Some(sender),
+            sender,
             inbox: Arc::new(Mutex::new(Some(inbox))),
-            ..Self::default()
+            staged: None,
+            wake: Arc::default(),
         }
     }
+}
 
+impl ProbeRequests {
     /// The probe loop is not optional.
     /// Need is stopping at shared builds the probe has not answered.
     /// Nothing below an entry point is promoted without the loop.
@@ -85,10 +88,8 @@ impl ProbeRequests {
     }
 
     fn deliver(&self, derivations: Vec<DerivationId>) {
-        if let Some(sender) = &self.sender {
-            let _ = sender.send(derivations);
-            self.wake.notify_one();
-        }
+        let _ = self.sender.send(derivations);
+        self.wake.notify_one();
     }
 }
 
@@ -256,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_probe_request_inside_a_transaction_waits_for_the_commit() {
-        let requests = ProbeRequests::channel();
+        let requests = ProbeRequests::default();
         let mut inbox = requests.take_inbox().expect("a fresh channel has one");
         let wake = requests.wake();
         let derivation = DerivationId::now_v7();
@@ -277,7 +278,7 @@ mod tests {
 
     #[test]
     fn a_rolled_back_transaction_asks_the_probe_nothing() {
-        let requests = ProbeRequests::channel();
+        let requests = ProbeRequests::default();
         let mut inbox = requests.take_inbox().expect("a fresh channel has one");
 
         requests.staged().send(vec![DerivationId::now_v7()]);

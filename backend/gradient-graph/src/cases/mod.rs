@@ -30,9 +30,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use gradient_db::DbContext;
 use gradient_db::evaluations::counters::eval_counters;
 use gradient_db::graph::consistency::ConsistencyReport;
-use gradient_db::{DbContext, DbMemory, ProbeRequests};
 use gradient_entity::StorePathMapping;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_dependency::EdgeKind;
@@ -126,19 +126,16 @@ impl Case {
         let declared = shape.declared_statuses();
         let secret = SECRET.with(|(_, path)| path.clone());
         let db = shape.into_database().await;
-        let probe_requests = ProbeRequests::channel();
-        let probe_inbox = probe_requests
+        let ctx = ctx_with_crypt_file(db.connection(), &secret).await;
+        let probe_inbox = ctx
+            .memory
+            .probe_requests
             .take_inbox()
             .expect("a fresh channel has an inbox");
-        let ctx = ctx_with_crypt_file(db.connection(), &secret).await;
         let mut config = (*ctx.config).clone();
         configure(&mut config);
         let ctx = DbContext {
             config: Arc::new(config),
-            memory: DbMemory {
-                probe_requests,
-                ..ctx.memory.clone()
-            },
             store_path_mapping: mapping.unwrap_or_else(|| Arc::clone(&ctx.store_path_mapping)),
             ..ctx
         };
