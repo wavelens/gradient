@@ -256,10 +256,7 @@ pub async fn init_state(
         graph: Graph::new(),
         extensions,
         memory: InstanceMemory {
-            db: DbMemory {
-                probe_requests: gradient_db::ProbeRequests::channel(),
-                ..Default::default()
-            },
+            db: DbMemory::default(),
             last_used_stamps: last_used_stamps(),
             cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
             build_progress: build_progress(),

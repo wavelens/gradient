@@ -13,7 +13,7 @@ use gradient_types::{Cli, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 use sea_orm::DatabaseConnection;
 
-use crate::{DbContext, DbMemory, ProbeRequests, WebDb, WorkerDb};
+use crate::{DbContext, WebDb, WorkerDb};
 
 /// Spawned tasks are holding `DbContext` clones that outlive a plain drop.
 /// `WorkerDb::into_transaction_log` is requiring the builder's handle to be the last one.
@@ -44,22 +44,13 @@ pub(crate) async fn ctx_with_probes(
     tokio::sync::mpsc::UnboundedReceiver<Vec<gradient_types::DerivationId>>,
 ) {
     let dir = std::env::temp_dir().join(format!("gradient-db-{}", uuid::Uuid::now_v7()));
-    let probe_requests = ProbeRequests::channel();
-    let probes = probe_requests
+    let (ctx, pool) = ctx_at(db, &dir).await;
+    let probes = ctx
+        .memory
+        .probe_requests
         .take_inbox()
         .expect("a fresh channel has one");
-    let (ctx, pool) = ctx_at(db, &dir).await;
-    (
-        DbContext {
-            memory: DbMemory {
-                probe_requests,
-                ..ctx.memory.clone()
-            },
-            ..ctx
-        },
-        pool,
-        probes,
-    )
+    (ctx, pool, probes)
 }
 
 pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (DbContext, WorkerDb) {
