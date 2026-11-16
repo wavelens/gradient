@@ -82,6 +82,7 @@ mod tests {
                 .iter()
                 .map(|name| (name.to_string(), format!("/run/secrets/{name}")))
                 .collect::<BTreeMap<_, _>>(),
+            git_https_credentials: Vec::new(),
             public: false,
             hide_build_requests: false,
             allow_exec_in_build_requests: false,

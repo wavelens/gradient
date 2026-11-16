@@ -17,6 +17,7 @@ mod workers;
 
 use crate::config::StateConfiguration;
 use helpers::{EntityLookup, ErrorCollector};
+pub(crate) use projects::invalid_git_host_error_message;
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Validation error in field '{field}': {message}")]

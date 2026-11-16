@@ -57,6 +57,8 @@ pub(super) async fn apply_state_to_database(
     app.apply_projects_without_members(&config.projects, &team_ids)
         .await?;
     app.apply_project_secrets(&config.projects).await?;
+    app.apply_project_git_https_credentials(&config.projects)
+        .await?;
     app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &pending)
         .await?;

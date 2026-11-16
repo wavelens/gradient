@@ -691,6 +691,43 @@ fn state_project_validator_rejects_duplicate_ids() {
 }
 
 #[test]
+fn state_validation_rejects_non_bare_host_and_second_credential_for_same_host() {
+    let json = r#"{
+        "users": {
+            "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+        },
+        "projects": {
+            "acme": {
+                "name": "acme", "display_name": "ACME",
+                "private_key_file": "/dev/null", "public": false, "created_by": "alice",
+                "git_https_credentials": [
+                    { "host": "github.com", "username": "ci", "password_file": "/run/secrets/a" },
+                    { "host": "https://git.example.com/acme", "username": "ci", "password_file": "/run/secrets/b" },
+                    { "host": "GitHub.com", "username": "ci", "password_file": "/run/secrets/c" },
+                    { "host": "git.example.com:8443", "username": " ", "password_file": "" }
+                ]
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+
+    let fields: Vec<String> = errors_of(&cfg)
+        .into_iter()
+        .map(|(field, _)| field)
+        .collect();
+
+    assert_eq!(
+        fields,
+        [
+            "projects.acme.git_https_credentials.1.host",
+            "projects.acme.git_https_credentials.2.host",
+            "projects.acme.git_https_credentials.3.username",
+            "projects.acme.git_https_credentials.3.password_file",
+        ]
+    );
+}
+
+#[test]
 fn state_project_members_validator_accepts_builtin_role() {
     let json = r#"{
         "users": {

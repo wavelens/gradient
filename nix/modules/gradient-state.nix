@@ -165,6 +165,19 @@
         '';
       };
 
+      git_https_credentials = mkOption {
+        type = types.listOf projectHttpsGitCredentialType;
+        default = [ ];
+        example = literalExpression ''
+          [
+            { host = "github.com"; username = "x-access-token"; password_file = "/run/secrets/github-token"; }
+          ]
+        '';
+        description = ''
+          Credentials for cloning Git repositories over HTTPS. One per host. Evaluations, flake inputs and workers use this credential for every HTTPS repository URL on that host. Server processes read each password file as a systemd credential. Those processes store the password in encrypted form. The next state apply deletes all project credentials that are absent from this list.
+        '';
+      };
+
       public = mkOption {
         type = types.bool;
         default = false;
@@ -742,6 +755,25 @@
         description = ''
           Role name: a built-in `Admin`, `Write` or `View`, or a custom role of this cache.
         '';
+      };
+    };
+  };
+
+  projectHttpsGitCredentialType = types.submodule {
+    options = {
+      host = mkOption {
+        type = types.str;
+        example = "git.example.com:8443";
+        description = "Only a hostname with an optional port (for example `github.com` or `git.example.com:8443`). URLs, usernames, paths, and IPv6 addresses are invalid.";
+      };
+      username = mkOption {
+        type = types.str;
+        example = "x-access-token";
+        description = "The username for the host. Forges that authenticate with tokens often accept any non-empty name, such as `x-access-token` on GitHub and `oauth2` on GitLab.";
+      };
+      password_file = mkOption {
+        type = types.str;
+        description = "A file with a password or access token.";
       };
     };
   };

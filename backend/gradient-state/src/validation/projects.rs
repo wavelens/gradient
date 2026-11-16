@@ -5,6 +5,8 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
+use crate::config::StateProject;
+use gradient_types::https_git_url_host::normalize_bare_https_git_host;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
@@ -64,5 +66,41 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             }
             // A missing user is intentionally not an error (issue #94).
         }
+
+        validate_project_https_git_credentials(project, errors);
     }
+}
+
+fn validate_project_https_git_credentials(project: &StateProject, errors: &mut ErrorCollector) {
+    let mut hosts_seen: HashSet<String> = HashSet::new();
+    for (index, credential) in project.git_https_credentials.iter().enumerate() {
+        let field = format!("projects.{}.git_https_credentials.{index}", project.name);
+        let host = &credential.host;
+        match normalize_bare_https_git_host(host).map(|normalized| hosts_seen.insert(normalized)) {
+            Some(false) => errors.push(
+                format!("{field}.host"),
+                format!("Duplicate credentials for host '{host}'"),
+            ),
+            Some(true) => {}
+            None => errors.push(
+                format!("{field}.host"),
+                invalid_git_host_error_message(host),
+            ),
+        }
+        if credential.username.trim().is_empty() {
+            errors.push(format!("{field}.username"), "Username can't be empty");
+        }
+        if credential.password_file.trim().is_empty() {
+            errors.push(
+                format!("{field}.password_file"),
+                "password_file cannot be empty",
+            );
+        }
+    }
+}
+
+pub(crate) fn invalid_git_host_error_message(host: &str) -> String {
+    format!(
+        "Host '{host}' is not a bare hostname with an optional port, like github.com or git.example.com:8443"
+    )
 }

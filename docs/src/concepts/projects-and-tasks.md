@@ -21,6 +21,7 @@ flowchart LR
 
 - **Members and Roles**: Admin, Write, View, or custom roles assembled from single permissions.
 - **SSH Key**: Each project receive one Ed25519 key, generated automatically, for cloning private repositories.
+- **HTTPS Credentials**: A project can store one pair of username and password per Git host for private repositories over HTTPS.
 - **Workers**: Jobs from a project reach workers only when the worker flag on that project enable.
 - **Teams**: A granted [team](teams.md) bring its users with a role, its workers, or both.
 - **Cache Subscriptions**: Build outputs of a project go to every subscribed cache.
@@ -49,6 +50,7 @@ flowchart LR
 | Flake directory | `https://git.example.com/org/repo.git?dir=nix/hosts` |
 
 - **SSH Key**: Both SSH forms use the project SSH key for authentication. Add that key as a deploy key on the Git host.
+- **HTTPS Login**: HTTPS URLs use the saved HTTPS credentials of the project for that host. Evaluation, flake inputs and workers all use them. Declare them in [`git_https_credentials`](../reference/state.md#projectsname) of the declarative state project, or save them through the API.
 - **Port**: A port number alone can follow the host in an `ssh://` URL. A path directly after `host:` can appear in the SCP-like form alone, without `ssh://`.
 - **Local Files**: `file://` URLs don't work.
 - **Flake Directory**: Use `?dir=<rel-dir>` on any URL form to target the flake in that directory. The path can't leave the repository. Other query keys don't work.
