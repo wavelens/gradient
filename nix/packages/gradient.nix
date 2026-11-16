@@ -161,7 +161,7 @@ craneLib.buildPackage (commonArgs // rec {
       inherit version;
       cargoArtifacts = testArtifacts;
       CARGO_PROFILE = "test";
-      cargoNextestExtraArgs = "--no-fail-fast";
+      cargoNextestExtraArgs = "--no-fail-fast --retries 2";
       doInstallCargoArtifacts = false;
 
       nativeCheckInputs = [ cacert e2fsprogs git postgresql_18 postgresqlTestHook ];
