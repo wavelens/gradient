@@ -473,6 +473,7 @@ impl MessageLoopState {
                 request,
                 ssh_key,
                 ssh_host_keys,
+                https_git_credentials: _,
             } => {
                 self.on_fetch_input(InputFetchJob {
                     fetch_id,
@@ -1375,6 +1376,7 @@ mod tests {
                 request: "{}".into(),
                 ssh_key: None,
                 ssh_host_keys: Vec::new(),
+                https_git_credentials: Vec::new(),
             })
             .await
             .unwrap();
@@ -1438,6 +1440,7 @@ mod tests {
                 request: "{}".into(),
                 ssh_key: None,
                 ssh_host_keys: Vec::new(),
+                https_git_credentials: Vec::new(),
             })
             .await
             .unwrap();

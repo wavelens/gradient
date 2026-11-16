@@ -6,6 +6,7 @@
 
 use gradient_db::DbContext;
 use gradient_db::lookup::by_id;
+use gradient_pool::InputRequest;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
 use tracing::{debug, warn};
@@ -13,7 +14,7 @@ use tracing::{debug, warn};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::exec_secrets::server_secret_values;
 use gradient_scheduler::jobs::{Assignment, PendingJob};
-use gradient_wire::messages::{GitServerSshHostKey, ServerMessage};
+use gradient_wire::messages::{GitServerSshHostKey, HttpsGitCredential, ServerMessage};
 use gradient_wire::types::{CredentialKind, Job};
 
 use super::store_paths::{outbound_message, project_mapper};
@@ -31,17 +32,36 @@ pub(super) async fn send_credentials_for_job(
     assignment: &Assignment,
 ) -> Result<(), String> {
     let caps = scheduler.worker_gradient_caps(worker_id).await;
-    if sends_ssh_key(caps.as_ref(), &assignment.job) {
+    let job_secrets =
+        load_exec_job_server_secret_credentials(db, caps.as_ref(), worker_id, assignment).await?;
+    if should_send_project_git_credentials_to_worker(caps.as_ref(), &assignment.job) {
         send_ssh_key_credential(writer, db, assignment.project_id).await;
+        send_project_https_git_credentials(writer, db, assignment.project_id).await;
     }
+    if job_secrets.is_empty() {
+        return Ok(());
+    }
+    let count = job_secrets.len();
+    for credential in job_secrets {
+        let _ = send_server_msg(writer, &credential).await;
+    }
+    debug!(job_id = %assignment.job_id(), count, "job secret credentials sent");
+    Ok(())
+}
 
+async fn load_exec_job_server_secret_credentials(
+    db: &DbContext,
+    caps: Option<&gradient_wire::types::GradientCapabilities>,
+    worker_id: &str,
+    assignment: &Assignment,
+) -> Result<Vec<ServerMessage>, String> {
     let (Job::Exec(exec), PendingJob::Exec(pending)) = (&assignment.job, &assignment.pending)
     else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let names = &exec.requirement.server_secrets;
     if names.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     if !caps.is_some_and(|c| c.secrets) {
         return Err(format!("worker {worker_id} lacks the secrets capability"));
@@ -56,11 +76,7 @@ pub(super) async fn send_credentials_for_job(
     )
     .await
     .map_err(|e| e.to_string())?;
-    for credential in job_secret_credentials(assignment.job_id(), values) {
-        let _ = send_server_msg(writer, &credential).await;
-    }
-    debug!(job_id = %assignment.job_id(), count = names.len(), "job secret credentials sent");
-    Ok(())
+    Ok(job_secret_credentials(assignment.job_id(), values))
 }
 
 fn job_secret_credentials(job_id: &str, values: Vec<(String, SecretBytes)>) -> Vec<ServerMessage> {
@@ -76,7 +92,7 @@ fn job_secret_credentials(job_id: &str, values: Vec<(String, SecretBytes)>) -> V
         .collect()
 }
 
-fn sends_ssh_key(
+fn should_send_project_git_credentials_to_worker(
     caps: Option<&gradient_wire::types::GradientCapabilities>,
     job: &gradient_wire::types::Job,
 ) -> bool {
@@ -101,18 +117,23 @@ pub(super) async fn send_input_fetch(
         return Ok(());
     };
     let caps = scheduler.worker_gradient_caps(worker_id).await;
-    let credentials = if sends_input_ssh_key(caps.as_ref(), &fetch.request) {
+    let request = InputRequest::parse(&fetch.request).ok();
+    let credentials = if sends_input_ssh_key(caps.as_ref(), request.as_ref()) {
         load_project_ssh_key_and_saved_git_server_ssh_host_keys(db, fetch.project).await
     } else {
         None
     };
     let (ssh_key, ssh_host_keys) = credentials.unzip();
+    let https_git_credentials =
+        load_https_git_credentials_for_fetch_input(db, caps.as_ref(), &fetch, request.as_ref())
+            .await;
     let msg = ServerMessage::FetchInput {
         fetch_id: fetch.fetch_id,
         project: fetch.project.to_string(),
         request: fetch.request,
         ssh_key,
         ssh_host_keys: ssh_host_keys.unwrap_or_default(),
+        https_git_credentials,
     };
     send_server_msg(writer, &outbound_message(msg, &mapper)).await
 }
@@ -121,14 +142,69 @@ pub(super) struct InputFetch {
     pub fetch_id: String,
     pub project: ProjectId,
     pub request: String,
+    pub needs_secrets: bool,
 }
 
 fn sends_input_ssh_key(
     caps: Option<&gradient_wire::types::GradientCapabilities>,
-    request: &str,
+    request: Option<&InputRequest>,
 ) -> bool {
-    caps.is_some_and(|c| c.secrets)
-        && gradient_pool::InputRequest::parse(request).is_ok_and(|r| r.needs_secrets)
+    caps.is_some_and(|c| c.secrets) && request.is_some_and(|r| r.needs_secrets)
+}
+
+async fn load_https_git_credentials_for_fetch_input(
+    db: &DbContext,
+    caps: Option<&gradient_wire::types::GradientCapabilities>,
+    fetch: &InputFetch,
+    request: Option<&InputRequest>,
+) -> Vec<HttpsGitCredential> {
+    let host = request
+        .and_then(|r| r.https_git_host.as_deref())
+        .filter(|_| fetch.needs_secrets && caps.is_some_and(|c| c.secrets));
+    let Some(host) = host else {
+        return Vec::new();
+    };
+    let project_id = fetch.project;
+    match gradient_sources::git::load_decrypted_project_git_https_credential(db, project_id, host)
+        .await
+    {
+        Ok(credential) => credential.into_iter().collect(),
+        Err(e) => {
+            warn!(%project_id, %host, error = %e, "The server doesn't pass the project's credentials for HTTPS Git to the input fetch. Loading or decrypting those credentials failed.");
+            Vec::new()
+        }
+    }
+}
+
+async fn send_project_https_git_credentials(
+    writer: &ProtoWriter,
+    db: &DbContext,
+    project_id: ProjectId,
+) {
+    let credentials = match gradient_sources::git::load_project_https_git_credentials(
+        db, project_id,
+    )
+    .await
+    {
+        Ok(credentials) => credentials,
+        Err(e) => {
+            warn!(%project_id, error = %e, "The server failed to load or decrypt the HTTPS git credentials for the project. It doesn't pass those credentials to the worker.");
+            return;
+        }
+    };
+    for credential in credentials {
+        let _ = send_server_msg(
+            writer,
+            &ServerMessage::Credential {
+                kind: CredentialKind::GitHttpsCredential {
+                    host: credential.host,
+                    username: credential.username,
+                },
+                data: credential.password.into_bytes(),
+            },
+        )
+        .await;
+    }
 }
 
 async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_id: ProjectId) {
@@ -230,14 +306,23 @@ mod tests {
             eval: true,
             ..Default::default()
         };
-        assert!(!sends_ssh_key(Some(&network_only), &fetch_job()));
-        assert!(!sends_ssh_key(None, &fetch_job()));
+        assert!(!should_send_project_git_credentials_to_worker(
+            Some(&network_only),
+            &fetch_job()
+        ));
+        assert!(!should_send_project_git_credentials_to_worker(
+            None,
+            &fetch_job()
+        ));
 
         let with_secrets = GradientCapabilities {
             secrets: true,
             ..network_only
         };
-        assert!(sends_ssh_key(Some(&with_secrets), &fetch_job()));
+        assert!(should_send_project_git_credentials_to_worker(
+            Some(&with_secrets),
+            &fetch_job()
+        ));
     }
 
     fn exec_job() -> Job {
@@ -273,9 +358,18 @@ mod tests {
             exec: true,
             ..Default::default()
         };
-        assert!(sends_ssh_key(Some(&with_secrets), &exec_job()));
-        assert!(!sends_ssh_key(Some(&without), &exec_job()));
-        assert!(!sends_ssh_key(None, &exec_job()));
+        assert!(should_send_project_git_credentials_to_worker(
+            Some(&with_secrets),
+            &exec_job()
+        ));
+        assert!(!should_send_project_git_credentials_to_worker(
+            Some(&without),
+            &exec_job()
+        ));
+        assert!(!should_send_project_git_credentials_to_worker(
+            None,
+            &exec_job()
+        ));
     }
 
     #[test]
@@ -330,9 +424,100 @@ mod tests {
             ..network_only
         };
 
-        assert!(!sends_input_ssh_key(Some(&network_only), ssh));
-        assert!(!sends_input_ssh_key(None, ssh));
-        assert!(!sends_input_ssh_key(Some(&with_secrets), https));
-        assert!(sends_input_ssh_key(Some(&with_secrets), ssh));
+        let (ssh, https) = (
+            InputRequest::parse(ssh).ok(),
+            InputRequest::parse(https).ok(),
+        );
+
+        assert!(!sends_input_ssh_key(Some(&network_only), ssh.as_ref()));
+        assert!(!sends_input_ssh_key(None, ssh.as_ref()));
+        assert!(!sends_input_ssh_key(Some(&with_secrets), https.as_ref()));
+        assert!(!sends_input_ssh_key(Some(&with_secrets), None));
+        assert!(sends_input_ssh_key(Some(&with_secrets), ssh.as_ref()));
+    }
+
+    #[tokio::test]
+    async fn input_fetch_gets_https_git_credential_only_when_needs_secrets_worker_capability_and_host_match()
+     {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        gradient_db::rows::insert::<EUser, _>(&conn, gradient_fixtures::rows::user())
+            .await
+            .unwrap();
+        let project =
+            gradient_db::rows::insert::<EProject, _>(&conn, gradient_fixtures::rows::project())
+                .await
+                .unwrap()
+                .id;
+        let (_secret, crypt_file) = gradient_graph::testing::secret_file();
+        let encrypted = gradient_sources::encrypt_secret(&crypt_file, "ghp-secret").unwrap();
+        gradient_db::project_git_https_credentials::upsert(
+            &conn,
+            project,
+            "github.com",
+            "x-access-token",
+            encrypted,
+            None,
+        )
+        .await
+        .unwrap();
+        let state = gradient_test_support::state::TestState::new()
+            .worker_db(conn)
+            .cli(move |cli| cli.secrets.crypt_file = crypt_file)
+            .build();
+        let ctx = state.db();
+        let with_secrets = GradientCapabilities {
+            network: true,
+            secrets: true,
+            ..Default::default()
+        };
+        let network_only = GradientCapabilities {
+            network: true,
+            ..Default::default()
+        };
+        let credentials = async |caps: Option<&GradientCapabilities>,
+                                 needs_secrets: bool,
+                                 url: &str| {
+            let fetch = InputFetch {
+                fetch_id: "f1".into(),
+                project,
+                request: format!(
+                    r#"{{"builtin":"fetchTree","args":{{"type":"git","url":"{url}"}}}}"#
+                ),
+                needs_secrets,
+            };
+            let request = InputRequest::parse(&fetch.request).ok();
+            load_https_git_credentials_for_fetch_input(&ctx, caps, &fetch, request.as_ref()).await
+        };
+
+        assert_eq!(
+            credentials(Some(&with_secrets), true, "git+https://github.com/o/r").await,
+            vec![HttpsGitCredential {
+                host: "github.com".into(),
+                username: "x-access-token".into(),
+                password: "ghp-secret".into(),
+            }]
+        );
+        assert!(
+            credentials(Some(&with_secrets), false, "https://github.com/o/r")
+                .await
+                .is_empty()
+        );
+        assert!(
+            credentials(Some(&with_secrets), true, "https://gitlab.com/o/r")
+                .await
+                .is_empty()
+        );
+        assert!(
+            credentials(Some(&network_only), true, "https://github.com/o/r")
+                .await
+                .is_empty()
+        );
+        assert!(
+            credentials(None, true, "https://github.com/o/r")
+                .await
+                .is_empty()
+        );
+        db.finish().await;
     }
 }

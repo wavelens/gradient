@@ -51,7 +51,7 @@ server
 8:StartCluster{attempt:str,roster:seq<{role:str,index:u32,worker:str,zone:opt<str>,endpoint:opt<str>}>}
 9:ClusterSignal{attempt:str,from:{role:str,index:u32},payload:bytes}
 10:AbortCluster{attempt:str,reason:str}
-11:Credential{kind:[0:SshKey{},1:JobSecret{job_id:str,name:str},2:SshHostKeys{keys:seq<{host:str,port:u16,public_key:str}>}],data:bytes}
+11:Credential{kind:[0:SshKey{},1:JobSecret{job_id:str,name:str},2:SshHostKeys{keys:seq<{host:str,port:u16,public_key:str}>},3:GitHttpsCredential{host:str,username:str}],data:bytes}
 12:NarPush{job_id:str,store_path:str,data:bytes,offset:u64,is_final:bool}
 13:NarUnavailable{job_id:str,store_path:str,reason:str}
 14:NarAbort{job_id:str,store_path:str,reason:str}
@@ -66,7 +66,7 @@ server
 23:Authenticate{worker_id:str,tokens:seq<(str,str)>}
 24:ImportResult{job_id:str,request_id:str,outcome:[0:Completed{realisations:seq<{drv_path:str,output:str,path:str}>},1:Failed{drv_path:str,build_id:str,status:str},2:Unknown{drv_path:str}]}
 25:InputResult{job_id:str,request_id:str,outcome:[0:Fetched{response:str},1:Failed{message:str},2:Unplaced{message:str}]}
-26:FetchInput{fetch_id:str,project:str,request:str,ssh_key:opt<str>,ssh_host_keys:seq<{host:str,port:u16,public_key:str}>}
+26:FetchInput{fetch_id:str,project:str,request:str,ssh_key:opt<str>,ssh_host_keys:seq<{host:str,port:u16,public_key:str}>,https_git_credentials:seq<{host:str,username:str,password:str}>}
 27:InputProgress{job_id:str,request_id:str,bytes_done:u64,bytes_total:opt<u64>}
 28:EvalShardReply{job_id:str,outcome:[0:Wait{retry_after_ms:u32},1:Source{store_path:str,fingerprint:str},2:Plan{},3:Shard{{id:str,pattern:str,children:opt<seq<str>>,drv_paths:seq<str>}},4:Finished{}]}
 29:PreWarmVms{count:u32,sizes:seq<{size:{cpus:u32,memory_mb:u64,disk_mb:u64},count:u32}>}

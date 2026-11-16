@@ -15,9 +15,9 @@ pub use crate::types::{
     EvalProgress, EvalSetCost, EvalShard, EvalShardOutcome, EvalShardSpec, EvalStatsReport,
     EvalSubtreeCost, FinishedShard, FlakeInputOverride, FlakeInputSourceWire, FlakeJob,
     FlakeOutputNode, FlakeSource, FlakeStep, GitServerSshHostKey, GitSshHostKeyObservation,
-    GradientCapabilities, GuestChannelKind, InputFetch, InputFetchState, InputUpdateSpec, Job,
-    JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, Realisation, RequiredPath,
-    RunningAssignment, VmStateKind, WorkerReportAssignment,
+    GradientCapabilities, GuestChannelKind, HttpsGitCredential, InputFetch, InputFetchState,
+    InputUpdateSpec, Job, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, Realisation,
+    RequiredPath, RunningAssignment, VmStateKind, WorkerReportAssignment,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,

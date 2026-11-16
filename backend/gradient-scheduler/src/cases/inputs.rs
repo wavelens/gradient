@@ -22,6 +22,7 @@ const W4: &str = "w4";
 
 const SSH_REQUEST: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.invalid/input.git","rev":"abc"},"storePath":"/nix/store/aaaa-input"}"#;
 const SSH_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.invalid/input.git","ref":"main"}}"#;
+const HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+https://example.invalid/input.git","ref":"main"}}"#;
 const FETCHED: &str = r#"{"storePath":"/nix/store/aaaa-input"}"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,7 @@ struct Fetch {
     fetch_id: String,
     project: ProjectId,
     request: String,
+    needs_secrets: bool,
 }
 
 #[tokio::test]
@@ -50,10 +52,86 @@ async fn i01_an_input_request_goes_to_a_network_and_secrets_worker() {
             fetch_id: fetches[0].fetch_id.clone(),
             project: case.db.project_of(e1).await,
             request: SSH_REQUEST.into(),
+            needs_secrets: true,
         }],
         "after 1: only W3 gets FetchInput"
     );
     assert_eq!(case.input_waits(), 1, "after 1: one input wait");
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn public_https_git_input_fetch_signal_has_needs_secrets_false_for_network_only_worker() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1)).await;
+    evaluating(&case, W1, e1).await;
+    case.connect(W2, super::w_network(), &[]).await;
+
+    case.input_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH,
+    )
+    .await;
+    let fetches = fetches_of(&case, &[W1, W2]);
+    assert_eq!(
+        fetches,
+        vec![Fetch {
+            worker: W2.into(),
+            fetch_id: fetches[0].fetch_id.clone(),
+            project: case.db.project_of(e1).await,
+            request: HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH.into(),
+            needs_secrets: false,
+        }],
+        "after 1: the network-only W2 fetches the public input"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn https_git_input_with_stored_https_credential_is_assigned_only_to_secrets_capable_worker_and_marked_needs_secrets()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1)).await;
+    let project = case.db.project_of(e1).await;
+    gradient_db::project_git_https_credentials::upsert(
+        &case.db.connection(),
+        project,
+        "example.invalid",
+        "x-access-token",
+        "encrypted".into(),
+        None,
+    )
+    .await
+    .unwrap();
+    evaluating(&case, W1, e1).await;
+    case.connect(W2, super::w_network(), &[]).await;
+    case.connect(W3, w_fetch(), &[]).await;
+
+    case.input_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH,
+    )
+    .await;
+    let fetches = fetches_of(&case, &[W1, W2, W3]);
+    assert_eq!(
+        fetches,
+        vec![Fetch {
+            worker: W3.into(),
+            fetch_id: fetches[0].fetch_id.clone(),
+            project,
+            request: HTTPS_GIT_FETCH_TREE_REQUEST_WITHOUT_STORE_PATH.into(),
+            needs_secrets: true,
+        }],
+        "after 1: only the secrets worker W3 gets FetchInput"
+    );
     case.check("step 1").await;
 
     case.finish().await;
@@ -608,11 +686,13 @@ fn fetches_of(case: &SchedulerCase, workers: &[&str]) -> Vec<Fetch> {
                     fetch_id,
                     project,
                     request,
+                    needs_secrets,
                 } => fetches.push(Fetch {
                     worker: (*worker).to_owned(),
                     fetch_id,
                     project,
                     request,
+                    needs_secrets,
                 }),
                 other => panic!("{worker} got {other:?} besides FetchInput"),
             }

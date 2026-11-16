@@ -27,7 +27,8 @@ use tracing::instrument;
 pub use checkout::{checkout_commit, checkout_commit_into};
 pub use commit_info::HeadCommit;
 pub use context::{
-    load_project_git_credentials_for_repository_url, repository_url_may_need_stored_credentials,
+    load_decrypted_project_git_https_credential, load_project_git_credentials_for_repository_url,
+    load_project_https_git_credentials, repository_url_may_need_stored_credentials,
     save_observed_project_ssh_host_keys,
 };
 pub use git_credentials::{GitOperationCredentials, HttpsGitCredential};
