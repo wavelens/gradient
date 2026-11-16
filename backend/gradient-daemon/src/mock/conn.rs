@@ -463,7 +463,10 @@ impl DaemonStore for MockConn {
     fn query_all_valid_paths(
         &mut self,
     ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + '_ {
-        ready(Err(self.unimplemented(Operation::QueryAllValidPaths))).empty_logs()
+        let result = self.timed("query_all_valid_paths", vec![], || {
+            self.state.store.all_valid_paths()
+        });
+        ready(result).empty_logs()
     }
 
     fn query_referrers<'a>(
@@ -802,6 +805,24 @@ mod tests {
             backend.0.journal.violations()[0],
             Violation::Unimplemented { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn add_two_paths_forget_one_then_query_all_valid_paths() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let (backend, mut client, _server) = connect(&dir).await;
+        let (kept, kept_nar) = item('1', "kept", &[]);
+        let (dropped, dropped_nar) = item('2', "dropped", &[]);
+        for (info, nar) in [(&kept, &kept_nar), (&dropped, &dropped_nar)] {
+            client
+                .add_to_store_nar(info, &nar[..], false, true)
+                .await
+                .expect("add");
+        }
+        backend.0.store.forget(&dropped.path).await.expect("forget");
+        let all = client.query_all_valid_paths().await.expect("all");
+        assert_eq!(all, StorePathSet::from([kept.path.clone()]));
+        assert!(backend.0.journal.violations().is_empty());
     }
 
     #[tokio::test]

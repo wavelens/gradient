@@ -211,6 +211,23 @@ impl MockStore {
             .collect()
     }
 
+    pub fn all_valid_paths(&self) -> anyhow::Result<StorePathSet> {
+        let mut valid: StorePathSet = match &self.base {
+            Some(base) => base
+                .lock()
+                .expect("base db")
+                .query_all_valid_paths(&self.store_dir)?
+                .into_iter()
+                .collect(),
+            None => StorePathSet::new(),
+        };
+        for forgotten in self.forgotten.read().expect("forgotten").iter() {
+            valid.remove(forgotten);
+        }
+        valid.extend(self.overlay.read().expect("overlay").keys().cloned());
+        Ok(valid)
+    }
+
     pub fn path_from_hash_part(&self, hash: &str) -> anyhow::Result<Option<StorePath>> {
         let overlay = self.overlay.read().expect("overlay");
         Ok(overlay
