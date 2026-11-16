@@ -260,11 +260,11 @@ fn answer_requests<R: Read, W: Write>(
             }),
             EvalRequest::FetchInput {
                 request,
-                git_ssh_command,
+                git_subprocess_environment,
             } => with_evaluator(evaluator, |ev| {
                 or_err(
                     ev.set_restrict_eval_and_allowed_uris(None)
-                        .and_then(|()| ev.fetch_tree(&request, git_ssh_command.as_deref()))
+                        .and_then(|()| ev.fetch_tree(&request, &git_subprocess_environment))
                         .map(|response| EvalResponse::FetchOk { response }),
                 )
             }),

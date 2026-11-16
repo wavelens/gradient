@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -19,7 +19,8 @@ use gradient_wire::messages::{
     WorkerReportAssignment,
 };
 use gradient_wire::traits::JobReporter;
-use gradient_wire::types::InputOutcome;
+use gradient_wire::types::{HttpsGitCredential, InputOutcome};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
@@ -35,18 +36,25 @@ pub struct InputFetchJob {
     pub request: String,
     pub ssh_key: Option<SecretString>,
     pub ssh_host_keys: Vec<GitServerSshHostKey>,
+    pub https_git_credentials: Vec<HttpsGitCredential>,
 }
 
 const NIX_FETCH_SSH_PRIVATE_KEY_FILE_NAME: &str = "key";
 const FETCH_SSH_TEMPORARY_KNOWN_HOSTS_FILE_NAME: &str = "known_hosts";
 const NIX_FETCH_SSH_LOG_FILE_NAME: &str = "ssh.log";
+const NIX_FETCH_GIT_CREDENTIAL_STORE_FILE_NAME: &str = "git-credentials";
+
+struct NixInputFetchGitCredentials {
+    directory: tempfile::TempDir,
+    environment: Vec<(String, String)>,
+}
 
 #[async_trait]
 pub(crate) trait InputDownloader: Send + Sync {
     async fn download(
         &self,
         request: String,
-        git_ssh_command: Option<String>,
+        git_subprocess_environment: Vec<(String, String)>,
         sink: Arc<dyn DownloadSink>,
     ) -> Result<String>;
 }
@@ -70,11 +78,13 @@ impl InputDownloader for SubprocessDownloader {
     async fn download(
         &self,
         request: String,
-        git_ssh_command: Option<String>,
+        git_subprocess_environment: Vec<(String, String)>,
         sink: Arc<dyn DownloadSink>,
     ) -> Result<String> {
         let mut worker = EvalWorker::spawn_for_fetch(&self.0).await?;
-        let fetched = worker.fetch(request, git_ssh_command, sink).await;
+        let fetched = worker
+            .fetch(request, git_subprocess_environment, sink)
+            .await;
         worker.shutdown().await;
         fetched
     }
@@ -144,22 +154,20 @@ async fn fetch_and_push(
     report: &dyn FetchReport,
     binpath_ssh: &str,
 ) -> Result<String> {
-    let ssh = write_known_hosts_and_build_nix_fetch_ssh_command(
-        job.ssh_key.as_ref().map(SecretString::expose),
-        &job.ssh_host_keys,
-        binpath_ssh,
-    )
-    .await?;
-    let git_ssh_command = ssh.as_ref().map(|(_, command)| command.clone());
+    let credentials = create_private_input_fetch_credentials_environment(job, binpath_ssh).await?;
+    let environment = credentials
+        .as_ref()
+        .map(|credentials| credentials.environment.clone())
+        .unwrap_or_default();
     let (transfers, totals) = Transfers::new();
-    let download = downloader.download(job.request.clone(), git_ssh_command, transfers);
+    let download = downloader.download(job.request.clone(), environment, transfers);
     let downloaded = tokio::select! {
         downloaded = download => downloaded,
         never = report_progress(totals, report) => match never {},
     };
-    if let Some((dir, _)) = &ssh {
+    if let Some(credentials) = &credentials {
         let observations = read_host_key_observations_from_temp_files_after_nix_input_fetch(
-            dir.path(),
+            credentials.directory.path(),
             &job.ssh_host_keys,
         )
         .await;
@@ -195,32 +203,126 @@ fn checked_store_path(request: &str, response: &str) -> Result<String> {
     Ok(fetched.to_owned())
 }
 
-async fn write_known_hosts_and_build_nix_fetch_ssh_command(
-    ssh_key: Option<&str>,
-    host_keys: &[GitServerSshHostKey],
+async fn create_private_input_fetch_credentials_environment(
+    job: &InputFetchJob,
     binpath_ssh: &str,
-) -> Result<Option<(tempfile::TempDir, String)>> {
-    let Some(key) = ssh_key else {
+) -> Result<Option<NixInputFetchGitCredentials>> {
+    if job.ssh_key.is_none() && job.https_git_credentials.is_empty() {
         return Ok(None);
-    };
-    let dir =
-        tempfile::tempdir().context("Create a temporary directory for SSH keys and host keys")?;
-    let key_path = dir.path().join(NIX_FETCH_SSH_PRIVATE_KEY_FILE_NAME);
-    let known_hosts = dir.path().join(FETCH_SSH_TEMPORARY_KNOWN_HOSTS_FILE_NAME);
-    let log = dir.path().join(NIX_FETCH_SSH_LOG_FILE_NAME);
+    }
+    let directory = tempfile::tempdir()
+        .context("Create a temporary directory for SSH keys, host keys and git credentials")?;
+    let mut environment = Vec::new();
+    if let Some(key) = &job.ssh_key {
+        let command = write_known_hosts_and_build_nix_fetch_ssh_command(
+            directory.path(),
+            key.expose(),
+            &job.ssh_host_keys,
+            binpath_ssh,
+        )
+        .await?;
+        environment.push(("GIT_SSH_COMMAND".to_owned(), command));
+    }
+    if !job.https_git_credentials.is_empty() {
+        let store = write_git_credential_store_file_to_private_dir(
+            directory.path(),
+            &job.https_git_credentials,
+        )
+        .await?;
+        environment.extend(git_credential_store_environment_variables(&store));
+    }
+    Ok(Some(NixInputFetchGitCredentials {
+        directory,
+        environment,
+    }))
+}
 
-    let mut key_file = tokio::fs::OpenOptions::new()
+async fn create_new_owner_only_file_with_secret(path: &Path, secret: &str) -> std::io::Result<()> {
+    let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(&key_path)
+        .open(path)
+        .await?;
+    file.write_all(secret.as_bytes()).await?;
+    file.flush().await
+}
+
+async fn write_git_credential_store_file_to_private_dir(
+    dir: &Path,
+    credentials: &[HttpsGitCredential],
+) -> Result<PathBuf> {
+    let lines = credentials
+        .iter()
+        .map(format_https_git_credential_store_lines)
+        .collect::<Result<String>>()?;
+    let path = dir.join(NIX_FETCH_GIT_CREDENTIAL_STORE_FILE_NAME);
+    create_new_owner_only_file_with_secret(&path, &lines)
+        .await
+        .context("Write the git-credential-store file")?;
+    Ok(path)
+}
+
+fn format_https_git_credential_store_lines(credential: &HttpsGitCredential) -> Result<String> {
+    let host = &credential.host;
+    let invalid =
+        || anyhow::anyhow!("Host {host} in the git credentials for HTTPS is not a valid URL host.");
+    let url = url::Url::parse(&format!("https://{host}")).map_err(|_| invalid())?;
+    let host_name = url.host_str().ok_or_else(invalid)?;
+    let credential_store_host_spellings = match url.port() {
+        Some(port) => vec![format!("{host_name}:{port}")],
+        None => vec![host_name.to_owned(), format!("{host_name}:443")],
+    };
+    let encoded_user_and_password = format!(
+        "{}:{}",
+        utf8_percent_encode(&credential.username, NON_ALPHANUMERIC),
+        utf8_percent_encode(credential.password.expose(), NON_ALPHANUMERIC)
+    );
+    Ok(credential_store_host_spellings
+        .iter()
+        .map(|spelling| format!("https://{encoded_user_and_password}@{spelling}\n"))
+        .collect())
+}
+
+fn git_credential_store_environment_variables(store: &Path) -> Vec<(String, String)> {
+    [
+        ("GIT_CONFIG_COUNT", "3".to_owned()),
+        ("GIT_CONFIG_KEY_0", "credential.helper".to_owned()),
+        ("GIT_CONFIG_VALUE_0", String::new()),
+        ("GIT_CONFIG_KEY_1", "credential.helper".to_owned()),
+        (
+            "GIT_CONFIG_VALUE_1",
+            format!(
+                "store --file={}",
+                quote_for_posix_shell(&store.to_string_lossy())
+            ),
+        ),
+        ("GIT_CONFIG_KEY_2", "credential.useHttpPath".to_owned()),
+        ("GIT_CONFIG_VALUE_2", "false".to_owned()),
+        ("GIT_TERMINAL_PROMPT", "0".to_owned()),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_owned(), value))
+    .collect()
+}
+
+fn quote_for_posix_shell(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+async fn write_known_hosts_and_build_nix_fetch_ssh_command(
+    dir: &Path,
+    key: &str,
+    host_keys: &[GitServerSshHostKey],
+    binpath_ssh: &str,
+) -> Result<String> {
+    let key_path = dir.join(NIX_FETCH_SSH_PRIVATE_KEY_FILE_NAME);
+    let known_hosts = dir.join(FETCH_SSH_TEMPORARY_KNOWN_HOSTS_FILE_NAME);
+    let log = dir.join(NIX_FETCH_SSH_LOG_FILE_NAME);
+
+    create_new_owner_only_file_with_secret(&key_path, key)
         .await
         .context("Write SSH key file")?;
-    key_file
-        .write_all(key.as_bytes())
-        .await
-        .context("Write SSH key file")?;
-    key_file.flush().await.context("Write SSH key file")?;
     let lines: String = host_keys
         .iter()
         .map(|key| format_known_hosts_line_for_saved_git_server_host_key(key) + "\n")
@@ -235,7 +337,7 @@ async fn write_known_hosts_and_build_nix_fetch_ssh_command(
         known_hosts.display(),
         log.display()
     );
-    Ok(Some((dir, ssh_command)))
+    Ok(ssh_command)
 }
 
 fn format_known_hosts_line_for_saved_git_server_host_key(key: &GitServerSshHostKey) -> String {
@@ -372,11 +474,22 @@ mod tests {
         transfers: Vec<(u64, u64, u64)>,
         known_hosts_line_to_append: Option<String>,
         ssh_log_text_before_host_key_failure: Option<String>,
-        seen: Mutex<Vec<FakeDownloaderSawSshCommandPrivateKeyAndKnownHostsContentsForOneDownload>>,
+        seen: Mutex<Vec<FakeInputDownloaderDownloadRecord>>,
     }
 
-    type FakeDownloaderSawSshCommandPrivateKeyAndKnownHostsContentsForOneDownload =
-        (Option<String>, Option<String>, Option<String>);
+    #[derive(Debug, Default, PartialEq)]
+    struct FakeInputDownloaderDownloadRecord {
+        environment: Vec<(String, String)>,
+        private_key: Option<String>,
+        known_hosts: Option<String>,
+        git_credential_store: Option<(String, u32)>,
+    }
+
+    fn read_owner_only_file_with_mode(path: &str) -> Option<(String, u32)> {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path).ok()?.permissions().mode() & 0o777;
+        Some((std::fs::read_to_string(path).ok()?, mode))
+    }
 
     fn value_after_option_in_ssh_command<'a>(command: &'a str, option: &str) -> Option<&'a str> {
         let mut words = command.split_whitespace();
@@ -400,16 +513,24 @@ mod tests {
         async fn download(
             &self,
             _request: String,
-            git_ssh_command: Option<String>,
+            environment: Vec<(String, String)>,
             sink: Arc<dyn DownloadSink>,
         ) -> Result<String> {
+            let variable = |name: &str| {
+                environment
+                    .iter()
+                    .find(|(variable, _)| variable == name)
+                    .map(|(_, value)| value.as_str())
+            };
             let path = |option| {
-                git_ssh_command
-                    .as_deref()
+                variable("GIT_SSH_COMMAND")
                     .and_then(|command| value_after_option_in_ssh_command(command, option))
             };
             let read = |option| path(option).and_then(|p| std::fs::read_to_string(p).ok());
-            let (key, known_hosts) = (read("-i"), read("UserKnownHostsFile="));
+            let (private_key, known_hosts) = (read("-i"), read("UserKnownHostsFile="));
+            let git_credential_store = variable("GIT_CONFIG_VALUE_1")
+                .and_then(|helper| helper.strip_prefix("store --file="))
+                .and_then(read_owner_only_file_with_mode);
             if let (Some(line), Some(known_hosts)) = (
                 &self.known_hosts_line_to_append,
                 path("UserKnownHostsFile="),
@@ -423,9 +544,12 @@ mod tests {
                 std::fs::write(log, text)?;
                 anyhow::bail!("Host key verification failed.");
             }
-            self.seen
-                .lock()
-                .push((git_ssh_command.clone(), key, known_hosts));
+            self.seen.lock().push(FakeInputDownloaderDownloadRecord {
+                environment: environment.clone(),
+                private_key,
+                known_hosts,
+                git_credential_store,
+            });
             for &(id, done, expected) in &self.transfers {
                 sink.transfer(id, done, expected);
             }
@@ -481,6 +605,7 @@ mod tests {
                     public_key: "ssh-ed25519 AAAAsaved22".into(),
                 },
             ],
+            https_git_credentials: Vec::new(),
         }
     }
 
@@ -528,8 +653,16 @@ mod tests {
         fetch_input(job(None), &downloader, &report, "/bin/ssh").await;
 
         let seen = downloader.seen.lock();
-        let (command, key, known_hosts) = &seen[0];
-        let command = command.as_deref().unwrap_or_default();
+        let FakeInputDownloaderDownloadRecord {
+            environment,
+            private_key,
+            known_hosts,
+            git_credential_store,
+        } = &seen[0];
+        let [(name, command)] = environment.as_slice() else {
+            panic!("only the ssh command: {environment:?}");
+        };
+        assert_eq!(name, "GIT_SSH_COMMAND");
         assert!(command.starts_with("/bin/ssh -i "), "{command}");
         for option in [
             "-o UserKnownHostsFile=",
@@ -538,15 +671,102 @@ mod tests {
         ] {
             assert!(command.contains(option), "{option} in {command}");
         }
-        assert_eq!(key.as_deref(), Some("PRIVATE KEY"));
+        assert_eq!(private_key.as_deref(), Some("PRIVATE KEY"));
         assert_eq!(
             known_hosts.as_deref(),
             Some(
                 "[git.example.org]:2222 ssh-ed25519 AAAAsaved2222\ngit.elektrat.de ssh-ed25519 AAAAsaved22\n"
             )
         );
-        assert_eq!(seen[1], (None, None, None), "no key, no ssh command");
+        assert_eq!(*git_credential_store, None);
+        assert_eq!(
+            seen[1],
+            FakeInputDownloaderDownloadRecord::default(),
+            "no key, no ssh command"
+        );
         assert!(report.received_host_key_observations.lock().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fetch_with_https_credential_uses_temporary_credential_store_file_and_without_credentials_sets_no_env_vars()
+     {
+        let downloader = FakeDownloader::answering(FETCHED);
+        let report = RecordedReport::default();
+        let with_credential = InputFetchJob {
+            https_git_credentials: vec![
+                HttpsGitCredential {
+                    host: "git.example.org:8443".into(),
+                    username: "ci bot".into(),
+                    password: SecretString::new("p@ss:w/rd%41".to_owned()),
+                },
+                HttpsGitCredential {
+                    host: "git.elektrat.de".into(),
+                    username: "deploy".into(),
+                    password: SecretString::new("token".to_owned()),
+                },
+            ],
+            ..job(None)
+        };
+
+        fetch_input(with_credential, &downloader, &report, "ssh").await;
+        fetch_input(job(None), &downloader, &report, "ssh").await;
+
+        let seen = downloader.seen.lock();
+        let environment = &seen[0].environment;
+        let helper = environment
+            .get(4)
+            .map(|(_, value)| value.as_str())
+            .unwrap_or_default();
+        let store = helper
+            .strip_prefix("store --file='")
+            .and_then(|path| path.strip_suffix('\''))
+            .unwrap_or_default();
+        let expected: Vec<(String, String)> = [
+            ("GIT_CONFIG_COUNT", "3"),
+            ("GIT_CONFIG_KEY_0", "credential.helper"),
+            ("GIT_CONFIG_VALUE_0", ""),
+            ("GIT_CONFIG_KEY_1", "credential.helper"),
+            ("GIT_CONFIG_VALUE_1", helper),
+            ("GIT_CONFIG_KEY_2", "credential.useHttpPath"),
+            ("GIT_CONFIG_VALUE_2", "false"),
+            ("GIT_TERMINAL_PROMPT", "0"),
+        ]
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .into();
+        assert_eq!(*environment, expected);
+        assert!(
+            store.ends_with(NIX_FETCH_GIT_CREDENTIAL_STORE_FILE_NAME),
+            "{helper}"
+        );
+        assert!(
+            environment.iter().all(|(_, value)| !value.contains("p@ss")),
+            "{environment:?}"
+        );
+        assert_eq!(
+            seen[0].git_credential_store,
+            Some((
+                "https://ci%20bot:p%40ss%3Aw%2Frd%2541@git.example.org:8443\n\
+                 https://deploy:token@git.elektrat.de\n\
+                 https://deploy:token@git.elektrat.de:443\n"
+                    .to_owned(),
+                0o600
+            ))
+        );
+        assert!(!Path::new(store).exists(), "removed after the fetch");
+        assert_eq!(seen[1], FakeInputDownloaderDownloadRecord::default());
+    }
+
+    #[test]
+    fn credential_helper_quotes_store_file_path_containing_single_quote_and_space() {
+        let environment = git_credential_store_environment_variables(Path::new("/tmp/it's dir/x"));
+
+        assert_eq!(
+            environment.get(4),
+            Some(&(
+                "GIT_CONFIG_VALUE_1".to_owned(),
+                r"store --file='/tmp/it'\''s dir/x'".to_owned()
+            ))
+        );
     }
 
     #[tokio::test(start_paused = true)]

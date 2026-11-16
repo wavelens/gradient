@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::ffi::OsString;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
@@ -159,9 +160,13 @@ impl NixEvaluator {
         StatsReader(&self.state)
     }
 
-    pub fn fetch_tree(&self, request: &str, git_ssh_command: Option<&str>) -> Result<String> {
+    pub fn fetch_tree(
+        &self,
+        request: &str,
+        git_subprocess_environment: &[(String, String)],
+    ) -> Result<String> {
         self.ctx.set_log_format("internal-json")?;
-        let _restore = SshCommand::set(git_ssh_command);
+        let _restore = NixFetchEnvironmentVariablesGuard::set(git_subprocess_environment);
         let fetched = self.answer_fetch(request);
         self.ctx.set_log_format("raw-with-logs")?;
         fetched
@@ -205,32 +210,39 @@ impl NixEvaluator {
     }
 }
 
-struct SshCommand(bool);
+struct NixFetchEnvironmentVariablesGuard(Vec<(String, Option<OsString>)>);
 
-impl SshCommand {
+impl NixFetchEnvironmentVariablesGuard {
     #[expect(
         clippy::disallowed_methods,
-        reason = "libgit2 inside Nix reads GIT_SSH_COMMAND from the process environment"
+        reason = "Nix fetchers run git as a subprocess and git processes read config from the environment of this process"
     )]
-    fn set(command: Option<&str>) -> Self {
-        let Some(command) = command else {
-            return Self(false);
-        };
-        // SAFETY (set and remove): the stats ticker never reads the environment, and nix's curl thread
-        // reads proxy variables only inside a transfer, which starts and ends within this fetch.
-        unsafe { std::env::set_var("GIT_SSH_COMMAND", command) };
-        Self(true)
+    fn set(variables: &[(String, String)]) -> Self {
+        let previous = variables
+            .iter()
+            .map(|(name, value)| {
+                let previous = std::env::var_os(name);
+                // SAFETY (set and remove): the stats ticker never reads the environment and nix's curl thread
+                // reads proxy variables only inside a transfer, which starts and ends within this fetch.
+                unsafe { std::env::set_var(name, value) };
+                (name.clone(), previous)
+            })
+            .collect();
+        Self(previous)
     }
 }
 
-impl Drop for SshCommand {
+impl Drop for NixFetchEnvironmentVariablesGuard {
     #[expect(
         clippy::disallowed_methods,
-        reason = "libgit2 inside Nix reads GIT_SSH_COMMAND from the process environment"
+        reason = "Nix fetchers run git as a subprocess and git processes read config from the environment of this process"
     )]
     fn drop(&mut self) {
-        if self.0 {
-            unsafe { std::env::remove_var("GIT_SSH_COMMAND") };
+        for (name, previous) in self.0.drain(..).rev() {
+            match previous {
+                Some(value) => unsafe { std::env::set_var(&name, value) },
+                None => unsafe { std::env::remove_var(&name) },
+            }
         }
     }
 }
