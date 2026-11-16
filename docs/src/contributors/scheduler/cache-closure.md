@@ -29,7 +29,7 @@ Runtime dependencies live in `derivation_dependency` alongside build dependencie
 | `.drv` present (`drv_present_predicate`) | The build's own `.drv` NAR exists with a backed `cached_path` row. This marks presence only, not a complete closure |
 
 - **Build start condition:** `blocking_deps = 0` and `.drv` present. `blocking_deps` counts direct dependencies without a set `fetchable` flag. The `fetchable` flags of those dependencies already cover their own closures, so the condition needs no recursion.
-- **Passthrough start condition:** shared builds available in a cache can start without either term. Their jobs carry no `required_paths` (`gradient-scheduler/src/loops/build.rs`).
+- **Passthrough start condition:** shared builds available in a cache can start without either term. Those jobs don't list any direct inputs (`gradient-scheduler/src/loops/build.rs`).
 - **Push:** jobs upload only their own outputs. Everything below them held a complete closure before assignment. A worker therefore need not push a closure for the invariant to hold.
 
 ## NAR Commit

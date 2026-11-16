@@ -214,7 +214,7 @@ A cluster member with the role `split-evaluation-primary` or `split-evaluation-c
     - Workers list their running jobs in `RunningJobs` after the reconnect. The server reattaches each listed assignment, and the job continues.
     - The `unreclaimed-job-sweep` pass checks every 10 s on every server instance. A job can outlast the grace by up to 10 s.
     - Open assignments left by a server restart get the full grace.
-    - Cluster members, server-dialed sessions, workers below protocol 42 and a grace of `0` skip the wait.
+    - Cluster members, server-dialed sessions and a grace of `0` skip the wait.
     - A worker back after the grace receive `AbortJob` for its listed jobs. That loss can increase the lost-worker streak by one at most.
 - **Lost Worker:** A job without a reclaim within the grace has a lost worker. A job missing from `RunningJobs` has one at once. Open assignments close as abandoned.
     - Each build in `Building` return to `Queued`. Its running attempt close as `Aborted` with the reason `WorkerLost`.

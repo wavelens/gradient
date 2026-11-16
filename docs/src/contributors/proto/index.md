@@ -23,7 +23,7 @@ flowchart LR
 
 -   :material-clipboard-list: **[Capabilities and Assignment](capabilities-and-dispatch.md)**
 
-    Worker capabilities, job offers and pull-based assignment.
+    Worker capabilities, store summary, pull-based assignment.
 
 -   :material-hammer-wrench: **[Jobs](jobs.md)**
 

@@ -48,8 +48,6 @@ Workers authorized by the proxy get recorded in a small local Postgres database.
 | Step | Proxy behavior |
 |---|---|
 | Tenants | One hub per tenant. A worker row names its tenant, and frames never cross tenant boundaries |
-| Offers | The upstream offer book gets mirrored, and candidates go out to capable workers |
-| Scores | The best score per candidate gets forwarded as deltas, at most once per second |
 | `RequestJob` | A worker poll turns into an upstream poll. The best capable waiting worker receives the `AssignJob`. Without such a worker, the proxy declines |
 | Reports | Routing happens by `job_id`. Queries receive a fresh `query_id`. Reports for jobs outside a worker's ownership get dropped |
 | Uploads | Every `UploadRequest` receives a fresh `request_id`. Grants, chunks and commits map back to the requesting worker |

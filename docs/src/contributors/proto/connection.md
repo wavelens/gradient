@@ -150,7 +150,7 @@ Running builds and evaluations survive a lost connection and a server restart. Q
 | Worker | Queues again every `JobCompleted` and `JobFailed` sent during the lost session. A dead socket can swallow them unnoticed. An `AbortJob` or a new assignment of the job drops the copy |
 | Worker | Performs a full handshake, then sends `RunningJobs` with the assignment of each running job, an empty list included |
 | Worker | Sends the queued reports first. Replays each buffered log next to the job loop, from the offset already sent |
-| Worker | Sends `RequestJobList` plus one `RequestJob` per kind |
+| Worker | The worker can send its store summary and then one `RequestJob` for each kind |
 | Server | Runs `recover_interrupted_work` before the first session. Assignments outside cluster attempts stay open. Their builds remain `Building` |
 | Server | Keeps the open assignments of a disconnected worker for `proto.assignmentReclaimGraceSecs` (600 s). The grace of a worker lost by a running server ends with its remaining `maxLifetime` at the latest |
 | Server | Reattaches every listed assignment that is still open and belongs to this worker. Sends `AbortJob` for every other listed one |
@@ -159,7 +159,6 @@ Running builds and evaluations survive a lost connection and a server restart. Q
 
 - Cluster members and aborted jobs stay out of `RunningJobs`. Cluster members abort at the end of the session.
 - `RunningJobs` can also list a job with its final `JobCompleted` or `JobFailed` still in the queue.
-- Workers below protocol 42 abort every running job at the end of the session. The server can re-queue the open assignments of such a worker at once.
 - Jobs of a server-dialed session end with the session. Such sessions never reclaim jobs.
 - Workers empty `job-logs/` at process start. No job can outlive a worker process restart.
 - Log bytes in flight at the moment the connection dropped can be missing from the build log.
@@ -183,7 +182,7 @@ Running builds and evaluations survive a lost connection and a server restart. Q
 - The agreed version is the lower of both newest versions. Every later frame is for that version.
 - Two ranges without overlap can end the session with close code `1002` and `no shared protocol version: ours 30..=30, peer 31..=32`.
 - A first frame without `GRAD` came from protocol 26 or older. The session can end with `peer protocol is older than 30`.
-- Supported versions start at 41. Older workers need an upgrade.
+- Supported versions start at 65. A peer older than 65 doesn't share a version with the other side. That session can end with close code `1002`.
 - Both sides are logging the reason at the `warn` level.
 - A server connecting to a worker can keep the reason as the worker's offline reason.
 - `gradient_wire::PROTO_VERSIONS` is the supported range, computed from the `#[proto]` annotations.
