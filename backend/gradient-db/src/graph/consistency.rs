@@ -135,6 +135,13 @@ impl BuildGraphConsistencyCheckStep {
             Self::CountAlarms => "count_alarms",
         }
     }
+
+    fn next_step_in_run_order(self) -> Option<Self> {
+        Self::ALL_CONSISTENCY_CHECK_STEPS_IN_RUN_ORDER
+            .into_iter()
+            .skip_while(|step| *step != self)
+            .nth(1)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -156,10 +163,15 @@ impl ConsistencyCheckRepairScopeChunkProgress {
             return Some(finished);
         }
 
-        BuildGraphConsistencyCheckStep::ALL_CONSISTENCY_CHECK_STEPS_IN_RUN_ORDER
-            .into_iter()
-            .skip_while(|step| *step != finished)
-            .nth(1)
+        finished.next_step_in_run_order()
+    }
+
+    fn reset_chunk_start_index_and_get_next_step_after_lock_timeout_failed_step(
+        &mut self,
+        failed: BuildGraphConsistencyCheckStep,
+    ) -> Option<BuildGraphConsistencyCheckStep> {
+        self.next_transaction_start_index = 0;
+        failed.next_step_in_run_order()
     }
 
     fn chunked_step_needs_another_message(&self, step: BuildGraphConsistencyCheckStep) -> bool {
@@ -187,8 +199,12 @@ impl ConsistencyCheckRepairScopeChunkProgress {
     }
 }
 
-pub async fn run_consistency_check_steps<E, F, Fut>(mut run_step: F) -> Result<ConsistencyReport, E>
+pub async fn run_consistency_check_steps<E, F, Fut>(
+    is_postgres_lock_timeout_error: impl Fn(&E) -> bool,
+    mut run_step: F,
+) -> Result<ConsistencyReport, E>
 where
+    E: std::fmt::Display,
     F: FnMut(BuildGraphConsistencyCheckStep, ConsistencyCheckRepairScopeChunkProgress) -> Fut,
     Fut: Future<Output = Result<ConsistencyCheckRepairScopeChunkProgress, E>>,
 {
@@ -196,17 +212,33 @@ where
     let mut step =
         Some(BuildGraphConsistencyCheckStep::ALL_CONSISTENCY_CHECK_STEPS_IN_RUN_ORDER[0]);
     while let Some(current) = step {
-        progress = run_step(current, progress).await?;
-        step = progress.next_step_after_finished_step(current);
+        step = match run_step(current, progress.clone()).await {
+            Ok(finished) => {
+                progress = finished;
+                progress.next_step_after_finished_step(current)
+            }
+            Err(e) if is_postgres_lock_timeout_error(&e) => {
+                tracing::warn!(
+                    step = current.step_name(),
+                    error = %format_args!("{e:#}"),
+                    "consistency check step hit a lock timeout. skipping to the next step"
+                );
+                progress.reset_chunk_start_index_and_get_next_step_after_lock_timeout_failed_step(
+                    current,
+                )
+            }
+            Err(e) => return Err(e),
+        };
     }
 
     Ok(progress.report_so_far)
 }
 
 pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
-    run_consistency_check_steps(|step, progress| {
-        run_one_consistency_check_step(ctx, step, progress)
-    })
+    run_consistency_check_steps(
+        crate::graph::can_start::lock_unavailable,
+        |step, progress| run_one_consistency_check_step(ctx, step, progress),
+    )
     .await
 }
 

@@ -232,22 +232,25 @@ impl Graph {
         if self.stub {
             return Ok(ConsistencyReport::default());
         }
-        run_consistency_check_steps(move |step, progress| async move {
-            let message = Transition::RunConsistencyCheckStep { step, progress };
-            self.call(|reply| GraphMsg::Transition(message, reply))
-                .await
-                .and_then(|report| {
-                    report
-                        .consistency_check_progress
-                        .context("The graph writer did not return the progress of the consistency check")
-                })
-                .with_context(|| {
-                    format!(
-                        "Step {} of the consistency check failed. The remaining steps wait for the next interval",
-                        step.step_name()
-                    )
-                })
-        })
+        let is_postgres_lock_timeout_error = |e: &anyhow::Error| {
+            writer::postgres_sqlstate_from_error_chain(e).as_deref() == Some("55P03")
+        };
+        run_consistency_check_steps(
+            is_postgres_lock_timeout_error,
+            move |step, progress| async move {
+                let message = Transition::RunConsistencyCheckStep { step, progress };
+                self.call(|reply| GraphMsg::Transition(message, reply))
+                    .await
+                    .and_then(|report| {
+                        report.consistency_check_progress.context(
+                            "The graph writer did not return the progress of the consistency check",
+                        )
+                    })
+                    .with_context(|| {
+                        format!("Step {} of the consistency check failed", step.step_name())
+                    })
+            },
+        )
         .await
     }
 

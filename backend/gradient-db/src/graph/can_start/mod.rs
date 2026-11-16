@@ -20,8 +20,8 @@ mod repair;
 mod test_rows;
 
 pub use fetchable::{advance_fetchable, became_fetchable, lost_fetchability, seed_blocking_deps};
-pub(crate) use lock::ids;
 pub use lock::{SeedLock, SharedBuildLock, lock_seed_shared_builds, lock_shared_builds};
+pub(crate) use lock::{ids, lock_unavailable};
 pub use need::{
     BudgetedNeedUpdate, NeedMoved, SettledNeed, gain_and_settle_need, recheck_forgotten_need,
     recount_wanted, settle_created, settle_skipped, update_and_settle_need,
