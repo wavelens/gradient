@@ -57,7 +57,9 @@ pub use self::input::*;
 pub use self::io::*;
 pub use self::log_api::{LogChunkIndex, LogChunkMeta, LogSearchDone, LogSearchHit};
 pub use self::nix_cache::*;
-pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, TriggerType};
+pub use self::triggers::{
+    ChangedFilePathFilter, ConcurrencyPolicy, TriggerConfig, TriggerConfigError, TriggerType,
+};
 pub use self::waiting_reason::{EvalCapability, ExecUnmet, UnmetRequirement, WaitingReason};
 pub use self::wildcard::*;
 pub use gradient_secret::{SecretBytes, SecretString};

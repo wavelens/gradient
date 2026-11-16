@@ -17,6 +17,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let mut schemas = read_schemas(&spec_path);
+    merge_all_of_object_schemas(&mut schemas);
     inline_unconstrained(&mut schemas);
     visit_objects(&mut schemas, &mut |map| {
         rewrite_ref(map);
@@ -46,6 +47,50 @@ fn visit_objects(node: &mut Value, visitor: &mut impl FnMut(&mut Map<String, Val
             .for_each(|child| visit_objects(child, visitor)),
         _ => {}
     }
+}
+
+fn merge_all_of_object_schemas(schemas: &mut Value) {
+    let definitions = schemas.clone();
+    visit_objects(schemas, &mut |map| {
+        let Some(Value::Array(parts)) = map.get("allOf") else {
+            return;
+        };
+        let Some(objects) = parts
+            .iter()
+            .map(|part| resolve_all_of_part_object_schema(part, &definitions))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        let mut properties = Map::new();
+        let mut required = Vec::new();
+        for object in objects {
+            if let Some(Value::Object(object_properties)) = object.get("properties") {
+                properties.extend(object_properties.clone());
+            }
+            if let Some(Value::Array(names)) = object.get("required") {
+                required.extend(names.iter().cloned());
+            }
+        }
+        map.remove("allOf");
+        map.insert("type".into(), json!("object"));
+        map.insert("properties".into(), Value::Object(properties));
+        if !required.is_empty() {
+            map.insert("required".into(), Value::Array(required));
+        }
+    });
+}
+
+fn resolve_all_of_part_object_schema<'a>(
+    part: &'a Value,
+    definitions: &'a Value,
+) -> Option<&'a Map<String, Value>> {
+    let schema = match part.get("$ref").and_then(Value::as_str) {
+        Some(target) => definitions.get(target.strip_prefix(SCHEMA_REF_PREFIX)?)?,
+        None => part,
+    };
+    let object = schema.as_object()?;
+    (object.get("type").and_then(Value::as_str) == Some("object")).then_some(object)
 }
 
 fn inline_unconstrained(schemas: &mut Value) {

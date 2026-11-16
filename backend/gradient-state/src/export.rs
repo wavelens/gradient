@@ -532,6 +532,7 @@ fn export_trigger(t: &gradient_entity::task_trigger::Model) -> Option<StateTrigg
         TriggerConfig::Polling {
             interval_secs,
             branch,
+            ..
         } => {
             let mut c = serde_json::Map::new();
             c.insert("interval_secs".into(), interval_secs.into());
@@ -545,6 +546,7 @@ fn export_trigger(t: &gradient_entity::task_trigger::Model) -> Option<StateTrigg
             tags,
             releases_only,
             include_flake_inputs,
+            ..
         } => {
             let mut c = serde_json::Map::new();
             c.insert("branches".into(), branches.into());
@@ -559,6 +561,7 @@ fn export_trigger(t: &gradient_entity::task_trigger::Model) -> Option<StateTrigg
             branches,
             actions,
             require_approval,
+            ..
         } => {
             let mut c = serde_json::Map::new();
             c.insert("branches".into(), branches.into());

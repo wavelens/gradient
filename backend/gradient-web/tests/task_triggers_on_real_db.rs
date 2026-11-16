@@ -19,7 +19,7 @@ use gradient_test_support::state::TestState;
 use gradient_test_support::web::bearer;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
 use gradient_types::ids::*;
-use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig, TriggerType};
 use gradient_types::{GitHostType, RoleId};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -145,6 +145,7 @@ async fn creating_a_task_with_triggers_stores_exactly_those_triggers() {
                 TriggerConfig::Polling {
                     interval_secs: 120,
                     branch: Some("release".into()),
+                    path_filter: ChangedFilePathFilter::default(),
                 },
                 true
             ),
@@ -188,6 +189,7 @@ async fn creating_a_task_without_triggers_adds_one_default_polling_trigger() {
             TriggerConfig::Polling {
                 interval_secs: 300,
                 branch: None,
+                path_filter: ChangedFilePathFilter::default(),
             },
             true
         )]
@@ -278,6 +280,7 @@ async fn duplicating_a_task_copies_settings_triggers_and_actions_onto_the_new_br
             TriggerConfig::Polling {
                 interval_secs: 300,
                 branch: None,
+                path_filter: ChangedFilePathFilter::default(),
             },
             true,
         ),
@@ -287,6 +290,7 @@ async fn duplicating_a_task_copies_settings_triggers_and_actions_onto_the_new_br
                 tags: vec![],
                 releases_only: false,
                 include_flake_inputs: false,
+                path_filter: ChangedFilePathFilter::default(),
             },
             false,
         ),

@@ -108,6 +108,7 @@ fn default_push_and_pull_request_trigger_suggestions() -> Vec<TriggerConfig> {
             tags: vec![],
             releases_only: false,
             include_flake_inputs: false,
+            path_filter: ChangedFilePathFilter::default(),
         },
         TriggerConfig::ReporterPullRequest {
             branches: vec![],
@@ -115,6 +116,7 @@ fn default_push_and_pull_request_trigger_suggestions() -> Vec<TriggerConfig> {
                 .map(String::from)
                 .to_vec(),
             require_approval: true,
+            path_filter: ChangedFilePathFilter::default(),
         },
     ]
 }
