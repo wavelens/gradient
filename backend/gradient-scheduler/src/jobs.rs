@@ -515,8 +515,8 @@ fn build_scoring_job_context_for_pending_job<'a>(
     now: chrono::NaiveDateTime,
 ) -> JobContext<'a> {
     JobContext {
-        missing_count: Some(score.missing_count),
-        missing_nar_size: Some(score.missing_nar_size),
+        missing_count: score.missing_count,
+        missing_nar_size: score.missing_nar_size,
         outputs_present: score.outputs_present,
         substitute_outputs: job.substitute_outputs(),
         dependency_count: job.dependency_count(),
@@ -647,7 +647,7 @@ fn exec_candidate(
     peers: &[ExecPeer],
     now: chrono::NaiveDateTime,
 ) -> ScoredCandidate {
-    let breakdown = exec.score_on(worker.exec, Some(score.missing_nar_size), peers, now);
+    let breakdown = exec.score_on(worker.exec, score.missing_nar_size, peers, now);
     ScoredCandidate {
         total: breakdown.total,
         choice: None,
@@ -3522,7 +3522,6 @@ mod tests {
         let mut pending_build_with_60_gb_predicted_peak_ram = build_predicted(60_000);
         if let PendingJob::Build(build) = &mut pending_build_with_60_gb_predicted_peak_ram {
             build.ready_at = heavy_build_ready_at_one_hour_ago;
-            build.rescore_count = gradient_pool::score::weights::RESCORE_MAX_ROUNDS;
         }
         tracker.add_pending("heavy".into(), pending_build_with_60_gb_predicted_peak_ram);
 
@@ -3541,7 +3540,6 @@ mod tests {
             let mut older_pending_build = build_job(ProjectId::now_v7(), vec![]);
             if let PendingJob::Build(build) = &mut older_pending_build {
                 build.ready_at = heavy_build_ready_at_one_hour_ago - chrono::Duration::hours(1);
-                build.rescore_count = gradient_pool::score::weights::RESCORE_MAX_ROUNDS;
             }
             tracker.add_pending(format!("older:{index:04}"), older_pending_build);
         }

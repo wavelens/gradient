@@ -92,49 +92,6 @@ impl ScoreRule for ReserveFetchWorkersRule {
     }
 }
 
-#[derive(Debug)]
-pub struct RescoreWaitRule {
-    pub max_rounds: u32,
-}
-
-impl Default for RescoreWaitRule {
-    fn default() -> Self {
-        Self {
-            max_rounds: crate::score::weights::RESCORE_MAX_ROUNDS,
-        }
-    }
-}
-
-impl ScoreRule for RescoreWaitRule {
-    fn name(&self) -> &'static str {
-        "RescoreWaitRule"
-    }
-
-    fn score(
-        &self,
-        _job: &JobContext<'_>,
-        _worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
-    ) -> f64 {
-        0.0
-    }
-
-    fn veto(
-        &self,
-        job: &JobContext<'_>,
-        _worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
-    ) -> bool {
-        job.job.build().is_some()
-            && job.missing_nar_size.is_none()
-            && job.rescore_count < self.max_rounds
-    }
-
-    fn description(&self) -> &'static str {
-        "Briefly holds back builds whose substitution cost has not been measured yet, letting them be rescored once the data lands."
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,70 +171,6 @@ mod tests {
         assert!(
             ancient > 1140.0,
             "ancient must clear the soft-cap budget for anti-starvation, got {ancient}"
-        );
-    }
-
-    #[test]
-    fn rescore_wait_vetoes_build_until_threshold_but_never_eval() {
-        let rule = RescoreWaitRule::default();
-        let archs: Vec<String> = vec![];
-        let w = worker(&archs, false);
-        let inst = crate::score::context::InstanceContext::default();
-        let now = gradient_types::now();
-        let build = build_job("x86_64-linux");
-        let eval = eval_job(false);
-
-        let c_build_none_0 = JobContext {
-            job: &build,
-            queued_at: now,
-            ready_at: now,
-            now,
-            ..Default::default()
-        };
-        let c_build_none_4 = JobContext {
-            job: &build,
-            queued_at: now,
-            ready_at: now,
-            rescore_count: 4,
-            now,
-            ..Default::default()
-        };
-        let c_build_some_0 = JobContext {
-            job: &build,
-            missing_nar_size: Some(10),
-            queued_at: now,
-            ready_at: now,
-            now,
-            ..Default::default()
-        };
-        let c_eval_none_0 = JobContext {
-            job: &eval,
-            queued_at: now,
-            ready_at: now,
-            now,
-            ..Default::default()
-        };
-
-        assert!(
-            rule.veto(&c_build_none_0, &w, &inst),
-            "unmeasured build within rounds is held"
-        );
-        assert!(
-            !rule.veto(&c_build_none_4, &w, &inst),
-            "released after max_rounds"
-        );
-        assert!(
-            !rule.veto(&c_build_some_0, &w, &inst),
-            "measured build dispatches"
-        );
-        assert!(
-            !rule.veto(&c_eval_none_0, &w, &inst),
-            "evals are never held"
-        );
-        assert_eq!(
-            rule.score(&c_build_none_0, &w, &inst),
-            0.0,
-            "the hold is a veto, not a penalty"
         );
     }
 

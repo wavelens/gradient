@@ -1513,7 +1513,6 @@ mod tests {
         let mut job = build_job(EvaluationId::now_v7(), ProjectId::now_v7(), shared_build);
         job.estimate =
             gradient_pool::score::BuildEstimate::fixed(Some(predicted_peak_ram_mb), None, 1);
-        job.rescore_count = gradient_pool::score::weights::RESCORE_MAX_ROUNDS;
         adjust(&mut job);
         let job_id = crate::jobs::build_job_key(shared_build);
         core.tracker

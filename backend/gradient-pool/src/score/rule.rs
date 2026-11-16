@@ -21,8 +21,8 @@ static DEFAULT_JOB: LazyLock<ScoredJob<'static>> = LazyLock::new(|| {
 #[derive(Clone, Copy)]
 pub struct JobContext<'a> {
     pub job: &'a ScoredJob<'a>,
-    pub missing_count: Option<u32>,
-    pub missing_nar_size: Option<u64>,
+    pub missing_count: u32,
+    pub missing_nar_size: u64,
     pub outputs_present: bool,
     pub substitute_outputs: Option<u32>,
     pub dependency_count: u32,
@@ -41,8 +41,8 @@ impl Default for JobContext<'_> {
         let now = gradient_types::now();
         Self {
             job: &DEFAULT_JOB,
-            missing_count: None,
-            missing_nar_size: None,
+            missing_count: 0,
+            missing_nar_size: 0,
             outputs_present: false,
             substitute_outputs: None,
             dependency_count: 0,

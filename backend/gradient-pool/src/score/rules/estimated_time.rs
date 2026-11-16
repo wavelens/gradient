@@ -11,7 +11,6 @@ use crate::score::context::{InstanceContext, SubstituteCost, WorkerMetricsView};
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::weights;
 
-const BYTES_PER_MIB: f64 = 1_048_576.0;
 const BYTES_PER_MB: f64 = 1_000_000.0;
 const BITS_PER_BYTE: f64 = 8.0;
 const BITS_PER_MEGABIT: f64 = 1_000_000.0;
@@ -19,8 +18,6 @@ const BITS_PER_MEGABIT: f64 = 1_000_000.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Fallback {
-    MissingNarSize,
-    MissingCount,
     BuildHistory,
     CoreScore,
     DownloadSpeed,
@@ -103,34 +100,6 @@ fn speed(
     fallbacks: &mut Vec<Fallback>,
 ) -> Option<f64> {
     known(own.map(f64::from), fallback, fallbacks).or(fleet_mean)
-}
-
-fn missing_nar_bytes(
-    job: &JobContext<'_>,
-    instance: &InstanceContext,
-    fallbacks: &mut Vec<Fallback>,
-) -> f64 {
-    known(
-        job.missing_nar_size.map(|b| b as f64),
-        Fallback::MissingNarSize,
-        fallbacks,
-    )
-    .or_else(|| instance.nar_size_mb.w1h.map(|mb| mb * BYTES_PER_MIB))
-    .unwrap_or(0.0)
-}
-
-fn missing_paths(
-    job: &JobContext<'_>,
-    instance: &InstanceContext,
-    fallbacks: &mut Vec<Fallback>,
-) -> f64 {
-    known(
-        job.missing_count.map(f64::from),
-        Fallback::MissingCount,
-        fallbacks,
-    )
-    .or(instance.missing_paths.w1h)
-    .unwrap_or(0.0)
 }
 
 fn output_nar_bytes(estimate: &BuildEstimate, fallbacks: &mut Vec<Fallback>) -> f64 {
@@ -326,8 +295,8 @@ fn build_estimate(
     let cores = worker.map_or(weights::REFERENCE_CORES, |m| {
         job.core_choice(m, instance.unmeasured_build_ram_mb()).cores
     });
-    let nar_bytes = missing_nar_bytes(job, instance, fallbacks);
-    let paths = missing_paths(job, instance, fallbacks);
+    let nar_bytes = job.missing_nar_size as f64;
+    let paths = f64::from(job.missing_count);
     let median = instance.build_time_median_ms;
     let build_secs = run_secs(
         estimate,
@@ -554,12 +523,12 @@ mod tests {
 
     fn ctx<'a>(
         job: &'a ScoredJob<'a>,
-        missing_nar_size: Option<u64>,
+        missing_nar_size: u64,
         outputs_present: bool,
     ) -> JobContext<'a> {
         JobContext {
             job,
-            missing_count: Some(0),
+            missing_count: 0,
             missing_nar_size,
             outputs_present,
             ..Default::default()
@@ -578,24 +547,17 @@ mod tests {
         let job = build_job(BuildEstimate::default());
         let inst = InstanceContext {
             per_path_secs: Some(0.5),
-            missing_paths: Windowed {
-                w1h: Some(8.0),
-                ..Default::default()
-            },
             ..Default::default()
         };
-        let scored = JobContext {
-            missing_count: Some(6),
-            ..ctx(&job, Some(0), false)
+        let c = JobContext {
+            missing_count: 6,
+            ..ctx(&job, 0, false)
         };
-        let unscored = JobContext {
-            missing_count: None,
-            ..ctx(&job, None, false)
-        };
-        let f = &mut Vec::new();
 
-        assert_eq!(path_secs(missing_paths(&scored, &inst, f), &inst, f), 3.0);
-        assert_eq!(path_secs(missing_paths(&unscored, &inst, f), &inst, f), 4.0);
+        assert_eq!(
+            estimate(&c, &WorkerContext::default(), &inst).path_secs,
+            3.0
+        );
     }
 
     #[test]
@@ -607,12 +569,12 @@ mod tests {
         let w = worker(on(4_000, 0));
 
         assert_eq!(
-            rule.score(&ctx(&short, Some(0), false), &w, &inst),
+            rule.score(&ctx(&short, 0, false), &w, &inst),
             rule.points_per_sec * (rule.cap_secs - 100.0)
         );
-        assert_eq!(rule.score(&ctx(&endless, Some(0), false), &w, &inst), 0.0);
+        assert_eq!(rule.score(&ctx(&endless, 0, false), &w, &inst), 0.0);
         assert_eq!(
-            rule.score(&ctx(&endless, Some(0), true), &w, &inst),
+            rule.score(&ctx(&endless, 0, true), &w, &inst),
             rule.points_per_sec * rule.cap_secs,
             "a worker holding the outputs builds nothing"
         );
@@ -634,7 +596,7 @@ mod tests {
             ..Default::default()
         });
 
-        let e = estimate(&ctx(&job, Some(0), false), &w, &InstanceContext::default());
+        let e = estimate(&ctx(&job, 0, false), &w, &InstanceContext::default());
 
         assert_eq!(e.cores, Some(43));
         assert!((e.build_secs - 600.0 * 16.0 / 43.0).abs() < 1e-6, "{e:?}");
@@ -655,7 +617,7 @@ mod tests {
             ..Default::default()
         };
 
-        let e = estimate(&ctx(&job, Some(0), true), &w, &inst);
+        let e = estimate(&ctx(&job, 0, true), &w, &inst);
         assert!((e.upload_secs - 20.0).abs() < 1e-9);
         assert_eq!(e.total(), e.upload_secs);
         assert_eq!(e.build_secs, 0.0);
@@ -678,7 +640,7 @@ mod tests {
             ..Default::default()
         });
 
-        let e = estimate(&ctx(&job, Some(GIGABYTE_BYTES), false), &w, &inst);
+        let e = estimate(&ctx(&job, GIGABYTE_BYTES, false), &w, &inst);
         assert!((e.download_secs - 10.0).abs() < 1e-9, "{e:?}");
         assert!((e.build_secs - 30.0).abs() < 1e-9, "{e:?}");
         assert!((e.upload_secs - 20.0).abs() < 1e-9, "{e:?}");
@@ -697,7 +659,7 @@ mod tests {
     fn substitute_ctx<'a>(job: &'a ScoredJob<'a>, outputs: u32) -> JobContext<'a> {
         JobContext {
             substitute_outputs: Some(outputs),
-            ..ctx(job, None, false)
+            ..ctx(job, 0, false)
         }
     }
 
@@ -745,10 +707,7 @@ mod tests {
     #[test]
     fn the_estimate_names_each_input_it_had_to_guess() {
         let job = build_job(BuildEstimate::default());
-        let c = JobContext {
-            missing_count: None,
-            ..ctx(&job, None, false)
-        };
+        let c = ctx(&job, 0, false);
         let w = WorkerContext::default();
         let inst = InstanceContext {
             build_time_median_ms: Windowed {
@@ -761,8 +720,6 @@ mod tests {
         assert_eq!(
             estimate(&c, &w, &inst).fallbacks,
             vec![
-                Fallback::MissingNarSize,
-                Fallback::MissingCount,
                 Fallback::BuildHistory,
                 Fallback::CoreScore,
                 Fallback::DownloadSpeed,
@@ -783,8 +740,8 @@ mod tests {
             ..built(30_000)
         });
         let c = JobContext {
-            missing_count: Some(3),
-            ..ctx(&job, Some(1), false)
+            missing_count: 3,
+            ..ctx(&job, 1, false)
         };
         let w = worker(WorkerMetricsView {
             cpu_core_score: 2_000,
@@ -813,12 +770,12 @@ mod tests {
         let inst = InstanceContext::default();
 
         assert!(
-            estimate(&ctx(&fleet, None, false), &w, &inst)
+            estimate(&ctx(&fleet, 0, false), &w, &inst)
                 .fallbacks
                 .contains(&Fallback::BuildHistory)
         );
         assert!(
-            !estimate(&ctx(&own, None, false), &w, &inst)
+            !estimate(&ctx(&own, 0, false), &w, &inst)
                 .fallbacks
                 .contains(&Fallback::BuildHistory)
         );
@@ -828,7 +785,7 @@ mod tests {
     fn a_large_download_goes_to_the_faster_downloading_worker() {
         let rule = EstimatedTimeRule::default();
         let job = build_job(BuildEstimate::default());
-        let c = ctx(&job, Some(4 * GIGABYTE_BYTES), false);
+        let c = ctx(&job, 4 * GIGABYTE_BYTES, false);
         let downloading = |download_speed_mbps| {
             worker(WorkerMetricsView {
                 download_speed_mbps: Some(download_speed_mbps),
@@ -860,11 +817,11 @@ mod tests {
         let w = worker(on(4_000, 0));
 
         assert_eq!(
-            rule.score(&ctx(&eval, Some(10), false), &w, &inst),
+            rule.score(&ctx(&eval, 10, false), &w, &inst),
             rule.points_per_sec * (rule.cap_secs - 100.0)
         );
         assert_eq!(
-            rule.score(&ctx(&unknown, None, false), &w, &inst),
+            rule.score(&ctx(&unknown, 0, false), &w, &inst),
             rule.points_per_sec * rule.cap_secs,
             "an evaluation never takes the build time of the instance"
         );
