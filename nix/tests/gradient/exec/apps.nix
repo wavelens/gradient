@@ -94,6 +94,12 @@ in {
     echo "a guest of 64 CPUs never boots in this test"
   '';
 
+  shared = pkgs.writeShellScript "exec-shared" ''
+    set -eu
+    echo written > "$GRADIENT_MOUNT_SCRATCH/probe"
+    echo "read $(${pkgs.coreutils}/bin/cat "$GRADIENT_MOUNT_SCRATCH/probe")"
+  '';
+
   hello = pkgs.writeText "exec-hello" "hello\n";
 
   trainer = pkgs.writeShellScript "exec-trainer" ''

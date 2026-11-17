@@ -32,7 +32,7 @@ GUEST_UNIT = re.compile(r"gradient-guest@[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
 NAMES = [
     "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
-    "secrets", "clash", "outputs", "pair", "sized", "toolarge", "manual",
+    "secrets", "clash", "outputs", "pair", "sized", "shared", "toolarge", "manual",
 ]
 GUEST_SUBNETS = [ipaddress.ip_network("10.233.0.0/16"), ipaddress.ip_network("10.234.0.0/16")]
 IMAGE_NAMES = ["trainer", "noagent"]
@@ -483,6 +483,11 @@ assert waiting["attempts"] == [], json.dumps(waiting)
 api("POST", f"exec/{JOBS['manual']}/run")
 wait_status("manual", "completed")
 assert "started by hand" in job_log("manual"), job_log("manual")
+
+banner("Phase 7g: a job can write a file to the per-job mount and read the file back")
+shared = wait_status("shared", "completed")
+assert end_reasons(shared) == ["completed"], json.dumps(shared)
+assert "read written" in job_log("shared"), f"The `shared` job failed to use the `scratch` mount.\n{job_log('shared')}"
 
 banner("Phase 8: a silent program times out")
 silent = wait_status("silent", "failed")

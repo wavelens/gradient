@@ -153,6 +153,7 @@ impl Host {
         let child = spawn_virtiofsd(&self.config.virtiofsd_bin, &socket, shared, read_only, &ids)?;
         lock(&self.children).push(child);
         wait_for_socket(&socket).await?;
+        share(&socket, worker.gid())?;
         Ok(SupervisorReply::MountSocket {
             path: socket.display().to_string(),
         })
@@ -545,6 +546,36 @@ mod tests {
             reject_guest_directory_path_with_symlink_or_not_directory(&root.join("missing"))
                 .is_err()
         );
+    }
+
+    fn write_virtiofsd_test_script_that_creates_socket_file(dir: &Path) -> PathBuf {
+        let script = dir.join("virtiofsd");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nfor arg; do case $arg in --socket-path=*) umask 077; : > \"${arg#--socket-path=}\";; esac; done\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    #[tokio::test]
+    async fn prepared_virtiofs_socket_is_readable_and_writable_by_guest_directory_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let shared = temp.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        let config = SupervisorConfig {
+            virtiofsd_bin: write_virtiofsd_test_script_that_creates_socket_file(temp.path())
+                .display()
+                .to_string(),
+            ..worker_config()
+        };
+        let host = Host::new(temp.path(), config);
+
+        host.prepare_mount("scratch", &shared, false).await.unwrap();
+
+        let socket = std::fs::metadata(temp.path().join("mounts/scratch.sock")).unwrap();
+        assert_eq!(socket.mode() & 0o777, SHARED_SOCKET_MODE);
     }
 
     fn worker_config() -> SupervisorConfig {
