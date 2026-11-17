@@ -218,11 +218,27 @@ pub fn present_predicate(alias: &str) -> String {
     )
 }
 
+fn all_outputs_cached_or_unneeded(alias: &str) -> String {
+    format!("bool_and(cp.file_hash IS NOT NULL OR o.name = ANY({alias}.unneeded_outputs))")
+}
+
 pub fn present_value(alias: &str) -> String {
     format!(
-        "coalesce((SELECT bool_and(cp.file_hash IS NOT NULL OR o.name = ANY({alias}.unneeded_outputs)) \
+        "coalesce((SELECT {all_outputs} \
                    FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash \
-                   WHERE o.derivation = {alias}.derivation), false)"
+                   WHERE o.derivation = {alias}.derivation), false)",
+        all_outputs = all_outputs_cached_or_unneeded(alias),
+    )
+}
+
+pub fn present_shared_build_derivation_ids_select() -> String {
+    format!(
+        "SELECT db.derivation FROM derivation_output o \
+         JOIN derivation_build db ON db.derivation = o.derivation \
+         LEFT JOIN cached_path cp ON cp.hash = o.hash \
+         GROUP BY db.derivation \
+         HAVING {all_outputs}",
+        all_outputs = all_outputs_cached_or_unneeded("db"),
     )
 }
 
