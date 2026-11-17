@@ -63,9 +63,9 @@ Every other message flush the queue first. A write after a batch or a commit can
 
 ## Batching
 
-- Queued batches to record share one transaction with a savepoint each (`record_one`). A batch failing for its content will fail only its caller.
+- Batch groups in the record queue form separate transactions (`record_one`). A group can hold every queued batch with the same triple of evaluation, task and continuation. A group can store up to `RECORD_ROW_BUDGET` derivations. Callers receive a response right after the commit of the group. Failures that come from batch content affect only that group. Failed groups count into `pass_errors` of the `graph` loop, like failures of other message types.
 - The graph writer can execute the queued `CommitNar` messages set-based under one savepoint (`nar::commit_batch`). Each step is one statement for the whole batch instead of a dozen per NAR. The cost of a commit is round trips. A failed batch will commit its NARs one by one (`commit_one`), each under its own savepoint. A bad NAR will fail only its uploader.
-- A flush can take place on the next mailbox turn. The flush is immediate once the queue is at `RECORD_ROW_BUDGET` (5000 derivations) or `NAR_COMMIT_BUDGET` (128 commits). After `NAR_FLUSH_TIME` (100 ms) a flush will take no more NAR commits and leave the rest to the next mailbox turn. The flush must hold the shared build locks of every commit until its end.
+- A flush can take place on the next mailbox turn. The flush is immediate once the queue is at `RECORD_ROW_BUDGET` (5000 derivations) or `NAR_COMMIT_BUDGET` (128 commits). After `NAR_FLUSH_TIME` (100 ms) a flush will take no more NAR commits and leave the rest to the next mailbox turn. The NAR commits of a flush share one transaction after the record groups. That transaction must hold the shared build locks of all commits until completion.
 - The wire of the worker is without an acknowledgement to retry on. A failed batch will fail its evaluation (`fail_evaluation`) instead of leaving the graph incomplete.
 - The graph writer can look up the stored derivations of a batch in the batch transaction itself (`stored_derivations`). Stored derivations have every output in our cache, with a complete closure. New and `Created` shared builds of stored derivations go to `Substituted`. Ids come from the transaction alone.
 - Upstream availability is not part of a batch. The probe can answer through `UpstreamHits` for shared builds needing a build. A batch can write `cache_available = false` on new shared builds only.
@@ -82,11 +82,11 @@ Every other message flush the queue first. A write after a batch or a commit can
 | `for_consistency_check_step` lock wait | 2 s | `lock_timeout` for each consistency check step (one attempt only). Steps that go past this wait fail. The remaining steps wait until the next interval. Failures add to `pass_errors` for the `graph` loop and the `graph-consistency` loop |
 
 - Callers wait for replies with no deadline. The graph writer can still apply a message from a caller that gave up. A caller-side timeout would report a write that later lands as failed. A worker session stuck behind a backlog will block its reader as backpressure.
-- A deadlock inside one batch will fail the whole flush (`escalate_retryable`), and `transact` will retry that flush.
+- A deadlock can trigger a retry of only the transaction for that batch group. A deadlock on one NAR during NAR commits can fail the entire transaction (`escalate_retryable`). `transact` can retry that transaction.
 - Status updates and their effects return every database error to the `transact` function. A `SELECT 1` probe before `COMMIT` can convert a transaction aborted with a merely logged error into a `25P02` error. Postgres would otherwise roll back silently on that `COMMIT`.
 - A retry can re-send board events and probe requests already sent in an aborted attempt.
 - The graph writer can read `pg_stat_activity` and log a warning for every other session where the transaction stayed open longer than the lock wait. The graph writer can write this log after a transaction failure with `55P03` or `57014`, or a budget overrun. Graph transactions use `gradient graph: <message kind>` as the application name.
-- `STATS` can record `graph.transaction_ms`, `graph.transaction_retries`, `graph.lock_timeouts` for each message type.
+- `STATS` can record `graph.transaction_ms`, `graph.transaction_retries`, `graph.lock_timeouts` for each message kind. Batch groups use key `record`. NAR commits inside a flush use key `commit_nar`.
 - `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`), consistency checks and cache demotion all run inside the graph writer. Consistency checks send one `Transition::RunConsistencyCheckStep` per step and use one transaction per step.
 - No batch can block the consistency check and a deadlock between the two is impossible. Its chunk locks still never wait, for a second instance of the writer.
 - The graph writer can keep no state between messages. A restart will lose only batches still queued, and their callers will get an error.
