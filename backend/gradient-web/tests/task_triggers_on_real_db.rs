@@ -307,6 +307,7 @@ async fn duplicating_a_task_copies_settings_triggers_and_actions_onto_the_new_br
                 last_fired_at: Some(test_date()),
                 created_at: test_date(),
                 updated_at: test_date(),
+                encrypted_secret: None,
             },
         )
         .await

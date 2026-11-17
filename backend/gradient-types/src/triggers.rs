@@ -52,6 +52,12 @@ pub enum TriggerConfig {
         #[serde(default)]
         branch: Option<String>,
     },
+    PostRequest {
+        #[serde(default)]
+        branch: Option<String>,
+        #[serde(flatten)]
+        path_filter: ChangedFilePathFilter,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -104,6 +110,7 @@ impl TriggerConfig {
             Self::ReporterPush { .. } => TriggerType::ReporterPush,
             Self::ReporterPullRequest { .. } => TriggerType::ReporterPullRequest,
             Self::Time { .. } => TriggerType::Time,
+            Self::PostRequest { .. } => TriggerType::PostRequest,
         }
     }
 
@@ -138,7 +145,8 @@ impl TriggerConfig {
         match self {
             Self::Polling { path_filter, .. }
             | Self::ReporterPush { path_filter, .. }
-            | Self::ReporterPullRequest { path_filter, .. } => Some(path_filter),
+            | Self::ReporterPullRequest { path_filter, .. }
+            | Self::PostRequest { path_filter, .. } => Some(path_filter),
             Self::Time { .. } => None,
         }
     }
@@ -157,7 +165,9 @@ impl TriggerConfig {
 
     pub fn trigger_branch(&self) -> Option<&str> {
         match self {
-            Self::Polling { branch, .. } | Self::Time { branch, .. } => branch.as_deref(),
+            Self::Polling { branch, .. }
+            | Self::Time { branch, .. }
+            | Self::PostRequest { branch, .. } => branch.as_deref(),
             Self::ReporterPush { branches, .. } | Self::ReporterPullRequest { branches, .. } => {
                 branches
                     .iter()
@@ -181,6 +191,10 @@ impl TriggerConfig {
             Self::Time { cron, .. } => Self::Time {
                 cron,
                 branch: Some(branch),
+            },
+            Self::PostRequest { path_filter, .. } => Self::PostRequest {
+                branch: Some(branch),
+                path_filter,
             },
             Self::ReporterPush {
                 tags,
@@ -211,7 +225,9 @@ impl TriggerConfig {
 
     pub fn branch_names_or_patterns_for_task_header(&self) -> Vec<Option<String>> {
         match self {
-            Self::Polling { branch, .. } | Self::Time { branch, .. } => vec![branch.clone()],
+            Self::Polling { branch, .. }
+            | Self::Time { branch, .. }
+            | Self::PostRequest { branch, .. } => vec![branch.clone()],
             Self::ReporterPush { branches, .. } | Self::ReporterPullRequest { branches, .. }
                 if branches.is_empty() =>
             {
@@ -337,6 +353,46 @@ mod tests {
         assert_eq!(db["branch"], serde_json::json!("develop"));
         let parsed = TriggerConfig::parse_row(TriggerType::Polling, &db).unwrap();
         assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn trigger_config_parse_row_round_trip_for_post_request_with_and_without_branch() {
+        let without_branch =
+            TriggerConfig::parse_row(TriggerType::PostRequest, &serde_json::json!({})).unwrap();
+        assert_eq!(
+            without_branch,
+            TriggerConfig::PostRequest {
+                branch: None,
+                path_filter: ChangedFilePathFilter::default(),
+            }
+        );
+        let with_branch = TriggerConfig::parse_row(
+            TriggerType::PostRequest,
+            &serde_json::json!({ "branch": "main", "include_paths": ["src/**"] }),
+        )
+        .unwrap();
+        let src_only = ChangedFilePathFilter {
+            include_paths: vec!["src/**".into()],
+            exclude_paths: vec![],
+        };
+        assert_eq!(
+            with_branch,
+            TriggerConfig::PostRequest {
+                branch: Some("main".into()),
+                path_filter: src_only.clone(),
+            }
+        );
+        for cfg in [without_branch, with_branch.clone()] {
+            let parsed =
+                TriggerConfig::parse_row(TriggerType::PostRequest, &cfg.to_db_json()).unwrap();
+            assert_eq!(parsed, cfg);
+        }
+        assert_eq!(with_branch.trigger_branch(), Some("main"));
+        assert_eq!(with_branch.path_filter(), Some(&src_only));
+        assert_eq!(
+            with_branch.with_branch("release".into()).path_filter(),
+            Some(&src_only)
+        );
     }
 
     #[test]

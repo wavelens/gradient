@@ -24878,6 +24878,22 @@ components:
             type: string
             enum:
             - time
+      - allOf:
+        - $ref: '#/components/schemas/ChangedFilePathFilter'
+        - type: object
+          properties:
+            branch:
+              type:
+              - string
+              - 'null'
+        - type: object
+          required:
+          - type
+          properties:
+            type:
+              type: string
+              enum:
+              - post_request
     TriggerOut:
       type: object
       required:
@@ -24919,6 +24935,7 @@ components:
       - reporter_push
       - reporter_pull_request
       - time
+      - post_request
     UnmetRequirement:
       type: object
       required:

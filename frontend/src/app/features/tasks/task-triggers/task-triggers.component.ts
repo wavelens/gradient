@@ -246,6 +246,7 @@ export class TaskTriggersComponent implements OnInit {
         return this.intervalError;
       case 'reporter_push':
       case 'reporter_pull_request':
+      case 'post_request':
         return null;
       case 'time':
         return this.cronError;
@@ -331,6 +332,8 @@ export class TaskTriggersComponent implements OnInit {
       }
       case 'time':
         return { type: 'time', cron: this.form.cron.trim(), branch } as TriggerConfig;
+      case 'post_request':
+        return { type: 'post_request', branch } as TriggerConfig;
     }
   }
 
@@ -491,6 +494,8 @@ export class TaskTriggersComponent implements OnInit {
         const schedule = description ? `${description} (${cron})` : cron;
         return cfg.branch ? `${schedule}, branch ${cfg.branch}` : schedule;
       }
+      case 'post_request':
+        return cfg.branch ? `branch ${cfg.branch}` : '';
     }
   }
 

@@ -110,6 +110,7 @@ impl Shape {
             last_fired_at,
             created_at: test_date(),
             updated_at: test_date(),
+            encrypted_secret: None,
         });
         self
     }

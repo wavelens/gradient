@@ -23,7 +23,7 @@ use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use anyhow::Context;
 use gradient_ci::CiContext;
-use gradient_ci::actions::encrypt_secret_with_file;
+use gradient_ci::actions::{encrypt_secret_with_file, new_webhook_secret};
 use gradient_db::git_host_connections::{self as connections, GitHostConnectionOwnerByDatabaseId};
 use gradient_db::lookup::by_id;
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
@@ -289,14 +289,6 @@ fn http_base_url(url: &str) -> WebResult<String> {
 
 fn non_blank(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
-}
-
-fn new_webhook_secret() -> String {
-    use rand::RngExt as _;
-
-    let mut raw = [0u8; 32];
-    rand::rng().fill(&mut raw);
-    hex::encode(raw)
 }
 
 fn check_capabilities(connection: &MGitHostConnection) -> WebResult<()> {

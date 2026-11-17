@@ -3126,6 +3126,10 @@ export type TriggerConfig = ChangedFilePathFilter & {
   cron: string;
   branch?: string | null;
   type: "time";
+} | ChangedFilePathFilter & {
+  branch?: string | null;
+} & {
+  type: "post_request";
 };
 
 export interface TriggerOut {
@@ -3140,7 +3144,7 @@ export interface TriggerOut {
   updated_at: string;
 }
 
-export type TriggerType = "polling" | "reporter_push" | "reporter_pull_request" | "time";
+export type TriggerType = "polling" | "reporter_push" | "reporter_pull_request" | "time" | "post_request";
 
 export interface UnmetRequirement {
   architecture: string;

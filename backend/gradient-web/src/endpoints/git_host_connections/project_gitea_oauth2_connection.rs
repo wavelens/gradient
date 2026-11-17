@@ -277,7 +277,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
         .map_err(|e| failed(&format!("{e:#}")))?;
 
         let crypt_file = config.secrets.crypt_file.as_str();
-        let webhook_secret = super::new_webhook_secret();
+        let webhook_secret = gradient_ci::actions::new_webhook_secret();
         let encrypt = |plain: &str| {
             encrypt_secret_with_file(crypt_file, plain).map_err(|e| failed(&format!("{e:#}")))
         };

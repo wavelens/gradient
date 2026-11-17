@@ -21,7 +21,7 @@ use serde_json::Value as JsonValue;
 
 pub use crypto::{
     decrypt_action_secret, decrypt_secret_with_file, encrypt_action_secret,
-    encrypt_secret_with_file,
+    encrypt_secret_with_file, new_webhook_secret,
 };
 pub use executor::{execute_action, test_git_host_action};
 pub use matchers::matches_event;

@@ -39,9 +39,11 @@ pub enum TriggerType {
     ReporterPullRequest = 2,
     #[sea_orm(num_value = 3)]
     Time = 3,
+    #[sea_orm(num_value = 4)]
+    PostRequest = 4,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "task_trigger")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -54,6 +56,27 @@ pub struct Model {
     pub last_fired_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub encrypted_secret: Option<String>,
+}
+
+impl std::fmt::Debug for Model {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskTrigger")
+            .field("id", &self.id)
+            .field("task", &self.task)
+            .field("trigger_type", &self.trigger_type)
+            .field("config", &self.config)
+            .field("active", &self.active)
+            .field("is_default", &self.is_default)
+            .field("last_fired_at", &self.last_fired_at)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .field(
+                "encrypted_secret",
+                &self.encrypted_secret.as_ref().map(|_| "[redacted]"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
