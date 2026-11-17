@@ -20,16 +20,32 @@ pub fn literal_prefix_len(pattern: &str) -> usize {
 pub fn glob_match(pattern: &str, candidate: &str) -> bool {
     let p: Vec<char> = pattern.chars().collect();
     let c: Vec<char> = candidate.chars().collect();
-    matches_from(&p, &c)
-}
-
-fn matches_from(p: &[char], c: &[char]) -> bool {
-    match p.first() {
-        None => c.is_empty(),
-        Some('*') => matches_from(&p[1..], c) || (!c.is_empty() && matches_from(p, &c[1..])),
-        Some('?') => !c.is_empty() && matches_from(&p[1..], &c[1..]),
-        Some(ch) => c.first() == Some(ch) && matches_from(&p[1..], &c[1..]),
+    let (mut pattern_char_index, mut candidate_char_index) = (0, 0);
+    let mut last_star_pattern_and_candidate_index: Option<(usize, usize)> = None;
+    while candidate_char_index < c.len() {
+        match p.get(pattern_char_index) {
+            Some('*') => {
+                last_star_pattern_and_candidate_index =
+                    Some((pattern_char_index, candidate_char_index));
+                pattern_char_index += 1;
+            }
+            Some(&ch) if ch == '?' || ch == c[candidate_char_index] => {
+                pattern_char_index += 1;
+                candidate_char_index += 1;
+            }
+            _ => {
+                let Some(last_star_pattern_and_candidate_index_ref) =
+                    last_star_pattern_and_candidate_index.as_mut()
+                else {
+                    return false;
+                };
+                last_star_pattern_and_candidate_index_ref.1 += 1;
+                pattern_char_index = last_star_pattern_and_candidate_index_ref.0 + 1;
+                candidate_char_index = last_star_pattern_and_candidate_index_ref.1;
+            }
+        }
     }
+    p[pattern_char_index..].iter().all(|&ch| ch == '*')
 }
 
 /// Literal entries are winning over any glob. Among globs the longest literal prefix is winning. A
@@ -105,6 +121,17 @@ mod tests {
         assert!(!glob_match("nixpkgs*", "flake-utils"));
         assert!(glob_match("nix?", "nixa"));
         assert!(!glob_match("nix?", "nix"));
+    }
+
+    #[test]
+    fn many_stars_long_path_without_b_returns_false() {
+        assert!(!glob_match("*a*a*a*a*a*a*a*b", &"a".repeat(60)));
+        assert!(glob_match(
+            "*a*a*a*a*a*a*a*b",
+            &format!("{}b", "a".repeat(60))
+        ));
+        assert!(glob_match("src/*.rs", "src/nested/lib.rs"));
+        assert!(!glob_match("src/*.rs", "src/lib.rsx"));
     }
 
     #[test]
