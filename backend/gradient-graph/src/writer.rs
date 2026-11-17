@@ -295,41 +295,68 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
         return;
     }
 
-    let (groups, replies): (Vec<RecordBatch>, Vec<Vec<Reply<RecordReport>>>) =
-        merge_queued(std::mem::take(&mut st.queued))
-            .into_iter()
-            .unzip();
-    let (commits, commit_replies): (Vec<NarCommit>, Vec<Reply<NarCommitted>>) =
-        std::mem::take(&mut st.nars).into_iter().unzip();
+    let groups = merge_queued(std::mem::take(&mut st.queued));
+    let commits = std::mem::take(&mut st.nars);
     st.queued_rows = 0;
-    let (groups_ref, commits_ref) = (&groups, &commits);
-    let limits = GraphWriterTransactionLimits::for_message_kind("flush");
-    let written = transact(&st.ctx, limits, move |scoped| async move {
-        let mut recorded = Vec::with_capacity(groups_ref.len());
-        for group in groups_ref {
-            recorded.push(escalate_retryable(record_one(&scoped, group).await)?);
-        }
+    for (group, replies) in groups {
+        write_record_batch_group_in_own_transaction(myself, st, group, replies).await;
+    }
+    if !commits.is_empty() {
+        commit_queued_nar_uploads(myself, st, commits).await;
+    }
+}
 
-        let committed = commit_nars(&scoped, commits_ref).await?;
-        claim_landed_paths(&scoped, commits_ref, &committed).await?;
-        Ok((recorded, committed))
+async fn write_record_batch_group_in_own_transaction(
+    myself: &ActorRef<GraphMsg>,
+    st: &GraphState,
+    group: RecordBatch,
+    replies: Vec<Reply<RecordReport>>,
+) {
+    let group_ref = &group;
+    let limits = GraphWriterTransactionLimits::for_message_kind("record");
+    let outcome = transact(&st.ctx, limits, move |scoped| async move {
+        record_one(&scoped, group_ref).await
     })
     .await;
+    st.record(&outcome.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
 
-    let (outcomes, committed) = match written {
-        Ok((outcomes, committed)) => {
-            st.record(&Ok(()));
-            (outcomes, Ok(committed))
+    match outcome {
+        Ok(report) => {
+            record::after_commit(&st.ctx, myself, &group, &report).await;
+            for reply in replies {
+                let _ = reply.send(Ok(report.clone()));
+            }
         }
         Err(e) => {
-            warn!(error = %e, groups = groups.len(), nars = commits.len(), "Record transaction failed. Writing evaluations and NARs in separate transactions.");
-            st.record(&Err(anyhow!("{e}")));
-            write_record_groups_then_nar_commits_separately_after_failed_flush(
-                &st.ctx, &groups, &commits,
-            )
-            .await
+            record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
+            let mut replies = replies.into_iter();
+            let first = replies.next();
+            for reply in replies {
+                let _ = reply.send(Err(anyhow!("{e:#}")));
+            }
+            if let Some(reply) = first {
+                let _ = reply.send(Err(e));
+            }
         }
-    };
+    }
+}
+
+async fn commit_queued_nar_uploads(
+    myself: &ActorRef<GraphMsg>,
+    st: &mut GraphState,
+    queued: Vec<(NarCommit, Reply<NarCommitted>)>,
+) {
+    let (commits, commit_replies): (Vec<NarCommit>, Vec<Reply<NarCommitted>>) =
+        queued.into_iter().unzip();
+    let commits_ref = &commits;
+    let limits = GraphWriterTransactionLimits::for_message_kind("commit_nar");
+    let committed = transact(&st.ctx, limits, move |scoped| async move {
+        let committed = commit_nars(&scoped, commits_ref).await?;
+        claim_landed_paths(&scoped, commits_ref, &committed).await?;
+        Ok(committed)
+    })
+    .await;
+    st.record(&committed.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
 
     match committed {
         Ok(committed) => {
@@ -355,55 +382,6 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
             }
         }
     }
-
-    for ((group, group_replies), outcome) in groups.into_iter().zip(replies).zip(outcomes) {
-        match outcome {
-            Ok(report) => {
-                record::after_commit(&st.ctx, myself, &group, &report).await;
-                for reply in group_replies {
-                    let _ = reply.send(Ok(report.clone()));
-                }
-            }
-            Err(e) => {
-                record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
-                let mut group_replies = group_replies.into_iter();
-                let first = group_replies.next();
-                for reply in group_replies {
-                    let _ = reply.send(Err(anyhow!("{e:#}")));
-                }
-                if let Some(reply) = first {
-                    let _ = reply.send(Err(e));
-                }
-            }
-        }
-    }
-}
-
-type NarCommitOutcomes = anyhow::Result<Vec<anyhow::Result<NarCommitted>>>;
-
-async fn write_record_groups_then_nar_commits_separately_after_failed_flush(
-    ctx: &DbContext,
-    groups: &[RecordBatch],
-    commits: &[NarCommit],
-) -> (Vec<anyhow::Result<RecordReport>>, NarCommitOutcomes) {
-    let mut outcomes = Vec::with_capacity(groups.len());
-    let limits = GraphWriterTransactionLimits::for_message_kind("record");
-    for group in groups {
-        let outcome = transact(ctx, limits, move |scoped| async move {
-            record_one(&scoped, group).await
-        })
-        .await;
-        outcomes.push(outcome);
-    }
-
-    let limits = GraphWriterTransactionLimits::for_message_kind("commit_nar");
-    let committed = transact(ctx, limits, move |scoped| async move {
-        let committed = commit_nars(&scoped, commits).await?;
-        claim_landed_paths(&scoped, commits, &committed).await?;
-        Ok(committed)
-    })
-    .await;
-    (outcomes, committed)
 }
 
 fn merge_queued(
@@ -444,10 +422,7 @@ fn escalate_retryable<T>(outcome: anyhow::Result<T>) -> anyhow::Result<anyhow::R
 
 #[tracing::instrument(level = "debug", skip_all)]
 async fn record_one(scoped: &DbContext, batch: &RecordBatch) -> anyhow::Result<RecordReport> {
-    in_savepoint(scoped, |inner| async move {
-        record::apply_batch(&inner, batch).await
-    })
-    .await
+    record::apply_batch(scoped, batch).await
 }
 
 #[tracing::instrument(level = "debug", skip_all, fields(nars = commits.len()))]
