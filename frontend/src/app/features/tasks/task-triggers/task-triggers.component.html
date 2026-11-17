@@ -280,6 +280,29 @@
     </gr-form-field>
   }
 
+  @if (form.type !== 'time') {
+    <gr-form-field label="Include Paths" for="trig-include-paths">
+      <gr-label-help slot="label" doc="concepts/triggers/#path-filters" title="Triggers fire only for commits that change files that match. Triggers fire anyway when Gradient cannot list the changed files." />
+      <span slot="hint">Comma-separated path patterns relative to the repository root. The <code>*</code> wildcard can match <code>/</code> too. Leave blank to match every changed file.</span>
+      <input
+        grInput
+        id="trig-include-paths"
+        [(ngModel)]="form.include_paths"
+        placeholder="src/*, flake.nix"
+        (keyup.enter)="submitForm()"
+      />
+    </gr-form-field>
+    <gr-form-field label="Exclude Paths" for="trig-exclude-paths" hint="Comma-separated path patterns. Changes that touch only these files don't start an evaluation.">
+      <input
+        grInput
+        id="trig-exclude-paths"
+        [(ngModel)]="form.exclude_paths"
+        placeholder="docs/*, *.md"
+        (keyup.enter)="submitForm()"
+      />
+    </gr-form-field>
+  }
+
   @if (form.type === 'time') {
     <gr-form-field label="Cron Expression" for="trig-cron" required
       [invalid]="(submitAttempted() || cronModel.touched) && !!cronError" [error]="cronError ?? ''">

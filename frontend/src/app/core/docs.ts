@@ -17,6 +17,7 @@ export type DocLink =
   | 'concepts/projects-and-tasks/#concurrency'
   | 'concepts/projects-and-tasks/#repository-url'
   | 'concepts/triggers/'
+  | 'concepts/triggers/#path-filters'
   | 'concepts/workers/#capabilities'
   | 'exec/secrets/'
   | 'exec/secrets/#3-encrypt-repository-sops-files'
