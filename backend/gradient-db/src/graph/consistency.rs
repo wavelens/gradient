@@ -11,7 +11,7 @@
 //! and the recount never runs to fix them.
 
 use crate::graph::can_start::{SWEEP_CHUNKS_PER_TRANSACTION, SWEEP_LOCK_CHUNK};
-use crate::graph::reachability::Adopted;
+use crate::graph::reachability::BUILD_SCAN_BATCH_SIZE;
 use crate::{DbContext, WorkerDb};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
@@ -144,17 +144,56 @@ impl BuildGraphConsistencyCheckStep {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OpenBuildAdoptionPhase {
+    ScanOpenBuildsAfterCursorDerivationId {
+        cursor: DerivationId,
+        adopted: Vec<DerivationId>,
+    },
+    UpdateWantedFlagOfAdoptedDerivations(Vec<DerivationId>),
+}
+
+impl Default for OpenBuildAdoptionPhase {
+    fn default() -> Self {
+        Self::ScanOpenBuildsAfterCursorDerivationId {
+            cursor: DerivationId::nil(),
+            adopted: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsistencyCheckRepairScopeChunkProgress {
     covered_derivation_ids: Vec<DerivationId>,
-    pending_adopted_ids: Option<Vec<DerivationId>>,
+    adopt_unnamed_builds_phase: OpenBuildAdoptionPhase,
+    open_builds_scanned_per_transaction: usize,
     derivation_ids_pending_forgotten_probe_rewalk: Vec<DerivationId>,
     derivation_ids_waiting_for_promotion_after_rewalks: Vec<DerivationId>,
     next_transaction_start_index: usize,
     report_so_far: ConsistencyReport,
 }
 
+impl Default for ConsistencyCheckRepairScopeChunkProgress {
+    fn default() -> Self {
+        Self::new_with_open_builds_per_transaction(BUILD_SCAN_BATCH_SIZE)
+    }
+}
+
 impl ConsistencyCheckRepairScopeChunkProgress {
+    pub fn new_with_open_builds_per_transaction(
+        open_builds_scanned_per_transaction: usize,
+    ) -> Self {
+        Self {
+            covered_derivation_ids: Vec::new(),
+            adopt_unnamed_builds_phase: OpenBuildAdoptionPhase::default(),
+            open_builds_scanned_per_transaction,
+            derivation_ids_pending_forgotten_probe_rewalk: Vec::new(),
+            derivation_ids_waiting_for_promotion_after_rewalks: Vec::new(),
+            next_transaction_start_index: 0,
+            report_so_far: ConsistencyReport::default(),
+        }
+    }
+
     fn next_step_after_finished_step(
         &self,
         finished: BuildGraphConsistencyCheckStep,
@@ -181,12 +220,15 @@ impl ConsistencyCheckRepairScopeChunkProgress {
             Step::RepairFetchable | Step::RecountBlockingDeps => {
                 self.next_transaction_start_index != 0
             }
-            Step::AdoptPendingClosures => {
-                self.next_transaction_start_index != 0
-                    || !self
-                        .derivation_ids_pending_forgotten_probe_rewalk
-                        .is_empty()
-            }
+            Step::AdoptPendingClosures => match &self.adopt_unnamed_builds_phase {
+                OpenBuildAdoptionPhase::ScanOpenBuildsAfterCursorDerivationId { .. } => true,
+                OpenBuildAdoptionPhase::UpdateWantedFlagOfAdoptedDerivations(waiting) => {
+                    !waiting.is_empty()
+                        || !self
+                            .derivation_ids_pending_forgotten_probe_rewalk
+                            .is_empty()
+                }
+            },
             _ => false,
         }
     }
@@ -200,6 +242,7 @@ impl ConsistencyCheckRepairScopeChunkProgress {
 }
 
 pub async fn run_consistency_check_steps<E, F, Fut>(
+    starting_progress: ConsistencyCheckRepairScopeChunkProgress,
     is_postgres_lock_timeout_error: impl Fn(&E) -> bool,
     mut run_step: F,
 ) -> Result<ConsistencyReport, E>
@@ -208,7 +251,7 @@ where
     F: FnMut(BuildGraphConsistencyCheckStep, ConsistencyCheckRepairScopeChunkProgress) -> Fut,
     Fut: Future<Output = Result<ConsistencyCheckRepairScopeChunkProgress, E>>,
 {
-    let mut progress = ConsistencyCheckRepairScopeChunkProgress::default();
+    let mut progress = starting_progress;
     let mut step =
         Some(BuildGraphConsistencyCheckStep::ALL_CONSISTENCY_CHECK_STEPS_IN_RUN_ORDER[0]);
     while let Some(current) = step {
@@ -236,6 +279,7 @@ where
 
 pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
     run_consistency_check_steps(
+        ConsistencyCheckRepairScopeChunkProgress::default(),
         crate::graph::can_start::lock_unavailable,
         |step, progress| run_one_consistency_check_step(ctx, step, progress),
     )
@@ -336,26 +380,80 @@ async fn adopt_pending_and_promote_slice(
         return rewalk_next_forgotten_probe_ids_then_promote(ctx, progress).await;
     }
 
-    let db = &ctx.worker_db;
-    let is_first_message_of_adopt_step = progress.pending_adopted_ids.is_none();
-    let adopted = if is_first_message_of_adopt_step
-        && crate::graph::reachability::pending_orphan_frontier(db).await?
-    {
-        crate::graph::reachability::adopt_pending_closures(db).await?
-    } else {
-        Adopted::default()
+    match &mut progress.adopt_unnamed_builds_phase {
+        OpenBuildAdoptionPhase::ScanOpenBuildsAfterCursorDerivationId { .. } => {
+            adopt_next_window_unnamed_builds_transaction_bump_graph_versions_advance_cursor_or_start_phase_two(
+                &ctx.worker_db,
+                progress,
+            )
+            .await
+        }
+        OpenBuildAdoptionPhase::UpdateWantedFlagOfAdoptedDerivations(waiting) => {
+            let slice: Vec<DerivationId> = waiting
+                .drain(..waiting.len().min(SWEEP_MAX_LOCK_KEYS))
+                .collect();
+            settle_need_and_promote_next_adopted_derivations_slice_in_transaction(
+                ctx, progress, &slice,
+            )
+            .await
+        }
+    }
+}
+
+async fn adopt_next_window_unnamed_builds_transaction_bump_graph_versions_advance_cursor_or_start_phase_two(
+    db: &WorkerDb,
+    progress: &mut ConsistencyCheckRepairScopeChunkProgress,
+) -> Result<(), DbErr> {
+    let OpenBuildAdoptionPhase::ScanOpenBuildsAfterCursorDerivationId { cursor, adopted } =
+        &mut progress.adopt_unnamed_builds_phase
+    else {
+        return Ok(());
     };
-    if is_first_message_of_adopt_step {
-        progress.report_so_far.adopted = adopted.pairs.len() as i64;
-        progress.pending_adopted_ids = Some(adopted.derivations());
+
+    let window = crate::graph::reachability::read_open_build_window_without_build_job(
+        db,
+        *cursor,
+        progress.open_builds_scanned_per_transaction,
+    )
+    .await?;
+    let found = crate::graph::reachability::adopt_unnamed_below_for_live_evaluations(
+        db,
+        &window.derivation_ids_without_build_job,
+    )
+    .await?;
+    crate::task_board::dep_counts::bump_graph_version(db, &found.evaluations()).await?;
+    progress.report_so_far.adopted += found.pairs.len() as i64;
+    adopted.extend(found.derivations());
+
+    match window.last_derivation_id {
+        Some(last)
+            if window.open_build_count_in_window
+                >= progress.open_builds_scanned_per_transaction =>
+        {
+            *cursor = last;
+        }
+        _ => {
+            let mut adopted = std::mem::take(adopted);
+            adopted.sort_unstable();
+            adopted.dedup();
+            progress.adopt_unnamed_builds_phase =
+                OpenBuildAdoptionPhase::UpdateWantedFlagOfAdoptedDerivations(adopted);
+        }
     }
 
-    let adopted_derivation_id_count = progress.pending_adopted_ids.as_ref().map_or(0, Vec::len);
-    let range = progress.take_next_slice_range(adopted_derivation_id_count);
-    if range.is_empty() {
+    Ok(())
+}
+
+async fn settle_need_and_promote_next_adopted_derivations_slice_in_transaction(
+    ctx: &DbContext,
+    progress: &mut ConsistencyCheckRepairScopeChunkProgress,
+    slice: &[DerivationId],
+) -> Result<(), DbErr> {
+    if slice.is_empty() {
         return Ok(());
     }
-    let slice = &progress.pending_adopted_ids.as_deref().unwrap_or_default()[range];
+
+    let db = &ctx.worker_db;
     let need_update = crate::graph::can_start::update_and_settle_need_with_advisory_key_limit(
         db,
         slice,
@@ -375,7 +473,6 @@ async fn adopt_pending_and_promote_slice(
         progress.derivation_ids_pending_forgotten_probe_rewalk =
             need_update.deferred_rewalk_derivations;
     }
-    crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
     crate::status::emit_transition_effects(ctx, &queued).await
 }
 
@@ -466,18 +563,26 @@ mod tests {
             .append_exec_results([exec(5)])
             .append_query_results([locked(), empty.clone(), empty.clone()]);
         db = if hole {
-            db.append_query_results([vec![BTreeMap::from([(
-                "?column?".to_owned(),
-                Value::Int(Some(1)),
-            )])]])
+            let unnamed = uuid::Uuid::now_v7();
+            db.append_query_results([vec![BTreeMap::from([
+                ("last_derivation_id".to_owned(), Value::from(unnamed)),
+                (
+                    "open_build_count_in_window".to_owned(),
+                    Value::BigInt(Some(1)),
+                ),
+                (
+                    "derivation_id_without_build_job".to_owned(),
+                    Value::from(unnamed),
+                ),
+            ])]])
             .append_exec_results([exec(0)])
             .append_query_results([vec![BTreeMap::from([
                 ("evaluation".to_owned(), Value::from(uuid::Uuid::now_v7())),
-                ("derivation".to_owned(), Value::from(uuid::Uuid::now_v7())),
+                ("derivation".to_owned(), Value::from(unnamed)),
             ])]])
-            .append_exec_results([exec(0), exec(0)])
+            .append_exec_results([exec(1), exec(0)])
             .append_query_results([empty.clone(), empty.clone()])
-            .append_exec_results([exec(1)])
+            .append_exec_results([exec(0)])
         } else {
             db.append_query_results([empty.clone()])
         };
@@ -577,9 +682,9 @@ mod tests {
         );
         assert!(
             log[19].contains(
-                "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
-            ),
-            "the naming backstop asks before it walks: {log:?}"
+                "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = s.derivation)"
+            ) && log[19].contains("ORDER BY db.derivation LIMIT $2"),
+            "naming backstop scanned the open build window for builds without a build job: {log:?}"
         );
         assert!(
             log[20].contains("SELECT DISTINCT o.hash"),
@@ -607,21 +712,21 @@ mod tests {
         assert_eq!(report.adopted, 1);
         let log = statements(pool.into_transaction_log());
         assert!(
-            log[19].contains("LIMIT 1")
+            log[19].contains("ORDER BY db.derivation LIMIT $2")
                 && log[20].contains("SET LOCAL work_mem")
-                && log[21].contains("INSERT INTO build_job"),
-            "the probe guards the walk that names: {log:?}"
+                && log[21].contains("INSERT INTO build_job")
+                && log[22].contains("graph_version = e.graph_version + 1"),
+            "window scan found an unnamed build, walk named it and the naming evaluation updated the graph version in the same transaction: {log:?}"
         );
         assert!(
-            log[22].contains("SET LOCAL work_mem")
-                && log[23].contains("ORDER BY derivation FOR NO KEY UPDATE")
-                && log[24].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
-            "a name gives the closure below it a need, in this pass and not the next: {log:?}"
+            log[23].contains("SET LOCAL work_mem")
+                && log[24].contains("ORDER BY derivation FOR NO KEY UPDATE")
+                && log[25].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
+            "a later transaction in the same run of the consistency check can give the named closure its need flag: {log:?}"
         );
         assert!(
-            log[25].contains("SET status = 1")
-                && log[26].contains("graph_version = e.graph_version + 1"),
-            "then queue what was named and bump: {log:?}"
+            log[26].contains("SET status = 1"),
+            "next, add the named build to the queue: {log:?}"
         );
         assert!(
             log[27].contains("SELECT DISTINCT o.hash")
@@ -658,10 +763,20 @@ mod tests {
 
         assert_eq!(progress.take_next_slice_range(bound + 1), 0..bound);
         assert_eq!(
+            progress.next_step_after_finished_step(Step::RecountBlockingDeps),
+            Some(Step::RecountBlockingDeps)
+        );
+        assert_eq!(progress.take_next_slice_range(bound + 1), bound..bound + 1);
+        assert_eq!(
+            progress.next_step_after_finished_step(Step::RecountBlockingDeps),
+            Some(Step::UnpromoteAndPromote)
+        );
+        assert_eq!(
             progress.next_step_after_finished_step(Step::AdoptPendingClosures),
             Some(Step::AdoptPendingClosures)
         );
-        assert_eq!(progress.take_next_slice_range(bound + 1), bound..bound + 1);
+        progress.adopt_unnamed_builds_phase =
+            OpenBuildAdoptionPhase::UpdateWantedFlagOfAdoptedDerivations(Vec::new());
         assert_eq!(
             progress.next_step_after_finished_step(Step::AdoptPendingClosures),
             Some(Step::CountAlarms)

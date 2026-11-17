@@ -76,7 +76,7 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
 static ADOPT_EVAL: LazyLock<String> =
     LazyLock::new(|| adopt_sql(&named_open("bj.evaluation = $1")));
 
-fn below_named_parents() -> String {
+fn below_named_parents(parent_build_is_wanted: bool) -> String {
     format!(
         "SELECT parent.evaluation, db.derivation, ({builder}) \
          FROM unnest($1::uuid[]) AS g(derivation) \
@@ -87,19 +87,28 @@ fn below_named_parents() -> String {
                              JOIN derivation pw ON pw.id = p.derivation \
                              JOIN build_job pj ON pj.derivation = p.derivation \
                              JOIN evaluation ev ON ev.id = pj.evaluation \
-                             WHERE p.derivation = e.derivation AND p.wanted AND {parent_open} \
+                             WHERE p.derivation = e.derivation{wanted} AND {parent_open} \
                                AND (({parent_builder}) OR e.kind IN (1, 2)) \
                                AND ev.status IN ({live}) OFFSET 0) parent \
          WHERE {open}",
         builder = builder_predicate("db", "w"),
         open = open_predicate("db"),
+        wanted = if parent_build_is_wanted {
+            " AND p.wanted"
+        } else {
+            ""
+        },
         parent_open = open_predicate("p"),
         parent_builder = builder_predicate("p", "pw"),
         live = crate::sql::status::eval_in(&EvaluationStatus::ACTIVE),
     )
 }
 
-static ADOPT_BELOW_NAMED: LazyLock<String> = LazyLock::new(|| adopt_sql(&below_named_parents()));
+static ADOPT_BELOW_NAMED: LazyLock<String> =
+    LazyLock::new(|| adopt_sql(&below_named_parents(true)));
+
+static INSERT_BUILD_JOBS_BELOW_LIVE_NAMED_PARENTS_IGNORING_WANTED_SQL: LazyLock<String> =
+    LazyLock::new(|| adopt_sql(&below_named_parents(false)));
 
 static ADOPT_UNNAMED_BELOW: LazyLock<String> = LazyLock::new(|| {
     let named_roots = named_open(&format!(
@@ -111,7 +120,7 @@ static ADOPT_UNNAMED_BELOW: LazyLock<String> = LazyLock::new(|| {
         "{cte} {insert}",
         cte = open_closure_cte_until(
             "pending",
-            &format!("{named_roots} UNION {}", below_named_parents()),
+            &format!("{named_roots} UNION {}", below_named_parents(true)),
             "EXISTS (SELECT 1 FROM build_job x \
              WHERE x.evaluation = c.evaluation AND x.derivation = e.dependency)",
         ),
@@ -121,6 +130,14 @@ static ADOPT_UNNAMED_BELOW: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     ADOPT_BELOW_NAMED_QUERY = || ADOPT_BELOW_NAMED.as_str(),
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
+
+crate::sql_lazy! {
+    INSERT_BUILD_JOBS_BELOW_LIVE_NAMED_PARENTS_IGNORING_WANTED_QUERY =
+        || INSERT_BUILD_JOBS_BELOW_LIVE_NAMED_PARENTS_IGNORING_WANTED_SQL.as_str(),
         params = [DerivationIds(64)],
         tier = Walk,
         flags = [Walk];
@@ -163,25 +180,37 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
-    pending_orphans_sql(&format!(
-        "EXISTS (SELECT 1 FROM derivation_dependency e \
-         JOIN derivation_build p ON p.derivation = e.derivation \
-         JOIN derivation w ON w.id = p.derivation \
-         JOIN build_job pj ON pj.derivation = p.derivation \
-         JOIN evaluation ev ON ev.id = pj.evaluation \
-         WHERE e.dependency = db.derivation AND {open} \
-           AND (({builder}) OR e.kind IN (1, 2)) AND ev.status IN ({live})) AND ",
-        open = open_predicate("p"),
-        builder = builder_predicate("p", "w"),
-        live = crate::sql::status::eval_in(&EvaluationStatus::ACTIVE),
-    ))
+pub const BUILD_SCAN_BATCH_SIZE: usize = 20_000;
+
+static OPEN_BUILDS_WITHOUT_BUILD_JOB_WINDOW_SCAN: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "WITH scanned AS MATERIALIZED (SELECT db.derivation FROM derivation_build db \
+                                      WHERE db.derivation > $1 AND {open} \
+                                      ORDER BY db.derivation LIMIT $2), \
+         without_build_job AS (SELECT s.derivation FROM scanned s WHERE NOT EXISTS \
+                               (SELECT 1 FROM build_job bj WHERE bj.derivation = s.derivation)), \
+         window_end AS (SELECT s.derivation, (SELECT count(*) FROM scanned) AS scanned_count \
+                        FROM scanned s ORDER BY s.derivation DESC LIMIT 1) \
+         SELECT e.derivation AS last_derivation_id, \
+                e.scanned_count AS open_build_count_in_window, \
+                u.derivation AS derivation_id_without_build_job \
+         FROM window_end e LEFT JOIN without_build_job u ON true",
+        open = open_predicate("db"),
+    )
 });
 
 crate::sql_lazy! {
-    PENDING_ORPHAN_FRONTIER_QUERY = || PENDING_ORPHAN_FRONTIER.as_str(),
-        params = [],
+    OPEN_BUILDS_WITHOUT_BUILD_JOB_WINDOW_SCAN_QUERY =
+        || OPEN_BUILDS_WITHOUT_BUILD_JOB_WINDOW_SCAN.as_str(),
+        params = [DerivationId, Int(BUILD_SCAN_BATCH_SIZE as i64)],
         tier = Sweep;
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct OpenBuildWindowScanResult {
+    pub derivation_ids_without_build_job: Vec<DerivationId>,
+    pub last_derivation_id: Option<DerivationId>,
+    pub open_build_count_in_window: usize,
 }
 
 pub async fn pending_orphans_among<C: ConnectionTrait>(
@@ -199,11 +228,38 @@ pub async fn pending_orphans_among<C: ConnectionTrait>(
         .is_some())
 }
 
-pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
-    Ok(db
-        .query_one_raw(PENDING_ORPHAN_FRONTIER_QUERY.stmt())
-        .await?
-        .is_some())
+pub async fn read_open_build_window_without_build_job<C: ConnectionTrait>(
+    db: &C,
+    after: DerivationId,
+    open_builds_scanned_per_transaction: usize,
+) -> Result<OpenBuildWindowScanResult, DbErr> {
+    let rows = db
+        .query_all_raw(OPEN_BUILDS_WITHOUT_BUILD_JOB_WINDOW_SCAN_QUERY.bind([
+            Value::Uuid(Some(after.into_inner())),
+            Value::BigInt(Some(open_builds_scanned_per_transaction as i64)),
+        ]))
+        .await?;
+    let Some(first) = rows.first() else {
+        return Ok(OpenBuildWindowScanResult::default());
+    };
+
+    Ok(OpenBuildWindowScanResult {
+        derivation_ids_without_build_job: rows
+            .iter()
+            .filter_map(|r| {
+                r.try_get::<Option<uuid::Uuid>>("", "derivation_id_without_build_job")
+                    .map(|d| d.map(DerivationId::new))
+                    .transpose()
+            })
+            .collect::<Result<_, DbErr>>()?,
+        last_derivation_id: Some(DerivationId::new(
+            first.try_get::<uuid::Uuid>("", "last_derivation_id")?,
+        )),
+        open_build_count_in_window: usize::try_from(
+            first.try_get::<i64>("", "open_build_count_in_window")?,
+        )
+        .unwrap_or(usize::MAX),
+    })
 }
 
 /// The conflict clause is absorbing a concurrent record naming the same pair.
@@ -237,6 +293,26 @@ where
 
     let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
     adopt(db, &ADOPT_BELOW_NAMED_QUERY, [ids.into()]).await
+}
+
+pub async fn adopt_unnamed_below_for_live_evaluations<C>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Adopted, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if derivations.is_empty() {
+        return Ok(Adopted::default());
+    }
+
+    let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
+    adopt(
+        db,
+        &INSERT_BUILD_JOBS_BELOW_LIVE_NAMED_PARENTS_IGNORING_WANTED_QUERY,
+        [ids.into()],
+    )
+    .await
 }
 
 pub async fn adopt_unnamed_below<C>(db: &C, derivations: &[DerivationId]) -> Result<Adopted, DbErr>
@@ -438,43 +514,23 @@ mod tests {
                 "?column?".to_owned(),
                 Value::Int(Some(1)),
             )])]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         assert!(pending_orphans_among(&db, &[d]).await.unwrap());
-        assert!(!pending_orphan_frontier(&db).await.unwrap());
         assert!(
             !pending_orphans_among(&db, &[]).await.unwrap(),
             "an empty scope asks nothing"
         );
         let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 2, "{log:?}");
-        for sql in &log {
-            let sql = norm(sql);
-            assert!(
-                sql.contains(
-                    "(NOT db.fetchable AND db.status NOT IN (4, 6, 9)) AND NOT EXISTS \
-                     (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
-                ),
-                "{sql}"
-            );
-        }
-
+        assert_eq!(log.len(), 1, "{log:?}");
+        let sql = norm(&log[0]);
         assert!(
-            norm(&log[0]).contains("db.derivation = ANY($1::uuid[])"),
-            "{log:?}"
-        );
-        let frontier = norm(&log[1]);
-        assert!(
-            frontier.contains(
-                "JOIN build_job pj ON pj.derivation = p.derivation \
-                 JOIN evaluation ev ON ev.id = pj.evaluation \
-                 WHERE e.dependency = db.derivation \
-                 AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
-                 AND ((w.walked AND p.probed AND NOT p.cache_available \
-                 AND p.status IN (0, 1, 2, 8)) OR e.kind IN (1, 2)) AND ev.status IN ("
+            sql.contains(
+                "(NOT db.fetchable AND db.status NOT IN (4, 6, 9)) AND NOT EXISTS \
+                 (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
             ),
-            "{frontier}"
+            "{sql}"
         );
+        assert!(sql.contains("db.derivation = ANY($1::uuid[])"), "{sql}");
     }
 }

@@ -30,7 +30,9 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Context as _;
 use gradient_db::DbContext;
-use gradient_db::graph::consistency::{ConsistencyReport, run_consistency_check_steps};
+use gradient_db::graph::consistency::{
+    ConsistencyCheckRepairScopeChunkProgress, ConsistencyReport, run_consistency_check_steps,
+};
 use gradient_types::DerivationId;
 use gradient_types::events::{Event, EventBus, graph};
 use gradient_util::supervision::{ChildCtx, ChildSpec, SupervisorHealth};
@@ -228,6 +230,29 @@ impl Graph {
     }
 
     pub async fn run_consistency_checks(&self) -> anyhow::Result<ConsistencyReport> {
+        self.run_consistency_check_steps_from_progress(
+            ConsistencyCheckRepairScopeChunkProgress::default(),
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn run_consistency_checks_scanning_open_builds_per_transaction(
+        &self,
+        open_builds_scanned_per_transaction: usize,
+    ) -> anyhow::Result<ConsistencyReport> {
+        self.run_consistency_check_steps_from_progress(
+            ConsistencyCheckRepairScopeChunkProgress::new_with_open_builds_per_transaction(
+                open_builds_scanned_per_transaction,
+            ),
+        )
+        .await
+    }
+
+    async fn run_consistency_check_steps_from_progress(
+        &self,
+        starting_progress: ConsistencyCheckRepairScopeChunkProgress,
+    ) -> anyhow::Result<ConsistencyReport> {
         #[cfg(feature = "stub")]
         if self.stub {
             return Ok(ConsistencyReport::default());
@@ -236,6 +261,7 @@ impl Graph {
             writer::postgres_sqlstate_from_error_chain(e).as_deref() == Some("55P03")
         };
         run_consistency_check_steps(
+            starting_progress,
             is_postgres_lock_timeout_error,
             move |step, progress| async move {
                 let message = Transition::RunConsistencyCheckStep { step, progress };

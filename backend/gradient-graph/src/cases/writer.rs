@@ -785,6 +785,165 @@ async fn m14_two_check_steps_repair_counters_and_a_large_scope_in_several_transa
     case.finish().await;
 }
 
+const BUILD_JOB_WRITTEN_IN_TRIGGER_SQL: &str = "
+    CREATE TRIGGER note_build_job AFTER INSERT ON build_job
+        FOR EACH ROW EXECUTE FUNCTION note_transaction();
+";
+
+async fn delete_build_job_rows_for_derivation_store_paths(case: &Case, paths: &[&str]) {
+    for path in paths {
+        let derivation = case.db.id_of(path).await;
+        case.sql(&format!(
+            "DELETE FROM build_job WHERE derivation = '{derivation}'"
+        ))
+        .await;
+    }
+}
+
+async fn derivation_ids_with_build_jobs_for_evaluation(
+    case: &Case,
+    evaluation: EvaluationId,
+) -> BTreeSet<DerivationId> {
+    case.jobs(evaluation)
+        .await
+        .into_iter()
+        .map(|job| job.derivation)
+        .collect()
+}
+
+#[tokio::test]
+async fn consistency_check_adopts_orphaned_subtrees_under_live_evaluation_leaves_parentless_open_build_and_window_size_one_scan_matches_unbounded_scan()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(B)
+            .depends_on(D)
+            .derivation(B)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .depends_on(C)
+            .derivation(C)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(C_OUT)
+            .build_status(BuildStatus::Queued)
+            .derivation(D)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(D_OUT)
+            .build_status(BuildStatus::Queued)
+            .derivation(Z)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(Z_OUT)
+            .build_status(BuildStatus::Skipped),
+    )
+    .await;
+    delete_build_job_rows_for_derivation_store_paths(&case, &[B, C]).await;
+
+    let report = case.drift().await;
+
+    assert_eq!(report.adopted, 2, "After 1: {report:?}");
+    assert!(
+        case.job(e1, B).await.is_some() && case.job(e1, C).await.is_some(),
+        "after 1: build jobs for B and C now belong to evaluation e1"
+    );
+    let z = case.db.id_of(Z).await;
+    assert_eq!(
+        case.db
+            .texts(&format!(
+                "SELECT count(*)::text FROM build_job WHERE derivation = '{z}'"
+            ))
+            .await,
+        ["0"],
+        "after 1: Z has no parent, so no names apply to it"
+    );
+    assert_eq!(
+        case.sb(Z).await.status,
+        BuildStatus::Skipped,
+        "after 1: Z stays Skipped"
+    );
+    let report = case.drift().await;
+    assert_eq!(
+        report.total(),
+        0,
+        "after 1 run: second check found nothing to repair: {report:?}"
+    );
+
+    case.sql(NOTE_TRANSACTIONS).await;
+    case.sql(BUILD_JOB_WRITTEN_IN_TRIGGER_SQL).await;
+    delete_build_job_rows_for_derivation_store_paths(&case, &[B, C, D]).await;
+
+    let one_open_build_per_transaction_consistency_check_report = case
+        .graph
+        .run_consistency_checks_scanning_open_builds_per_transaction(1)
+        .await
+        .expect("after 2: run a check per transaction to scan one open build");
+
+    let transactions: BTreeSet<String> = transactions_writing(&case, "build_job")
+        .await
+        .into_iter()
+        .collect();
+    assert_eq!(
+        transactions.len(),
+        2,
+        "after 2: two transactions name the subtrees under B and under D: {transactions:?}"
+    );
+    let derivation_ids_named_after_one_build_per_transaction_run =
+        derivation_ids_with_build_jobs_for_evaluation(&case, e1).await;
+    case.sql("DELETE FROM written_in").await;
+    delete_build_job_rows_for_derivation_store_paths(&case, &[B, C, D]).await;
+
+    let default_window_consistency_check_report = case
+        .graph
+        .run_consistency_checks()
+        .await
+        .expect("after 3: run the check with the default window");
+
+    let transactions: BTreeSet<String> = transactions_writing(&case, "build_job")
+        .await
+        .into_iter()
+        .collect();
+    assert_eq!(
+        transactions.len(),
+        1,
+        "after 3: one window can identify all builds in one transaction: {transactions:?}"
+    );
+    assert_eq!(
+        (
+            one_open_build_per_transaction_consistency_check_report.adopted,
+            derivation_ids_named_after_one_build_per_transaction_run,
+        ),
+        (
+            default_window_consistency_check_report.adopted,
+            derivation_ids_with_build_jobs_for_evaluation(&case, e1).await,
+        ),
+        "after 3 rounds: both window sizes adopt the same pair"
+    );
+    assert_eq!(
+        default_window_consistency_check_report.adopted, 3,
+        "after 3 rounds: both window sizes adopt the same pair"
+    );
+    case.finish().await;
+}
+
 #[tokio::test]
 async fn row_lock_timeout_in_first_step_still_repairs_wanted_counter_of_other_build() {
     let e1 = EvaluationId::now_v7();
