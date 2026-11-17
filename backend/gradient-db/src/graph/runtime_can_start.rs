@@ -17,7 +17,9 @@ use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 
 use crate::graph::can_start::{ids, lock_shared_builds};
-use crate::graph::predicates::{present_predicate, shared_build_complete_predicate};
+use crate::graph::predicates::{
+    present_predicate, present_shared_build_derivation_ids_select, shared_build_complete_predicate,
+};
 use crate::sql::StatusWrite;
 
 fn seed_sql() -> String {
@@ -80,14 +82,16 @@ fn recount_sql() -> String {
 
 fn drifted_sql() -> String {
     format!(
-        "WITH marked_incomplete AS MATERIALIZED (\
+        "WITH present_derivations AS MATERIALIZED ({present}), \
+         marked_incomplete AS MATERIALIZED (\
              SELECT db.derivation, db.missing_runtime_deps FROM derivation_build db \
-             WHERE db.missing_runtime_deps <> 0 OR NOT {present}), \
+             LEFT JOIN present_derivations p ON p.derivation = db.derivation \
+             WHERE db.missing_runtime_deps <> 0 OR p.derivation IS NULL), \
          {counts} \
          SELECT 1 FROM marked_incomplete i FULL JOIN counts c ON c.derivation = i.derivation \
          WHERE i.derivation IS NULL OR i.missing_runtime_deps <> coalesce(c.n, 0) \
          LIMIT 1",
-        present = present_predicate("db"),
+        present = present_shared_build_derivation_ids_select(),
         counts = runtime_dependents_counted("marked_incomplete"),
     )
 }
@@ -671,8 +675,17 @@ mod tests {
         let sql = MISSING_RUNTIME_DEPS_DRIFTED.text();
         assert!(!sql.contains("RECURSIVE"), "{sql}");
         assert!(
-            sql.contains("WHERE db.missing_runtime_deps <> 0 OR NOT (EXISTS"),
+            sql.contains(&format!(
+                "present_derivations AS MATERIALIZED ({})",
+                present_shared_build_derivation_ids_select()
+            )),
             "{sql}"
+        );
+        assert!(
+            sql.contains(
+                "LEFT JOIN present_derivations p ON p.derivation = db.derivation WHERE db.missing_runtime_deps <> 0 OR p.derivation IS NULL"
+            ),
+            "A join against a materialized set can hash and spill to disk. A subquery under OR cannot."
         );
         assert!(sql.contains("FROM marked_incomplete u, LATERAL ("), "{sql}");
         assert!(
