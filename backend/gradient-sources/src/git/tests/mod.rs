@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod fixtures;
+mod changed_paths;
+pub(crate) mod fixtures;
 mod https_credentials_for_operation_host;
 
 use super::checkout::{checkout_commit, checkout_commit_into};
