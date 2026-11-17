@@ -44,7 +44,8 @@ fn check_out_into(dir: &Path, url: &str, commit: &str) -> Result<()> {
     let oid = Oid::from_str(commit).with_context(|| format!("invalid commit SHA: {commit}"))?;
     let repo = Repository::init(dir).context("init the checkout")?;
 
-    Origin::new(&repo, url)?
+    Origin::new(&repo, url)
+        .with_context(|| format!("invalid repository URL {url}"))?
         .fetch_commit(oid)
         .with_context(|| format!("fetch commit {commit} from {url}"))?;
 
@@ -61,20 +62,18 @@ fn check_out_into(dir: &Path, url: &str, commit: &str) -> Result<()> {
     Ok(())
 }
 
-struct Origin<'a> {
+pub(super) struct Origin<'a> {
     remote: Remote<'a>,
     url: &'a str,
 }
 
 impl<'a> Origin<'a> {
-    fn new(repo: &'a Repository, url: &'a str) -> Result<Self> {
-        let remote = repo
-            .remote_anonymous(url)
-            .with_context(|| format!("invalid repository URL {url}"))?;
+    pub(super) fn new(repo: &'a Repository, url: &'a str) -> Result<Self, git2::Error> {
+        let remote = repo.remote_anonymous(url)?;
         Ok(Self { remote, url })
     }
 
-    fn fetch_commit(&mut self, oid: Oid) -> Result<(), git2::Error> {
+    pub(super) fn fetch_commit(&mut self, oid: Oid) -> Result<(), git2::Error> {
         if let Some(tip) = self.ref_pointing_at(oid)? {
             return self.fetch(&tip, true);
         }
@@ -97,7 +96,7 @@ impl<'a> Origin<'a> {
             .map(|head| head.name().to_owned()))
     }
 
-    fn fetch(&mut self, refspec: &str, shallow: bool) -> Result<(), git2::Error> {
+    pub(super) fn fetch(&mut self, refspec: &str, shallow: bool) -> Result<(), git2::Error> {
         let mut options =
             build_fetch_options_with_time_and_size_limits_and_optional_shallow(self.url, shallow);
         self.remote.fetch(&[refspec], Some(&mut options), None)

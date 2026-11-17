@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod changed_paths;
 mod checkout;
 mod commit_info;
 mod context;
@@ -24,6 +25,7 @@ use gradient_types::*;
 use sea_orm::ConnectionTrait;
 use tracing::instrument;
 
+pub use changed_paths::ComparisonBaseCommit;
 pub use checkout::{checkout_commit, checkout_commit_into};
 pub use commit_info::HeadCommit;
 pub use context::{
@@ -80,6 +82,23 @@ pub async fn get_commit_info(
     TaskGitContext::new(ctx, task)
         .await?
         .commit_info(commit_hash)
+        .await
+}
+
+#[instrument(skip(ctx, base, head), fields(task_id = %task.id, task_name = %task.name, head = %vec_to_hex(head)))]
+pub async fn get_changed_file_path_pairs_between_commits(
+    ctx: &DbContext,
+    task: &MTask,
+    base: ComparisonBaseCommit,
+    head: &[u8],
+    head_repository: Option<&str>,
+) -> Result<Vec<String>, SourceError> {
+    let urls: Vec<&str> = std::iter::once(task.repository.as_str())
+        .chain(head_repository)
+        .collect();
+    TaskGitContext::new_with_credentials_for_repository_urls(ctx, task, &urls)
+        .await?
+        .changed_paths(base, head.to_vec(), head_repository)
         .await
 }
 
@@ -151,4 +170,4 @@ pub(crate) fn remote_ref_commit(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

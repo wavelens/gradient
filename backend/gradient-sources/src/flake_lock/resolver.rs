@@ -317,38 +317,29 @@ struct GitlabCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::tests::fixtures::run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout;
     use std::path::Path;
-    use std::process::Command;
-
-    fn git(repo: &Path, args: &[&str]) -> String {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .output()
-            .unwrap();
-        String::from_utf8(out.stdout).unwrap().trim().to_owned()
-    }
 
     fn commit_file(repo: &Path, name: &str) {
         std::fs::write(repo.join(name), name).unwrap();
-        git(repo, &["add", "."]);
-        git(repo, &["commit", "-m", name]);
+        run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+            repo,
+            &["add", "."],
+        );
+        run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+            repo,
+            &["commit", "-m", name],
+        );
     }
 
     fn make_git_repo() -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("r");
         std::fs::create_dir(&repo).unwrap();
-        git(&repo, &["init", "-b", "main"]);
+        run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+            &repo,
+            &["init", "-b", "main"],
+        );
         commit_file(&repo, "f");
         (tmp, repo)
     }
@@ -390,7 +381,13 @@ mod tests {
         let url = format!("file://{}", repo.display());
         let (rev, _, checkout) =
             git_checkout(&url, None, &crate::git::GitOperationCredentials::default()).unwrap();
-        assert_eq!(rev, git(&repo, &["rev-parse", "main"]));
+        assert_eq!(
+            rev,
+            run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+                &repo,
+                &["rev-parse", "main"]
+            )
+        );
         assert!(checkout.path().join("f").exists());
         assert!(!checkout.path().join(".git").exists());
     }
@@ -398,9 +395,15 @@ mod tests {
     #[test]
     fn git_checkout_resolves_a_branch_other_than_the_default() {
         let (_tmp, repo) = make_git_repo();
-        git(&repo, &["checkout", "-b", "feature"]);
+        run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+            &repo,
+            &["checkout", "-b", "feature"],
+        );
         commit_file(&repo, "g");
-        git(&repo, &["checkout", "main"]);
+        run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+            &repo,
+            &["checkout", "main"],
+        );
         let url = format!("file://{}", repo.display());
 
         let (rev, last_modified, checkout) = git_checkout(
@@ -410,10 +413,19 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(rev, git(&repo, &["rev-parse", "feature"]));
+        assert_eq!(
+            rev,
+            run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+                &repo,
+                &["rev-parse", "feature"]
+            )
+        );
         assert_eq!(
             last_modified.to_string(),
-            git(&repo, &["log", "-1", "--format=%ct", "feature"])
+            run_git_command_in_repository_with_fixed_author_and_return_trimmed_stdout(
+                &repo,
+                &["log", "-1", "--format=%ct", "feature"]
+            )
         );
         assert!(checkout.path().join("g").exists());
     }

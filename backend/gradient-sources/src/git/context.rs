@@ -25,16 +25,37 @@ pub(super) struct TaskGitContext<'a> {
 
 impl<'a> TaskGitContext<'a> {
     pub(super) async fn new(ctx: &'a DbContext, task: &'a MTask) -> Result<Self, SourceError> {
-        let credentials = if repository_url_may_need_stored_credentials(&task.repository) {
+        Self::new_with_credentials_for_repository_urls(ctx, task, &[&task.repository]).await
+    }
+
+    pub(super) async fn new_with_credentials_for_repository_urls(
+        ctx: &'a DbContext,
+        task: &'a MTask,
+        urls: &[&str],
+    ) -> Result<Self, SourceError> {
+        let mut credentials = GitOperationCredentials::default();
+        let urls: Vec<&str> = urls
+            .iter()
+            .copied()
+            .filter(|url| repository_url_may_need_stored_credentials(url))
+            .collect();
+        if !urls.is_empty() {
             let project = EProject::find_by_id(task.project)
                 .one(&ctx.worker_db)
                 .await
                 .map_err(database_error)?
                 .ok_or(SourceError::ProjectNotFound { id: task.project })?;
-            load_project_git_credentials_for_repository_url(ctx, &project, &task.repository).await?
-        } else {
-            GitOperationCredentials::default()
-        };
+            for url in urls {
+                let loaded =
+                    load_project_git_credentials_for_repository_url(ctx, &project, url).await?;
+                credentials.ssh_git_private_key_and_known_hosts = credentials
+                    .ssh_git_private_key_and_known_hosts
+                    .or(loaded.ssh_git_private_key_and_known_hosts);
+                credentials
+                    .https_git_credentials
+                    .extend(loaded.https_git_credentials);
+            }
+        }
         Ok(Self {
             ctx,
             task,
