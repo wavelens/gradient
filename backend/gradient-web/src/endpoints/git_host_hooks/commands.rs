@@ -389,6 +389,7 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
         ctx.connection_id,
         ctx.repository_urls,
         Some(snapshot.head_branch.as_str()),
+        None,
         "synchronize",
         commit_hash,
         snapshot.title.clone(),

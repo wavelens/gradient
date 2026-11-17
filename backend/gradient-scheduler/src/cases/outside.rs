@@ -41,16 +41,35 @@ impl GitRepo {
     }
 
     pub fn commit(&self, message: &str) -> Vec<u8> {
+        self.commit_files(message, &[])
+    }
+
+    pub fn commit_files(&self, message: &str, paths: &[&str]) -> Vec<u8> {
         let author =
             git2::Signature::now("Test User", "test@example.invalid").expect("a commit author");
-        let tree = self
-            .repo
-            .treebuilder(None)
-            .and_then(|builder| builder.write())
-            .and_then(|id| self.repo.find_tree(id))
-            .expect("an empty tree");
         let mut head = lock(&self.head);
         let parent = head.and_then(|id| self.repo.find_commit(id).ok());
+        let parent_tree = match &parent {
+            Some(commit) => commit.tree().expect("the tree of the parent"),
+            None => self
+                .repo
+                .treebuilder(None)
+                .and_then(|builder| builder.write())
+                .and_then(|id| self.repo.find_tree(id))
+                .expect("an empty tree"),
+        };
+        let mut update = git2::build::TreeUpdateBuilder::new();
+        for path in paths {
+            let blob = self
+                .repo
+                .blob(message.as_bytes())
+                .expect("the file content is written");
+            update.upsert(*path, blob, git2::FileMode::Blob);
+        }
+        let tree = update
+            .create_updated(&self.repo, &parent_tree)
+            .and_then(|id| self.repo.find_tree(id))
+            .expect("the tree with the changed files");
         let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
         let id = self
             .repo
@@ -58,6 +77,22 @@ impl GitRepo {
             .expect("the commit is written");
         *head = Some(id);
         id.as_bytes().to_vec()
+    }
+
+    pub fn delete_commit_object(&self, commit: &[u8]) {
+        let commit_id_hex_string = git2::Oid::from_bytes(commit)
+            .expect("a commit id")
+            .to_string();
+        let (loose_object_subdirectory_name, loose_object_file_name) =
+            commit_id_hex_string.split_at(2);
+        std::fs::remove_file(
+            self.repo
+                .path()
+                .join("objects")
+                .join(loose_object_subdirectory_name)
+                .join(loose_object_file_name),
+        )
+        .expect("delete a loose commit object");
     }
 
     pub fn push(&self, branch: &str, commit: &[u8]) {

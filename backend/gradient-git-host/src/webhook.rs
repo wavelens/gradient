@@ -305,6 +305,8 @@ pub struct GitLabMergeRequestPayload {
 pub struct GitLabMRAttributes {
     pub action: String,
     pub source_branch: String,
+    #[serde(default)]
+    pub target_branch: Option<String>,
     pub last_commit: GitLabCommit,
     #[serde(default)]
     pub title: Option<String>,
@@ -424,6 +426,7 @@ pub struct ParsedPullRequestEvent {
     pub repository_urls: Vec<String>,
     pub action: String,
     pub branch: Option<String>,
+    pub base_branch: Option<String>,
     pub pr_number: Option<u64>,
     pub pr_author: Option<String>,
     pub sender: Option<String>,
@@ -683,6 +686,7 @@ impl ParsedPullRequestEvent {
             repository_urls,
             action: payload.action,
             branch: Some(payload.pull_request.head.branch),
+            base_branch: payload.pull_request.base.map(|base| base.branch),
             pr_number: payload.pull_request.number,
             pr_author,
             sender,
@@ -729,6 +733,7 @@ impl ParsedPullRequestEvent {
             repository_urls,
             action: normalise_gitea_pr_action(payload.action),
             branch: payload.pull_request.head_branch(),
+            base_branch: payload.pull_request.base.and_then(|base| base.git_ref),
             pr_number: payload.pull_request.number,
             pr_author,
             sender,
@@ -778,6 +783,7 @@ impl ParsedPullRequestEvent {
             repository_urls,
             action,
             branch: Some(payload.object_attributes.source_branch),
+            base_branch: payload.object_attributes.target_branch,
             pr_number: payload.object_attributes.iid,
             pr_author,
             sender,
@@ -1084,6 +1090,10 @@ mod tests {
         assert_eq!(ev.pr_number, Some(42));
         assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
         assert_eq!(ev.is_fork, Some(true));
+        assert_eq!(
+            (ev.branch.as_deref(), ev.base_branch.as_deref()),
+            (Some("patch-1"), Some("main"))
+        );
     }
 
     #[test]
@@ -1193,6 +1203,7 @@ mod tests {
                     "action": "open",
                     "iid": 11,
                     "source_branch": "feat",
+                    "target_branch": "main",
                     "source_project_id": 99,
                     "target_project_id": 1,
                     "last_commit": {{ "id": "{VALID_SHA}" }}
@@ -1209,6 +1220,7 @@ mod tests {
         assert_eq!(ev.pr_number, Some(11));
         assert_eq!(ev.pr_author.as_deref(), Some("external"));
         assert_eq!(ev.is_fork, Some(true));
+        assert_eq!(ev.base_branch.as_deref(), Some("main"));
     }
 
     #[test]

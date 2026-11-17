@@ -130,7 +130,6 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     let mut atask: ATask = task.clone().into();
     atask.last_check_at = Set(*NULL_TIME);
     atask.last_evaluation = Set(Some(evaluation.id));
-    atask.force_evaluation = Set(true);
     atask.update(db).await?;
 
     Ok(evaluation)

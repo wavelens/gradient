@@ -36,13 +36,14 @@ pub use context::{
 pub use git_credentials::{GitOperationCredentials, HttpsGitCredential};
 pub use remote::BranchHead;
 pub use ssh::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
+pub use update_check::{BranchCheckOutcome, TaskUpdateCheck};
 
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
 pub async fn check_task_updates(
     ctx: &DbContext,
     task: &MTask,
     branch: Option<&str>,
-) -> Result<(bool, BranchHead), SourceError> {
+) -> Result<TaskUpdateCheck, SourceError> {
     TaskGitContext::new(ctx, task)
         .await?
         .check_for_updates(branch)

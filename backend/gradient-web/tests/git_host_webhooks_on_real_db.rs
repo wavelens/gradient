@@ -11,15 +11,15 @@
 
 use axum_test::{TestResponse, TestServer};
 use gradient_ci::actions::encrypt_secret_with_file;
-use gradient_entity::{evaluation, git_host_connection, task, task_trigger};
+use gradient_entity::{commit, evaluation, git_host_connection, task, task_trigger};
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::rows;
 use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
-use gradient_types::GitHostType;
 use gradient_types::ids::*;
 use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig};
+use gradient_types::{GitHostType, branch_key};
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
@@ -54,6 +54,8 @@ struct WebhookTestRealDatabaseHttpServerAndGiteaConnection {
 
 async fn create_test_database_with_user_project_task_gitea_webhook_secret_push_trigger_and_http_server(
     plaintext_secret: &str,
+    repository: &str,
+    path_filter: ChangedFilePathFilter,
 ) -> WebhookTestRealDatabaseHttpServerAndGiteaConnection {
     let db = TestDatabase::create().await;
     let conn = db.connection();
@@ -85,7 +87,7 @@ async fn create_test_database_with_user_project_task_gitea_webhook_secret_push_t
     gradient_db::rows::insert::<task::Entity, _>(
         &conn,
         task::Model {
-            repository: "https://gitea.example.com/test-org/repo".into(),
+            repository: repository.into(),
             git_host_connection: Some(connection.id),
             ..rows::task()
         },
@@ -97,7 +99,7 @@ async fn create_test_database_with_user_project_task_gitea_webhook_secret_push_t
         tags: vec![],
         releases_only: false,
         include_flake_inputs: false,
-        path_filter: ChangedFilePathFilter::default(),
+        path_filter,
     };
     gradient_db::triggers::insert(
         &conn,
@@ -131,8 +133,8 @@ async fn post_signed_gitea_push_webhook(
     server: &TestServer,
     path: &str,
     plaintext_secret: &str,
+    body: &[u8],
 ) -> TestResponse {
-    let body = GITEA_PUSH_WEBHOOK_JSON_BODY_FOR_MAIN_BRANCH.as_bytes();
     server
         .post(path)
         .add_header("X-Gitea-Event", "push")
@@ -140,8 +142,33 @@ async fn post_signed_gitea_push_webhook(
             "X-Gitea-Signature",
             compute_gitea_webhook_signature_hex(plaintext_secret, body),
         )
-        .bytes(body.into())
+        .bytes(body.to_vec().into())
         .await
+}
+
+fn commit_files(repo: &git2::Repository, message: &str, paths: &[&str]) -> git2::Oid {
+    let author = git2::Signature::now("Test User", "test@example.invalid").unwrap();
+    let parent = repo.head().ok().map(|head| head.peel_to_commit().unwrap());
+    let parent_tree = match &parent {
+        Some(commit) => commit.tree().unwrap(),
+        None => repo
+            .find_tree(repo.treebuilder(None).unwrap().write().unwrap())
+            .unwrap(),
+    };
+    let mut update = git2::build::TreeUpdateBuilder::new();
+    for path in paths {
+        update.upsert(
+            *path,
+            repo.blob(message.as_bytes()).unwrap(),
+            git2::FileMode::Blob,
+        );
+    }
+    let tree = repo
+        .find_tree(update.create_updated(repo, &parent_tree).unwrap())
+        .unwrap();
+    let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+    repo.commit(Some("HEAD"), &author, &author, message, &tree, &parents)
+        .unwrap()
 }
 
 async fn assert_webhook_queued_one_evaluation_and_evaluation_row_exists(
@@ -162,6 +189,8 @@ async fn signed_push_webhook_queues_evaluation_for_task_using_git_host_connectio
     let s =
         create_test_database_with_user_project_task_gitea_webhook_secret_push_trigger_and_http_server(
             secret,
+            "https://gitea.example.com/test-org/repo",
+            ChangedFilePathFilter::default(),
         )
         .await;
 
@@ -169,6 +198,7 @@ async fn signed_push_webhook_queues_evaluation_for_task_using_git_host_connectio
         &s.server,
         &format!("/api/v1/hooks/{}", s.connection.id),
         secret,
+        GITEA_PUSH_WEBHOOK_JSON_BODY_FOR_MAIN_BRANCH.as_bytes(),
     )
     .await;
 
@@ -182,6 +212,8 @@ async fn test_signed_push_webhook_at_old_gitea_hook_path_queues_evaluation() {
     let s =
         create_test_database_with_user_project_task_gitea_webhook_secret_push_trigger_and_http_server(
             secret,
+            "https://gitea.example.com/test-org/repo",
+            ChangedFilePathFilter::default(),
         )
         .await;
 
@@ -189,10 +221,81 @@ async fn test_signed_push_webhook_at_old_gitea_hook_path_queues_evaluation() {
         &s.server,
         &format!("/api/v1/hooks/gitea/test-project/{}", s.connection.name),
         secret,
+        GITEA_PUSH_WEBHOOK_JSON_BODY_FOR_MAIN_BRANCH.as_bytes(),
     )
     .await;
 
     assert_webhook_queued_one_evaluation_and_evaluation_row_exists(&s.db, &res).await;
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn signed_gitea_push_webhook_with_no_matching_include_path_skips_evaluation_with_path_filter_reason()
+ {
+    let secret = "webhook-secret-plaintext";
+    let repo_dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(repo_dir.path()).unwrap();
+    let base = commit_files(&repo, "base", &["src/main.rs"]);
+    let head = commit_files(&repo, "head", &["docs/guide.md"]);
+    let url = format!("file://{}", repo_dir.path().display());
+    let s =
+        create_test_database_with_user_project_task_gitea_webhook_secret_push_trigger_and_http_server(
+            secret,
+            &url,
+            ChangedFilePathFilter {
+                include_paths: vec!["src/*".into()],
+                exclude_paths: vec![],
+            },
+        )
+        .await;
+    let conn = s.db.connection();
+    let base_commit = gradient_db::rows::insert::<commit::Entity, _>(
+        &conn,
+        commit::Model {
+            hash: base.as_bytes().to_vec(),
+            ..rows::build_request_commit()
+        },
+    )
+    .await
+    .unwrap();
+    gradient_db::rows::insert::<evaluation::Entity, _>(
+        &conn,
+        evaluation::Model {
+            branch: branch_key::branch("main"),
+            status: evaluation::EvaluationStatus::Completed,
+            ..rows::queued_evaluation(task_id(), base_commit.id)
+        },
+    )
+    .await
+    .unwrap();
+    let body = json!({
+        "ref": "refs/heads/main",
+        "after": head.to_string(),
+        "repository": { "clone_url": url, "ssh_url": url },
+    })
+    .to_string();
+
+    let res = post_signed_gitea_push_webhook(
+        &s.server,
+        &format!("/api/v1/hooks/{}", s.connection.id),
+        secret,
+        body.as_bytes(),
+    )
+    .await;
+
+    res.assert_status_ok();
+    let message = res.json::<Value>()["message"].clone();
+    let skipped = message["skipped"].as_array().unwrap();
+    assert_eq!(
+        (
+            message["queued"].as_array().unwrap().len(),
+            skipped.len(),
+            skipped[0]["reason"].clone(),
+        ),
+        (0, 1, json!("no_changed_file_matches_path_filter")),
+        "{message}"
+    );
+    assert_eq!(s.db.rows::<evaluation::Entity>().await.len(), 1);
     s.db.finish().await;
 }
 

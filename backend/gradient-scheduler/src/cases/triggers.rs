@@ -1324,6 +1324,208 @@ async fn t24_a_new_commit_on_another_branch_keeps_the_waiting_evaluation() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn t25_a_docs_only_head_commit_outside_include_paths_creates_no_evaluation_but_stamps_last_fired_at_and_the_next_src_commit_creates_one()
+ {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit_files("c0", &["src/main.rs"]);
+    let c1 = repo.commit_files("c1", &["docs/guide.md"]);
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(polled_with_src_only_path_filter(e0, t1, &repo, &c0)).await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    assert!(
+        fresh.is_empty(),
+        "after 1: no new evaluation, got {fresh:?}"
+    );
+    assert!(
+        case.trigger(t1).await.last_fired_at.is_some_and(is_recent),
+        "after 1: task_trigger(T1).last_fired_at ~now"
+    );
+    case.check("step 1").await;
+    case.finish().await;
+
+    let c2 = repo.commit_files("c2", &["src/lib.rs"]);
+    repo.push("main", &c2);
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let case = SchedulerCase::start(polled_with_src_only_path_filter(e0, t1, &repo, &c0)).await;
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let [e1] = fresh.as_slice() else {
+        panic!("after 2: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(commit_of(&case, e1).await, c2, "after 2: E1.commit");
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t26_a_poll_onto_a_missing_base_commit_creates_an_evaluation_even_when_only_docs_changed() {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c1 = repo.commit_files("c1", &["docs/guide.md"]);
+    repo.push("main", &c1);
+    let case =
+        SchedulerCase::start(polled_with_src_only_path_filter(e0, t1, &repo, &[7u8; 20])).await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let [e1] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(commit_of(&case, e1).await, c1, "after 1: E1.commit");
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t27_second_poll_of_skipped_docs_only_head_does_not_list_changed_files_again_and_creates_no_evaluation()
+ {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit_files("c0", &["src/main.rs"]);
+    let c1 = repo.commit_files("c1", &["docs/guide.md"]);
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(polled_with_src_only_path_filter(e0, t1, &repo, &c0)).await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    assert!(
+        fresh.is_empty(),
+        "after 1: no new evaluation, got {fresh:?}"
+    );
+    case.check("step 1").await;
+
+    repo.delete_commit_object(&c0);
+    let polling_trigger_row = case.trigger(t1).await;
+    let trigger_owner_task = case
+        .db
+        .find::<task::Entity>(polling_trigger_row.task)
+        .await
+        .expect("the task of the trigger");
+    assert!(
+        gradient_sources::get_changed_file_path_pairs_between_commits(
+            &case.scheduler.db,
+            &trigger_owner_task,
+            gradient_sources::ComparisonBaseCommit::CommitHashBytes(c0.clone()),
+            &c1,
+            None,
+        )
+        .await
+        .is_err(),
+        "after 2: a listing of changed files can fail, so the trigger can fire anyway"
+    );
+    case.enqueue_trigger_fire(t1, polling_trigger_row.last_fired_at)
+        .await;
+    assert_eq!(
+        case.deliver_trigger_fires().await,
+        1,
+        "after 2: deliver the second poll"
+    );
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    assert!(
+        fresh.is_empty(),
+        "after 2: the remembered skip produced no evaluation. The new evaluations are in {fresh:?}."
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t28_forced_evaluation_on_docs_only_head_outside_include_path_still_creates_evaluation() {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit_files("c0", &["src/main.rs"]);
+    let c1 = repo.commit_files("c1", &["docs/guide.md"]);
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(polled_with_src_only_path_filter(e0, t1, &repo, &c0)).await;
+    case.db
+        .execute("UPDATE task SET force_evaluation = true")
+        .await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let [e1] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(commit_of(&case, e1).await, c1, "after 1: E1.commit");
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t29_second_poll_to_docs_only_head_outside_include_path_creates_no_evaluation_after_src_evaluation()
+ {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit_files("c0", &["src/main.rs"]);
+    let c1 = repo.commit_files("c1", &["src/lib.rs"]);
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(
+        polled_with_src_only_path_filter(e0, t1, &repo, &c0)
+            .task_option(|t| t.concurrency = ConcurrencyPolicy::SoftAbort),
+    )
+    .await;
+
+    case.fire_once().await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let [e1] = fresh.as_slice() else {
+        panic!("after 1: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(commit_of(&case, e1).await, c1, "after 1: E1.commit");
+    case.check("step 1").await;
+
+    let c2 = repo.commit_files("c2", &["docs/guide.md"]);
+    repo.push("main", &c2);
+    case.enqueue_trigger_fire(t1, case.trigger(t1).await.last_fired_at)
+        .await;
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0, e1.id]).await;
+    assert!(
+        fresh.is_empty(),
+        "after 2: no new evaluation, got {fresh:?}"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+fn polled_with_src_only_path_filter(
+    e0: EvaluationId,
+    t1: TaskTriggerId,
+    repo: &GitRepo,
+    commit: &[u8],
+) -> Shape {
+    shape()
+        .evaluation(e0)
+        .evaluation_status(EvaluationStatus::Completed)
+        .repository(&repo.url())
+        .commit_hash(commit)
+        .branch(&branch_key::branch("main"))
+        .last_evaluation(e0)
+        .trigger(
+            t1,
+            TriggerType::Polling,
+            serde_json::json!({ "interval_secs": 60, "branch": "main", "include_paths": ["src/*"] }),
+            true,
+            None,
+        )
+        .into_cache(CacheId::now_v7())
+        .worker_registration("w-reg")
+}
+
 fn waiting_no_cache_evaluation_with_push_trigger(
     e0: EvaluationId,
     t1: TaskTriggerId,

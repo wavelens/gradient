@@ -4,14 +4,112 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::DbContext;
+use gradient_db::lookup::by_id;
+use gradient_sources::{ComparisonBaseCommit, get_changed_file_path_pairs_between_commits};
 use gradient_types::triggers::ChangedFilePathFilter;
+use gradient_types::*;
 use gradient_util::glob::glob_match;
+use sea_orm::ConnectionTrait;
+use std::time::Duration;
+use tracing::warn;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathFilterBaseCommit {
+    NewestEvaluationOnBranch(String),
+    TargetBranchTip(String),
+    CommitHashBytes(Vec<u8>),
+}
+
+pub struct PathFilterCommitComparison<'a> {
+    pub base: &'a PathFilterBaseCommit,
+    pub head: &'a [u8],
+    pub head_repository: Option<&'a str>,
+}
+
+pub async fn should_fire_trigger_for_path_filter<C: ConnectionTrait>(
+    db: &C,
+    sources: &DbContext,
+    task: &MTask,
+    filter: &ChangedFilePathFilter,
+    comparison: PathFilterCommitComparison<'_>,
+    budget: Duration,
+) -> bool {
+    if path_filter_has_no_include_or_exclude_patterns(filter) {
+        return true;
+    }
+    let changed = changed_paths_between_base_and_head(db, sources, task, comparison);
+    match tokio::time::timeout(budget, changed).await {
+        Ok(Ok(Some(paths))) => changed_paths_match_trigger_path_filter(filter, &paths),
+        Ok(Ok(None)) => true,
+        Ok(Err(error)) => {
+            warn!(%error, task_id = %task.id, "Failed to get the changed file list for the trigger path filter. Trigger fires anyway.");
+            true
+        }
+        Err(_) => {
+            warn!(task_id = %task.id, budget_secs = budget.as_secs(), "Listing changed files for path filter of trigger timed out. Run trigger anyway.");
+            true
+        }
+    }
+}
+
+async fn changed_paths_between_base_and_head<C: ConnectionTrait>(
+    db: &C,
+    sources: &DbContext,
+    task: &MTask,
+    comparison: PathFilterCommitComparison<'_>,
+) -> anyhow::Result<Option<Vec<String>>> {
+    let base = match comparison.base {
+        PathFilterBaseCommit::NewestEvaluationOnBranch(branch) => {
+            match find_newest_task_branch_evaluation_commit_hash_bytes(db, task.id, branch).await? {
+                Some(hash) if hash != comparison.head => {
+                    ComparisonBaseCommit::CommitHashBytes(hash)
+                }
+                _ => return Ok(None),
+            }
+        }
+        PathFilterBaseCommit::TargetBranchTip(branch) => {
+            ComparisonBaseCommit::BranchName(branch.clone())
+        }
+        PathFilterBaseCommit::CommitHashBytes(hash) if hash != comparison.head => {
+            ComparisonBaseCommit::CommitHashBytes(hash.clone())
+        }
+        PathFilterBaseCommit::CommitHashBytes(_) => return Ok(None),
+    };
+    let paths = get_changed_file_path_pairs_between_commits(
+        sources,
+        task,
+        base,
+        comparison.head,
+        comparison.head_repository,
+    )
+    .await?;
+    Ok(Some(paths))
+}
+
+async fn find_newest_task_branch_evaluation_commit_hash_bytes<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+    branch: &str,
+) -> Result<Option<Vec<u8>>, sea_orm::DbErr> {
+    let Some(newest) = gradient_db::evaluations::branch::newest_on_branch(db, task, branch).await?
+    else {
+        return Ok(None);
+    };
+    Ok(by_id::<ECommit, _>(db, newest.commit)
+        .await?
+        .map(|commit| commit.hash))
+}
+
+fn path_filter_has_no_include_or_exclude_patterns(filter: &ChangedFilePathFilter) -> bool {
+    filter.include_paths.is_empty() && filter.exclude_paths.is_empty()
+}
 
 pub fn changed_paths_match_trigger_path_filter(
     filter: &ChangedFilePathFilter,
     changed_paths: &[String],
 ) -> bool {
-    if filter.include_paths.is_empty() && filter.exclude_paths.is_empty() {
+    if path_filter_has_no_include_or_exclude_patterns(filter) {
         return true;
     }
     changed_paths.iter().any(|path| {

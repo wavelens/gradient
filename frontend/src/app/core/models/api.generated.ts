@@ -2852,7 +2852,7 @@ export interface TaskDetailsResponse {
   managed: boolean;
 }
 
-export type TaskEvaluationNotStartedReason = "same_commit" | "filter" | "tag_not_found" | "concurrency" | "commit_message" | "error" | "input_update_running" | "input_update_not_configured";
+export type TaskEvaluationNotStartedReason = "same_commit" | "filter" | "no_changed_file_matches_path_filter" | "tag_not_found" | "concurrency" | "commit_message" | "error" | "input_update_running" | "input_update_not_configured";
 
 export type TaskId = string;
 

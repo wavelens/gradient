@@ -19,12 +19,26 @@ fn database_error(e: sea_orm::DbErr) -> SourceError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchCheckOutcome {
+    RemoteBranchHeadIsNewestEvaluation,
+    RemoteHeadCommitDiffersFromLatestEvaluation,
+    AdminForcedEvaluationDue,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskUpdateCheck {
+    pub outcome: BranchCheckOutcome,
+    pub head: BranchHead,
+    pub newest_evaluation_commit_hash: Option<Vec<u8>>,
+}
+
 impl TaskGitContext<'_> {
     #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name))]
     pub(super) async fn check_for_updates(
         &self,
         branch: Option<&str>,
-    ) -> Result<(bool, BranchHead), SourceError> {
+    ) -> Result<TaskUpdateCheck, SourceError> {
         debug!("Checking for updates on task");
 
         let head = self.remote_head(branch).await?;
@@ -33,28 +47,34 @@ impl TaskGitContext<'_> {
         let newest = newest_on_branch(&self.ctx.worker_db, self.task.id, &head.branch)
             .await
             .map_err(database_error)?;
-        let head_evaluated = match &newest {
-            Some(evaluation) => self.commit_hash(evaluation).await? == Some(head.commit.clone()),
-            None => false,
+        let newest_evaluation_commit_hash = match &newest {
+            Some(evaluation) => self.commit_hash(evaluation).await?,
+            None => None,
         };
+        let head_evaluated = newest_evaluation_commit_hash.as_ref() == Some(&head.commit);
 
-        if self.task.force_evaluation {
+        let outcome = if self.task.force_evaluation {
             if head_evaluated && newest.is_some_and(|e| e.status.is_active()) {
                 debug!("Evaluation of the remote head in progress, skipping forced re-eval");
-                return Ok((false, head));
+                BranchCheckOutcome::RemoteBranchHeadIsNewestEvaluation
+            } else {
+                info!("Force evaluation enabled, updating task");
+                self.clear_force_evaluation().await;
+                BranchCheckOutcome::AdminForcedEvaluationDue
             }
-            info!("Force evaluation enabled, updating task");
-            self.clear_force_evaluation().await;
-            return Ok((true, head));
-        }
-
-        if head_evaluated {
+        } else if head_evaluated {
             debug!("Remote hash matches the newest evaluation of the branch, no update needed");
-            return Ok((false, head));
-        }
+            BranchCheckOutcome::RemoteBranchHeadIsNewestEvaluation
+        } else {
+            info!("Remote hash differs from the newest evaluation of the branch, update needed");
+            BranchCheckOutcome::RemoteHeadCommitDiffersFromLatestEvaluation
+        };
 
-        info!("Remote hash differs from the newest evaluation of the branch, update needed");
-        Ok((true, head))
+        Ok(TaskUpdateCheck {
+            outcome,
+            head,
+            newest_evaluation_commit_hash,
+        })
     }
 
     pub(super) async fn remote_head(

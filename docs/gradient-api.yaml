@@ -24076,6 +24076,7 @@ components:
       enum:
       - same_commit
       - filter
+      - no_changed_file_matches_path_filter
       - tag_not_found
       - concurrency
       - commit_message
