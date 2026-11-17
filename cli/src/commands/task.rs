@@ -12,7 +12,7 @@ use crate::input::{
     selected_task,
 };
 use crate::output::{Color, ExitKind, Output};
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use connector::Client;
 use connector::api::{
@@ -48,15 +48,8 @@ pub enum Commands {
         /// Flake attribute wildcard to evaluate
         #[arg(short = 'w', long)]
         wildcard: Option<String>,
-        /// Branch that the triggers evaluate. Default: the default branch of the repository
-        #[arg(short, long)]
-        branch: Option<String>,
-        /// Trigger to add: `polling`, `cron=<expression>`, `push` or `pr`. Repeat this flag to specify multiple triggers. Leave out this flag to set one polling trigger for the task.
-        #[arg(long = "trigger", value_parser = parse_trigger_value)]
-        triggers: Vec<CommandLineTrigger>,
-        /// Create a task without a default trigger for polling.
-        #[arg(long)]
-        no_default_trigger: bool,
+        #[command(flatten)]
+        task_create_trigger_flags: TaskCreateTriggerFlags,
     },
     /// Copy the selected task and its settings, triggers, and actions to a new task for another branch.
     Duplicate {
@@ -305,6 +298,25 @@ pub enum TaskTriggerCommands {
     },
 }
 
+#[derive(Args, Debug)]
+pub struct TaskCreateTriggerFlags {
+    /// Branch that the triggers evaluate. Default: the default branch of the repository
+    #[arg(short, long)]
+    branch: Option<String>,
+    /// Trigger to add: `polling`, `cron=<expression>`, `push` or `pr`. Repeat this flag to specify multiple triggers. Leave out this flag to set one polling trigger for the task.
+    #[arg(long = "trigger", value_parser = parse_trigger_value)]
+    triggers: Vec<CommandLineTrigger>,
+    /// Create a task without a default trigger for polling.
+    #[arg(long)]
+    no_default_trigger: bool,
+    /// Path patterns relative to the repository root let `*` stand for any text with `/` present. Polling, push and pull request triggers start evaluations only for commits that change files that match the pattern. Repeat this flag to specify multiple patterns.
+    #[arg(long = "include-path", value_name = "PATTERN")]
+    changed_file_path_patterns: Vec<String>,
+    /// Path patterns are relative to the repository root. `*` can match any text with `/` inside. Changes that touch only files that match never start an evaluation from triggers for polling, push or pull requests. Repeat this flag for multiple patterns.
+    #[arg(long = "exclude-path", value_name = "PATTERN")]
+    excluded_changed_file_path_patterns: Vec<String>,
+}
+
 const DEFAULT_POLLING_INTERVAL_SECS: i32 = 300;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,16 +345,25 @@ async fn build_optional_task_create_trigger_configs(
     client: &Client,
     project: &str,
     repository: &str,
-    branch: Option<String>,
-    mut triggers: Vec<CommandLineTrigger>,
-    no_default_trigger: bool,
+    TaskCreateTriggerFlags {
+        branch,
+        mut triggers,
+        no_default_trigger,
+        changed_file_path_patterns,
+        excluded_changed_file_path_patterns,
+    }: TaskCreateTriggerFlags,
     out: Output,
 ) -> Option<Vec<TriggerConfig>> {
     if triggers.is_empty() {
         if no_default_trigger {
             return Some(Vec::new());
         }
-        branch.as_ref()?;
+        if branch.is_none()
+            && changed_file_path_patterns.is_empty()
+            && excluded_changed_file_path_patterns.is_empty()
+        {
+            return None;
+        }
         triggers.push(CommandLineTrigger::Polling);
     }
 
@@ -353,8 +374,8 @@ async fn build_optional_task_create_trigger_configs(
             CommandLineTrigger::Polling => TriggerConfig::Polling {
                 interval_secs: DEFAULT_POLLING_INTERVAL_SECS,
                 branch: branch.clone(),
-                include_paths: Vec::new(),
-                exclude_paths: Vec::new(),
+                include_paths: changed_file_path_patterns.clone(),
+                exclude_paths: excluded_changed_file_path_patterns.clone(),
             },
             CommandLineTrigger::Cron(cron) => TriggerConfig::Time {
                 cron,
@@ -388,10 +409,22 @@ async fn build_optional_task_create_trigger_configs(
                             ),
                         )
                     });
-                if let TriggerConfig::ReporterPush { branches, .. }
-                | TriggerConfig::ReporterPullRequest { branches, .. } = &mut config
+                if let TriggerConfig::ReporterPush {
+                    branches,
+                    include_paths,
+                    exclude_paths,
+                    ..
+                }
+                | TriggerConfig::ReporterPullRequest {
+                    branches,
+                    include_paths,
+                    exclude_paths,
+                    ..
+                } = &mut config
                 {
                     *branches = branch.iter().cloned().collect();
+                    include_paths.clone_from(&changed_file_path_patterns);
+                    exclude_paths.clone_from(&excluded_changed_file_path_patterns);
                 }
                 config
             }
@@ -515,9 +548,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             description,
             repository,
             wildcard,
-            branch,
-            triggers,
-            no_default_trigger,
+            task_create_trigger_flags,
         } => {
             let project = selected_project(out);
 
@@ -539,9 +570,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 &client,
                 &project,
                 &repository,
-                branch,
-                triggers,
-                no_default_trigger,
+                task_create_trigger_flags,
                 out,
             )
             .await;

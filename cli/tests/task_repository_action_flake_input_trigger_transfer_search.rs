@@ -173,6 +173,58 @@ async fn test_task_create_sends_branch_cron_and_suggested_push_trigger_in_one_re
 }
 
 #[tokio::test]
+async fn test_task_create_include_exclude_paths_on_push_and_polling_not_cron_and_default_polling_without_branch()
+ {
+    let server = MockServer::start().await;
+    mount_push_and_pull_request_suggestions(
+        &server,
+        serde_json::json!([{"type": "reporter_push"}, {"type": "reporter_pull_request"}]),
+    )
+    .await;
+    mount_task_create(&server, 1).await;
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(
+        &home,
+        &create_task_args(&[
+            "--trigger",
+            "polling",
+            "--trigger",
+            "cron=0 3 * * *",
+            "--trigger",
+            "push",
+            "--include-path",
+            "src/*",
+            "--include-path",
+            "flake.lock",
+            "--exclude-path",
+            "src/*.md",
+        ]),
+    )
+    .success();
+
+    let triggers = sent_task_create_body(&server).await["triggers"].clone();
+    let include = serde_json::json!(["src/*", "flake.lock"]);
+    let exclude = serde_json::json!(["src/*.md"]);
+    assert_eq!(triggers[0]["type"], "polling");
+    assert_eq!(triggers[0]["include_paths"], include);
+    assert_eq!(triggers[0]["exclude_paths"], exclude);
+    assert!(triggers[1].get("include_paths").is_none(), "{triggers}");
+    assert_eq!(triggers[2]["type"], "reporter_push");
+    assert_eq!(triggers[2]["include_paths"], include);
+    assert_eq!(triggers[2]["exclude_paths"], exclude);
+
+    let server = MockServer::start().await;
+    mount_task_create(&server, 1).await;
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(&home, &create_task_args(&["--include-path", "src/*"]))
+        .success();
+    let triggers = sent_task_create_body(&server).await["triggers"].clone();
+    assert_eq!(triggers.as_array().unwrap().len(), 1, "{triggers}");
+    assert_eq!(triggers[0]["type"], "polling");
+    assert_eq!(triggers[0]["include_paths"], serde_json::json!(["src/*"]));
+}
+
+#[tokio::test]
 async fn test_task_create_leaves_triggers_to_the_server_unless_asked_and_can_skip_the_default() {
     let server = MockServer::start().await;
     mount_task_create(&server, 1).await;

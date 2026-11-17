@@ -433,94 +433,19 @@ pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
     Ok(())
 }
 
+const DEFAULT_POLLING_TRIGGER_INTERVAL_SECS: u32 = 300;
+
 pub(crate) fn build_trigger_config(t: &StateTrigger) -> anyhow::Result<TriggerConfig> {
-    use gradient_types::triggers::TriggerType as TT;
-    let cfg = match t.trigger_type {
-        TT::Polling => {
-            let interval = u32::try_from(
-                t.config
-                    .get("interval_secs")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(300),
-            )
-            .context("convert polling interval_secs")?;
-            TriggerConfig::Polling {
-                interval_secs: interval,
-                branch: t
-                    .config
-                    .get("branch")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_owned()),
-                path_filter: ChangedFilePathFilter::default(),
-            }
-        }
-        TT::ReporterPush | TT::ReporterPullRequest => {
-            if t.trigger_type == TT::ReporterPush {
-                TriggerConfig::ReporterPush {
-                    branches: t
-                        .config
-                        .get("branches")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_default(),
-                    tags: t
-                        .config
-                        .get("tags")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_default(),
-                    releases_only: t
-                        .config
-                        .get("releases_only")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    include_flake_inputs: t
-                        .config
-                        .get("include_flake_inputs")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
-                    path_filter: ChangedFilePathFilter::default(),
-                }
-            } else {
-                TriggerConfig::ReporterPullRequest {
-                    branches: t
-                        .config
-                        .get("branches")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_default(),
-                    actions: t
-                        .config
-                        .get("actions")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_else(|| {
-                            vec!["opened".into(), "synchronize".into(), "reopened".into()]
-                        }),
-                    require_approval: t
-                        .config
-                        .get("require_approval")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true),
-                    path_filter: ChangedFilePathFilter::default(),
-                }
-            }
-        }
-        TT::Time => {
-            let cron = t
-                .config
-                .get("cron")
-                .and_then(|v| v.as_str())
-                .context("time trigger requires `cron`")?
-                .to_string();
-            TriggerConfig::Time {
-                cron,
-                branch: t
-                    .config
-                    .get("branch")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_owned()),
-            }
-        }
-    };
-    cfg.validate_and_convert_cron_to_six_fields()
-        .context("validate the trigger config")
+    let mut config = t.config.as_object().cloned().unwrap_or_default();
+    if t.trigger_type == TriggerType::Polling {
+        config
+            .entry("interval_secs")
+            .or_insert(DEFAULT_POLLING_TRIGGER_INTERVAL_SECS.into());
+    }
+    Ok(TriggerConfig::parse_row(
+        t.trigger_type,
+        &serde_json::Value::Object(config),
+    )?)
 }
 
 pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {
@@ -925,6 +850,36 @@ mod trigger_helper_tests {
                 path_filter: ChangedFilePathFilter::default(),
             }
         );
+    }
+
+    #[test]
+    fn reporter_push_trigger_include_paths_and_exclude_paths_round_trip_through_database_and_export()
+     {
+        let declared = StateTrigger {
+            trigger_type: TriggerType::ReporterPush,
+            config: serde_json::json!({
+                "branches": ["main"],
+                "include_paths": ["src/*"],
+                "exclude_paths": ["src/*.md"],
+            }),
+            active: true,
+            is_default: false,
+        };
+        let cfg = build_trigger_config(&declared).unwrap();
+        let stored = gradient_entity::task_trigger::Model {
+            trigger_type: cfg.trigger_type(),
+            config: cfg.to_db_json(),
+            active: true,
+            ..Default::default()
+        };
+        assert_eq!(stored.config["include_paths"], serde_json::json!(["src/*"]));
+        assert_eq!(
+            stored.config["exclude_paths"],
+            serde_json::json!(["src/*.md"])
+        );
+
+        let exported = crate::export::export_trigger(&stored).unwrap();
+        assert_eq!(build_trigger_config(&exported).unwrap(), cfg);
     }
 
     #[test]

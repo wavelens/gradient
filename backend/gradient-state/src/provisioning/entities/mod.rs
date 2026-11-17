@@ -15,3 +15,5 @@ mod tasks;
 mod teams;
 mod users;
 mod workers;
+
+pub(crate) use tasks::build_trigger_config;

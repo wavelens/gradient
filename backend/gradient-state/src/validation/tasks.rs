@@ -6,6 +6,7 @@
 
 use super::helpers::{EntityLookup, ErrorCollector};
 use crate::config::{StateAction, StateGitHostConnection, StateTask};
+use crate::provisioning::build_trigger_config;
 use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::input::check_nix_restricted_evaluation_url_prefix;
 use gradient_types::triggers::TriggerType;
@@ -95,6 +96,15 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 format!("tasks.{}.triggers", task.name),
                 "at most one trigger can have `is_default` set",
             );
+        }
+
+        for trigger in task.triggers.iter().flatten() {
+            if let Err(error) = build_trigger_config(trigger) {
+                errors.push(
+                    format!("tasks.{}.triggers", task.name),
+                    format!("{error:#}"),
+                );
+            }
         }
 
         validate_task_git_host_connection_reference(lookup, task, errors);

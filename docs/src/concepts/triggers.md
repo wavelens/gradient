@@ -32,7 +32,8 @@ Git host connections do not add triggers to a task. The **Triggers** page of a t
 - **Branch**: `branch`, or the remote default branch if that branch is absent.
 - **New Commit**: An evaluation can start only for a remote head that is different from the branch's latest evaluation.
 - **Skip Markers**: A head commit with a [skip marker](projects-and-tasks.md#skip-a-commit) starts no evaluation.
-- **Fallback**: Polling triggers next to active push triggers catch only missed webhooks. A **Pause polling** button on the **Triggers** page can pause the polling trigger.
+- **Fallback**: A polling trigger next to an active push trigger can catch only missed webhooks. The **Pause polling** button on the **Triggers** page can pause a polling trigger.
+- **Path Filters**: `include_paths` and `exclude_paths` limit polling to commits that change specific files. See [Path Filters](#path-filters).
 
 ## Time (cron)
 
@@ -87,7 +88,8 @@ Push triggers need a connection to a Git host that can receive events. Select th
 - **Patterns**: `*` can match any text, and `/` can appear inside that match. All other characters match only themselves.
 - **Empty Filter**: An empty `branches` or `tags` list can match everything. Triggers with no filter fire on every branch push and every tag push.
 - **Releases Only**: Triggers ignore normal pushes and merge queue entries. Nothing can start on a tag push with no release.
-- **Skip Markers**: Valid only for branch and tag pushes.
+- **Skip Markers**: Valid only on pushes to branches and tags.
+- **Path Filters**: `include_paths` and `exclude_paths` restrict branch pushes to commits that change specific files. See [Path Filters](#path-filters).
 
 ### Pushes to Flake Inputs
 
@@ -110,6 +112,7 @@ Pull request events from the Git host activate this trigger. Push events don't a
 |---|---|
 | `actions` | Action names of the event, by default `opened`, `synchronize`, `reopened`. An empty list fires on every action. |
 | `branches` | The source branch of the pull request, not the target branch |
+| `include_paths`, `exclude_paths` | Files changed between the tip of the target branch and the head of the pull request. See [Path Filters](#path-filters). Empty by default. |
 | `require_approval` | Pull requests from forks wait for a maintainer, by default on. A pull request from the same repository or by a repository writer starts right away |
 
 - **Action Names**: GitHub names stay as sent. GitLab names map to `opened`, `synchronize`, `reopened`, `closed` and `merged`.
@@ -125,6 +128,28 @@ Users with write permission to the repository can steer a pull request with comm
 | `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 `/gradient run` fire pull request triggers with action `synchronize`. Triggers without `synchronize` in `actions`, or with a `branches` filter that does not match, ignore that command.
+
+## Path Filters
+
+`include_paths` and `exclude_paths` restrict polling, push, and pull request triggers to commits that change specific files. Both lists are empty by default. Empty filters match all commits.
+
+| Trigger | Base of the comparison | Head of the comparison |
+|---|---|---|
+| Polling | Commit of the newest evaluation on the branch | New head of the branch |
+| Push | Commit of the newest evaluation on the pushed branch | Pushed commit |
+| Pull Request | Tip of the target branch | Head of the pull request |
+
+- **Match**: Triggers fire when the changed files include at least one file with a match for a `include_paths` pattern and no match for a `exclude_paths` pattern. All files match an empty `include_paths` list.
+- **Patterns**: Paths are relative to the repository root. Don't add a leading ``/``. ``*`` can match any text. ``/`` can appear inside that match. ``?`` can match exactly one character. An empty pattern is invalid.
+- **Renames**: Both the old path and the new path of a renamed file count as modified.
+- **Skipped Commits**: Skipped commits do not change the base for comparison. Commits after a skipped commit still compare against the same evaluated commit. Changes from every skipped commit enter that comparison.
+- **Pull Requests**: Pull requests compare the file tree at the tip of the target branch with the file tree at the pull request head, not the merge base. A pull request that is behind the target branch can trigger more often, never less.
+- **Fail Open**: Triggers always fire when Gradient cannot list the changed files. Reasons include no earlier evaluation on the branch, a base equal to the head, a fetch that failed, a Git error, and a timeout. Timeouts run 30 seconds per polling and 8 seconds for all triggers of one webhook.
+- **Not Filtered**: Time triggers, manual evaluation, `/gradient run` comments, tag pushes, releases, entries in the merge queue, updates to flake inputs and the first poll after a change to a task's evaluation settings ignore path filters.
+- **Skipped Webhooks**: The webhook response can list each skipped trigger with a reason `no_changed_file_matches_path_filter`.
+
+!!! warning
+    Skipped commits get no evaluation and no commit status. Rules that protect a branch and require the Gradient check block merges of pull requests whose head commit was skipped.
 
 ## Related
 
