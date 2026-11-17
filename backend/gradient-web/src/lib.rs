@@ -498,6 +498,9 @@ async fn start_background_services(
             state.db(),
         )),
         ChildSpec::pass(gradient_db::metrics::rollup::Rollup::new(state.db())),
+        ChildSpec::pass(gradient_db::caches::usage::CacheUsageRecount::new(
+            state.db(),
+        )),
         ChildSpec::pass(
             gradient_db::yearly_instance_summary::YearlyInstanceRecapSnapshotCreationJob::new(
                 state.db(),
