@@ -28,6 +28,7 @@ bytes       = { workspace = true }
 git2        = { workspace = true }
 hex         = { workspace = true }
 hmac        = { workspace = true }
+http        = { workspace = true }
 jsonwebtoken = { workspace = true, features = ["use_pem"] }
 reqwest     = { workspace = true }
 serde       = { workspace = true }

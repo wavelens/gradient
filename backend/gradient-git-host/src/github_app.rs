@@ -11,6 +11,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::time::{SystemTime, UNIX_EPOCH};
+use subtle::ConstantTimeEq;
 use tracing::debug;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -171,6 +172,26 @@ pub fn verify_gitea_signature(secret: &str, signature_header: &str, body: &[u8])
     mac.verify_slice(&expected_bytes).is_ok()
 }
 
+pub fn verify_request_against_plaintext_secret(
+    secret: &str,
+    headers: &http::HeaderMap,
+    body: &[u8],
+) -> bool {
+    let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    let token_matches = |token: &str| bool::from(token.as_bytes().ct_eq(secret.as_bytes()));
+    let gitea_signature_matches = |signature: &str| verify_gitea_signature(secret, signature, body);
+
+    !secret.is_empty()
+        && (header("authorization")
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .is_some_and(token_matches)
+            || header("x-hub-signature-256")
+                .is_some_and(|signature| verify_github_signature(secret, signature, body))
+            || header("x-forgejo-signature").is_some_and(gitea_signature_matches)
+            || header("x-gitea-signature").is_some_and(gitea_signature_matches)
+            || header("x-gitlab-token").is_some_and(token_matches))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,5 +347,132 @@ AwIDAQAB\n\
         ] {
             assert!(!verify_gitea_signature(secret, sig, body), "{sig}");
         }
+    }
+
+    fn header_map_from_header_name_value_pairs(pairs: &[(&'static str, &str)]) -> http::HeaderMap {
+        pairs
+            .iter()
+            .map(|(name, value)| {
+                (
+                    http::HeaderName::from_static(name),
+                    http::HeaderValue::from_str(value).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_bearer_header_accepts_matching_plaintext_secret_and_rejects_equal_length_wrong_secret()
+    {
+        let accepted =
+            header_map_from_header_name_value_pairs(&[("authorization", "Bearer s3cret")]);
+        let wrong = header_map_from_header_name_value_pairs(&[("authorization", "Bearer s3creT")]);
+        let no_prefix = header_map_from_header_name_value_pairs(&[("authorization", "s3cret")]);
+        assert!(verify_request_against_plaintext_secret(
+            "s3cret", &accepted, b""
+        ));
+        assert!(!verify_request_against_plaintext_secret(
+            "s3cret", &wrong, b""
+        ));
+        assert!(!verify_request_against_plaintext_secret(
+            "s3cret", &no_prefix, b""
+        ));
+    }
+
+    #[test]
+    fn x_hub_signature_256_accepts_right_secret_and_rejects_other_secret() {
+        let body = b"{}";
+        let sig = compute_github_sig("s3cret", body);
+        let headers = header_map_from_header_name_value_pairs(&[("x-hub-signature-256", &sig)]);
+        assert!(verify_request_against_plaintext_secret(
+            "s3cret", &headers, body
+        ));
+        assert!(!verify_request_against_plaintext_secret(
+            "other", &headers, body
+        ));
+
+        let with_wrong_bearer = header_map_from_header_name_value_pairs(&[
+            ("authorization", "Bearer x"),
+            ("x-hub-signature-256", &sig),
+        ]);
+        assert!(verify_request_against_plaintext_secret(
+            "s3cret",
+            &with_wrong_bearer,
+            body
+        ));
+    }
+
+    #[test]
+    fn rejects_request_when_every_presented_credential_is_wrong() {
+        let body = b"{}";
+        let headers = header_map_from_header_name_value_pairs(&[
+            ("authorization", "Bearer x"),
+            ("x-hub-signature-256", &compute_github_sig("other", body)),
+            ("x-gitea-signature", &compute_gitea_sig("other", body)),
+            ("x-gitlab-token", "s3creT"),
+        ]);
+        assert!(!verify_request_against_plaintext_secret(
+            "s3cret", &headers, body
+        ));
+    }
+
+    #[test]
+    fn empty_secret_never_authenticates() {
+        let headers = header_map_from_header_name_value_pairs(&[
+            ("authorization", "Bearer "),
+            ("x-gitlab-token", ""),
+            ("x-hub-signature-256", &compute_github_sig("", b"")),
+        ]);
+        assert!(!verify_request_against_plaintext_secret("", &headers, b""));
+    }
+
+    #[test]
+    fn gitea_and_forgejo_signature_headers_accept_correct_secret_and_reject_wrong_secret() {
+        let body = b"{}";
+        let sig = compute_gitea_sig("s3cret", body);
+        for name in ["x-gitea-signature", "x-forgejo-signature"] {
+            let headers = header_map_from_header_name_value_pairs(&[(name, &sig)]);
+            assert!(
+                verify_request_against_plaintext_secret("s3cret", &headers, body),
+                "{name}"
+            );
+            assert!(
+                !verify_request_against_plaintext_secret("other", &headers, body),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn gitlab_token_header_equal_to_secret_is_accepted_and_different_token_is_rejected() {
+        let accepted = header_map_from_header_name_value_pairs(&[("x-gitlab-token", "s3cret")]);
+        let wrong = header_map_from_header_name_value_pairs(&[("x-gitlab-token", "s3creT")]);
+        let mut non_utf8 = http::HeaderMap::new();
+        non_utf8.insert(
+            "x-gitlab-token",
+            http::HeaderValue::from_bytes(b"s3cret\xff").unwrap(),
+        );
+        assert!(verify_request_against_plaintext_secret(
+            "s3cret", &accepted, b""
+        ));
+        assert!(!verify_request_against_plaintext_secret(
+            "s3cret", &wrong, b""
+        ));
+        assert!(!verify_request_against_plaintext_secret(
+            "s3cret", &non_utf8, b""
+        ));
+    }
+
+    #[test]
+    fn rejects_request_without_accepted_credential_headers() {
+        let headers = header_map_from_header_name_value_pairs(&[("x-api-key", "s3cret")]);
+        assert!(!verify_request_against_plaintext_secret(
+            "s3cret", &headers, b""
+        ));
+        assert!(!verify_request_against_plaintext_secret(
+            "s3cret",
+            &http::HeaderMap::new(),
+            b""
+        ));
     }
 }
