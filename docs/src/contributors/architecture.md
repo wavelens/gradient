@@ -62,6 +62,7 @@ root
 ├── effects                              actor: sends pending deliveries; effects-workers factory beneath
 ├── retention (hourly), rollup,
 │   cache_metric_flush, otlp-snapshot    metrics pipeline; otlp-snapshot only with an OTLP endpoint
+├── cache_usage_recount                  every 15 min or more: recount stored bytes per cache
 └── outbound-connect                     every 15 s: dials workers with a registered URL
 ```
 

@@ -425,10 +425,6 @@ pub(crate) async fn run_rollup(ctx: &DbContext) {
         warn!(error = %e, "rollup cache-storage failed");
     }
 
-    if let Err(e) = crate::caches::usage::recount_cache_usage(db).await {
-        warn!(error = %e, "rollup cache-usage recount failed");
-    }
-
     for (sql, label) in [
         (upstream_latency_sql(), metric::UPSTREAM_LATENCY_MS),
         (upstream_hits_sql(), metric::UPSTREAM_NARINFO_HITS),

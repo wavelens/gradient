@@ -5980,7 +5980,7 @@ paths:
         Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).
         `builds_completed` counts the builds that ran to completion in those projects (substituted builds excluded, a build reused by several evaluations counts once); `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.
         `cpu_time_ms` and `cpu_time_ms_7d` are null if no workers report CPU time (build metrics are off on the worker).
-        `cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.
+        `cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); a background pass can recount each size every 15 minutes, or at the interval of the metrics rollup if that interval is longer, and a path held by two caches counts in both.
         `workers` cover connected workers in viewable projects. `used_build_slot_count` is the count of build jobs assigned to them. `total_build_slots` is the sum of their `max_concurrent_builds`.
       operationId: getDashboardStats
       responses:

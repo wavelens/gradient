@@ -7,8 +7,15 @@
 //! The read is a separate statement and can run in parallel.
 //! An `INSERT ... SELECT` is never running in parallel.
 
+use std::time::Duration;
+
 use gradient_types::ids::CacheId;
+use gradient_util::supervision::{Pass, PassError};
 use sea_orm::{ConnectionTrait, DbErr, Value};
+
+use crate::DbContext;
+
+const MINIMUM_CACHE_USAGE_RECOUNT_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 crate::sql! {
     CACHE_USAGE_TOTALS = "SELECT s.cache AS cache, sum(cp.file_size)::bigint AS bytes \
@@ -48,6 +55,39 @@ pub async fn recount_cache_usage<C: ConnectionTrait>(db: &C) -> Result<u64, DbEr
     store_cache_usage(db, totals).await
 }
 
+fn cache_usage_recount_period_from_rollup_interval(rollup_interval: Duration) -> Duration {
+    rollup_interval.max(MINIMUM_CACHE_USAGE_RECOUNT_INTERVAL)
+}
+
+pub struct CacheUsageRecount {
+    ctx: DbContext,
+    period: Duration,
+}
+
+impl CacheUsageRecount {
+    pub fn new(ctx: DbContext) -> Self {
+        let period = cache_usage_recount_period_from_rollup_interval(Duration::from_secs(
+            ctx.config.metrics_args.rollup_interval_secs.get(),
+        ));
+        Self { ctx, period }
+    }
+}
+
+impl Pass for CacheUsageRecount {
+    const NAME: &'static str = "cache_usage_recount";
+    const BUDGET: Duration = Duration::from_secs(180);
+    const RUN_AT_START: bool = true;
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        recount_cache_usage(&self.ctx.worker_db).await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +123,19 @@ mod tests {
         let values = format!("{:?}", statements[1].values);
         assert!(values.contains(&a.into_inner().to_string()), "{values}");
         assert!(values.contains("BigInt(Some(20))"), "{values}");
+    }
+
+    #[test]
+    fn the_cache_usage_recount_period_is_fifteen_minutes_at_the_default_rollup_interval_and_matches_an_admin_set_one_hour_interval()
+     {
+        assert_eq!(
+            cache_usage_recount_period_from_rollup_interval(Duration::from_secs(60)),
+            Duration::from_secs(15 * 60)
+        );
+        assert_eq!(
+            cache_usage_recount_period_from_rollup_interval(Duration::from_secs(3600)),
+            Duration::from_secs(3600)
+        );
     }
 
     #[test]
