@@ -326,7 +326,7 @@ async fn route_github_app_release(
     path = "/hooks/{git_host}/{project}/{connection_name}",
     operation_id = "gitHostWebhook",
     tag = "git-host-webhooks",
-    summary = "Receive Git host push webhook",
+    summary = "Receive Git host webhook",
     description = "Old webhook address can still serve requests. Gradient can find the connection for the project's Git host by name and handle requests like `POST /hooks/{connection}`. Path segment `git_host` can select the payload format.",
     params(("git_host" = String, Path), ("project" = String, Path), ("connection_name" = String, Path)),
     request_body(content = serde_json::Value, content_type = "application/json"),

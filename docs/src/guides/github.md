@@ -5,7 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Connect GitHub
 
-A GitHub App links one Gradient instance to GitHub. With this connection in place, every push and pull request can trigger evaluations. Each commit then shows a status check.
+A GitHub App can link a Gradient instance to GitHub. With this connection in place, every push and pull request can trigger evaluations. Each commit then shows a status check.
+
+## GitHub App
 
 **Requirements:**
 
@@ -13,13 +15,13 @@ A GitHub App links one Gradient instance to GitHub. With this connection in plac
 - Admin rights on the GitHub user or organization that owns the repositories.
 - A task with a GitHub repository URL, see [First Project](../get-started/first-project.md).
 
-## 1. Register the GitHub App
+### 1. Register the GitHub App
 
 Register the App once for each instance. Open the **Git hosts** tab in **Admin** of Gradient. Users of GitHub Enterprise enter the host address first. Click **Create on GitHub** and confirm the registration on GitHub.
 
 Gradient now shows the **App ID**, the **private key** and the **webhook secret** one time only. Save the key and the secret as files on the server.
 
-## 2. Configure the Server
+### 2. Configure the Server
 
 ```nix
 services.gradient.githubApp = {
@@ -32,11 +34,11 @@ services.gradient.githubApp = {
 
 1. The App ID obtained in step 1.
 
-## 3. Install the App
+### 3. Install the App
 
 Install the App from the GitHub page of the App on the account with the repository. Each installation is a connection to a Git host named `github-<account>` with the instance as owner. Find the connection on the **Git hosts** tab under **Admin**. All projects can use the connection. The connection can receive events and report status. Remove the installation on GitHub. The connection is gone.
 
-## 4. Choose the Connection on the Task
+### 4. Choose the Connection on the Task
 
 Tasks map to one Git host connection each. Push triggers and pull request triggers fire for tasks on an event from their Git host connection. Commit statuses go through the same connection.
 
@@ -77,12 +79,12 @@ Tasks map to one Git host connection each. Push triggers and pull request trigge
 
     1.  ID of the app installation. Find this number at the end of the URL in the settings for the app installation on GitHub.
 
-## Verify Deployment
+### Verify Deployment
 
 - A push to the repository triggers an evaluation within seconds.
 - Gradient reports its status on the GitHub commit page.
 
-## Pull Requests
+### Pull Requests
 
 Push events require the **Push (reporter)** trigger from step 4. Pull Requests require the **Pull Request (reporter)** trigger.
 
@@ -95,7 +97,7 @@ Push events require the **Push (reporter)** trigger from step 4. Pull Requests r
 
 Fork pull requests wait for maintainer approval before they run. To enable this check, set **Require maintainer approval for PRs from non-writers** on the **Pull Request (reporter)** trigger.
 
-## Merge Queue
+### Merge Queue
 
 Merge queue entries count as a push to the target branch of the queue. A **Push (reporter)** trigger with a branch filter on the target branch can start the evaluation.
 
@@ -113,7 +115,7 @@ GitHub can merge an entry after a passed check, or drop the entry after a failed
     | Permissions | `metadata: read`, `contents: read`, `pull_requests: write`, `issues: write`, `statuses: write`, `checks: write`, `merge_queues: read` |
     | Events | `push`, `pull_request`, `release`, `check_run`, `issue_comment`, `pull_request_review`, `merge_group` |
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Fix |
 |---|---|
