@@ -10,8 +10,20 @@ use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let mut seen: HashSet<(GitHostConnectionOwner, &str)> = HashSet::new();
+    let mut ids_seen: HashSet<uuid::Uuid> = HashSet::new();
     for (label, connection) in &lookup.config.git_host_connections {
         let field = |key: &str| format!("git_host_connections.{label}.{key}");
+
+        if let Some(id) = &connection.id {
+            match id.trim().parse::<uuid::Uuid>() {
+                Ok(parsed) if !ids_seen.insert(parsed) => errors.push(
+                    field("id"),
+                    format!("Connection ID '{}' to the git host is a duplicate.", id),
+                ),
+                Ok(_) => {}
+                Err(_) => errors.push(field("id"), format!("Invalid UUID '{}'", id)),
+            }
+        }
 
         let owner = match connection.owner.parse::<GitHostConnectionOwner>() {
             Ok(owner) => Some(owner),

@@ -119,6 +119,7 @@ services.gradient.state = {
 | `created_by` | string | - | Name of the user who created the connection. |
 | `display_name` | null or string | `null` | A human-readable name to display for the connection. |
 | `git_host_type` | one of `gitea` `forgejo` `gitlab` `github` | - | Type of Git host |
+| `id` | null or string | `null` | The UUID of the connection. The webhook URL `/api/v1/hooks/<id>` can end with this value. The server can generate a UUID with `null`. The server can reject a conflicting value for an existing connection of the same name. |
 | `installation_id` | null or int | `null` | The installation ID of the GitHub App. This number shows at the end of the installation URL. The field is required for `git_host_type = "github"` and allowed only with `owner = "instance"`. |
 | `name` | string | attribute name | Name of the connection. Unique per owner. |
 | `owner` | string | - | `instance`, `team/<name>` or `project/<name>`. All projects can use instance connections. A team's projects can use that team's connections. |

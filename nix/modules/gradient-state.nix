@@ -514,6 +514,14 @@
 
   gitHostConnectionType = types.submodule ({ config, name, ... }: {
     options = {
+      id = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Connection UUID. Set the value to `null` so the server can generate a UUID. Set this value before the first deploy to learn the Webhook URL `/api/v1/hooks/<id>` ahead of time. The URL can stay the same after that, even on a new database or after a rename of the connection. The server can accept only values that have no conflict with an existing connection of the same name. Generate a UUID with {command}`uuidgen`.
+        '';
+      };
+
       name = mkOption {
         type = types.str;
         default = name;
@@ -546,7 +554,7 @@
         type = types.bool;
         default = true;
         description = ''
-          Whether the connection can receive push and pull request webhooks from the Git host `/api/v1/hooks/<connection-id>`.
+          Whether the connection can receive push and pull request webhooks from the Git host at `/api/v1/hooks/<id>`. Set `id` to check this URL before deployment.
         '';
       };
 
