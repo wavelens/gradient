@@ -9,8 +9,10 @@ mod build_jobs;
 mod outputs;
 
 pub use adoption::{
-    Adopted, adopt_below_named, adopt_pending_closure, adopt_pending_closures, adopt_unnamed_below,
-    pending_orphan_frontier, pending_orphans_among,
+    Adopted, BUILD_SCAN_BATCH_SIZE, OpenBuildWindowScanResult, adopt_below_named,
+    adopt_pending_closure, adopt_pending_closures, adopt_unnamed_below,
+    adopt_unnamed_below_for_live_evaluations, pending_orphans_among,
+    read_open_build_window_without_build_job,
 };
 pub use build_jobs::{
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
