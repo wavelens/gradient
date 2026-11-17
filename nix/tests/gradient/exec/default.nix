@@ -152,11 +152,13 @@
         guestCpus = 32;
         guestDiskMb = 131072;
         inherit maxPreWarm stopGuestsWithWorker sops;
+        mounts = [{ name = "scratch"; path = "/srv/scratch"; perJob = true; }];
         allow = {
           network = true;
           ssh = true;
           retries = 1;
           nodes = 2;
+          mounts = [ "scratch" ];
           inherit customImages;
         };
       };
