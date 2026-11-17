@@ -5,9 +5,12 @@
  */
 
 use std::collections::BTreeSet;
+use std::future::poll_fn;
 use std::ops::RangeInclusive;
+use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::task::Poll;
 use std::time::Duration;
 
 use gradient_db::connection::find_sessions_with_transaction_older_than;
@@ -79,6 +82,12 @@ struct Injected<T> {
 // Both messages wait in the mailbox ahead of the first flush.
 async fn together<F, S>(first: impl Future<Output = F>, second: impl Future<Output = S>) -> (F, S) {
     tokio::join!(first, second)
+}
+
+async fn poll_once_and_check_still_pending<T>(
+    mut future: Pin<&mut impl Future<Output = T>>,
+) -> bool {
+    poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx).is_pending())).await
 }
 
 async fn inject_error<T, F, Fut>(
@@ -340,10 +349,15 @@ async fn m04_a_batch_and_a_commit_queued_together_see_each_other_after_the_flush
     );
     let of_walk = transactions_writing(&case, "derivation").await;
     let of_commit = transactions_writing(&case, "cached_path").await;
-    assert_eq!(of_walk.len(), 1, "after 1: the batch wrote A: {of_walk:?}");
-    assert_eq!(
-        of_walk, of_commit,
-        "after 1: the batch and the commit share a transaction"
+    let ([walk], [commit]) = (of_walk.as_slice(), of_commit.as_slice()) else {
+        panic!(
+            "after 1: {of_walk:?} {of_commit:?} come from one transaction for the batch and one for the commit."
+        );
+    };
+    let transaction_order = |id: &String| id.parse::<u64>().expect("Transaction ID is a number");
+    assert!(
+        transaction_order(walk) < transaction_order(commit),
+        "after 1: batch commit with a transaction older than the NAR: {walk} {commit}"
     );
     case.zero_drift("step 1").await;
     case.finish().await;
@@ -1003,5 +1017,69 @@ async fn row_lock_timeout_in_first_step_still_repairs_wanted_counter_of_other_bu
         "after 2: {report:?}"
     );
     case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn m15_two_batches_of_different_evaluations_committed_in_separate_transactions_let_the_first_reply_and_rows_be_visible_while_a_lock_holds_only_the_second()
+ {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(walked_a_above_a_stub(e2).evaluation(e1)).await;
+    case.sql(NOTE_TRANSACTIONS).await;
+    let of_e1 = case.tasked(e1, vec![entry_point(C, C_OUT, "pkg.c")]).await;
+    let of_e2 = case.tasked(e2, vec![entry_point(D, D_OUT, "pkg.d")]).await;
+
+    let (first, second) = together(case.walk_result(of_e1), case.walk_result(of_e2)).await;
+
+    first.expect("after 1: first result ok");
+    second.expect("after 1: second result ok");
+    let transactions: BTreeSet<String> = transactions_writing(&case, "derivation")
+        .await
+        .into_iter()
+        .collect();
+    assert_eq!(
+        transactions.len(),
+        2,
+        "after 1: commit the E1 batch and the E2 batch in two separate transactions: {transactions:?}"
+    );
+    case.zero_drift("step 1").await;
+
+    let derivation_b_build_row_lock_transaction =
+        open_second_transaction_and_lock_derivation_build_row(&case, B).await;
+    let of_e1 = case.tasked(e1, vec![entry_point(Z, Z_OUT, "pkg.z")]).await;
+    let of_e2 = case.tasked(e2, vec![with_output(drv(B, &[]), B_OUT)]).await;
+    let mut second = Box::pin(case.walk_result(of_e2));
+
+    let (first, second_sent) = together(
+        tokio::time::timeout(
+            DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS.statement_lock_wait_timeout / 2,
+            case.walk_result(of_e1),
+        ),
+        poll_once_and_check_still_pending(second.as_mut()),
+    )
+    .await;
+
+    first
+        .expect("after 2: E1 responded. E2 waited for the lock.")
+        .expect("after 2: the first result is OK");
+    assert!(
+        second_sent,
+        "after 2: E2 batch went out and no reply came back yet"
+    );
+    let z = case.find_derivation(Z).await;
+    assert!(z.is_some(), "After 2: derivation(Z) is present");
+    let waiting = poll_once_and_check_still_pending(second.as_mut()).await;
+    assert!(waiting, "After 2: batches from E2 wait for the lock");
+    let b = case.derivation(B).await;
+    assert!(!b.walked, "after 2: derivation(B) is still a stub");
+    derivation_b_build_row_lock_transaction
+        .rollback()
+        .await
+        .expect("second transaction releases that lock");
+
+    second.await.expect("After 3: second result is OK");
+    let b = case.derivation(B).await;
+    assert!(b.walked, "After 3: derivation(B) walked");
+    case.zero_drift("step 3").await;
     case.finish().await;
 }
