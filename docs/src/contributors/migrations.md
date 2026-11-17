@@ -46,6 +46,7 @@ Starting instances prepare the schema one at a time. Instances that prepare the 
 - **Lock Wait:** DDL migrations on an existing table wait up to 5 seconds for a lock.
     - Transaction migrations start with `SET LOCAL lock_timeout = '5s'`, as in `m20261216_000000_add_revision_to_pending_delivery.rs`.
     - `CONCURRENTLY` migrations run outside a transaction. `SET LOCAL` can't take effect outside a transaction. These migrations start with `SET lock_timeout = '5s'` and end with `RESET lock_timeout`.
+    - Run these statements in one session through `run_sql_statements_on_one_connection` (`backend/gradient-migration/src/sql_on_one_connection.rs`), as in `m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently.rs`. Separate calls go to different pooled connections. Timeouts then miss `CREATE INDEX` and remain on a connection in the pool.
     - Five seconds is still below the 10-second lock wait for transactions of the graph writer. Queued migrations therefore give up before graph transactions of running instances.
     - Timeouts cause a server exit and a systemd restart.
 - **Backfills:** Migrations update at most a limited number of rows. Larger backfills run as a background pass with checkpoints after startup. The module `backend/gradient-cache/src/storage_migrations/mod.rs` and the `storage_migration` table are an example. Code can read both states until that pass is complete.
