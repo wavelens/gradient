@@ -7,10 +7,14 @@
 use gradient_db::status::BuildRefusal;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
+use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::ids::EvaluationId;
-use gradient_entity::{build_job, derivation_build, entry_point, evaluation};
+use gradient_entity::ids::{DerivationBuildId, DerivationId, EvaluationId};
+use gradient_entity::{
+    build_job, derivation, derivation_build, derivation_dependency, entry_point, evaluation,
+};
 use gradient_fixtures::shape::{Shape, shape};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, IntoActiveModel, TransactionTrait};
 
 use super::{
     A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, BD, BD_OUT, C, C_OUT, Case, D, D_OUT, F, F_OUT, F1,
@@ -1015,4 +1019,179 @@ async fn d15_one_key_budget_defers_forgotten_miss_rewalk_no_build_dep() {
         "after 2: sb(C) status, wanted"
     );
     case.finish().await;
+}
+
+const TEST_DEPENDENCY_UNWANTED_PARENT_COUNT: usize = 200;
+
+#[tokio::test]
+async fn d16_update_need_reads_only_wanted_open_parents_through_partial_index() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(X)
+            .derivation(X)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(X_OUT)
+            .build_status(BuildStatus::Queued),
+    )
+    .await;
+    insert_many_unwanted_parent_derivations_with_unwanted_shared_build(
+        &case,
+        X,
+        TEST_DEPENDENCY_UNWANTED_PARENT_COUNT,
+    )
+    .await;
+    case.sql("VACUUM (ANALYZE) derivation, derivation_build, derivation_dependency")
+        .await;
+
+    let update_need_query_from_statement_registry = gradient_db::sql::registry()
+        .find(|query| query.name == "UPDATE_NEED")
+        .expect("The statement registry contains `UPDATE_NEED`.");
+    let root_derivation_id = case.db.id_of(X).await.into_inner();
+    let txn = case
+        .db
+        .connection()
+        .begin()
+        .await
+        .expect("a transaction opens");
+    txn.execute_unprepared("SET LOCAL enable_seqscan = off")
+        .await
+        .expect("Sequential scan is off.");
+    let parsed_explain_analyze_json: serde_json::Value = txn
+        .query_one_raw(update_need_query_from_statement_registry.bind_built(
+            format!(
+                "EXPLAIN (ANALYZE, FORMAT JSON) {}",
+                update_need_query_from_statement_registry.text()
+            ),
+            [sea_orm::Value::from(vec![root_derivation_id])],
+        ))
+        .await
+        .expect("Postgres can run EXPLAIN on UPDATE_NEED and show the query plan.")
+        .expect("EXPLAIN commands return one row.")
+        .try_get("", "QUERY PLAN")
+        .expect("The plan is JSON.");
+    txn.rollback().await.expect("Transaction rollback");
+
+    let plan = &parsed_explain_analyze_json;
+    let flattened_plan_tree_nodes = collect_explain_plan_nodes(&plan[0]["Plan"]);
+    assert!(
+        flattened_plan_tree_nodes
+            .iter()
+            .any(|node| node["Index Name"] == "idx-derivation_build-wanted-open"),
+        "The parent probe can use the index of needed open shared builds: {plan}"
+    );
+    let reverse_edge_index_scan_plan_nodes: Vec<_> = flattened_plan_tree_nodes
+        .iter()
+        .filter(|node| {
+            node["Index Name"] == "idx-derivation_dependency-reverse-pair" && node["Alias"] != "k"
+        })
+        .collect();
+    assert!(
+        !reverse_edge_index_scan_plan_nodes.is_empty()
+            && reverse_edge_index_scan_plan_nodes
+                .iter()
+                .all(|node| node["Node Type"] == "Index Only Scan"),
+        "The edge list can read only the reverse edge index: {plan}"
+    );
+    let parent_shared_build_probe: Vec<_> = flattened_plan_tree_nodes
+        .iter()
+        .filter(|node| node["Relation Name"] == "derivation_build" && node["Alias"] == "p")
+        .collect();
+    assert!(
+        !parent_shared_build_probe.is_empty()
+            && parent_shared_build_probe.iter().all(|node| {
+                node["Node Type"] == "Index Only Scan"
+                    && node["Index Name"] == "idx-derivation_build-wanted-open"
+            }),
+        "A parent probe can read only the index entries of the open shared build that the probe needs: {plan}"
+    );
+    let plan_nodes_reading_parent_build_row: Vec<_> = flattened_plan_tree_nodes
+        .iter()
+        .filter(|node| node["Relation Name"] == "derivation_build" && node["Alias"] == "pb")
+        .collect();
+    assert!(
+        !plan_nodes_reading_parent_build_row.is_empty()
+            && plan_nodes_reading_parent_build_row
+                .iter()
+                .all(|node| node["Actual Loops"] == 1),
+        "The builder check does one read of the shared build for the one wanted open parent, not one read for every parent: {plan}"
+    );
+    case.finish_with_drift().await;
+}
+
+async fn insert_many_unwanted_parent_derivations_with_unwanted_shared_build(
+    case: &Case,
+    dependency: &str,
+    parent_count_to_insert: usize,
+) {
+    let dependency_derivation_row = case.derivation(dependency).await;
+    let dependency_derivation_build_row = case.sb(dependency).await;
+    let new_parent_derivation_ids: Vec<DerivationId> = (0..parent_count_to_insert)
+        .map(|_| DerivationId::now_v7())
+        .collect();
+    let connection = case.db.connection();
+
+    derivation::Entity::insert_many(new_parent_derivation_ids.iter().enumerate().map(
+        |(index, id)| {
+            derivation::Model {
+                id: *id,
+                hash: format!("{index:032}"),
+                ..dependency_derivation_row.clone()
+            }
+            .into_active_model()
+            .reset_all()
+        },
+    ))
+    .exec_without_returning(&connection)
+    .await
+    .expect("Write the parent derivation.");
+    derivation_build::Entity::insert_many(new_parent_derivation_ids.iter().map(|id| {
+        derivation_build::Model {
+            id: DerivationBuildId::now_v7(),
+            derivation: *id,
+            status: BuildStatus::Skipped,
+            wanted: false,
+            ..dependency_derivation_build_row.clone()
+        }
+        .into_active_model()
+        .reset_all()
+    }))
+    .exec_without_returning(&connection)
+    .await
+    .expect("Write the shared builds of the parents.");
+    derivation_dependency::Entity::insert_many(new_parent_derivation_ids.iter().map(|id| {
+        derivation_dependency::Model {
+            derivation: *id,
+            dependency: dependency_derivation_row.id,
+            kind: EdgeKind::Buildtime,
+            dependency_outputs: None,
+        }
+        .into_active_model()
+        .reset_all()
+    }))
+    .exec_without_returning(&connection)
+    .await
+    .expect("The parent edges get written");
+}
+
+fn collect_explain_plan_nodes(node: &serde_json::Value) -> Vec<&serde_json::Value> {
+    let mut flattened_plan_tree_nodes = vec![node];
+    if let Some(children) = node["Plans"].as_array() {
+        for child in children {
+            flattened_plan_tree_nodes.extend(collect_explain_plan_nodes(child));
+        }
+    }
+
+    flattened_plan_tree_nodes
 }

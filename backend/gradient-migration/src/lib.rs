@@ -86,6 +86,8 @@ mod m20261214_000000_add_read_superuser_rights_bit_to_existing_api_keys_that_hav
 mod m20261215_000000_add_references_are_claimed_to_cached_path_signature;
 mod m20261216_000000_add_revision_to_pending_delivery;
 mod m20261217_000000_create_project_git_https_credential_table;
+mod m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently;
+mod sql_on_one_connection;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -199,6 +201,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261215_000000_add_references_are_claimed_to_cached_path_signature::Migration),
             Box::new(m20261216_000000_add_revision_to_pending_delivery::Migration),
             Box::new(m20261217_000000_create_project_git_https_credential_table::Migration),
+            Box::new(m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently::Migration),
         ]
     }
 }
