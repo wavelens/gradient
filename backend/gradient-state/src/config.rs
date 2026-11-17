@@ -163,6 +163,8 @@ fn default_active() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateGitHostConnection {
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     #[serde(default)]
     pub display_name: Option<String>,

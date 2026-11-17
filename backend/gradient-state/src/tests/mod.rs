@@ -377,6 +377,29 @@ fn rejects_duplicate_connection_name_for_same_owner_but_allows_it_for_different_
 }
 
 #[test]
+fn test_state_validation_rejects_duplicate_and_invalid_git_host_connection_pinned_ids() {
+    let cfg = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "a": { "id": "00000000-0000-0000-0000-000000000000", "name": "a", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" },
+            "b": { "id": "00000000-0000-0000-0000-000000000000", "name": "b", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" },
+            "c": { "id": "not-a-uuid", "name": "c", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" }
+        }"#,
+    );
+    let id_errors: Vec<_> = errors_of(&cfg)
+        .into_iter()
+        .filter(|(field, _)| field.ends_with(".id"))
+        .collect();
+    assert_eq!(id_errors.len(), 2, "got: {id_errors:?}");
+    assert!(
+        id_errors
+            .iter()
+            .any(|(field, message)| field == "git_host_connections.c.id"
+                && message.contains("not-a-uuid")),
+        "got: {id_errors:?}"
+    );
+}
+
+#[test]
 fn state_github_connection_requires_installation_id() {
     let connections = r#"{
         "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "created_by": "alice" }

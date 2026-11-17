@@ -13,7 +13,7 @@ use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_db::git_host_connections::{self, GitHostConnectionOwnerByDatabaseId};
 use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::*;
-use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
@@ -111,18 +111,28 @@ impl<'a> StateApplicator<'a> {
                 .clone()
                 .unwrap_or_else(|| state_connection.name.clone());
 
-            let existing =
-                match git_host_connections::by_name(self.db, owner_id, &state_connection.name)
-                    .await?
-                {
-                    Some(existing) => Some(existing),
-                    None => match github_installation_id {
-                        Some(id) => {
-                            git_host_connections::by_github_installation_id(self.db, id).await?
-                        }
-                        None => None,
-                    },
-                };
+            let declared_id = state_connection
+                .id
+                .as_deref()
+                .map(|id| {
+                    id.trim().parse::<GitHostConnectionId>().map_err(|e| {
+                        format!(
+                            "Git host connection '{}' has an invalid id '{}': {}",
+                            label, id, e
+                        )
+                    })
+                })
+                .transpose()?;
+
+            let existing = self
+                .find_existing_git_host_connection_row(
+                    label,
+                    declared_id,
+                    owner_id,
+                    &state_connection.name,
+                    github_installation_id,
+                )
+                .await?;
 
             if let Some(existing) = existing {
                 let mut active = existing.into_active_model();
@@ -146,7 +156,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!(%label, "Updated the managed connection to the Git host.");
             } else {
                 MGitHostConnection {
-                    id: GitHostConnectionId::now_v7(),
+                    id: declared_id.unwrap_or_else(GitHostConnectionId::now_v7),
                     project,
                     owner_team,
                     name: state_connection.name.clone(),
@@ -176,6 +186,49 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
+    async fn find_existing_git_host_connection_row(
+        &self,
+        label: &str,
+        declared_id: Option<GitHostConnectionId>,
+        owner_id: GitHostConnectionOwnerByDatabaseId,
+        name: &str,
+        github_installation_id: Option<i64>,
+    ) -> Result<Option<MGitHostConnection>, DynError> {
+        let pinned = match declared_id {
+            Some(id) => EGitHostConnection::find_by_id(id).one(self.db).await?,
+            None => None,
+        };
+
+        let existing = match git_host_connections::by_name(self.db, owner_id, name).await? {
+            Some(existing) => Some(existing),
+            None => match github_installation_id {
+                Some(id) => git_host_connections::by_github_installation_id(self.db, id).await?,
+                None => None,
+            },
+        };
+
+        if let Some(pinned) = pinned {
+            if let Some(other) = existing.filter(|other| other.id != pinned.id) {
+                return Err(format!(
+                    "The pinned ID for Git host connection \"{}\" is {}. That name or the ID of the GitHub installation is already in use by connection {}.",
+                    label, pinned.id, other.id
+                )
+                .into());
+            }
+            return Ok(Some(pinned));
+        }
+
+        if let (Some(declared), Some(row)) = (declared_id, &existing) {
+            return Err(format!(
+                "Git host connection '{}' with ID {} already present. The declared ID in state is {}. IDs are immutable.",
+                label, row.id, declared
+            )
+            .into());
+        }
+
+        Ok(existing)
+    }
+
     pub(crate) fn read_and_encrypt_git_host_connection_credential_file(
         &self,
         field_set: Option<&str>,
@@ -200,5 +253,133 @@ impl<'a> StateApplicator<'a> {
                 )
             })?;
         Ok(Some(encrypted))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+    use sea_orm::DatabaseConnection;
+    use std::path::Path;
+
+    fn state_connection(name: &str, id: Option<GitHostConnectionId>) -> StateGitHostConnection {
+        StateGitHostConnection {
+            id: id.map(|id| id.to_string()),
+            name: name.into(),
+            display_name: None,
+            owner: "instance".into(),
+            git_host_type: "gitea".into(),
+            secret_file: None,
+            base_url: Some("https://forge.example.com".into()),
+            access_token_file: None,
+            receives_events: true,
+            reports_status: false,
+            installation_id: None,
+            account_login: None,
+            created_by: rows::user().username,
+        }
+    }
+
+    async fn database_with_user() -> TestDatabase {
+        let db = TestDatabase::create().await;
+        rows::user()
+            .into_active_model()
+            .insert(&db.connection())
+            .await
+            .unwrap();
+        db
+    }
+
+    async fn apply(
+        db: &DatabaseConnection,
+        connection: StateGitHostConnection,
+    ) -> Result<(), DynError> {
+        let app = StateApplicator {
+            db,
+            crypt_secret_file: "",
+            credentials_dir: Path::new(""),
+            email_enabled: false,
+        };
+        app.apply_git_host_connections(
+            &HashMap::from([(connection.name.clone(), connection)]),
+            &HashMap::new(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn applying_state_twice_renaming_pinned_git_host_connection_keeps_row_and_id() {
+        let db = database_with_user().await;
+        let pinned = GitHostConnectionId::now_v7();
+
+        apply(&db.connection(), state_connection("forge", Some(pinned)))
+            .await
+            .unwrap();
+        apply(&db.connection(), state_connection("renamed", Some(pinned)))
+            .await
+            .unwrap();
+
+        let rows = db.rows::<EGitHostConnection>().await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].id, pinned);
+        assert_eq!(rows[0].name, "renamed");
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn apply_git_host_connection_with_mismatched_id_fails_and_leaves_existing_row_unchanged()
+    {
+        let db = database_with_user().await;
+        apply(&db.connection(), state_connection("forge", None))
+            .await
+            .unwrap();
+        let existing = db.rows::<EGitHostConnection>().await.remove(0);
+
+        let declared = GitHostConnectionId::now_v7();
+        let err = apply(&db.connection(), state_connection("forge", Some(declared)))
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains(&declared.to_string()), "{err}");
+        let rows = db.rows::<EGitHostConnection>().await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].id, existing.id);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn rename_pinned_git_host_connection_to_existing_name_fails_naming_both_ids_and_leaves_rows_unchanged()
+     {
+        let db = database_with_user().await;
+        let pinned = GitHostConnectionId::now_v7();
+        apply(&db.connection(), state_connection("forge", Some(pinned)))
+            .await
+            .unwrap();
+        apply(&db.connection(), state_connection("taken", None))
+            .await
+            .unwrap();
+        let before = db.rows::<EGitHostConnection>().await;
+        let taken = before.iter().find(|row| row.name == "taken").unwrap().id;
+
+        let err = apply(&db.connection(), state_connection("taken", Some(pinned)))
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains(&pinned.to_string()), "{err}");
+        assert!(err.contains(&taken.to_string()), "{err}");
+        let mut after = db.rows::<EGitHostConnection>().await;
+        after.sort_by_key(|row| row.id);
+        let mut before = before;
+        before.sort_by_key(|row| row.id);
+        let names = |rows: &[MGitHostConnection]| {
+            rows.iter()
+                .map(|row| (row.id, row.name.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&after), names(&before));
+        db.finish().await;
     }
 }

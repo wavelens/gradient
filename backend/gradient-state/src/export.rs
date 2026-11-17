@@ -384,6 +384,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         config.git_host_connections.insert(
             build_exported_git_host_connection_label(&owner, &c.name),
             StateGitHostConnection {
+                id: Some(c.id.to_string()),
                 name: c.name.clone(),
                 display_name: Some(c.display_name.clone()),
                 owner: owner.to_string(),
