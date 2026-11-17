@@ -12,6 +12,7 @@ export function getCiTriggerTypeLabel(type: TriggerType): string {
     case 'reporter_push': return 'Push';
     case 'reporter_pull_request': return 'Pull request';
     case 'time': return 'Schedule (cron)';
+    case 'post_request': return 'POST request';
   }
 }
 

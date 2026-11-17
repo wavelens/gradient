@@ -69,7 +69,7 @@ export function buildTaskCreationTriggersFromWizardChoices(choices: {
   const triggers: TriggerConfig[] = [];
   if (choices.polling) triggers.push({ type: 'polling', interval_secs: DEFAULT_POLLING_INTERVAL_SECS, branch });
   for (const { config, selected } of choices.suggestions) {
-    if (!selected || config.type === 'polling' || config.type === 'time') continue;
+    if (!selected || (config.type !== 'reporter_push' && config.type !== 'reporter_pull_request')) continue;
     triggers.push(branch ? { ...config, branches: [branch] } : config);
   }
   const cron = choices.cron.trim();

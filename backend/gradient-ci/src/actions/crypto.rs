@@ -23,6 +23,14 @@ pub fn encrypt_secret_with_file(crypt_secret_file: &str, plaintext: &str) -> Res
     encrypt_action_secret(plaintext, key.expose())
 }
 
+pub fn new_webhook_secret() -> String {
+    use rand::RngExt as _;
+
+    let mut raw = [0u8; 32];
+    rand::rng().fill(&mut raw);
+    hex::encode(raw)
+}
+
 pub fn decrypt_secret_with_file(
     crypt_secret_file: &str,
     ciphertext: &str,
