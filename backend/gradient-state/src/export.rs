@@ -21,7 +21,7 @@ use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::permissions::{
     cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec,
 };
-use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_types::triggers::TriggerConfig;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 
@@ -526,61 +526,15 @@ fn export_team_worker(
     }
 }
 
-fn export_trigger(t: &gradient_entity::task_trigger::Model) -> Option<StateTrigger> {
+pub(crate) fn export_trigger(t: &gradient_entity::task_trigger::Model) -> Option<StateTrigger> {
     let cfg = TriggerConfig::parse_row(t.trigger_type, &t.config).ok()?;
-    let (trigger_type, config) = match cfg {
-        TriggerConfig::Polling {
-            interval_secs,
-            branch,
-            ..
-        } => {
-            let mut c = serde_json::Map::new();
-            c.insert("interval_secs".into(), interval_secs.into());
-            if let Some(b) = branch {
-                c.insert("branch".into(), b.into());
-            }
-            (TriggerType::Polling, c)
-        }
-        TriggerConfig::ReporterPush {
-            branches,
-            tags,
-            releases_only,
-            include_flake_inputs,
-            ..
-        } => {
-            let mut c = serde_json::Map::new();
-            c.insert("branches".into(), branches.into());
-            c.insert("tags".into(), tags.into());
-            c.insert("releases_only".into(), releases_only.into());
-            if include_flake_inputs {
-                c.insert("include_flake_inputs".into(), include_flake_inputs.into());
-            }
-            (TriggerType::ReporterPush, c)
-        }
-        TriggerConfig::ReporterPullRequest {
-            branches,
-            actions,
-            require_approval,
-            ..
-        } => {
-            let mut c = serde_json::Map::new();
-            c.insert("branches".into(), branches.into());
-            c.insert("actions".into(), actions.into());
-            c.insert("require_approval".into(), require_approval.into());
-            (TriggerType::ReporterPullRequest, c)
-        }
-        TriggerConfig::Time { cron, branch } => {
-            let mut c = serde_json::Map::new();
-            c.insert("cron".into(), cron.into());
-            if let Some(b) = branch {
-                c.insert("branch".into(), b.into());
-            }
-            (TriggerType::Time, c)
-        }
-    };
+    let mut config = cfg.to_db_json();
+    if let serde_json::Value::Object(fields) = &mut config {
+        fields.retain(|_, value| !value.is_null());
+    }
     Some(StateTrigger {
-        trigger_type,
-        config: serde_json::Value::Object(config),
+        trigger_type: cfg.trigger_type(),
+        config,
         active: t.active,
         is_default: t.is_default,
     })

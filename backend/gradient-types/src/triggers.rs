@@ -116,8 +116,7 @@ impl TriggerConfig {
             m.insert("type".into(), serde_json::to_value(trigger_type)?);
         }
         let parsed: TriggerConfig = serde_json::from_value(value)?;
-        parsed.validate()?;
-        Ok(parsed)
+        parsed.validate_and_convert_cron_to_six_fields()
     }
 
     pub fn validate(&self) -> Result<(), TriggerConfigError> {

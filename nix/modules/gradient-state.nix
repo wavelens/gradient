@@ -644,6 +644,8 @@
 
           Empty `branches`, `tags` and `actions` lists match everything.
 
+          `polling`, `reporter_push` and `reporter_pull_request` also accept `include_paths` and `exclude_paths`. These are lists of path patterns relative to the repository root, such as `[ "src/*" ]`. `*` can match any text with `/`. These triggers start an evaluation only for commits that change files that match `include_paths` and match no pattern in `exclude_paths`. The default is an empty list. All commits match.
+
           `require_approval` defaults to `true` for pull request triggers. It parks
           evaluations of pull requests from contributors without write access on the Git host. A
           maintainer releases them with "Approve and run" on the GitHub check or a

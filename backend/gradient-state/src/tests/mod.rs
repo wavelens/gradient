@@ -152,6 +152,21 @@ fn state_task_with_two_default_triggers_rejected() {
     );
 }
 
+#[test]
+fn test_state_validation_rejects_trigger_with_absolute_include_paths_pattern() {
+    let cfg = make_state_with_git_host_connections_and_web_task_extra_fields(
+        "{}",
+        r#""triggers": [{ "type": "polling", "config": { "include_paths": ["/src/*"] } }]"#,
+    );
+    let errors = errors_of(&cfg);
+    assert!(
+        errors
+            .iter()
+            .any(|(field, message)| field == "tasks.web.triggers" && message.contains("/src/*")),
+        "expected the absolute include_paths pattern to be rejected, got: {errors:?}"
+    );
+}
+
 fn errors_of(cfg: &StateConfiguration) -> Vec<(String, String)> {
     cfg.validate()
         .errors

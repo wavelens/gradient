@@ -22,6 +22,7 @@ use std::path::Path;
 pub(crate) use credentials::{
     derive_public_key, parse_api_key_hash, parse_password_phc, read_credential,
 };
+pub(crate) use entities::build_trigger_config;
 pub(crate) use lookups::{load_git_host_connections_usable_by_project_by_name, lookup_id};
 
 pub use pending::{PendingProjectMembership, PendingProjectMemberships};
