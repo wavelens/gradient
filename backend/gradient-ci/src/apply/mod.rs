@@ -15,7 +15,10 @@ use gradient_entity::evaluation::WalkMode;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
 
-pub use changed_paths::changed_paths_match_trigger_path_filter;
+pub use changed_paths::{
+    PathFilterBaseCommit, PathFilterCommitComparison, changed_paths_match_trigger_path_filter,
+    should_fire_trigger_for_path_filter,
+};
 pub use gates::{
     park_if_no_cache, park_if_no_workers, park_if_pending_approval, park_storage_full,
 };

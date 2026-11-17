@@ -57,6 +57,7 @@ impl QueuedEvaluation {
 pub enum TaskEvaluationNotStartedReason {
     SameCommit,
     Filter,
+    NoChangedFileMatchesPathFilter,
     TagNotFound,
     Concurrency,
     CommitMessage,
@@ -70,6 +71,9 @@ impl TaskEvaluationNotStartedReason {
         match self {
             Self::SameCommit => "The task already evaluated this commit.",
             Self::Filter => "Branch not in trigger's branch list",
+            Self::NoChangedFileMatchesPathFilter => {
+                "Changed files don't match the trigger's path filter."
+            }
             Self::TagNotFound => "Tag not found in repository",
             Self::Concurrency => {
                 "The concurrency rules of the task skip a new evaluation because an evaluation is already active."

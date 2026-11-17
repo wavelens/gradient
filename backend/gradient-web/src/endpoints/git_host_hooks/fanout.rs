@@ -11,7 +11,10 @@ use super::response::{
     QueuedEvaluation, SkippedTask, TaskEvaluationNotStartedReason, WebhookTriggerOutcome,
 };
 use gradient_ci::CiContext;
-use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_owner_repo};
+use gradient_ci::{
+    ApplyInput, ApplyOutcome, ApprovalInfo, PathFilterBaseCommit, PathFilterCommitComparison,
+    apply_trigger, parse_owner_repo, should_fire_trigger_for_path_filter,
+};
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::evaluation::WalkMode;
@@ -22,7 +25,11 @@ use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::Instant;
 use tracing::{info, warn};
+
+const CHANGED_PATHS_CHECK_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Copy)]
 enum PushRefKind<'a> {
@@ -65,6 +72,12 @@ async fn trigger_task_repository_push(
     push: &ParsedPushEvent,
 ) -> WebhookTriggerOutcome {
     let ref_kind = PushRefKind::of(push);
+    let path_filter_base_commit_description = match ref_kind {
+        PushRefKind::Branch(_) => Some(PathFilterBaseCommit::NewestEvaluationOnBranch(
+            ref_kind.branch_key(),
+        )),
+        PushRefKind::Tag(_) => None,
+    };
     fan_out_triggers(
         ci,
         scheduler,
@@ -103,6 +116,7 @@ async fn trigger_task_repository_push(
         true,
         None,
         None,
+        path_filter_base_commit_description,
     )
     .await
 }
@@ -143,6 +157,7 @@ pub(super) async fn trigger_merge_group_for_connection(
         false,
         None,
         None,
+        None,
     )
     .await
 }
@@ -157,6 +172,7 @@ pub(super) async fn trigger_pr_for_connection(
     connection_id: GitHostConnectionId,
     event_repo_urls: &[String],
     branch: Option<&str>,
+    base_branch: Option<&str>,
     action: &str,
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
@@ -173,6 +189,9 @@ pub(super) async fn trigger_pr_for_connection(
         || branch_key::NO_BRANCH.to_owned(),
         branch_key::pull_request,
     );
+    let path_filter_base_commit_description = base_branch
+        .filter(|_| !manual)
+        .map(|base| PathFilterBaseCommit::TargetBranchTip(base.to_owned()));
     fan_out_triggers(
         ci,
         scheduler,
@@ -212,6 +231,7 @@ pub(super) async fn trigger_pr_for_connection(
         false,
         wildcard_override,
         source_comment,
+        path_filter_base_commit_description,
     )
     .await
 }
@@ -271,6 +291,7 @@ pub(super) async fn trigger_release_for_connection(
         false,
         None,
         None,
+        None,
     )
     .await
 }
@@ -321,10 +342,12 @@ async fn fan_out_triggers<F>(
     honors_skip_marker: bool,
     wildcard_override: Option<String>,
     source_comment: Option<serde_json::Value>,
+    path_filter_base_commit_description: Option<PathFilterBaseCommit>,
 ) -> WebhookTriggerOutcome
 where
     F: Fn(&TriggerConfig) -> FilterResult,
 {
+    let path_filter_check_deadline = Instant::now() + CHANGED_PATHS_CHECK_TIMEOUT;
     let triggers = match gradient_db::triggers::list_active_triggers_of_type_on_tasks_using_git_host_connection(
         &ci.db.web_db,
         connection_id,
@@ -393,6 +416,32 @@ where
             );
             continue;
         };
+
+        if let (Some(base), Some(filter)) = (
+            path_filter_base_commit_description.as_ref(),
+            cfg.path_filter(),
+        ) && !should_fire_trigger_for_path_filter(
+            &ci.db.web_db,
+            &ci.db,
+            &task,
+            filter,
+            PathFilterCommitComparison {
+                base,
+                head: &commit_hash,
+                head_repository: repository_override.as_deref(),
+            },
+            path_filter_check_deadline.saturating_duration_since(Instant::now()),
+        )
+        .await
+        {
+            push_skipped(
+                &mut outcome,
+                &task,
+                project_name,
+                TaskEvaluationNotStartedReason::NoChangedFileMatchesPathFilter,
+            );
+            continue;
+        }
 
         let gate_approval = if pr_require_approval {
             decide_pr_gate(ci, &task, approval_ctx.as_ref()).await

@@ -96,6 +96,7 @@ harmonia-file-nar = { workspace = true }
 [dev-dependencies]
 async-trait       = { workspace = true }
 axum-test         = { workspace = true }
+git2              = { workspace = true }
 harmonia-file-nar = { workspace = true, features = ["test"] }
 hmac              = { workspace = true }
 gradient-fixtures = { workspace = true }

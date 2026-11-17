@@ -39,17 +39,25 @@ pub(crate) fn cron_due(cron_expr: &str, after: NaiveDateTime, now: NaiveDateTime
 }
 
 use gradient_ci::trigger::{InputUpdateOutcome, maybe_trigger_input_update};
-use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
+use gradient_ci::{
+    ApplyInput, ApplyOutcome, PathFilterBaseCommit, PathFilterCommitComparison, apply_trigger,
+    should_fire_trigger_for_path_filter,
+};
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::evaluation::WalkMode;
 use gradient_entity::task_trigger as ept;
-use gradient_sources::{BranchHead, check_task_updates, get_commit_info};
-use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_sources::{
+    BranchCheckOutcome, BranchHead, TaskUpdateCheck, check_task_updates, get_commit_info,
+};
+use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig, TriggerType};
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError};
+use gradient_util::sync::Mutex;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 use super::Scheduler;
@@ -114,8 +122,8 @@ pub async fn fire(scheduler: &Scheduler, fire: &TriggerFire) -> anyhow::Result<(
     {
         warn!(error = %e, task = %task.name, "Failed to record the repository fetch result");
     }
-    if let Ok((has_update, head)) = resolved {
-        apply_resolved_head(scheduler, &trig, &task, &cfg, has_update, head).await;
+    if let Ok(task_update_check_result) = resolved {
+        apply_resolved_head(scheduler, &trig, &task, &cfg, task_update_check_result).await;
     }
 
     stamp_last_fired(&scheduler.db.worker_db, &trig, now).await
@@ -200,9 +208,13 @@ async fn apply_resolved_head(
     trig: &ept::Model,
     task: &MTask,
     cfg: &TriggerConfig,
-    has_update: bool,
-    head: BranchHead,
+    task_update_check_result: TaskUpdateCheck,
 ) {
+    let TaskUpdateCheck {
+        outcome,
+        head,
+        newest_evaluation_commit_hash,
+    } = task_update_check_result;
     let input_update = maybe_trigger_input_update(
         &scheduler.db.worker_db,
         task,
@@ -218,8 +230,100 @@ async fn apply_resolved_head(
         return;
     }
 
-    if has_update || matches!(cfg, TriggerConfig::Time { .. }) {
-        apply_to_task(scheduler, trig, task, cfg, head).await;
+    if outcome == BranchCheckOutcome::RemoteBranchHeadIsNewestEvaluation
+        && !matches!(cfg, TriggerConfig::Time { .. })
+    {
+        return;
+    }
+    if outcome != BranchCheckOutcome::AdminForcedEvaluationDue
+        && let Some(filter) = cfg.path_filter()
+        && let Some(base) = newest_evaluation_commit_hash
+        && !trigger_path_filter_allows_head_commit(
+            scheduler,
+            trig,
+            task,
+            SkippedComparison {
+                head: head.commit.clone(),
+                base,
+                filter: filter.clone(),
+            },
+        )
+        .await
+    {
+        info!(task = %task.name, trigger_id = %trig.id, "Skip evaluation because no changed files match the path filter of the trigger.");
+        return;
+    }
+    apply_to_task(scheduler, trig, task, cfg, head).await;
+}
+
+async fn trigger_path_filter_allows_head_commit(
+    scheduler: &Scheduler,
+    trig: &ept::Model,
+    task: &MTask,
+    comparison: SkippedComparison,
+) -> bool {
+    if scheduler
+        .last_path_filter_skipped_comparison_by_trigger_id
+        .trigger_was_last_skipped_for_this_comparison(trig.id, &comparison)
+    {
+        return false;
+    }
+    let head_commit_passes_trigger_path_filter = should_fire_trigger_for_path_filter(
+        &scheduler.db.worker_db,
+        &scheduler.db,
+        task,
+        &comparison.filter,
+        PathFilterCommitComparison {
+            base: &PathFilterBaseCommit::CommitHashBytes(comparison.base.clone()),
+            head: &comparison.head,
+            head_repository: None,
+        },
+        HEAD_RESOLVE_BUDGET,
+    )
+    .await;
+    if head_commit_passes_trigger_path_filter {
+        scheduler
+            .last_path_filter_skipped_comparison_by_trigger_id
+            .remove_trigger_skip(trig.id);
+    } else {
+        scheduler
+            .last_path_filter_skipped_comparison_by_trigger_id
+            .record_trigger_skipped_for_comparison(trig.id, comparison);
+    }
+    head_commit_passes_trigger_path_filter
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct PathFilterSkippedComparisonsByTriggerId(
+    Arc<Mutex<HashMap<TaskTriggerId, SkippedComparison>>>,
+);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SkippedComparison {
+    head: Vec<u8>,
+    base: Vec<u8>,
+    filter: ChangedFilePathFilter,
+}
+
+impl PathFilterSkippedComparisonsByTriggerId {
+    fn trigger_was_last_skipped_for_this_comparison(
+        &self,
+        trigger: TaskTriggerId,
+        comparison: &SkippedComparison,
+    ) -> bool {
+        self.0.lock().get(&trigger) == Some(comparison)
+    }
+
+    fn record_trigger_skipped_for_comparison(
+        &self,
+        trigger: TaskTriggerId,
+        comparison: SkippedComparison,
+    ) {
+        self.0.lock().insert(trigger, comparison);
+    }
+
+    fn remove_trigger_skip(&self, trigger: TaskTriggerId) {
+        self.0.lock().remove(&trigger);
     }
 }
 

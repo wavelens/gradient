@@ -25,8 +25,9 @@ pub mod webhooks;
 
 pub use self::abort::{AbortKind, abort_evaluation};
 pub use self::apply::{
-    ApplyError, ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_no_cache,
-    park_if_no_workers, park_if_pending_approval, park_storage_full,
+    ApplyError, ApplyInput, ApplyOutcome, ApprovalInfo, PathFilterBaseCommit,
+    PathFilterCommitComparison, apply_trigger, park_if_no_cache, park_if_no_workers,
+    park_if_pending_approval, park_storage_full, should_fire_trigger_for_path_filter,
 };
 pub use self::context::CiContext;
 pub use self::error::ActionError;

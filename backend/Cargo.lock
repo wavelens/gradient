@@ -3595,6 +3595,7 @@ dependencies = [
  "email_address",
  "futures",
  "git-url-parse",
+ "git2",
  "governor",
  "gradient-cache",
  "gradient-ci",

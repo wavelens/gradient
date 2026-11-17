@@ -95,6 +95,8 @@ pub struct Scheduler {
     pub(crate) split_decisions: eval_split::create::SplitDecisions,
     pub(crate) pre_warm: pre_warm::PreWarmCounts,
     pub(crate) unplaceable_exec_jobs: unplaceable_exec_jobs::UnplaceableExecJobs,
+    pub(crate) last_path_filter_skipped_comparison_by_trigger_id:
+        trigger_firing::PathFilterSkippedComparisonsByTriggerId,
     expected_reclaims: Arc<gradient_util::sync::Mutex<Vec<KeptAssignment>>>,
     pub guest_channels: Arc<GuestChannels>,
     pub(crate) allowed_uri_prefixes: Arc<[String]>,
@@ -128,6 +130,7 @@ impl Scheduler {
             split_decisions: Default::default(),
             pre_warm: pre_warm::PreWarmCounts::default(),
             unplaceable_exec_jobs: Default::default(),
+            last_path_filter_skipped_comparison_by_trigger_id: Default::default(),
             guest_channels: GuestChannels::new(),
             expected_reclaims: Arc::default(),
             allowed_uri_prefixes: state.config.eval.allowed_uri_prefixes.clone().into(),
