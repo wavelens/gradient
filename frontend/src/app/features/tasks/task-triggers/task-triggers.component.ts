@@ -35,6 +35,7 @@ import {
   TriggerType,
   TriggerOut,
   TriggerConfig,
+  ChangedFilePathFilter,
   CreateTriggerRequest,
   UpdateTriggerRequest,
 } from '@core/models';
@@ -63,6 +64,8 @@ interface TriggerFormState {
   actions: string;
   require_approval: boolean;
   cron: string;
+  include_paths: string;
+  exclude_paths: string;
 }
 
 const DEFAULT_FORM: TriggerFormState = {
@@ -77,12 +80,21 @@ const DEFAULT_FORM: TriggerFormState = {
   actions: '',
   require_approval: true,
   cron: '',
+  include_paths: '',
+  exclude_paths: '',
 };
 
 const secondsInOneHour = 3600;
 
 function getPollingIntervalSecondsOrDefault(trigger: TriggerOut): number {
   return (trigger.config as { interval_secs?: number }).interval_secs ?? 300;
+}
+
+function getPathFilterSummaryParts(filter: ChangedFilePathFilter): string[] {
+  const parts: string[] = [];
+  if (filter.include_paths?.length) parts.push(`include paths: ${filter.include_paths.join(', ')}`);
+  if (filter.exclude_paths?.length) parts.push(`exclude paths: ${filter.exclude_paths.join(', ')}`);
+  return parts;
 }
 
 @Component({
@@ -267,6 +279,8 @@ export class TaskTriggersComponent implements OnInit {
       actions: (cfg.actions ?? []).join(', '),
       require_approval: cfg.require_approval ?? true,
       cron: cfg.cron ?? '',
+      include_paths: (cfg.include_paths ?? []).join(', '),
+      exclude_paths: (cfg.exclude_paths ?? []).join(', '),
     };
     this.loadedForm = JSON.stringify(this.form);
     this.error.set(null);
@@ -282,13 +296,22 @@ export class TaskTriggersComponent implements OnInit {
     this.error.set(null);
   }
 
+  private buildChangedFilePathFilter(): ChangedFilePathFilter {
+    const filter: ChangedFilePathFilter = {};
+    const includePaths = splitList(this.form.include_paths);
+    const excludePaths = splitList(this.form.exclude_paths);
+    if (includePaths.length) filter.include_paths = includePaths;
+    if (excludePaths.length) filter.exclude_paths = excludePaths;
+    return filter;
+  }
+
   private buildConfig(): object {
     const branch = this.form.branch?.trim() || null;
     switch (this.form.type) {
       case 'polling':
-        return { type: 'polling', interval_secs: Number(this.form.interval_secs), branch } as TriggerConfig;
+        return { type: 'polling', interval_secs: Number(this.form.interval_secs), branch, ...this.buildChangedFilePathFilter() } as TriggerConfig;
       case 'reporter_push': {
-        const cfg: any = { type: 'reporter_push' };
+        const cfg: any = { type: 'reporter_push', ...this.buildChangedFilePathFilter() };
         const branches = splitList(this.form.branches);
         const tags = splitList(this.form.tags);
         if (branches.length) cfg.branches = branches;
@@ -298,7 +321,7 @@ export class TaskTriggersComponent implements OnInit {
         return cfg;
       }
       case 'reporter_pull_request': {
-        const cfg: any = { type: 'reporter_pull_request' };
+        const cfg: any = { type: 'reporter_pull_request', ...this.buildChangedFilePathFilter() };
         const branches = splitList(this.form.branches);
         const actions = splitList(this.form.actions);
         if (branches.length) cfg.branches = branches;
@@ -443,7 +466,7 @@ export class TaskTriggersComponent implements OnInit {
       case 'polling': {
         let summary = `every ${this.formatSeconds(getPollingIntervalSecondsOrDefault(trigger))}`;
         if (cfg.branch) summary += `, branch ${cfg.branch}`;
-        return summary;
+        return [summary, ...getPathFilterSummaryParts(cfg)].join(', ');
       }
       case 'reporter_push': {
         const parts: string[] = [];
@@ -451,6 +474,7 @@ export class TaskTriggersComponent implements OnInit {
         if (cfg.tags?.length) parts.push(`tags: ${cfg.tags.join(', ')}`);
         if (cfg.releases_only) parts.push('releases only');
         if (cfg.include_flake_inputs) parts.push('flake input');
+        parts.push(...getPathFilterSummaryParts(cfg));
         return parts.join(' / ');
       }
       case 'reporter_pull_request': {
@@ -458,6 +482,7 @@ export class TaskTriggersComponent implements OnInit {
         if (cfg.branches?.length) parts.push(`branches: ${cfg.branches.join(', ')}`);
         if (cfg.actions?.length) parts.push(`actions: ${cfg.actions.join(', ')}`);
         if (cfg.require_approval === false) parts.push('approval gate off');
+        parts.push(...getPathFilterSummaryParts(cfg));
         return parts.join(' / ');
       }
       case 'time': {

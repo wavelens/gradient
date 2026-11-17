@@ -313,7 +313,7 @@ describe('TaskTriggersComponent - validation', () => {
 
   function withCreate(update = vi.fn((..._args: any[]) => of({}))) {
     const fixture = setup(writer, [trigger], update);
-    const create = vi.fn(() => of({}));
+    const create = vi.fn((..._args: any[]) => of({}));
     Object.assign(TestBed.inject(TriggersService), { create });
     return { fixture, component: fixture.componentInstance, create, update };
   }
@@ -373,6 +373,51 @@ describe('TaskTriggersComponent - validation', () => {
     document.querySelector('#trig-branch')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
     expect(create).toHaveBeenCalledOnce();
     expect(success).toHaveBeenCalledWith('Trigger created');
+  });
+
+  it.each(['polling', 'reporter_push', 'reporter_pull_request'] as const)('sends both path filter lists for a %s trigger', (type) => {
+    const { component, create } = withCreate();
+    component.startCreate();
+    component.form.type = type;
+    component.form.include_paths = ' src/*, flake.nix ';
+    component.form.exclude_paths = 'docs/*';
+    component.saveCreate();
+    expect(create).toHaveBeenCalledWith('acme', 'demo', expect.objectContaining({
+      config: expect.objectContaining({ type, include_paths: ['src/*', 'flake.nix'], exclude_paths: ['docs/*'] }),
+    }));
+  });
+
+  it.each(['polling', 'reporter_push', 'reporter_pull_request', 'time'] as const)('leaves empty path filter lists out of a %s trigger', (type) => {
+    const { component, create } = withCreate();
+    component.startCreate();
+    component.form.type = type;
+    component.form.cron = '0 2 * * *';
+    component.form.include_paths = ' , ';
+    component.saveCreate();
+    const config = create.mock.calls[0][2].config;
+    expect(config).not.toHaveProperty('include_paths');
+    expect(config).not.toHaveProperty('exclude_paths');
+  });
+
+  it('loads the path filters into the edit form and drops a cleared list', () => {
+    const filtered = { ...trigger, config: { ...trigger.config, include_paths: ['src/*'], exclude_paths: ['docs/*', '*.md'] } };
+    const { component, update } = withCreate();
+    component.startEdit(filtered as any);
+    expect(component.form.exclude_paths).toBe('docs/*, *.md');
+    component.form.include_paths = '';
+    component.saveEdit();
+    const config = update.mock.calls[0][3].config;
+    expect(config).not.toHaveProperty('include_paths');
+    expect(config.exclude_paths).toEqual(['docs/*', '*.md']);
+  });
+
+  it('names the path filters in the summary row', () => {
+    const push = { ...trigger, id: 't2', type: 'reporter_push' as const, config: { type: 'reporter_push', branches: ['main'], include_paths: ['src/*'], exclude_paths: ['docs/*'] } };
+    const polling = { ...trigger, config: { ...trigger.config, include_paths: ['nix/*'] } };
+    const fixture = setup(writer, [polling, push]);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('branches: main / include paths: src/* / exclude paths: docs/*');
+    expect(text).toContain('every 5 min, include paths: nix/*');
   });
 
   it('closes the edit dialog without a request when nothing changed', () => {
