@@ -30,10 +30,13 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        if !task.repository.starts_with("http") && !task.repository.starts_with("git") {
+        if !task.repository.starts_with("http")
+            && !task.repository.starts_with("git")
+            && !task.repository.starts_with("ssh://")
+        {
             errors.push(
                 format!("tasks.{}.repository", task.name),
-                "Repository URL must start with http or git",
+                "Repository URL must start with http, git or ssh://",
             );
         }
 

@@ -74,6 +74,15 @@ fn a_state_task_with_an_escaping_flake_directory_is_refused() {
 }
 
 #[test]
+fn a_state_task_accepts_an_ssh_repository_url_with_a_port() {
+    let mut cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+    cfg.tasks.get_mut("web").unwrap().repository =
+        "ssh://user@git.example.com:2222/acme/web.git".to_owned();
+
+    assert!(cfg.validate().is_valid);
+}
+
+#[test]
 fn declarative_state_task_without_restrict_evaluation_fetches_deserializes_with_restricted_evaluation_off()
  {
     let cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
