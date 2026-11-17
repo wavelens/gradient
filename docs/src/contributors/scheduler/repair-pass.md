@@ -98,7 +98,7 @@ Changes to `evaluation.graph_version` can invalidate the per-entry-point status 
 | 4 | Recount `wanted`, table-wide | `need_drift` |
 | 5 | `settle_skipped`: settle shared builds wanted by no evaluation to `Skipped`, thaw needed ones | `skipped_moves` |
 | 6 | Recount `blocking_deps` over the repair scope, then un-queue and queue | `counter_drift`, `unpromoted_startable` |
-| 7 | Adopt pending shared builds reachable by a live evaluation and named by nobody | `adopted` |
+| 7 | Adopt open shared builds that no evaluation names, below an open parent that a live evaluation names. Find them among builds without a `build_job` row | `adopted` |
 | 8 | Count unbacked outputs of terminal-success producers, without `unneeded_outputs` (read-only) | `unbacked_trusted_outputs` |
 | 9 | Recount evaluation shared-build counters | `eval_counter_drift` |
 | 10 | Tally `Building` evaluations where `active_shared_builds = 0`. These evaluations lack an open exec job and a queued continue file. Keep the tally read-only. | `wedged_building_evals` |
@@ -106,7 +106,7 @@ Changes to `evaluation.graph_version` can invalidate the per-entry-point status 
 - **Repair scope:** pending shared builds, their direct dependencies, `fetchable` rows with `missing_runtime_deps > 0`, and terminal-success rows without a set `fetchable` flag. Every pass must log the scope size under the `scope` field.
 - Steps 1 and 2 first compare each counter with its direct inputs. The full recount can only start on a mismatch.
 - Agreeing counters already equal the recount result on the acyclic dependency graph.
-- Each step is a separate transaction by the graph writer. Steps 3, 6, and 7 handle up to 8,000 derivations in one transaction. Steps 3 and 6 first use `try_lock_shared_builds` to lock each slice of 1,000 derivations. They recount that slice. Failed or canceled checks put only the in-progress transaction at risk. Committed steps stay intact.
+- Each step is a separate transaction by the graph writer. Steps 3 and 6 process up to 8,000 derivations in one transaction. Step 7 can scan up to 20,000 open builds in one transaction. Step 7 can then update the wanted flag for adopted builds at 8,000 per transaction. Steps 3 and 6 first use `try_lock_shared_builds` to lock each slice of 1,000 derivations. They recount that slice. Failed or canceled checks put only the in-progress transaction at risk. Committed steps stay intact.
 - A recount can read one snapshot and spread nothing. A chain of drifted rows will converge one level per interval.
 - Drift counts are rows already repaired. A warning naming only those rows is a successful self-repair.
 - Interval `0` will disable the check and the `graph-stuck-reheal` pass.

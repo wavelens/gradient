@@ -159,7 +159,7 @@ The `evaluation` table holds five counter columns. They cover the shared builds 
 - Always name every walked derivation plus the direct inputs in a batch. Stop descending at `walked AND unwalked_inputs = 0`. Only the evaluation that walked a cut-off subtree names its interior.
 - Deleting that evaluation cascades those names away. Start the open-closure walk from every `build_job` of a live evaluation with `reachability::adopt_pending_closures`. Insert the missing `(evaluation, derivation)` rows with `ON CONFLICT DO NOTHING`.
 - Name a build with `reachability::adopt_below_named` at the moment it gains the needs-build mark. Every live evaluation naming a wanted open parent then names the build and the open closure below it. A build below a cut-off subtree can therefore queue during the evaluation.
-- Further callers: the per-task GC, the [repair pass](repair-pass.md) and the consistency check. The GC can call through `settle_after_delete`, but only when a cascaded name belonged to an open shared build. The repair pass can call `adopt_pending_closure` for one evaluation. The consistency check can call once `pending_orphan_frontier` detects an unnamed open shared build one edge below a named one.
+- Further callers: the per-task GC, the [repair pass](repair-pass.md) and the consistency check. The GC can call through `settle_after_delete`, but only when a cascaded name belonged to an open shared build. The repair pass can call `adopt_pending_closure` for one evaluation. The consistency check can scan unfinished shared builds in windows of 20,000. The consistency check can also name each build with no `build_job` row under an unfinished parent that running evaluations already name.
 
 ## Walk Completeness
 
