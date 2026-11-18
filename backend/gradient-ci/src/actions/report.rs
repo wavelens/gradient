@@ -21,7 +21,7 @@ use gradient_types::{
     EExecJob, EForkPullRequestApproval, ETask, EvaluationId, ExecJobId, MBuildJob, MCommit,
     MEvaluation, MTask, PullRequestApprovalId,
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::warn;
 
 gradient_db::sql! {
@@ -96,11 +96,19 @@ pub(crate) async fn build_ci_reports_from_commit_status_check_rows(
             status,
             description,
         } => evaluation_reports(ctx, &target, &task, status, description).await?,
-        CheckReportRow::EntryPoint { name, status } => vec![target.report(
-            reporting::build_check_context(&task.name, &name),
+        CheckReportRow::EntryPoints {
+            entry_point_names,
             status,
-            None,
-        )],
+        } => entry_point_names
+            .iter()
+            .map(|name| {
+                target.report(
+                    reporting::build_check_context(&task.name, name),
+                    status.clone(),
+                    None,
+                )
+            })
+            .collect(),
     })
 }
 
@@ -145,8 +153,8 @@ enum CheckReportRow {
         status: CiStatus,
         description: Option<String>,
     },
-    EntryPoint {
-        name: String,
+    EntryPoints {
+        entry_point_names: Vec<String>,
         status: CiStatus,
     },
 }
@@ -179,8 +187,8 @@ async fn read_check_report_state(
             ..
         } => read_exec_job_check_state_from_row(ctx, *job)
             .await?
-            .map(|status| CheckReportRow::EntryPoint {
-                name: entry_point_name.clone(),
+            .map(|status| CheckReportRow::EntryPoints {
+                entry_point_names: vec![entry_point_name.clone()],
                 status,
             }),
     })
@@ -208,9 +216,10 @@ async fn load_build_job_check_state(
     else {
         return Ok(None);
     };
-    Ok(build_job_entry_point(ctx, &job)
-        .await?
-        .map(|name| CheckReportRow::EntryPoint { name, status }))
+    Ok(Some(CheckReportRow::EntryPoints {
+        entry_point_names: build_job_entry_point_names(ctx, &job).await?,
+        status,
+    }))
 }
 
 async fn read_exec_job_check_state_from_row(
@@ -289,14 +298,15 @@ async fn will_evaluation_build_derivation(
         .is_some_and(|derivation| derivation.ifd))
 }
 
-async fn build_job_entry_point(ctx: &CiContext, job: &MBuildJob) -> Result<Option<String>> {
-    let entry_point = EEntryPoint::find()
+async fn build_job_entry_point_names(ctx: &CiContext, job: &MBuildJob) -> Result<Vec<String>> {
+    let entry_points = EEntryPoint::find()
         .filter(CEntryPoint::Derivation.eq(job.derivation))
         .filter(CEntryPoint::Evaluation.eq(job.evaluation))
-        .one(&ctx.db.worker_db)
+        .order_by_asc(CEntryPoint::Eval)
+        .all(&ctx.db.worker_db)
         .await
         .context("load entry points")?;
-    Ok(entry_point.map(|ep| ep.eval))
+    Ok(entry_points.into_iter().map(|ep| ep.eval).collect())
 }
 
 async fn evaluation_reports(
