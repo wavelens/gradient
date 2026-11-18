@@ -36,6 +36,18 @@ let
     cache_name = "other";
   };
 
+  first_task_trigger_config_by_trigger = trigger:
+    builtins.head (evaluateGradientStateModuleWithState {
+      tasks.web = {
+        project = "acme";
+        repository = "https://example.com/acme/web.git";
+        created_by = "admin";
+        triggers = [ trigger ];
+      };
+    }).services.gradient.state.tasks.web.triggers;
+
+  throws = e: !(builtins.tryEval (builtins.deepSeq e e)).success;
+
   failsWith = state: expected:
     let messages = failedAssertionMessages state;
     in builtins.length messages == 1 && lib.all (part: lib.hasInfix part (builtins.head messages)) expected;
@@ -48,4 +60,9 @@ assert failsWith (cacheWithUpstreams [ external { type = "external"; } ])
   [ "caches.main.upstream_caches.1" "`display_name`, `url`, `public_key`" ];
 assert failsWith (cacheWithUpstreams [ { type = "internal"; display_name = "Other"; } ])
   [ "caches.main.upstream_caches.0" "`internal`" "`cache_name`" ];
+assert (first_task_trigger_config_by_trigger { type = "reporter_pull_request"; config.branches = [ "main" "flake-update/*" ]; }).config
+  == { branches = [ "main" "flake-update/*" ]; };
+assert (first_task_trigger_config_by_trigger { type = "polling"; }).config == { };
+assert throws (first_task_trigger_config_by_trigger { type = "reporter_pull_request"; config.branches = "*"; }).config;
+assert throws (first_task_trigger_config_by_trigger { type = "reporter_push"; config.branche = [ "main" ]; }).config;
 pkgs.runCommand "state-option-evaluation-check" { } "touch $out"

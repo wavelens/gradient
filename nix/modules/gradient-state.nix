@@ -611,6 +611,29 @@
     };
   });
 
+  triggerConfigType = let
+    makeNullableOption = type: description: mkOption {
+      type = types.nullOr type;
+      default = null;
+      inherit description;
+    };
+    patterns = types.listOf types.str;
+  in types.submodule {
+    options = {
+      interval_secs = makeNullableOption types.ints.positive "Seconds between two polls of the polling trigger. The minimum is 10. Use 300 for a null value.";
+      branch = makeNullableOption types.str "The branch that `polling`, `time`, or `post_request` triggers evaluate. The remote HEAD is the source for `null`.";
+      cron = makeNullableOption types.str "Cron schedule for the `time` trigger in UTC (5 fields (`min hour dom mon dow`) or 6 fields (`sec min hour dom mon dow`)).";
+      branches = makeNullableOption patterns "Branch patterns for `reporter_push` or `reporter_pull_request` triggers (for example, `[ \"main\" \"release/*\" ]`). An empty list or `null` matches all branches.";
+      tags = makeNullableOption patterns "Tag patterns for the reporter_push trigger. An empty list or null can match every tag.";
+      releases_only = makeNullableOption types.bool "Restrict the `reporter_push` trigger to releases. Use false for a null value.";
+      include_flake_inputs = makeNullableOption types.bool "Whether a push to the repository of a tracked flake input can fire the `reporter_push` trigger. `null` can use `false`.";
+      actions = makeNullableOption patterns "Pull request actions that fire the reporter_pull_request trigger. Empty lists match all actions. A null value can select opened, synchronize and reopened.";
+      require_approval = makeNullableOption types.bool "Whether pull requests from contributors who don't have write permission wait for approval before `reporter_pull_request` triggers evaluate them. `null` uses `true`.";
+      include_paths = makeNullableOption patterns "Relative path patterns from the repository root. Evaluation can start only for commits that change a file covered by one of these patterns. An empty list or `null` can match every commit.";
+      exclude_paths = makeNullableOption patterns "Relative path patterns from the repository root. Changed files that match any of these patterns don't start an evaluation.";
+    };
+  };
+
   triggerType = types.submodule ({ name, ... }: {
     options = {
       type = mkOption {
@@ -621,8 +644,9 @@
       };
 
       config = mkOption {
-        type = types.attrs;
+        type = triggerConfigType;
         default = { };
+        apply = filterAttrs (_: value: value != null);
         example = literalExpression ''
           { interval_secs = 60; }
         '';

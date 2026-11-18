@@ -104,7 +104,7 @@ services.gradient.state = {
 | `wait_for_workers` | bool | `false` | Whether to wait for workers when an evaluation can require an architecture or system feature that no connected worker can offer for its builds. The server can abort that evaluation and show a warning about what is missing when this field is absent. Exec jobs that no connected worker can run have the same behavior. |
 | `triggers` | null or list of submodule | `null` | Evaluation triggers of the task are polling, push to a Git host, pull request on a Git host, cron schedule or POST request. |
 | `triggers.*.active` | bool | `true` | Whether this trigger is active. |
-| `triggers.*.config` | attribute set | `{ }` | Configuration specific to the trigger type. |
+| `triggers.*.config` | submodule | `{ }` | Configuration for a specific trigger type. Keys come from [Trigger Types](#trigger-types). Unknown keys and values of the wrong type, such as a string for `branches`, cause Nix evaluation to fail. |
 | `triggers.*.id` | null or string | `null` | The UUID of the trigger, and the `<id>` in `post_request` trigger URL `/api/v1/hooks/trigger/<id>`. The server can generate a UUID with `null`. Without a fixed ID, the URL can change on each trigger recreation by `state apply` after a config change. The server can reject an ID of another task, or an ID for a config with another ID already set. |
 | `triggers.*.is_default` | bool | `false` | Whether the trigger is the default trigger of the task. The first trigger is the default when no trigger sets the flag. |
 | `triggers.*.secret_file` | null or path | `null` | Path to a file with the trigger secret. The `post_request` type needs this path. Other types reject it. An empty file can make `state apply` fail. |

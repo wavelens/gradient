@@ -162,7 +162,8 @@ fn test_state_validation_rejects_trigger_with_absolute_include_paths_pattern() {
     assert!(
         errors
             .iter()
-            .any(|(field, message)| field == "tasks.web.triggers" && message.contains("/src/*")),
+            .any(|(field, message)| field == "tasks.web.triggers.0.config"
+                && message.contains("/src/*")),
         "expected the absolute include_paths pattern to be rejected, got: {errors:?}"
     );
 }
