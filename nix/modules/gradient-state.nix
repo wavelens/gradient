@@ -1509,7 +1509,19 @@ in
       }) p.flake_input_overrides
     ) config.services.gradient.state.tasks);
     invalid = filter (b: !b.valid) bad;
-  in map (b: {
+    requiredOptionNamesByUpstreamCacheType = {
+      internal = [ "cache_name" ];
+      external = [ "display_name" "url" "public_key" ];
+    };
+    upstreamCacheNullFieldAssertions = flatten (mapAttrsToList (cacheName: cache:
+      imap0 (index: upstream: let
+        missing = filter (option: upstream.${option} == null) requiredOptionNamesByUpstreamCacheType.${upstream.type};
+      in {
+        assertion = missing == [ ];
+        message = "services.gradient.state.caches.${cacheName}.upstream_caches.${toString index}: An upstream cache of type `${upstream.type}` needs these values. ${concatMapStringsSep ", " (option: "`${option}`") missing}.";
+      }) cache.upstream_caches
+    ) config.services.gradient.state.caches);
+  in upstreamCacheNullFieldAssertions ++ map (b: {
     assertion = false;
     message = ''
       services.gradient.state.tasks.${b.task}.flake_input_overrides.${b.input}: \

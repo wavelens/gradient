@@ -71,9 +71,7 @@
     '' + extraConfig;
   };
 
-  stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" (builtins.removeAttrs cfg.state [ "validate" "delete" ] // {
-    caches = lib.mapAttrs (_: cache: builtins.removeAttrs cache [ "upstreams" ]) cfg.state.caches;
-  });
+  stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" (builtins.removeAttrs cfg.state [ "validate" "delete" ]);
 
   validatedStateJsonFile = if cfg.state.validate then
     pkgs.runCommand "gradient-state-validated.json" { __structuredAttrs = true; } ''
