@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_db::lookup::by_id;
 use gradient_entity::*;
-use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_types::triggers::{TriggerConfig, TriggerConfigError, TriggerType};
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, Iterable,
@@ -620,17 +620,14 @@ async fn insert_declared_trigger_row_using_pinned_id<C: ConnectionTrait>(
 
 const DEFAULT_POLLING_TRIGGER_INTERVAL_SECS: u32 = 300;
 
-pub(crate) fn build_trigger_config(t: &StateTrigger) -> anyhow::Result<TriggerConfig> {
+pub(crate) fn build_trigger_config(t: &StateTrigger) -> Result<TriggerConfig, TriggerConfigError> {
     let mut config = t.config.as_object().cloned().unwrap_or_default();
     if t.trigger_type == TriggerType::Polling {
         config
             .entry("interval_secs")
             .or_insert(DEFAULT_POLLING_TRIGGER_INTERVAL_SECS.into());
     }
-    Ok(TriggerConfig::parse_row(
-        t.trigger_type,
-        &serde_json::Value::Object(config),
-    )?)
+    TriggerConfig::parse_row(t.trigger_type, &serde_json::Value::Object(config))
 }
 
 pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {

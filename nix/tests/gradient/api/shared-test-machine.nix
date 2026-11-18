@@ -93,7 +93,9 @@ in {
           triggers = [
             { type = "polling"; config = { interval_secs = 300; }; }
             { type = "time"; config = { cron = "0 0 2 * * *"; }; }
+            { type = "reporter_pull_request"; config = { branches = [ "main" "flake-update/*" ]; require_approval = false; }; }
           ];
+          git_host_connection = "state-events";
           flake_input_overrides.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
         };
 

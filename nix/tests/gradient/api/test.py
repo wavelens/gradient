@@ -554,7 +554,6 @@ releaser = next(r for r in api("GET", "projects/stateproject/roles", token=sa_to
                 if r["name"] == "releaser")
 assert set(releaser["permissions"]) == {"viewProject", "triggerEvaluation"}, releaser
 
-# Task applied with its non-default fields and both triggers.
 proj = api("GET", "tasks/stateproject/statetask", token=sa_token)
 assert proj["concurrency"] == "hard_abort", proj
 assert proj["keep_evaluations"] == 5, proj
@@ -562,8 +561,12 @@ state_sub = next(s for s in api("GET", "projects/stateproject/subscribe", token=
                  if s["name"] == "statecache")
 assert state_sub["managed"] is True and state_sub["sign_outputs"] is False, state_sub
 assert proj["wildcard"] == "packages.x86_64-linux.**", proj
-trig_types = {t["type"] for t in api("GET", "tasks/stateproject/statetask/triggers", token=sa_token)}
-assert {"polling", "time"} <= trig_types, trig_types
+state_triggers = {t["type"]: t for t in api("GET", "tasks/stateproject/statetask/triggers", token=sa_token)}
+assert {"polling", "time", "reporter_pull_request"} <= state_triggers.keys(), state_triggers
+pr_config = state_triggers["reporter_pull_request"]["config"]
+assert pr_config["branches"] == ["main", "flake-update/*"], pr_config
+assert pr_config["require_approval"] is False, pr_config
+assert pr_config["actions"] == ["opened", "synchronize", "reopened"], pr_config
 
 # Cache applied with members, custom role and upstream.
 cache = api("GET", "caches/statecache", token=sa_token)

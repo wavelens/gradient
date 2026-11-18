@@ -99,15 +99,6 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        for trigger in task.triggers.iter().flatten() {
-            if let Err(error) = build_trigger_config(trigger) {
-                errors.push(
-                    format!("tasks.{}.triggers", task.name),
-                    format!("{error:#}"),
-                );
-            }
-        }
-
         validate_task_triggers(task, &mut pinned_trigger_uuids_across_tasks, errors);
         validate_task_git_host_connection_reference(lookup, task, errors);
     }
@@ -130,6 +121,9 @@ fn validate_task_triggers(
                 field("secret_file"),
                 "Only post_request triggers take secret_file.",
             ),
+        }
+        if let Err(error) = build_trigger_config(trigger) {
+            errors.push(field("config"), error.to_string());
         }
 
         let Some(id) = trigger.id.as_deref() else {
@@ -311,6 +305,35 @@ mod validate_task_triggers_tests {
                 "tasks.web.triggers.2.id",
                 "tasks.web.triggers.4.id",
             ]
+        );
+    }
+
+    #[test]
+    fn reporter_pull_request_trigger_branches_string_reports_single_config_validation_error() {
+        let task: StateTask = serde_json::from_value(serde_json::json!({
+            "name": "web",
+            "project": "acme",
+            "display_name": "Web",
+            "repository": "https://example.com/acme/web.git",
+            "created_by": "alice",
+            "triggers": [
+                { "type": "reporter_pull_request", "config": { "branches": ["main"] } },
+                { "type": "reporter_pull_request", "config": { "branches": "*" } },
+            ],
+        }))
+        .unwrap();
+        let mut errors = ErrorCollector::new();
+
+        validate_task_triggers(&task, &mut HashMap::new(), &mut errors);
+
+        let errors = errors.into_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, "tasks.web.triggers.1.config");
+        assert_eq!(
+            errors[0].message.matches("expected a sequence").count(),
+            1,
+            "{}",
+            errors[0].message
         );
     }
 
