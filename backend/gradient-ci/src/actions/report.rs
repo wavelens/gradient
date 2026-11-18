@@ -17,11 +17,10 @@ use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::{
-    BuildJobId, CEntryPoint, EBuildJob, EDerivation, EDerivationBuild, EEntryPoint, EEvaluation,
-    EExecJob, EForkPullRequestApproval, ETask, EvaluationId, ExecJobId, MBuildJob, MCommit,
-    MEvaluation, MTask, PullRequestApprovalId,
+    BuildJobId, EBuildJob, EDerivation, EDerivationBuild, EEvaluation, EExecJob,
+    EForkPullRequestApproval, ETask, EvaluationId, ExecJobId, MBuildJob, MCommit, MEvaluation,
+    MTask, PullRequestApprovalId,
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::warn;
 
 gradient_db::sql! {
@@ -216,10 +215,20 @@ async fn load_build_job_check_state(
     else {
         return Ok(None);
     };
-    Ok(Some(CheckReportRow::EntryPoints {
-        entry_point_names: build_job_entry_point_names(ctx, &job).await?,
-        status,
-    }))
+    let entry_point_names = gradient_db::entry_points::attribute_paths_by_derivation_id(
+        db,
+        job.evaluation,
+        &[job.derivation],
+    )
+    .await
+    .context("load entry points")?
+    .remove(&job.derivation);
+    Ok(
+        entry_point_names.map(|entry_point_names| CheckReportRow::EntryPoints {
+            entry_point_names,
+            status,
+        }),
+    )
 }
 
 async fn read_exec_job_check_state_from_row(
@@ -296,17 +305,6 @@ async fn will_evaluation_build_derivation(
         .await
         .context("load derivation")?
         .is_some_and(|derivation| derivation.ifd))
-}
-
-async fn build_job_entry_point_names(ctx: &CiContext, job: &MBuildJob) -> Result<Vec<String>> {
-    let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Derivation.eq(job.derivation))
-        .filter(CEntryPoint::Evaluation.eq(job.evaluation))
-        .order_by_asc(CEntryPoint::Eval)
-        .all(&ctx.db.worker_db)
-        .await
-        .context("load entry points")?;
-    Ok(entry_points.into_iter().map(|ep| ep.eval).collect())
 }
 
 async fn evaluation_reports(
