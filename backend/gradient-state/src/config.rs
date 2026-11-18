@@ -144,6 +144,10 @@ pub struct StateTrigger {
     pub active: bool,
     #[serde(default)]
     pub is_default: bool,
+    #[serde(default)]
+    pub secret_file: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 impl StateTrigger {
@@ -153,6 +157,8 @@ impl StateTrigger {
             config: serde_json::json!({ "interval_secs": 300 }),
             active: true,
             is_default: true,
+            secret_file: None,
+            id: None,
         }
     }
 }

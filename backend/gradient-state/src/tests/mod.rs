@@ -167,6 +167,25 @@ fn test_state_validation_rejects_trigger_with_absolute_include_paths_pattern() {
     );
 }
 
+#[test]
+fn state_validation_rejects_same_pinned_trigger_id_in_two_tasks() {
+    let mut cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+    let mut api = cfg.tasks["web"].clone();
+    api.name = "api".into();
+    cfg.tasks.insert("api".into(), api);
+    let pinned = uuid::Uuid::now_v7().to_string();
+    for task in cfg.tasks.values_mut() {
+        let mut trigger = crate::StateTrigger::default_polling();
+        trigger.id = Some(pinned.clone());
+        task.triggers = Some(vec![trigger]);
+    }
+
+    let fields: Vec<String> = cfg.validate().errors.into_iter().map(|e| e.field).collect();
+
+    assert_eq!(fields.len(), 1, "{fields:?}");
+    assert!(fields[0].ends_with(".triggers.0.id"), "{fields:?}");
+}
+
 fn errors_of(cfg: &StateConfiguration) -> Vec<(String, String)> {
     cfg.validate()
         .errors

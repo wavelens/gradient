@@ -12,10 +12,11 @@ use gradient_types::input::check_nix_restricted_evaluation_url_prefix;
 use gradient_types::triggers::TriggerType;
 use gradient_types::{ActionType, RepositoryLocation};
 use sea_orm::Iterable;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let config = lookup.config;
+    let mut pinned_trigger_uuids_across_tasks = HashMap::new();
     for task in config.tasks.values() {
         if !lookup.project_exists(&task.project) {
             errors.push(
@@ -107,7 +108,53 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             }
         }
 
+        validate_task_triggers(task, &mut pinned_trigger_uuids_across_tasks, errors);
         validate_task_git_host_connection_reference(lookup, task, errors);
+    }
+}
+
+fn validate_task_triggers(
+    task: &StateTask,
+    ids: &mut HashMap<uuid::Uuid, String>,
+    errors: &mut ErrorCollector,
+) {
+    for (index, trigger) in task.triggers.iter().flatten().enumerate() {
+        let field = |name: &str| format!("tasks.{}.triggers.{}.{}", task.name, index, name);
+        match (trigger.trigger_type, &trigger.secret_file) {
+            (TriggerType::PostRequest, None) => errors.push(
+                field("secret_file"),
+                "A post_request trigger needs secret_file.",
+            ),
+            (TriggerType::PostRequest, Some(_)) | (_, None) => {}
+            (_, Some(_)) => errors.push(
+                field("secret_file"),
+                "Only post_request triggers take secret_file.",
+            ),
+        }
+
+        let Some(id) = trigger.id.as_deref() else {
+            continue;
+        };
+        let Ok(uuid) = id.parse::<uuid::Uuid>() else {
+            errors.push(field("id"), format!("Trigger ID '{}' is not a UUID.", id));
+            continue;
+        };
+        match ids.get(&uuid) {
+            None => {
+                ids.insert(uuid, task.name.clone());
+            }
+            Some(first_task) if *first_task == task.name => errors.push(
+                field("id"),
+                format!("Duplicate trigger ID '{}' in task '{}'.", id, task.name),
+            ),
+            Some(first_task) => errors.push(
+                field("id"),
+                format!(
+                    "Duplicate trigger ID '{}' in task '{}' and '{}'.",
+                    id, first_task, task.name
+                ),
+            ),
+        }
     }
 }
 
@@ -227,4 +274,73 @@ fn find_declared_git_host_connection_for_task<'a>(
             connection.name == name && connection.owner.parse().ok().as_ref() == Some(&owner)
         })
     })
+}
+
+#[cfg(test)]
+mod validate_task_triggers_tests {
+    use super::*;
+
+    #[test]
+    fn state_validation_rejects_invalid_trigger_secret_file_and_ids() {
+        let duplicate = "0192f0c4-7d4e-7a51-9b2c-3f5e6d7a8b9c";
+        let task: StateTask = serde_json::from_value(serde_json::json!({
+            "name": "web",
+            "project": "acme",
+            "display_name": "Web",
+            "repository": "https://example.com/acme/web.git",
+            "created_by": "alice",
+            "triggers": [
+                { "type": "post_request" },
+                { "type": "polling", "secret_file": "/run/secrets/trigger" },
+                { "type": "polling", "id": "not-a-uuid" },
+                { "type": "post_request", "secret_file": "/run/secrets/trigger", "id": duplicate },
+                { "type": "time", "config": { "cron": "0 2 * * *" }, "id": duplicate },
+            ],
+        }))
+        .unwrap();
+        let mut errors = ErrorCollector::new();
+
+        validate_task_triggers(&task, &mut HashMap::new(), &mut errors);
+
+        let fields: Vec<String> = errors.into_errors().into_iter().map(|e| e.field).collect();
+        assert_eq!(
+            fields,
+            [
+                "tasks.web.triggers.0.secret_file",
+                "tasks.web.triggers.1.secret_file",
+                "tasks.web.triggers.2.id",
+                "tasks.web.triggers.4.id",
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_pinned_trigger_id_across_tasks_names_both_tasks() {
+        let task_with_pinned_trigger = |name: &str| -> StateTask {
+            serde_json::from_value(serde_json::json!({
+                "name": name,
+                "project": "acme",
+                "display_name": name,
+                "repository": "https://example.com/acme/web.git",
+                "created_by": "alice",
+                "triggers": [{ "type": "polling", "id": uuid::Uuid::from_u128(7).to_string() }],
+            }))
+            .unwrap()
+        };
+        let mut ids = HashMap::new();
+        let mut errors = ErrorCollector::new();
+
+        validate_task_triggers(&task_with_pinned_trigger("web"), &mut ids, &mut errors);
+        validate_task_triggers(&task_with_pinned_trigger("docs"), &mut ids, &mut errors);
+
+        let errors = errors.into_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, "tasks.docs.triggers.0.id");
+        assert!(errors[0].message.contains("'web'"), "{}", errors[0].message);
+        assert!(
+            errors[0].message.contains("'docs'"),
+            "{}",
+            errors[0].message
+        );
+    }
 }

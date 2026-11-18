@@ -614,7 +614,7 @@
   triggerType = types.submodule ({ name, ... }: {
     options = {
       type = mkOption {
-        type = types.enum [ "polling" "reporter_push" "reporter_pull_request" "time" ];
+        type = types.enum [ "polling" "reporter_push" "reporter_pull_request" "time" "post_request" ];
         description = ''
           Trigger kind, determining the expected `config` and the firing behavior of the trigger.
         '';
@@ -641,10 +641,11 @@
           - `time` can receive `{ cron = "0 2 * * *"; branch = "main"; }` in UTC. There are 5
             fields in `cron` (`min hour dom mon dow`, seconds are `0`) or 6 fields
             (`sec min hour dom mon dow`). The default for `branch` is remote HEAD.
+          - `post_request` takes `{ branch = "main"; }`. A POST request to `/api/v1/hooks/trigger/<id>` with the trigger secret fires the trigger, and `branch` defaults to the remote HEAD.
 
           Empty `branches`, `tags` and `actions` lists match everything.
 
-          `polling`, `reporter_push` and `reporter_pull_request` also accept `include_paths` and `exclude_paths`. These are lists of path patterns relative to the repository root, such as `[ "src/*" ]`. `*` can match any text with `/`. These triggers start an evaluation only for commits that change files that match `include_paths` and match no pattern in `exclude_paths`. The default is an empty list. All commits match.
+          `polling`, `post_request`, `reporter_push` and `reporter_pull_request` also accept `include_paths` and `exclude_paths`. These are lists of path patterns relative to the repository root, such as `[ "src/*" ]`. `*` can match any text with `/`. These triggers start an evaluation only for commits that change files that match `include_paths` and match no pattern in `exclude_paths`. The default is an empty list. All commits match.
 
           `require_approval` defaults to `true` for pull request triggers. It parks
           evaluations of pull requests from contributors without write access on the Git host. A
@@ -667,6 +668,22 @@
           Whether the trigger is the default trigger of the task. The "Start Evaluation" button
           and the evaluate API fire the default trigger. At most one trigger of a task sets this
           flag, and the first trigger is the default when none does.
+        '';
+      };
+
+      id = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Trigger UUID. Set the value to `null` so the server can generate a UUID. Set this value before the first deploy to learn `post_request` trigger URL `/api/v1/hooks/trigger/<id>` ahead of time. The URL can stay the same after a config change and with a new database. The URL can change on every state apply run after a config change if the ID stayed unset. The server can't accept a value that another task already set, or a value for a trigger that already had a config with another ID. Generate a UUID with {command}`uuidgen`.
+        '';
+      };
+
+      secret_file = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = ''
+          This file is the source of the secret for this trigger. The sender of a POST request can prove the secret with `Authorization: Bearer <secret>` (HMAC signature headers for GitHub, Gitea, and Forgejo) or `X-Gitlab-Token`. Gradient can read this file as a systemd credential and store the secret in encrypted form. This file is mandatory for the post_request type. Other types don't accept the file. An empty file can make state apply fail. Generate a secret with {command}`openssl rand -hex 32`.
         '';
       };
     };
