@@ -539,6 +539,14 @@ pub async fn run_task_trigger_subcommand(cmd: TaskTriggerCommands, out: Output) 
             ),
             color,
         ));
+        if let Some(url) = &trigger.post_request_url {
+            out.human(format!("URL for POST requests: {url}"));
+        }
+        if trigger.has_secret {
+            out.human("Secret stored.");
+        } else if trigger.post_request_url.is_some() {
+            out.human("No secret stored. POST requests return 401 before secret creation.");
+        }
     };
 
     match cmd {
@@ -568,12 +576,14 @@ pub async fn run_task_trigger_subcommand(cmd: TaskTriggerCommands, out: Output) 
                 config: parse_json_configuration_from_command_line::<TriggerConfig>(&config, out),
                 active: Some(!inactive),
             };
-            let id = tasks
+            let created = tasks
                 .create_trigger(&project, &task, body)
                 .await
                 .unwrap_or_else(|e| out.fail(e));
-            out.ok(&serde_json::json!({"created": true, "id": id}));
+            out.ok(&created);
             out.human("Created trigger.");
+            print(&created);
+            print_generated_post_request_trigger_secret_with_warning(out, &created);
         }
 
         TaskTriggerCommands::Edit {
@@ -593,12 +603,13 @@ pub async fn run_task_trigger_subcommand(cmd: TaskTriggerCommands, out: Output) 
                 }),
                 active,
             };
-            tasks
+            let updated = tasks
                 .update_trigger(&project, &task, &trigger, body)
                 .await
                 .unwrap_or_else(|e| out.fail(e));
-            out.ok(&serde_json::json!({"updated": true}));
+            out.ok(&updated);
             out.human("Trigger update succeeded.");
+            print_generated_post_request_trigger_secret_with_warning(out, &updated);
         }
 
         TaskTriggerCommands::Delete { trigger } => {
@@ -627,5 +638,27 @@ pub async fn run_task_trigger_subcommand(cmd: TaskTriggerCommands, out: Output) 
             out.ok(&trigger);
             out.human("The trigger is the default.");
         }
+
+        TaskTriggerCommands::RotateTriggerSecret { trigger } => {
+            let trigger = tasks
+                .replace_trigger_secret(&project, &task, &trigger)
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&trigger);
+            out.human("Replaced the secret of the trigger.");
+            print_generated_post_request_trigger_secret_with_warning(out, &trigger);
+        }
+    }
+}
+
+fn print_generated_post_request_trigger_secret_with_warning(
+    out: Output,
+    trigger: &connector::api::TriggerOut,
+) {
+    if let Some(secret) = &trigger.generated_secret {
+        out.human(format!("Trigger secret: {secret}"));
+        out.human(
+            "Store the trigger secret in a safe place. No way to show the secret again. Enter the secret in the system for POST requests.",
+        );
     }
 }
