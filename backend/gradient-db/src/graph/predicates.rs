@@ -160,21 +160,24 @@ fn directly_needed_predicate(output: &str) -> String {
     format!(
         "(EXISTS (SELECT 1 FROM entry_point ep {live} WHERE ep.derivation = {output}.derivation) \
          OR EXISTS (SELECT 1 FROM derivation_dependency e \
-                    JOIN derivation_build p ON p.derivation = e.derivation \
-                    JOIN derivation pw ON pw.id = p.derivation \
+                    CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
+                                        JOIN derivation pw ON pw.id = p.derivation \
+                                        WHERE p.derivation = e.derivation \
+                                          AND p.wanted AND {open} AND ({builder}) \
+                                        OFFSET 0) wanted_open_parent_build \
                     WHERE e.dependency = {output}.derivation AND e.kind IN (0, 2) \
-                      AND p.wanted AND {open} AND ({builder}) \
                       AND (e.dependency_outputs IS NULL \
                            OR {output}.name = ANY(e.dependency_outputs))) \
          OR EXISTS (SELECT 1 FROM derivation_dependency e \
-                    JOIN derivation_build p ON p.derivation = e.derivation, \
+                    CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
+                                        WHERE p.derivation = e.derivation AND p.wanted AND {open} \
+                                        OFFSET 0) wanted_open_parent, \
                     LATERAL (SELECT {refs} AS refs FROM derivation_output po \
                              LEFT JOIN cached_path pcp ON pcp.hash = po.hash \
                              WHERE po.derivation = e.derivation \
                                AND (pcp.file_hash IS NOT NULL OR po.references_list IS NOT NULL) \
                              OFFSET 0) r \
                     WHERE e.dependency = {output}.derivation AND e.kind IN (1, 2) \
-                      AND p.wanted AND {open} \
                       AND (r.refs IS NULL OR string_to_array(r.refs, ' ') && {tokens})))",
         live = crate::graph::can_start::wanted_by_its_evaluation("ep"),
         open = open_predicate("p"),

@@ -1130,6 +1130,72 @@ async fn d16_update_need_reads_only_wanted_open_parents_through_partial_index() 
     case.finish_with_drift().await;
 }
 
+#[tokio::test]
+async fn d17_needed_outputs_reads_only_wanted_open_parents_through_partial_index() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(X)
+            .derivation(X)
+            .walked()
+            .job()
+            .probed()
+            .drv_cached()
+            .output(X_OUT)
+            .build_status(BuildStatus::Queued),
+    )
+    .await;
+    insert_many_unwanted_parent_derivations_with_unwanted_shared_build(
+        &case,
+        X,
+        TEST_DEPENDENCY_UNWANTED_PARENT_COUNT,
+    )
+    .await;
+    case.sql("VACUUM (ANALYZE) derivation, derivation_build, derivation_dependency")
+        .await;
+
+    let needed_outputs_query = gradient_db::sql::registry()
+        .find(|query| query.name == "NEEDED_OUTPUTS")
+        .expect("The statement registry contains `NEEDED_OUTPUTS`.");
+    let dependency_derivation_id = case.db.id_of(X).await.into_inner();
+    let plan: serde_json::Value = case
+        .db
+        .connection()
+        .query_one_raw(needed_outputs_query.bind_built(
+            format!(
+                "EXPLAIN (ANALYZE, FORMAT JSON) {}",
+                needed_outputs_query.text()
+            ),
+            [sea_orm::Value::from(vec![dependency_derivation_id])],
+        ))
+        .await
+        .expect("Postgres can run EXPLAIN on NEEDED_OUTPUTS and show the query plan.")
+        .expect("EXPLAIN commands return one row.")
+        .try_get("", "QUERY PLAN")
+        .expect("The plan is JSON.");
+
+    let parent_shared_build_reads: Vec<_> = collect_explain_plan_nodes(&plan[0]["Plan"])
+        .into_iter()
+        .filter(|node| node["Relation Name"] == "derivation_build" && node["Alias"] == "p")
+        .collect();
+    assert!(
+        !parent_shared_build_reads.is_empty()
+            && parent_shared_build_reads
+                .iter()
+                .all(|node| node["Index Cond"].is_string()),
+        "All reads of the parent shared build in NEEDED_OUTPUTS look up a row by key. They never scan every incomplete shared build that evaluations still need: {plan}"
+    );
+    case.finish_with_drift().await;
+}
+
 async fn insert_many_unwanted_parent_derivations_with_unwanted_shared_build(
     case: &Case,
     dependency: &str,
