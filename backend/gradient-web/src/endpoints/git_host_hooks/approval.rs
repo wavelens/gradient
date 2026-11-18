@@ -170,6 +170,14 @@ pub(super) async fn approve_approval_and_start_approved_commit_evaluation(
     )
     .await;
     let Some(approved) = approved.filter(|_| !outcome.queued.is_empty()) else {
+        info!(
+            %approval,
+            task_id = %task.id,
+            pr_number,
+            maintainer = maintainer_login,
+            skipped = ?outcome.skipped,
+            "The approval is still pending because the evaluation didn't start."
+        );
         return false;
     };
     ci.db
