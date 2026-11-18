@@ -13,7 +13,7 @@ use axum_test::TestServer;
 use gradient_ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
 use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_fixtures::mock::{empty_db, mock_db};
+use gradient_fixtures::mock::{all_statements, empty_db, exec_ok, mock_db};
 use gradient_fixtures::rows::worker_registration;
 use gradient_test_support::state::TestState;
 use gradient_types::GitHostType;
@@ -1091,4 +1091,173 @@ async fn github_app_webhook_no_matching_repo_returns_zero() {
     assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
+}
+
+fn active_post_request_trigger_row_with_encrypted_secret(
+    encrypted_secret: Option<String>,
+) -> gradient_entity::task_trigger::Model {
+    gradient_entity::task_trigger::Model {
+        encrypted_secret,
+        last_fired_at: Some(fixture_date()),
+        ..trigger_row(TriggerConfig::PostRequest {
+            branch: None,
+            path_filter: Default::default(),
+        })
+    }
+}
+
+fn trigger_webhook_path_for_test_trigger_id() -> String {
+    format!("/api/v1/hooks/trigger/{}", trigger_id())
+}
+
+#[tokio::test]
+async fn post_trigger_hook_url_returns_404_for_missing_inactive_wrong_type_trigger_or_inactive_task()
+ {
+    let post_request = active_post_request_trigger_row_with_encrypted_secret(Some("x".into()));
+    let inactive_trigger = gradient_entity::task_trigger::Model {
+        active: false,
+        ..post_request.clone()
+    };
+    let polling_trigger = trigger_row(TriggerConfig::Polling {
+        interval_secs: 60,
+        branch: None,
+        path_filter: Default::default(),
+    });
+    let inactive_task = gradient_entity::task::Model {
+        active: false,
+        ..task_row()
+    };
+
+    let cases = [
+        mock_db().append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()]),
+        mock_db()
+            .append_query_results([vec![inactive_trigger]])
+            .append_query_results([vec![task_row()]]),
+        mock_db()
+            .append_query_results([vec![polling_trigger]])
+            .append_query_results([vec![task_row()]]),
+        mock_db()
+            .append_query_results([vec![post_request]])
+            .append_query_results([vec![inactive_task]]),
+    ];
+
+    for db in cases {
+        let server = TestServer::new(
+            create_router(make_state(db.into_connection(), None, None)).expect("router"),
+        );
+        let response = server
+            .post(&trigger_webhook_path_for_test_trigger_id())
+            .add_header("Authorization", "Bearer x")
+            .await;
+        response.assert_status_not_found();
+    }
+}
+
+#[tokio::test]
+async fn post_trigger_hook_url_returns_401_when_trigger_has_no_stored_secret() {
+    let db = mock_db()
+        .append_query_results([vec![active_post_request_trigger_row_with_encrypted_secret(
+            None,
+        )]])
+        .append_query_results([vec![task_row()]])
+        .into_connection();
+    let server = TestServer::new(create_router(make_state(db, None, None)).expect("router"));
+
+    let response = server
+        .post(&trigger_webhook_path_for_test_trigger_id())
+        .add_header("Authorization", "Bearer ")
+        .await;
+
+    response.assert_status_unauthorized();
+}
+
+#[tokio::test]
+async fn post_trigger_hook_url_returns_401_when_stored_secret_is_empty_string() {
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, "").expect("encrypt");
+    let db = mock_db()
+        .append_query_results([vec![active_post_request_trigger_row_with_encrypted_secret(
+            Some(ciphertext),
+        )]])
+        .append_query_results([vec![task_row()]])
+        .into_connection();
+    let server =
+        TestServer::new(create_router(make_state(db, Some(crypt_path), None)).expect("router"));
+
+    let response = server
+        .post(&trigger_webhook_path_for_test_trigger_id())
+        .add_header("X-Gitlab-Token", "")
+        .await;
+
+    response.assert_status_unauthorized();
+}
+
+#[tokio::test]
+async fn post_trigger_hook_with_wrong_signature_returns_unauthorized() {
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, "right-secret").expect("encrypt");
+    let db = mock_db()
+        .append_query_results([vec![active_post_request_trigger_row_with_encrypted_secret(
+            Some(ciphertext),
+        )]])
+        .append_query_results([vec![task_row()]])
+        .into_connection();
+    let server =
+        TestServer::new(create_router(make_state(db, Some(crypt_path), None)).expect("router"));
+    let body = GITHUB_PUSH_BODY.as_bytes();
+
+    let response = server
+        .post(&trigger_webhook_path_for_test_trigger_id())
+        .add_header(
+            "X-Hub-Signature-256",
+            &github_signature("other-secret", body),
+        )
+        .bytes(body.into())
+        .await;
+
+    response.assert_status_unauthorized();
+}
+
+#[tokio::test]
+async fn valid_bearer_post_enqueues_one_trigger_fire_delivery_with_row_last_fired_at_and_returns_202()
+ {
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, "s3cret").expect("encrypt");
+    let trigger = active_post_request_trigger_row_with_encrypted_secret(Some(ciphertext));
+    let web_db = mock_db()
+        .append_query_results([vec![trigger.clone()]])
+        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![trigger]])
+        .append_query_results([vec![task_row()]])
+        .into_connection();
+    let worker_db = mock_db()
+        .append_exec_results([exec_ok(), exec_ok()])
+        .into_connection();
+    let server = TestState::new()
+        .web_db(web_db)
+        .worker_db(worker_db.clone())
+        .cli(|cli| cli.secrets.crypt_file = crypt_path)
+        .server();
+
+    for _ in 0..2 {
+        let response = server
+            .post(&trigger_webhook_path_for_test_trigger_id())
+            .add_header("Authorization", "Bearer s3cret")
+            .await;
+        response.assert_status(axum::http::StatusCode::ACCEPTED);
+        let json: Value = response.json();
+        assert_eq!(json["message"]["trigger"], trigger_id().to_string());
+    }
+
+    let expected_key = format!("{}:{}", trigger_id(), fixture_date());
+    let inserts: Vec<_> = all_statements(worker_db.into_transaction_log())
+        .into_iter()
+        .filter(|s| s.sql.starts_with("INSERT INTO pending_delivery"))
+        .collect();
+    assert_eq!(inserts.len(), 2);
+    for insert in inserts {
+        assert!(insert.sql.contains("ON CONFLICT"), "{}", insert.sql);
+        let values = format!("{:?}", insert.values);
+        assert!(values.contains(&expected_key), "{values}");
+    }
 }

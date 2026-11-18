@@ -20,6 +20,7 @@ flowchart LR
 | `time` | Time (cron) | Each time of the cron schedule | Evaluated again |
 | `reporter_push` | Push (reporter) | A push, a release or a merge queue entry | Skipped |
 | `reporter_pull_request` | Pull Request (reporter) | A pull request event or a `/gradient run` comment | Skipped, except for `/gradient run` |
+| `post_request` | POST request | A POST request to the trigger URL with the trigger secret | Skipped |
 
 A task can have triggers in any combination. Use [declarative state reference](../reference/state.md#trigger-types) to list the options for each type. Use [concurrency table](projects-and-tasks.md#concurrency) to get the branch name of each evaluation.
 
@@ -131,11 +132,12 @@ Users with write permission to the repository can steer a pull request with comm
 
 ## Path Filters
 
-`include_paths` and `exclude_paths` restrict polling, push, and pull request triggers to commits that change specific files. Both lists are empty by default. Empty filters match all commits.
+`include_paths` and `exclude_paths` restrict polling, POST request, push, and pull request triggers to commits that change specific files. Both lists are empty by default. Empty filters match all commits.
 
 | Trigger | Base of the comparison | Head of the comparison |
 |---|---|---|
 | Polling | Commit of the newest evaluation on the branch | New head of the branch |
+| POST Request | Commit of the newest evaluation on the branch | New head of the branch |
 | Push | Commit of the newest evaluation on the pushed branch | Pushed commit |
 | Pull Request | Tip of the target branch | Head of the pull request |
 
@@ -144,12 +146,53 @@ Users with write permission to the repository can steer a pull request with comm
 - **Renames**: Both the old path and the new path of a renamed file count as modified.
 - **Skipped Commits**: Skipped commits do not change the base for comparison. Commits after a skipped commit still compare against the same evaluated commit. Changes from every skipped commit enter that comparison.
 - **Pull Requests**: Pull requests compare the file tree at the tip of the target branch with the file tree at the pull request head, not the merge base. A pull request that is behind the target branch can trigger more often, never less.
-- **Fail Open**: Triggers always fire when Gradient cannot list the changed files. Reasons include no earlier evaluation on the branch, a base equal to the head, a fetch that failed, a Git error, and a timeout. Timeouts run 30 seconds per polling and 8 seconds for all triggers of one webhook.
+- **Fail Open**: Triggers always fire when Gradient cannot list changed files. Reasons include no previous evaluation on the branch, equal base and head, a fetch failure, a Git error, or a timeout. Timeouts are 30 seconds per polling or POST request. All triggers of one webhook get 8 seconds.
 - **Not Filtered**: Time triggers, manual evaluation, `/gradient run` comments, tag pushes, releases, entries in the merge queue, updates to flake inputs and the first poll after a change to a task's evaluation settings ignore path filters.
 - **Skipped Webhooks**: The webhook response can list each skipped trigger with a reason `no_changed_file_matches_path_filter`.
 
 !!! warning
     Skipped commits get no evaluation and no commit status. Rules that protect a branch and require the Gradient check block merges of pull requests whose head commit was skipped.
+
+## POST Request
+
+Triggers for POST requests start from one HTTP request from an external system. Sources include repository webhooks on GitHub, Gitea, Forgejo and GitLab, CI jobs, cron jobs on another host, and curl. Triggers for POST requests require no connection to the Git host.
+
+- **URL**: `https://<gradient>/api/v1/hooks/trigger/<trigger id>`. View the URL on the trigger page for the task.
+- **Secret**: Gradient generates a secret at creation and shows it once.
+- **Answer**: `202` with a trigger ID. Evaluation results do not appear in the response.
+- **Body**: The request body is ignored by Gradient except for the signature check.
+- **After the Request**: The flow is the same as the polling trigger. Checks by Gradient target the HEAD of `branch`, or the HEAD of the remote default branch when `branch` is absent. New HEAD commits start an evaluation.
+- **Skip Markers**: Gradient skips the evaluation of a HEAD commit with a skip marker.
+- **Path Filters**: `include_paths` and `exclude_paths` limit evaluation to commits that change specific files. See [Path Filters](#path-filters) for details.
+- **Refusals**: `404` for an unknown or inactive trigger, a trigger of another type, or an inactive task. `401` for a missing secret or absent or wrong credentials.
+
+Gradient can accept a request when a valid secret is in any of the request headers. Requests with no such header, or with only wrong credentials, get `401`.
+
+| Header | Content |
+|---|---|
+| `Authorization: Bearer <secret>` | The secret in plain text. |
+| `X-Hub-Signature-256` | HMAC-SHA256 of the body, GitHub format `sha256=<hex>` |
+| `X-Forgejo-Signature` / `X-Gitea-Signature` | The HMAC-SHA256 of the body in hex. |
+| `X-Gitlab-Token` | Plaintext secret in GitLab format |
+
+### Fire a Trigger with curl
+
+```sh
+curl -X POST -H "Authorization: Bearer $SECRET" \
+  https://gradient.example.com/api/v1/hooks/trigger/<trigger id>
+```
+
+### GitHub Repository Webhook
+
+Webhooks for a GitHub repository send a trigger on every push. Use these values to add a webhook in the repository Settings > Webhooks.
+
+| Field | Value |
+|---|---|
+| Payload URL | `https://gradient.example.com/api/v1/hooks/trigger/<trigger id>` |
+| Content type | `application/json` |
+| Secret | The trigger secret |
+
+Gitea, Forgejo, and GitLab webhooks work the same way for the trigger URL and trigger secret.
 
 ## Related
 

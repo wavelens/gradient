@@ -5,7 +5,10 @@
  */
 
 use gradient_ci::ApplyOutcome;
-use gradient_db::deliveries::trigger_fire::TriggerFire;
+use gradient_db::deliveries::pending::{self, Outcome};
+use gradient_db::deliveries::trigger_fire::{
+    TriggerFire, enqueue_or_increment_trigger_fire_for_post_request,
+};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, AbortReason, EvaluationKind, EvaluationStatus};
 use gradient_entity::ids::{CacheId, EvaluationId, TaskTriggerId};
@@ -1497,6 +1500,150 @@ async fn t29_second_poll_to_docs_only_head_outside_include_path_creates_no_evalu
         fresh.is_empty(),
         "after 2: no new evaluation, got {fresh:?}"
     );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t30_a_post_request_while_a_firing_is_in_flight_creates_another_firing_at_the_newer_commit()
+{
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit("c0");
+    let c1 = repo.commit("c1");
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e0)
+            .evaluation_status(EvaluationStatus::Completed)
+            .repository(&repo.url())
+            .commit_hash(&c0)
+            .branch(&branch_key::branch("main"))
+            .last_evaluation(e0)
+            .task_option(|t| t.concurrency = ConcurrencyPolicy::All)
+            .trigger(
+                t1,
+                TriggerType::PostRequest,
+                serde_json::json!({ "branch": "main" }),
+                true,
+                None,
+            )
+            .into_cache(CacheId::now_v7())
+            .worker_registration("w-reg"),
+    )
+    .await;
+    let db = &case.scheduler.db.worker_db;
+    let fire = TriggerFire {
+        trigger: t1,
+        last_fired_at: None,
+    };
+
+    for _ in 0..2 {
+        enqueue_or_increment_trigger_fire_for_post_request(db, &fire)
+            .await
+            .expect("the post request firing is queued");
+    }
+    let claimed = pending::claim_due(db, 8).await.expect("the firings claim");
+    let [in_flight] = claimed.as_slice() else {
+        panic!("after 1: a single claimed firing, got {claimed:?}");
+    };
+    crate::trigger_firing::fire(&case.scheduler, &fire)
+        .await
+        .expect("the firing applies");
+    let c2 = repo.commit("c2");
+    repo.push("main", &c2);
+    enqueue_or_increment_trigger_fire_for_post_request(db, &fire)
+        .await
+        .expect("the post request firing is queued");
+    pending::mark(db, in_flight, &Outcome::Delivered)
+        .await
+        .expect("the firing is marked");
+
+    assert_eq!(
+        case.deliver_trigger_fires().await,
+        1,
+        "after 2: delivered firings"
+    );
+    let mut commits = Vec::new();
+    for evaluation in evaluations_besides(&case, &[e0]).await {
+        commits.push(commit_of(&case, &evaluation).await);
+    }
+    commits.sort();
+    let mut expected = vec![c1, c2];
+    expected.sort();
+    assert_eq!(commits, expected, "after 2: commits of the new evaluations");
+    assert!(
+        firings(&case)
+            .await
+            .iter()
+            .all(|row| row.delivered_at.is_some()),
+        "after 2: every firing delivered"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn t31_post_request_trigger_with_src_include_paths_on_docs_only_head_commit_creates_no_evaluation_and_next_post_after_src_commit_creates_one_at_that_commit()
+ {
+    let (e0, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let repo = GitRepo::new();
+    let c0 = repo.commit_files("c0", &["src/main.rs"]);
+    let c1 = repo.commit_files("c1", &["docs/guide.md"]);
+    repo.push("main", &c1);
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e0)
+            .evaluation_status(EvaluationStatus::Completed)
+            .repository(&repo.url())
+            .commit_hash(&c0)
+            .branch(&branch_key::branch("main"))
+            .last_evaluation(e0)
+            .trigger(
+                t1,
+                TriggerType::PostRequest,
+                serde_json::json!({ "branch": "main", "include_paths": ["src/*"] }),
+                true,
+                None,
+            )
+            .into_cache(CacheId::now_v7())
+            .worker_registration("w-reg"),
+    )
+    .await;
+    let db = &case.scheduler.db.worker_db;
+    let fire = TriggerFire {
+        trigger: t1,
+        last_fired_at: None,
+    };
+
+    enqueue_or_increment_trigger_fire_for_post_request(db, &fire)
+        .await
+        .expect("the post request firing is queued");
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    assert!(
+        fresh.is_empty(),
+        "after 1: no new evaluation, got {fresh:?}"
+    );
+    case.check("step 1").await;
+
+    let c2 = repo.commit_files("c2", &["src/lib.rs"]);
+    repo.push("main", &c2);
+    let fire = TriggerFire {
+        trigger: t1,
+        last_fired_at: case.trigger(t1).await.last_fired_at,
+    };
+    enqueue_or_increment_trigger_fire_for_post_request(db, &fire)
+        .await
+        .expect("the post request firing is queued");
+    case.deliver_trigger_fires().await;
+    let fresh = evaluations_besides(&case, &[e0]).await;
+    let [e1] = fresh.as_slice() else {
+        panic!("after 2: a single new evaluation, got {fresh:?}");
+    };
+    assert_eq!(commit_of(&case, e1).await, c2, "after 2: E1.commit");
     case.check("step 2").await;
 
     case.finish().await;

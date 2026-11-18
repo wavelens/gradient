@@ -190,7 +190,9 @@ async fn load_pending_firing(
     let Some(trig) = by_id::<ept::Entity, _>(db, fire.trigger).await? else {
         return Ok(None);
     };
-    if !trig.active || trig.last_fired_at != fire.last_fired_at {
+    let stale =
+        trig.last_fired_at != fire.last_fired_at && trig.trigger_type != TriggerType::PostRequest;
+    if !trig.active || stale {
         return Ok(None);
     }
     let Some(task) = by_id::<ETask, _>(db, trig.task).await? else {

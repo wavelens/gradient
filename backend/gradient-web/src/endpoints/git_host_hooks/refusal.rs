@@ -45,3 +45,28 @@ impl Refusal for GitHostHookRefusal {
         }
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum TriggerPostRequestRefusal {
+    #[error(
+        "Either there is no valid trigger for POST requests at this address, or the task is inactive."
+    )]
+    PostRequestTriggerNotFoundOrTaskInactive,
+    #[error("The trigger has no secret. Replace the trigger secret in Gradient.")]
+    TriggerSecretMissing,
+    #[error(
+        "Credentials are missing or invalid. Send the trigger secret in one of the accepted headers."
+    )]
+    MissingAuthenticationCredentials,
+}
+
+impl Refusal for TriggerPostRequestRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::PostRequestTriggerNotFoundOrTaskInactive => RefusalStatus::NotFound,
+            Self::TriggerSecretMissing | Self::MissingAuthenticationCredentials => {
+                RefusalStatus::Unauthorized
+            }
+        }
+    }
+}

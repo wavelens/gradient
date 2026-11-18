@@ -3132,6 +3132,10 @@ export type TriggerConfig = ChangedFilePathFilter & {
   type: "post_request";
 };
 
+export interface TriggerFiringQueuedResponse {
+  trigger: TaskTriggerId;
+}
+
 export interface TriggerOut {
   id: TaskTriggerId;
   task: TaskId;

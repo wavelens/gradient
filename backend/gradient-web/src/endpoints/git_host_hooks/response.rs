@@ -33,6 +33,11 @@ impl IncomingWebhookResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct TriggerFiringQueuedResponse {
+    pub trigger: TaskTriggerId,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct QueuedEvaluation {
     pub task_id: TaskId,
