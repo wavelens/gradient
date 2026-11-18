@@ -351,7 +351,7 @@ async fn test_task_trigger_default_and_task_transfer_call_matching_endpoints() {
         )))
         .respond_with(ok(serde_json::json!({
             "id": TRIGGER, "task": TASK_ID, "type": "time", "config": {"cron": "0 3 * * *"},
-            "active": true, "is_default": true,
+            "active": true, "is_default": true, "has_secret": false,
             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00"
         })))
         .expect(1)

@@ -384,6 +384,68 @@ async fn duplicating_a_task_copies_settings_triggers_and_actions_onto_the_new_br
 }
 
 #[tokio::test]
+async fn duplicating_task_copies_post_request_trigger_with_new_id_and_without_secret() {
+    let s = seeded(BASE_ROLE_ADMIN_ID).await;
+    let conn = s.db.connection();
+    gradient_db::rows::insert::<task::Entity, _>(&conn, rows::task())
+        .await
+        .unwrap();
+    let source = gradient_db::triggers::insert(
+        &conn,
+        task_trigger::Model {
+            id: TaskTriggerId::now_v7(),
+            task: task_id(),
+            trigger_type: TriggerType::PostRequest,
+            config: TriggerConfig::PostRequest {
+                branch: None,
+                path_filter: Default::default(),
+            }
+            .to_db_json(),
+            active: true,
+            is_default: true,
+            last_fired_at: None,
+            created_at: test_date(),
+            updated_at: test_date(),
+            encrypted_secret: Some("ciphertext".into()),
+        },
+    )
+    .await
+    .unwrap();
+
+    let res = s
+        .server
+        .post("/api/v1/tasks/test-project/test-task/duplicate")
+        .add_header("authorization", &s.auth)
+        .json(
+            &json!({ "name": "test-task-release", "display_name": "Release", "branch": "release" }),
+        )
+        .await;
+    res.assert_status_ok();
+
+    let listed = s
+        .server
+        .get("/api/v1/tasks/test-project/test-task-release/triggers")
+        .add_header("authorization", &s.auth)
+        .await;
+    listed.assert_status_ok();
+    let copies = listed.json::<Value>()["message"].clone();
+    assert_eq!(copies.as_array().unwrap().len(), 1);
+    assert_eq!(copies[0]["type"], "post_request");
+    assert_eq!(copies[0]["has_secret"], false);
+    assert_ne!(copies[0]["id"], source.id.to_string());
+    assert!(
+        copies[0]["post_request_url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!(
+                "/api/v1/hooks/trigger/{}",
+                copies[0]["id"].as_str().unwrap()
+            ))
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn the_repository_check_refuses_invalid_urls_and_view_members() {
     let admin = seeded(BASE_ROLE_ADMIN_ID).await;
     admin

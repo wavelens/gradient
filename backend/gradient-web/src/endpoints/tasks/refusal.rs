@@ -22,6 +22,8 @@ pub(crate) enum TaskRefusal {
     InactiveTrigger,
     #[error("the default trigger cannot be deleted, make another trigger the default first")]
     DefaultTriggerDeletion,
+    #[error("Only post_request triggers accept new secrets")]
+    TriggerSecretReplacementNeedsPostRequestTrigger,
     #[error("{0}")]
     InvalidRepositoryUrl(String),
     #[error("{0}")]
@@ -107,6 +109,7 @@ impl Refusal for TaskRefusal {
             | Self::OverrideExists { .. }
             | Self::InvalidTriggerConfig(_)
             | Self::InactiveTrigger
+            | Self::TriggerSecretReplacementNeedsPostRequestTrigger
             | Self::InvalidRepositoryUrl(_)
             | Self::InvalidWildcard(_)
             | Self::KeepEvaluationsBelowMinimum
