@@ -160,13 +160,13 @@ services.gradient.state = {
 | `signing_key_file` | string | - | Path to the file with the Nix cache signing key. |
 | `upstream_caches` | list of submodule | cache.nixos.org | Upstream caches used as substituters: internal Gradient caches or external Nix binary caches. |
 | `upstream_caches.*.active` | boolean | `true` | Whether the upstream cache is in use. Gradient keeps inactive upstream caches but never queries them. The UI can change this value, and the server restores it on the next start. |
-| `upstream_caches.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. |
-| `upstream_caches.*.display_name` | null or string | `null` | Name shown in the UI for the upstream cache. |
+| `upstream_caches.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. All internal upstream caches need this value. |
+| `upstream_caches.*.display_name` | null or string | `null` | Name shown in the UI for the upstream cache. Each external upstream cache needs this value. |
 | `upstream_caches.*.http1_only` | boolean | `false` | Whether requests to the external Nix binary cache use HTTP/1.1 only. Enable this for caches that break HTTP/2 transfers. |
 | `upstream_caches.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Access mode for an internal upstream cache. |
 | `upstream_caches.*.public_key` | null or string | `null` | Public key of the external Nix binary cache. Required for `external` upstream caches. |
 | `upstream_caches.*.type` | one of `internal` `external` | - | Kind of upstream: `internal` for another Gradient cache, `external` for a Nix binary cache URL. |
-| `upstream_caches.*.url` | null or string | `null` | URL of the external Nix binary cache. |
+| `upstream_caches.*.url` | null or string | `null` | URL of an external Nix binary cache. Always set this value on each external upstream cache. |
 
 ## `roles.<name>`
 
