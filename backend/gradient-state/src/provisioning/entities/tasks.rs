@@ -11,6 +11,7 @@ use super::super::{
 };
 use crate::config::*;
 use anyhow::{Context, Result};
+use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_db::lookup::by_id;
 use gradient_entity::*;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -137,7 +138,7 @@ impl<'a> StateApplicator<'a> {
                 None => None,
             };
             if let Some(triggers) = &triggers {
-                apply_task_triggers(self.db, &task_row, triggers)
+                self.apply_task_triggers(&state_task.project, &task_row, triggers)
                     .await
                     .map_err(|e| {
                         format!(
@@ -351,86 +352,270 @@ impl<'a> StateApplicator<'a> {
     }
 }
 
-pub(crate) async fn apply_task_triggers<C: ConnectionTrait>(
+struct PreparedTriggerDeclaration {
+    config: TriggerConfig,
+    key: String,
+    id: Option<TaskTriggerId>,
+    active: bool,
+    encrypted_secret: Option<String>,
+}
+
+struct StoredTriggerRowsToKeepAndDelete {
+    rows_to_keep_or_insert_in_declared_trigger_order: Vec<Option<MTaskTrigger>>,
+    unmatched_trigger_rows_to_delete: Vec<MTaskTrigger>,
+}
+
+impl<'a> StateApplicator<'a> {
+    pub(crate) async fn apply_task_triggers(
+        &self,
+        project: &str,
+        task: &MTask,
+        desired: &[StateTrigger],
+    ) -> Result<(), DynError> {
+        if desired.is_empty() {
+            return Err(format!("task '{}' must have at least one trigger", task.name).into());
+        }
+
+        let declared = desired
+            .iter()
+            .enumerate()
+            .map(|(index, trigger)| {
+                self.prepare_trigger_declaration_at_index(project, &task.name, index, trigger)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.ensure_pinned_trigger_belongs_to_task(task, &declared)
+            .await?;
+        let stored = ETaskTrigger::find()
+            .filter(CTaskTrigger::Task.eq(task.id))
+            .all(self.db)
+            .await?;
+        let matched = match_declared_task_triggers_to_stored_rows(&task.name, &declared, stored)?;
+
+        for row in matched.unmatched_trigger_rows_to_delete {
+            ETaskTrigger::delete_by_id(row.id).exec(self.db).await?;
+        }
+        let mut applied = Vec::with_capacity(declared.len());
+        for (declaration, row) in declared
+            .iter()
+            .zip(matched.rows_to_keep_or_insert_in_declared_trigger_order)
+        {
+            applied.push(match row {
+                Some(row) => {
+                    update_stored_trigger_fields_if_changed(self.db, row, declaration).await?
+                }
+                None => {
+                    insert_declared_trigger_row_using_pinned_id(self.db, task.id, declaration)
+                        .await?
+                }
+            });
+        }
+
+        let default_index = desired.iter().position(|t| t.is_default).unwrap_or(0);
+        let default_trigger = applied.swap_remove(default_index);
+        if !default_trigger.is_default {
+            gradient_db::triggers::make_default(self.db, default_trigger).await?;
+        }
+
+        Ok(())
+    }
+
+    fn prepare_trigger_declaration_at_index(
+        &self,
+        project: &str,
+        task: &str,
+        index: usize,
+        trigger: &StateTrigger,
+    ) -> Result<PreparedTriggerDeclaration, DynError> {
+        let config = build_trigger_config(trigger)?;
+        let id = trigger
+            .id
+            .as_deref()
+            .map(|id| {
+                id.parse::<TaskTriggerId>().map_err(|e| {
+                    format!(
+                        "Invalid ID '{}' for trigger {} in task '{}': {}",
+                        id, index, task, e
+                    )
+                })
+            })
+            .transpose()?;
+        let encrypted_secret = match config {
+            TriggerConfig::PostRequest { .. } => Some(
+                self.read_and_encrypt_post_request_trigger_secret_credential_file(
+                    project, task, index,
+                )?,
+            ),
+            _ => None,
+        };
+        Ok(PreparedTriggerDeclaration {
+            key: trigger_key(&config),
+            config,
+            id,
+            active: trigger.active,
+            encrypted_secret,
+        })
+    }
+
+    fn read_and_encrypt_post_request_trigger_secret_credential_file(
+        &self,
+        project: &str,
+        task: &str,
+        index: usize,
+    ) -> Result<String, DynError> {
+        let (contents, path) = read_credential(
+            self.credentials_dir,
+            "trigger",
+            &format!("{project}_{task}_{index}"),
+            "secret",
+            "Secret file for triggers",
+        )?;
+        let secret = contents.trim();
+        if secret.is_empty() {
+            return Err(format!("The secret file {} for the trigger is empty.", path).into());
+        }
+        encrypt_secret_with_file(self.crypt_secret_file, secret).map_err(|e| {
+            format!(
+                "Failed to encrypt secret for trigger {} in task \"{}\": {}",
+                index, task, e
+            )
+            .into()
+        })
+    }
+
+    async fn ensure_pinned_trigger_belongs_to_task(
+        &self,
+        task: &MTask,
+        declared: &[PreparedTriggerDeclaration],
+    ) -> Result<(), DynError> {
+        let pinned: Vec<TaskTriggerId> = declared.iter().filter_map(|d| d.id).collect();
+        if pinned.is_empty() {
+            return Ok(());
+        }
+        let Some(foreign) = ETaskTrigger::find()
+            .filter(CTaskTrigger::Id.is_in(pinned))
+            .filter(CTaskTrigger::Task.ne(task.id))
+            .one(self.db)
+            .await?
+        else {
+            return Ok(());
+        };
+        let other_task = by_id::<task::Entity, _>(self.db, foreign.task)
+            .await?
+            .map(|other| other.name)
+            .unwrap_or_default();
+        let index = declared
+            .iter()
+            .position(|d| d.id == Some(foreign.id))
+            .unwrap_or_default();
+        Err(format!(
+            "Triggers in task \"{}\" already use the pinned ID {} of trigger {} in task \"{}\".",
+            other_task, foreign.id, index, task.name
+        )
+        .into())
+    }
+}
+
+fn match_declared_task_triggers_to_stored_rows(
+    task: &str,
+    declared: &[PreparedTriggerDeclaration],
+    stored: Vec<MTaskTrigger>,
+) -> Result<StoredTriggerRowsToKeepAndDelete, DynError> {
+    let mut pool = stored
+        .into_iter()
+        .map(|row| {
+            let config = TriggerConfig::parse_row(row.trigger_type, &row.config)
+                .context("parse existing trigger")?;
+            Ok((trigger_key(&config), row))
+        })
+        .collect::<Result<Vec<_>, DynError>>()?;
+
+    let mut matched: Vec<Option<MTaskTrigger>> = declared
+        .iter()
+        .map(|d| {
+            d.id.and_then(|id| {
+                remove_first_matching_stored_trigger_row(&mut pool, |(_, row)| row.id == id)
+            })
+        })
+        .collect();
+
+    for (index, (declaration, row)) in declared.iter().zip(&matched).enumerate() {
+        let (Some(declared_id), None) = (declaration.id, row) else {
+            continue;
+        };
+        if let Some((_, existing)) = pool.iter().find(|(key, _)| *key == declaration.key) {
+            return Err(format!(
+                "The existing row for trigger {} of task '{}' and the state use different IDs: ID {} in the row, ID {} in the state. IDs are immutable.",
+                index, task, existing.id, declared_id
+            )
+            .into());
+        }
+    }
+
+    for (declaration, row) in declared.iter().zip(matched.iter_mut()) {
+        if declaration.id.is_none() {
+            *row = remove_first_matching_stored_trigger_row(&mut pool, |(key, _)| {
+                *key == declaration.key
+            });
+        }
+    }
+
+    Ok(StoredTriggerRowsToKeepAndDelete {
+        rows_to_keep_or_insert_in_declared_trigger_order: matched,
+        unmatched_trigger_rows_to_delete: pool.into_iter().map(|(_, row)| row).collect(),
+    })
+}
+
+fn remove_first_matching_stored_trigger_row(
+    pool: &mut Vec<(String, MTaskTrigger)>,
+    matches: impl Fn(&(String, MTaskTrigger)) -> bool,
+) -> Option<MTaskTrigger> {
+    let position = pool.iter().position(matches)?;
+    Some(pool.swap_remove(position).1)
+}
+
+async fn update_stored_trigger_fields_if_changed<C: ConnectionTrait>(
     db: &C,
-    task: &MTask,
-    desired: &[StateTrigger],
-) -> anyhow::Result<()> {
-    if desired.is_empty() {
-        anyhow::bail!("task '{}' must have at least one trigger", task.name);
+    row: MTaskTrigger,
+    declaration: &PreparedTriggerDeclaration,
+) -> Result<MTaskTrigger, sea_orm::DbErr> {
+    let mut active = row.clone().into_active_model();
+    active
+        .trigger_type
+        .set_if_not_equals(declaration.config.trigger_type());
+    active
+        .config
+        .set_if_not_equals(declaration.config.to_db_json());
+    active.active.set_if_not_equals(declaration.active);
+    active
+        .encrypted_secret
+        .set_if_not_equals(declaration.encrypted_secret.clone());
+    if !active.is_changed() {
+        return Ok(row);
     }
+    active.updated_at = Set(gradient_types::now());
+    active.update(db).await
+}
 
-    let mut desired_by_key: HashMap<String, (TriggerConfig, bool)> = HashMap::new();
-    let mut default_key = None;
-    for t in desired {
-        let cfg = build_trigger_config(t)?;
-        let key = trigger_key(&cfg);
-        if t.is_default || default_key.is_none() {
-            default_key = Some(key.clone());
-        }
-        desired_by_key.insert(key, (cfg, t.active));
-    }
-
-    let existing: Vec<MTaskTrigger> = ETaskTrigger::find()
-        .filter(CTaskTrigger::Task.eq(task.id))
-        .all(db)
-        .await?;
-
-    let mut existing_by_key: HashMap<String, MTaskTrigger> = HashMap::new();
-    for row in existing {
-        let cfg = TriggerConfig::parse_row(row.trigger_type, &row.config)
-            .context("parse existing trigger")?;
-        let key = trigger_key(&cfg);
-        existing_by_key.insert(key, row);
-    }
-
+async fn insert_declared_trigger_row_using_pinned_id<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+    declaration: &PreparedTriggerDeclaration,
+) -> Result<MTaskTrigger, sea_orm::DbErr> {
     let now = gradient_types::now();
-
-    let mut kept: HashMap<String, MTaskTrigger> = HashMap::new();
-    for (key, (cfg, active)) in &desired_by_key {
-        if existing_by_key.contains_key(key) {
-            continue;
-        }
-        let inserted = MTaskTrigger {
-            id: TaskTriggerId::now_v7(),
-            task: task.id,
-            trigger_type: cfg.trigger_type(),
-            config: cfg.to_db_json(),
-            active: *active,
-            created_at: now,
-            updated_at: now,
-            ..Default::default()
-        }
-        .into_active_model()
-        .insert(db)
-        .await?;
-        kept.insert(key.clone(), inserted);
+    MTaskTrigger {
+        id: declaration.id.unwrap_or_else(TaskTriggerId::now_v7),
+        task,
+        trigger_type: declaration.config.trigger_type(),
+        config: declaration.config.to_db_json(),
+        active: declaration.active,
+        encrypted_secret: declaration.encrypted_secret.clone(),
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
     }
-
-    for (key, row) in existing_by_key {
-        let Some((_, active)) = desired_by_key.get(&key) else {
-            ETaskTrigger::delete_by_id(row.id).exec(db).await?;
-            continue;
-        };
-        let row = if row.active != *active {
-            let mut a: ATaskTrigger = row.into();
-            a.active = Set(*active);
-            a.updated_at = Set(now);
-            a.update(db).await?
-        } else {
-            row
-        };
-        kept.insert(key, row);
-    }
-
-    let default_trigger = default_key
-        .and_then(|key| kept.remove(&key))
-        .context("the default trigger was not applied")?;
-    if !default_trigger.is_default {
-        gradient_db::triggers::make_default(db, default_trigger).await?;
-    }
-
-    Ok(())
+    .into_active_model()
+    .insert(db)
+    .await
 }
 
 const DEFAULT_POLLING_TRIGGER_INTERVAL_SECS: u32 = 300;
@@ -731,6 +916,8 @@ mod trigger_helper_tests {
             config: serde_json::json!({ "interval_secs": interval_secs }),
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         }
     }
 
@@ -755,6 +942,8 @@ mod trigger_helper_tests {
             config: serde_json::Value::Null,
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         };
         let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
@@ -785,6 +974,8 @@ mod trigger_helper_tests {
             config: serde_json::json!({ "cron": "0 0 2 * * *" }),
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         };
         let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
@@ -803,6 +994,8 @@ mod trigger_helper_tests {
             config: serde_json::json!({ "cron": "0 2 * * *", "branch": "release" }),
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         };
         let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
@@ -821,6 +1014,8 @@ mod trigger_helper_tests {
             config: serde_json::json!({}),
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         };
         let err = build_trigger_config(&t).unwrap_err();
         assert!(err.to_string().contains("cron"));
@@ -838,6 +1033,8 @@ mod trigger_helper_tests {
             }),
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         };
         let cfg = build_trigger_config(&t).unwrap();
         assert_eq!(
@@ -864,6 +1061,8 @@ mod trigger_helper_tests {
             }),
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         };
         let cfg = build_trigger_config(&declared).unwrap();
         let stored = gradient_entity::task_trigger::Model {
@@ -1314,6 +1513,8 @@ mod tests_check_task_git_host_connection_capabilities {
             config: serde_json::json!({}),
             active: true,
             is_default: false,
+            secret_file: None,
+            id: None,
         }
     }
 
@@ -1356,5 +1557,313 @@ mod tests_check_task_git_host_connection_capabilities {
             check_task_git_host_connection_capabilities(&pushed, Some(&capable)),
             Ok(())
         );
+    }
+}
+
+#[cfg(test)]
+mod declared_task_trigger_application_tests {
+    use super::trigger_helper_tests::polling_trigger;
+    use super::*;
+    use gradient_ci::actions::decrypt_secret_with_file;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+    use sea_orm::DatabaseConnection;
+    use tempfile::TempDir;
+
+    struct StateApplyTestTempCredentialFiles {
+        dir: TempDir,
+        crypt_file: String,
+    }
+
+    impl StateApplyTestTempCredentialFiles {
+        fn new() -> Self {
+            let dir = TempDir::new().unwrap();
+            let crypt_file = dir.path().join("crypt");
+            std::fs::write(&crypt_file, "this-is-a-32-byte-crypt-key!!!!").unwrap();
+            Self {
+                crypt_file: crypt_file.to_str().unwrap().to_owned(),
+                dir,
+            }
+        }
+
+        fn write_post_request_trigger_secret_credential_file_for_index(
+            &self,
+            index: usize,
+            contents: &str,
+        ) {
+            std::fs::write(
+                self.dir.path().join(format!(
+                    "gradient_trigger_test-project_test-task_{index}_secret"
+                )),
+                contents,
+            )
+            .unwrap();
+        }
+
+        async fn apply(
+            &self,
+            db: &DatabaseConnection,
+            task: &MTask,
+            triggers: &[StateTrigger],
+        ) -> Result<(), DynError> {
+            let app = StateApplicator {
+                db,
+                crypt_secret_file: &self.crypt_file,
+                credentials_dir: self.dir.path(),
+                email_enabled: false,
+            };
+            app.apply_task_triggers("test-project", task, triggers)
+                .await
+        }
+
+        fn decrypt_stored_trigger_secret_with_test_crypt_key_file(
+            &self,
+            row: &MTaskTrigger,
+        ) -> String {
+            decrypt_secret_with_file(&self.crypt_file, row.encrypted_secret.as_deref().unwrap())
+                .unwrap()
+                .expose()
+                .to_owned()
+        }
+    }
+
+    async fn database_with_user_project_and_task() -> TestDatabase {
+        let db = TestDatabase::create().await;
+        let connection = db.connection();
+        rows::user()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        rows::project()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        rows::task()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        db
+    }
+
+    fn build_post_request_state_trigger_with_branch_and_optional_pinned_id(
+        branch: &str,
+        id: Option<TaskTriggerId>,
+    ) -> StateTrigger {
+        StateTrigger {
+            trigger_type: TriggerType::PostRequest,
+            config: serde_json::json!({ "branch": branch }),
+            active: true,
+            is_default: false,
+            secret_file: Some("/run/secrets/trigger".into()),
+            id: id.map(|id| id.to_string()),
+        }
+    }
+
+    fn pinned_polling_trigger_with_60_second_interval(id: TaskTriggerId) -> StateTrigger {
+        StateTrigger {
+            id: Some(id.to_string()),
+            ..polling_trigger(60)
+        }
+    }
+
+    #[tokio::test]
+    async fn changed_credential_file_updates_kept_post_request_trigger_secret_on_next_state_apply()
+    {
+        let db = database_with_user_project_and_task().await;
+        let files = StateApplyTestTempCredentialFiles::new();
+        let trigger =
+            build_post_request_state_trigger_with_branch_and_optional_pinned_id("main", None);
+        files.write_post_request_trigger_secret_credential_file_for_index(0, "s3cret\n");
+
+        files
+            .apply(
+                &db.connection(),
+                &rows::task(),
+                std::slice::from_ref(&trigger),
+            )
+            .await
+            .unwrap();
+        let first = db.rows::<ETaskTrigger>().await.remove(0);
+        assert_eq!(
+            files.decrypt_stored_trigger_secret_with_test_crypt_key_file(&first),
+            "s3cret"
+        );
+
+        files.write_post_request_trigger_secret_credential_file_for_index(0, "rotated");
+        files
+            .apply(&db.connection(), &rows::task(), &[trigger])
+            .await
+            .unwrap();
+        let rows = db.rows::<ETaskTrigger>().await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].id, first.id);
+        assert_ne!(rows[0].encrypted_secret, first.encrypted_secret);
+        assert_eq!(
+            files.decrypt_stored_trigger_secret_with_test_crypt_key_file(&rows[0]),
+            "rotated"
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn post_request_trigger_with_empty_or_whitespace_secret_credential_file_fails_state_apply_and_stores_no_secret()
+     {
+        let db = database_with_user_project_and_task().await;
+        let files = StateApplyTestTempCredentialFiles::new();
+        files.write_post_request_trigger_secret_credential_file_for_index(0, " \n");
+
+        let err = files
+            .apply(
+                &db.connection(),
+                &rows::task(),
+                &[
+                    build_post_request_state_trigger_with_branch_and_optional_pinned_id(
+                        "main", None,
+                    ),
+                ],
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("gradient_trigger_test-project_test-task_0_secret"),
+            "{err}"
+        );
+        assert!(err.contains("empty"), "{err}");
+        assert!(db.rows::<ETaskTrigger>().await.is_empty());
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn state_trigger_with_pinned_id_keeps_id_when_branch_changes() {
+        let db = database_with_user_project_and_task().await;
+        let files = StateApplyTestTempCredentialFiles::new();
+        files.write_post_request_trigger_secret_credential_file_for_index(0, "first");
+        files.write_post_request_trigger_secret_credential_file_for_index(1, "second");
+        let pinned = TaskTriggerId::now_v7();
+        let pinned_trigger = |branch| {
+            build_post_request_state_trigger_with_branch_and_optional_pinned_id(
+                branch,
+                Some(pinned),
+            )
+        };
+
+        files
+            .apply(&db.connection(), &rows::task(), &[pinned_trigger("main")])
+            .await
+            .unwrap();
+        files
+            .apply(
+                &db.connection(),
+                &rows::task(),
+                &[pinned_trigger("release")],
+            )
+            .await
+            .unwrap();
+        let rows = db.rows::<ETaskTrigger>().await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].id, pinned);
+        assert_eq!(rows[0].config["branch"], "release");
+
+        let twin = TaskTriggerId::now_v7();
+        let twins = [
+            pinned_trigger("main"),
+            build_post_request_state_trigger_with_branch_and_optional_pinned_id("main", Some(twin)),
+        ];
+        for _ in 0..2 {
+            files
+                .apply(&db.connection(), &rows::task(), &twins)
+                .await
+                .unwrap();
+        }
+        let mut ids: Vec<_> = db
+            .rows::<ETaskTrigger>()
+            .await
+            .iter()
+            .map(|row| row.id)
+            .collect();
+        ids.sort();
+        let mut expected = vec![pinned, twin];
+        expected.sort();
+        assert_eq!(ids, expected);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn rejects_pinned_trigger_from_other_task() {
+        let db = database_with_user_project_and_task().await;
+        let other_task = MTask {
+            id: TaskId::now_v7(),
+            name: "other-task".into(),
+            ..rows::task()
+        };
+        other_task
+            .clone()
+            .into_active_model()
+            .insert(&db.connection())
+            .await
+            .unwrap();
+        let files = StateApplyTestTempCredentialFiles::new();
+        let pinned = TaskTriggerId::now_v7();
+        files
+            .apply(
+                &db.connection(),
+                &other_task,
+                &[pinned_polling_trigger_with_60_second_interval(pinned)],
+            )
+            .await
+            .unwrap();
+
+        let err = files
+            .apply(
+                &db.connection(),
+                &rows::task(),
+                &[pinned_polling_trigger_with_60_second_interval(pinned)],
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("\"test-task\"") && err.contains("\"other-task\""),
+            "{err}"
+        );
+        let rows = db.rows::<ETaskTrigger>().await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].task, other_task.id);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn declared_trigger_id_next_to_unpinned_stored_row_with_same_config_fails_apply_state() {
+        let db = database_with_user_project_and_task().await;
+        let files = StateApplyTestTempCredentialFiles::new();
+        files
+            .apply(&db.connection(), &rows::task(), &[polling_trigger(60)])
+            .await
+            .unwrap();
+        let existing = db.rows::<ETaskTrigger>().await.remove(0);
+
+        let declared = TaskTriggerId::now_v7();
+        let err = files
+            .apply(
+                &db.connection(),
+                &rows::task(),
+                &[pinned_polling_trigger_with_60_second_interval(declared)],
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains(&declared.to_string()), "{err}");
+        assert!(err.contains(&existing.id.to_string()), "{err}");
+        let rows = db.rows::<ETaskTrigger>().await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].id, existing.id);
+        db.finish().await;
     }
 }

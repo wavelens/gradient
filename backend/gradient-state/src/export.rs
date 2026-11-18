@@ -537,6 +537,8 @@ pub(crate) fn export_trigger(t: &gradient_entity::task_trigger::Model) -> Option
         config,
         active: t.active,
         is_default: t.is_default,
+        secret_file: None,
+        id: Some(t.id.to_string()),
     })
 }
 
@@ -779,6 +781,7 @@ fn nix_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_types::triggers::TriggerType;
     use serde_json::json;
 
     #[test]
@@ -885,6 +888,27 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn test_export_state_writes_trigger_id_and_null_secret_file_for_post_request_trigger() {
+        let trigger = gradient_entity::task_trigger::Model {
+            id: TaskTriggerId::now_v7(),
+            trigger_type: TriggerType::PostRequest,
+            config: json!({ "branch": "main" }),
+            encrypted_secret: Some("ciphertext".into()),
+            ..Default::default()
+        };
+
+        let exported = serde_json::to_value(export_trigger(&trigger).unwrap()).unwrap();
+
+        assert_eq!(exported["id"], trigger.id.to_string());
+        assert!(exported["secret_file"].is_null(), "{exported}");
+        assert_eq!(
+            exported["config"],
+            json!({ "branch": "main", "include_paths": [], "exclude_paths": [] })
+        );
+        assert!(!exported.to_string().contains("ciphertext"), "{exported}");
     }
 
     #[test]
