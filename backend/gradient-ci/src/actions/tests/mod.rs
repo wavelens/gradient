@@ -13,7 +13,7 @@ use super::matching_actions;
 use super::report::build_ci_reports_from_commit_status_check_rows;
 use super::truncate;
 use crate::reporting::CommitStatusCheckWithIds;
-use fixtures::{action_with, make_ctx_with, run};
+use fixtures::{action_with, make_ctx_with, make_ctx_with_database_connection, run};
 use gradient_fixtures::mock::mock_db;
 use gradient_git_host::reporter::CiStatus;
 use gradient_types::ActionType;
@@ -404,6 +404,56 @@ fn transient_derivation_build_failure_yields_no_commit_status_report() {
             .unwrap();
 
         assert!(reports.is_empty(), "{reports:?}");
+    });
+}
+
+#[test]
+fn build_check_for_two_entry_points_sharing_one_derivation_reports_check_for_each_entry_point_name()
+{
+    use gradient_entity::build::BuildStatus;
+    use gradient_fixtures::shape::shape;
+    use gradient_types::{EBuildJob, EvaluationId};
+
+    run(async {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .task_option(|task| task.name = "pr".into())
+            .derivation("/nix/store/[hash1]-gradient.drv")
+            .build_status(BuildStatus::Completed)
+            .job()
+            .entry_point("packages.x86_64-linux.gradient")
+            .entry_point("packages.x86_64-linux.default")
+            .into_database()
+            .await;
+        let build_job = db.rows::<EBuildJob>().await.remove(0);
+        let ctx = make_ctx_with_database_connection(db.connection());
+        let check = CommitStatusCheckWithIds::Build {
+            evaluation,
+            build_job: build_job.id,
+        };
+
+        let reports = build_ci_reports_from_commit_status_check_rows(&ctx, &check)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            reports
+                .iter()
+                .map(|r| (r.context.as_str(), r.status.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "gradient/pr: Build packages.x86_64-linux.default",
+                    CiStatus::Success
+                ),
+                (
+                    "gradient/pr: Build packages.x86_64-linux.gradient",
+                    CiStatus::Success
+                ),
+            ],
+        );
+        db.finish().await;
     });
 }
 
