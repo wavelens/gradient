@@ -134,6 +134,13 @@
       lib.optional (file != null) "gradient_action_${task.project}_${task.name}_${action.name}_${field}:${file}"
     ) task.actions
   ) cfg.state.tasks);
+
+  taskPostRequestTriggerSecretFileLoadCredentialEntries = lib.concatLists (lib.mapAttrsToList (_: task:
+    lib.concatLists (lib.imap0 (index: trigger:
+      lib.optional (trigger.secret_file != null)
+        "gradient_trigger_${task.project}_${task.name}_${toString index}_secret:${trigger.secret_file}"
+    ) (lib.optionals (task.triggers != null) task.triggers))
+  ) cfg.state.tasks);
 in {
   disabledModules = [ "services/continuous-integration/gradient/default.nix" ];
 
@@ -684,7 +691,7 @@ in {
               "gradient_metrics_token:${cfg.metrics.tokenFile}"
             ++ userPasswordFiles ++ projectPrivateKeyFiles ++ projectSecretFiles ++ projectPasswordLoadCredentialEntries ++ cacheSigningKeyFiles ++ apiKeyFiles
               ++ workerTokenFiles ++ gitHostConnectionLoadCredentialEntries
-              ++ actionSecretFiles;
+              ++ actionSecretFiles ++ taskPostRequestTriggerSecretFileLoadCredentialEntries;
           };
 
           unitConfig = {
