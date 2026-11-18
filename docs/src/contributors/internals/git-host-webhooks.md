@@ -61,14 +61,17 @@ GitHub App webhooks reach the following handlers:
 
 ## Approval of Pull Requests from Forks
 
-Pull requests from forks wait for a maintainer with ``require_approval`` in their trigger. Gradient does not create an evaluation before approval of the exact head commit by a person with write access to the repository.
+Pull requests from forks wait for maintainers with `require_approval` in the trigger. Gradient does not create an evaluation of a commit until people with write access to the repository approve that commit.
 
 | Step | Code | Action |
 |---|---|---|
 | 1 | `decide_pr_gate` (`git_host_hooks/fanout.rs`) | Block unless the head repository is equal to the base repository, or the sender can write to the repository. Treat an unknown fork state as a fork. |
 | 2 | `is_commit_approved_by_maintainer_for_task` | Approved commits start evaluation immediately. Database errors mark the commit as unapproved. |
 | 3 | `store_pending_approval_for_untrusted_fork_pull_request_commit_and_post_approval_check` | Store one pending `fork_pull_request_approval` row for each task, pull request and commit. Delete old pending rows for the same pull request. Record `fork_pull_request_approval.needs_maintainer_approval`. Post the `gradient/<task>: Approval` check. |
-| 4 | `approve_approval_and_start_approved_commit_evaluation` (`git_host_hooks/approval.rs`) | The **Approve and run** button, an approval review, or `/gradient approve` and `/gradient run` from a user with write permission to the repository mark the row as approved. The row trigger can start evaluation of the approved commit after that. Only one evaluation can start per row. |
+| 4 | `handle_github_check_run` (`git_host_hooks/approval.rs`) | A user with write permission can use the **Approve and run** button to approve the row of the check that was clicked. |
+| 5 | `handle_pull_request_review` | An approval review from a user with write permission can approve only the pending row of the commit under review. GitHub can send that commit as `review.commit_id`. Gitea and Forgejo don't send the commit under review. Gradient can use `pull_request.head.sha` instead. A review for a commit without a pending row can't change anything. |
+| 6 | `approve_newest_pending_approval_and_start_its_evaluation` | `/gradient approve` and `/gradient run` from users with write permission have no commits. These comments approve the newest pending row of the pull request. |
+| 7 | `approve_approval_and_start_approved_commit_evaluation` | Load the task and active triggers first. Mark the row as approved and create an evaluation in one transaction. Roll back the transaction and keep the row pending if no new evaluation can result. Record `fork_pull_request_approval.evaluation_started_after_approval` after the commit, not before. |
 
 ## Related
 

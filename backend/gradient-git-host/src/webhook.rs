@@ -362,6 +362,8 @@ pub struct GitHubReview {
     pub state: Option<String>,
     #[serde(default)]
     pub user: Option<GitHubUser>,
+    #[serde(default)]
+    pub commit_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -390,6 +392,8 @@ pub struct GiteaReview {
 pub struct GiteaReviewPr {
     #[serde(default)]
     pub number: Option<u64>,
+    #[serde(default)]
+    pub head: Option<GiteaPRRef>,
 }
 
 pub struct ParsedPushEvent {
@@ -461,6 +465,7 @@ pub struct ParsedPullRequestReviewEvent {
     pub reviewer: Option<String>,
     pub pr_number: Option<u64>,
     pub repository_full_name: Option<String>,
+    pub commit_hash: Option<Vec<u8>>,
 }
 
 pub struct PushCommit {
@@ -908,6 +913,11 @@ impl ParsedPullRequestReviewEvent {
                 .state
                 .as_deref()
                 .is_some_and(|s| s.eq_ignore_ascii_case("approved"));
+        let commit_hash = payload
+            .review
+            .commit_id
+            .as_deref()
+            .and_then(|sha| decode_sha_hex(sha, "github", "review.commit_id"));
         let reviewer = payload
             .review
             .user
@@ -918,6 +928,7 @@ impl ParsedPullRequestReviewEvent {
             reviewer,
             pr_number: payload.pull_request.number,
             repository_full_name: payload.repository.full_name,
+            commit_hash,
         })
     }
 
@@ -931,12 +942,18 @@ impl ParsedPullRequestReviewEvent {
         };
         let approved = payload.action == "reviewed"
             && payload.review.review_type.as_deref() == Some("pull_request_review_approved");
+        let commit_hash = payload
+            .pull_request
+            .head
+            .as_ref()
+            .and_then(|head| decode_sha_hex(&head.sha, "gitea", "pull_request.head.sha"));
         let reviewer = payload.sender.and_then(|s| s.username.or(s.login));
         Some(Self {
             approved,
             reviewer,
             pr_number: payload.pull_request.number,
             repository_full_name: payload.repository.full_name,
+            commit_hash,
         })
     }
 }
@@ -1532,8 +1549,12 @@ mod tests {
     fn github_review_approved_by_maintainer() {
         let body = r#"{
             "action": "submitted",
-            "review": { "state": "approved", "user": { "login": "maintainer" } },
-            "pull_request": { "number": 42 },
+            "review": {
+                "state": "approved",
+                "user": { "login": "maintainer" },
+                "commit_id": "abcdef0123456789abcdef0123456789abcdef01"
+            },
+            "pull_request": { "number": 42, "head": { "sha": "1111111111111111111111111111111111111111" } },
             "repository": { "clone_url": "x", "ssh_url": "y", "full_name": "org/repo" }
         }"#;
         let ev = ParsedPullRequestReviewEvent::from_github(body.as_bytes()).unwrap();
@@ -1541,6 +1562,19 @@ mod tests {
         assert_eq!(ev.reviewer.as_deref(), Some("maintainer"));
         assert_eq!(ev.pr_number, Some(42));
         assert_eq!(ev.repository_full_name.as_deref(), Some("org/repo"));
+        assert_eq!(ev.commit_hash, Some(hex::decode(VALID_SHA).unwrap()));
+    }
+
+    #[test]
+    fn github_review_without_commit_id_has_no_commit_hash() {
+        let body = r#"{
+            "action": "submitted",
+            "review": { "state": "approved", "user": { "login": "maintainer" } },
+            "pull_request": { "number": 42 },
+            "repository": { "clone_url": "x", "ssh_url": "y", "full_name": "org/repo" }
+        }"#;
+        let ev = ParsedPullRequestReviewEvent::from_github(body.as_bytes()).unwrap();
+        assert_eq!(ev.commit_hash, None);
     }
 
     #[test]
@@ -1571,8 +1605,12 @@ mod tests {
     fn gitea_review_approved_by_maintainer() {
         let body = r#"{
             "action": "reviewed",
-            "review": { "type": "pull_request_review_approved" },
-            "pull_request": { "number": 7 },
+            "review": { "type": "pull_request_review_approved", "content": "" },
+            "commit_id": "",
+            "pull_request": {
+                "number": 7,
+                "head": { "sha": "abcdef0123456789abcdef0123456789abcdef01", "ref": "feature", "label": "feature" }
+            },
             "repository": { "clone_url": "x", "full_name": "org/repo" },
             "sender": { "username": "maintainer" }
         }"#;
@@ -1581,6 +1619,20 @@ mod tests {
         assert_eq!(ev.reviewer.as_deref(), Some("maintainer"));
         assert_eq!(ev.pr_number, Some(7));
         assert_eq!(ev.repository_full_name.as_deref(), Some("org/repo"));
+        assert_eq!(ev.commit_hash, Some(hex::decode(VALID_SHA).unwrap()));
+    }
+
+    #[test]
+    fn gitea_review_without_pull_request_head_has_no_commit_hash() {
+        let body = r#"{
+            "action": "reviewed",
+            "review": { "type": "pull_request_review_approved" },
+            "pull_request": { "number": 7 },
+            "repository": { "clone_url": "x", "full_name": "org/repo" },
+            "sender": { "username": "maintainer" }
+        }"#;
+        let ev = ParsedPullRequestReviewEvent::from_gitea(body.as_bytes()).unwrap();
+        assert_eq!(ev.commit_hash, None);
     }
 
     #[test]

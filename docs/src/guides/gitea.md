@@ -180,7 +180,8 @@ services.gradient.state.tasks.app = {
 |---|---|
 | Open or update a pull request | The head commit of the pull request get evaluated |
 | Comment `/gradient run` | A new evaluation of the pull request start |
-| Comment `/gradient approve` or approve the review | Fork pull requests that wait for maintainer approval get the latest commit evaluated. |
+| Comment `/gradient approve` | Gradient can evaluate the latest commit of a fork pull request with pending maintainer approval. |
+| Approve the review | Gradient can evaluate the head commit at review time of a fork pull request with pending maintainer approval. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 There's a setting called **Require maintainer approval for PRs from non-writers** for the **Pull Request (reporter)** trigger (`require_approval` in `config`). Approval checks depend on this setting. New commits need a new approval.

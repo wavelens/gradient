@@ -15,8 +15,8 @@ use super::response::{
 };
 use gradient_ci::CiContext;
 use gradient_ci::{
-    ApplyInput, ApplyOutcome, PathFilterBaseCommit, PathFilterCommitComparison, apply_trigger,
-    parse_owner_repo, should_fire_trigger_for_path_filter,
+    ApplyError, ApplyInput, ApplyOutcome, PathFilterBaseCommit, PathFilterCommitComparison,
+    apply_trigger, parse_owner_repo, should_fire_trigger_for_path_filter,
 };
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
@@ -518,7 +518,7 @@ pub(super) async fn load_trigger_task(db: &WebDb, trig: &ept::Model) -> Option<M
     }
 }
 
-pub(super) async fn apply_and_record(
+async fn apply_and_record(
     db: &DbContext,
     scheduler: &Arc<Scheduler>,
     task: &MTask,
@@ -529,6 +529,17 @@ pub(super) async fn apply_and_record(
 ) {
     let apply_result = apply_trigger(&db.web_db, task, input).await;
     touch_trigger_last_fired(&db.web_db, trig).await;
+    record_trigger_apply_outcome(db, scheduler, task, apply_result, project_name, outcome).await;
+}
+
+pub(super) async fn record_trigger_apply_outcome(
+    db: &DbContext,
+    scheduler: &Arc<Scheduler>,
+    task: &MTask,
+    apply_result: Result<ApplyOutcome, ApplyError>,
+    project_name: String,
+    outcome: &mut WebhookTriggerOutcome,
+) {
     match apply_result {
         Ok(ApplyOutcome::Created {
             evaluation: eval,

@@ -81,6 +81,21 @@ pub async fn get_newest_pending_pull_request_approval_for_task<C: ConnectionTrai
         .await
 }
 
+pub async fn get_pending_pull_request_approval_for_task_commit<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+    pr_number: u64,
+    commit_hash: &[u8],
+) -> Result<Option<MForkPullRequestApproval>, DbErr> {
+    EForkPullRequestApproval::find()
+        .filter(CForkPullRequestApproval::Task.eq(task))
+        .filter(CForkPullRequestApproval::PrNumber.eq(pr_number as i64))
+        .filter(CForkPullRequestApproval::CommitHash.eq(commit_hash.to_vec()))
+        .filter(CForkPullRequestApproval::ApprovedAt.is_null())
+        .one(db)
+        .await
+}
+
 pub async fn find_approval_by_check_run_id<C: ConnectionTrait>(
     db: &C,
     check_run_id: i64,
@@ -260,6 +275,22 @@ mod tests {
         )
         .await
         .expect("the approval state loads");
+        let pending_for_commit = get_pending_pull_request_approval_for_task_commit(
+            &conn,
+            task,
+            APPROVAL_TEST_PULL_REQUEST_NUMBER,
+            &[1; 20],
+        )
+        .await
+        .expect("the pending approval of the commit loads");
+        let pending_for_other_commit = get_pending_pull_request_approval_for_task_commit(
+            &conn,
+            task,
+            APPROVAL_TEST_PULL_REQUEST_NUMBER,
+            &[2; 20],
+        )
+        .await
+        .expect("the pending approval of another commit loads");
 
         let first = mark_pull_request_approval_approved(&conn, pending.id, "maintainer")
             .await
@@ -269,6 +300,19 @@ mod tests {
             .expect("the second approval succeeds");
 
         assert!(!approved_before);
+        assert_eq!(pending_for_commit.map(|row| row.id), Some(pending.id));
+        assert!(pending_for_other_commit.is_none());
+        assert!(
+            get_pending_pull_request_approval_for_task_commit(
+                &conn,
+                task,
+                APPROVAL_TEST_PULL_REQUEST_NUMBER,
+                &[1; 20]
+            )
+            .await
+            .expect("the pending approval of the approved commit loads")
+            .is_none()
+        );
         assert_eq!(
             first.and_then(|row| row.approving_maintainer_login),
             Some("maintainer".to_owned())

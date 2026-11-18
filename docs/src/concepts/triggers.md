@@ -125,7 +125,7 @@ Users with write permission to the repository can steer a pull request with comm
 |---|---|
 | `/gradient run` | Approval and evaluation of the latest commit pending approval. Otherwise, a new evaluation of the current head commit. A commit with a prior evaluation can still receive a new evaluation. |
 | `/gradient run <wildcard>` | The same with a different [wildcard](../reference/wildcards.md) |
-| `/gradient approve` | Approval and Evaluation of the Latest Commit Up for Approval |
+| `/gradient approve` | Approval and evaluation of the latest commit pending approval. |
 | `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 `/gradient run` fire pull request triggers with action `synchronize`. Triggers without `synchronize` in `actions`, or with a `branches` filter that does not match, ignore that command.
