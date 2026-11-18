@@ -189,41 +189,6 @@ pub async fn insert<C: ConnectionTrait>(
     evaluation.into_active_model().insert(db).await
 }
 
-crate::sql! {
-    EVAL_BY_CHECK_RUN_ID = r#"SELECT id FROM evaluation
-           WHERE check_run_ids IS NOT NULL
-             AND EXISTS (
-                 SELECT 1
-                 FROM jsonb_each(check_run_ids) AS kv
-                 WHERE (kv.value)::text::bigint = $1
-             )
-           LIMIT 1"#,
-        params = [Int(123456)];
-}
-
-pub async fn id_by_check_run<C: ConnectionTrait>(
-    db: &C,
-    check_run: i64,
-) -> Result<Option<EvaluationId>, DbErr> {
-    // `evaluation.check_run_ids` is a JSON map per check-context name. Any stored id can match the
-    // clicked check.
-    use sea_orm::FromQueryResult;
-
-    #[derive(FromQueryResult)]
-    struct Row {
-        id: uuid::Uuid,
-    }
-
-    Ok(
-        Row::find_by_statement(
-            EVAL_BY_CHECK_RUN_ID.bind([sea_orm::Value::BigInt(Some(check_run))]),
-        )
-        .one(db)
-        .await?
-        .map(|row| EvaluationId::new(row.id)),
-    )
-}
-
 pub async fn of_commit<C: ConnectionTrait>(
     db: &C,
     commit: CommitId,

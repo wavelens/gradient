@@ -92,7 +92,8 @@ Push events require the **Push (reporter)** trigger from step 4. Pull Requests r
 |---|---|
 | Open or update a pull request | Evaluation of the pull request's head commit |
 | Comment `/gradient run` | New evaluation of the pull request |
-| Comment `/gradient approve` or approve the review | Evaluation of the latest commit in a fork pull request awaiting maintainer approval. |
+| Comment `/gradient approve` | Evaluation of the latest commit in a fork pull request awaiting maintainer approval. |
+| Approve the review | Evaluation of the reviewed commit in a fork pull request awaiting maintainer approval. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 Commits in pull requests from forks wait for maintainer approval before the start of evaluation. The `gradient/<task>: Approval` check can show the **Approve and run** button. Each new commit must get a new approval. Set **Require maintainer approval for PRs from non-writers** with the **Pull Request (reporter)** trigger to enable this check.

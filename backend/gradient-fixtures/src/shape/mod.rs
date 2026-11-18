@@ -1092,7 +1092,7 @@ mod tests {
                 .commit_hash(&[7; 20])
                 .wildcard("pkg.*")
                 .evaluation_kind(EvaluationKind::InputUpdate)
-                .waiting_reason(serde_json::json!({"kind": "approval"}))
+                .waiting_reason(serde_json::json!({"kind": "no_cache"}))
                 .updated_at(earlier)
                 .last_evaluation(e)
                 .trigger(

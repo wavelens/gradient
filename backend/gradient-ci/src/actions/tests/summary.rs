@@ -71,14 +71,17 @@ fn test_fire_payload_reads_names_from_content() {
 fn status_spells_out_the_event_suffix() {
     run(async {
         let envelope = json!({ "at": "t", "content": {} });
-        let s = EventSummary::resolve(&make_ctx(), "evaluation.action_required", &envelope)
-            .await
-            .unwrap();
-        assert_eq!(s.status, "action required");
-        assert!(
-            s.mail_body()
-                .starts_with("evaluation.action_required action required\n")
-        );
+        let s = EventSummary::resolve(
+            &make_ctx(),
+            "fork_pull_request_approval.needs_maintainer_approval",
+            &envelope,
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.status, "needs maintainer approval");
+        assert!(s.mail_body().starts_with(
+            "fork_pull_request_approval.needs_maintainer_approval needs maintainer approval\n"
+        ));
     });
 }
 
