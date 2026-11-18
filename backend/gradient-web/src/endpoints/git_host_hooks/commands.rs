@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::approval::{PullRequestApprovalContext, on_approval_granted, sender_is_trusted};
+use super::approval::{
+    PullRequestApprovalContext, approve_newest_pending_approval_and_start_its_evaluation,
+    sender_is_trusted,
+};
 use super::fanout::trigger_pr_for_connection;
 use super::installation::{resolve_github_app_targets, task_serves_repository};
 use super::payloads::CommentPayload;
 use gradient_ci::CiContext;
 use gradient_ci::pull_request_summary::enable_pull_request_summary;
-use gradient_ci::{
-    find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,
-    unpark_approval_with_wildcard,
-};
 use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
 use gradient_types::wildcard::Wildcard;
@@ -158,7 +157,7 @@ pub(super) async fn handle_issue_comment(
     if !action_taken {
         debug!(
             pr_number,
-            "/gradient comment had no parked evaluation and produced no fresh fire"
+            "The `/gradient` comment has no pending approval. No new evaluation started."
         );
     }
 }
@@ -270,13 +269,36 @@ async fn handle_comment_for_connection(ctx: &CommentRoute<'_>) -> bool {
     if matches!(ctx.cmd, GradientCommand::Summary) {
         return enable_summaries(ctx, &task_ids).await;
     }
-    if unpark_existing_approvals(ctx, &task_ids).await {
+    if approve_newest_pending_approval_and_start_its_evaluation(
+        ctx.ci,
+        ctx.scheduler,
+        &task_ids,
+        ctx.pr_number,
+        ctx.sender,
+        ctx.wildcard_override,
+        build_source_comment_for_pull_request_command(ctx.reaction_target.as_ref()),
+    )
+    .await
+    {
         return true;
     }
     if !matches!(ctx.cmd, GradientCommand::Run { .. }) {
         return false;
     }
     run_fresh_evaluation(ctx, &task_ids).await
+}
+
+fn build_source_comment_for_pull_request_command(
+    target: Option<&gradient_ci::ReactionTarget>,
+) -> Option<serde_json::Value> {
+    target.map(|t| {
+        serde_json::json!({
+            "owner": t.owner,
+            "repo": t.repo,
+            "pr_number": t.pr_number,
+            "comment_id": t.comment_id,
+        })
+    })
 }
 
 async fn enable_summaries(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
@@ -293,52 +315,6 @@ async fn enable_summaries(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
     }
 
     enabled_any
-}
-
-async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
-    let mut unparked_any = false;
-    for task_id in task_ids {
-        let Ok(Some(eval)) =
-            find_approval_gated_eval(&ctx.ci.db.web_db, *task_id, ctx.pr_number).await
-        else {
-            continue;
-        };
-        let unpark_result = match ctx.wildcard_override {
-            None => unpark_approval(&ctx.ci.db.web_db, eval.id).await,
-            Some(w) => unpark_approval_with_wildcard(&ctx.ci.db.web_db, eval.id, w).await,
-        };
-        match unpark_result {
-            Ok(Some(unparked)) => {
-                info!(
-                    evaluation_id = %eval.id,
-                    pr_number = ctx.pr_number,
-                    sender = %ctx.sender,
-                    wildcard_override = ctx.wildcard_override.as_deref(),
-                    "PR approval gate cleared via /gradient comment"
-                );
-                if let Some(target) = ctx.reaction_target {
-                    let json = serde_json::json!({
-                        "owner": target.owner,
-                        "repo": target.repo,
-                        "pr_number": target.pr_number,
-                        "comment_id": target.comment_id,
-                    });
-                    if let Err(e) =
-                        set_evaluation_source_comment(&ctx.ci.db.web_db, unparked.id, json).await
-                    {
-                        warn!(error = %e, evaluation_id = %unparked.id, "stamp source_comment on unparked eval failed");
-                    }
-                }
-                on_approval_granted(&ctx.ci.db, &unparked).await;
-                unparked_any = true;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate")
-            }
-        }
-    }
-    unparked_any
 }
 
 /// The maintainer is already trust-verified. `sender` is letting `decide_pr_gate` treat the command
@@ -367,14 +343,6 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
         is_fork: snapshot.is_fork,
         sender: Some(ctx.sender.to_string()),
     };
-    let source_comment_json = ctx.reaction_target.as_ref().map(|t| {
-        serde_json::json!({
-            "owner": t.owner,
-            "repo": t.repo,
-            "pr_number": t.pr_number,
-            "comment_id": t.comment_id,
-        })
-    });
     if ctx.repository_urls.is_empty() {
         warn!(
             connection_id = %ctx.connection_id,
@@ -398,7 +366,7 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
         snapshot.head_clone_url.clone(),
         true,
         ctx.wildcard_override.clone(),
-        source_comment_json,
+        build_source_comment_for_pull_request_command(ctx.reaction_target.as_ref()),
     )
     .await;
     if !outcome.queued.is_empty() {

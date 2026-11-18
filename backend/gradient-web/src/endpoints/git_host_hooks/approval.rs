@@ -8,15 +8,24 @@ use super::commands::{
     first_task_with_reporter, github_installation_id_from_comment_body,
     load_active_pull_request_tasks_for_event_repository,
 };
+use super::fanout::{apply_and_record, project_name_for};
 use super::installation::{resolve_github_app_targets, task_serves_repository};
 use super::payloads::GithubCheckRunRequestedAction;
+use super::response::WebhookTriggerOutcome;
 use gradient_ci::CiContext;
-use gradient_ci::{APPROVAL_ACTION_ID, find_approval_gated_eval, unpark_approval};
+use gradient_ci::{APPROVAL_ACTION_ID, ApplyInput};
+use gradient_db::DbContext;
+use gradient_db::fork_pull_request_approvals as approvals;
 use gradient_db::lookup::by_id;
-use gradient_db::{DbContext, WebDb};
+use gradient_entity::evaluation::WalkMode;
 use gradient_git_host::{ParsedPullRequestEvent, ParsedPullRequestReviewEvent};
-use gradient_types::events::evaluation;
+use gradient_scheduler::Scheduler;
+use gradient_types::branch_key;
+use gradient_types::events::fork_pull_request_approval_events::{Phase, Reported};
+use gradient_types::input::vec_to_hex;
+use gradient_types::triggers::TriggerType;
 use gradient_types::*;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, Default)]
@@ -38,7 +47,179 @@ impl From<&ParsedPullRequestEvent> for PullRequestApprovalContext {
     }
 }
 
-pub(super) async fn handle_github_check_run(ci: &CiContext, body: &[u8]) {
+#[derive(Debug, Clone)]
+pub(super) struct ApprovalInfo {
+    pub pr_number: u64,
+    pub pr_author: String,
+}
+
+fn approval_event(
+    approval: &MForkPullRequestApproval,
+    project: ProjectId,
+    phase: Phase,
+) -> Reported {
+    Reported {
+        approval_id: approval.id,
+        phase,
+        task: approval.task,
+        project,
+        pr_number: approval.pr_number as u64,
+        pr_author: approval.pr_author.clone(),
+        commit: vec_to_hex(&approval.commit_hash),
+        approving_maintainer_login: approval.approving_maintainer_login.clone(),
+    }
+}
+
+pub(super) async fn store_pending_approval_for_untrusted_fork_pull_request_commit_and_post_approval_check(
+    db: &DbContext,
+    project: ProjectId,
+    pending: MForkPullRequestApproval,
+) -> Result<(), sea_orm::DbErr> {
+    let stored =
+        approvals::add_pending_approval_for_pull_request_commit_and_remove_older_pending_approvals(
+            &db.web_db, pending,
+        )
+        .await?;
+    db.record(approval_event(
+        &stored,
+        project,
+        Phase::NeedsMaintainerApproval,
+    ))
+    .await;
+    Ok(())
+}
+
+pub(super) async fn approve_approval_and_start_approved_commit_evaluation(
+    ci: &CiContext,
+    scheduler: &Arc<Scheduler>,
+    approval: PullRequestApprovalId,
+    maintainer_login: &str,
+    wildcard_override: Option<String>,
+    source_comment: Option<serde_json::Value>,
+) -> bool {
+    let approved = match approvals::mark_pull_request_approval_approved(
+        &ci.db.web_db,
+        approval,
+        maintainer_login,
+    )
+    .await
+    {
+        Ok(Some(approved)) => approved,
+        Ok(None) => return false,
+        Err(e) => {
+            warn!(error = %e, %approval, "Mark fork pull request approval as approved.");
+            return false;
+        }
+    };
+    let Some(task) = by_id::<ETask, _>(&ci.db.web_db, approved.task)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return false;
+    };
+    ci.db
+        .record(approval_event(
+            &approved,
+            task.project,
+            Phase::EvaluationStartedAfterApproval,
+        ))
+        .await;
+
+    let Some(trigger) = by_id::<ETaskTrigger, _>(&ci.db.web_db, approved.trigger)
+        .await
+        .ok()
+        .flatten()
+        .filter(|trigger| trigger.active)
+    else {
+        return false;
+    };
+    let pr_number = approved.pr_number as u64;
+    let source_comment = source_comment.unwrap_or_else(
+        || serde_json::json!({ "pr_number": pr_number, "pr_author": approved.pr_author }),
+    );
+    let input = ApplyInput {
+        trigger_id: Some(trigger.id),
+        trigger_type: TriggerType::ReporterPullRequest,
+        branch: branch_key::pull_request(pr_number),
+        commit_hash: approved.commit_hash,
+        commit_message: approved.commit_message,
+        author_name: approved.author_name,
+        manual: true,
+        honors_skip_marker: false,
+        repository_override: approved.head_repo_clone_url,
+        wildcard_override,
+        source_comment: Some(source_comment),
+        started_by: None,
+        walk_mode: WalkMode::Pruned,
+    };
+    let project_name = project_name_for(&ci.db.web_db, task.project)
+        .await
+        .unwrap_or_default();
+    let mut outcome = WebhookTriggerOutcome::default();
+    apply_and_record(
+        &ci.db,
+        scheduler,
+        &task,
+        &trigger,
+        input,
+        project_name,
+        &mut outcome,
+    )
+    .await;
+    info!(
+        %approval,
+        pr_number,
+        maintainer = maintainer_login,
+        queued = outcome.queued.len(),
+        "A maintainer approved the commit in a fork pull request."
+    );
+    !outcome.queued.is_empty()
+}
+
+pub(super) async fn approve_newest_pending_approval_and_start_its_evaluation(
+    ci: &CiContext,
+    scheduler: &Arc<Scheduler>,
+    task_ids: &[TaskId],
+    pr_number: u64,
+    maintainer_login: &str,
+    wildcard_override: &Option<String>,
+    source_comment: Option<serde_json::Value>,
+) -> bool {
+    let mut started_any = false;
+    for task_id in task_ids {
+        let pending = match approvals::get_newest_pending_pull_request_approval_for_task(
+            &ci.db.web_db,
+            *task_id,
+            pr_number,
+        )
+        .await
+        {
+            Ok(Some(pending)) => pending,
+            Ok(None) => continue,
+            Err(e) => {
+                warn!(error = %e, %task_id, pr_number, "Loading Pending Approvals for Fork Pull Requests");
+                continue;
+            }
+        };
+        started_any |= approve_approval_and_start_approved_commit_evaluation(
+            ci,
+            scheduler,
+            pending.id,
+            maintainer_login,
+            wildcard_override.clone(),
+            source_comment.clone(),
+        )
+        .await;
+    }
+    started_any
+}
+
+pub(super) async fn handle_github_check_run(
+    ci: &CiContext,
+    scheduler: &Arc<Scheduler>,
+    body: &[u8],
+) {
     let payload: GithubCheckRunRequestedAction = match serde_json::from_slice(body) {
         Ok(p) => p,
         Err(e) => {
@@ -72,80 +253,49 @@ pub(super) async fn handle_github_check_run(ci: &CiContext, body: &[u8]) {
     };
 
     let check_id = payload.check_run.id;
-    let Some(eval) = find_eval_by_check_id(&ci.db.web_db, check_id).await else {
+    let Some(approval) = approvals::find_approval_by_check_run_id(&ci.db.web_db, check_id)
+        .await
+        .ok()
+        .flatten()
+    else {
         warn!(
             check_run_id = check_id,
-            "GitHub check_run.requested_action: no evaluation with matching repo_check_id"
+            "GitHub check_run.requested_action: no fork pull request approval with a matching check run ID"
         );
         return;
     };
-    let Some(task_id) = eval.task else {
-        return;
-    };
-    let task_repository = by_id::<ETask, _>(&ci.db.web_db, task_id)
+    let task_repository = by_id::<ETask, _>(&ci.db.web_db, approval.task)
         .await
         .ok()
         .flatten()
         .map(|task| task.repository);
     if !task_repository.is_some_and(|url| task_serves_repository(&url, owner, repo)) {
         warn!(
-            evaluation_id = %eval.id,
+            approval_id = %approval.id,
             %full_name,
-            "Rejecting approval click - the evaluation belongs to another repository"
+            "Reject approval click - this approval is for a different repository"
         );
         return;
     }
 
-    if !sender_is_trusted(ci, task_id, owner, repo, sender.login).await {
+    if !sender_is_trusted(ci, approval.task, owner, repo, sender.login).await {
         warn!(
-            evaluation_id = %eval.id,
+            approval_id = %approval.id,
             sender = %sender.login,
             "Rejecting approval click - sender is not a repo writer"
         );
         return;
     }
 
-    match unpark_approval(&ci.db.web_db, eval.id).await {
-        Ok(Some(unparked)) => {
-            info!(
-                evaluation_id = %eval.id,
-                sender = %sender.login,
-                "PR approval gate cleared via GitHub action"
-            );
-            on_approval_granted(&ci.db, &unparked).await;
-        }
-        Ok(None) => {
-            warn!(
-                evaluation_id = %eval.id,
-                "Approval click but evaluation no longer in Waiting+Approval state"
-            );
-        }
-        Err(e) => warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate"),
-    }
-}
-
-pub(super) async fn on_approval_granted(db: &DbContext, eval: &MEvaluation) {
-    let Some(task_id) = eval.task else {
-        return;
-    };
-    db.record(evaluation::Reported {
-        evaluation_id: eval.id,
-        phase: evaluation::Phase::ApprovalGranted,
-        status: i16::from(eval.status),
-        task: Some(task_id),
-        ..Default::default()
-    })
+    approve_approval_and_start_approved_commit_evaluation(
+        ci,
+        scheduler,
+        approval.id,
+        sender.login,
+        None,
+        None,
+    )
     .await;
-    db.record_evaluation_created(eval).await;
-}
-
-async fn find_eval_by_check_id(db: &WebDb, check_id: i64) -> Option<MEvaluation> {
-    let id = gradient_db::evaluations::id_by_check_run(db, check_id)
-        .await
-        .ok()
-        .flatten()?;
-
-    by_id::<EEvaluation, _>(db, id).await.ok().flatten()
 }
 
 /// The trust probe is failing closed on any error.
@@ -175,30 +325,9 @@ pub(super) async fn sender_is_trusted(
     }
 }
 
-async fn unpark_pr_approval_eval(
-    db: &DbContext,
-    task_id: TaskId,
-    pr_number: u64,
-) -> Option<MEvaluation> {
-    let eval = find_approval_gated_eval(&db.web_db, task_id, pr_number)
-        .await
-        .ok()
-        .flatten()?;
-    match unpark_approval(&db.web_db, eval.id).await {
-        Ok(Some(unparked)) => {
-            on_approval_granted(db, &unparked).await;
-            Some(unparked)
-        }
-        Ok(None) => None,
-        Err(e) => {
-            warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate via review");
-            None
-        }
-    }
-}
-
 pub(super) async fn handle_pull_request_review(
     ci: &CiContext,
+    scheduler: &Arc<Scheduler>,
     git_host: GitHostType,
     connection_id: Option<GitHostConnectionId>,
     body: &[u8],
@@ -283,15 +412,120 @@ pub(super) async fn handle_pull_request_review(
             );
             continue;
         }
-        for task_id in &task_ids {
-            if let Some(unparked) = unpark_pr_approval_eval(&ci.db, *task_id, pr_number).await {
-                info!(
-                    evaluation_id = %unparked.id,
-                    pr_number,
-                    %reviewer,
-                    "PR approval gate cleared via native Git host review"
-                );
-            }
-        }
+        approve_newest_pending_approval_and_start_its_evaluation(
+            ci, scheduler, &task_ids, pr_number, &reviewer, &None, None,
+        )
+        .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::ids::task_id;
+    use gradient_fixtures::{rows, test_date};
+    use gradient_test_support::state::TestState;
+    use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig};
+
+    #[tokio::test]
+    async fn approving_pending_fork_pull_request_approval_starts_one_approved_commit_evaluation_and_approving_again_starts_none()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        gradient_db::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the user is written");
+        gradient_db::rows::insert::<EProject, _>(&conn, rows::project())
+            .await
+            .expect("the project is written");
+        gradient_db::rows::insert::<ETask, _>(&conn, rows::task())
+            .await
+            .expect("the task is written");
+        let pull_request = TriggerConfig::ReporterPullRequest {
+            branches: vec![],
+            actions: vec![],
+            require_approval: true,
+            path_filter: ChangedFilePathFilter::default(),
+        };
+        let trigger = gradient_db::triggers::insert(
+            &conn,
+            MTaskTrigger {
+                id: TaskTriggerId::now_v7(),
+                task: task_id(),
+                trigger_type: pull_request.trigger_type(),
+                config: pull_request.to_db_json(),
+                active: true,
+                created_at: test_date(),
+                updated_at: test_date(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the trigger is written");
+        let pending = gradient_db::rows::insert::<EForkPullRequestApproval, _>(
+            &conn,
+            MForkPullRequestApproval {
+                id: PullRequestApprovalId::now_v7(),
+                task: task_id(),
+                trigger: trigger.id,
+                pr_number: 7,
+                pr_author: "external".into(),
+                commit_hash: vec![9; 20],
+                head_repo_clone_url: Some("https://github.com/external/repo".into()),
+                created_at: test_date(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the pending approval is written");
+        let state = TestState::new()
+            .web_db(conn.clone())
+            .worker_db(conn)
+            .build();
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        let ci = state.ci();
+
+        let first = approve_approval_and_start_approved_commit_evaluation(
+            &ci,
+            &scheduler,
+            pending.id,
+            "maintainer",
+            None,
+            None,
+        )
+        .await;
+        let second = approve_approval_and_start_approved_commit_evaluation(
+            &ci,
+            &scheduler,
+            pending.id,
+            "maintainer",
+            None,
+            None,
+        )
+        .await;
+
+        assert!(first);
+        assert!(!second);
+        let evaluations = db.rows::<EEvaluation>().await;
+        assert_eq!(evaluations.len(), 1);
+        assert_eq!(
+            evaluations[0].repository,
+            "https://github.com/external/repo"
+        );
+        let commit = db
+            .find::<ECommit>(evaluations[0].commit)
+            .await
+            .expect("the evaluated commit");
+        assert_eq!(commit.hash, vec![9; 20]);
+        let approved = db
+            .find::<EForkPullRequestApproval>(pending.id)
+            .await
+            .expect("the approval");
+        assert_eq!(
+            approved.approving_maintainer_login.as_deref(),
+            Some("maintainer")
+        );
+        db.finish().await;
     }
 }

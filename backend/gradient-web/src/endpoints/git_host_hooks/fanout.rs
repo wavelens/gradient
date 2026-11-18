@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::approval::{PullRequestApprovalContext, sender_is_trusted};
+use super::approval::{
+    ApprovalInfo, PullRequestApprovalContext, sender_is_trusted,
+    store_pending_approval_for_untrusted_fork_pull_request_commit_and_post_approval_check,
+};
 use super::flake_input_push::trigger_input_updates_for_push;
 use super::installation::event_repo_matches_task;
 use super::response::{
@@ -12,8 +15,8 @@ use super::response::{
 };
 use gradient_ci::CiContext;
 use gradient_ci::{
-    ApplyInput, ApplyOutcome, ApprovalInfo, PathFilterBaseCommit, PathFilterCommitComparison,
-    apply_trigger, parse_owner_repo, should_fire_trigger_for_path_filter,
+    ApplyInput, ApplyOutcome, PathFilterBaseCommit, PathFilterCommitComparison, apply_trigger,
+    parse_owner_repo, should_fire_trigger_for_path_filter,
 };
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
@@ -443,11 +446,23 @@ where
             continue;
         }
 
-        let gate_approval = if pr_require_approval {
-            decide_pr_gate(ci, &task, approval_ctx.as_ref()).await
-        } else {
-            None
-        };
+        if pr_require_approval
+            && let Some(reason) =
+                require_maintainer_approval_for_untrusted_fork_pull_request_commit(
+                    ci,
+                    &task,
+                    &trig,
+                    approval_ctx.as_ref(),
+                    &commit_hash,
+                    repository_override.clone(),
+                    commit_message.clone(),
+                    author_name.clone(),
+                )
+                .await
+        {
+            push_skipped(&mut outcome, &task, project_name, reason);
+            continue;
+        }
 
         let input = ApplyInput {
             trigger_id: Some(trig.id),
@@ -458,7 +473,6 @@ where
             author_name: author_name.clone(),
             manual,
             honors_skip_marker,
-            gate_approval,
             repository_override: repository_override.clone(),
             wildcard_override: wildcard_override.clone(),
             source_comment: source_comment.clone(),
@@ -504,7 +518,7 @@ pub(super) async fn load_trigger_task(db: &WebDb, trig: &ept::Model) -> Option<M
     }
 }
 
-async fn apply_and_record(
+pub(super) async fn apply_and_record(
     db: &DbContext,
     scheduler: &Arc<Scheduler>,
     task: &MTask,
@@ -603,6 +617,68 @@ fn gate_decision(ctx: &PullRequestApprovalContext, sender_trusted: bool) -> Opti
     Some(ApprovalInfo {
         pr_number: ctx.pr_number.unwrap_or(0),
         pr_author: ctx.pr_author.clone().unwrap_or_default(),
+    })
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
+async fn require_maintainer_approval_for_untrusted_fork_pull_request_commit(
+    ci: &CiContext,
+    task: &MTask,
+    trig: &ept::Model,
+    approval_ctx: Option<&PullRequestApprovalContext>,
+    commit_hash: &[u8],
+    head_repo_clone_url: Option<String>,
+    commit_message: Option<String>,
+    author_name: Option<String>,
+) -> Option<TaskEvaluationNotStartedReason> {
+    let approval_gated_pull_request = decide_pr_gate(ci, task, approval_ctx).await?;
+    let approved = gradient_db::fork_pull_request_approvals::is_commit_approved_by_maintainer_for_task(
+        &ci.db.web_db,
+        task.id,
+        approval_gated_pull_request.pr_number,
+        commit_hash,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!(error = %e, task_id = %task.id, "Check whether a maintainer approved the commit of a fork pull request");
+        false
+    });
+    if approved {
+        return None;
+    }
+
+    let pending = MForkPullRequestApproval {
+        id: PullRequestApprovalId::now_v7(),
+        task: task.id,
+        trigger: trig.id,
+        pr_number: approval_gated_pull_request.pr_number as i64,
+        pr_author: approval_gated_pull_request.pr_author,
+        commit_hash: commit_hash.to_vec(),
+        head_repo_clone_url,
+        commit_message,
+        author_name,
+        check_run_id: None,
+        approving_maintainer_login: None,
+        approved_at: None,
+        created_at: gradient_types::now(),
+    };
+    let stored =
+        store_pending_approval_for_untrusted_fork_pull_request_commit_and_post_approval_check(
+            &ci.db,
+            task.project,
+            pending,
+        )
+        .await;
+    touch_trigger_last_fired(&ci.db.web_db, trig).await;
+    Some(match stored {
+        Ok(()) => TaskEvaluationNotStartedReason::ForkPullRequestCommitWaitsForMaintainerApproval,
+        Err(e) => {
+            warn!(error = %e, task_id = %task.id, "Save pending fork pull request approval");
+            TaskEvaluationNotStartedReason::Error
+        }
     })
 }
 

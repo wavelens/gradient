@@ -69,6 +69,7 @@ pub enum TaskEvaluationNotStartedReason {
     Error,
     InputUpdateRunning,
     InputUpdateNotConfigured,
+    ForkPullRequestCommitWaitsForMaintainerApproval,
 }
 
 impl TaskEvaluationNotStartedReason {
@@ -91,6 +92,9 @@ impl TaskEvaluationNotStartedReason {
                 "An update of the flake.lock inputs is already in progress."
             }
             Self::InputUpdateNotConfigured => "This task has no setup for updating flake inputs.",
+            Self::ForkPullRequestCommitWaitsForMaintainerApproval => {
+                "The commits of the pull request from a fork await approval from a maintainer."
+            }
         }
     }
 }

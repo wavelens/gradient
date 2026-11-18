@@ -629,7 +629,6 @@ pub(super) async fn fire(
                 author_name: Some(head.author_name),
                 manual: true,
                 honors_skip_marker: false,
-                gate_approval: None,
                 repository_override: None,
                 wildcard_override: request.wildcard_override,
                 source_comment: None,

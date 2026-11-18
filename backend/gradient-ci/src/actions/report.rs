@@ -18,7 +18,8 @@ use gradient_types::input::vec_to_hex;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::{
     BuildJobId, CEntryPoint, EBuildJob, EDerivation, EDerivationBuild, EEntryPoint, EEvaluation,
-    EExecJob, EvaluationId, ExecJobId, MBuildJob, MCommit, MEvaluation, MTask,
+    EExecJob, EForkPullRequestApproval, ETask, EvaluationId, ExecJobId, MBuildJob, MCommit,
+    MEvaluation, MTask, PullRequestApprovalId,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::warn;
@@ -72,7 +73,13 @@ pub(crate) async fn build_ci_reports_from_commit_status_check_rows(
     ctx: &CiContext,
     check: &CommitStatusCheckWithIds,
 ) -> Result<Vec<CiReport>> {
-    let Some(evaluation) = by_id::<EEvaluation, _>(&ctx.db.worker_db, check.evaluation_id())
+    if let CommitStatusCheckWithIds::Approval { approval } = check {
+        return approval_reports(ctx, *approval).await;
+    }
+    let Some(evaluation_id) = check.evaluation_id() else {
+        return Ok(Vec::new());
+    };
+    let Some(evaluation) = by_id::<EEvaluation, _>(&ctx.db.worker_db, evaluation_id)
         .await
         .context("load evaluation")?
     else {
@@ -85,14 +92,6 @@ pub(crate) async fn build_ci_reports_from_commit_status_check_rows(
     let target = build_report_target(ctx, &evaluation, &task, &commit).await?;
 
     Ok(match state {
-        CheckReportRow::Approval {
-            status,
-            description,
-        } => vec![target.report(
-            reporting::approval_check_context(&task.name),
-            status,
-            description,
-        )],
         CheckReportRow::Evaluation {
             status,
             description,
@@ -105,11 +104,43 @@ pub(crate) async fn build_ci_reports_from_commit_status_check_rows(
     })
 }
 
+async fn approval_reports(
+    ctx: &CiContext,
+    approval: PullRequestApprovalId,
+) -> Result<Vec<CiReport>> {
+    let db = &ctx.db.worker_db;
+    let Some(approval) = by_id::<EForkPullRequestApproval, _>(db, approval)
+        .await
+        .context("load fork pull request approval")?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(task) = by_id::<ETask, _>(db, approval.task)
+        .await
+        .context("load task")?
+    else {
+        return Ok(Vec::new());
+    };
+    let (owner, repo) =
+        parse_owner_repo(&task.repository).ok_or_else(|| ActionError::RepositoryUnparsable {
+            repository: task.repository.clone(),
+        })?;
+    let status = reporting::ci_status_for_approval_check(approval.approved_at.is_some());
+    Ok(vec![CiReport {
+        owner,
+        repo,
+        sha: vec_to_hex(&approval.commit_hash),
+        context: reporting::approval_check_context(&task.name),
+        existing_check_id: approval.check_run_id,
+        requested_actions: requested_actions_for(status.clone()),
+        description: (status == CiStatus::ActionRequired)
+            .then(|| reporting::APPROVAL_PENDING_DESCRIPTION.to_owned()),
+        status,
+        details_url: None,
+    }])
+}
+
 enum CheckReportRow {
-    Approval {
-        status: CiStatus,
-        description: Option<String>,
-    },
     Evaluation {
         status: CiStatus,
         description: Option<String>,
@@ -134,14 +165,7 @@ async fn read_check_report_state(
             .map(str::to_owned);
 
     Ok(match check {
-        CommitStatusCheckWithIds::Approval { .. } => {
-            let status =
-                reporting::ci_status_for_approval_check(evaluation.status, reason.as_ref());
-            Some(CheckReportRow::Approval {
-                description: description.filter(|_| status == CiStatus::ActionRequired),
-                status,
-            })
-        }
+        CommitStatusCheckWithIds::Approval { .. } => None,
         CommitStatusCheckWithIds::Evaluation { .. } => Some(CheckReportRow::Evaluation {
             status: reporting::ci_status_for_evaluation(&evaluation.status),
             description,

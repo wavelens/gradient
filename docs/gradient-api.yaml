@@ -24167,6 +24167,7 @@ components:
       - error
       - input_update_running
       - input_update_not_configured
+      - fork_pull_request_commit_waits_for_maintainer_approval
     TaskId:
       type: string
       format: uuid
@@ -25459,22 +25460,6 @@ components:
             type: string
             enum:
             - eval_workers
-      - type: object
-        required:
-        - pr_number
-        - pr_author
-        - kind
-        properties:
-          pr_number:
-            type: integer
-            format: int64
-            minimum: 0
-          pr_author:
-            type: string
-          kind:
-            type: string
-            enum:
-            - approval
       - type: object
         required:
         - kind

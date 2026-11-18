@@ -30,10 +30,13 @@ pub const EVALUATION_WAITING: &str = "evaluation.waiting";
 pub const EVALUATION_COMPLETED: &str = "evaluation.completed";
 pub const EVALUATION_FAILED: &str = "evaluation.failed";
 pub const EVALUATION_ABORTED: &str = "evaluation.aborted";
-pub const EVALUATION_ACTION_REQUIRED: &str = "evaluation.action_required";
-pub const EVALUATION_APPROVAL_GRANTED: &str = "evaluation.approval_granted";
 pub const EVALUATION_PROGRESS: &str = "evaluation.progress";
 pub const EVALUATION_ACTIVITY: &str = "evaluation.activity";
+
+pub const FORK_PULL_REQUEST_APPROVAL_NEEDS_MAINTAINER_APPROVAL: &str =
+    "fork_pull_request_approval.needs_maintainer_approval";
+pub const FORK_PULL_REQUEST_APPROVAL_EVALUATION_STARTED_AFTER_APPROVAL: &str =
+    "fork_pull_request_approval.evaluation_started_after_approval";
 
 pub const CACHE_CHANGED: &str = "cache.changed";
 pub const CACHE_NAR_FETCHED: &str = "cache.nar.fetched";

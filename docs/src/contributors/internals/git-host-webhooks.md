@@ -59,6 +59,17 @@ GitHub App webhooks reach the following handlers:
 | 4 | `gradient_ci::trigger::trigger_evaluation` | Insert or update the `Commit` row for the project and hash. Keep the stored message if the new message is empty. Insert the `Queued` evaluation. Reset `last_check_at`. |
 | 5 | `eval-dispatch` | Gets woken through `record_evaluation_created` and offers the evaluation to workers. A 5 s tick serves as the fallback |
 
+## Approval of Pull Requests from Forks
+
+Pull requests from forks wait for a maintainer with ``require_approval`` in their trigger. Gradient does not create an evaluation before approval of the exact head commit by a person with write access to the repository.
+
+| Step | Code | Action |
+|---|---|---|
+| 1 | `decide_pr_gate` (`git_host_hooks/fanout.rs`) | Block unless the head repository is equal to the base repository, or the sender can write to the repository. Treat an unknown fork state as a fork. |
+| 2 | `is_commit_approved_by_maintainer_for_task` | Approved commits start evaluation immediately. Database errors mark the commit as unapproved. |
+| 3 | `store_pending_approval_for_untrusted_fork_pull_request_commit_and_post_approval_check` | Store one pending `fork_pull_request_approval` row for each task, pull request and commit. Delete old pending rows for the same pull request. Record `fork_pull_request_approval.needs_maintainer_approval`. Post the `gradient/<task>: Approval` check. |
+| 4 | `approve_approval_and_start_approved_commit_evaluation` (`git_host_hooks/approval.rs`) | The **Approve and run** button, an approval review, or `/gradient approve` and `/gradient run` from a user with write permission to the repository mark the row as approved. The row trigger can start evaluation of the approved commit after that. Only one evaluation can start per row. |
+
 ## Related
 
 - [Connect GitHub](../../guides/github.md) covers the initial setup

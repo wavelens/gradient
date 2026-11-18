@@ -127,6 +127,7 @@ id_newtype!(ProjectCacheId);
 id_newtype!(ProjectInvitationId);
 id_newtype!(ProjectUserId);
 id_newtype!(PullRequestSummaryId);
+id_newtype!(PullRequestApprovalId);
 id_newtype!(TaskId);
 id_newtype!(TaskActionId);
 id_newtype!(TaskActionDeliveryId);

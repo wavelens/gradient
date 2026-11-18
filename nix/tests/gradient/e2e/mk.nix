@@ -218,7 +218,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
                   {
                     name = "restart-probe";
                     type = "send_web_request";
-                    events = [ "evaluation.approval_granted" ];
+                    events = [ "fork_pull_request_approval.evaluation_started_after_approval" ];
                     config = { url = "http://hook.local:8099/hook"; };
                   }
                 ];
@@ -2739,7 +2739,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     sql(
         "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) VALUES ("
         "gen_random_uuid(), 3, 'restart-probe', "
-        f"""'{{"action": "{action_id}", "event": "evaluation.approval_granted", "envelope": {{"event": "evaluation.approval_granted", "at": "2026-01-01T00:00:00Z", "content": {{"probe": "restart"}}}}}}'::jsonb, """
+        f"""'{{"action": "{action_id}", "event": "fork_pull_request_approval.evaluation_started_after_approval", "envelope": {{"event": "fork_pull_request_approval.evaluation_started_after_approval", "at": "2026-01-01T00:00:00Z", "content": {{"probe": "restart"}}}}}}'::jsonb, """
         "now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
     )
     server.succeed("systemctl start gradient-server.service")

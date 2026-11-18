@@ -300,6 +300,112 @@ async fn signed_gitea_push_webhook_with_no_matching_include_path_skips_evaluatio
 }
 
 #[tokio::test]
+async fn gitea_fork_pull_request_from_untrusted_sender_waits_for_approval_then_queues_evaluation() {
+    let secret = "webhook-secret-plaintext";
+    let s =
+        create_test_database_with_user_project_task_gitea_webhook_secret_push_trigger_and_http_server(
+            secret,
+            "https://gitea.example.com/test-org/repo",
+            ChangedFilePathFilter::default(),
+        )
+        .await;
+    let conn = s.db.connection();
+    let pull_request = TriggerConfig::ReporterPullRequest {
+        branches: vec![],
+        actions: vec![],
+        require_approval: true,
+        path_filter: ChangedFilePathFilter::default(),
+    };
+    gradient_db::triggers::insert(
+        &conn,
+        task_trigger::Model {
+            id: TaskTriggerId::now_v7(),
+            task: task_id(),
+            trigger_type: pull_request.trigger_type(),
+            config: pull_request.to_db_json(),
+            active: true,
+            created_at: test_date(),
+            updated_at: test_date(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let head_sha = "abcdef0123456789abcdef0123456789abcdef01";
+    let body = json!({
+        "action": "opened",
+        "number": 7,
+        "pull_request": {
+            "number": 7,
+            "user": { "login": "external" },
+            "head": {
+                "sha": head_sha,
+                "ref": "feature",
+                "repo": {
+                    "full_name": "external/repo",
+                    "clone_url": "https://gitea.example.com/external/repo",
+                },
+            },
+        },
+        "repository": {
+            "full_name": "test-org/repo",
+            "clone_url": "https://gitea.example.com/test-org/repo",
+        },
+        "sender": { "login": "external" },
+    })
+    .to_string();
+    let build_signed_pull_request_webhook_request = || {
+        s.server
+            .post(&format!("/api/v1/hooks/{}", s.connection.id))
+            .add_header("X-Gitea-Event", "pull_request")
+            .add_header(
+                "X-Gitea-Signature",
+                compute_gitea_webhook_signature_hex(secret, body.as_bytes()),
+            )
+            .bytes(body.clone().into_bytes().into())
+    };
+
+    let waiting = build_signed_pull_request_webhook_request().await;
+
+    waiting.assert_status_ok();
+    let message = waiting.json::<Value>()["message"].clone();
+    assert_eq!(
+        message["skipped"][0]["reason"],
+        json!("fork_pull_request_commit_waits_for_maintainer_approval"),
+        "{message}"
+    );
+    assert!(s.db.rows::<evaluation::Entity>().await.is_empty());
+    let approvals =
+        s.db.rows::<gradient_entity::fork_pull_request_approval::Entity>()
+            .await;
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(
+        (
+            approvals[0].pr_number,
+            approvals[0].commit_hash.clone(),
+            approvals[0].head_repo_clone_url.as_deref(),
+        ),
+        (
+            7,
+            hex::decode(head_sha).unwrap(),
+            Some("https://gitea.example.com/external/repo"),
+        )
+    );
+
+    gradient_db::fork_pull_request_approvals::mark_pull_request_approval_approved(
+        &conn,
+        approvals[0].id,
+        "maintainer",
+    )
+    .await
+    .unwrap();
+    let approved = build_signed_pull_request_webhook_request().await;
+
+    assert_webhook_queued_one_evaluation_and_evaluation_row_exists(&s.db, &approved).await;
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn github_app_installation_webhook_created_stores_and_deleted_removes_instance_git_host_connection()
  {
     let secret = "github-webhook-secret";

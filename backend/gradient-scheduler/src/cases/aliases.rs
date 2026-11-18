@@ -60,7 +60,6 @@ pub(super) fn trigger_input(
         author_name: None,
         manual: false,
         honors_skip_marker: true,
-        gate_approval: None,
         repository_override: None,
         wildcard_override: None,
         source_comment: None,

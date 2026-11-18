@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::lookup::by_id;
 use gradient_db::projects::workers::project_has_eval_capable_worker_registration;
 use gradient_types::ids::ProjectId;
 use gradient_types::waiting_reason::WaitingReason;
@@ -12,9 +11,8 @@ use gradient_types::*;
 
 use gradient_db::status::change_evaluation_status;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 pub async fn unpark_no_cache_for_project<C: ConnectionTrait>(
     db: &C,
@@ -139,7 +137,7 @@ async fn unpark_for_project<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
 
     let mut unparked = Vec::with_capacity(candidates.len());
     for eval in candidates {
-        unparked.extend(unpark(db, eval.id, None).await?);
+        unparked.extend(unpark(db, eval.id).await?);
     }
     Ok(unparked)
 }
@@ -147,99 +145,14 @@ async fn unpark_for_project<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
 async fn unpark<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-    wildcard: Option<&str>,
 ) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
     change_evaluation_status(db, evaluation, EvaluationStatus::UNPARK, |update| {
-        let update = update.col_expr(
+        update.col_expr(
             CEvaluation::WaitingReason,
             Expr::value(Option::<serde_json::Value>::None),
-        );
-        match wildcard {
-            Some(wildcard) => update.col_expr(CEvaluation::Wildcard, Expr::value(wildcard)),
-            None => update,
-        }
+        )
     })
     .await
-}
-
-pub async fn unpark_approval(
-    db: &impl ConnectionTrait,
-    evaluation_id: EvaluationId,
-) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
-    let Some(eval) = by_id::<EEvaluation, _>(db, evaluation_id).await? else {
-        return Ok(None);
-    };
-    if eval.status != EvaluationStatus::Waiting {
-        return Ok(None);
-    }
-    let is_approval = eval
-        .waiting_reason
-        .as_ref()
-        .and_then(WaitingReason::from_json)
-        .is_some_and(|r| matches!(r, WaitingReason::Approval { .. }));
-    if !is_approval {
-        return Ok(None);
-    }
-    unpark(db, eval.id, None).await
-}
-
-pub async fn unpark_approval_with_wildcard(
-    db: &impl ConnectionTrait,
-    evaluation_id: EvaluationId,
-    wildcard: &str,
-) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
-    let Some(eval) = by_id::<EEvaluation, _>(db, evaluation_id).await? else {
-        return Ok(None);
-    };
-    if eval.status != EvaluationStatus::Waiting {
-        return Ok(None);
-    }
-    let is_approval = eval
-        .waiting_reason
-        .as_ref()
-        .and_then(WaitingReason::from_json)
-        .is_some_and(|r| matches!(r, WaitingReason::Approval { .. }));
-    if !is_approval {
-        return Ok(None);
-    }
-    unpark(db, eval.id, Some(wildcard)).await
-}
-
-/// The terminal-status reaction must land on the maintainer's `/gradient run` or `/gradient
-/// approve` comment. The original webhook of the row is not the target.
-pub async fn set_evaluation_source_comment(
-    db: &impl ConnectionTrait,
-    evaluation_id: EvaluationId,
-    source_comment: serde_json::Value,
-) -> Result<(), sea_orm::DbErr> {
-    let Some(eval) = by_id::<EEvaluation, _>(db, evaluation_id).await? else {
-        return Ok(());
-    };
-    let mut ae: AEvaluation = eval.into();
-    ae.source_comment = Set(Some(source_comment));
-    ae.updated_at = Set(gradient_types::now());
-    ae.update(db).await?;
-    Ok(())
-}
-
-pub async fn find_approval_gated_eval(
-    db: &impl ConnectionTrait,
-    task: TaskId,
-    pr_number: u64,
-) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
-    let parked = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task))
-        .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
-        .all(db)
-        .await?;
-    Ok(parked.into_iter().find(|e| {
-        e.waiting_reason
-            .as_ref()
-            .and_then(WaitingReason::from_json)
-            .is_some_and(
-                |r| matches!(r, WaitingReason::Approval { pr_number: n, .. } if n == pr_number),
-            )
-    }))
 }
 
 #[cfg(test)]
@@ -260,78 +173,6 @@ mod tests {
             waiting_reason: Some(reason.to_json()),
             ..Default::default()
         }
-    }
-
-    #[tokio::test]
-    async fn unpark_approval_requeues_waiting_approval_row() {
-        let parked = waiting_eval(WaitingReason::approval(7, "octocat"));
-        let mut requeued = parked.clone();
-        requeued.status = EvaluationStatus::Queued;
-        requeued.waiting_reason = None;
-
-        let db = mock_db()
-            .append_query_results([vec![parked.clone()]])
-            .append_query_results([vec![requeued.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-
-        let out = unpark_approval(&db, parked.id).await.unwrap().unwrap();
-        assert_eq!(out.status, EvaluationStatus::Queued);
-        assert!(out.waiting_reason.is_none());
-    }
-
-    #[tokio::test]
-    async fn unpark_approval_no_op_for_non_approval_reason() {
-        let parked = waiting_eval(WaitingReason::NoCache);
-        let db = mock_db()
-            .append_query_results([vec![parked.clone()]])
-            .into_connection();
-        assert!(unpark_approval(&db, parked.id).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn unpark_approval_with_wildcard_overrides_wildcard_and_requeues() {
-        let mut parked = waiting_eval(WaitingReason::approval(7, "octocat"));
-        parked.wildcard = "*".into();
-
-        let mut requeued = parked.clone();
-        requeued.status = EvaluationStatus::Queued;
-        requeued.waiting_reason = None;
-        requeued.wildcard = "packages.x86_64-linux.foo".into();
-
-        let db = mock_db()
-            .append_query_results([vec![parked.clone()]])
-            .append_query_results([vec![requeued.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-
-        let out = unpark_approval_with_wildcard(&db, parked.id, "packages.x86_64-linux.foo")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(out.status, EvaluationStatus::Queued);
-        assert!(out.waiting_reason.is_none());
-        assert_eq!(out.wildcard, "packages.x86_64-linux.foo");
-    }
-
-    #[tokio::test]
-    async fn unpark_approval_with_wildcard_no_op_for_non_approval_reason() {
-        let parked = waiting_eval(WaitingReason::NoCache);
-        let db = mock_db()
-            .append_query_results([vec![parked.clone()]])
-            .into_connection();
-        assert!(
-            unpark_approval_with_wildcard(&db, parked.id, "packages.*.*")
-                .await
-                .unwrap()
-                .is_none()
-        );
     }
 
     fn make_task(project: ProjectId) -> gradient_entity::task::Model {

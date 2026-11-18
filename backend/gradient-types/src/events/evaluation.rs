@@ -22,8 +22,6 @@ pub enum Phase {
     Completed,
     Failed,
     Aborted,
-    ActionRequired,
-    ApprovalGranted,
 }
 
 impl From<EvaluationStatus> for Phase {
@@ -52,8 +50,6 @@ impl Phase {
             Phase::Completed => names::EVALUATION_COMPLETED,
             Phase::Failed => names::EVALUATION_FAILED,
             Phase::Aborted => names::EVALUATION_ABORTED,
-            Phase::ActionRequired => names::EVALUATION_ACTION_REQUIRED,
-            Phase::ApprovalGranted => names::EVALUATION_APPROVAL_GRANTED,
         }
     }
 
@@ -63,10 +59,6 @@ impl Phase {
     ) -> Option<(Self, Option<&'static str>)> {
         Some(match (status, reason) {
             (EvaluationStatus::Queued, _) => (Phase::Queued, None),
-            (EvaluationStatus::Waiting, Some(WaitingReason::Approval { .. })) => (
-                Phase::ActionRequired,
-                Some("Awaiting maintainer approval for external contributor PR."),
-            ),
             (EvaluationStatus::Waiting, Some(WaitingReason::NoCache)) => (
                 Phase::Queued,
                 Some("Waiting for a writable cache subscription before this evaluation can run."),
@@ -114,8 +106,6 @@ impl EventKind for Reported {
         names::EVALUATION_COMPLETED,
         names::EVALUATION_FAILED,
         names::EVALUATION_ABORTED,
-        names::EVALUATION_ACTION_REQUIRED,
-        names::EVALUATION_APPROVAL_GRANTED,
     ];
 
     fn name(&self) -> Cow<'static, str> {
@@ -198,20 +188,6 @@ mod tests {
             Phase::from(EvaluationStatus::EvaluatingDerivation).name(),
             "evaluation.started"
         );
-    }
-
-    #[test]
-    fn a_created_evaluation_waiting_for_approval_requires_action() {
-        let (phase, description) = Phase::of_created(
-            EvaluationStatus::Waiting,
-            Some(WaitingReason::Approval {
-                pr_number: 1,
-                pr_author: "someone".into(),
-            }),
-        )
-        .unwrap();
-        assert_eq!(phase.name(), "evaluation.action_required");
-        assert!(description.is_some());
     }
 
     #[test]

@@ -351,7 +351,6 @@ async fn apply_to_task(
             author_name: Some(author),
             manual: false,
             honors_skip_marker: trigger_config_honors_skip_marker(cfg),
-            gate_approval: None,
             repository_override: None,
             wildcard_override: None,
             source_comment: None,

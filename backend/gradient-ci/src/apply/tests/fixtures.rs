@@ -72,7 +72,6 @@ pub fn input(trig: TaskTriggerId, ttype: TriggerType, hash: Vec<u8>, manual: boo
         author_name: None,
         manual,
         honors_skip_marker: false,
-        gate_approval: None,
         repository_override: None,
         wildcard_override: None,
         source_comment: None,

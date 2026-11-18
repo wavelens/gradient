@@ -2852,7 +2852,7 @@ export interface TaskDetailsResponse {
   managed: boolean;
 }
 
-export type TaskEvaluationNotStartedReason = "same_commit" | "filter" | "no_changed_file_matches_path_filter" | "tag_not_found" | "concurrency" | "commit_message" | "error" | "input_update_running" | "input_update_not_configured";
+export type TaskEvaluationNotStartedReason = "same_commit" | "filter" | "no_changed_file_matches_path_filter" | "tag_not_found" | "concurrency" | "commit_message" | "error" | "input_update_running" | "input_update_not_configured" | "fork_pull_request_commit_waits_for_maintainer_approval";
 
 export type TaskId = string;
 
@@ -3308,10 +3308,6 @@ export type WaitingReason = {
   capability: EvalCapability;
   connected_workers: number;
   kind: "eval_workers";
-} | {
-  pr_number: number;
-  pr_author: string;
-  kind: "approval";
 } | {
   kind: "no_cache";
 } | {

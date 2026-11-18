@@ -178,7 +178,7 @@ async fn handle_github_app_webhook(
             IncomingWebhookResponse::empty(&event)
         }
         "check_run" => {
-            approval::handle_github_check_run(ci, body).await;
+            approval::handle_github_check_run(ci, scheduler, body).await;
             IncomingWebhookResponse::empty(&event)
         }
         "issue_comment" => {
@@ -194,8 +194,15 @@ async fn handle_github_app_webhook(
             IncomingWebhookResponse::empty(&event)
         }
         "pull_request_review" => {
-            approval::handle_pull_request_review(ci, GitHostType::GitHub, None, body, client_ip)
-                .await;
+            approval::handle_pull_request_review(
+                ci,
+                scheduler,
+                GitHostType::GitHub,
+                None,
+                body,
+                client_ip,
+            )
+            .await;
             IncomingWebhookResponse::empty(&event)
         }
         other => IncomingWebhookResponse::empty(other),
@@ -571,6 +578,7 @@ async fn verify_webhook_signature_and_ip_allowlist_then_trigger_event_evaluation
         WebhookEventKind::Review => {
             approval::handle_pull_request_review(
                 ci,
+                scheduler,
                 git_host_type,
                 Some(connection_id),
                 body,

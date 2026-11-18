@@ -6,12 +6,12 @@
 
 mod fixtures;
 
-use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_storage_full};
+use super::{ApplyInput, ApplyOutcome, apply_trigger, park_storage_full};
 use fixtures::{
     input, make_commit, make_eval, make_task_with_concurrency, make_task_with_last_eval,
     one_active_per_branch_violation, with_eval_worker, with_writable_cache,
 };
-use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_fixtures::mock::{empty_db, mock_db};
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
@@ -358,97 +358,6 @@ async fn hard_abort_populates_aborted_fields() {
         [(running_eval_id, true)],
         "the caller must abort the eval's shared builds"
     );
-}
-
-#[tokio::test]
-async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
-    use gradient_types::waiting_reason::WaitingReason;
-    let task = make_task_with_last_eval(None);
-    let new_eval_id = EvaluationId::now_v7();
-    let new_commit_id = CommitId::now_v7();
-    let trig = TaskTriggerId::now_v7();
-    let new_hash = vec![1u8; 20];
-
-    let parked_eval = {
-        let mut m = make_eval(
-            new_eval_id,
-            task.id,
-            new_commit_id,
-            EvaluationStatus::Waiting,
-        );
-        m.trigger = Some(trig);
-        m.waiting_reason = Some(WaitingReason::approval(42, "external-contrib").to_json());
-        m
-    };
-
-    let db = mock_db()
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
-        .append_query_results([vec![{
-            let mut m = make_eval(
-                new_eval_id,
-                task.id,
-                new_commit_id,
-                EvaluationStatus::Queued,
-            );
-            m.trigger = Some(trig);
-            m
-        }]])
-        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        .append_query_results([vec![task.clone()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .append_query_results([vec![parked_eval.clone()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .into_connection();
-
-    let applied = ApplyInput {
-        trigger_id: Some(trig),
-        trigger_type: TriggerType::ReporterPullRequest,
-        branch: gradient_types::branch_key::pull_request(42),
-        commit_hash: new_hash,
-        commit_message: None,
-        author_name: None,
-        manual: false,
-        honors_skip_marker: false,
-        gate_approval: Some(ApprovalInfo {
-            pr_number: 42,
-            pr_author: "external-contrib".into(),
-        }),
-        repository_override: None,
-        wildcard_override: None,
-        source_comment: None,
-        started_by: None,
-        walk_mode: WalkMode::Pruned,
-    };
-    let res = apply_trigger(&db, &task, applied).await.unwrap();
-
-    let ApplyOutcome::Created { evaluation, .. } = res else {
-        panic!("expected Created, got {res:?}");
-    };
-    assert_eq!(evaluation.status, EvaluationStatus::Waiting);
-    let reason = evaluation
-        .waiting_reason
-        .as_ref()
-        .and_then(WaitingReason::from_json)
-        .expect("waiting_reason must be set");
-    match reason {
-        WaitingReason::Approval {
-            pr_number,
-            pr_author,
-        } => {
-            assert_eq!(pr_number, 42);
-            assert_eq!(pr_author, "external-contrib");
-        }
-        other => panic!("expected Approval, got {other:?}"),
-    }
 }
 
 #[tokio::test]

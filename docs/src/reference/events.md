@@ -31,7 +31,8 @@ All three payloads use one JSON structure: websocket messages, webhook bodies, a
 | Family | Durable | Examples |
 |---|---|---|
 | `build.<status>` | yes (entry points) | `build.queued`, `build.started`, `build.completed`, `build.failed`, `build.substituted` |
-| `evaluation.<phase>` | yes | `evaluation.queued`, `evaluation.building`, `evaluation.failed`, `evaluation.approval_granted` |
+| `evaluation.<phase>` | yes | `evaluation.queued`, `evaluation.building`, `evaluation.failed`, `evaluation.aborted` |
+| `fork_pull_request_approval.<phase>` | yes | `fork_pull_request_approval.needs_maintainer_approval`, `fork_pull_request_approval.evaluation_started_after_approval` |
 | `exec_job.<status>` | yes | `exec_job.queued`, `exec_job.started`, `exec_job.phase`, `exec_job.completed`, `exec_job.failed`, `exec_job.aborted` |
 | `project.*`, `task.*`, `cache.*` | yes | `project.create`, `task.star`, `task.action.update`, `cache.nar.upload`, `cache.member.create` |
 | `gc.*` | yes | `gc.swept`, `gc.deep_finished` |

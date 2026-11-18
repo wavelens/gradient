@@ -120,12 +120,7 @@ impl WaitingRefresh<'_> {
                 .as_slice();
 
             if eval.status == EvaluationStatus::Waiting
-                && reason.as_ref().is_some_and(|r| {
-                    matches!(
-                        r,
-                        WaitingReason::Approval { .. } | WaitingReason::CacheStorageFull
-                    )
-                })
+                && matches!(reason, Some(WaitingReason::CacheStorageFull))
             {
                 continue;
             }

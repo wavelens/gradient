@@ -109,7 +109,7 @@ services.gradient.state.tasks.app = {
 1.  The connection name, looked up in the project, then its owner team, then the instance.
 2.  Posts commit statuses through the connection.
 3.  Put branch and tag filters into `config`, see [Trigger Types](../reference/state.md#trigger-types).
-4.  Optional. Covers merge request evaluations, with fork merge requests held until a maintainer approves them.
+4.  Optional. Merge requests also start an evaluation. Commits in merge requests from forks wait for approval from a maintainer.
 
 ## Verify Deployment
 
@@ -123,7 +123,7 @@ services.gradient.state.tasks.app = {
 |---|---|
 | Open or update a merge request | Evaluate the head commit of that merge request |
 | Comment `/gradient run` | Trigger a new evaluation of the merge request |
-| Comment `/gradient approve` | Release a fork-based merge request that waits on maintainer approval |
+| Comment `/gradient approve` | Start evaluation of the commits in a merge request from a fork awaiting maintainer approval. |
 | Comment `/gradient summary` | Post one comment with the built, failed and unchanged packages, and update it after every push |
 
 The **Pull Request (reporter)** trigger has an option called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). GitLab does not fire a webhook when a reviewer approves a merge request through the review UI. A `/gradient approve` comment therefore remains the only way to grant approval.

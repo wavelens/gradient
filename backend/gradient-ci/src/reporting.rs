@@ -12,7 +12,7 @@ use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::events::evaluation::Phase;
 use gradient_types::events::names;
 use gradient_types::waiting_reason::WaitingReason;
-use gradient_types::{BuildJobId, EvaluationId, ExecJobId};
+use gradient_types::{BuildJobId, EvaluationId, ExecJobId, PullRequestApprovalId};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
@@ -59,8 +59,10 @@ pub enum CheckContextKind {
 
 pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
     match event {
-        names::EVALUATION_ACTION_REQUIRED => Some(CheckContextKind::Approval),
-        names::EVALUATION_APPROVAL_GRANTED => Some(CheckContextKind::Approval),
+        names::FORK_PULL_REQUEST_APPROVAL_NEEDS_MAINTAINER_APPROVAL
+        | names::FORK_PULL_REQUEST_APPROVAL_EVALUATION_STARTED_AFTER_APPROVAL => {
+            Some(CheckContextKind::Approval)
+        }
         names::EVALUATION_QUEUED
         | names::EVALUATION_STARTED
         | names::EVALUATION_BUILDING
@@ -84,7 +86,7 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommitStatusCheckWithIds {
     Approval {
-        evaluation: EvaluationId,
+        approval: PullRequestApprovalId,
     },
     Evaluation {
         evaluation: EvaluationId,
@@ -103,6 +105,11 @@ pub enum CommitStatusCheckWithIds {
 #[derive(Deserialize)]
 struct EvaluationEventContentId {
     evaluation_id: EvaluationId,
+}
+
+#[derive(Deserialize)]
+struct ApprovalEventContentId {
+    approval_id: PullRequestApprovalId,
 }
 
 #[derive(Deserialize)]
@@ -136,10 +143,10 @@ impl CommitStatusCheckWithIds {
         };
         Ok(Some(match kind {
             CheckContextKind::Approval => {
-                let ids: EvaluationEventContentId =
+                let ids: ApprovalEventContentId =
                     deserialize_id_from_event_content(event, content)?;
                 Self::Approval {
-                    evaluation: ids.evaluation_id,
+                    approval: ids.approval_id,
                 }
             }
             CheckContextKind::Evaluation => {
@@ -171,12 +178,12 @@ impl CommitStatusCheckWithIds {
         }))
     }
 
-    pub fn evaluation_id(&self) -> EvaluationId {
+    pub fn evaluation_id(&self) -> Option<EvaluationId> {
         match self {
-            Self::Approval { evaluation }
-            | Self::Evaluation { evaluation }
+            Self::Approval { .. } => None,
+            Self::Evaluation { evaluation }
             | Self::Build { evaluation, .. }
-            | Self::ExecJob { evaluation, .. } => *evaluation,
+            | Self::ExecJob { evaluation, .. } => Some(*evaluation),
         }
     }
 }
@@ -220,15 +227,14 @@ pub fn queued_or_waiting_evaluation_description(
     Phase::of_created(status, reason).and_then(|(_, description)| description)
 }
 
-pub fn ci_status_for_approval_check(
-    status: EvaluationStatus,
-    reason: Option<&WaitingReason>,
-) -> CiStatus {
-    match (status, reason) {
-        (EvaluationStatus::Waiting, Some(WaitingReason::Approval { .. })) => {
-            CiStatus::ActionRequired
-        }
-        _ => CiStatus::Success,
+pub const APPROVAL_PENDING_DESCRIPTION: &str =
+    "Awaiting maintainer approval for external contributor PR.";
+
+pub fn ci_status_for_approval_check(approved: bool) -> CiStatus {
+    if approved {
+        CiStatus::Success
+    } else {
+        CiStatus::ActionRequired
     }
 }
 
@@ -259,7 +265,7 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
 mod tests {
     use super::*;
     use gradient_types::events::build::Reported;
-    use gradient_types::events::{evaluation, exec_job};
+    use gradient_types::events::{evaluation, exec_job, fork_pull_request_approval_events};
 
     #[test]
     fn check_scope_uses_the_project_when_present() {
@@ -355,23 +361,37 @@ mod tests {
     }
 
     #[test]
-    fn approval_check_is_action_required_while_waiting_for_maintainer_approval_else_success() {
-        let approval = WaitingReason::Approval {
-            pr_number: 7,
-            pr_author: "contributor".into(),
-        };
+    fn approval_check_is_action_required_until_a_maintainer_approves() {
         assert_eq!(
-            ci_status_for_approval_check(EvaluationStatus::Waiting, Some(&approval)),
+            ci_status_for_approval_check(false),
             CiStatus::ActionRequired
         );
-        assert_eq!(
-            ci_status_for_approval_check(EvaluationStatus::Waiting, Some(&WaitingReason::NoCache)),
-            CiStatus::Success
-        );
-        assert_eq!(
-            ci_status_for_approval_check(EvaluationStatus::Queued, None),
-            CiStatus::Success
-        );
+        assert_eq!(ci_status_for_approval_check(true), CiStatus::Success);
+    }
+
+    #[test]
+    fn both_approval_events_name_the_approval_check_of_their_approval_row() {
+        let approval = PullRequestApprovalId::now_v7();
+        for phase in [
+            fork_pull_request_approval_events::Phase::NeedsMaintainerApproval,
+            fork_pull_request_approval_events::Phase::EvaluationStartedAfterApproval,
+        ] {
+            let content =
+                gradient_types::Event::from(fork_pull_request_approval_events::Reported {
+                    approval_id: approval,
+                    phase,
+                    ..Default::default()
+                })
+                .content();
+            assert_eq!(
+                CommitStatusCheckWithIds::commit_status_check_from_event_name_and_content(
+                    phase.name(),
+                    &content
+                )
+                .unwrap(),
+                Some(CommitStatusCheckWithIds::Approval { approval })
+            );
+        }
     }
 
     #[test]

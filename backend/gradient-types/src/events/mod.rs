@@ -15,6 +15,7 @@ mod envelope;
 pub mod evaluation;
 pub mod exec_job;
 mod filter;
+pub mod fork_pull_request_approval_events;
 pub mod gc;
 pub mod graph;
 pub mod names;
@@ -202,6 +203,7 @@ events! {
     EvaluationReported(evaluation::Reported),
     EvaluationProgress(evaluation::Progress),
     EvaluationActivity(evaluation::Activity),
+    ForkPullRequestApprovalReported(fork_pull_request_approval_events::Reported),
     GraphRecorded(graph::Recorded),
     GraphNarCommitted(graph::NarCommitted),
     GraphTransitioned(graph::Transitioned),

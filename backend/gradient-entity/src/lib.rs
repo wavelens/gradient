@@ -66,6 +66,7 @@ pub mod evaluation_message;
 pub mod evaluation_metric;
 pub mod feature;
 pub mod flake_output_node;
+pub mod fork_pull_request_approval;
 pub mod git_host_connection;
 pub mod incoming_webhook_delivery;
 pub mod open_pr_state;

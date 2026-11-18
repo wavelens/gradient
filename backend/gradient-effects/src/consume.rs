@@ -250,8 +250,8 @@ fn task_commit_status_check_delivery_queue_key(
     check: &CommitStatusCheckWithIds,
 ) -> String {
     match check {
-        CommitStatusCheckWithIds::Approval { evaluation } => {
-            format!("{task}:approval:{evaluation}")
+        CommitStatusCheckWithIds::Approval { approval } => {
+            format!("{task}:approval:{approval}")
         }
         CommitStatusCheckWithIds::Evaluation { evaluation } => {
             format!("{task}:evaluation:{evaluation}")
@@ -339,7 +339,7 @@ async fn deliver_webhook(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> 
 }
 
 async fn react_on_terminal(ctx: &EffectsCtx, reported: &evaluation::Reported) {
-    if reported.created || reported.phase == evaluation::Phase::ApprovalGranted {
+    if reported.created {
         return;
     }
     let (Some(task), Ok(status)) = (
@@ -609,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluation_action_required_and_queued_map_to_checks_but_input_update_maps_to_none() {
+    fn evaluation_queued_maps_to_check_but_input_update_maps_to_none() {
         let evaluation_id = EvaluationId::now_v7();
         let build_evaluation_event_and_return_commit_status_check =
             |phase, evaluation_kind: Option<&str>| {
@@ -629,15 +629,6 @@ mod tests {
                 .unwrap()
             };
 
-        assert_eq!(
-            build_evaluation_event_and_return_commit_status_check(
-                evaluation::Phase::ActionRequired,
-                None
-            ),
-            Some(CommitStatusCheckWithIds::Approval {
-                evaluation: evaluation_id
-            })
-        );
         assert_eq!(
             build_evaluation_event_and_return_commit_status_check(evaluation::Phase::Queued, None),
             Some(CommitStatusCheckWithIds::Evaluation {
