@@ -511,13 +511,11 @@ pub(super) async fn handle_pull_request_review(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::evaluation::EvaluationStatus;
     use gradient_fixtures::database::TestDatabase;
     use gradient_fixtures::ids::task_id;
     use gradient_fixtures::{rows, test_date};
     use gradient_test_support::state::TestState;
     use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig};
-    use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 
     #[tokio::test]
     async fn approving_pending_fork_pull_request_approval_starts_one_approved_commit_evaluation_and_approving_again_or_approving_next_commit_during_evaluation_starts_no_evaluation_and_leaves_next_approval_pending()
@@ -618,12 +616,15 @@ mod tests {
             Some("maintainer")
         );
 
-        let mut running = evaluations[0].clone().into_active_model();
-        running.status = Set(EvaluationStatus::Building);
-        running
-            .update(&db.connection())
-            .await
-            .expect("the evaluation builds");
+        gradient_db::status::change_evaluation_status(
+            &db.connection(),
+            evaluations[0].id,
+            gradient_entity::evaluation::EvaluationStatus::Building.report(),
+            |update| update,
+        )
+        .await
+        .expect("the evaluation builds")
+        .expect("the parked evaluation can start building");
         let blocked = gradient_db::rows::insert::<EForkPullRequestApproval, _>(
             &db.connection(),
             MForkPullRequestApproval {
