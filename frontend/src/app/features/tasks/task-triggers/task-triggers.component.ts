@@ -8,6 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { finalize, type Observable } from 'rxjs';
 import { TriggersService } from '@core/services/triggers.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -17,6 +18,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
+  CopyFieldComponent,
   DialogComponent,
   FormFieldComponent,
   IconComponent,
@@ -113,6 +115,7 @@ function getPathFilterSummaryParts(filter: ChangedFilePathFilter): string[] {
     InputDirective,
     SelectComponent,
     CheckboxComponent,
+    CopyFieldComponent,
     LoadStateComponent,
     WritableDirective,
     IconComponent,
@@ -142,7 +145,9 @@ export class TaskTriggersComponent implements OnInit {
   viewerIsProjectMember = computed(() => isViewerProjectMember(this.taskAccessData()?.task));
   access = injectTaskAccessTo('manageTriggers');
 
-  rowBusy = computed(() => this.firingId() !== null || this.makingDefaultId() !== null);
+  rowBusy = computed(
+    () => this.firingId() !== null || this.makingDefaultId() !== null || this.triggerIdWithSecretBeingReplaced() !== null,
+  );
 
   triggerAccess = computed(() => this.accessSvc.triggerAccess(this.taskAccess()));
 
@@ -156,6 +161,7 @@ export class TaskTriggersComponent implements OnInit {
   loadError = signal<unknown>(null);
   saving = signal(false);
   makingDefaultId = signal<string | null>(null);
+  triggerIdWithSecretBeingReplaced = signal<string | null>(null);
   firingId = signal<string | null>(null);
   fireSuccessId = signal<string | null>(null);
 
@@ -167,6 +173,7 @@ export class TaskTriggersComponent implements OnInit {
   editingTrigger = signal<TriggerOut | null>(null);
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
+  createdTriggerWithOneTimeSecret = signal<{ url: string; secret: string } | null>(null);
   error = signal<string | null>(null);
 
   private suggestions = signal<TriggerConfig[]>([]);
@@ -186,7 +193,7 @@ export class TaskTriggersComponent implements OnInit {
   private loadedForm = '';
 
   readonly typeLabel = getCiTriggerTypeLabel;
-  typeOptions: Option<TriggerType>[] = (['polling', 'reporter_push', 'reporter_pull_request', 'time'] as const)
+  typeOptions: Option<TriggerType>[] = (['polling', 'reporter_push', 'reporter_pull_request', 'time', 'post_request'] as const)
     .map((value) => ({ label: getCiTriggerTypeLabel(value), value }));
 
   ngOnInit(): void {
@@ -333,7 +340,7 @@ export class TaskTriggersComponent implements OnInit {
       case 'time':
         return { type: 'time', cron: this.form.cron.trim(), branch } as TriggerConfig;
       case 'post_request':
-        return { type: 'post_request', branch } as TriggerConfig;
+        return { type: 'post_request', branch, ...this.buildChangedFilePathFilter() } as TriggerConfig;
     }
   }
 
@@ -348,10 +355,11 @@ export class TaskTriggersComponent implements OnInit {
       active: this.form.active,
     };
     this.triggersService.create(this.projectName, this.taskName, body).subscribe({
-      next: () => {
+      next: (saved) => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
         this.notify.success('Trigger created');
+        this.openTriggerSecretDialogIfGeneratedSecretPresent(saved);
         this.loadTriggers();
       },
       error: (err) => {
@@ -377,11 +385,12 @@ export class TaskTriggersComponent implements OnInit {
       active: this.form.active,
     };
     this.triggersService.update(this.projectName, this.taskName, target.id, body).subscribe({
-      next: () => {
+      next: (saved) => {
         this.saving.set(false);
         this.showEditDialog.set(false);
         this.editingTrigger.set(null);
         this.notify.success('Trigger saved');
+        this.openTriggerSecretDialogIfGeneratedSecretPresent(saved);
         this.loadTriggers();
       },
       error: (err) => {
@@ -403,6 +412,37 @@ export class TaskTriggersComponent implements OnInit {
       this.notify.success('Trigger deleted');
       this.loadTriggers();
     });
+  }
+
+  replaceTriggerSecretAndOpenNewSecretDialog(trigger: TriggerOut): void {
+    const replace = () => this.triggersService.replacePostRequestTriggerSecret(this.projectName, this.taskName, trigger.id);
+    const request = trigger.has_secret
+      ? this.confirm.confirm({
+        title: 'Replace Secret',
+        target: `${this.typeLabel(trigger.type)}: ${trigger.post_request_url ?? ''}`,
+        consequence: 'Requests that use the current secret no longer start this trigger.',
+        confirmLabel: 'Replace',
+        failure: 'Failed to replace the secret.',
+        action: replace,
+      })
+      : this.replaceSecretAndMarkTriggerBusy(trigger.id, replace);
+    request.subscribe({
+      next: (saved) => {
+        this.openTriggerSecretDialogIfGeneratedSecretPresent(saved);
+        this.loadTriggers();
+      },
+      error: (error: unknown) => this.notify.failure('Failed to replace secret', error),
+    });
+  }
+
+  private replaceSecretAndMarkTriggerBusy(id: string, replace: () => Observable<TriggerOut>): Observable<TriggerOut> {
+    this.triggerIdWithSecretBeingReplaced.set(id);
+    return replace().pipe(finalize(() => this.triggerIdWithSecretBeingReplaced.set(null)));
+  }
+
+  private openTriggerSecretDialogIfGeneratedSecretPresent(saved: TriggerOut): void {
+    if (!saved.generated_secret) return;
+    this.createdTriggerWithOneTimeSecret.set({ url: saved.post_request_url ?? '', secret: saved.generated_secret });
   }
 
   setPollingTriggerToHourly(trigger: TriggerOut): void {
@@ -495,7 +535,7 @@ export class TaskTriggersComponent implements OnInit {
         return cfg.branch ? `${schedule}, branch ${cfg.branch}` : schedule;
       }
       case 'post_request':
-        return cfg.branch ? `branch ${cfg.branch}` : '';
+        return [...(cfg.branch ? [`branch ${cfg.branch}`] : []), ...getPathFilterSummaryParts(cfg)].join(', ');
     }
   }
 

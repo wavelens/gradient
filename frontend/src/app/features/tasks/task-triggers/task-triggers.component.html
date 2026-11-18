@@ -55,6 +55,9 @@
                   @if (!trigger.active) {
                     <gr-badge severity="neutral">Inactive</gr-badge>
                   }
+                  @if (trigger.type === 'post_request' && !trigger.has_secret) {
+                    <gr-badge severity="warning">No secret</gr-badge>
+                  }
                   <span>Last fired: {{ trigger.last_fired_at | relativeTime }}</span>
                   @if (nextPoll(trigger); as next) {
                     <span>{{ next }}</span>
@@ -93,6 +96,19 @@
                   (click)="makeDefault(trigger.id)"
                 ></button>
               }
+              @if (trigger.type === 'post_request') {
+                <button
+                  *appWritable="access()"
+                  grButton
+                  [label]="trigger.has_secret ? 'Replace secret' : 'Generate secret'"
+                  icon="key"
+                  severity="secondary"
+                  size="small"
+                  [loading]="triggerIdWithSecretBeingReplaced() === trigger.id"
+                  [disabled]="rowBusy()"
+                  (click)="replaceTriggerSecretAndOpenNewSecretDialog(trigger)"
+                ></button>
+              }
               <button
                 *appWritable="access()"
                 grButton
@@ -117,6 +133,9 @@
               }
             </div>
           </div>
+          @if (trigger.post_request_url) {
+            <gr-copy-field [value]="trigger.post_request_url" />
+          }
         </div>
       }
     </div>
@@ -174,6 +193,23 @@
   </div>
 </gr-dialog>
 
+<gr-dialog header="Trigger secret" [visible]="!!createdTriggerWithOneTimeSecret()"
+  (visibleChange)="$event || createdTriggerWithOneTimeSecret.set(null)" [closable]="false" width="560px">
+  @if (createdTriggerWithOneTimeSecret(); as created) {
+    <p>Copy the trigger URL and secret into the system for POST requests. Gradient can show the secret only once.</p>
+    <gr-form-field label="Trigger URL">
+      <span slot="hint">Acceptable headers are Authorization: Bearer, X-Hub-Signature-256, X-Forgejo-Signature, X-Gitea-Signature, and X-Gitlab-Token.</span>
+      <gr-copy-field [value]="created.url" />
+    </gr-form-field>
+    <gr-form-field label="Trigger secret">
+      <gr-copy-field [value]="created.secret" />
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    <button grButton label="Done" icon="check" (click)="createdTriggerWithOneTimeSecret.set(null)" data-testid="secret-done"></button>
+  </div>
+</gr-dialog>
+
 <!-- Shared form template -->
 <ng-template #triggerForm let-isEdit="isEdit">
   <gr-form-field label="Type" for="trig-type">
@@ -191,7 +227,7 @@
   }
   </gr-form-field>
 
-  @if (form.type === 'polling' || form.type === 'time') {
+  @if (form.type === 'polling' || form.type === 'time' || form.type === 'post_request') {
     <gr-form-field label="Branch" for="trig-branch" hint="Leave empty to track the repo's default branch (HEAD).">
       <input
         grInput

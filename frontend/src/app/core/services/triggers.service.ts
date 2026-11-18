@@ -48,6 +48,10 @@ export class TriggersService {
     return this.api.post<FireOutcome>(`${this.base(project, proj)}/${id}/test`);
   }
 
+  replacePostRequestTriggerSecret(project: string, proj: string, id: string): Observable<TriggerOut> {
+    return this.api.post<TriggerOut>(`${this.base(project, proj)}/${id}/secret`);
+  }
+
   getSuggestedPushAndPullRequestTriggerConfigs(project: string, repository: string): Observable<TriggerConfig[]> {
     return this.api.get<TriggerConfig[]>(`projects/${project}/trigger-suggestions?repository=${encodeURIComponent(repository)}`);
   }
