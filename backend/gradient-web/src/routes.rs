@@ -543,7 +543,8 @@ pub(crate) fn webhook_routes() -> OpenApiRouter<Arc<ServerState>> {
         OpenApiRouter::new()
             .routes(routes!(git_host_hooks::github_app_webhook))
             .routes(routes!(git_host_hooks::git_host_webhook))
-            .routes(routes!(git_host_hooks::git_host_connection_webhook)),
+            .routes(routes!(git_host_hooks::git_host_connection_webhook))
+            .routes(routes!(git_host_hooks::trigger_webhook)),
     ))
 }
 

@@ -9,7 +9,7 @@ use gradient_types::TaskTriggerId;
 use sea_orm::{ConnectionTrait, DbErr};
 use serde::{Deserialize, Serialize};
 
-use super::pending::{PendingDeliveryKind, enqueue_many};
+use super::pending::{PendingDeliveryKind, enqueue_many, enqueue_or_increment_revision};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerFire {
@@ -40,6 +40,15 @@ pub async fn enqueue_trigger_fires<C: ConnectionTrait>(
         .collect::<Result<Vec<_>, DbErr>>()?;
 
     enqueue_many(db, PendingDeliveryKind::TriggerFire, rows).await
+}
+
+pub async fn enqueue_or_increment_trigger_fire_for_post_request<C: ConnectionTrait>(
+    db: &C,
+    fire: &TriggerFire,
+) -> Result<(), DbErr> {
+    let payload = serde_json::to_value(fire)
+        .map_err(|e| DbErr::Custom(format!("encode a trigger fire: {e}")))?;
+    enqueue_or_increment_revision(db, PendingDeliveryKind::TriggerFire, fire.key(), payload).await
 }
 
 #[cfg(test)]

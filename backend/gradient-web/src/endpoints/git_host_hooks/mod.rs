@@ -16,11 +16,13 @@ pub(crate) mod installation;
 mod payloads;
 mod refusal;
 mod response;
+mod trigger_webhook;
 
 pub use response::{
     IncomingWebhookResponse, QueuedEvaluation, SkippedTask, TaskEvaluationNotStartedReason,
-    WebhookTriggerOutcome,
+    TriggerFiringQueuedResponse, WebhookTriggerOutcome,
 };
+pub use trigger_webhook::*;
 
 use crate::extractors::Path;
 use crate::ip_allowlist::is_allowed as ip_allowed;

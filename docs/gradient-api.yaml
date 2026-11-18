@@ -7303,6 +7303,48 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security: []
+  /api/v1/hooks/trigger/{trigger_id}:
+    post:
+      tags:
+      - git-host-webhooks
+      summary: Fire a POST request trigger
+      description: |-
+        Fire one trigger of type `post_request`. The trigger secret can prove the origin, so the request needs no login. These headers can carry the secret. A single valid header is enough.
+        - `Authorization: Bearer <secret>`
+        - `X-Hub-Signature-256` (HMAC-SHA256 of the body, GitHub format)
+        - `X-Forgejo-Signature` / `X-Gitea-Signature` (HMAC-SHA256 of the body in hex)
+        - `X-Gitlab-Token` (plain secret)
+
+        Only signature checks read the body. Requests with a valid secret receive `202` and queue one firing. All firings check the trigger branch in the same way as a polling trigger. New commits start an evaluation for the firing.
+      operationId: triggerWebhook
+      parameters:
+      - name: trigger_id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TaskTriggerId'
+      requestBody:
+        content:
+          application/json:
+            schema: {}
+      responses:
+        '202':
+          description: Gradient queued the trigger.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TriggerFiringQueuedResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security: []
   /api/v1/hooks/{connection}:
     post:
       tags:
@@ -24894,6 +24936,13 @@ components:
               type: string
               enum:
               - post_request
+    TriggerFiringQueuedResponse:
+      type: object
+      required:
+      - trigger
+      properties:
+        trigger:
+          $ref: '#/components/schemas/TaskTriggerId'
     TriggerOut:
       type: object
       required:
