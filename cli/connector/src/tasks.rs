@@ -438,7 +438,7 @@ impl TasksApi<'_> {
         project: &str,
         proj: &str,
         body: CreateTriggerRequest,
-    ) -> Result<String, ConnectorError> {
+    ) -> Result<TriggerOut, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -483,7 +483,7 @@ impl TasksApi<'_> {
         proj: &str,
         id: &str,
         body: UpdateTriggerRequest,
-    ) -> Result<String, ConnectorError> {
+    ) -> Result<TriggerOut, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -560,6 +560,28 @@ impl TasksApi<'_> {
             Method::POST,
             &format!(
                 "tasks/{}/{}/triggers/{}/default",
+                encode_url_component(project),
+                encode_url_component(proj),
+                encode_url_component(id)
+            ),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn replace_trigger_secret(
+        &self,
+        project: &str,
+        proj: &str,
+        id: &str,
+    ) -> Result<TriggerOut, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!(
+                "tasks/{}/{}/triggers/{}/secret",
                 encode_url_component(project),
                 encode_url_component(proj),
                 encode_url_component(id)

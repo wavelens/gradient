@@ -296,6 +296,11 @@ pub enum TaskTriggerCommands {
         /// Trigger UUID
         trigger: String,
     },
+    /// Replace the secret of the post_request trigger. Invalidate the old secret immediately.
+    RotateTriggerSecret {
+        /// Trigger UUID
+        trigger: String,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -303,16 +308,16 @@ pub struct TaskCreateTriggerFlags {
     /// Branch that the triggers evaluate. Default: the default branch of the repository
     #[arg(short, long)]
     branch: Option<String>,
-    /// Trigger to add: `polling`, `cron=<expression>`, `push` or `pr`. Repeat this flag to specify multiple triggers. Leave out this flag to set one polling trigger for the task.
+    /// Triggers to add are `polling`, `cron=<expression>`, `push`, `pr`, or `post-request`. Repeat this flag for multiple triggers. Omit this flag to set one polling trigger on the task.
     #[arg(long = "trigger", value_parser = parse_trigger_value)]
     triggers: Vec<CommandLineTrigger>,
     /// Create a task without a default trigger for polling.
     #[arg(long)]
     no_default_trigger: bool,
-    /// Path patterns relative to the repository root let `*` stand for any text with `/` present. Polling, push and pull request triggers start evaluations only for commits that change files that match the pattern. Repeat this flag to specify multiple patterns.
+    /// Path patterns relative to the repository root let `*` stand for any text with `/` present. Polling, POST request, push and pull request triggers start evaluations only for commits that change files that match the pattern. Repeat this flag to specify multiple patterns.
     #[arg(long = "include-path", value_name = "PATTERN")]
     changed_file_path_patterns: Vec<String>,
-    /// Path patterns are relative to the repository root. `*` can match any text with `/` inside. Changes that touch only files that match never start an evaluation from triggers for polling, push or pull requests. Repeat this flag for multiple patterns.
+    /// Path patterns are relative to the repository root. `*` can match any text with `/`. Changes that touch only matching files don't start an evaluation from polling, POST request, push, or pull request triggers. Repeat this flag to specify multiple patterns.
     #[arg(long = "exclude-path", value_name = "PATTERN")]
     excluded_changed_file_path_patterns: Vec<String>,
 }
@@ -325,6 +330,7 @@ pub enum CommandLineTrigger {
     Cron(String),
     Push,
     PullRequest,
+    PostRequest,
 }
 
 fn parse_trigger_value(value: &str) -> Result<CommandLineTrigger, String> {
@@ -332,12 +338,33 @@ fn parse_trigger_value(value: &str) -> Result<CommandLineTrigger, String> {
         None if value == "polling" => Ok(CommandLineTrigger::Polling),
         None if value == "push" => Ok(CommandLineTrigger::Push),
         None if value == "pr" => Ok(CommandLineTrigger::PullRequest),
+        None if value == "post-request" => Ok(CommandLineTrigger::PostRequest),
         Some(("cron", expression)) if !expression.trim().is_empty() => {
             Ok(CommandLineTrigger::Cron(expression.trim().to_owned()))
         }
         _ => Err(format!(
-            "Unknown trigger '{value}'. Use polling, cron=<expression>, push or pr."
+            "Unknown trigger '{value}'. Accepted values are polling, cron=<expression>, push, pr, post-request."
         )),
+    }
+}
+
+async fn print_post_request_trigger_ids_and_secret_creation_hints(
+    client: &Client,
+    project: &str,
+    task: &str,
+    out: Output,
+) {
+    let Ok(triggers) = client.tasks().triggers(project, task).await else {
+        return;
+    };
+    for trigger in triggers.iter().filter(|t| !t.has_secret) {
+        if let Some(url) = &trigger.post_request_url {
+            out.human(format!("URL for POST requests: {url}"));
+            out.human(format!(
+                "No secret yet. Run `gradient task trigger rotate-trigger-secret {}` to create one.",
+                trigger.id
+            ));
+        }
     }
 }
 
@@ -380,6 +407,11 @@ async fn build_optional_task_create_trigger_configs(
             CommandLineTrigger::Cron(cron) => TriggerConfig::Time {
                 cron,
                 branch: branch.clone(),
+            },
+            CommandLineTrigger::PostRequest => TriggerConfig::PostRequest {
+                branch: branch.clone(),
+                include_paths: changed_file_path_patterns.clone(),
+                exclude_paths: excluded_changed_file_path_patterns.clone(),
             },
             CommandLineTrigger::Push | CommandLineTrigger::PullRequest => {
                 if suggestions.is_none() {
@@ -574,6 +606,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                 out,
             )
             .await;
+            let has_inline_post_request_trigger = triggers
+                .iter()
+                .flatten()
+                .any(|trigger| matches!(trigger, TriggerConfig::PostRequest { .. }));
             match client
                 .tasks()
                 .create(
@@ -603,6 +639,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&created);
                     out.progress("Task created.");
                     out.human(created.id);
+                    if has_inline_post_request_trigger && !out.is_json() {
+                        print_post_request_trigger_ids_and_secret_creation_hints(
+                            &client, &project, &name, out,
+                        )
+                        .await;
+                    }
                     crate::commands::project::print_missing_project_prerequisites(
                         &client, &project, out,
                     )
@@ -786,5 +828,23 @@ pub async fn handle(cmd: Commands, out: Output) {
             task_subcommands::run_flake_input_subcommand(cmd, out).await
         }
         Commands::Trigger { cmd } => task_subcommands::run_task_trigger_subcommand(cmd, out).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_post_request_trigger_choice_from_trigger_cli_value() {
+        assert_eq!(
+            parse_trigger_value("post-request"),
+            Ok(CommandLineTrigger::PostRequest)
+        );
+        assert!(
+            parse_trigger_value("nope")
+                .unwrap_err()
+                .contains("post-request")
+        );
     }
 }

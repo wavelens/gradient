@@ -37,16 +37,19 @@ fn home_with(server: &MockServer) -> TempDir {
     home
 }
 
-fn run_gradient_json_with_temp_home(home: &TempDir, args: &[&str]) -> assert_cmd::assert::Assert {
+fn run_gradient_with_temp_home(home: &TempDir, args: &[&str]) -> assert_cmd::assert::Assert {
     Command::cargo_bin("gradient")
         .unwrap()
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .env_remove("GRADIENT_ACCOUNT")
-        .arg("--json")
         .args(["--task", "proj/nightly"])
         .args(args)
         .assert()
+}
+
+fn run_gradient_json_with_temp_home(home: &TempDir, args: &[&str]) -> assert_cmd::assert::Assert {
+    run_gradient_with_temp_home(home, &[&["--json"], args].concat())
 }
 
 #[tokio::test]
@@ -255,6 +258,71 @@ async fn test_task_create_with_push_trigger_and_no_webhook_receiver_creates_noth
 
     let home = home_with(&server);
     run_gradient_json_with_temp_home(&home, &create_task_args(&["--trigger", "pr"])).failure();
+}
+
+async fn mount_get_triggers_response_with_one_post_request_trigger_without_secret(
+    server: &MockServer,
+    task: &str,
+) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/tasks/proj/{task}/triggers")))
+        .respond_with(ok(serde_json::json!([{
+            "id": TRIGGER, "task": TASK_ID, "type": "post_request", "config": {"branch": "main"},
+            "active": true, "is_default": false, "has_secret": false,
+            "post_request_url": format!("https://gradient.example/api/v1/hooks/trigger/{TRIGGER}"),
+            "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00"
+        }])))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn test_task_create_post_request_trigger_prints_id_with_rotate_secret_hint_and_trigger_list_prints_no_secret()
+ {
+    let server = MockServer::start().await;
+    mount_task_create(&server, 1).await;
+    mount_get_triggers_response_with_one_post_request_trigger_without_secret(&server, "web").await;
+    mount_get_triggers_response_with_one_post_request_trigger_without_secret(&server, "nightly")
+        .await;
+
+    let home = home_with(&server);
+    let created = run_gradient_with_temp_home(
+        &home,
+        &create_task_args(&[
+            "--branch",
+            "main",
+            "--trigger",
+            "post-request",
+            "--include-path",
+            "src/*",
+        ]),
+    )
+    .success()
+    .get_output()
+    .stdout
+    .clone();
+    let created = String::from_utf8(created).unwrap();
+    let triggers = sent_task_create_body(&server).await["triggers"].clone();
+    assert_eq!(triggers[0]["type"], "post_request");
+    assert_eq!(triggers[0]["include_paths"], serde_json::json!(["src/*"]));
+    assert!(
+        created.contains(&format!(
+            "gradient task trigger rotate-trigger-secret {TRIGGER}"
+        )),
+        "{created}"
+    );
+
+    let listed = run_gradient_with_temp_home(&home, &["task", "trigger", "list"])
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let listed = String::from_utf8(listed).unwrap();
+    assert!(
+        listed.contains("No secret stored. POST requests return 401 before secret creation."),
+        "{listed}"
+    );
 }
 
 #[tokio::test]
