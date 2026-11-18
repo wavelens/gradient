@@ -93,11 +93,11 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(Array.from(el.querySelectorAll('a')).some((a) => a.textContent?.includes('Repository'))).toBe(false);
   });
 
-  it('offers all four trigger kinds when creating a trigger', () => {
+  it('offers all five trigger kinds when creating a trigger', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     fixture.componentInstance.startCreate();
     fixture.detectChanges();
-    expect(fixture.componentInstance.typeOptions.map((o) => o.value)).toEqual(['polling', 'reporter_push', 'reporter_pull_request', 'time']);
+    expect(fixture.componentInstance.typeOptions.map((o) => o.value)).toEqual(['polling', 'reporter_push', 'reporter_pull_request', 'time', 'post_request']);
     expect(document.querySelector('#trig-type')).not.toBeNull();
   });
 
@@ -375,7 +375,7 @@ describe('TaskTriggersComponent - validation', () => {
     expect(success).toHaveBeenCalledWith('Trigger created');
   });
 
-  it.each(['polling', 'reporter_push', 'reporter_pull_request'] as const)('sends both path filter lists for a %s trigger', (type) => {
+  it.each(['polling', 'reporter_push', 'reporter_pull_request', 'post_request'] as const)('sends both path filter lists for a %s trigger', (type) => {
     const { component, create } = withCreate();
     component.startCreate();
     component.form.type = type;
@@ -387,7 +387,7 @@ describe('TaskTriggersComponent - validation', () => {
     }));
   });
 
-  it.each(['polling', 'reporter_push', 'reporter_pull_request', 'time'] as const)('leaves empty path filter lists out of a %s trigger', (type) => {
+  it.each(['polling', 'reporter_push', 'reporter_pull_request', 'time', 'post_request'] as const)('leaves empty path filter lists out of a %s trigger', (type) => {
     const { component, create } = withCreate();
     component.startCreate();
     component.form.type = type;
@@ -414,10 +414,12 @@ describe('TaskTriggersComponent - validation', () => {
   it('names the path filters in the summary row', () => {
     const push = { ...trigger, id: 't2', type: 'reporter_push' as const, config: { type: 'reporter_push', branches: ['main'], include_paths: ['src/*'], exclude_paths: ['docs/*'] } };
     const polling = { ...trigger, config: { ...trigger.config, include_paths: ['nix/*'] } };
-    const fixture = setup(writer, [polling, push]);
+    const postRequest = { ...trigger, id: 't3', type: 'post_request' as const, config: { type: 'post_request', branch: 'main', exclude_paths: ['*.md'] } };
+    const fixture = setup(writer, [polling, push, postRequest]);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('branches: main / include paths: src/* / exclude paths: docs/*');
     expect(text).toContain('every 5 min, include paths: nix/*');
+    expect(text).toContain('branch main, exclude paths: *.md');
   });
 
   it('closes the edit dialog without a request when nothing changed', () => {
@@ -426,6 +428,90 @@ describe('TaskTriggersComponent - validation', () => {
     component.saveEdit();
     expect(update).not.toHaveBeenCalled();
     expect(component.showEditDialog()).toBe(false);
+  });
+});
+
+describe('TaskTriggersComponent - post request trigger', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+  const url = 'https://ci.example.com/api/v1/hooks/trigger/t5';
+  const postRequest = {
+    ...trigger,
+    id: 't5',
+    type: 'post_request' as const,
+    config: { type: 'post_request', branch: null },
+    has_secret: true,
+    post_request_url: url,
+  };
+  const dialogCopyFieldValues = () =>
+    Array.from(document.querySelectorAll<HTMLInputElement>('.gr-dialog gr-copy-field input')).map((input) => input.value);
+
+  function renderWithReplace(triggers: unknown[], confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action())) {
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm } });
+    const fixture = setup(writer, triggers);
+    const replace = vi.fn(() => of({ ...postRequest, generated_secret: 'trsec-456' }));
+    Object.assign(TestBed.inject(TriggersService), { replacePostRequestTriggerSecret: replace });
+    const row = (fixture.nativeElement as HTMLElement).querySelector('.trigger-row') as HTMLElement;
+    return { fixture, row, replace, confirm };
+  }
+
+  it('creates a post request trigger and shows the generated secret once', () => {
+    const fixture = setup(writer, []);
+    const create = vi.fn(() => of({ ...postRequest, generated_secret: 'trsec-123' }));
+    Object.assign(TestBed.inject(TriggersService), { create });
+    const component = fixture.componentInstance;
+    component.startCreate();
+    component.form.type = 'post_request';
+    component.form.branch = ' main ';
+    component.saveCreate();
+    fixture.detectChanges();
+
+    expect(create).toHaveBeenCalledWith('acme', 'demo', { config: { type: 'post_request', branch: 'main' }, active: true });
+    expect(component.createdTriggerWithOneTimeSecret()).toEqual({ url, secret: 'trsec-123' });
+    expect(dialogCopyFieldValues()).toEqual([url, 'trsec-123']);
+    (document.querySelector('[data-testid="secret-done"]') as HTMLButtonElement).click();
+    expect(component.createdTriggerWithOneTimeSecret()).toBeNull();
+  });
+
+  it('replaces the secret of a post request trigger and shows the new one', () => {
+    const { fixture, row, replace, confirm } = renderWithReplace([postRequest]);
+    expect(row.querySelector<HTMLInputElement>('gr-copy-field input')?.value).toBe(url);
+    expect(findByText(row, 'generate secret')).toBeNull();
+
+    findByText(row, 'replace secret')!.click();
+    fixture.detectChanges();
+
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Replace Secret' }));
+    expect(replace).toHaveBeenCalledWith('acme', 'demo', 't5');
+    expect(dialogCopyFieldValues()).toEqual([url, 'trsec-456']);
+  });
+
+  it('gives a post request trigger without a secret one without asking first', () => {
+    const { fixture, row, replace, confirm } = renderWithReplace([{ ...postRequest, has_secret: false }]);
+    expect(row.textContent).toContain('No secret');
+    expect(findByText(row, 'replace secret')).toBeNull();
+
+    findByText(row, 'generate secret')!.click();
+    fixture.detectChanges();
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledWith('acme', 'demo', 't5');
+    expect(fixture.componentInstance.createdTriggerWithOneTimeSecret()?.secret).toBe('trsec-456');
+  });
+
+  it('double-click "Generate secret" on a trigger without a secret to send one secret request', () => {
+    const { fixture, row, replace } = renderWithReplace([{ ...postRequest, has_secret: false }]);
+    replace.mockReturnValue(NEVER);
+
+    findByText(row, 'generate secret')!.click();
+    fixture.detectChanges();
+    findByText(row, 'generate secret')!.click();
+
+    expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides Replace secret on a state-managed task', () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true }, [postRequest]);
+    expect(findByText(fixture.nativeElement, 'replace secret')).toBeNull();
   });
 });
 
