@@ -19,6 +19,7 @@ use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, TaskScope,
 use anyhow::Context;
 use axum::{Extension, Json};
 use chrono::Utc;
+use gradient_ci::actions::{encrypt_secret_with_file, new_webhook_secret};
 use gradient_ci::trigger::InputUpdateOutcome;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
@@ -44,9 +45,10 @@ pub fn router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(read, update, delete_one))
         .routes(routes!(fire_now))
         .routes(routes!(set_default))
+        .routes(routes!(rotate_trigger_secret))
 }
 
-#[derive(Serialize, Debug, ToSchema)]
+#[derive(Serialize, ToSchema)]
 pub struct TriggerOut {
     pub id: TaskTriggerId,
     pub task: TaskId,
@@ -58,22 +60,65 @@ pub struct TriggerOut {
     pub last_fired_at: Option<chrono::NaiveDateTime>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
+    pub has_secret: bool,
+    pub post_request_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_secret: Option<String>,
 }
 
-impl From<MTaskTrigger> for TriggerOut {
-    fn from(m: MTaskTrigger) -> Self {
-        Self {
-            id: m.id,
-            task: m.task,
-            trigger_type: m.trigger_type,
-            config: m.config,
-            active: m.active,
-            is_default: m.is_default,
-            last_fired_at: m.last_fired_at,
-            created_at: m.created_at,
-            updated_at: m.updated_at,
-        }
+fn trigger_public_post_url(serve_url: &str, trigger: &MTaskTrigger) -> Option<String> {
+    (trigger.trigger_type == TriggerType::PostRequest).then(|| {
+        format!(
+            "{}/api/v1/hooks/trigger/{}",
+            serve_url.trim_end_matches('/'),
+            trigger.id
+        )
+    })
+}
+
+fn trigger_api_response_from_row_and_base_url(row: MTaskTrigger, serve_url: &str) -> TriggerOut {
+    TriggerOut {
+        post_request_url: trigger_public_post_url(serve_url, &row),
+        has_secret: row.encrypted_secret.is_some(),
+        generated_secret: None,
+        id: row.id,
+        task: row.task,
+        trigger_type: row.trigger_type,
+        config: row.config,
+        active: row.active,
+        is_default: row.is_default,
+        last_fired_at: row.last_fired_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
     }
+}
+
+fn create_trigger_secret_with_encrypted_copy(crypt_file: &str) -> WebResult<(String, String)> {
+    let plaintext = new_webhook_secret();
+    let ciphertext = encrypt_secret_with_file(crypt_file, &plaintext)
+        .context("encrypt the task trigger secret")?;
+    Ok((plaintext, ciphertext))
+}
+
+fn encrypted_secret_change_for_trigger_type_update(
+    active: &mut ATaskTrigger,
+    trigger_type: TriggerType,
+    crypt_file: &str,
+) -> WebResult<Option<String>> {
+    if trigger_type != TriggerType::PostRequest {
+        active.encrypted_secret = Set(None);
+        return Ok(None);
+    }
+    if active
+        .encrypted_secret
+        .try_as_ref()
+        .is_some_and(Option::is_some)
+    {
+        return Ok(None);
+    }
+    let (plaintext, ciphertext) = create_trigger_secret_with_encrypted_copy(crypt_file)?;
+    active.encrypted_secret = Set(Some(ciphertext));
+    Ok(Some(plaintext))
 }
 
 fn build_trigger_audit_log_json(trigger: &MTaskTrigger) -> serde_json::Value {
@@ -171,8 +216,13 @@ pub async fn list(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
     let rows = gradient_db::triggers::of_task(&db.web_db, proj.id).await?;
+    let serve_url = &db.config.server.serve_url;
 
-    Ok(ok_json(rows.into_iter().map(TriggerOut::from).collect()))
+    Ok(ok_json(
+        rows.into_iter()
+            .map(|row| trigger_api_response_from_row_and_base_url(row, serve_url))
+            .collect(),
+    ))
 }
 
 #[utoipa::path(
@@ -191,13 +241,20 @@ pub async fn create(
     JsonBody(body): JsonBody<CreateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let config = validate_trigger_config_and_return_config_to_store(body.config)?;
-    let trigger = build_task_trigger_row_from_config_and_flags(
+    let mut trigger = build_task_trigger_row_from_config_and_flags(
         proj.id,
         &config,
         body.active,
         false,
         gradient_types::now(),
     );
+    let generated_secret = (trigger.trigger_type == TriggerType::PostRequest)
+        .then(|| create_trigger_secret_with_encrypted_copy(&db.config.secrets.crypt_file))
+        .transpose()?
+        .map(|(plaintext, ciphertext)| {
+            trigger.encrypted_secret = Some(ciphertext);
+            plaintext
+        });
     let row = gradient_db::triggers::insert(&db.web_db, trigger).await?;
 
     audit
@@ -207,7 +264,10 @@ pub async fn create(
             build_trigger_audit_log_json(&row),
         )
         .await;
-    Ok(ok_json(TriggerOut::from(row)))
+    Ok(ok_json(TriggerOut {
+        generated_secret,
+        ..trigger_api_response_from_row_and_base_url(row, &db.config.server.serve_url)
+    }))
 }
 
 pub(crate) fn validate_trigger_config_and_return_config_to_store(
@@ -261,7 +321,10 @@ pub async fn read(
         .await?
         .or_not_found(Resource::Trigger)?;
 
-    Ok(ok_json(TriggerOut::from(row)))
+    Ok(ok_json(trigger_api_response_from_row_and_base_url(
+        row,
+        &db.config.server.serve_url,
+    )))
 }
 
 #[utoipa::path(
@@ -296,8 +359,14 @@ pub async fn update(
     };
 
     let mut active: ATaskTrigger = row.into();
+    let mut generated_secret = None;
     if let Some(cfg) = config {
         let tt = cfg.trigger_type();
+        generated_secret = encrypted_secret_change_for_trigger_type_update(
+            &mut active,
+            tt,
+            &db.config.secrets.crypt_file,
+        )?;
         active.trigger_type = Set(tt);
         active.config = Set(cfg.to_db_json());
     }
@@ -315,7 +384,58 @@ pub async fn update(
             build_trigger_audit_log_json(&updated),
         )
         .await;
-    Ok(ok_json(TriggerOut::from(updated)))
+    Ok(ok_json(TriggerOut {
+        generated_secret,
+        ..trigger_api_response_from_row_and_base_url(updated, &db.config.server.serve_url)
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/{id}/secret",
+    operation_id = "rotateTaskTriggerSecret",
+    tag = "triggers",
+    summary = "Replace trigger secret",
+    description = "Generate a new secret for the `post_request` trigger, encrypt it, and store it. Return the new secret once in `generated_secret` in the response. Old secrets stop working immediately. Reject other trigger types.",
+    params(TaskPath, ("id" = TaskTriggerId, Path)),
+    responses((status = OK, description = "Trigger with the new secret", body = TriggerOut), WebError)
+)]
+pub async fn rotate_trigger_secret(
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
+    audit: Audit,
+) -> WebResult<Json<BaseResponse<TriggerOut>>> {
+    let id: TaskTriggerId = params.param("id")?;
+
+    let row = gradient_db::triggers::by_id_in_task(&db.web_db, proj.id, id)
+        .await?
+        .or_not_found(Resource::Trigger)?;
+    if row.trigger_type != TriggerType::PostRequest {
+        return Err(TaskRefusal::TriggerSecretReplacementNeedsPostRequestTrigger.into());
+    }
+
+    let (plaintext, ciphertext) =
+        create_trigger_secret_with_encrypted_copy(&db.config.secrets.crypt_file)?;
+    let mut active: ATaskTrigger = row.into();
+    active.encrypted_secret = Set(Some(ciphertext));
+    active.updated_at = Set(gradient_types::now());
+    let updated = gradient_db::triggers::update(&db.web_db, active).await?;
+
+    audit
+        .write(
+            Action::TaskEvaluationTriggerChanged,
+            EventOwner::task(proj.project, proj.id),
+            build_trigger_audit_log_json(&updated),
+        )
+        .await;
+    Ok(ok_json(TriggerOut {
+        generated_secret: Some(plaintext),
+        ..trigger_api_response_from_row_and_base_url(updated, &db.config.server.serve_url)
+    }))
 }
 
 #[utoipa::path(
@@ -395,7 +515,10 @@ pub async fn set_default(
             build_trigger_audit_log_json(&updated),
         )
         .await;
-    Ok(ok_json(TriggerOut::from(updated)))
+    Ok(ok_json(trigger_api_response_from_row_and_base_url(
+        updated,
+        &db.config.server.serve_url,
+    )))
 }
 
 #[derive(Serialize, Debug, ToSchema)]

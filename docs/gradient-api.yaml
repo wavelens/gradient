@@ -12297,6 +12297,48 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/triggers/{id}/secret:
+    post:
+      tags:
+      - triggers
+      summary: Replace trigger secret
+      description: Generate a new secret for the `post_request` trigger, encrypt it, and store it. Return the new secret once in `generated_secret` in the response. Old secrets stop working immediately. Reject other trigger types.
+      operationId: rotateTaskTriggerSecret
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TaskTriggerId'
+      responses:
+        '200':
+          description: Trigger with the new secret
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TriggerOut'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/tasks/{project}/{task}/triggers/{id}/test:
     post:
       tags:
@@ -24954,6 +24996,7 @@ components:
       - is_default
       - created_at
       - updated_at
+      - has_secret
       properties:
         id:
           $ref: '#/components/schemas/TaskTriggerId'
@@ -24977,6 +25020,16 @@ components:
         updated_at:
           type: string
           format: date-time
+        has_secret:
+          type: boolean
+        post_request_url:
+          type:
+          - string
+          - 'null'
+        generated_secret:
+          type:
+          - string
+          - 'null'
     TriggerType:
       type: string
       enum:

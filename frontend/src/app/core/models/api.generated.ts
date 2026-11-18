@@ -3146,6 +3146,9 @@ export interface TriggerOut {
   last_fired_at?: string | null;
   created_at: string;
   updated_at: string;
+  has_secret: boolean;
+  post_request_url?: string | null;
+  generated_secret?: string | null;
 }
 
 export type TriggerType = "polling" | "reporter_push" | "reporter_pull_request" | "time" | "post_request";

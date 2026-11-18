@@ -814,6 +814,7 @@ pub async fn duplicate_task(
             task: copy.id,
             config,
             last_fired_at: None,
+            encrypted_secret: None,
             created_at: now,
             updated_at: now,
             ..trigger

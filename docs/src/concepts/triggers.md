@@ -159,6 +159,8 @@ Triggers for POST requests start from one HTTP request from an external system. 
 
 - **URL**: `https://<gradient>/api/v1/hooks/trigger/<trigger id>`. View the URL on the trigger page for the task.
 - **Secret**: Gradient generates a secret at creation and shows it once.
+- **Replace Secret**: Create a new secret with the "Replace secret" button on the trigger page, `gradient task trigger rotate-trigger-secret <trigger id>`, or `POST /api/v1/tasks/<project>/<task>/triggers/<trigger id>/secret`. Triggers without a secret show a "Generate secret" button instead. Old secrets stop working immediately.
+- **No Secret**: Triggers on duplicated tasks and triggers that are created with the task start without a secret. Trigger URLs respond with `401` until creation of a new secret.
 - **Answer**: `202` with a trigger ID. Evaluation results do not appear in the response.
 - **Body**: The request body is ignored by Gradient except for the signature check.
 - **After the Request**: The flow is the same as the polling trigger. Checks by Gradient target the HEAD of `branch`, or the HEAD of the remote default branch when `branch` is absent. New HEAD commits start an evaluation.
