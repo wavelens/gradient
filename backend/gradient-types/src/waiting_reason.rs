@@ -30,10 +30,6 @@ pub enum WaitingReason {
         capability: EvalCapability,
         connected_workers: u32,
     },
-    Approval {
-        pr_number: u64,
-        pr_author: String,
-    },
     NoCache,
     CacheStorageFull,
     Draining,
@@ -187,13 +183,6 @@ impl WaitingReason {
             unmet,
             connected_workers,
             available_architectures,
-        }
-    }
-
-    pub fn approval(pr_number: u64, pr_author: impl Into<String>) -> Self {
-        Self::Approval {
-            pr_number,
-            pr_author: pr_author.into(),
         }
     }
 

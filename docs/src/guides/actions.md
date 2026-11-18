@@ -77,7 +77,7 @@ An action without events can never fire. Most actions need only a few of them, l
 | `evaluation.completed` | All builds in the evaluation passed |
 | `evaluation.failed` | The evaluation failed |
 | `build.failed` | A single build failed |
-| `evaluation.action_required` | A fork pull request await maintainer approval |
+| `fork_pull_request_approval.needs_maintainer_approval` | A commit of a fork pull request waits for maintainer approval |
 
 The [events reference](../reference/events.md) list every available event.
 

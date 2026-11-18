@@ -39,6 +39,7 @@ pub mod exec_jobs;
 pub mod flake_input_overrides;
 pub mod flake_input_sources;
 pub mod flake_output_nodes;
+pub mod fork_pull_request_approvals;
 pub mod git_host_connections;
 pub mod graph;
 pub mod incoming_deliveries;

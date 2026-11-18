@@ -114,7 +114,7 @@ Pull request events from the Git host activate this trigger. Push events don't a
 | `actions` | Action names of the event, by default `opened`, `synchronize`, `reopened`. An empty list fires on every action. |
 | `branches` | The source branch of the pull request, not the target branch |
 | `include_paths`, `exclude_paths` | Files changed between the tip of the target branch and the head of the pull request. See [Path Filters](#path-filters). Empty by default. |
-| `require_approval` | Pull requests from forks wait for a maintainer, by default on. A pull request from the same repository or by a repository writer starts right away |
+| `require_approval` | Commits in pull requests from forks wait for maintainer approval by default. Evaluations from Gradient start only after approval. Each new commit must get a new approval. Pull requests from the same repository, or from users with write permission to the repository, start immediately. |
 
 - **Action Names**: GitHub names stay as sent. GitLab names map to `opened`, `synchronize`, `reopened`, `closed` and `merged`.
 - **Missing Event**: Webhooks without a pull request event, or `actions` without `synchronize`, block evaluation for a push to a branch with a pull request.
@@ -123,9 +123,9 @@ Users with write permission to the repository can steer a pull request with comm
 
 | Comment | Effect |
 |---|---|
-| `/gradient run` | Release of a waiting pull request. Otherwise a new evaluation of the current head commit, even when that commit got evaluated before |
+| `/gradient run` | Approval and evaluation of the latest commit pending approval. Otherwise, a new evaluation of the current head commit. A commit with a prior evaluation can still receive a new evaluation. |
 | `/gradient run <wildcard>` | The same with a different [wildcard](../reference/wildcards.md) |
-| `/gradient approve` | Release of a pull request waiting for approval |
+| `/gradient approve` | Approval and Evaluation of the Latest Commit Up for Approval |
 | `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 `/gradient run` fire pull request triggers with action `synchronize`. Triggers without `synchronize` in `actions`, or with a `branches` filter that does not match, ignore that command.

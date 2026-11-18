@@ -566,13 +566,13 @@ async fn q13_a_server_drain_makes_evaluations_wait_and_its_end_returns_them() {
 }
 
 #[tokio::test]
-async fn q14_the_waiting_pass_leaves_approval_and_a_still_missing_cache_alone() {
+async fn q14_the_waiting_pass_leaves_full_cache_storage_and_a_still_missing_cache_alone() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(
         shape()
             .evalq(e1)
             .evaluation_status(EvaluationStatus::Waiting)
-            .waiting_reason(WaitingReason::approval(1, "author").to_json())
+            .waiting_reason(WaitingReason::CacheStorageFull.to_json())
             .evaluation(e2)
             .evaluation_status(EvaluationStatus::Waiting)
             .waiting_reason(WaitingReason::NoCache.to_json()),

@@ -131,7 +131,7 @@ async fn post_reports(
     ctx: &CiContext,
     reporter: &dyn CiReporter,
     reports: &[CiReport],
-    evaluation_id: Option<EvaluationId>,
+    check: Option<&CommitStatusCheckWithIds>,
 ) -> Result<PostOutcome> {
     let mut first_id = None;
     for report in reports {
@@ -139,8 +139,8 @@ async fn post_reports(
             .report(report)
             .await
             .context("send Git host status report")?;
-        if let (Some(new_id), Some(evaluation_id)) = (new_id, evaluation_id) {
-            persist_evaluation_check_id(ctx, evaluation_id, &report.context, new_id).await;
+        if let (Some(new_id), Some(check)) = (new_id, check) {
+            persist_check_run_id(ctx, check, &report.context, new_id).await?;
         }
         first_id = first_id.or(new_id);
     }
@@ -148,6 +148,31 @@ async fn post_reports(
         response_status: Some(200),
         response_body: first_id.map(|id| format!("{{\"check_run_id\":{id}}}")),
     })
+}
+
+async fn persist_check_run_id(
+    ctx: &CiContext,
+    check: &CommitStatusCheckWithIds,
+    context: &str,
+    check_run_id: i64,
+) -> Result<()> {
+    match check {
+        CommitStatusCheckWithIds::Approval { approval } => {
+            gradient_db::fork_pull_request_approvals::store_approval_check_run_id(
+                &ctx.db.worker_db,
+                *approval,
+                check_run_id,
+            )
+            .await
+            .context("store the check run id of the approval check")?;
+        }
+        other => {
+            if let Some(evaluation_id) = other.evaluation_id() {
+                persist_evaluation_check_id(ctx, evaluation_id, context, check_run_id).await;
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn record_attempt(
@@ -204,13 +229,7 @@ pub async fn post_commit_status_reports_for_task_check_event_and_record_attempt(
     let outcome = async {
         let reporter =
             build_commit_status_reporter_from_git_host_connection_row(ctx, &connection).await?;
-        post_reports(
-            ctx,
-            reporter.as_ref(),
-            &reports,
-            Some(check.evaluation_id()),
-        )
-        .await
+        post_reports(ctx, reporter.as_ref(), &reports, Some(check)).await
     }
     .await;
     record_attempt(ctx, task.id, connection.id, event, started, &outcome).await?;

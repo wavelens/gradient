@@ -166,7 +166,7 @@ services.gradient.state.tasks.app = {
 1.  The connection name, looked up in the project, then its owner team, then the instance.
 2.  Posts commit statuses through the connection.
 3.  Put branch and tag filters into `config`, see [Trigger Types](../reference/state.md#trigger-types).
-4.  Optional. Covers evaluations of pull requests. Fork pull requests stay pending until a maintainer gives approval.
+4.  Triggers are optional. Pull requests get an evaluation. Commits in pull requests from forks wait for maintainer approval.
 
 ## Verify Deployment
 
@@ -180,10 +180,10 @@ services.gradient.state.tasks.app = {
 |---|---|
 | Open or update a pull request | The head commit of the pull request get evaluated |
 | Comment `/gradient run` | A new evaluation of the pull request start |
-| Comment `/gradient approve` or approve the review | A pull request from a fork that waited for maintainer approval get released |
+| Comment `/gradient approve` or approve the review | Fork pull requests that wait for maintainer approval get the latest commit evaluated. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
-The **Pull Request (reporter)** trigger include a setting called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). This setting controls the approval check.
+There's a setting called **Require maintainer approval for PRs from non-writers** for the **Pull Request (reporter)** trigger (`require_approval` in `config`). Approval checks depend on this setting. New commits need a new approval.
 
 Pull requests from the [AGit flow](https://docs.gitea.com/usage/issues-prs/agit/) (`git push origin HEAD:refs/for/main`) get evaluated too.
 

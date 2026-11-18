@@ -115,13 +115,6 @@ describe('explainWaiting', () => {
     expect(explainWaiting({ kind: 'draining' }, 'acme', ADMIN).hint).toBe('Ask an instance admin to stop draining.');
   });
 
-  it('explains how a maintainer approves a pull request, which happens outside Gradient', () => {
-    const explained = explainWaiting({ kind: 'approval', pr_number: 7, pr_author: 'mallory' }, 'acme', SUPERUSER);
-    expect(explained.detail).toBe('Awaiting maintainer approval for pull request #7 by mallory.');
-    expect(explained.action).toBeNull();
-    expect(explained.hint).toContain('/gradient approve');
-  });
-
   it('offers nothing to do while the build graph recovers by itself', () => {
     const explained = explainWaiting({ kind: 'graph_stuck', pending_shared_builds: 9 }, 'acme', SUPERUSER);
     expect(explained.detail).toBe('Workers are available, but 9 builds are blocked on dependencies. Recovering automatically.');

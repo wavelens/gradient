@@ -92,10 +92,10 @@ Push events require the **Push (reporter)** trigger from step 4. Pull Requests r
 |---|---|
 | Open or update a pull request | Evaluation of the pull request's head commit |
 | Comment `/gradient run` | New evaluation of the pull request |
-| Comment `/gradient approve` or approve the review | Release of a pull request from a fork waiting for maintainer approval |
+| Comment `/gradient approve` or approve the review | Evaluation of the latest commit in a fork pull request awaiting maintainer approval. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
-Fork pull requests wait for maintainer approval before they run. To enable this check, set **Require maintainer approval for PRs from non-writers** on the **Pull Request (reporter)** trigger.
+Commits in pull requests from forks wait for maintainer approval before the start of evaluation. The `gradient/<task>: Approval` check can show the **Approve and run** button. Each new commit must get a new approval. Set **Require maintainer approval for PRs from non-writers** with the **Pull Request (reporter)** trigger to enable this check.
 
 ### Merge Queue
 
@@ -122,7 +122,7 @@ GitHub can merge an entry after a passed check, or drop the entry after a failed
 | `400 manifest state invalid or expired` | Over 10 minutes elapsed. Repeat step 1 |
 | `404 Pending credentials` after App creation | The credentials got shown once already, or the server restarted. Repeat step 1 |
 | `403 superuser required` | The account lacks the superuser flag |
-| An approving review does not release a fork pull request | The App predates the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
+| Approved reviews don't start evaluation of pull requests from forks | The App predates the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
 | Merge queue entries wait for the Gradient check without end | The App predates the `merge_group` event. Grant **Merge queues** read access and enable **Merge group** under the App's **Permissions & events** |
 | Pushes arrive but no evaluation starts | No **Git host connection** on the task, no push trigger, or a repository URL that doesn't match the pushed repository |
 | No status on the commit | **Report commit status** is off on the task's **Repository** page |

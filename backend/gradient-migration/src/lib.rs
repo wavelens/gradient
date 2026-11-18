@@ -88,6 +88,7 @@ mod m20261216_000000_add_revision_to_pending_delivery;
 mod m20261217_000000_create_project_git_https_credential_table;
 mod m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently;
 mod m20261219_000000_add_encrypted_secret_to_task_trigger;
+mod m20261220_000000_create_fork_pull_request_approval_table_and_convert_evaluations_waiting_for_approval;
 mod sql_on_one_connection;
 
 pub struct UpgradeFloor {
@@ -204,6 +205,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261217_000000_create_project_git_https_credential_table::Migration),
             Box::new(m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently::Migration),
             Box::new(m20261219_000000_add_encrypted_secret_to_task_trigger::Migration),
+            Box::new(m20261220_000000_create_fork_pull_request_approval_table_and_convert_evaluations_waiting_for_approval::Migration),
         ]
     }
 }

@@ -19,9 +19,7 @@ pub use changed_paths::{
     PathFilterBaseCommit, PathFilterCommitComparison, changed_paths_match_trigger_path_filter,
     should_fire_trigger_for_path_filter,
 };
-pub use gates::{
-    park_if_no_cache, park_if_no_workers, park_if_pending_approval, park_storage_full,
-};
+pub use gates::{park_if_no_cache, park_if_no_workers, park_storage_full};
 
 #[derive(Debug)]
 #[allow(
@@ -57,18 +55,11 @@ pub struct ApplyInput {
     pub author_name: Option<String>,
     pub manual: bool,
     pub honors_skip_marker: bool,
-    pub gate_approval: Option<ApprovalInfo>,
     pub repository_override: Option<String>,
     pub wildcard_override: Option<String>,
     pub source_comment: Option<serde_json::Value>,
     pub started_by: Option<UserId>,
     pub walk_mode: WalkMode,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApprovalInfo {
-    pub pr_number: u64,
-    pub pr_author: String,
 }
 
 pub async fn apply_trigger<C: ConnectionTrait>(
@@ -136,7 +127,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     let aborted: Vec<EvaluationId> = aborted_evaluations.iter().map(|(id, _)| *id).collect();
     gradient_db::status::stamp_superseded_by_on_aborted_evaluations(db, &aborted, eval.id).await?;
 
-    let eval = gates::run_gates(db, eval, input.gate_approval.as_ref(), task.project).await?;
+    let eval = gates::run_gates(db, eval, task.project).await?;
 
     Ok(ApplyOutcome::Created {
         evaluation: eval,

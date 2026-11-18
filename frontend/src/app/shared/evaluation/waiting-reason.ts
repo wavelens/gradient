@@ -133,14 +133,6 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
         showProjectReadinessRows: viewerIsProjectMember && reason.connected_workers === 0,
       };
     }
-    case 'approval':
-      return {
-        title: 'Waiting for approval',
-        detail: `Awaiting maintainer approval for pull request #${reason.pr_number} by ${reason.pr_author}.`,
-        requirements: [],
-        action: null,
-        hint: 'A maintainer can approve the pull request with the "Approve and run" check or the /gradient approve comment.',
-      };
     case 'no_cache':
       return {
         title: 'No writable cache',
