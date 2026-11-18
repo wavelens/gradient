@@ -348,7 +348,7 @@ async fn apply_to_task(
             commit_message: Some(msg),
             author_name: Some(author),
             manual: false,
-            honors_skip_marker: matches!(cfg, TriggerConfig::Polling { .. }),
+            honors_skip_marker: trigger_config_honors_skip_marker(cfg),
             gate_approval: None,
             repository_override: None,
             wildcard_override: None,
@@ -387,6 +387,13 @@ async fn apply_to_task(
             error!(error = %e, trigger_id = %trig.id, "trigger application failed");
         }
     }
+}
+
+fn trigger_config_honors_skip_marker(cfg: &TriggerConfig) -> bool {
+    matches!(
+        cfg,
+        TriggerConfig::Polling { .. } | TriggerConfig::PostRequest { .. }
+    )
 }
 
 async fn commit_metadata(
@@ -494,6 +501,88 @@ mod tests {
 
         let ok = std::future::ready(Ok::<_, std::io::Error>((true, vec![1u8])));
         assert_eq!(resolve_head(ok, "answers").await, Ok((true, vec![1u8])));
+    }
+
+    #[test]
+    fn test_skip_marker_honored_by_polling_and_post_request_triggers_but_not_time_and_reporter_triggers()
+     {
+        let honoring = [
+            TriggerConfig::Polling {
+                interval_secs: 60,
+                branch: None,
+                path_filter: Default::default(),
+            },
+            TriggerConfig::PostRequest {
+                branch: None,
+                path_filter: Default::default(),
+            },
+        ];
+        let ignoring = [
+            TriggerConfig::Time {
+                cron: "0 * * * * *".into(),
+                branch: None,
+            },
+            TriggerConfig::ReporterPush {
+                branches: vec![],
+                tags: vec![],
+                releases_only: false,
+                include_flake_inputs: false,
+                path_filter: Default::default(),
+            },
+            TriggerConfig::ReporterPullRequest {
+                branches: vec![],
+                actions: vec![],
+                require_approval: true,
+                path_filter: Default::default(),
+            },
+        ];
+        assert!(honoring.iter().all(trigger_config_honors_skip_marker));
+        assert!(!ignoring.iter().any(trigger_config_honors_skip_marker));
+    }
+
+    #[test]
+    fn post_request_trigger_never_fired_with_old_created_at_is_not_due_on_timed_trigger_pass() {
+        let now = dt("2026-05-06 10:00:00");
+        let trig = ept::Model {
+            id: tid(),
+            trigger_type: TriggerType::PostRequest,
+            config: serde_json::json!({}),
+            active: true,
+            last_fired_at: None,
+            created_at: now - chrono::Duration::days(365),
+            ..Default::default()
+        };
+        assert_eq!(due_fire(&trig, now), None);
+    }
+
+    #[tokio::test]
+    async fn active_triggers_query_filters_only_polling_and_time_trigger_types() {
+        use gradient_fixtures::mock::{all_statements, mock_db};
+        let db = WorkerDb::new(
+            mock_db()
+                .append_query_results([Vec::<ept::Model>::new()])
+                .into_connection(),
+        );
+
+        assert!(active_triggers(&db).await.expect("query").is_empty());
+
+        let statements = all_statements(db.into_transaction_log());
+        assert_eq!(statements.len(), 1, "{statements:?}");
+        assert!(statements[0].sql.starts_with("SELECT"), "{statements:?}");
+        let values = statements[0].values.clone().expect("parameters").0;
+        let type_param = |t: TriggerType| sea_orm::Value::SmallInt(Some(i16::from(t)));
+        assert!(
+            values.contains(&type_param(TriggerType::Polling)),
+            "{values:?}"
+        );
+        assert!(
+            values.contains(&type_param(TriggerType::Time)),
+            "{values:?}"
+        );
+        assert!(
+            !values.contains(&type_param(TriggerType::PostRequest)),
+            "{values:?}"
+        );
     }
 
     #[test]
