@@ -15,6 +15,7 @@ pub mod team;
 pub(crate) use refusal::GitHostConnectionRefusal;
 
 use crate::audit::Audit;
+use crate::endpoints::tasks::repository::TaskCommitStatusPostAttempt;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::normalize_allowed_ips;
@@ -35,24 +36,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct GitHostConnectionResponse {
-    pub id: GitHostConnectionId,
-    pub owner: GitHostConnectionOwner,
-    pub name: String,
-    pub display_name: String,
-    pub git_host_type: String,
-    pub base_url: Option<String>,
+    #[serde(flatten)]
+    pub connection: GitHostConnectionSummary,
     pub has_secret: bool,
     pub has_access_token: bool,
-    pub access_token_refreshes_automatically: bool,
     pub allowed_ips: Vec<String>,
-    pub receives_events: bool,
-    pub reports_status: bool,
     pub installation_id: Option<i64>,
-    pub account_login: Option<String>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub managed: bool,
-    pub webhook_url: Option<String>,
     pub generated_secret: Option<String>,
 }
 
@@ -67,9 +59,57 @@ pub struct GitHostConnectionSummary {
     pub receives_events: bool,
     pub reports_status: bool,
     pub can_manage: bool,
+    pub account_login: Option<String>,
+    pub webhook_url: Option<String>,
+    pub access_token_expires_at: Option<chrono::NaiveDateTime>,
+    pub access_token_refreshes_automatically: bool,
+    pub last_delivery: Option<IncomingWebhookDeliveryResponse>,
+    pub refused_signature_count: i64,
+    pub last_refused_signature_at: Option<chrono::NaiveDateTime>,
+    pub last_status_post: Option<TaskCommitStatusPostAttempt>,
+    pub task_count: u64,
+    pub repository_fit: Option<RepositoryFit>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, utoipa::ToSchema)]
+pub struct RepositoryFit {
+    pub fits: bool,
+    pub reason: Option<String>,
+}
+
+impl RepositoryFit {
+    pub(crate) fn of(repository: &str, connection: &MGitHostConnection) -> Self {
+        match check_task_repository_url_can_use_git_host_connection(repository, connection) {
+            Ok(()) => Self {
+                fits: true,
+                reason: None,
+            },
+            Err(reason) => Self {
+                fits: false,
+                reason: Some(reason),
+            },
+        }
+    }
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct GitHostConnectionTaskResponse {
+    pub id: TaskId,
+    pub project: String,
+    pub name: String,
+    pub display_name: String,
+    pub repository: String,
+    pub report_status: bool,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct GitHostConnectionTestResponse {
+    pub success: bool,
+    pub account: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone, utoipa::ToSchema)]
 pub struct IncomingWebhookDeliveryResponse {
     pub id: IncomingWebhookDeliveryId,
     pub event: String,
@@ -170,12 +210,31 @@ pub(crate) fn webhook_url(serve_url: &str, connection: &MGitHostConnection) -> O
     })
 }
 
-pub(crate) fn summary(
+pub(crate) struct SummaryOptions<'a> {
+    pub(crate) serve_url: &'a str,
+    pub(crate) can_manage: bool,
+    pub(crate) repository: Option<&'a str>,
+}
+
+pub(crate) async fn summary(
+    db: &impl sea_orm::ConnectionTrait,
     connection: &MGitHostConnection,
     owner: GitHostConnectionOwner,
-    can_manage: bool,
-) -> GitHostConnectionSummary {
-    GitHostConnectionSummary {
+    options: &SummaryOptions<'_>,
+) -> WebResult<GitHostConnectionSummary> {
+    let last_delivery = gradient_db::incoming_deliveries::of_connection(db, connection.id, 1)
+        .await?
+        .into_iter()
+        .next()
+        .map(Into::into);
+    let last_status_post =
+        connections::newest_commit_status_post_attempt_of_tasks_using_connection(
+            db,
+            connection.id,
+        )
+        .await?
+        .map(|row| TaskCommitStatusPostAttempt::of(row, options.can_manage));
+    Ok(GitHostConnectionSummary {
         id: connection.id,
         owner,
         name: connection.name.clone(),
@@ -184,21 +243,33 @@ pub(crate) fn summary(
         base_url: connection.base_url.clone(),
         receives_events: connection.receives_events,
         reports_status: connection.reports_status,
-        can_manage,
-    }
+        can_manage: options.can_manage,
+        account_login: connection.account_login.clone(),
+        webhook_url: webhook_url(options.serve_url, connection),
+        access_token_expires_at: connection.access_token_expires_at,
+        access_token_refreshes_automatically: connection.encrypted_refresh_token.is_some(),
+        last_delivery,
+        refused_signature_count: connection.refused_signature_count,
+        last_refused_signature_at: connection.last_refused_signature_at,
+        last_status_post,
+        task_count: connections::count_tasks_using_connection(db, connection.id).await?,
+        repository_fit: options
+            .repository
+            .map(|repository| RepositoryFit::of(repository, connection)),
+    })
 }
 
 pub(crate) async fn summaries_of_owner(
     db: &impl sea_orm::ConnectionTrait,
     owner: GitHostConnectionOwnerByDatabaseId,
-    can_manage: bool,
+    options: &SummaryOptions<'_>,
 ) -> WebResult<Vec<GitHostConnectionSummary>> {
     let named = name_owner(db, owner).await?;
-    Ok(connections::of_owner(db, owner)
-        .await?
-        .iter()
-        .map(|connection| summary(connection, named.clone(), can_manage))
-        .collect())
+    let mut out = Vec::new();
+    for connection in connections::of_owner(db, owner).await? {
+        out.push(summary(db, &connection, named.clone(), options).await?);
+    }
+    Ok(out)
 }
 
 pub(crate) async fn response(
@@ -207,22 +278,17 @@ pub(crate) async fn response(
     connection: MGitHostConnection,
 ) -> WebResult<GitHostConnectionResponse> {
     let owner = name_owner(db, GitHostConnectionOwnerByDatabaseId::of(&connection)).await?;
+    let options = SummaryOptions {
+        serve_url,
+        can_manage: true,
+        repository: None,
+    };
     Ok(GitHostConnectionResponse {
-        id: connection.id,
-        owner,
-        webhook_url: webhook_url(serve_url, &connection),
-        name: connection.name,
-        display_name: connection.display_name,
-        git_host_type: connection.git_host_type.as_path_segment().to_owned(),
-        base_url: connection.base_url,
+        connection: summary(db, &connection, owner, &options).await?,
         has_secret: connection.secret.is_some(),
         has_access_token: connection.access_token.is_some(),
-        access_token_refreshes_automatically: connection.encrypted_refresh_token.is_some(),
         allowed_ips: connection.allowed_ips.unwrap_or_default(),
-        receives_events: connection.receives_events,
-        reports_status: connection.reports_status,
         installation_id: connection.github_installation_id,
-        account_login: connection.account_login,
         created_by: connection.created_by,
         created_at: connection.created_at,
         managed: connection.managed,
@@ -521,6 +587,13 @@ pub(crate) async fn deliveries(
     id: GitHostConnectionId,
 ) -> WebResult<Vec<IncomingWebhookDeliveryResponse>> {
     load_of_owner(db, owner, id).await?;
+    deliveries_of_connection(db, id).await
+}
+
+pub(crate) async fn deliveries_of_connection(
+    db: &impl sea_orm::ConnectionTrait,
+    id: GitHostConnectionId,
+) -> WebResult<Vec<IncomingWebhookDeliveryResponse>> {
     Ok(
         gradient_db::incoming_deliveries::of_connection(db, id, DELIVERY_LIST_LIMIT)
             .await?
@@ -585,8 +658,15 @@ pub(crate) fn check_task_repository_url_can_use_git_host_connection(
             "Repository host {host} and connection host {expected} differ"
         ));
     }
-    if gradient_ci::parse_owner_repo(repository).is_none() {
+    let Some((owner, _)) = gradient_ci::parse_owner_repo(repository) else {
         return Err(format!("Can't read owner and repository from {repository}"));
+    };
+    if let (Some(_), Some(account)) = (connection.github_installation_id, &connection.account_login)
+        && !owner.eq_ignore_ascii_case(account)
+    {
+        return Err(format!(
+            "The GitHub App installation on {account} has no access to repositories of {owner}"
+        ));
     }
     Ok(())
 }
@@ -634,6 +714,32 @@ mod tests {
         .unwrap_err();
         assert!(
             reason.contains("gitlab.com") && reason.contains("github.com"),
+            "{reason}"
+        );
+    }
+
+    #[test]
+    fn a_github_app_installation_fits_only_repositories_of_its_account() {
+        let installation = MGitHostConnection {
+            git_host_type: GitHostType::GitHub,
+            github_installation_id: Some(7),
+            account_login: Some("Acme".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            check_task_repository_url_can_use_git_host_connection(
+                "https://github.com/acme/infra",
+                &installation
+            ),
+            Ok(())
+        );
+        let reason = check_task_repository_url_can_use_git_host_connection(
+            "https://github.com/other/infra",
+            &installation,
+        )
+        .unwrap_err();
+        assert!(
+            reason.contains("Acme") && reason.contains("other"),
             "{reason}"
         );
     }

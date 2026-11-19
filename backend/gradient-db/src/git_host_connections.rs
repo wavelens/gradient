@@ -9,7 +9,7 @@ use gradient_types::*;
 use sea_orm::sea_query::{Condition, Expr, ExprTrait, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder, QuerySelect,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,6 +170,62 @@ pub async fn record_commit_status_post_attempt<C: ConnectionTrait>(
     post_attempt::Entity::delete_many()
         .filter(post_attempt::Column::Task.eq(task))
         .filter(post_attempt::Column::Id.not_in_subquery(kept))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+pub async fn newest_commit_status_post_attempt_of_tasks_using_connection<C: ConnectionTrait>(
+    db: &C,
+    connection: GitHostConnectionId,
+) -> Result<Option<post_attempt::Model>, DbErr> {
+    let tasks_using_connection = Query::select()
+        .column(CTask::Id)
+        .from(gradient_entity::task::Entity)
+        .and_where(CTask::GitHostConnection.eq(connection))
+        .to_owned();
+    post_attempt::Entity::find()
+        .filter(post_attempt::Column::Task.in_subquery(tasks_using_connection))
+        .order_by_desc(post_attempt::Column::DeliveredAt)
+        .one(db)
+        .await
+}
+
+pub async fn tasks_using_connection<C: ConnectionTrait>(
+    db: &C,
+    connection: GitHostConnectionId,
+) -> Result<Vec<MTask>, DbErr> {
+    ETask::find()
+        .filter(CTask::GitHostConnection.eq(connection))
+        .order_by_asc(CTask::Name)
+        .all(db)
+        .await
+}
+
+pub async fn count_tasks_using_connection<C: ConnectionTrait>(
+    db: &C,
+    connection: GitHostConnectionId,
+) -> Result<u64, DbErr> {
+    ETask::find()
+        .filter(CTask::GitHostConnection.eq(connection))
+        .count(db)
+        .await
+}
+
+pub async fn link_tasks_to_connection<C: ConnectionTrait>(
+    db: &C,
+    tasks: &[TaskId],
+    connection: GitHostConnectionId,
+    report_status: bool,
+) -> Result<(), DbErr> {
+    if tasks.is_empty() {
+        return Ok(());
+    }
+    ETask::update_many()
+        .col_expr(CTask::GitHostConnection, Expr::value(connection))
+        .col_expr(CTask::ReportStatus, Expr::value(report_status))
+        .filter(CTask::Id.is_in(tasks.iter().copied()))
+        .filter(CTask::GitHostConnection.is_null())
         .exec(db)
         .await?;
     Ok(())

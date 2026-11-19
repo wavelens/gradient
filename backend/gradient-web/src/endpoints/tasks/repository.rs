@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 const STATUS_POST_LIST_LIMIT: u64 = 10;
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[derive(Serialize, Debug, Clone, utoipa::ToSchema)]
 pub struct TaskCommitStatusPostAttempt {
     pub id: TaskCommitStatusPostAttemptId,
     pub event: String,
@@ -50,7 +50,7 @@ pub struct TaskCommitStatusPostAttempt {
 }
 
 impl TaskCommitStatusPostAttempt {
-    fn of(
+    pub(crate) fn of(
         row: gradient_entity::task_commit_status_post_attempt::Model,
         can_edit_task: bool,
     ) -> Self {
@@ -121,28 +121,27 @@ async fn repository_response(
     let can_edit_task = permitted(Permission::EditTask);
     let can_manage_integrations = permitted(Permission::ManageIntegrations);
 
-    let available_connections =
-        connections::project::available_summaries(&db.web_db, project, can_manage_integrations)
-            .await?;
+    let available_connections = connections::project::available_summaries(
+        &db.web_db,
+        &db.config.server.serve_url,
+        project,
+        can_manage_integrations,
+        Some(&task.repository),
+    )
+    .await?;
     let git_host_connection = task
         .git_host_connection
         .and_then(|id| available_connections.iter().find(|c| c.id == id).cloned());
     let (webhook_url, last_event) = match &git_host_connection {
-        Some(selected) => {
-            let row = gradient_db::lookup::by_id::<EGitHostConnection, _>(&db.web_db, selected.id)
-                .await?;
-            let webhook_url = row
-                .as_ref()
-                .filter(|_| selected.can_manage)
-                .and_then(|row| connections::webhook_url(&db.config.server.serve_url, row));
-            let last_event = find_newest_incoming_webhook_delivery_for_task_repository(
+        Some(selected) => (
+            selected.webhook_url.clone(),
+            find_newest_incoming_webhook_delivery_for_task_repository(
                 &db.web_db,
                 selected.id,
                 &task.repository,
             )
-            .await?;
-            (webhook_url, last_event)
-        }
+            .await?,
+        ),
         None => (None, None),
     };
     let status_posts = gradient_db::git_host_connections::commit_status_post_attempts_of_task(
