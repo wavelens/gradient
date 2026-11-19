@@ -280,7 +280,10 @@ async fn project_member_with_edit_task_permission_but_not_manage_integrations_ca
     let repo = res.json::<Value>()["message"].clone();
     assert_eq!(repo["can_manage_integrations"], false);
     assert_eq!(repo["git_host_connection"]["can_manage"], false);
-    assert!(repo["webhook_url"].is_null(), "{repo}");
+    assert!(
+        repo["git_host_connection"]["webhook_url"].is_string(),
+        "{repo}"
+    );
     let task = read_test_task_row_from_database(&s).await;
     assert_eq!(task.git_host_connection, Some(connection.id));
     assert!(task.report_status);

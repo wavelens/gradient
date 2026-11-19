@@ -32,7 +32,16 @@ pub async fn list_instance_git_host_connections(
     State(state): State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionSummary>>>> {
     Ok(ok_json(
-        super::summaries_of_owner(&state.web_db, Owner::Instance, true).await?,
+        super::summaries_of_owner(
+            &state.web_db,
+            Owner::Instance,
+            &super::SummaryOptions {
+                serve_url: &state.config.server.serve_url,
+                can_manage: true,
+                repository: None,
+            },
+        )
+        .await?,
     ))
 }
 

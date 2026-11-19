@@ -610,3 +610,98 @@ async fn moving_a_task_needs_a_git_host_connection_the_target_project_can_use() 
     transfer().await.assert_status_ok();
     s.db.finish().await;
 }
+
+#[tokio::test]
+async fn view_members_see_connection_health_and_repository_fit_in_the_project_list() {
+    let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
+    let connection = insert_test_git_host_connection(
+        &s,
+        git_host_connection::Model {
+            refused_signature_count: 3,
+            last_refused_signature_at: Some(test_date()),
+            ..build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+                project_id(),
+                "https://gitea.example.com",
+                true,
+            )
+        },
+    )
+    .await;
+    s.db.execute(&format!(
+        "UPDATE task SET git_host_connection = '{}'",
+        connection.id
+    ))
+    .await;
+    gradient_db::rows::insert::<incoming_webhook_delivery::Entity, _>(
+        &s.db.connection(),
+        incoming_webhook_delivery::Model {
+            id: IncomingWebhookDeliveryId::now_v7(),
+            git_host_connection: connection.id,
+            event: "push".into(),
+            status_code: 200,
+            result: DeliveryResult::Queued,
+            created_at: test_date(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let list = |repository: &'static str| {
+        s.server
+            .get(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH)
+            .add_query_param("repository", repository)
+            .add_header("authorization", &s.auth)
+    };
+
+    let res = list("https://gitea.example.com/acme/app").await;
+    res.assert_status_ok();
+    let entry = res.json::<Value>()["message"][0].clone();
+    assert_eq!(entry["can_manage"], false, "{entry}");
+    assert!(
+        entry["webhook_url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("/api/v1/hooks/{}", connection.id)),
+        "{entry}"
+    );
+    assert_eq!(entry["task_count"], 1, "{entry}");
+    assert_eq!(entry["refused_signature_count"], 3, "{entry}");
+    assert_eq!(entry["last_delivery"]["result"], "queued", "{entry}");
+    assert_eq!(entry["repository_fit"], json!({ "fits": true, "reason": null }));
+
+    let res = list("https://github.com/acme/app").await;
+    let fit = res.json::<Value>()["message"][0]["repository_fit"].clone();
+    assert_eq!(fit["fits"], false, "{fit}");
+    assert!(fit["reason"].as_str().unwrap().contains("github.com"), "{fit}");
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn project_members_can_list_deliveries_of_a_team_connection_the_project_uses() {
+    let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
+    seed_platform_team_with_test_user_role_as_project_owner(&s, TeamRole::Member).await;
+    let connection = insert_test_git_host_connection(
+        &s,
+        git_host_connection::Model {
+            project: None,
+            owner_team: Some(team_id()),
+            ..build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+                project_id(),
+                "https://gitea.example.com",
+                false,
+            )
+        },
+    )
+    .await;
+
+    s.server
+        .get(&format!(
+            "{TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH}/{}/deliveries",
+            connection.id
+        ))
+        .add_header("authorization", &s.auth)
+        .await
+        .assert_status_ok();
+    s.db.finish().await;
+}

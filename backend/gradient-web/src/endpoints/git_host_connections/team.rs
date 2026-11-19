@@ -42,7 +42,16 @@ pub async fn list_team_git_host_connections(
 ) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionSummary>>>> {
     let can_manage = user.superuser || role == Some(TeamRole::Admin);
     Ok(ok_json(
-        super::summaries_of_owner(&db.web_db, Owner::Team(team.id), can_manage).await?,
+        super::summaries_of_owner(
+            &db.web_db,
+            Owner::Team(team.id),
+            &super::SummaryOptions {
+                serve_url: &db.config.server.serve_url,
+                can_manage,
+                repository: None,
+            },
+        )
+        .await?,
     ))
 }
 
