@@ -296,6 +296,40 @@ pub(crate) async fn response(
     })
 }
 
+pub(crate) async fn link_fitting_tasks_without_connection(
+    db: &impl sea_orm::ConnectionTrait,
+    connection: &MGitHostConnection,
+) -> WebResult<Vec<MTask>> {
+    let candidates = match GitHostConnectionOwnerByDatabaseId::of(connection) {
+        GitHostConnectionOwnerByDatabaseId::Project(project) => {
+            gradient_db::tasks::of_project(project).all(db).await?
+        }
+        GitHostConnectionOwnerByDatabaseId::Instance
+            if connection.github_installation_id.is_some()
+                && connection.account_login.is_some() =>
+        {
+            gradient_db::tasks::with_repository_containing(db, "github").await?
+        }
+        _ => Vec::new(),
+    };
+    let linked: Vec<MTask> = candidates
+        .into_iter()
+        .filter(|task| {
+            !task.managed
+                && task.git_host_connection.is_none()
+                && check_task_repository_url_can_use_git_host_connection(
+                    &task.repository,
+                    connection,
+                )
+                .is_ok()
+        })
+        .collect();
+    let ids: Vec<TaskId> = linked.iter().map(|task| task.id).collect();
+    connections::link_tasks_to_connection(db, &ids, connection.id, connection.reports_status)
+        .await?;
+    Ok(linked)
+}
+
 pub(crate) async fn load_of_owner(
     db: &impl sea_orm::ConnectionTrait,
     owner: GitHostConnectionOwnerByDatabaseId,
@@ -436,6 +470,7 @@ pub(crate) async fn create(
     if git_host == GitHostType::GitHub {
         let created = create_github_app_connection(ci, owner, user, body.installation_id).await?;
         write_audit(audit, Action::GitHostConnectionCreate, &created).await;
+        link_fitting_tasks_without_connection(&ci.db.web_db, &created).await?;
         return response(&ci.db.web_db, serve_url, created).await;
     }
 
@@ -492,6 +527,7 @@ pub(crate) async fn create(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GitHostConnectionName))?;
     write_audit(audit, Action::GitHostConnectionCreate, &created).await;
+    link_fitting_tasks_without_connection(&ci.db.web_db, &created).await?;
     let mut out = response(&ci.db.web_db, serve_url, created).await?;
     out.generated_secret = generated_secret;
     Ok(out)

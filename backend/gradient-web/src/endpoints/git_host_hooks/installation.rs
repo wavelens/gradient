@@ -52,7 +52,10 @@ pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
     .await
     {
         Ok(connection) => {
-            info!(installation_id, connection = %connection.id, account_login, "Saved a connection to the Git host for an installation of the GitHub App")
+            info!(installation_id, connection = %connection.id, account_login, "Saved a connection to the Git host for an installation of the GitHub App");
+            if let Err(e) = crate::endpoints::git_host_connections::link_fitting_tasks_without_connection(db, &connection).await {
+                warn!(error = %e, installation_id, "Failed to link tasks to the connection of the GitHub App installation");
+            }
         }
         Err(e) => {
             warn!(error = %e, installation_id, "Failed to save the connection to the Git host for the installation of the GitHub App.")

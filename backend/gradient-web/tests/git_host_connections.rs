@@ -678,6 +678,39 @@ async fn view_members_see_connection_health_and_repository_fit_in_the_project_li
 }
 
 #[tokio::test]
+async fn creating_a_project_connection_links_fitting_tasks_without_a_connection() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+
+    let res = s
+        .server
+        .put(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH)
+        .add_header("authorization", &s.auth)
+        .json(&json!({
+            "name": "gitea",
+            "git_host_type": "gitea",
+            "base_url": "https://gitea.example.com",
+            "access_token": "token",
+            "reports_status": true,
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let created = res.json::<Value>()["message"].clone();
+    assert_eq!(created["task_count"], 1, "{created}");
+    let task = s
+        .db
+        .find::<task::Entity>(gradient_fixtures::ids::task_id())
+        .await
+        .unwrap();
+    assert_eq!(
+        task.git_host_connection.map(|id| id.to_string()),
+        created["id"].as_str().map(str::to_owned)
+    );
+    assert!(task.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn project_members_can_list_deliveries_of_a_team_connection_the_project_uses() {
     let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
     seed_platform_team_with_test_user_role_as_project_owner(&s, TeamRole::Member).await;

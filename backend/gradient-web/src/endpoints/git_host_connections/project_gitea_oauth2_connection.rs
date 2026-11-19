@@ -347,37 +347,26 @@ async fn install_gradient_webhooks_on_project_task_repositories_for_new_gitea_co
     webhook_secret: &str,
     access_token: &str,
 ) -> usize {
-    let (Some(project), Some(base_url), Some(webhook_url)) = (
-        connection.project,
+    let (Some(base_url), Some(webhook_url)) = (
         connection.base_url.as_deref(),
         super::webhook_url(serve_url, connection),
     ) else {
         return 0;
     };
-    let Ok(tasks) = gradient_db::tasks::of_project(project).all(web_db).await else {
-        return 0;
+    let tasks = match super::link_fitting_tasks_without_connection(web_db, connection).await {
+        Ok(tasks) => tasks,
+        Err(e) => {
+            tracing::warn!(connection = %connection.id, error = %e, "Failed to link the tasks of the project to the new connection");
+            return 0;
+        }
     };
 
     let mut installed = 0;
-    for task in tasks.into_iter().filter(|t| {
-        !t.managed
-            && t.git_host_connection.is_none()
-            && super::check_task_repository_url_can_use_git_host_connection(
-                &t.repository,
-                connection,
-            )
-            .is_ok()
-    }) {
+    for task in tasks {
         let Some(repository) = provision::repository_path(&task.repository) else {
             continue;
         };
         let task_id = task.id;
-        let mut active: ATask = task.into();
-        active.git_host_connection = Set(Some(connection.id));
-        if let Err(e) = gradient_db::tasks::update(web_db, active).await {
-            tracing::warn!(task = %task_id, error = %e, "Failed to associate the new connection with the task.");
-            continue;
-        }
         let access = ForgeAccess {
             git_host: connection.git_host_type,
             endpoint_url: base_url,
