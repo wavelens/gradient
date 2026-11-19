@@ -6,7 +6,9 @@
 
 use super::TaskResponse;
 use super::refusal::TaskRefusal;
-use super::repository::check_git_host_connection_fits_task;
+use super::repository::{
+    check_git_host_connection_fits_task, choose_git_host_connection_for_new_task,
+};
 use super::triggers::{
     build_task_trigger_row_from_config_and_flags,
     validate_trigger_config_and_return_config_to_store,
@@ -70,6 +72,10 @@ pub struct MakeTaskRequest {
     pub extra_allowed_uri_prefixes: Option<Vec<String>>,
     #[serde(default)]
     pub triggers: Option<Vec<TriggerConfig>>,
+    #[serde(default)]
+    pub git_host_connection: Option<GitHostConnectionId>,
+    #[serde(default)]
+    pub report_status: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
@@ -236,7 +242,7 @@ pub async fn get(
     operation_id = "createTask",
     tag = "tasks",
     summary = "Create task",
-    description = "Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers.",
+    description = "Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. `git_host_connection` selects the connection to the Git host. Without it, the task gets the one connection that fits the repository, if exactly one fits. `report_status` defaults to whether that connection reports commit status.",
     params(("project" = String, Path)),
     request_body = MakeTaskRequest,
     responses((status = OK, description = "Created a task.", body = CreatedEntityResponse), WebError)
@@ -291,6 +297,14 @@ pub async fn put(
 
     let extra_allowed_uri_prefixes =
         validate_extra_allowed_uri_prefixes(body.extra_allowed_uri_prefixes.unwrap_or_default())?;
+    let (git_host_connection, report_status) = choose_git_host_connection_for_new_task(
+        &state.web_db,
+        &project,
+        &repository,
+        body.git_host_connection,
+        body.report_status,
+    )
+    .await?;
 
     let now = gradient_types::now();
     let task = MTask {
@@ -313,6 +327,8 @@ pub async fn put(
         exec_enabled: body.exec_enabled.unwrap_or(false),
         restrict_evaluation_fetches: body.restrict_evaluation_fetches.unwrap_or(false),
         extra_allowed_uri_prefixes,
+        git_host_connection,
+        report_status,
         ..Default::default()
     };
 

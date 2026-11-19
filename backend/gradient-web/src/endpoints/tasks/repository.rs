@@ -219,6 +219,50 @@ pub(crate) async fn check_git_host_connection_fits_task(
     Ok(row)
 }
 
+fn check_report_status_is_possible(
+    connection: Option<&MGitHostConnection>,
+    report_status: bool,
+) -> WebResult<()> {
+    match connection {
+        Some(row) if report_status && !row.reports_status => {
+            Err(GitHostConnectionRefusal::ConnectionCannotReportStatus {
+                name: row.name.clone(),
+            }
+            .into())
+        }
+        None if report_status => Err(GitHostConnectionRefusal::ReportStatusNeedsConnection.into()),
+        _ => Ok(()),
+    }
+}
+
+pub(crate) async fn choose_git_host_connection_for_new_task(
+    db: &impl sea_orm::ConnectionTrait,
+    project: &MProject,
+    repository: &str,
+    requested: Option<GitHostConnectionId>,
+    report_status: Option<bool>,
+) -> WebResult<(Option<GitHostConnectionId>, bool)> {
+    let connection = match requested {
+        Some(id) => Some(check_git_host_connection_fits_task(db, project, repository, id).await?),
+        None => {
+            let mut fitting = list_git_host_connections_available_to_project(db, project)
+                .await?
+                .into_iter()
+                .filter(|row| {
+                    check_task_repository_url_can_use_git_host_connection(repository, row).is_ok()
+                });
+            match (fitting.next(), fitting.next()) {
+                (Some(only), None) => Some(only),
+                _ => None,
+            }
+        }
+    };
+    let report_status = report_status
+        .unwrap_or_else(|| connection.as_ref().is_some_and(|row| row.reports_status));
+    check_report_status_is_possible(connection.as_ref(), report_status)?;
+    Ok((connection.map(|row| row.id), report_status))
+}
+
 #[utoipa::path(
     patch,
     path = "/tasks/{project}/{task}/repository",
@@ -242,23 +286,13 @@ pub async fn save_task_repository_connection_and_commit_status(
     audit: Audit,
     JsonBody(body): JsonBody<TaskRepositoryConnectionAndCommitStatusPatchRequest>,
 ) -> WebResult<Json<BaseResponse<TaskRepositoryResponse>>> {
-    match body.git_host_connection {
-        Some(id) => {
-            let row =
-                check_git_host_connection_fits_task(&db.web_db, &project, &task.repository, id)
-                    .await?;
-            if body.report_status && !row.reports_status {
-                return Err(GitHostConnectionRefusal::ConnectionCannotReportStatus {
-                    name: row.name,
-                }
-                .into());
-            }
-        }
-        None if body.report_status => {
-            return Err(GitHostConnectionRefusal::ReportStatusNeedsConnection.into());
-        }
-        None => {}
-    }
+    let connection = match body.git_host_connection {
+        Some(id) => Some(
+            check_git_host_connection_fits_task(&db.web_db, &project, &task.repository, id).await?,
+        ),
+        None => None,
+    };
+    check_report_status_is_possible(connection.as_ref(), body.report_status)?;
 
     let mut active: ATask = task.into();
     active.git_host_connection = Set(body.git_host_connection);
