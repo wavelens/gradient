@@ -207,6 +207,42 @@ async fn signed_push_webhook_queues_evaluation_for_task_using_git_host_connectio
 }
 
 #[tokio::test]
+async fn push_webhook_with_wrong_signature_counts_on_the_connection_without_a_delivery_row() {
+    let s =
+        create_test_database_with_user_project_task_gitea_webhook_secret_push_trigger_and_http_server(
+            "webhook-secret-plaintext",
+            "https://gitea.example.com/test-org/repo",
+            ChangedFilePathFilter::default(),
+        )
+        .await;
+
+    for _ in 0..3 {
+        let res = post_signed_gitea_push_webhook(
+            &s.server,
+            &format!("/api/v1/hooks/{}", s.connection.id),
+            "a-different-secret",
+            GITEA_PUSH_WEBHOOK_JSON_BODY_FOR_MAIN_BRANCH.as_bytes(),
+        )
+        .await;
+        res.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    let connection = s
+        .db
+        .find::<git_host_connection::Entity>(s.connection.id)
+        .await
+        .unwrap();
+    assert_eq!(connection.refused_signature_count, 3);
+    assert!(connection.last_refused_signature_at.is_some());
+    let deliveries =
+        gradient_db::incoming_deliveries::of_connection(&s.db.connection(), s.connection.id, 50)
+            .await
+            .unwrap();
+    assert!(deliveries.is_empty(), "{deliveries:?}");
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn test_signed_push_webhook_at_old_gitea_hook_path_queues_evaluation() {
     let secret = "webhook-secret-plaintext";
     let s =

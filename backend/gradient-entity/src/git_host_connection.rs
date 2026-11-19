@@ -92,6 +92,8 @@ pub struct Model {
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
+    pub refused_signature_count: i64,
+    pub last_refused_signature_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -144,6 +146,8 @@ impl std::fmt::Debug for Model {
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .field("managed", &self.managed)
+            .field("refused_signature_count", &self.refused_signature_count)
+            .field("last_refused_signature_at", &self.last_refused_signature_at)
             .finish()
     }
 }

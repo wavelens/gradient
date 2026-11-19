@@ -175,6 +175,8 @@ impl<'a> StateApplicator<'a> {
                     created_by: created_by_id,
                     created_at: now(),
                     managed: true,
+                    refused_signature_count: 0,
+                    last_refused_signature_at: None,
                 }
                 .into_active_model()
                 .insert(self.db)

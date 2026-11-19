@@ -6,7 +6,7 @@
 
 use gradient_entity::task_commit_status_post_attempt as post_attempt;
 use gradient_types::*;
-use sea_orm::sea_query::{Condition, Query};
+use sea_orm::sea_query::{Condition, Expr, ExprTrait, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, QueryOrder, QuerySelect,
@@ -131,6 +131,25 @@ pub async fn write_all_columns_of_git_host_connection<C: ConnectionTrait>(
 ) -> Result<MGitHostConnection, DbErr> {
     crate::rows::update::<EGitHostConnection, _>(db, connection.into_active_model().reset_all())
         .await
+}
+
+pub async fn count_refused_signature<C: ConnectionTrait>(
+    db: &C,
+    connection: GitHostConnectionId,
+) -> Result<(), DbErr> {
+    EGitHostConnection::update_many()
+        .col_expr(
+            CGitHostConnection::RefusedSignatureCount,
+            Expr::col(CGitHostConnection::RefusedSignatureCount).add(1),
+        )
+        .col_expr(
+            CGitHostConnection::LastRefusedSignatureAt,
+            Expr::value(gradient_types::now()),
+        )
+        .filter(CGitHostConnection::Id.eq(connection))
+        .exec(db)
+        .await?;
+    Ok(())
 }
 
 const POST_ATTEMPTS_KEPT_PER_TASK: u64 = 50;

@@ -305,6 +305,8 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
             created_by: claims.user_id,
             created_at: now,
             managed: false,
+            refused_signature_count: 0,
+            last_refused_signature_at: None,
         };
         let created = gradient_db::rows::insert::<EGitHostConnection, _>(web_db, connection)
             .await
