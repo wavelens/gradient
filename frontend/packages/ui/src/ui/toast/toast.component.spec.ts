@@ -99,6 +99,15 @@ describe('MessageService and ToastComponent', () => {
       expect(stack(fixture).style.top).toBe('');
     });
 
+    it('keeps the default place when the page header ends too low in the viewport', () => {
+      fakeHeader('main-header', 56);
+      fakeHeader('page-layout__header', window.innerHeight - 40);
+      const { fixture, service } = render();
+      service.add({ summary: 'Saved', life: 0 });
+      fixture.detectChanges();
+      expect(stack(fixture).style.top).toBe('');
+    });
+
     it('keeps the default place on pages without a page header', () => {
       const { fixture, service } = render();
       service.add({ summary: 'Saved', life: 0 });
