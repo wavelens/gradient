@@ -9,6 +9,7 @@ import { MessageService } from '../message/message.service';
 import { MessageSeverity } from '../types';
 
 const TOAST_GAP_PX = 8;
+const HIGHEST_PAGE_HEADER_BOTTOM_VIEWPORT_FRACTION = 1 / 3;
 
 const ICONS: Record<MessageSeverity, string> = {
   success: 'check_circle',
@@ -60,7 +61,10 @@ export class ToastComponent {
     if (!pageHeader) return null;
     const below = pageHeader.getBoundingClientRect().bottom + TOAST_GAP_PX;
     const appHeaderBottom = appHeader?.getBoundingClientRect().bottom ?? 0;
-    return below > appHeaderBottom + TOAST_GAP_PX ? below : null;
+    const viewportHeight = this.document.defaultView?.innerHeight ?? 0;
+    const belowAppHeader = below > appHeaderBottom + TOAST_GAP_PX;
+    const leavesRoomForToasts = below <= viewportHeight * HIGHEST_PAGE_HEADER_BOTTOM_VIEWPORT_FRACTION;
+    return belowAppHeader && leavesRoomForToasts ? below : null;
   }
 
   protected iconFor(severity: MessageSeverity | undefined): string {
