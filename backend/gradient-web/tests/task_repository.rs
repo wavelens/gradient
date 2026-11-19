@@ -454,3 +454,127 @@ async fn commit_status_test_returns_conflict_when_task_has_no_evaluated_commit()
     );
     s.db.finish().await;
 }
+
+async fn create_task_and_read_its_row(
+    s: &RealTestDatabaseHttpServerAndBearerAuthHeader,
+    extra: Value,
+) -> (StatusCode, Option<task::Model>) {
+    let mut body = json!({
+        "name": "new-task",
+        "display_name": "New Task",
+        "description": "",
+        "repository": "https://gitea.example.com/acme/other",
+        "wildcard": "packages",
+        "triggers": [],
+    });
+    body.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    let res = s
+        .server
+        .put("/api/v1/tasks/test-project")
+        .add_header("authorization", &s.auth)
+        .json(&body)
+        .await;
+    let row = s
+        .db
+        .rows::<task::Entity>()
+        .await
+        .into_iter()
+        .find(|task| task.name == "new-task");
+    (res.status_code(), row)
+}
+
+#[tokio::test]
+async fn a_new_task_gets_the_only_fitting_connection_with_its_status_reporting() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let fitting = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            true,
+        ),
+    )
+    .await;
+    insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://codeberg.org",
+            true,
+        ),
+    )
+    .await;
+
+    let (status, row) = create_task_and_read_its_row(&s, json!({})).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let row = row.unwrap();
+    assert_eq!(row.git_host_connection, Some(fitting.id));
+    assert!(row.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn a_new_task_gets_no_connection_when_several_fit() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    for _ in 0..2 {
+        insert_test_git_host_connection(
+            &s,
+            build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+                project_id(),
+                "https://gitea.example.com",
+                true,
+            ),
+        )
+        .await;
+    }
+
+    let (status, row) = create_task_and_read_its_row(&s, json!({})).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let row = row.unwrap();
+    assert_eq!(row.git_host_connection, None);
+    assert!(!row.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn a_new_task_takes_the_chosen_connection_and_refuses_one_that_does_not_fit() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let chosen = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            true,
+        ),
+    )
+    .await;
+    let other_host = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://codeberg.org",
+            true,
+        ),
+    )
+    .await;
+
+    let (status, row) =
+        create_task_and_read_its_row(&s, json!({ "git_host_connection": other_host.id })).await;
+    assert!(status.is_client_error(), "{status}");
+    assert!(row.is_none());
+
+    let (status, row) = create_task_and_read_its_row(
+        &s,
+        json!({ "git_host_connection": chosen.id, "report_status": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let row = row.unwrap();
+    assert_eq!(row.git_host_connection, Some(chosen.id));
+    assert!(!row.report_status);
+    s.db.finish().await;
+}

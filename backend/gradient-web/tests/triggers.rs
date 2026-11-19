@@ -683,6 +683,7 @@ async fn create_task_seeds_default_polling_trigger() {
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_query_results([Vec::<task::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::git_host_connection::Model>::new()])
         .append_query_results([vec![created_task]])
         .append_query_results([vec![seeded_trigger]]);
 
