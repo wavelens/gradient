@@ -418,6 +418,8 @@ pub(crate) async fn create(
         created_by: user,
         created_at: gradient_types::now(),
         managed: false,
+        refused_signature_count: 0,
+        last_refused_signature_at: None,
     };
     check_capabilities(&connection)?;
     let created = gradient_db::rows::insert::<EGitHostConnection, _>(&ci.db.web_db, connection)
