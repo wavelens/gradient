@@ -5,12 +5,14 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal, viewChild } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { ButtonComponent, CopyFieldComponent, SettingsSectionComponent } from '@gradient/ui/ui';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
 import { deliveryBadgeSeverity, deliverySummary, gitHostSettingsLinks } from '@shared/git';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { links } from '@shared/routing';
 import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { StepHistoryLine, StepHistoryListComponent } from './step-history-list.component';
@@ -20,7 +22,7 @@ const EARLIER_DELIVERIES_SHOWN = 5;
 @Component({
   selector: 'app-repository-incoming-events',
   standalone: true,
-  imports: [ButtonComponent, ChainStepStateBadgeComponent, CopyFieldComponent, GitHostConnectionDialogComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
+  imports: [RouterLink, ButtonComponent, ChainStepStateBadgeComponent, CopyFieldComponent, GitHostConnectionDialogComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <gr-settings-section title="Incoming events">
@@ -42,6 +44,10 @@ const EARLIER_DELIVERIES_SHOWN = 5;
           @if (step().action?.type === 'change_webhook_secret' && state().git_host_connection; as connection) {
             <button grButton label="Change webhook secret" icon="key" [severity]="hasPrimaryAction() ? 'primary' : 'secondary'"
               (click)="connectionDialog()?.openEdit(connection, { focusWebhookSecret: true })" data-testid="change-webhook-secret"></button>
+          }
+          @if (newTriggerLink(); as link) {
+            <a grButton label="Add trigger" icon="add" [severity]="hasPrimaryAction() ? 'primary' : 'secondary'" [routerLink]="link"
+              data-testid="add-trigger"></a>
           }
         </div>
         @if (webhookUrlToAdd(); as url) {
@@ -90,6 +96,10 @@ export class RepositoryIncomingEventsComponent {
   webhookUrlToAdd = computed(() => {
     const action = this.step().action;
     return action?.type === 'add_webhook_on_host' ? action.webhook_url : null;
+  });
+  newTriggerLink = computed(() => {
+    const action = this.step().action;
+    return action?.type === 'add_trigger' ? links.taskTriggerCreate(this.project(), this.task(), action.trigger_type) : null;
   });
   webhookSettingsUrl = computed(
     () => gitHostSettingsLinks(this.state().repository, this.state().git_host_connection?.git_host_type ?? null)?.webhooks ?? null,

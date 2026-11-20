@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { finalize, type Observable } from 'rxjs';
 import { TriggersService } from '@core/services/triggers.service';
@@ -137,6 +137,7 @@ function getPathFilterSummaryParts(filter: ChangedFilePathFilter): string[] {
 export class TaskTriggersComponent implements OnInit {
   protected readonly links = links;
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private triggersService = inject(TriggersService);
   private tasks = inject(TasksService);
   private crumbs = inject(BreadcrumbsService);
@@ -208,6 +209,15 @@ export class TaskTriggersComponent implements OnInit {
     this.loadTriggers();
     this.loadSuggestions();
     this.loadRepository();
+    this.openCreateDialogFromLink();
+  }
+
+  private openCreateDialogFromLink(): void {
+    const type = this.typeOptions.find((option) => option.value === this.route.snapshot.queryParamMap.get('new_trigger'))?.value;
+    if (!type) return;
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { new_trigger: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    const access = this.access();
+    if (access?.canEdit && !access.managed) this.startCreate(type);
   }
 
   private loadRepository(): void {
@@ -279,8 +289,8 @@ export class TaskTriggersComponent implements OnInit {
     else this.saveCreate();
   }
 
-  startCreate(): void {
-    this.form = { ...DEFAULT_FORM };
+  startCreate(type: TriggerType = DEFAULT_FORM.type): void {
+    this.form = { ...DEFAULT_FORM, type };
     this.error.set(null);
     this.submitAttempted.set(false);
     this.editingTrigger.set(null);
