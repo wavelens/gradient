@@ -32,8 +32,8 @@ impl GitHostProvider for GitlabProvider {
     ) -> anyhow::Result<Arc<dyn CiReporter>> {
         let base_url = endpoint_url
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| anyhow!("GitLab connection missing endpoint_url"))?;
-        let token = token.ok_or_else(|| anyhow!("GitLab connection missing token"))?;
+            .ok_or_else(|| anyhow!("GitLab connection has no endpoint_url"))?;
+        let token = token.ok_or_else(|| anyhow!("GitLab connection has no token"))?;
 
         Ok(Arc::new(GitlabReporter::new(http, base_url, token)?))
     }
