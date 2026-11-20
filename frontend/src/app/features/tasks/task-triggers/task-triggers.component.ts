@@ -46,7 +46,7 @@ import { CurrentTimeSignal, RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { TasksService } from '@core/services/tasks.service';
 import { TaskGitHostChainComponent } from '@shared/git-host-connections/task-git-host-chain.component';
-import { splitList } from '@shared/forms';
+import { dialogFormChangesSinceOpen, splitList } from '@shared/forms';
 import { getCiTriggerTypeLabel, getNextPollTime, nextPollText } from '@shared/evaluation';
 import { cronExpressionToPlainEnglish } from './cron-expression-description';
 import { TaskSettingsNavigationComponent } from '../task-settings-navigation/task-settings-navigation.component';
@@ -197,7 +197,7 @@ export class TaskTriggersComponent implements OnInit {
 
   form: TriggerFormState = { ...DEFAULT_FORM };
   submitAttempted = signal(false);
-  private loadedForm = '';
+  readonly triggerFormChanges = dialogFormChangesSinceOpen(() => this.form);
 
   readonly typeLabel = getCiTriggerTypeLabel;
   typeOptions: Option<TriggerType>[] = (['polling', 'reporter_push', 'reporter_pull_request', 'time', 'post_request'] as const)
@@ -291,6 +291,7 @@ export class TaskTriggersComponent implements OnInit {
 
   startCreate(type: TriggerType = DEFAULT_FORM.type): void {
     this.form = { ...DEFAULT_FORM, type };
+    this.triggerFormChanges.mark();
     this.error.set(null);
     this.submitAttempted.set(false);
     this.editingTrigger.set(null);
@@ -314,7 +315,7 @@ export class TaskTriggersComponent implements OnInit {
       include_paths: (cfg.include_paths ?? []).join(', '),
       exclude_paths: (cfg.exclude_paths ?? []).join(', '),
     };
-    this.loadedForm = JSON.stringify(this.form);
+    this.triggerFormChanges.mark();
     this.error.set(null);
     this.submitAttempted.set(false);
     this.editingTrigger.set(trigger);
@@ -398,7 +399,7 @@ export class TaskTriggersComponent implements OnInit {
     if (!target || this.saving()) return;
     this.submitAttempted.set(true);
     if (this.formError) return;
-    if (JSON.stringify(this.form) === this.loadedForm) {
+    if (!this.triggerFormChanges.changed()) {
       this.cancelEdit();
       return;
     }
