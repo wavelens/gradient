@@ -577,7 +577,9 @@
       account_login = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "GitHub account login of the installation, used for naming only.";
+        description = ''
+          GitHub user or organization the App is installed on. Required for `git_host_type = "github"`. Only repositories of this account fit the connection.
+        '';
       };
 
       secret_file = mkOption {
