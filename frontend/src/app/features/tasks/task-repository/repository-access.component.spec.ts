@@ -52,7 +52,7 @@ describe('RepositoryAccessComponent', () => {
   it('makes Edit URL the primary button when a failed fetch is the first step to fix', () => {
     const chain = {
       ...chainWithoutConnection,
-      repository: { state: 'failing' as const, detail: "Can't fetch the repository", action: { type: 'edit_repository_url' as const } },
+      repository: { state: 'failing' as const, detail: 'Repository fetch failed', action: { type: 'edit_repository_url' as const } },
     };
     const fixture = render({ chain }, {});
     fixture.componentRef.setInput('hasPrimaryAction', true);

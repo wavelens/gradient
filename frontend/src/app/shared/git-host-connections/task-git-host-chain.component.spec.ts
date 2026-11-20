@@ -13,7 +13,7 @@ import { TaskGitHostChainComponent } from './task-git-host-chain.component';
 const chain: TaskGitHostChain = {
   repository: { state: 'ok', detail: 'acme/app on git.example.com' },
   connection: { state: 'ok', detail: 'Forgejo' },
-  incoming_events: { state: 'attention', detail: 'No event received yet', action: { type: 'install_webhook' } },
+  incoming_events: { state: 'attention', detail: 'No webhook events yet', action: { type: 'install_webhook' } },
   commit_status: { state: 'off', detail: 'Off for this task', action: { type: 'turn_on_report_status' } },
 };
 
@@ -34,7 +34,7 @@ describe('TaskGitHostChainComponent', () => {
     const el = render();
     expect(summary(el)).toContain('Incomplete');
     expect(summary(el)).toContain('Incoming events');
-    expect(summary(el)).toContain('No event received yet');
+    expect(summary(el)).toContain('No webhook events yet');
     expect(el.querySelectorAll('button')).toHaveLength(0);
   });
 

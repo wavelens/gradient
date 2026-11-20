@@ -82,9 +82,9 @@ describe('RepositoryCommitStatusComponent', () => {
   });
 
   it('shows only its state while the connection step blocks it', () => {
-    const chain = { ...linked, connection: { state: 'attention' as const, detail: 'No connection' }, commit_status: { state: 'off' as const, detail: 'Needs a connection' } };
+    const chain = { ...linked, connection: { state: 'attention' as const, detail: 'No connection' }, commit_status: { state: 'off' as const, detail: 'Connection required' } };
     const { el } = render({ chain, git_host_connection: null });
-    expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Needs a connection');
+    expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Connection required');
     expect(el.querySelector('gr-checkbox')).toBeNull();
   });
 
@@ -107,7 +107,7 @@ describe('RepositoryCommitStatusComponent', () => {
   });
 
   it('makes the status report test the primary button when no status was posted yet', () => {
-    const chain = { ...linked, commit_status: { state: 'attention' as const, detail: 'No status posted yet', action: { type: 'test_status_report' as const } } };
+    const chain = { ...linked, commit_status: { state: 'attention' as const, detail: 'Gradient has not posted a commit status yet.', action: { type: 'test_status_report' as const } } };
     const postPendingTestCommitStatus = vi.fn(() => of({ success: true, response_status: 201 }));
     const { el, component, notify } = render({ chain, report_status: true }, { postPendingTestCommitStatus }, true);
     const changed = vi.fn();
@@ -121,10 +121,10 @@ describe('RepositoryCommitStatusComponent', () => {
   });
 
   it('shows the last status post with its time and the earlier posts below', () => {
-    const chain = { ...linked, commit_status: { state: 'ok' as const, detail: 'Last push status posted', at: '2026-11-20T10:00:00' } };
+    const chain = { ...linked, commit_status: { state: 'ok' as const, detail: 'Last posted push status', at: '2026-11-20T10:00:00' } };
     const status_posts = [post('2026-11-20T10:00:00', true), post('2026-11-20T09:00:00', false)];
     const { el } = render({ chain, report_status: true, status_posts });
-    expect(el.querySelector('[data-testid="step-status"]')?.textContent).toContain('Last push status posted');
+    expect(el.querySelector('[data-testid="step-status"]')?.textContent).toContain('Last posted push status');
     const history = Array.from(el.querySelectorAll('app-step-history-list li'));
     expect(history).toHaveLength(1);
     expect(history[0].textContent).toContain('Failed with HTTP 500');
