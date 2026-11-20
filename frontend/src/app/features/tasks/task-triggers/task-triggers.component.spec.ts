@@ -6,7 +6,8 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { taskAccessData } from '@core/resolvers/access-route.testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { links } from '@shared/routing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, NEVER, type Observable, of, throwError } from 'rxjs';
@@ -118,14 +119,28 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(fixture.nativeElement.textContent ?? '').toContain('branches: main / tags: v*');
   });
 
-  it('shows the git host chain in a push trigger and leads its actions to the Repository page', () => {
+  it('sums up the git host chain in a push trigger and links to the Repository page', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
-    fixture.componentInstance.startCreate();
-    fixture.componentInstance.form.type = 'reporter_push';
+    fixture.componentInstance.startCreate('reporter_push');
     fixture.detectChanges();
     const chain = document.querySelector('[data-testid="trigger-connection-chain"]');
     expect(chain?.textContent).toContain('No connection to forgejo.example.com');
-    expect(chain?.querySelector('[data-testid="chain-action-select_connection"]')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
+    expect(chain?.querySelector('[data-testid="open-repository"]')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
+  });
+
+  it('asks before the Repository link drops trigger edits and opens the page after Discard', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    fixture.componentInstance.startCreate('reporter_push');
+    fixture.componentInstance.form.branches = 'main';
+    fixture.detectChanges();
+    document.querySelector<HTMLElement>('[data-testid="open-repository"]')!.click();
+    fixture.detectChanges();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(document.querySelector('.gr-dialog__discard')?.textContent).toContain('Discard changes?');
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog__discard button')).find((b) => b.textContent?.trim() === 'Discard')!.click();
+    expect(fixture.componentInstance.showCreateDialog()).toBe(false);
+    expect(navigate).toHaveBeenCalledWith(links.taskPage('acme', 'demo', 'repository'));
   });
 
   it('opens the new trigger dialog with the type from the link', () => {
