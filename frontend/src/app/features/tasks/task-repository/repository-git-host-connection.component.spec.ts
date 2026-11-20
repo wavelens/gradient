@@ -158,4 +158,14 @@ describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
     expect(testId(member.el, 'new-connection')).toBeNull();
     expect(testId(member.el, 'no-connections')?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/git-host-connections');
   });
+
+  it('leaves the next action to the chain instead of offering it twice', () => {
+    const createConnection = { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, git_host_type: 'forgejo', base_url: 'https://forgejo.example.com' } } };
+    const manager = render({ available_connections: [], can_manage_integrations: true, chain: createConnection });
+    expect(manager.el.querySelector('gr-settings-section')).toBeNull();
+    TestBed.resetTestingModule();
+    const testReport = { ...chainWithoutConnection, commit_status: { state: 'attention' as const, detail: 'No status posted yet', action: { type: 'test_status_report' as const } } };
+    const reporter = render({ git_host_connection: reporting, report_status: true, chain: testReport });
+    expect(testId(reporter.el, 'test-status-report')).toBeNull();
+  });
 });

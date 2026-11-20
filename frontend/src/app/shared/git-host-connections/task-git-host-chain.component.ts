@@ -48,6 +48,15 @@ const ACTION_LABELS: Record<TaskGitHostChainStepAction['type'], string | null> =
   test_status_report: 'Test status report',
 };
 
+export function nextChainStepKey(chain: TaskGitHostChain): ChainStepKey | undefined {
+  return (Object.keys(STEP_TITLES) as ChainStepKey[]).find((key) => chain[key].action);
+}
+
+export function nextChainAction(chain: TaskGitHostChain): TaskGitHostChainStepAction | null {
+  const key = nextChainStepKey(chain);
+  return key ? (chain[key].action ?? null) : null;
+}
+
 interface ChainStepView extends TaskGitHostChainStep {
   key: ChainStepKey;
   title: string;
@@ -135,7 +144,7 @@ export class TaskGitHostChainComponent {
 
   steps = computed<ChainStepView[]>(() => {
     const keys = Object.keys(STEP_TITLES) as ChainStepKey[];
-    const nextKey = keys.find((key) => this.chain()[key].action);
+    const nextKey = nextChainStepKey(this.chain());
     return keys.map((key) => {
       const step = this.chain()[key];
       const action = key === nextKey ? step.action : null;
