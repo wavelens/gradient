@@ -9,9 +9,9 @@ use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use connector::Client;
 use connector::api::{
-    CreateGitHostConnectionRequest, GitHostConnectionId, GitHostConnectionResponse,
-    GitHostConnectionSummary, IncomingWebhookDeliveryResponse, IndexName,
-    PatchGitHostConnectionRequest,
+    CreateGitHostConnectionRequest, GitHostConnectionId, GitHostConnectionOwner,
+    GitHostConnectionResponse, GitHostConnectionSummary, IncomingWebhookDeliveryResponse,
+    IndexName, PatchGitHostConnectionRequest,
 };
 use connector::git_host_connections::GitHostConnectionSetOwner;
 
@@ -268,6 +268,39 @@ async fn resolve_git_host_connection_uuid_from_name_or_uuid(
             out.err(
                 ExitKind::Usage,
                 format!("There is no connection for {owner} to a Git host named '{reference}'."),
+            )
+        })
+}
+
+pub async fn resolve_git_host_connection_available_to_project(
+    client: &Client,
+    project: &str,
+    reference: &str,
+    out: Output,
+) -> GitHostConnectionId {
+    if let Ok(id) = reference.parse::<GitHostConnectionId>() {
+        return id;
+    }
+    let closest_owner_first = |connection: &GitHostConnectionSummary| match connection.owner {
+        GitHostConnectionOwner::Project(_) => 0,
+        GitHostConnectionOwner::Team(_) => 1,
+        GitHostConnectionOwner::Instance => 2,
+    };
+    client
+        .git_host_connections()
+        .list(&GitHostConnectionSetOwner::Project(project.to_owned()))
+        .await
+        .unwrap_or_else(|e| out.fail(e))
+        .into_iter()
+        .filter(|connection| connection.name == reference)
+        .min_by_key(closest_owner_first)
+        .map(|connection| connection.id)
+        .unwrap_or_else(|| {
+            out.err(
+                ExitKind::Usage,
+                format!(
+                    "Project {project} can't use a connection to a Git host named '{reference}'. `gradient project git-host-connection list` shows the connections it can use."
+                ),
             )
         })
 }
