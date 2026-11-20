@@ -61,9 +61,15 @@ describe('TaskGitHostChainComponent', () => {
     expect(emitted).toEqual([{ type: 'install_webhook' }]);
   });
 
+  it('offers only the action of the first step that needs one', () => {
+    const { el } = render();
+    expect(el.querySelectorAll('[data-testid^="chain-action-"]')).toHaveLength(1);
+    expect(el.querySelector('[data-testid="chain-action-turn_on_report_status"]')).toBeNull();
+  });
+
   it('links actions to the repository page when a link is given', () => {
     const { el, emitted } = render({ repositoryPageLink: links.taskPage('acme', 'app', 'repository') });
-    const action = el.querySelector('[data-testid="chain-action-turn_on_report_status"]') as HTMLAnchorElement;
+    const action = el.querySelector('[data-testid="chain-action-install_webhook"]') as HTMLAnchorElement;
     expect(action.tagName).toBe('A');
     expect(action.getAttribute('href')).toBe('/project/acme/task/app/repository');
     expect(emitted).toEqual([]);
