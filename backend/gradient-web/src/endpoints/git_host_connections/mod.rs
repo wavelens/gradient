@@ -10,9 +10,14 @@ pub mod admin;
 pub mod project;
 pub mod project_gitea_oauth2_connection;
 mod refusal;
+mod summaries;
 pub mod team;
 
 pub(crate) use refusal::GitHostConnectionRefusal;
+pub(crate) use summaries::{
+    ConnectionReader, ConnectionToSummarize, DeliveryRepositoryLimits, SummaryOptions, summaries,
+    summaries_of_owner,
+};
 
 use crate::audit::Audit;
 use crate::endpoints::tasks::repository::TaskCommitStatusPostAttempt;
@@ -211,78 +216,30 @@ pub(crate) fn webhook_url(serve_url: &str, connection: &MGitHostConnection) -> O
     })
 }
 
-pub(crate) struct SummaryOptions<'a> {
-    pub(crate) serve_url: &'a str,
-    pub(crate) can_manage: bool,
-    pub(crate) repository: Option<&'a str>,
-}
-
-pub(crate) async fn summary(
-    db: &impl sea_orm::ConnectionTrait,
-    connection: &MGitHostConnection,
-    owner: GitHostConnectionOwner,
-    options: &SummaryOptions<'_>,
-) -> WebResult<GitHostConnectionSummary> {
-    let last_delivery = gradient_db::incoming_deliveries::of_connection(db, connection.id, 1)
-        .await?
-        .into_iter()
-        .next()
-        .map(Into::into);
-    let last_status_post =
-        connections::newest_commit_status_post_attempt_of_tasks_using_connection(db, connection.id)
-            .await?
-            .map(|row| TaskCommitStatusPostAttempt::of(row, options.can_manage));
-    Ok(GitHostConnectionSummary {
-        id: connection.id,
-        owner,
-        name: connection.name.clone(),
-        display_name: connection.display_name.clone(),
-        git_host_type: connection.git_host_type.as_path_segment().to_owned(),
-        base_url: connection.base_url.clone(),
-        receives_events: connection.receives_events,
-        reports_status: connection.reports_status,
-        can_manage: options.can_manage,
-        account_login: connection.account_login.clone(),
-        webhook_url: webhook_url(options.serve_url, connection),
-        access_token_expires_at: connection.access_token_expires_at,
-        access_token_refreshes_automatically: connection.encrypted_refresh_token.is_some(),
-        last_delivery,
-        refused_signature_count: connection.refused_signature_count,
-        last_refused_signature_at: connection.last_refused_signature_at,
-        last_status_post,
-        task_count: connections::count_tasks_using_connection(db, connection.id).await?,
-        repository_fit: options
-            .repository
-            .map(|repository| RepositoryFit::of(repository, connection)),
-    })
-}
-
-pub(crate) async fn summaries_of_owner(
-    db: &impl sea_orm::ConnectionTrait,
-    owner: GitHostConnectionOwnerByDatabaseId,
-    options: &SummaryOptions<'_>,
-) -> WebResult<Vec<GitHostConnectionSummary>> {
-    let named = name_owner(db, owner).await?;
-    let mut out = Vec::new();
-    for connection in connections::of_owner(db, owner).await? {
-        out.push(summary(db, &connection, named.clone(), options).await?);
-    }
-    Ok(out)
-}
-
 pub(crate) async fn response(
     db: &impl sea_orm::ConnectionTrait,
+    reader: &ConnectionReader<'_>,
     serve_url: &str,
     connection: MGitHostConnection,
 ) -> WebResult<GitHostConnectionResponse> {
-    let owner = name_owner(db, GitHostConnectionOwnerByDatabaseId::of(&connection)).await?;
     let options = SummaryOptions {
         serve_url,
-        can_manage: true,
         repository: None,
     };
+    let summary = summaries(
+        db,
+        reader,
+        &options,
+        vec![ConnectionToSummarize {
+            connection: connection.clone(),
+            can_manage: true,
+        }],
+    )
+    .await?
+    .pop()
+    .or_not_found(Resource::GitHostConnection)?;
     Ok(GitHostConnectionResponse {
-        connection: summary(db, &connection, owner, &options).await?,
+        connection: summary,
         has_secret: connection.secret.is_some(),
         has_access_token: connection.access_token.is_some(),
         allowed_ips: connection.allowed_ips.unwrap_or_default(),
@@ -486,16 +443,17 @@ async fn create_github_app_connection(
 pub(crate) async fn create(
     ci: &CiContext,
     owner: GitHostConnectionOwnerByDatabaseId,
-    user: UserId,
+    reader: &ConnectionReader<'_>,
     body: CreateGitHostConnectionRequest,
     audit: &Audit,
 ) -> WebResult<GitHostConnectionResponse> {
+    let user = reader.user.id;
     let git_host = parse_git_host(&body.git_host_type)?;
     let serve_url = &ci.db.config.server.serve_url;
     if git_host == GitHostType::GitHub {
         let created = create_github_app_connection(ci, owner, user, body.installation_id).await?;
         write_audit(audit, Action::GitHostConnectionCreate, &created).await;
-        return response(&ci.db.web_db, serve_url, created).await;
+        return response(&ci.db.web_db, reader, serve_url, created).await;
     }
 
     let name = body.name.into_inner();
@@ -551,7 +509,7 @@ pub(crate) async fn create(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GitHostConnectionName))?;
     write_audit(audit, Action::GitHostConnectionCreate, &created).await;
-    let mut out = response(&ci.db.web_db, serve_url, created).await?;
+    let mut out = response(&ci.db.web_db, reader, serve_url, created).await?;
     out.generated_secret = generated_secret;
     Ok(out)
 }
@@ -559,6 +517,7 @@ pub(crate) async fn create(
 pub(crate) async fn patch(
     ci: &CiContext,
     owner: GitHostConnectionOwnerByDatabaseId,
+    reader: &ConnectionReader<'_>,
     id: GitHostConnectionId,
     body: PatchGitHostConnectionRequest,
     audit: &Audit,
@@ -622,7 +581,13 @@ pub(crate) async fn patch(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GitHostConnectionName))?;
     write_audit(audit, Action::GitHostConnectionUpdate, &updated).await;
-    let mut out = response(&ci.db.web_db, &ci.db.config.server.serve_url, updated).await?;
+    let mut out = response(
+        &ci.db.web_db,
+        reader,
+        &ci.db.config.server.serve_url,
+        updated,
+    )
+    .await?;
     out.generated_secret = generated_secret;
     Ok(out)
 }
@@ -710,55 +675,42 @@ pub(crate) async fn test(
 
 pub(crate) async fn deliveries(
     db: &impl sea_orm::ConnectionTrait,
+    reader: &ConnectionReader<'_>,
     owner: GitHostConnectionOwnerByDatabaseId,
     id: GitHostConnectionId,
 ) -> WebResult<Vec<IncomingWebhookDeliveryResponse>> {
-    load_of_owner(db, owner, id).await?;
-    deliveries_of_connection(db, id).await
+    let connection = load_of_owner(db, owner, id).await?;
+    deliveries_of_connection(db, reader, &connection).await
 }
 
 pub(crate) async fn deliveries_of_connection(
     db: &impl sea_orm::ConnectionTrait,
-    id: GitHostConnectionId,
+    reader: &ConnectionReader<'_>,
+    connection: &MGitHostConnection,
 ) -> WebResult<Vec<IncomingWebhookDeliveryResponse>> {
+    let limits = DeliveryRepositoryLimits::of(db, reader, &[connection]).await?;
     Ok(
-        gradient_db::incoming_deliveries::of_connection(db, id, DELIVERY_LIST_LIMIT)
+        gradient_db::incoming_deliveries::of_connection(db, connection.id, DELIVERY_LIST_LIMIT)
             .await?
             .into_iter()
+            .filter(|delivery| limits.allow(delivery))
             .map(Into::into)
             .collect(),
     )
 }
 
-pub(crate) async fn tasks_using_connection_visible_to_user(
+pub(crate) async fn tasks_using_connection_visible_to_reader(
     db: &impl sea_orm::ConnectionTrait,
     connection: GitHostConnectionId,
-    user: &MUser,
+    reader: &ConnectionReader<'_>,
 ) -> WebResult<Vec<GitHostConnectionTaskResponse>> {
     let tasks = connections::tasks_using_connection(db, connection).await?;
-    let project_ids: Vec<ProjectId> = tasks
-        .iter()
-        .map(|task| task.project)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let grants = gradient_db::access::project_grants(db, user.id, project_ids.clone()).await?;
-    let visible_project_names: std::collections::HashMap<ProjectId, String> =
-        gradient_db::projects::with_ids(db, &project_ids)
-            .await?
-            .into_iter()
-            .filter(|project| {
-                user.superuser
-                    || project.public
-                    || grants.get(&project.id).is_some_and(|grant| {
-                        crate::permissions::mask_grants(
-                            grant.permissions,
-                            crate::permissions::Permission::ViewProject,
-                        )
-                    })
-            })
-            .map(|project| (project.id, project.name))
-            .collect();
+    let visible_project_names = summaries::project_names_visible_to_reader(
+        db,
+        reader,
+        tasks.iter().map(|task| task.project),
+    )
+    .await?;
     Ok(tasks
         .into_iter()
         .filter_map(|task| {

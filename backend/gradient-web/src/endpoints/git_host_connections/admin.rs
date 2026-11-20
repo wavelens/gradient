@@ -5,9 +5,9 @@
  */
 
 use super::{
-    CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
-    PatchGitHostConnectionRequest,
+    ConnectionReader, CreateGitHostConnectionRequest, GitHostConnectionResponse,
+    GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
+    IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -31,16 +31,18 @@ use std::sync::Arc;
 )]
 pub async fn list_instance_git_host_connections(
     State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionSummary>>>> {
     Ok(ok_json(
         super::summaries_of_owner(
             &state.web_db,
+            &ConnectionReader::new(&user, None),
             Owner::Instance,
             &super::SummaryOptions {
                 serve_url: &state.config.server.serve_url,
-                can_manage: true,
                 repository: None,
             },
+            true,
         )
         .await?,
     ))
@@ -63,7 +65,14 @@ pub async fn create_instance_git_host_connection(
     JsonBody(body): JsonBody<CreateGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::create(&state.ci(), Owner::Instance, user.id, body, &audit).await?,
+        super::create(
+            &state.ci(),
+            Owner::Instance,
+            &ConnectionReader::new(&user, None),
+            body,
+            &audit,
+        )
+        .await?,
     ))
 }
 
@@ -78,11 +87,18 @@ pub async fn create_instance_git_host_connection(
 )]
 pub async fn get_instance_git_host_connection(
     State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
     Path(id): Path<GitHostConnectionId>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     let row = super::load_of_owner(&state.web_db, Owner::Instance, id).await?;
     Ok(ok_json(
-        super::response(&state.web_db, &state.config.server.serve_url, row).await?,
+        super::response(
+            &state.web_db,
+            &ConnectionReader::new(&user, None),
+            &state.config.server.serve_url,
+            row,
+        )
+        .await?,
     ))
 }
 
@@ -99,12 +115,21 @@ pub async fn get_instance_git_host_connection(
 )]
 pub async fn patch_instance_git_host_connection(
     State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
     Path(id): Path<GitHostConnectionId>,
     audit: Audit,
     JsonBody(body): JsonBody<PatchGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::patch(&state.ci(), Owner::Instance, id, body, &audit).await?,
+        super::patch(
+            &state.ci(),
+            Owner::Instance,
+            &ConnectionReader::new(&user, None),
+            id,
+            body,
+            &audit,
+        )
+        .await?,
     ))
 }
 
@@ -139,10 +164,17 @@ pub async fn delete_instance_git_host_connection(
 )]
 pub async fn list_instance_git_host_connection_deliveries(
     State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
     Path(id): Path<GitHostConnectionId>,
 ) -> WebResult<Json<BaseResponse<Vec<IncomingWebhookDeliveryResponse>>>> {
     Ok(ok_json(
-        super::deliveries(&state.web_db, Owner::Instance, id).await?,
+        super::deliveries(
+            &state.web_db,
+            &ConnectionReader::new(&user, None),
+            Owner::Instance,
+            id,
+        )
+        .await?,
     ))
 }
 
@@ -163,7 +195,12 @@ pub async fn list_instance_git_host_connection_tasks(
 ) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionTaskResponse>>>> {
     let connection = super::load_of_owner(&state.web_db, Owner::Instance, id).await?;
     Ok(ok_json(
-        super::tasks_using_connection_visible_to_user(&state.web_db, connection.id, &user).await?,
+        super::tasks_using_connection_visible_to_reader(
+            &state.web_db,
+            connection.id,
+            &ConnectionReader::new(&user, None),
+        )
+        .await?,
     ))
 }
 

@@ -5,9 +5,10 @@
  */
 
 use super::{
-    CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
-    PatchGitHostConnectionRequest,
+    ConnectionReader, ConnectionToSummarize, CreateGitHostConnectionRequest,
+    GitHostConnectionResponse, GitHostConnectionSummary, GitHostConnectionTaskResponse,
+    GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    SummaryOptions,
 };
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::ProjectPath;
@@ -30,23 +31,21 @@ use std::sync::Arc;
 
 pub(crate) async fn available_summaries(
     db: &impl sea_orm::ConnectionTrait,
-    serve_url: &str,
+    reader: &ConnectionReader<'_>,
+    options: &SummaryOptions<'_>,
     project: &MProject,
     can_manage_project_connections: bool,
-    repository: Option<&str>,
 ) -> WebResult<Vec<GitHostConnectionSummary>> {
-    let rows = list_git_host_connections_available_to_project(db, project).await?;
-    let mut out = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let owner = Owner::of(row);
-        let options = super::SummaryOptions {
-            serve_url,
-            can_manage: owner == Owner::Project(project.id) && can_manage_project_connections,
-            repository,
-        };
-        out.push(super::summary(db, row, super::name_owner(db, owner).await?, &options).await?);
-    }
-    Ok(out)
+    let rows = list_git_host_connections_available_to_project(db, project)
+        .await?
+        .into_iter()
+        .map(|connection| ConnectionToSummarize {
+            can_manage: Owner::of(&connection) == Owner::Project(project.id)
+                && can_manage_project_connections,
+            connection,
+        })
+        .collect();
+    super::summaries(db, reader, options, rows).await
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
@@ -93,10 +92,13 @@ pub async fn list_project_git_host_connections(
     Ok(ok_json(
         available_summaries(
             &db.web_db,
-            &db.config.server.serve_url,
+            &ConnectionReader::new(&user, api_key.as_ref()),
+            &SummaryOptions {
+                serve_url: &db.config.server.serve_url,
+                repository: query.repository.as_deref().filter(|r| !r.trim().is_empty()),
+            },
             &project,
             can_manage,
-            query.repository.as_deref().filter(|r| !r.trim().is_empty()),
         )
         .await?,
     ))
@@ -114,7 +116,12 @@ pub async fn list_project_git_host_connections(
     responses((status = OK, description = "Connection created", body = GitHostConnectionResponse), WebError)
 )]
 pub async fn create_project_git_host_connection(
-    ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
+    ProjectScope {
+        project,
+        user,
+        api_key,
+        ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
     State(state): State<Arc<ServerState>>,
     audit: Audit,
     JsonBody(body): JsonBody<CreateGitHostConnectionRequest>,
@@ -123,7 +130,7 @@ pub async fn create_project_git_host_connection(
         super::create(
             &state.ci(),
             Owner::Project(project.id),
-            user.id,
+            &ConnectionReader::new(&user, api_key.as_ref()),
             body,
             &audit,
         )
@@ -143,6 +150,8 @@ pub async fn create_project_git_host_connection(
 pub async fn get_project_git_host_connection(
     ProjectScope {
         project,
+        user,
+        api_key,
         db,
         params,
         ..
@@ -151,7 +160,13 @@ pub async fn get_project_git_host_connection(
     let row =
         super::load_of_owner(&db.web_db, Owner::Project(project.id), params.param("id")?).await?;
     Ok(ok_json(
-        super::response(&db.web_db, &db.config.server.serve_url, row).await?,
+        super::response(
+            &db.web_db,
+            &ConnectionReader::new(&user, api_key.as_ref()),
+            &db.config.server.serve_url,
+            row,
+        )
+        .await?,
     ))
 }
 
@@ -168,7 +183,11 @@ pub async fn get_project_git_host_connection(
 )]
 pub async fn patch_project_git_host_connection(
     ProjectScope {
-        project, params, ..
+        project,
+        user,
+        api_key,
+        params,
+        ..
     }: ProjectScope<Requires<can::ManageIntegrations>>,
     State(state): State<Arc<ServerState>>,
     audit: Audit,
@@ -178,6 +197,7 @@ pub async fn patch_project_git_host_connection(
         super::patch(
             &state.ci(),
             Owner::Project(project.id),
+            &ConnectionReader::new(&user, api_key.as_ref()),
             params.param("id")?,
             body,
             &audit,
@@ -228,6 +248,8 @@ pub async fn delete_project_git_host_connection(
 pub async fn list_project_git_host_connection_deliveries(
     ProjectScope {
         project,
+        user,
+        api_key,
         db,
         params,
         ..
@@ -235,7 +257,12 @@ pub async fn list_project_git_host_connection_deliveries(
 ) -> WebResult<Json<BaseResponse<Vec<IncomingWebhookDeliveryResponse>>>> {
     let connection = load_available_to_project(&db.web_db, &project, params.param("id")?).await?;
     Ok(ok_json(
-        super::deliveries_of_connection(&db.web_db, connection.id).await?,
+        super::deliveries_of_connection(
+            &db.web_db,
+            &ConnectionReader::new(&user, api_key.as_ref()),
+            &connection,
+        )
+        .await?,
     ))
 }
 
@@ -253,6 +280,7 @@ pub async fn list_project_git_host_connection_tasks(
     ProjectScope {
         project,
         user,
+        api_key,
         db,
         params,
         ..
@@ -260,7 +288,12 @@ pub async fn list_project_git_host_connection_tasks(
 ) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionTaskResponse>>>> {
     let connection = load_available_to_project(&db.web_db, &project, params.param("id")?).await?;
     Ok(ok_json(
-        super::tasks_using_connection_visible_to_user(&db.web_db, connection.id, &user).await?,
+        super::tasks_using_connection_visible_to_reader(
+            &db.web_db,
+            connection.id,
+            &ConnectionReader::new(&user, api_key.as_ref()),
+        )
+        .await?,
     ))
 }
 

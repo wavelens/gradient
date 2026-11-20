@@ -34,6 +34,23 @@ pub async fn record<C: ConnectionTrait>(db: &C, delivery: Model) -> Result<(), D
     Ok(())
 }
 
+pub async fn newest_per_connection_and_repository<C: ConnectionTrait>(
+    db: &C,
+    connections: &[GitHostConnectionId],
+) -> Result<Vec<Model>, DbErr> {
+    if connections.is_empty() {
+        return Ok(Vec::new());
+    }
+    Entity::find()
+        .distinct_on([Column::GitHostConnection, Column::Repository])
+        .filter(Column::GitHostConnection.is_in(connections.iter().copied()))
+        .order_by_asc(Column::GitHostConnection)
+        .order_by_asc(Column::Repository)
+        .order_by_desc(Column::CreatedAt)
+        .all(db)
+        .await
+}
+
 pub async fn of_connection<C: ConnectionTrait>(
     db: &C,
     connection: GitHostConnectionId,

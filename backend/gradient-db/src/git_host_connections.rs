@@ -9,7 +9,7 @@ use gradient_types::*;
 use sea_orm::sea_query::{Condition, Expr, ExprTrait, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,19 +175,65 @@ pub async fn record_commit_status_post_attempt<C: ConnectionTrait>(
     Ok(())
 }
 
-pub async fn newest_commit_status_post_attempt_of_tasks_using_connection<C: ConnectionTrait>(
+pub async fn newest_commit_status_post_attempt_per_connection<C: ConnectionTrait>(
     db: &C,
-    connection: GitHostConnectionId,
-) -> Result<Option<post_attempt::Model>, DbErr> {
-    let tasks_using_connection = Query::select()
+    connections: &[GitHostConnectionId],
+    task_projects: &[ProjectId],
+) -> Result<Vec<post_attempt::Model>, DbErr> {
+    if connections.is_empty() || task_projects.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tasks_of_projects = Query::select()
         .column(CTask::Id)
         .from(gradient_entity::task::Entity)
-        .and_where(CTask::GitHostConnection.eq(connection))
+        .and_where(CTask::Project.is_in(task_projects.iter().copied()))
         .to_owned();
     post_attempt::Entity::find()
-        .filter(post_attempt::Column::Task.in_subquery(tasks_using_connection))
+        .distinct_on([post_attempt::Column::GitHostConnection])
+        .filter(post_attempt::Column::GitHostConnection.is_in(connections.iter().copied()))
+        .filter(post_attempt::Column::Task.in_subquery(tasks_of_projects))
+        .order_by_asc(post_attempt::Column::GitHostConnection)
         .order_by_desc(post_attempt::Column::DeliveredAt)
-        .one(db)
+        .all(db)
+        .await
+}
+
+pub async fn task_counts_by_connection_and_project<C: ConnectionTrait>(
+    db: &C,
+    connections: &[GitHostConnectionId],
+) -> Result<Vec<(GitHostConnectionId, ProjectId, i64)>, DbErr> {
+    if connections.is_empty() {
+        return Ok(Vec::new());
+    }
+    ETask::find()
+        .select_only()
+        .column(CTask::GitHostConnection)
+        .column(CTask::Project)
+        .column_as(CTask::Id.count(), "task_count")
+        .filter(CTask::GitHostConnection.is_in(connections.iter().copied()))
+        .group_by(CTask::GitHostConnection)
+        .group_by(CTask::Project)
+        .into_tuple()
+        .all(db)
+        .await
+}
+
+pub async fn repositories_of_project_tasks_by_connection<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    connections: &[GitHostConnectionId],
+) -> Result<Vec<(GitHostConnectionId, String)>, DbErr> {
+    if connections.is_empty() {
+        return Ok(Vec::new());
+    }
+    ETask::find()
+        .select_only()
+        .column(CTask::GitHostConnection)
+        .column(CTask::Repository)
+        .filter(CTask::Project.eq(project))
+        .filter(CTask::GitHostConnection.is_in(connections.iter().copied()))
+        .into_tuple()
+        .all(db)
         .await
 }
 
@@ -199,16 +245,6 @@ pub async fn tasks_using_connection<C: ConnectionTrait>(
         .filter(CTask::GitHostConnection.eq(connection))
         .order_by_asc(CTask::Name)
         .all(db)
-        .await
-}
-
-pub async fn count_tasks_using_connection<C: ConnectionTrait>(
-    db: &C,
-    connection: GitHostConnectionId,
-) -> Result<u64, DbErr> {
-    ETask::find()
-        .filter(CTask::GitHostConnection.eq(connection))
-        .count(db)
         .await
 }
 
