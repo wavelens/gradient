@@ -55,7 +55,12 @@ const full: GitHostConnectionResponse = {
   created_at: '2026-01-01T00:00:00Z',
 };
 
-function render(access: AccessState = writable, connections: GitHostConnectionSummary[] = [own, inherited], api: object = {}) {
+function render(
+  access: AccessState = writable,
+  connections: GitHostConnectionSummary[] = [own, inherited],
+  api: object = {},
+  inputs: Record<string, unknown> = {},
+) {
   const notify = { success: vi.fn(), failure: vi.fn(), copyToClipboard: vi.fn(() => Promise.resolve()) };
   const confirm = vi.fn((request: ConfirmRequest) => request.action());
   const list = vi.fn(() => of(connections));
@@ -72,6 +77,7 @@ function render(access: AccessState = writable, connections: GitHostConnectionSu
   const fixture = TestBed.createComponent(GitHostConnectionListComponent);
   fixture.componentRef.setInput('gitHostConnectionOwner', project);
   fixture.componentRef.setInput('access', access);
+  for (const [name, value] of Object.entries(inputs)) fixture.componentRef.setInput(name, value);
   fixture.detectChanges();
   const el = fixture.nativeElement as HTMLElement;
   return { fixture, el, component: fixture.componentInstance, notify, confirm, list };
@@ -82,6 +88,37 @@ function rows(el: HTMLElement, testId: string): HTMLElement[] {
 }
 
 describe('GitHostConnectionListComponent', () => {
+  const installation: GitHostConnectionSummary = {
+    ...own,
+    id: 'c3',
+    name: 'github-acme',
+    display_name: 'GitHub',
+    git_host_type: 'github',
+    account_login: 'acme',
+    github_installation_id: 42,
+  };
+
+  it('lists only the connections of the chosen git host types', () => {
+    const { el } = render(writable, [own, installation], {}, { gitHostTypes: ['github'] });
+    const names = Array.from(el.querySelectorAll('.connection-row')).map((row) => row.textContent);
+    expect(names).toHaveLength(1);
+    expect(names[0]).toContain('acme');
+  });
+
+  it('shows nothing for an empty list without an empty state', () => {
+    const { el } = render(writable, [own], {}, { gitHostTypes: ['github'], showsEmptyState: false });
+    expect(el.querySelector('gr-empty-state')).toBeNull();
+    expect(el.querySelector('.connection-row')).toBeNull();
+  });
+
+  it('marks a connection shown on request and loads the list again', () => {
+    const { fixture, el, component, list } = render(writable, [own, installation]);
+    component.showConnection('c3');
+    fixture.detectChanges();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(el.querySelector('#connection-c3')?.classList).toContain('connection-row-linked');
+  });
+
   it('lists the own connections first and names the owner of inherited ones without actions', () => {
     const { el, list } = render(writable, [inherited, own]);
     expect(list).toHaveBeenCalledWith(project);
