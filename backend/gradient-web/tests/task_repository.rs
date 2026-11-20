@@ -160,7 +160,7 @@ async fn get_task_repository_shows_selected_git_host_connection_webhook_url_and_
     assert_eq!(repo["git_host_connection"]["id"], connection.id.to_string());
     assert_eq!(repo["git_host_connection"]["can_manage"], true);
     assert!(
-        repo["webhook_url"]
+        repo["git_host_connection"]["webhook_url"]
             .as_str()
             .unwrap()
             .ends_with(&format!("/api/v1/hooks/{}", connection.id)),
@@ -169,8 +169,90 @@ async fn get_task_repository_shows_selected_git_host_connection_webhook_url_and_
     assert_eq!(repo["report_status"], true);
     assert_eq!(repo["available_connections"].as_array().unwrap().len(), 1);
     assert_eq!(repo["status_posts"], json!([]));
+    assert_eq!(repo["recent_deliveries"], json!([]));
     assert_eq!(repo["can_edit"], true);
     assert_eq!(repo["can_manage_integrations"], true);
+    let chain = &repo["chain"];
+    assert_eq!(chain["repository"]["state"], "ok", "{chain}");
+    assert_eq!(
+        chain["repository"]["detail"],
+        "acme/app on gitea.example.com"
+    );
+    assert_eq!(chain["connection"]["state"], "ok");
+    assert_eq!(chain["incoming_events"]["state"], "attention");
+    assert_eq!(
+        chain["incoming_events"]["action"],
+        json!({ "type": "install_webhook" })
+    );
+    assert_eq!(chain["commit_status"]["state"], "attention");
+    assert_eq!(
+        chain["commit_status"]["action"],
+        json!({ "type": "test_status_report" })
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn task_repository_chain_uses_newest_delivery_for_the_task_repository_only() {
+    let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
+    let connection = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            false,
+        ),
+    )
+    .await;
+    let conn = s.db.connection();
+    gradient_db::rows::update::<task::Entity, _>(
+        &conn,
+        task::ActiveModel {
+            id: sea_orm::ActiveValue::Unchanged(task_id()),
+            git_host_connection: sea_orm::ActiveValue::Set(Some(connection.id)),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    for (repository, minutes) in [
+        ("https://gitea.example.com/acme/app", 0),
+        ("https://gitea.example.com/acme/other", 1),
+    ] {
+        gradient_db::rows::insert::<gradient_entity::incoming_webhook_delivery::Entity, _>(
+            &conn,
+            gradient_entity::incoming_webhook_delivery::Model {
+                id: IncomingWebhookDeliveryId::now_v7(),
+                git_host_connection: connection.id,
+                event: "push".into(),
+                status_code: 200,
+                result: gradient_entity::incoming_webhook_delivery::DeliveryResult::Queued,
+                repository: Some(repository.into()),
+                tasks_scanned: 1,
+                queued: 1,
+                created_at: test_date() + chrono::Duration::minutes(minutes),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let res = s.server.get(URL).add_header("authorization", &s.auth).await;
+
+    res.assert_status_ok();
+    let repo = res.json::<Value>()["message"].clone();
+    let deliveries = repo["recent_deliveries"].as_array().unwrap();
+    assert_eq!(deliveries.len(), 1, "{repo}");
+    assert_eq!(
+        deliveries[0]["repository"],
+        "https://gitea.example.com/acme/app"
+    );
+    let events = &repo["chain"]["incoming_events"];
+    assert_eq!(events["state"], "ok", "{events}");
+    assert_eq!(events["detail"], "push event queued an evaluation");
+    assert_eq!(events["action"], Value::Null);
+    assert_eq!(repo["chain"]["commit_status"]["state"], "off");
     s.db.finish().await;
 }
 
