@@ -190,6 +190,32 @@ describe('CacheNarsComponent pinning', () => {
   });
 });
 
+describe('CacheNarsComponent hash link', () => {
+  it('open details for the store path from the hash link once and keep the filter', () => {
+    const { fixture, query } = render(() => of(PAGE));
+    const service = TestBed.inject(CachesService) as unknown as { getCacheNar: () => unknown };
+    service.getCacheNar = vi.fn(() => NEVER);
+    query.next(convertToParamMap({ hash: 'abc123' }));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.selected()).toEqual(NAR);
+    expect(fixture.componentInstance.search()).toBe('abc123');
+    expect(service.getCacheNar).toHaveBeenCalledWith('main', 'abc123');
+
+    fixture.componentInstance.closeDrawer();
+    query.next(convertToParamMap({ hash: 'abc123', sort: 'nar_size' }));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.selected()).toBeNull();
+  });
+
+  it('usual empty state and no details drawer for hash link with no store path', () => {
+    const { fixture, query, root } = render(() => of({ ...PAGE, items: [], total: 0 }));
+    query.next(convertToParamMap({ hash: 'abc123' }));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.selected()).toBeNull();
+    expect(root.textContent).toContain('No archives match the current filters.');
+  });
+});
+
 describe('CacheNarsComponent paging', () => {
   it('moves to the last page that has rows when the requested page is past the end', () => {
     const { fixture, query } = render(() => of({ ...PAGE, items: [], total: 60, page: 3 }));
