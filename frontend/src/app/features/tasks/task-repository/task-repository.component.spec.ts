@@ -15,6 +15,7 @@ import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
 import { RepositoryAccessComponent } from './repository-access.component';
 import { taskAccessData } from '@core/resolvers/access-route.testing';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 
 const state: TaskRepositoryResponse = {
   repository: 'ssh://git@forgejo.example.com/acme/app.git',
@@ -30,7 +31,7 @@ const state: TaskRepositoryResponse = {
   can_manage_integrations: true,
 };
 
-function render(getRepository: () => unknown, member = true, canEdit = member) {
+function render(getRepository: () => unknown, member = true, canEdit = member, tasks: object = {}) {
   const data = taskAccessData({ managed: false, canEdit, canTrigger: canEdit });
   if (!member) data.taskAccess.task.permissions = [];
   TestBed.configureTestingModule({
@@ -41,7 +42,8 @@ function render(getRepository: () => unknown, member = true, canEdit = member) {
         provide: ActivatedRoute,
         useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'app' }) }, parent: { data: of(data) } },
       },
-      { provide: TasksService, useValue: { getRepository, getTaskInfo: () => of({ display_name: 'App' }) } },
+      { provide: TasksService, useValue: { getRepository, getTaskInfo: () => of({ display_name: 'App' }), ...tasks } },
+      { provide: GitHostConnectionsApi, useValue: {} },
     ],
   });
   const fixture = TestBed.createComponent(TaskRepositoryComponent);
@@ -89,5 +91,20 @@ describe('TaskRepositoryComponent', () => {
     expect(fixture.componentInstance.canDeactivate()).toBeInstanceOf(Observable);
     access.cancelEdit();
     expect(fixture.componentInstance.canDeactivate()).toBe(true);
+  });
+
+  it('shows the chain first and runs its actions on the sections below', () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const getRepository = vi.fn(() => of(state));
+    const installWebhook = vi.fn(() => of('ok'));
+    const fixture = render(getRepository, true, true, { installWebhook });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('gr-settings-section app-task-git-host-chain')).not.toBeNull();
+    const access = fixture.debugElement.query(By.directive(RepositoryAccessComponent)).componentInstance as RepositoryAccessComponent;
+    fixture.componentInstance.runChainAction({ type: 'edit_repository_url' });
+    expect(access.editing()).toBe(true);
+    fixture.componentInstance.runChainAction({ type: 'install_webhook' });
+    expect(installWebhook).toHaveBeenCalledWith('acme', 'app');
+    expect(getRepository).toHaveBeenCalledTimes(2);
   });
 });

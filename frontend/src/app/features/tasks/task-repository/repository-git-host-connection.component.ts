@@ -4,193 +4,126 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, linkedSignal, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import {
-  BadgeComponent,
-  ButtonComponent,
-  CheckboxComponent,
-  CopyFieldComponent,
-  FormFieldComponent,
-  SelectComponent,
-  SettingsSectionComponent,
-  SubmitDirective,
-} from '@gradient/ui/ui';
-import {
-  TaskCommitStatusPostAttempt,
-  TaskRepositoryResponse,
-  eventNameToReadableText,
-  getGitHostConnectionOwnerReadableText,
-} from '@core/models';
+import { ButtonComponent, CheckboxComponent, FormFieldComponent, SelectComponent, SettingsSectionComponent } from '@gradient/ui/ui';
+import { GitHostConnectionOwner, TaskRepositoryConnectionAndCommitStatusPatchRequest, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
-import { ConfigService } from '@core/services/config.service';
-import { AuthService } from '@core/services/auth.service';
-import { deliverySummary, gitHostLabel, gitHostSettingsLinks, repositoryHost, webhookEvents } from '@shared/git';
-import { CurrentTimeSignal, RelativeTimePipe, relativeTime } from '@shared/text';
+import { repositoryHost } from '@shared/git';
 import { links } from '@shared/routing';
-import { unsavedChanges } from '@shared/forms';
-import { canInstallWebhookOrDeployKeyForTask } from './provisioning';
+import { GitHostConnectionDialogComponent, GitHostConnectionDialogPrefill } from '@shared/git-host-connections/git-host-connection-dialog.component';
+import { gitHostConnectionPickerLabel } from '@shared/git-host-connections/git-host-connection-health';
 
 @Component({
   selector: 'app-repository-git-host-connection',
   standalone: true,
-  imports: [
-    FormsModule,
-    RouterLink,
-    BadgeComponent,
-    ButtonComponent,
-    CheckboxComponent,
-    CopyFieldComponent,
-    FormFieldComponent,
-    RelativeTimePipe,
-    SelectComponent,
-    SettingsSectionComponent,
-    SubmitDirective,
-  ],
+  imports: [FormsModule, RouterLink, ButtonComponent, CheckboxComponent, FormFieldComponent, SelectComponent, SettingsSectionComponent, GitHostConnectionDialogComponent],
   templateUrl: './repository-git-host-connection.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     @use '@gradient/ui/styles/variables' as *;
 
-    .status-posts { list-style: none; margin: 0; padding: 0; }
-    .status-posts li { display: flex; align-items: baseline; gap: $spacing-sm; padding: $spacing-xs 0; }
-    .status-post-error { flex: 1; word-break: break-word; }
+    .connection-picker { display: flex; gap: $spacing-sm; align-items: center; }
+    .connection-picker > gr-select { flex: 1; min-width: 0; }
+    .report-status { display: flex; flex-wrap: wrap; gap: $spacing-md; align-items: center; }
   `,
 })
-export class RepositoryGitHostConnectionAndCommitStatusComponent implements OnInit {
+export class RepositoryGitHostConnectionAndCommitStatusComponent {
   protected readonly links = links;
-  protected readonly eventNameToReadableText = eventNameToReadableText;
   private tasks = inject(TasksService);
   private notify = inject(NotifyService);
-  private config = inject(ConfigService);
-  private auth = inject(AuthService);
-  private clock = inject(CurrentTimeSignal);
+  private dialog = viewChild.required(GitHostConnectionDialogComponent);
 
   project = input.required<string>();
   task = input.required<string>();
   state = input.required<TaskRepositoryResponse>();
-  taskRepositoryResponseAfterGitHostSave = output<TaskRepositoryResponse>();
+  saved = output<TaskRepositoryResponse>();
   changed = output<void>();
 
-  selectedGitHostConnectionId = linkedSignal(() => this.state().git_host_connection?.id ?? '');
-  reportCommitStatusChecked = linkedSignal(() => this.state().report_status);
-  saving = signal(false);
-  isStatusReportTestRunning = signal(false);
-  testStatusReportResult = signal<TaskCommitStatusPostAttempt | null>(null);
+  selectedId = linkedSignal(() => this.state().git_host_connection?.id ?? '');
+  reportStatus = linkedSignal(() => this.state().report_status);
+  savingSelection = signal(false);
+  savingReportStatus = signal(false);
+  testingStatusReport = signal(false);
 
-  gitHostConnectionDropdownOptions = computed(() => [
+  owner = computed<GitHostConnectionOwner>(() => ({ type: 'project', name: this.project() }));
+  host = computed(() => repositoryHost(this.state().repository) ?? this.state().repository);
+  fittingConnections = computed(() => {
+    const currentId = this.state().git_host_connection?.id;
+    return this.state().available_connections.filter((connection) => connection.repository_fit?.fits !== false || connection.id === currentId);
+  });
+  selectFittingConnectionOrFocusPicker(): void {
+    const fitting = this.state().available_connections.filter((connection) => connection.repository_fit?.fits !== false);
+    if (fitting.length === 1) this.selectConnection(fitting[0].id);
+    else this.focusPicker();
+  }
+  pickerOptions = computed(() => [
     { label: 'No connection', value: '' },
-    ...this.state().available_connections.map((connection) => ({
-      value: connection.id,
-      label: [
-        connection.display_name,
-        getGitHostConnectionOwnerReadableText(connection.owner),
-        gitHostLabel(connection.git_host_type),
-        ...(connection.receives_events ? ['events'] : []),
-        ...(connection.reports_status ? ['status'] : []),
-      ].join(' · '),
-    })),
+    ...this.fittingConnections().map((connection) => ({ value: connection.id, label: gitHostConnectionPickerLabel(connection) })),
   ]);
-  selectedGitHostConnectionSummary = computed(
-    () => this.state().available_connections.find((connection) => connection.id === this.selectedGitHostConnectionId()) ?? null,
+  projectConnectionNames = computed(() =>
+    this.state().available_connections.filter((connection) => connection.owner.type === 'project').map((connection) => connection.name),
   );
-  selectedConnectionCanReportCommitStatus = computed(() => this.selectedGitHostConnectionSummary()?.reports_status ?? false);
-  gitHostConnectionFormDiffersFromSaved = computed(
-    () =>
-      this.selectedGitHostConnectionId() !== (this.state().git_host_connection?.id ?? '') ||
-      this.reportCommitStatusChecked() !== this.state().report_status,
-  );
-  readonly unsaved = unsavedChanges(() => this.gitHostConnectionFormDiffersFromSaved(), 'Git host connection');
-  testStatusReportButtonDisabledReason = computed(() => {
-    if (this.gitHostConnectionFormDiffersFromSaved()) return 'Save the connection before the test.';
-    if (!this.state().report_status) return 'Turn on reporting of commit status and save first.';
-    return null;
+  connectionReportsStatus = computed(() => this.state().git_host_connection?.reports_status ?? false);
+  connectionLink = computed(() => {
+    const connection = this.state().git_host_connection;
+    if (!connection || (connection.owner.type !== 'project' && !connection.can_manage)) return null;
+    return links.gitHostConnection(connection.owner, connection.id);
   });
 
-  isGitHub = computed(() => repositoryHost(this.state().repository) === 'github.com');
-  availableGitHostConnectionsIncludeGitHubAppConnection = computed(() => this.state().available_connections.some((connection) => connection.git_host_type === 'github'));
-  gitHubConnectionHintForRepositoryWithoutConnection = computed(() => {
-    if (this.config.githubAppEnabled) return 'install';
-    return this.auth.user()?.superuser ? 'admin' : 'ask';
-  });
-
-  savedGitHostConnectionReceivesEvents = computed(() => this.state().git_host_connection?.receives_events ?? false);
-  webhookInstalledInThisSession = signal(false);
-  showInstallWebhookButton = computed(() =>
-    canInstallWebhookOrDeployKeyForTask(this.state()) &&
-    this.savedGitHostConnectionReceivesEvents() &&
-    !this.webhookInstalledInThisSession(),
-  );
-  hostLinks = computed(() => gitHostSettingsLinks(this.state().repository, this.state().git_host_connection?.git_host_type ?? null));
-  events = computed(() => webhookEvents(this.state().git_host_connection?.git_host_type ?? 'forgejo'));
-  lastEvent = computed(() => {
-    const event = this.state().recent_deliveries[0];
-    return event ? `${deliverySummary(event)} · ${relativeTime(event.created_at, this.clock.currentTimeMilliseconds())}` : null;
-  });
-  installingWebhook = signal(false);
-
-  ngOnInit(): void {
-    this.unsaved.mark();
+  selectConnection(id: string | null): void {
+    const value = id ?? '';
+    if (!this.state().can_edit || this.savingSelection() || value === (this.state().git_host_connection?.id ?? '')) return;
+    this.selectedId.set(value);
+    this.savingSelection.set(true);
+    this.update({ git_host_connection: value || null }, () => this.savingSelection.set(false), () => this.selectedId.set(this.state().git_host_connection?.id ?? ''));
   }
 
-  selectGitHostConnectionAndUpdateReportCommitStatus(id: string): void {
-    this.selectedGitHostConnectionId.set(id ?? '');
-    if (!this.selectedConnectionCanReportCommitStatus()) this.reportCommitStatusChecked.set(false);
+  setReportStatus(reportStatus: boolean): void {
+    if (!this.state().can_edit || this.savingReportStatus()) return;
+    this.reportStatus.set(reportStatus);
+    this.savingReportStatus.set(true);
+    this.update({ report_status: reportStatus }, () => this.savingReportStatus.set(false), () => this.reportStatus.set(this.state().report_status));
   }
 
-  save(): void {
-    if (!this.state().can_edit || !this.gitHostConnectionFormDiffersFromSaved() || this.saving()) return;
-    this.saving.set(true);
-    this.tasks
-      .updateTaskRepositoryConnection(this.project(), this.task(), {
-        git_host_connection: this.selectedGitHostConnectionId() || null,
-        report_status: this.reportCommitStatusChecked(),
-      })
-      .subscribe({
-        next: (state) => {
-          this.saving.set(false);
-          this.testStatusReportResult.set(null);
-          this.notify.success('Repository connection saved');
-          this.taskRepositoryResponseAfterGitHostSave.emit(state);
-        },
-        error: (error: unknown) => {
-          this.saving.set(false);
-          this.notify.failure("Couldn't save repository connection", error);
-        },
-      });
+  openCreateConnection(prefill: GitHostConnectionDialogPrefill = { base_url: this.state().repository }): void {
+    this.dialog().openCreate(prefill);
   }
 
-  postPendingTestCommitStatusAndShowResultOnTestStatusReportButtonClick(): void {
-    if (this.testStatusReportButtonDisabledReason() || this.isStatusReportTestRunning()) return;
-    this.isStatusReportTestRunning.set(true);
+  focusPicker(): void {
+    document.getElementById('task-git-host-connection')?.focus();
+  }
+
+  testStatusReport(): void {
+    if (this.testingStatusReport()) return;
+    this.testingStatusReport.set(true);
     this.tasks.postPendingTestCommitStatus(this.project(), this.task()).subscribe({
       next: (attempt) => {
-        this.isStatusReportTestRunning.set(false);
-        this.testStatusReportResult.set(attempt);
+        this.testingStatusReport.set(false);
+        if (attempt.success) this.notify.success('Status report sent');
+        else this.notify.failure(`Status report failed: ${attempt.error_message ?? `HTTP ${attempt.response_status ?? 'error'}`}`, null);
         this.changed.emit();
       },
       error: (error: unknown) => {
-        this.isStatusReportTestRunning.set(false);
-        this.notify.failure('Could not test the status report', error);
+        this.testingStatusReport.set(false);
+        this.notify.failure("Couldn't test the status report", error);
         this.changed.emit();
       },
     });
   }
 
-  installWebhook(): void {
-    if (!this.showInstallWebhookButton() || this.installingWebhook()) return;
-    this.installingWebhook.set(true);
-    this.tasks.installWebhook(this.project(), this.task()).subscribe({
-      next: () => {
-        this.installingWebhook.set(false);
-        this.webhookInstalledInThisSession.set(true);
-        this.notify.success('Webhook installed');
+  private update(body: TaskRepositoryConnectionAndCommitStatusPatchRequest, done: () => void, revert: () => void): void {
+    this.tasks.updateTaskRepositoryConnection(this.project(), this.task(), body).subscribe({
+      next: (state) => {
+        done();
+        this.saved.emit(state);
       },
       error: (error: unknown) => {
-        this.installingWebhook.set(false);
-        this.notify.failure("Couldn't install webhook", error);
+        done();
+        revert();
+        this.notify.failure("Couldn't save the git host connection of the task", error);
       },
     });
   }
