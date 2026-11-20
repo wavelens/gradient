@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Each step carries at most one action. Actions the caller may not run are left out.
+//! Steps carry at most one action each. Actions that the caller can't run don't appear.
 
 use super::RepositoryFetchStatus;
 use super::repository::TaskCommitStatusPostAttempt;
@@ -148,7 +148,7 @@ fn repository_step(
                 ..step(
                     TaskGitHostChainStepState::Failing,
                     match &fetch.error {
-                        Some(error) => format!("Can't fetch the repository: {error}"),
+                        Some(error) => format!("Repository fetch failed: {error}"),
                         None => format!(
                             "Can't fetch {}/{} from {}",
                             repository.owner, repository.name, repository.host
@@ -169,7 +169,7 @@ fn repository_step(
         None => step(
             TaskGitHostChainStepState::Failing,
             format!(
-                "Can't read host, owner and repository from {}",
+                "Cannot read host, owner and repository from {}",
                 input.repository
             ),
             edit,
@@ -210,22 +210,25 @@ fn connection_step(
     match fitting.as_slice() {
         [only] => step(
             TaskGitHostChainStepState::Attention,
-            format!("{} fits but isn't selected", connection_label(only)),
+            format!(
+                "{}: connection match, but no selection",
+                connection_label(only)
+            ),
             select,
         ),
         [_, ..] => step(
             TaskGitHostChainStepState::Attention,
-            format!("{} connections fit; none is selected", fitting.len()),
+            format!("{} connections match. None selected.", fitting.len()),
             select,
         ),
         [] if repository.host == "github.com" && !input.github_app_configured => step(
             TaskGitHostChainStepState::Attention,
-            "This server has no GitHub App. An instance admin can set one up.",
+            "This server doesn't have a GitHub App. An instance admin can configure one.",
             None,
         ),
         [] if repository.host == "github.com" && input.can_install_github_app => step(
             TaskGitHostChainStepState::Attention,
-            format!("The GitHub App isn't installed on {}", repository.owner),
+            format!("GitHub App not installed ({})", repository.owner),
             Some(TaskGitHostChainStepAction::InstallGithubApp {
                 account: repository.owner.clone(),
             }),
@@ -233,7 +236,7 @@ fn connection_step(
         [] if repository.host == "github.com" => step(
             TaskGitHostChainStepState::Attention,
             format!(
-                "The GitHub App isn't installed on {}. An instance admin can install it.",
+                "{} does not have the GitHub App. An instance admin can install it.",
                 repository.owner
             ),
             None,
@@ -316,7 +319,7 @@ fn incoming_events_step(
     connection: &GitHostConnectionSummary,
 ) -> TaskGitHostChainStep {
     if !connection.receives_events {
-        return off("The connection doesn't receive events");
+        return off("Connection doesn't receive events");
     }
     let github_app = is_github_app_installation(connection);
     let refused_after_last_delivery = connection.last_refused_signature_at.filter(|refused| {
@@ -330,7 +333,7 @@ fn incoming_events_step(
             at: Some(refused_at),
             ..step(
                 TaskGitHostChainStepState::Failing,
-                "The last delivery had a wrong signature; the webhook secrets differ",
+                "The last delivery had an invalid signature. The webhook secret doesn't match.",
                 (!github_app)
                     .then(|| secret_mismatch_action(input, connection))
                     .flatten(),
@@ -348,12 +351,12 @@ fn incoming_events_step(
         },
         None if github_app => step(
             TaskGitHostChainStepState::Attention,
-            "No event from GitHub yet",
+            "No events from GitHub",
             None,
         ),
         None => step(
             TaskGitHostChainStepState::Attention,
-            "No event received yet",
+            "No webhook events yet",
             webhook_action(input, connection),
         ),
     }
@@ -364,7 +367,7 @@ fn commit_status_step(
     connection: &GitHostConnectionSummary,
 ) -> TaskGitHostChainStep {
     if !connection.reports_status {
-        return off("The connection doesn't report commit status");
+        return off("The connection doesn't report commit status.");
     }
     if !input.report_status {
         return step(
@@ -383,7 +386,7 @@ fn commit_status_step(
             at: Some(post.delivered_at),
             ..step(
                 TaskGitHostChainStepState::Ok,
-                format!("Last {} status posted", post.event),
+                format!("Last posted {} status", post.event),
                 None,
             )
         },
@@ -392,18 +395,18 @@ fn commit_status_step(
             ..step(
                 TaskGitHostChainStepState::Failing,
                 match (&post.error_message, post.response_status) {
-                    (Some(error), _) => format!("Last status post failed: {error}"),
+                    (Some(error), _) => format!("The previous status post failed with {error}"),
                     (None, Some(status)) => {
                         format!("Last status post failed with HTTP {status}")
                     }
-                    (None, None) => "Last status post failed".to_owned(),
+                    (None, None) => "The last status post failed.".to_owned(),
                 },
                 test,
             )
         },
         None => step(
             TaskGitHostChainStepState::Attention,
-            "No status posted yet",
+            "Gradient has not posted a commit status yet.",
             test,
         ),
     }
@@ -416,8 +419,8 @@ pub(crate) fn task_git_host_chain(input: &TaskGitHostChainInput<'_>) -> TaskGitH
         return TaskGitHostChain {
             repository: repository_step,
             connection: off("Needs a readable repository URL"),
-            incoming_events: off("Needs a connection"),
-            commit_status: off("Needs a connection"),
+            incoming_events: off("Connection required"),
+            commit_status: off("Connection required"),
         };
     };
     let connection_step = connection_step(input, &repository);
@@ -429,7 +432,7 @@ pub(crate) fn task_git_host_chain(input: &TaskGitHostChainInput<'_>) -> TaskGitH
             incoming_events_step(input, connection),
             commit_status_step(input, connection),
         ),
-        None => (off("Needs a connection"), off("Needs a connection")),
+        None => (off("Connection required"), off("Connection required")),
     };
     TaskGitHostChain {
         repository: repository_step,
@@ -475,7 +478,7 @@ mod tests {
             repository_fit: Some(RepositoryFit {
                 fits,
                 can_be_selected: fits,
-                reason: (!fits).then(|| "Points at another host".to_owned()),
+                reason: (!fits).then(|| "Different host".to_owned()),
             }),
         }
     }
@@ -600,7 +603,7 @@ mod tests {
         let selected = connection(false);
         let chain = task_git_host_chain(&input(GITEA_REPOSITORY, Some(&selected), &[]));
         assert_eq!(chain.connection.state, Failing);
-        assert_eq!(chain.connection.detail, "Points at another host");
+        assert_eq!(chain.connection.detail, "Different host");
         assert_eq!(chain.incoming_events.state, Off);
     }
 
@@ -726,7 +729,7 @@ mod tests {
         assert_eq!(chain.repository.state, Failing);
         assert_eq!(
             chain.repository.detail,
-            "Can't fetch the repository: Name or service not known"
+            "Repository fetch failed: Name or service not known"
         );
         assert_eq!(chain.repository.at, Some(test_date()));
         assert_eq!(

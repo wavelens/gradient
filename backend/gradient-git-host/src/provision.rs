@@ -81,7 +81,7 @@ pub async fn token_account_login(
     account
         .login
         .or(account.username)
-        .ok_or_else(|| ProvisionError::Host("The Git host returned no account name".to_owned()))
+        .ok_or_else(|| ProvisionError::Host("Git host did not return an account name".to_owned()))
 }
 
 impl ForgeAccess<'_> {

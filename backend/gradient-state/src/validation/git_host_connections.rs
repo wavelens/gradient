@@ -88,7 +88,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
         {
             errors.push(
                 field("account_login"),
-                "git_host_type 'github' requires the account_login of the installation. Only repositories of that account fit the connection.",
+                "The git_host_type 'github' needs the account_login of the installation. Only repositories that belong to that account fit this connection.",
             );
         }
         let capabilities = connection.capabilities();
@@ -96,7 +96,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             let (key, message) = match missing {
                 MissingGitHostConnectionSetting::Capability => (
                     "receives_events",
-                    "Turn on receives_events, reports_status, or both.",
+                    "Enable `receives_events`, `reports_status`, or both.",
                 ),
                 MissingGitHostConnectionSetting::BaseUrlOrAccessTokenForStatus => (
                     if capabilities.has_base_url {
@@ -104,7 +104,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                     } else {
                         "base_url"
                     },
-                    "reports_status needs base_url and access_token_file.",
+                    "Provide base_url and access_token_file for reports_status.",
                 ),
                 MissingGitHostConnectionSetting::WebhookSecretForEvents => (
                     "secret_file",

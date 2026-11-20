@@ -335,7 +335,7 @@ async fn git_host_connection_for_commit_status_requires_base_url_and_access_toke
     res.assert_status_bad_request();
     assert_eq!(
         error_message_from_response(&res),
-        "Reporting commit status needs the Git host URL and an access token."
+        "The Git host URL and access token are required to report commit status."
     );
     assert!(s.db.rows::<git_host_connection::Entity>().await.is_empty());
     s.db.finish().await;
@@ -468,7 +468,7 @@ async fn testing_a_connection_reports_why_sign_in_is_impossible() {
         .json::<Value>()["message"]
         .clone();
     assert_eq!(result["success"], false);
-    assert_eq!(result["error"], "The connection has no access token");
+    assert_eq!(result["error"], "The connection has no access token.");
     s.db.finish().await;
 }
 

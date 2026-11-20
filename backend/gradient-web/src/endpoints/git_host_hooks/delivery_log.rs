@@ -111,7 +111,7 @@ async fn tasks_tracking_repository(db: &WebDb, repository: &str) -> Vec<MTask> {
             .filter(|task| repo_identity(&task.repository).as_ref() == Some(&identity))
             .collect(),
         Err(e) => {
-            warn!(error = %e, "Failed to look up the tasks that track a repository.");
+            warn!(error = %e, "Failed to look up tasks that track the repository.");
             Vec::new()
         }
     }
@@ -149,7 +149,7 @@ fn task_list_visible_to_connection(
     let mut labels: Vec<String> = own.iter().map(|task| task.name.clone()).collect();
     match other.len() {
         0 => {}
-        1 => labels.push("1 task of another project".to_owned()),
+        1 => labels.push("1 task in another project".to_owned()),
         n => labels.push(format!("{n} tasks of other projects")),
     }
     labels.join(", ")
@@ -163,7 +163,7 @@ fn describe_tasks_tracking_repository(
     tracking_tasks: &[MTask],
 ) -> String {
     if tracking_tasks.is_empty() {
-        return format!("No task tracks {identity}");
+        return format!("No task tracks {identity}.");
     }
     let (using, not_using): (Vec<&MTask>, Vec<&MTask>) = tracking_tasks
         .iter()
@@ -175,7 +175,7 @@ fn describe_tasks_tracking_repository(
             ("track", "use")
         };
         format!(
-            "{} {track} {identity} but {uses} no or another connection",
+            "{} {track} {identity} but {uses} either no connection or a different connection.",
             task_list_visible_to_connection(&not_using, connection_project)
         )
     } else {
@@ -185,7 +185,7 @@ fn describe_tasks_tracking_repository(
             ("use", "have")
         };
         format!(
-            "{} {uses} this connection for {identity} but {has} no trigger for {event} events",
+            "{} {uses} this connection for {identity} but {has} no {event} event trigger",
             task_list_visible_to_connection(&using, connection_project)
         )
     }
@@ -264,7 +264,7 @@ mod tests {
             None,
             &[],
         );
-        assert_eq!(detail, "No task tracks acme/app");
+        assert_eq!(detail, "No task tracks acme/app.");
     }
 
     #[test]
@@ -283,7 +283,7 @@ mod tests {
             describe_tasks_tracking_repository("acme/app", "push", connection, Some(own), &tasks);
         assert_eq!(
             detail,
-            "main, 1 task of another project track acme/app but use no or another connection"
+            "main, 1 task in another project track acme/app but use either no connection or a different connection."
         );
     }
 
@@ -301,7 +301,7 @@ mod tests {
         );
         assert_eq!(
             detail,
-            "main uses this connection for acme/app but has no trigger for pull_request events"
+            "main uses this connection for acme/app but has no pull_request event trigger"
         );
     }
 
@@ -317,7 +317,7 @@ mod tests {
             describe_tasks_tracking_repository("acme/app", "push", connection, Some(own), &tasks);
         assert_eq!(
             detail,
-            "main, docs use this connection for acme/app but have no trigger for push events"
+            "main, docs use this connection for acme/app but have no push event trigger"
         );
     }
 
@@ -334,7 +334,7 @@ mod tests {
         );
         assert_eq!(
             detail,
-            "main tracks acme/app but uses no or another connection"
+            "main tracks acme/app but uses either no connection or a different connection."
         );
     }
 

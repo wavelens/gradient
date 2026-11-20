@@ -10,7 +10,7 @@ use crate::refusal::{Refusal, RefusalStatus};
 pub(crate) enum AdminRefusal {
     #[error("host must contain only alphanumerics, '.' and '-'")]
     InvalidHostCharacters,
-    #[error("A GitHub organization name contains only letters, digits and '-'")]
+    #[error("Use only letters, digits and '-' in the name of a GitHub organization.")]
     InvalidOrganizationCharacters,
     #[error("manifest state invalid or expired")]
     InvalidManifestState,
