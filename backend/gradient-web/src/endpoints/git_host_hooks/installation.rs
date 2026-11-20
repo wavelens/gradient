@@ -43,7 +43,7 @@ pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
         return;
     };
     let account_login = payload.installation.account.login.as_str();
-    match gradient_ci::github_app_connection::upsert_github_app_installation_git_host_connection(
+    match crate::endpoints::git_host_connections::save_github_app_installation_and_link_tasks_when_new(
         db.inner(),
         installation_id,
         Some(account_login),
@@ -53,15 +53,6 @@ pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
     {
         Ok(connection) => {
             info!(installation_id, connection = %connection.id, account_login, "Saved a connection to the Git host for an installation of the GitHub App");
-            if let Err(e) =
-                crate::endpoints::git_host_connections::link_fitting_tasks_without_connection(
-                    db,
-                    &connection,
-                )
-                .await
-            {
-                warn!(error = %e, installation_id, "Failed to link tasks to the connection of the GitHub App installation");
-            }
         }
         Err(e) => {
             warn!(error = %e, installation_id, "Failed to save the connection to the Git host for the installation of the GitHub App.")

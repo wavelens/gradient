@@ -6,10 +6,7 @@
 
 use gradient_db::git_host_connections::{self, GitHostConnectionOwnerByDatabaseId};
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ConnectionTrait, DbErr, IntoActiveModel, TransactionSession,
-    TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, DbErr, IntoActiveModel};
 
 pub const GITHUB_APP_CONNECTION_DISPLAY_NAME: &str = "GitHub";
 
@@ -39,46 +36,53 @@ async fn free_instance_name<C: ConnectionTrait>(
     })
 }
 
-pub async fn upsert_github_app_installation_git_host_connection<C: TransactionTrait>(
-    db: &C,
+pub struct SavedGitHubAppInstallationConnection {
+    pub connection: MGitHostConnection,
+    pub inserted: bool,
+}
+
+pub async fn upsert_github_app_installation_git_host_connection<C: ConnectionTrait>(
+    txn: &C,
     installation_id: i64,
     account_login: Option<&str>,
     creator: UserId,
-) -> Result<MGitHostConnection, DbErr> {
-    let txn = db.begin().await?;
-    let connection =
-        match git_host_connections::by_github_installation_id(&txn, installation_id).await? {
-            Some(existing) => match account_login {
-                Some(login) if existing.account_login.as_deref() != Some(login) => {
-                    let mut active = existing.into_active_model();
-                    active.account_login = ActiveValue::Set(Some(login.to_owned()));
-                    active.update(&txn).await?
-                }
-                _ => existing,
-            },
-            None => {
-                MGitHostConnection {
-                    id: GitHostConnectionId::now_v7(),
-                    project: None,
-                    owner_team: None,
-                    name: free_instance_name(&txn, account_login, installation_id).await?,
-                    display_name: GITHUB_APP_CONNECTION_DISPLAY_NAME.to_owned(),
-                    git_host_type: GitHostType::GitHub,
-                    receives_events: true,
-                    reports_status: true,
-                    github_installation_id: Some(installation_id),
-                    account_login: account_login.map(str::to_owned),
-                    created_by: creator,
-                    created_at: chrono::Utc::now().naive_utc(),
-                    ..Default::default()
-                }
-                .into_active_model()
-                .insert(&txn)
-                .await?
+) -> Result<SavedGitHubAppInstallationConnection, DbErr> {
+    let existing = git_host_connections::by_github_installation_id(txn, installation_id).await?;
+    let inserted = existing.is_none();
+    let connection = match existing {
+        Some(existing) => match account_login {
+            Some(login) if existing.account_login.as_deref() != Some(login) => {
+                let mut active = existing.into_active_model();
+                active.account_login = ActiveValue::Set(Some(login.to_owned()));
+                active.update(txn).await?
             }
-        };
-    txn.commit().await?;
-    Ok(connection)
+            _ => existing,
+        },
+        None => {
+            MGitHostConnection {
+                id: GitHostConnectionId::now_v7(),
+                project: None,
+                owner_team: None,
+                name: free_instance_name(txn, account_login, installation_id).await?,
+                display_name: GITHUB_APP_CONNECTION_DISPLAY_NAME.to_owned(),
+                git_host_type: GitHostType::GitHub,
+                receives_events: true,
+                reports_status: true,
+                github_installation_id: Some(installation_id),
+                account_login: account_login.map(str::to_owned),
+                created_by: creator,
+                created_at: chrono::Utc::now().naive_utc(),
+                ..Default::default()
+            }
+            .into_active_model()
+            .insert(txn)
+            .await?
+        }
+    };
+    Ok(SavedGitHubAppInstallationConnection {
+        connection,
+        inserted,
+    })
 }
 
 #[cfg(test)]
@@ -125,7 +129,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(connection.id, existing.id);
+        assert!(!connection.inserted);
+        assert_eq!(connection.connection.id, existing.id);
     }
 
     #[tokio::test]
@@ -144,6 +149,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(connection.name, "github-42");
+        assert!(connection.inserted);
+        assert_eq!(connection.connection.name, "github-42");
     }
 }
