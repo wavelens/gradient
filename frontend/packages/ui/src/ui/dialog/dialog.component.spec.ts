@@ -5,7 +5,7 @@
  */
 
 import { InteractivityChecker } from '@angular/cdk/a11y';
-import { Component, signal } from '@angular/core';
+import { Component, signal, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { DialogComponent } from './dialog.component';
 import { SelectComponent } from '../select/select.component';
@@ -47,6 +47,7 @@ class HostComponent {
   confirmDisabled = signal(false);
   withField = signal(false);
   clicks: string[] = [];
+  dialog = viewChild.required(DialogComponent);
 }
 
 class LayoutFreeInteractivityChecker extends InteractivityChecker {
@@ -72,6 +73,9 @@ function render() {
 }
 
 const panel = () => document.querySelector('.gr-dialog');
+
+const discardPromptButton = (label: string) =>
+  Array.from(panel()?.querySelectorAll<HTMLButtonElement>('.gr-dialog__discard button') ?? []).find((b) => b.textContent?.trim() === label)!;
 
 describe('DialogComponent', () => {
   it('stays out of the DOM until it is made visible', () => {
@@ -178,6 +182,47 @@ describe('DialogComponent', () => {
     fixture.detectChanges();
     expect(fixture.componentInstance.open()).toBe(false);
     expect(fixture.componentInstance.hidden()).toBe(1);
+  });
+
+  it('runs the step after closing once the dialog closes', () => {
+    const fixture = render();
+    const after = vi.fn();
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    fixture.componentInstance.dialog().close(after);
+    expect(fixture.componentInstance.open()).toBe(false);
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the step after closing only after Discard', () => {
+    const fixture = render();
+    const after = vi.fn();
+    fixture.componentInstance.discard.set(true);
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    fixture.componentInstance.dialog().close(after);
+    fixture.detectChanges();
+    expect(after).not.toHaveBeenCalled();
+    discardPromptButton('Discard').click();
+    expect(fixture.componentInstance.open()).toBe(false);
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgets the step after closing when the user keeps editing', () => {
+    const fixture = render();
+    const after = vi.fn();
+    fixture.componentInstance.discard.set(true);
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    fixture.componentInstance.dialog().close(after);
+    fixture.detectChanges();
+    discardPromptButton('Continue editing').click();
+    fixture.detectChanges();
+    escape();
+    fixture.detectChanges();
+    discardPromptButton('Discard').click();
+    expect(fixture.componentInstance.open()).toBe(false);
+    expect(after).not.toHaveBeenCalled();
   });
 
   it('hides the close button when it is not closable', () => {
