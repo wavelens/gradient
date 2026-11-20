@@ -116,7 +116,7 @@ export class GitHostConnectionListComponent implements OnInit {
   }
 
   canManageRow(connection: GitHostConnectionSummary): boolean {
-    return this.isOwn(connection) && connection.can_manage && this.writable();
+    return this.isOwn(connection) && (connection.can_manage ?? false) && this.writable();
   }
 
   canEditRow(connection: GitHostConnectionSummary): boolean {
