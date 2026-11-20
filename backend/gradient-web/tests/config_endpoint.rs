@@ -54,11 +54,17 @@ async fn config_links_the_page_and_the_install_page_of_the_github_app() {
             cli.github_app.webhook_secret_file = Some("/run/secret".into());
         })
         .build();
-    state
+    while state
         .memory
         .github_app_page_url
-        .get_or_look_up(async { Ok("https://github.com/apps/gradient-ci/".to_owned()) })
-        .await;
+        .get_cached_page_url_and_start_background_lookup_when_stale_or_missing(
+            &state.shutdown,
+            || async { Ok("https://github.com/apps/gradient-ci/".to_owned()) },
+        )
+        .is_none()
+    {
+        tokio::task::yield_now().await;
+    }
     let server = axum_test::TestServer::new(gradient_web::create_router(state).unwrap());
 
     let body: Value = server.get("/api/v1/config").await.json();

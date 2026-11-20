@@ -10,8 +10,8 @@ use hmac::{Hmac, KeyInit, Mac};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::sync::{Mutex, PoisonError};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
@@ -131,46 +131,55 @@ pub fn install_url(app_page_url: &str) -> String {
     format!("{}/installations/new", app_page_url.trim_end_matches('/'))
 }
 
-const RETRY_PAGE_URL_LOOKUP_AFTER: Duration = Duration::from_secs(300);
+const GITHUB_APP_PAGE_URL_LOOKUP_START_DELAY_AFTER_LAST_FINISHED_LOOKUP_FIVE_MINUTES: Duration =
+    Duration::from_secs(300);
 
-#[derive(Debug, Clone)]
-enum PageUrlLookup {
-    Found(String),
-    FailedAt(Instant),
+#[derive(Debug, Default)]
+struct GitHubAppPageUrlLookupState {
+    page_url: Option<String>,
+    last_page_url_lookup_finished_at: Option<tokio::time::Instant>,
+    page_url_lookup_task_is_running: bool,
 }
 
 #[derive(Debug, Default)]
-pub struct GitHubAppPageUrlCache(Mutex<Option<PageUrlLookup>>);
+pub struct GitHubAppPageUrlCache(Mutex<GitHubAppPageUrlLookupState>);
 
 impl GitHubAppPageUrlCache {
-    pub async fn get_or_look_up(
-        &self,
-        look_up: impl Future<Output = Result<String>>,
-    ) -> Option<String> {
-        let cached = self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        match cached {
-            Some(PageUrlLookup::Found(url)) => return Some(url),
-            Some(PageUrlLookup::FailedAt(at)) if at.elapsed() < RETRY_PAGE_URL_LOOKUP_AFTER => {
-                return None;
-            }
-            _ => {}
+    pub fn get_cached_page_url_and_start_background_lookup_when_stale_or_missing<F>(
+        self: &Arc<Self>,
+        shutdown: &gradient_util::shutdown::Shutdown,
+        look_up: impl FnOnce() -> F,
+    ) -> Option<String>
+    where
+        F: Future<Output = Result<String>> + Send + 'static,
+    {
+        let mut state = self.lock_page_url_lookup_state();
+        let stale = state.last_page_url_lookup_finished_at.is_none_or(|at| {
+            at.elapsed() >= GITHUB_APP_PAGE_URL_LOOKUP_START_DELAY_AFTER_LAST_FINISHED_LOOKUP_FIVE_MINUTES
+        });
+        if stale && !state.page_url_lookup_task_is_running {
+            state.page_url_lookup_task_is_running = true;
+            let cache = Arc::clone(self);
+            let lookup = look_up();
+            shutdown.spawn(async move {
+                cache.store_finished_github_app_page_url_lookup_result(lookup.await);
+            });
         }
-        let (stored, found) = match look_up.await {
-            Ok(url) => {
-                let url = url.trim_end_matches('/').to_owned();
-                (PageUrlLookup::Found(url.clone()), Some(url))
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to look up the page for the GitHub App.");
-                (PageUrlLookup::FailedAt(Instant::now()), None)
-            }
-        };
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(stored);
-        found
+        state.page_url.clone()
+    }
+
+    fn store_finished_github_app_page_url_lookup_result(&self, result: Result<String>) {
+        let mut state = self.lock_page_url_lookup_state();
+        match result {
+            Ok(url) => state.page_url = Some(url.trim_end_matches('/').to_owned()),
+            Err(e) => warn!(error = %e, "Failed to look up the page for the GitHub App."),
+        }
+        state.last_page_url_lookup_finished_at = Some(tokio::time::Instant::now());
+        state.page_url_lookup_task_is_running = false;
+    }
+
+    fn lock_page_url_lookup_state(&self) -> MutexGuard<'_, GitHubAppPageUrlLookupState> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -240,31 +249,153 @@ pub fn verify_request_against_plaintext_secret(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[tokio::test]
-    async fn a_found_page_url_is_kept() {
-        let cache = GitHubAppPageUrlCache::default();
-        let found = cache
-            .get_or_look_up(async { Ok("https://github.com/apps/gradient".to_owned()) })
-            .await;
-        assert_eq!(found.as_deref(), Some("https://github.com/apps/gradient"));
-        let kept = cache
-            .get_or_look_up(async { anyhow::bail!("must not look up again") })
-            .await;
-        assert_eq!(kept.as_deref(), Some("https://github.com/apps/gradient"));
+    const EXAMPLE_GITHUB_APP_PAGE_URL: &str = "https://github.com/apps/gradient";
+
+    fn get_cached_page_url_and_count_started_background_lookups(
+        cache: &Arc<GitHubAppPageUrlCache>,
+        lookups: &Arc<AtomicUsize>,
+        lookup: impl Future<Output = Result<String>> + Send + 'static,
+    ) -> Option<String> {
+        let lookups = Arc::clone(lookups);
+        cache.get_cached_page_url_and_start_background_lookup_when_stale_or_missing(
+            &gradient_util::shutdown::Shutdown::new(),
+            move || {
+                lookups.fetch_add(1, Ordering::SeqCst);
+                lookup
+            },
+        )
+    }
+
+    async fn lookup_page_url_with_trailing_slash_succeeds() -> Result<String> {
+        Ok(format!("{EXAMPLE_GITHUB_APP_PAGE_URL}/"))
+    }
+
+    async fn page_url_lookup_fails_when_github_is_unreachable() -> Result<String> {
+        anyhow::bail!("GitHub is unreachable")
+    }
+
+    async fn wait_until_cache_lookup_task_finishes(cache: &GitHubAppPageUrlCache) {
+        while cache
+            .lock_page_url_lookup_state()
+            .page_url_lookup_task_is_running
+        {
+            tokio::task::yield_now().await;
+        }
     }
 
     #[tokio::test]
-    async fn a_failed_lookup_is_not_repeated_right_away() {
-        let cache = GitHubAppPageUrlCache::default();
-        let failed = cache
-            .get_or_look_up(async { anyhow::bail!("GitHub is unreachable") })
-            .await;
-        assert_eq!(failed, None);
-        let skipped = cache
-            .get_or_look_up(async { Ok("https://github.com/apps/gradient".to_owned()) })
-            .await;
-        assert_eq!(skipped, None);
+    async fn github_app_page_url_cache_returns_none_while_pending_starts_one_lookup_and_returns_url_without_new_lookup()
+     {
+        let cache = Arc::new(GitHubAppPageUrlCache::default());
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let pending = async move {
+            released.await?;
+            lookup_page_url_with_trailing_slash_succeeds().await
+        };
+
+        assert_eq!(
+            get_cached_page_url_and_count_started_background_lookups(&cache, &lookups, pending),
+            None
+        );
+        assert_eq!(
+            get_cached_page_url_and_count_started_background_lookups(
+                &cache,
+                &lookups,
+                lookup_page_url_with_trailing_slash_succeeds()
+            ),
+            None
+        );
+        assert_eq!(lookups.load(Ordering::SeqCst), 1);
+
+        release.send(()).unwrap();
+        wait_until_cache_lookup_task_finishes(&cache).await;
+        let cached = get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            page_url_lookup_fails_when_github_is_unreachable(),
+        );
+        assert_eq!(cached.as_deref(), Some(EXAMPLE_GITHUB_APP_PAGE_URL));
+        assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_lookup_waits_for_refresh_interval_before_next_lookup() {
+        let cache = Arc::new(GitHubAppPageUrlCache::default());
+        let lookups = Arc::new(AtomicUsize::new(0));
+
+        assert_eq!(
+            get_cached_page_url_and_count_started_background_lookups(
+                &cache,
+                &lookups,
+                page_url_lookup_fails_when_github_is_unreachable()
+            ),
+            None
+        );
+        wait_until_cache_lookup_task_finishes(&cache).await;
+        assert_eq!(
+            get_cached_page_url_and_count_started_background_lookups(
+                &cache,
+                &lookups,
+                lookup_page_url_with_trailing_slash_succeeds()
+            ),
+            None
+        );
+        assert_eq!(lookups.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(
+            GITHUB_APP_PAGE_URL_LOOKUP_START_DELAY_AFTER_LAST_FINISHED_LOOKUP_FIVE_MINUTES,
+        )
+        .await;
+        assert_eq!(
+            get_cached_page_url_and_count_started_background_lookups(
+                &cache,
+                &lookups,
+                lookup_page_url_with_trailing_slash_succeeds()
+            ),
+            None
+        );
+        assert_eq!(lookups.load(Ordering::SeqCst), 2);
+        wait_until_cache_lookup_task_finishes(&cache).await;
+        let cached = get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            page_url_lookup_fails_when_github_is_unreachable(),
+        );
+        assert_eq!(cached.as_deref(), Some(EXAMPLE_GITHUB_APP_PAGE_URL));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_refresh_after_successful_lookup_returns_previously_found_url() {
+        let cache = Arc::new(GitHubAppPageUrlCache::default());
+        let lookups = Arc::new(AtomicUsize::new(0));
+
+        get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            lookup_page_url_with_trailing_slash_succeeds(),
+        );
+        wait_until_cache_lookup_task_finishes(&cache).await;
+        tokio::time::advance(
+            GITHUB_APP_PAGE_URL_LOOKUP_START_DELAY_AFTER_LAST_FINISHED_LOOKUP_FIVE_MINUTES,
+        )
+        .await;
+        let during_refresh = get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            page_url_lookup_fails_when_github_is_unreachable(),
+        );
+        assert_eq!(during_refresh.as_deref(), Some(EXAMPLE_GITHUB_APP_PAGE_URL));
+        wait_until_cache_lookup_task_finishes(&cache).await;
+        assert_eq!(lookups.load(Ordering::SeqCst), 2);
+        let after_refresh = get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            page_url_lookup_fails_when_github_is_unreachable(),
+        );
+        assert_eq!(after_refresh.as_deref(), Some(EXAMPLE_GITHUB_APP_PAGE_URL));
     }
 
     const TEST_RSA_PEM_PKCS1: &str = "-----BEGIN RSA PRIVATE KEY-----\n\
