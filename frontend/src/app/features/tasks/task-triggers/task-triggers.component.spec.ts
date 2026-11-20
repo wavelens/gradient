@@ -128,6 +128,20 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(chain?.querySelector('[data-testid="chain-action-select_connection"]')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
   });
 
+  it('opens the new trigger dialog with the type from the link', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [trigger], undefined, { new_trigger: 'reporter_push' });
+    expect(fixture.componentInstance.showCreateDialog()).toBe(true);
+    expect(fixture.componentInstance.form.type).toBe('reporter_push');
+  });
+
+  it('ignores a new trigger link without edit access or with an unknown type', () => {
+    expect(setup({ managed: false, canEdit: false, canTrigger: false }, [trigger], undefined, { new_trigger: 'reporter_push' })
+      .componentInstance.showCreateDialog()).toBe(false);
+    TestBed.resetTestingModule();
+    expect(setup({ managed: false, canEdit: true, canTrigger: true }, [trigger], undefined, { new_trigger: 'unknown' })
+      .componentInstance.showCreateDialog()).toBe(false);
+  });
+
   it('hides write buttons under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     expect(fixture.nativeElement.querySelector('app-settings-access-state-badge')?.textContent).toContain('server configuration');

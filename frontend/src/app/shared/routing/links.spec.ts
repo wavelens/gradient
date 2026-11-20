@@ -45,6 +45,7 @@ const every: UrlTree[] = [
   links.subscribeToCache('p', 'c'),
   links.task('p', 't', 'e'),
   ...(['settings', 'triggers', 'actions', 'flake-inputs', 'metrics'] as const).map((page) => links.taskPage('p', 't', page)),
+  links.taskTriggerCreate('p', 't', 'reporter_push'),
   links.entryPointMetrics('p', 't', 'packages.x86_64-linux.hello'),
   links.execJob('p', 't', 'j', { node: 1, terminal: true }),
   links.evaluationLog('p', 'e', { build: 'b' }),
@@ -107,6 +108,10 @@ describe('links', () => {
     expect(String(links.evaluationLog('p', 'e1', { build: 'b1' }))).toBe('/project/p/log/e1?build=b1');
     expect(String(links.evaluationLog('p', 'e1', { filter: 'b1' }))).toBe('/project/p/log/e1?filter=b1');
     expect(String(links.evaluationLog('p', 'e1', { messages: true }))).toBe('/project/p/log/e1?eval=1');
+  });
+
+  it('opens the new trigger dialog of a task with the given trigger type', () => {
+    expect(String(links.taskTriggerCreate('p', 't', 'reporter_push'))).toBe('/project/p/task/t/triggers?new_trigger=reporter_push');
   });
 
   it('links a build log line by build, attempt and line, without the sidebar filter', () => {
