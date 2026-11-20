@@ -27,6 +27,7 @@ export type DocLink =
   | 'guides/flake-updates/#2-add-the-open-pr-action'
   | 'guides/gitea/#inbound-and-outbound'
   | 'guides/github/#1-register-the-github-app'
+  | 'guides/github/#2-configure-the-server'
   | 'guides/github/#3-install-the-app'
   | 'guides/remote-worker/#1-pick-a-worker-id'
   | 'guides/remote-worker/#2-register-the-worker'

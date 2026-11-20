@@ -261,6 +261,30 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-returned"]')?.textContent).toContain('Installed on acme');
     });
 
+    it('prompt for server config and restart instead of polling for a missing GitHub App', () => {
+      vi.useFakeTimers();
+      setup({ installation_id: '42', setup_action: 'install' });
+      const { fixture, root } = render();
+      vi.advanceTimersByTime(60_000);
+      fixture.detectChanges();
+      const returned = root.querySelector('[data-testid="github-app-returned"]')!;
+      expect(connections.list).not.toHaveBeenCalled();
+      expect(returned.textContent).toContain('restart the server');
+      expect(returned.querySelector('a[href$="guides/github/#2-configure-the-server"]')).not.toBeNull();
+      expect(button(root, 'Check again')).toBeUndefined();
+    });
+
+    it("the 'missing' banner points to the App installation on GitHub when GitHub reports no installation", () => {
+      vi.useFakeTimers();
+      setup({ installation_id: '42', setup_action: 'install' }, {});
+      const { fixture, root } = render();
+      vi.advanceTimersByTime(60_000);
+      fixture.detectChanges();
+      const returned = root.querySelector('[data-testid="github-app-returned"]')!;
+      expect(returned.textContent).toContain('Advanced');
+      expect(returned.querySelector('a[href="https://github.com/apps/gradient-ci"]')).not.toBeNull();
+    });
+
     it('shows that the account owner needs to approve the requested installation', () => {
       setup({ setup_action: 'request' }, {});
       const { root } = render();
