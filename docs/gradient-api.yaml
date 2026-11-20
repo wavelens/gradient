@@ -24564,6 +24564,19 @@ components:
             - change_webhook_secret
       - type: object
         required:
+        - task_count
+        - type
+        properties:
+          task_count:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - open_connection_shared_by_tasks
+      - type: object
+        required:
         - trigger_type
         - type
         properties:

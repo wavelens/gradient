@@ -2911,6 +2911,9 @@ export type TaskGitHostChainStepAction = {
 } | {
   type: "change_webhook_secret";
 } | {
+  task_count: number;
+  type: "open_connection_shared_by_tasks";
+} | {
   trigger_type: TriggerType;
   type: "add_trigger";
 } | {

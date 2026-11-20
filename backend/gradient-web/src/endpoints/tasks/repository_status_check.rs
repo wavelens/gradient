@@ -43,6 +43,9 @@ pub enum TaskGitHostChainStepAction {
         webhook_url: String,
     },
     ChangeWebhookSecret,
+    OpenConnectionSharedByTasks {
+        task_count: u64,
+    },
     AddTrigger {
         trigger_type: TriggerType,
     },
@@ -71,6 +74,7 @@ pub(crate) struct TaskRepositoryStatusCheckInput<'a> {
     pub(crate) fetch: Option<&'a RepositoryFetchStatus>,
     pub(crate) connection: Option<&'a GitHostConnectionSummary>,
     pub(crate) connection_has_access_token: bool,
+    pub(crate) total_task_count_for_connection: u64,
     pub(crate) available_connections: &'a [GitHostConnectionSummary],
     pub(crate) report_status: bool,
     pub(crate) newest_delivery: Option<&'a IncomingWebhookDeliveryResponse>,
@@ -298,10 +302,23 @@ fn secret_mismatch_action(
     connection: &GitHostConnectionSummary,
 ) -> Option<TaskGitHostChainStepAction> {
     if input.can_manage_integrations && input.connection_has_access_token {
-        Some(TaskGitHostChainStepAction::InstallWebhook)
-    } else {
-        (connection.can_manage && !connection.managed)
-            .then_some(TaskGitHostChainStepAction::ChangeWebhookSecret)
+        return Some(TaskGitHostChainStepAction::InstallWebhook);
+    }
+    if !connection.can_manage || connection.managed {
+        return None;
+    }
+    Some(match input.total_task_count_for_connection {
+        0 | 1 => TaskGitHostChainStepAction::ChangeWebhookSecret,
+        task_count => TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count },
+    })
+}
+
+fn secret_mismatch_detail(input: &TaskRepositoryStatusCheckInput<'_>) -> String {
+    match input.total_task_count_for_connection {
+        0 | 1 => "Rejected last delivery: webhook secret does not match".to_owned(),
+        task_count => format!(
+            "Rejected last delivery: webhook secret does not match. {task_count} tasks share this connection"
+        ),
     }
 }
 
@@ -333,7 +350,7 @@ fn incoming_events_step(
             at: Some(refused_at),
             ..step(
                 TaskGitHostChainStepState::Failing,
-                "Rejected last delivery: webhook secret does not match",
+                secret_mismatch_detail(input),
                 (!github_app)
                     .then(|| secret_mismatch_action(input, connection))
                     .flatten(),
@@ -509,6 +526,7 @@ mod tests {
             fetch: None,
             connection,
             connection_has_access_token: true,
+            total_task_count_for_connection: 1,
             available_connections,
             report_status: true,
             newest_delivery: None,
@@ -734,6 +752,42 @@ mod tests {
         };
         assert_eq!(
             check_task_repository_readable_git_host_webhook_and_commit_status(&declared)
+                .incoming_events
+                .action,
+            None
+        );
+    }
+
+    #[test]
+    fn refused_webhook_secret_on_connection_used_by_several_tasks_makes_incoming_events_step_offer_shared_connection_link_and_name_task_count()
+     {
+        let mut selected = connection(true);
+        selected.last_refused_signature_at = Some(test_date());
+        let shared = TaskRepositoryStatusCheckInput {
+            connection_has_access_token: false,
+            total_task_count_for_connection: 3,
+            ..input(GITEA_REPOSITORY, Some(&selected), &[])
+        };
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&shared);
+        assert_eq!(
+            chain.incoming_events.action,
+            Some(TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count: 3 })
+        );
+        assert!(
+            chain.incoming_events.detail.contains("3 tasks"),
+            "{}",
+            chain.incoming_events.detail
+        );
+        let unmanageable_connection = GitHostConnectionSummary {
+            can_manage: false,
+            ..selected.clone()
+        };
+        let unmanageable = TaskRepositoryStatusCheckInput {
+            connection: Some(&unmanageable_connection),
+            ..shared
+        };
+        assert_eq!(
+            check_task_repository_readable_git_host_webhook_and_commit_status(&unmanageable)
                 .incoming_events
                 .action,
             None
