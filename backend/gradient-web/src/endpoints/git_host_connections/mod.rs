@@ -614,6 +614,74 @@ pub(crate) async fn delete(
     Ok(())
 }
 
+async fn sign_in_account(
+    ci: &CiContext,
+    connection: &MGitHostConnection,
+) -> Result<String, String> {
+    if let Some(installation_id) = connection.github_installation_id {
+        let app = ci
+            .db
+            .config
+            .github_app
+            .clone()
+            .ok_or_else(|| GitHostConnectionRefusal::GitHubAppNotConfigured.to_string())?;
+        let pem = tokio::fs::read_to_string(&app.private_key_file)
+            .await
+            .map_err(|_| "Can't read the private key of the GitHub App".to_owned())?;
+        return gradient_git_host::github_app::get_installation(
+            &ci.http,
+            app.app_id,
+            &pem,
+            installation_id,
+        )
+        .await
+        .map_err(|e| e.to_string());
+    }
+    let base_url = connection
+        .base_url
+        .as_deref()
+        .ok_or_else(|| "The connection has no base URL".to_owned())?;
+    gradient_util::http_validation::validate_webhook_url(base_url)
+        .map_err(|e| format!("Gradient doesn't call {base_url}: {e}"))?;
+    let token = gradient_ci::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token(
+        ci.db.web_db.inner(),
+        &ci.db.config,
+        &ci.http,
+        connection,
+    )
+    .await
+    .map_err(|e| format!("Can't get a usable access token: {e}"))?
+    .ok_or_else(|| "The connection has no access token".to_owned())?;
+    gradient_git_host::provision::token_account_login(
+        ci.http.clone(),
+        connection.git_host_type,
+        base_url,
+        token.expose(),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+pub(crate) async fn test(
+    ci: &CiContext,
+    owner: GitHostConnectionOwnerByDatabaseId,
+    id: GitHostConnectionId,
+) -> WebResult<GitHostConnectionTestResponse> {
+    let connection = load_of_owner(&ci.db.web_db, owner, id).await?;
+    Ok(match sign_in_account(ci, &connection).await {
+        Ok(account) => GitHostConnectionTestResponse {
+            success: true,
+            account: Some(account),
+            error: None,
+        },
+        Err(error) => GitHostConnectionTestResponse {
+            success: false,
+            account: None,
+            error: Some(error),
+        },
+    })
+}
+
 pub(crate) async fn deliveries(
     db: &impl sea_orm::ConnectionTrait,
     owner: GitHostConnectionOwnerByDatabaseId,

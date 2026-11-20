@@ -408,6 +408,81 @@ async fn removing_webhook_secret_of_connection_receiving_events_is_refused() {
     s.db.finish().await;
 }
 
+async fn test_project_connection(
+    s: &RealTestDatabaseHttpServerAndBearerAuthHeader,
+    connection: GitHostConnectionId,
+) -> axum_test::TestResponse {
+    s.server
+        .post(&format!(
+            "{TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH}/{connection}/test"
+        ))
+        .add_header("authorization", &s.auth)
+        .await
+}
+
+#[tokio::test]
+async fn testing_a_connection_reports_why_sign_in_is_impossible() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let loopback = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "http://127.0.0.1:9",
+            true,
+        ),
+    )
+    .await;
+    let tokenless = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            false,
+        ),
+    )
+    .await;
+
+    let res = test_project_connection(&s, loopback.id).await;
+    res.assert_status_ok();
+    let result = res.json::<Value>()["message"].clone();
+    assert_eq!(result["success"], false);
+    assert_eq!(result["account"], Value::Null);
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("Gradient doesn't call http://127.0.0.1:9"),
+        "{result}"
+    );
+
+    let result = test_project_connection(&s, tokenless.id)
+        .await
+        .json::<Value>()["message"]
+        .clone();
+    assert_eq!(result["success"], false);
+    assert_eq!(result["error"], "The connection has no access token");
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn testing_a_connection_needs_manage_integrations() {
+    let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
+    let connection = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            false,
+        ),
+    )
+    .await;
+
+    test_project_connection(&s, connection.id)
+        .await
+        .assert_status_forbidden();
+    s.db.finish().await;
+}
+
 #[tokio::test]
 async fn project_members_can_list_incoming_webhook_deliveries_of_project_git_host_connection() {
     let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;

@@ -6,7 +6,8 @@
 
 use super::{
     CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    GitHostConnectionTaskResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
+    PatchGitHostConnectionRequest,
 };
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::ProjectPath;
@@ -260,5 +261,26 @@ pub async fn list_project_git_host_connection_tasks(
     let connection = load_available_to_project(&db.web_db, &project, params.param("id")?).await?;
     Ok(ok_json(
         super::tasks_using_connection_visible_to_user(&db.web_db, connection.id, &user).await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/git-host-connections/{id}/test",
+    operation_id = "testProjectGitHostConnection",
+    tag = "git-host-connections",
+    summary = "Test a connection",
+    description = "Sign in to the Git host with the credentials of a connection of the project. Return the account name on success, or the reason for the failure.",
+    params(ProjectPath, ("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Result of the sign-in", body = GitHostConnectionTestResponse), WebError)
+)]
+pub async fn test_project_git_host_connection(
+    ProjectScope {
+        project, params, ..
+    }: ProjectScope<Requires<can::ManageIntegrations>>,
+    State(state): State<Arc<ServerState>>,
+) -> WebResult<Json<BaseResponse<GitHostConnectionTestResponse>>> {
+    Ok(ok_json(
+        super::test(&state.ci(), Owner::Project(project.id), params.param("id")?).await?,
     ))
 }

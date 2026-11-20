@@ -6,7 +6,8 @@
 
 use super::{
     CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    GitHostConnectionTaskResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
+    PatchGitHostConnectionRequest,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -163,5 +164,24 @@ pub async fn list_instance_git_host_connection_tasks(
     let connection = super::load_of_owner(&state.web_db, Owner::Instance, id).await?;
     Ok(ok_json(
         super::tasks_using_connection_visible_to_user(&state.web_db, connection.id, &user).await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/git-host-connections/{id}/test",
+    operation_id = "testInstanceGitHostConnection",
+    tag = "admin",
+    summary = "Test a connection",
+    description = "Sign in to the Git host with the credentials of a connection of the instance. Return the account name on success, or the reason for the failure.",
+    params(("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Result of the sign-in", body = GitHostConnectionTestResponse), WebError)
+)]
+pub async fn test_instance_git_host_connection(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<GitHostConnectionId>,
+) -> WebResult<Json<BaseResponse<GitHostConnectionTestResponse>>> {
+    Ok(ok_json(
+        super::test(&state.ci(), Owner::Instance, id).await?,
     ))
 }

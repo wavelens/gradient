@@ -197,6 +197,9 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     git_host_connections::project::list_project_git_host_connection_tasks
                 ))
                 .routes(routes!(
+                    git_host_connections::project::test_project_git_host_connection
+                ))
+                .routes(routes!(
                     git_host_connections::project_gitea_oauth2_connection::redirect_signed_in_browser_to_git_host_for_project_oauth_approval
                 ))
                 .routes(routes!(
@@ -213,6 +216,9 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     ))
                     .routes(routes!(
                     git_host_connections::team::list_team_git_host_connection_tasks
+                ))
+                .routes(routes!(
+                    git_host_connections::team::test_team_git_host_connection
                 ))
                 .routes(routes!(
                     tasks::repository::get_task_repository,

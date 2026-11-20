@@ -59,6 +59,9 @@ pub fn admin_router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(
             git_host_connections::admin::list_instance_git_host_connection_tasks
         ))
+        .routes(routes!(
+            git_host_connections::admin::test_instance_git_host_connection
+        ))
         .routes(routes!(maintenance::start_deep_gc))
         .routes(routes!(maintenance::start_gc_round_now))
         .routes(routes!(storage::get_storage))
