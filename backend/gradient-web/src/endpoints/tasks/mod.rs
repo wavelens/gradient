@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod evaluations;
 pub mod flake_inputs;
+pub mod git_host_chain;
 pub mod management;
 pub mod metrics;
 pub mod provision;

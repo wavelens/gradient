@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::git_host_chain::{TaskGitHostChain, TaskGitHostChainInput, task_git_host_chain};
 use super::{RepositoryFetchStatus, error_message_if_caller_can_edit_task};
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::TaskPath;
@@ -38,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 const STATUS_POST_LIST_LIMIT: u64 = 10;
+const RECENT_DELIVERY_LIST_LIMIT: usize = 10;
 
 #[derive(Serialize, Debug, Clone, utoipa::ToSchema)]
 pub struct TaskCommitStatusPostAttempt {
@@ -72,9 +74,9 @@ pub struct TaskRepositoryResponse {
     pub deploy_key: Option<String>,
     pub fetch: Option<RepositoryFetchStatus>,
     pub git_host_connection: Option<GitHostConnectionSummary>,
-    pub webhook_url: Option<String>,
     pub report_status: bool,
-    pub last_event: Option<IncomingWebhookDeliveryResponse>,
+    pub chain: TaskGitHostChain,
+    pub recent_deliveries: Vec<IncomingWebhookDeliveryResponse>,
     pub status_posts: Vec<TaskCommitStatusPostAttempt>,
     pub available_connections: Vec<GitHostConnectionSummary>,
     pub can_edit: bool,
@@ -88,11 +90,11 @@ pub struct TaskRepositoryConnectionAndCommitStatusPatchRequest {
     pub report_status: bool,
 }
 
-async fn find_newest_incoming_webhook_delivery_for_task_repository(
+async fn recent_incoming_webhook_deliveries_for_task_repository(
     db: &impl sea_orm::ConnectionTrait,
     connection: GitHostConnectionId,
     task_repository: &str,
-) -> WebResult<Option<IncomingWebhookDeliveryResponse>> {
+) -> WebResult<Vec<IncomingWebhookDeliveryResponse>> {
     let task_identity = repo_identity(task_repository);
     let deliveries = gradient_db::incoming_deliveries::of_connection(
         db,
@@ -102,11 +104,13 @@ async fn find_newest_incoming_webhook_delivery_for_task_repository(
     .await?;
     Ok(deliveries
         .into_iter()
-        .find(|d| match (&d.repository, &task_identity) {
+        .filter(|d| match (&d.repository, &task_identity) {
             (Some(repository), Some(task)) => repo_identity(repository).as_ref() == Some(task),
             _ => true,
         })
-        .map(Into::into))
+        .take(RECENT_DELIVERY_LIST_LIMIT)
+        .map(Into::into)
+        .collect())
 }
 
 async fn repository_response(
@@ -132,31 +136,46 @@ async fn repository_response(
     let git_host_connection = task
         .git_host_connection
         .and_then(|id| available_connections.iter().find(|c| c.id == id).cloned());
-    let (webhook_url, last_event) = match &git_host_connection {
+    let (recent_deliveries, connection_has_access_token) = match &git_host_connection {
         Some(selected) => (
-            selected.webhook_url.clone(),
-            find_newest_incoming_webhook_delivery_for_task_repository(
+            recent_incoming_webhook_deliveries_for_task_repository(
                 &db.web_db,
                 selected.id,
                 &task.repository,
             )
             .await?,
+            gradient_db::lookup::by_id::<EGitHostConnection, _>(&db.web_db, selected.id)
+                .await?
+                .is_some_and(|row| row.access_token.is_some()),
         ),
-        None => (None, None),
+        None => (Vec::new(), false),
     };
-    let status_posts = gradient_db::git_host_connections::commit_status_post_attempts_of_task(
-        &db.web_db,
-        task.id,
-        STATUS_POST_LIST_LIMIT,
-    )
-    .await?
-    .into_iter()
-    .map(|row| TaskCommitStatusPostAttempt::of(row, can_edit_task))
-    .collect();
+    let status_posts: Vec<TaskCommitStatusPostAttempt> =
+        gradient_db::git_host_connections::commit_status_post_attempts_of_task(
+            &db.web_db,
+            task.id,
+            STATUS_POST_LIST_LIMIT,
+        )
+        .await?
+        .into_iter()
+        .map(|row| TaskCommitStatusPostAttempt::of(row, can_edit_task))
+        .collect();
 
     let uses_ssh = check_repository_url_is_ssh(&task.repository);
     let deploy_key =
         uses_ssh.then(|| format_public_key(project.clone(), &db.config.server.serve_url));
+    let can_edit = can_edit_task && !task.managed;
+    let chain = task_git_host_chain(&TaskGitHostChainInput {
+        repository: &task.repository,
+        connection: git_host_connection.as_ref(),
+        connection_has_access_token,
+        available_connections: &available_connections,
+        report_status: task.report_status,
+        newest_delivery: recent_deliveries.first(),
+        newest_status_post: status_posts.first(),
+        can_edit_task: can_edit,
+        can_manage_integrations,
+    });
 
     Ok(TaskRepositoryResponse {
         repository: task.repository.clone(),
@@ -164,12 +183,12 @@ async fn repository_response(
         deploy_key,
         fetch: RepositoryFetchStatus::of(task, can_edit_task),
         git_host_connection,
-        webhook_url,
         report_status: task.report_status,
-        last_event,
+        chain,
+        recent_deliveries,
         status_posts,
         available_connections,
-        can_edit: can_edit_task && !task.managed,
+        can_edit,
         can_manage_integrations,
     })
 }
