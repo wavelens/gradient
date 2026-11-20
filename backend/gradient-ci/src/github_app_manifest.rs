@@ -31,8 +31,8 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "active": true,
         },
         "redirect_url": format!("{base}/api/v1/admin/github-app/callback"),
-        // `setup_url` is omitted on purpose. GitHub is using it as the post-install redirect.
-        // Pointing it at `/admin/github-app` sent the operator back into the "Create on GitHub" UI.
+        // GitHub sends the browser to `setup_url` after an install. That page shows the new installation, not the form that creates an App.
+        "setup_url": format!("{base}/admin/git-host-connections"),
         "setup_on_update": false,
         "public": false,
         "default_permissions": {
@@ -56,8 +56,13 @@ pub fn build_manifest(serve_url: &str) -> Value {
     })
 }
 
-pub fn manifest_post_url(host: &str, state: &str) -> String {
-    format!("https://{host}/settings/apps/new?state={state}")
+pub fn manifest_post_url(host: &str, organization: Option<&str>, state: &str) -> String {
+    match organization {
+        Some(organization) => {
+            format!("https://{host}/organizations/{organization}/settings/apps/new?state={state}")
+        }
+        None => format!("https://{host}/settings/apps/new?state={state}"),
+    }
 }
 
 pub fn api_base_url(host: &str) -> String {
@@ -130,9 +135,27 @@ mod tests {
             m["redirect_url"],
             "https://gradient.example.com/api/v1/admin/github-app/callback"
         );
-        assert!(
-            m.get("setup_url").is_none() || m["setup_url"].is_null(),
-            "setup_url must be absent so the post-install redirect doesn't loop back to /admin/github-app"
+    }
+
+    #[test]
+    fn an_install_returns_to_the_installations_and_not_to_the_app_setup() {
+        let m = build_manifest("https://gradient.example.com/");
+        assert_eq!(
+            m["setup_url"],
+            "https://gradient.example.com/admin/git-host-connections"
+        );
+        assert_eq!(m["setup_on_update"], false);
+    }
+
+    #[test]
+    fn an_app_for_an_organization_is_registered_in_its_settings() {
+        assert_eq!(
+            manifest_post_url("github.com", None, "s1"),
+            "https://github.com/settings/apps/new?state=s1"
+        );
+        assert_eq!(
+            manifest_post_url("ghe.example.com", Some("acme-corp"), "s1"),
+            "https://ghe.example.com/organizations/acme-corp/settings/apps/new?state=s1"
         );
     }
 

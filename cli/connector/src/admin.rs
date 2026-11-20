@@ -146,9 +146,11 @@ impl AdminApi<'_> {
     pub async fn github_app_manifest(
         &self,
         host: Option<&str>,
+        organization: Option<&str>,
     ) -> Result<GithubAppManifestResponse, ConnectorError> {
         let body = GithubAppManifestRequest {
             host: host.map(str::to_owned),
+            organization: organization.map(str::to_owned),
         };
         let req = http::request(
             self.0.http(),

@@ -10,6 +10,8 @@ use crate::refusal::{Refusal, RefusalStatus};
 pub(crate) enum AdminRefusal {
     #[error("host must contain only alphanumerics, '.' and '-'")]
     InvalidHostCharacters,
+    #[error("A GitHub organization name contains only letters, digits and '-'")]
+    InvalidOrganizationCharacters,
     #[error("manifest state invalid or expired")]
     InvalidManifestState,
     #[error("Pending credentials")]
@@ -22,6 +24,7 @@ impl Refusal for AdminRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::InvalidHostCharacters
+            | Self::InvalidOrganizationCharacters
             | Self::InvalidManifestState
             | Self::UnknownFormat { .. } => RefusalStatus::BadRequest,
             Self::NoPendingCredentials => RefusalStatus::NotFound,
