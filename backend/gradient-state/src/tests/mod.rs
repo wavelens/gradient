@@ -465,6 +465,21 @@ fn state_github_connection_requires_account_login() {
 }
 
 #[test]
+fn only_github_connections_report_status_unless_declared_otherwise() {
+    let cfg = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" },
+            "gh-silent": { "name": "gh-silent", "owner": "instance", "git_host_type": "github", "installation_id": 43, "account_login": "beta", "reports_status": false, "created_by": "alice" },
+            "forge": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "secret_file": "/dev/null", "created_by": "alice" }
+        }"#,
+    );
+    let reports = |label: &str| cfg.git_host_connections[label].reports_status();
+    assert!(reports("gh"));
+    assert!(!reports("gh-silent"));
+    assert!(!reports("forge"));
+}
+
+#[test]
 fn state_github_connection_with_installation_id_is_valid() {
     let connections = r#"{
         "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }

@@ -126,7 +126,7 @@ services.gradient.state = {
 | `name` | string | attribute name | Name of the connection. Unique per owner. |
 | `owner` | string | - | `instance`, `team/<name>` or `project/<name>`. All projects can use instance connections. A team's projects can use that team's connections. |
 | `receives_events` | bool | `true` | Whether the connection can receive webhooks from the Git host with HMAC verification. Triggers for push and pull requests need this. |
-| `reports_status` | bool | `false` | Whether the connection can post commit status to the Git host. Tasks that use `report_status` need the setting. |
+| `reports_status` | null or bool | `null` | Whether the connection can post commit status to the Git host. Tasks that use `report_status` need the setting. `null` means `true` for `github` and `false` for other Git hosts. |
 | `secret_file` | null or path | `null` | Path to the file with the secret for HMAC signatures on incoming webhooks. |
 
 ## `caches.<name>`

@@ -147,7 +147,7 @@ impl<'a> StateApplicator<'a> {
                 active.encrypted_refresh_token = Set(None);
                 active.access_token_expires_at = Set(None);
                 active.receives_events = Set(state_connection.receives_events);
-                active.reports_status = Set(state_connection.reports_status);
+                active.reports_status = Set(state_connection.reports_status());
                 active.github_installation_id = Set(github_installation_id);
                 active.account_login = Set(state_connection.account_login.clone());
                 active.created_by = Set(created_by_id);
@@ -169,7 +169,7 @@ impl<'a> StateApplicator<'a> {
                     access_token_expires_at: None,
                     allowed_ips: None,
                     receives_events: state_connection.receives_events,
-                    reports_status: state_connection.reports_status,
+                    reports_status: state_connection.reports_status(),
                     github_installation_id,
                     account_login: state_connection.account_login.clone(),
                     created_by: created_by_id,
@@ -277,7 +277,7 @@ mod tests {
             base_url: Some("https://forge.example.com".into()),
             access_token_file: None,
             receives_events: true,
-            reports_status: false,
+            reports_status: None,
             installation_id: None,
             account_login: None,
             created_by: rows::user().username,
@@ -327,6 +327,49 @@ mod tests {
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(rows[0].id, pinned);
         assert_eq!(rows[0].name, "renamed");
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_declared_github_installation_keeps_reporting_commit_status() {
+        let db = database_with_user().await;
+        let installed = MGitHostConnection {
+            id: GitHostConnectionId::now_v7(),
+            name: "github-acme".into(),
+            display_name: "GitHub".into(),
+            git_host_type: GitHostType::GitHub,
+            receives_events: true,
+            reports_status: true,
+            github_installation_id: Some(42),
+            account_login: Some("acme".into()),
+            created_by: rows::user().id,
+            created_at: gradient_fixtures::test_date(),
+            ..Default::default()
+        };
+        installed
+            .clone()
+            .into_active_model()
+            .insert(&db.connection())
+            .await
+            .unwrap();
+
+        apply(
+            &db.connection(),
+            StateGitHostConnection {
+                git_host_type: "github".into(),
+                base_url: None,
+                installation_id: Some(42),
+                account_login: Some("acme".into()),
+                ..state_connection("github", None)
+            },
+        )
+        .await
+        .unwrap();
+
+        let row = db.rows::<EGitHostConnection>().await.remove(0);
+        assert_eq!(row.id, installed.id);
+        assert!(row.managed);
+        assert!(row.reports_status);
         db.finish().await;
     }
 
