@@ -20,6 +20,7 @@ import {
   GitHostConnectionOwner,
   GitHostConnectionSummary,
   GitHostConnectionTaskResponse,
+  GitHostType,
   getGitHostConnectionOwnerReadableText,
   isSameGitHostConnectionOwner,
 } from '@core/models';
@@ -67,6 +68,8 @@ export class GitHostConnectionListComponent implements OnInit {
 
   gitHostConnectionOwner = input.required<GitHostConnectionOwner>();
   access = input.required<AccessState>();
+  gitHostTypes = input<readonly GitHostType[] | null>(null);
+  showsEmptyState = input(true);
 
   protected readonly gitHostLabel = gitHostLabel;
   protected readonly ownerText = getGitHostConnectionOwnerReadableText;
@@ -87,9 +90,13 @@ export class GitHostConnectionListComponent implements OnInit {
   menuItems = signal<MenuItem[]>([]);
 
   writable = computed(() => this.accessService.isWritable(this.access()));
-  ownConnections = computed(() => this.connections().filter((c) => this.isOwn(c)));
-  ownConnectionNames = computed(() => this.ownConnections().map((c) => c.name));
-  sortedConnections = computed(() => [...this.ownConnections(), ...this.connections().filter((c) => !this.isOwn(c))]);
+  private shownConnections = computed(() => {
+    const types = this.gitHostTypes();
+    return types ? this.connections().filter((c) => types.includes(c.git_host_type as GitHostType)) : this.connections();
+  });
+  ownConnections = computed(() => this.shownConnections().filter((c) => this.isOwn(c)));
+  ownConnectionNames = computed(() => this.connections().filter((c) => this.isOwn(c)).map((c) => c.name));
+  sortedConnections = computed(() => [...this.ownConnections(), ...this.shownConnections().filter((c) => !this.isOwn(c))]);
 
   ngOnInit(): void {
     this.linkedId.set(this.route.snapshot.queryParamMap.get('connection'));
@@ -110,6 +117,11 @@ export class GitHostConnectionListComponent implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  showConnection(id: string): void {
+    this.linkedId.set(id);
+    this.load();
   }
 
   isOwn(connection: GitHostConnectionSummary): boolean {

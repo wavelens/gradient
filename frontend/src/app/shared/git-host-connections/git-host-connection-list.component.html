@@ -11,11 +11,13 @@
 <gr-load-state [loading]="loading()" [error]="loadError()" loadingMessage="Loading git host connections..."
   errorTitle="Failed to load git host connections" (retry)="load()">
   @if (sortedConnections().length === 0) {
-    <gr-empty-state icon="hub" title="No git host connections">
-      @if (writable()) {
-        <button slot="action" grButton label="New connection" icon="add" (click)="openCreate()" data-testid="new-connection"></button>
-      }
-    </gr-empty-state>
+    @if (showsEmptyState()) {
+      <gr-empty-state icon="hub" title="No git host connections">
+        @if (writable()) {
+          <button slot="action" grButton label="New connection" icon="add" (click)="openCreate()" data-testid="new-connection"></button>
+        }
+      </gr-empty-state>
+    }
   } @else {
     <div class="connection-list">
       @for (connection of sortedConnections(); track connection.id) {
