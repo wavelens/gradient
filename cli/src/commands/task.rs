@@ -5,6 +5,7 @@
  */
 
 use crate::commands::builds::BuildClass;
+use crate::commands::git_host_connection::resolve_git_host_connection_available_to_project;
 use crate::commands::{completion, task_subcommands};
 use crate::config::*;
 use crate::input::{
@@ -48,6 +49,12 @@ pub enum Commands {
         /// Flake attribute wildcard to evaluate
         #[arg(short = 'w', long)]
         wildcard: Option<String>,
+        /// Connection name or UUID from `gradient project git-host-connection list`. Without this flag the server picks the one connection that fits the repository, if exactly one does.
+        #[arg(long)]
+        git_host_connection: Option<String>,
+        /// Post commit status for task evaluation: true or false. Default: on when the connection reports status
+        #[arg(long)]
+        report_status: Option<bool>,
         #[command(flatten)]
         task_create_trigger_flags: TaskCreateTriggerFlags,
     },
@@ -437,7 +444,7 @@ async fn build_optional_task_create_trigger_configs(
                         out.err(
                             ExitKind::Usage,
                             format!(
-                                "No connection in this project can receive events from the Git host for {repository}. Add a connection in `gradient project git-host-connection create --receives-events true`. Then try again."
+                                "No connection of this project receives events from the Git host of {repository}. Create one with `gradient project git-host-connection create`, then select it with `--git-host-connection <name>`."
                             ),
                         )
                     });
@@ -580,6 +587,8 @@ pub async fn handle(cmd: Commands, out: Output) {
             description,
             repository,
             wildcard,
+            git_host_connection,
+            report_status,
             task_create_trigger_flags,
         } => {
             let project = selected_project(out);
@@ -598,6 +607,15 @@ pub async fn handle(cmd: Commands, out: Output) {
             let repository = input.get("Repository");
 
             let client = client_from_config(out);
+            let git_host_connection = match git_host_connection {
+                Some(reference) => Some(
+                    resolve_git_host_connection_available_to_project(
+                        &client, &project, &reference, out,
+                    )
+                    .await,
+                ),
+                None => None,
+            };
             let triggers = build_optional_task_create_trigger_configs(
                 &client,
                 &project,
@@ -628,8 +646,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                         restrict_evaluation_fetches: None,
                         extra_allowed_uri_prefixes: None,
                         triggers,
-                        git_host_connection: None,
-                        report_status: None,
+                        git_host_connection,
+                        report_status,
                     },
                 )
                 .await

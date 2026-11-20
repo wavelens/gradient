@@ -257,7 +257,72 @@ async fn test_task_create_with_push_trigger_and_no_webhook_receiver_creates_noth
     mount_task_create(&server, 0).await;
 
     let home = home_with(&server);
-    run_gradient_json_with_temp_home(&home, &create_task_args(&["--trigger", "pr"])).failure();
+    let output = run_gradient_json_with_temp_home(&home, &create_task_args(&["--trigger", "pr"]))
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let envelope: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let message = envelope["message"].as_str().unwrap();
+    assert!(message.contains("--git-host-connection"), "{message}");
+}
+
+#[tokio::test]
+async fn test_task_create_sends_the_connection_of_the_project_by_name_and_report_status() {
+    let server = MockServer::start().await;
+    let connection = |id: &str, owner: serde_json::Value| {
+        serde_json::json!({
+            "id": id, "owner": owner, "name": "forgejo", "display_name": "Forgejo",
+            "git_host_type": "forgejo", "receives_events": true, "reports_status": true
+        })
+    };
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/proj/git-host-connections"))
+        .respond_with(ok(serde_json::json!([
+            connection(ACTION, serde_json::json!({"type": "instance"})),
+            connection(
+                TRIGGER,
+                serde_json::json!({"type": "project", "name": "proj"})
+            ),
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    mount_task_create(&server, 1).await;
+
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(
+        &home,
+        &create_task_args(&[
+            "--git-host-connection",
+            "forgejo",
+            "--report-status",
+            "false",
+        ]),
+    )
+    .success();
+
+    let body = sent_task_create_body(&server).await;
+    assert_eq!(body["git_host_connection"], TRIGGER);
+    assert_eq!(body["report_status"], false);
+}
+
+#[tokio::test]
+async fn test_task_create_with_an_unknown_connection_creates_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/proj/git-host-connections"))
+        .respond_with(ok(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    mount_task_create(&server, 0).await;
+
+    let home = home_with(&server);
+    run_gradient_json_with_temp_home(
+        &home,
+        &create_task_args(&["--git-host-connection", "gitlab"]),
+    )
+    .code(2);
 }
 
 async fn mount_get_triggers_response_with_one_post_request_trigger_without_secret(
