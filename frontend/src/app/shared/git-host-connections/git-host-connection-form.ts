@@ -97,6 +97,17 @@ export function effectiveReportsStatus(form: GitHostConnectionFormValue, context
   return form.reports_status ?? (!!form.access_token.trim() || !!context.editing?.has_access_token);
 }
 
+export function hasNonDefaultAdvancedSettings(form: GitHostConnectionFormValue, context: GitHostConnectionFormContext): boolean {
+  const defaultReportsStatus = !!form.access_token.trim() || !!context.editing?.has_access_token;
+  return (
+    !!form.display_name.trim() ||
+    !form.receives_events ||
+    (form.reports_status !== null && form.reports_status !== defaultReportsStatus) ||
+    !!form.secret.trim() ||
+    !!form.allowed_ips.trim()
+  );
+}
+
 export function gitHostConnectionFormErrors(form: GitHostConnectionFormValue, context: GitHostConnectionFormContext): GitHostConnectionFormErrors {
   const errors: GitHostConnectionFormErrors = {};
   const baseUrl = form.base_url.trim();

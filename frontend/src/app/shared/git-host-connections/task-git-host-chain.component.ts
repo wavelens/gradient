@@ -27,6 +27,8 @@ const ACTION_LABELS: Record<TaskGitHostChainStepAction['type'], string | null> =
   install_github_app: null,
   install_webhook: 'Install webhook',
   add_webhook_on_host: 'Add webhook',
+  change_webhook_secret: 'Change secret',
+  add_trigger: 'Add trigger',
   turn_on_report_status: 'Turn on',
   test_status_report: 'Test status report',
 };

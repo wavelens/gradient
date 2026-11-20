@@ -84,7 +84,9 @@ interface SavedConnectionOutcome {
         @if (editing()?.managed) {
           <gr-message-banner type="info">{{ managedReason }}</gr-message-banner>
         }
-        <app-git-host-connection-form [(value)]="form" [context]="context()" [showErrors]="attempted()" [oauthProject]="oauthProject()" />
+        @if (open()) {
+          <app-git-host-connection-form [(value)]="form" [context]="context()" [showErrors]="attempted()" [oauthProject]="oauthProject()" />
+        }
       }
       <div grDialogFooter>
         @if (outcome()) {

@@ -13,6 +13,7 @@ import {
   gitHostConnectionFormErrors,
   gitHostConnectionFormFromResponse,
   gitHostConnectionNameFromHost,
+  hasNonDefaultAdvancedSettings,
   patchGitHostConnectionRequest,
 } from './git-host-connection-form';
 
@@ -90,5 +91,17 @@ describe('git host connection form', () => {
     const context = { editing: existing, existingNames: ['git-example'] };
     expect(gitHostConnectionFormErrors(form, context)).toEqual({});
     expect(patchGitHostConnectionRequest(form, existing, context)).toEqual({ display_name: 'Example', reports_status: false });
+  });
+
+  it('finds advanced settings only when one differs from its default', () => {
+    const context = { editing: existing, existingNames: [] };
+    const saved = gitHostConnectionFormFromResponse(existing);
+    expect(hasNonDefaultAdvancedSettings(emptyGitHostConnectionForm(), creating)).toBe(false);
+    expect(hasNonDefaultAdvancedSettings(saved, context)).toBe(false);
+    expect(hasNonDefaultAdvancedSettings({ ...saved, reports_status: false }, context)).toBe(true);
+    expect(hasNonDefaultAdvancedSettings({ ...saved, display_name: 'Example' }, context)).toBe(true);
+    expect(hasNonDefaultAdvancedSettings({ ...saved, receives_events: false }, context)).toBe(true);
+    expect(hasNonDefaultAdvancedSettings({ ...saved, secret: 'whsec' }, context)).toBe(true);
+    expect(hasNonDefaultAdvancedSettings({ ...saved, allowed_ips: '10.0.0.0/8' }, context)).toBe(true);
   });
 });
