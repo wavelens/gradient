@@ -583,7 +583,7 @@ mod tests {
         });
         assert_eq!(chain.connection.state, Attention);
         assert_eq!(chain.connection.action, None);
-        assert!(chain.connection.detail.contains("no GitHub App"));
+        assert!(chain.connection.detail.contains("doesn't have a GitHub App"));
     }
 
     #[test]
