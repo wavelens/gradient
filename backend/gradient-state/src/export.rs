@@ -393,7 +393,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 base_url: c.base_url.clone(),
                 access_token_file: None,
                 receives_events: c.receives_events,
-                reports_status: c.reports_status,
+                reports_status: Some(c.reports_status),
                 installation_id: c.github_installation_id,
                 account_login: c.account_login.clone(),
                 created_by: name_or_blank(&username, c.created_by),

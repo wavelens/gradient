@@ -7,7 +7,7 @@
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerType};
 use gradient_types::{
-    DEFAULT_TASK_WILDCARD, NIXOS_CACHE_NAME, NIXOS_CACHE_PUBLIC_KEY, NIXOS_CACHE_URL,
+    DEFAULT_TASK_WILDCARD, GitHostType, NIXOS_CACHE_NAME, NIXOS_CACHE_PUBLIC_KEY, NIXOS_CACHE_URL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -185,12 +185,23 @@ pub struct StateGitHostConnection {
     #[serde(default = "default_true")]
     pub receives_events: bool,
     #[serde(default)]
-    pub reports_status: bool,
+    pub reports_status: Option<bool>,
     #[serde(default)]
     pub installation_id: Option<i64>,
     #[serde(default)]
     pub account_login: Option<String>,
     pub created_by: String,
+}
+
+impl StateGitHostConnection {
+    pub fn git_host_type(&self) -> Option<GitHostType> {
+        GitHostType::from_path_segment(&self.git_host_type)
+    }
+
+    pub fn reports_status(&self) -> bool {
+        self.reports_status
+            .unwrap_or(self.git_host_type() == Some(GitHostType::GitHub))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

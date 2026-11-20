@@ -60,7 +60,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        let git_host_type = GitHostType::from_path_segment(&connection.git_host_type);
+        let git_host_type = connection.git_host_type();
         if git_host_type.is_none() {
             errors.push(
                 field("git_host_type"),
