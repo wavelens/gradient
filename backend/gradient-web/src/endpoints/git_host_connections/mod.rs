@@ -54,7 +54,6 @@ pub struct GitHostConnectionResponse {
     pub installation_id: Option<i64>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
-    pub managed: bool,
     pub generated_secret: Option<String>,
 }
 
@@ -70,6 +69,8 @@ pub struct GitHostConnectionSummary {
     pub reports_status: bool,
     #[schema(required = false, default = false)]
     pub can_manage: bool,
+    #[schema(required = false, default = false)]
+    pub managed: bool,
     pub account_login: Option<String>,
     pub webhook_url: Option<String>,
     pub access_token_expires_at: Option<chrono::NaiveDateTime>,
@@ -262,7 +263,6 @@ pub(crate) async fn response(
         installation_id: connection.github_installation_id,
         created_by: connection.created_by,
         created_at: connection.created_at,
-        managed: connection.managed,
         generated_secret: None,
     })
 }
