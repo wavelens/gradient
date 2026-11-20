@@ -108,7 +108,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 ),
                 MissingGitHostConnectionSetting::WebhookSecretForEvents => (
                     "secret_file",
-                    "Provide `secret_file` with the webhook secret for `receives_events`.",
+                    "Provide `secret_file` with the webhook secret for `receives_events`, or set `receives_events = false`.",
                 ),
             };
             errors.push(field(key), message);
