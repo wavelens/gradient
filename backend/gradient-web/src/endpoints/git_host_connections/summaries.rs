@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! An API key restricted to one project sees only that project's tasks and deliveries of shared connections only for that project's repositories.
+//! API keys that are restricted to one project see only the tasks of that project. Such keys see only webhook deliveries for that project's repositories on a shared connection.
 
 use super::{
     GitHostConnectionSummary, IncomingWebhookDeliveryResponse, RepositoryFit, name_owner,

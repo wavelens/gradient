@@ -92,7 +92,7 @@ pub struct TaskRepositoryResponse {
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct TaskRepositoryConnectionAndCommitStatusPatchRequest {
-    /// Omitted fields stay unchanged. JSON null removes the connection and turns commit status off.
+    /// Omitted fields stay unchanged. Set git_host_connection to JSON null to detach the connection and disable commit status reporting.
     #[serde(
         default,
         deserialize_with = "crate::helpers::deserialize_optional_field"

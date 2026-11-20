@@ -90,7 +90,7 @@ pub fn clean_github_organization(raw: Option<&str>) -> Result<Option<String>, We
     operation_id = "createGithubAppManifest",
     tag = "admin",
     summary = "Build GitHub App manifest",
-    description = "Builds a GitHub App manifest pre-filled with this server URLs, permissions and events. With\n`organization` set, the App belongs to that GitHub organization instead\nof the personal account of the admin. Returns a one-shot CSRF state token plus\nthe GitHub URL the browser should POST the manifest to.\n\nRequires `superuser`. The state token is consumed by the matching\n`GET /admin/github-app/callback` invocation; it expires after 10\nminutes.",
+    description = "Build a GitHub App manifest and prefill this server's URL, permissions and events. Set ``organization`` to place the app in that GitHub organization instead of the admin's personal account. Return a one-shot CSRF state token and the GitHub URL that the browser should POST the manifest to.\n\nRequests require `superuser`. Matching calls to `GET /admin/github-app/callback` use the state token once. State tokens expire after 10 minutes.",
     request_body = GithubAppManifestRequest,
     responses((status = OK, description = "Manifest, post URL, and CSRF state", body = GithubAppManifestResponse), WebError)
 )]
@@ -120,9 +120,9 @@ pub async fn request_manifest(
     operation_id = "githubAppManifestCallback",
     tag = "admin",
     summary = "GitHub App manifest callback",
-    description = "Receives the redirect from GitHub after the operator submits the\nmanifest. Validates the `state` token, exchanges the temporary `code`\nfor the App's permanent credentials, stashes them in a one-shot\nin-memory store per superuser who initiated the manifest\nflow, and redirects the browser to `/admin/git-host-connections?ready=1`.\n\n**Unauthenticated** - GitHub redirects the operator's browser here\nfrom `https://github.com/...` and that cross-site navigation does not\ncarry a bearer token. CSRF and identity binding are provided by the\none-shot `state` token issued at `POST /admin/github-app/manifest`,\nwhich is bound to the initiating superuser at issuance.",
+    description = "Receive the redirect from GitHub for the manifest that the admin submitted. Verify the ``state`` token. Exchange temporary ``code`` for the persistent credentials of the App. Store them in a one-shot in-memory store per superuser that started the manifest flow. Redirect the browser to ``/admin/git-host-connections?ready=1``.\n\n**Unauthenticated** - GitHub redirects the browser of the admin from `https://github.com/...` to this location, but that cross-site navigation sends no bearer token. CSRF and identity binding come from a single-use `state` token that `POST /admin/github-app/manifest` issues, and that token ties to the superuser who started it.",
     params(CallbackQuery),
-    responses((status = FOUND, description = "Redirect to `/admin/git-host-connections?ready=1` on success."), WebError)
+    responses((status = FOUND, description = "Successful responses redirect to `/admin/git-host-connections?ready=1`."), WebError)
 )]
 pub async fn callback(
     State(state): State<Arc<ServerState>>,

@@ -72,7 +72,7 @@ pub(crate) async fn load_available_to_project(
     operation_id = "listProjectGitHostConnections",
     tag = "git-host-connections",
     summary = "List usable git host connections",
-    description = "List the connections to Git hosts that this project can use. These groups appear in the result.\n- connections of the project\n- connections of its owner team\n- connections of the instance, with installations of the GitHub App\n\nCredentials don't appear. `can_manage` is true for the connections of the project when the caller can manage integrations. With `repository`, each connection has `repository_fit`: whether a task with this repository URL can use the connection and the reason when it can't.",
+    description = "List the connections to Git hosts that this project can use. These groups appear in the result.\n- connections of the project\n- connections of its owner team\n- connections of the instance, with installations of the GitHub App\n\nCredentials don't appear. `can_manage` is true for the connections of the project when the caller can manage integrations. All connections get `repository_fit` with `repository` in the request. These values report whether a task with that repository URL can use the connection and the reason when the task can't.",
     params(ProjectPath, ProjectGitHostConnectionListQuery),
     responses((status = OK, description = "Usable connections", body = Vec<GitHostConnectionSummary>), WebError)
 )]
@@ -271,10 +271,10 @@ pub async fn list_project_git_host_connection_deliveries(
     path = "/projects/{project}/git-host-connections/{id}/tasks",
     operation_id = "listProjectGitHostConnectionTasks",
     tag = "git-host-connections",
-    summary = "List tasks using a connection",
-    description = "List the tasks that use a connection the project can use. The list holds only tasks of projects the caller can see.",
+    summary = "List tasks that use a connection",
+    description = "List the tasks that use a connection available to the project. The list includes only tasks in projects that the caller can view.",
     params(ProjectPath, ("id" = GitHostConnectionId, Path)),
-    responses((status = OK, description = "Tasks using the connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
+    responses((status = OK, description = "Tasks that use a connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
 )]
 pub async fn list_project_git_host_connection_tasks(
     ProjectScope {
@@ -302,10 +302,10 @@ pub async fn list_project_git_host_connection_tasks(
     path = "/projects/{project}/git-host-connections/{id}/test",
     operation_id = "testProjectGitHostConnection",
     tag = "git-host-connections",
-    summary = "Test a connection",
-    description = "Sign in to the Git host with the credentials of a connection of the project. Return the account name on success, or the reason for the failure.",
+    summary = "Test connection",
+    description = "Sign in to the Git host with the credentials from the project connection. Return the account name on success. Return the reason on failure.",
     params(ProjectPath, ("id" = GitHostConnectionId, Path)),
-    responses((status = OK, description = "Result of the sign-in", body = GitHostConnectionTestResponse), WebError)
+    responses((status = OK, description = "Sign-in result", body = GitHostConnectionTestResponse), WebError)
 )]
 pub async fn test_project_git_host_connection(
     ProjectScope {

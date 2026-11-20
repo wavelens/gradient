@@ -360,8 +360,8 @@ paths:
     get:
       tags:
       - admin
-      summary: List tasks using a connection
-      description: List the tasks of every project that use a connection of the instance.
+      summary: List tasks that use a connection
+      description: List tasks for all projects that use the instance connection.
       operationId: listInstanceGitHostConnectionTasks
       parameters:
       - name: id
@@ -371,7 +371,7 @@ paths:
           $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Tasks using the connection
+          description: Tasks that use a connection
           content:
             application/json:
               schema:
@@ -394,8 +394,8 @@ paths:
     post:
       tags:
       - admin
-      summary: Test a connection
-      description: Sign in to the Git host with the credentials of a connection of the instance. Return the account name on success, or the reason for the failure.
+      summary: Test connection
+      description: Sign in to the Git host with the credentials for the instance connection. Return the account name after a successful sign-in. Return the reason for a failed sign-in.
       operationId: testInstanceGitHostConnection
       parameters:
       - name: id
@@ -405,7 +405,7 @@ paths:
           $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Result of the sign-in
+          description: Sign-in result
           content:
             application/json:
               schema:
@@ -428,17 +428,9 @@ paths:
       - admin
       summary: GitHub App manifest callback
       description: |-
-        Receives the redirect from GitHub after the operator submits the
-        manifest. Validates the `state` token, exchanges the temporary `code`
-        for the App's permanent credentials, stashes them in a one-shot
-        in-memory store per superuser who initiated the manifest
-        flow, and redirects the browser to `/admin/git-host-connections?ready=1`.
+        Receive the redirect from GitHub for the manifest that the admin submitted. Verify the ``state`` token. Exchange temporary ``code`` for the persistent credentials of the App. Store them in a one-shot in-memory store per superuser that started the manifest flow. Redirect the browser to ``/admin/git-host-connections?ready=1``.
 
-        **Unauthenticated** - GitHub redirects the operator's browser here
-        from `https://github.com/...` and that cross-site navigation does not
-        carry a bearer token. CSRF and identity binding are provided by the
-        one-shot `state` token issued at `POST /admin/github-app/manifest`,
-        which is bound to the initiating superuser at issuance.
+        **Unauthenticated** - GitHub redirects the browser of the admin from `https://github.com/...` to this location, but that cross-site navigation sends no bearer token. CSRF and identity binding come from a single-use `state` token that `POST /admin/github-app/manifest` issues, and that token ties to the superuser who started it.
       operationId: githubAppManifestCallback
       parameters:
       - name: code
@@ -458,7 +450,7 @@ paths:
           type: string
       responses:
         '302':
-          description: Redirect to `/admin/git-host-connections?ready=1` on success.
+          description: Successful responses redirect to `/admin/git-host-connections?ready=1`.
         default:
           $ref: '#/components/responses/Error'
       security: []
@@ -500,14 +492,9 @@ paths:
       - admin
       summary: Build GitHub App manifest
       description: |-
-        Builds a GitHub App manifest pre-filled with this server URLs, permissions and events. With
-        `organization` set, the App belongs to that GitHub organization instead
-        of the personal account of the admin. Returns a one-shot CSRF state token plus
-        the GitHub URL the browser should POST the manifest to.
+        Build a GitHub App manifest and prefill this server's URL, permissions and events. Set ``organization`` to place the app in that GitHub organization instead of the admin's personal account. Return a one-shot CSRF state token and the GitHub URL that the browser should POST the manifest to.
 
-        Requires `superuser`. The state token is consumed by the matching
-        `GET /admin/github-app/callback` invocation; it expires after 10
-        minutes.
+        Requests require `superuser`. Matching calls to `GET /admin/github-app/callback` use the state token once. State tokens expire after 10 minutes.
       operationId: createGithubAppManifest
       requestBody:
         content:
@@ -7991,7 +7978,7 @@ paths:
         - connections of its owner team
         - connections of the instance, with installations of the GitHub App
 
-        Credentials don't appear. `can_manage` is true for the connections of the project when the caller can manage integrations. With `repository`, each connection has `repository_fit`: whether a task with this repository URL can use the connection and the reason when it can't.
+        Credentials don't appear. `can_manage` is true for the connections of the project when the caller can manage integrations. All connections get `repository_fit` with `repository` in the request. These values report whether a task with that repository URL can use the connection and the reason when the task can't.
       operationId: listProjectGitHostConnections
       parameters:
       - name: project
@@ -8251,8 +8238,8 @@ paths:
     get:
       tags:
       - git-host-connections
-      summary: List tasks using a connection
-      description: List the tasks that use a connection the project can use. The list holds only tasks of projects the caller can see.
+      summary: List tasks that use a connection
+      description: List the tasks that use a connection available to the project. The list includes only tasks in projects that the caller can view.
       operationId: listProjectGitHostConnectionTasks
       parameters:
       - name: project
@@ -8267,7 +8254,7 @@ paths:
           $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Tasks using the connection
+          description: Tasks that use a connection
           content:
             application/json:
               schema:
@@ -8290,8 +8277,8 @@ paths:
     post:
       tags:
       - git-host-connections
-      summary: Test a connection
-      description: Sign in to the Git host with the credentials of a connection of the project. Return the account name on success, or the reason for the failure.
+      summary: Test connection
+      description: Sign in to the Git host with the credentials from the project connection. Return the account name on success. Return the reason on failure.
       operationId: testProjectGitHostConnection
       parameters:
       - name: project
@@ -8306,7 +8293,7 @@ paths:
           $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Result of the sign-in
+          description: Sign-in result
           content:
             application/json:
               schema:
@@ -12975,8 +12962,8 @@ paths:
     get:
       tags:
       - git-host-connections
-      summary: List tasks using a connection
-      description: List the tasks that use a connection of the team. The list holds only tasks of projects the caller can see.
+      summary: List tasks that use a connection
+      description: List the tasks that use the team's connection. Only tasks in projects that the caller can view appear in the list.
       operationId: listTeamGitHostConnectionTasks
       parameters:
       - name: team
@@ -12991,7 +12978,7 @@ paths:
           $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Tasks using the connection
+          description: Tasks that use a connection
           content:
             application/json:
               schema:
@@ -13014,8 +13001,8 @@ paths:
     post:
       tags:
       - git-host-connections
-      summary: Test a connection
-      description: Sign in to the Git host with the credentials of a connection of the team. Return the account name on success, or the reason for the failure.
+      summary: Test connection
+      description: Sign in to the Git host with the credentials for the team connection. Return the account name for a successful sign-in. Return the reason for a failed sign-in.
       operationId: testTeamGitHostConnection
       parameters:
       - name: team
@@ -13030,7 +13017,7 @@ paths:
           $ref: '#/components/schemas/GitHostConnectionId'
       responses:
         '200':
-          description: Result of the sign-in
+          description: Sign-in result
           content:
             application/json:
               schema:
@@ -24670,7 +24657,7 @@ components:
         git_host_connection:
           oneOf:
           - $ref: '#/components/schemas/GitHostConnectionId'
-            description: Omitted fields stay unchanged. JSON null removes the connection and turns commit status off.
+            description: Omitted fields stay unchanged. Set git_host_connection to JSON null to detach the connection and disable commit status reporting.
           - type: 'null'
         report_status:
           type: boolean

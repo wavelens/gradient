@@ -183,10 +183,10 @@ pub async fn list_instance_git_host_connection_deliveries(
     path = "/git-host-connections/{id}/tasks",
     operation_id = "listInstanceGitHostConnectionTasks",
     tag = "admin",
-    summary = "List tasks using a connection",
-    description = "List the tasks of every project that use a connection of the instance.",
+    summary = "List tasks that use a connection",
+    description = "List tasks for all projects that use the instance connection.",
     params(("id" = GitHostConnectionId, Path)),
-    responses((status = OK, description = "Tasks using the connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
+    responses((status = OK, description = "Tasks that use a connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
 )]
 pub async fn list_instance_git_host_connection_tasks(
     State(state): State<Arc<ServerState>>,
@@ -209,10 +209,10 @@ pub async fn list_instance_git_host_connection_tasks(
     path = "/git-host-connections/{id}/test",
     operation_id = "testInstanceGitHostConnection",
     tag = "admin",
-    summary = "Test a connection",
-    description = "Sign in to the Git host with the credentials of a connection of the instance. Return the account name on success, or the reason for the failure.",
+    summary = "Test connection",
+    description = "Sign in to the Git host with the credentials for the instance connection. Return the account name after a successful sign-in. Return the reason for a failed sign-in.",
     params(("id" = GitHostConnectionId, Path)),
-    responses((status = OK, description = "Result of the sign-in", body = GitHostConnectionTestResponse), WebError)
+    responses((status = OK, description = "Sign-in result", body = GitHostConnectionTestResponse), WebError)
 )]
 pub async fn test_instance_git_host_connection(
     State(state): State<Arc<ServerState>>,
