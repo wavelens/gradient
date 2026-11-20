@@ -59,7 +59,7 @@ A personal access token from a dedicated account works as an alternative. That a
 1. Open **Project settings -> Git host connections** and click **New connection**. On the team settings page for **Git host connections**, share the connection with all projects in the team.
 2. Select GitLab in **Host type**. Enter `https://gitlab.com` or a self-hosted address in **Host URL**. Paste the token into **Access token** and click **Create**.
 3. Gradient checked the token and identified the bot user by the "Signed in as <account>" message. **Webhook URL** and **Webhook secret** only appear once.
-4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. Two or more fitting connections come with a **Connection** select.
+4. Click **Connect repository** in the project and enter the repository URL. The **Git Host** step can pick the single fitting connection for the repository host. Two or more fitting connections come with a **Connection** select.
 5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for the connection that has **Reports status** on.
 
 Steps from Connection to Commit Status map to one section each on the **Repository** page of a task. A status and one action appear in each section.
@@ -78,7 +78,7 @@ A Developer token needs a manual webhook. Use **Open webhook settings** to open 
 | Secret token | The secret |
 | Trigger | **Push events**, **Tag push events**, **Comments**, **Merge request events**, **Releases events** |
 
-Repository URLs over SSH with a developer token use the deploy key from the **Repository access** step. Copy that key to **Settings -> Repository -> Deploy keys** in GitLab. Click **Test access**.
+Repository URLs over SSH with a developer token use the deploy key from the **Repository Access** step. Copy that key to **Settings -> Repository -> Deploy keys** in GitLab. Click **Test access**.
 
 ## Declarative Setup
 

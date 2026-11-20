@@ -60,9 +60,9 @@ const DEFAULT_POLLING_INTERVAL_SECS = 300;
 
 const STEPS: { id: ConnectRepositoryWizardStep; label: string }[] = [
   { id: 'repository', label: 'Repository' },
-  { id: 'git-host', label: 'Git host' },
+  { id: 'git-host', label: 'Git Host' },
   { id: 'access', label: 'Access' },
-  { id: 'triggers', label: 'Triggers and settings' },
+  { id: 'triggers', label: 'Triggers and Settings' },
 ];
 
 interface SuggestedTriggerChoice {
