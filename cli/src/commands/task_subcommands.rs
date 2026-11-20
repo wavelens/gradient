@@ -150,7 +150,7 @@ fn command_for_chain_action(
             "gradient task repository install-webhook".to_owned()
         }
         TaskGitHostChainStepAction::AddWebhookOnHost { webhook_url } => {
-            format!("Add a webhook with the URL {webhook_url} on the Git host")
+            format!("Add the webhook for URL {webhook_url} on the Git host")
         }
         TaskGitHostChainStepAction::ChangeWebhookSecret => {
             format!("gradient project git-host-connection edit {connection} --secret <secret>")
@@ -172,8 +172,8 @@ fn print_chain(repository: &TaskRepositoryResponse, out: Output) {
     for (title, step) in [
         ("Repository", &chain.repository),
         ("Connection", &chain.connection),
-        ("Incoming events", &chain.incoming_events),
-        ("Commit status", &chain.commit_status),
+        ("Incoming Events", &chain.incoming_events),
+        ("Commit Status", &chain.commit_status),
     ] {
         out.human(format!("{title}: {}, {}", step.state, step.detail));
         if let Some(action) = &step.action {

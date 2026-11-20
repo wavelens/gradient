@@ -49,10 +49,10 @@ pub enum Commands {
         /// Flake attribute wildcard to evaluate
         #[arg(short = 'w', long)]
         wildcard: Option<String>,
-        /// Connection name or UUID from `gradient project git-host-connection list`. Without this flag the server picks the one connection that fits the repository, if exactly one does.
+        /// Connection name or UUID of `gradient project git-host-connection list`. Omit this flag so the server can select the connection when exactly one connection can match the repository.
         #[arg(long)]
         git_host_connection: Option<String>,
-        /// Post commit status for task evaluation: true or false. Default: on when the connection reports status
+        /// Post commit status for task evaluations: true or false. Default: on if the connection can report status.
         #[arg(long)]
         report_status: Option<bool>,
         #[command(flatten)]
@@ -445,7 +445,7 @@ async fn build_optional_task_create_trigger_configs(
                         out.err(
                             ExitKind::Usage,
                             format!(
-                                "No connection of this project receives events from the Git host of {repository}. Create one with `gradient project git-host-connection create`, then select it with `--git-host-connection <name>`."
+                                "No connection in this project receives events from the Git host of {repository}. Create a connection in `gradient project git-host-connection create`. Select it in `--git-host-connection <name>`."
                             ),
                         )
                     });

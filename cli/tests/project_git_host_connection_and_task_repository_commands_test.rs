@@ -401,7 +401,7 @@ async fn test_task_repository_show_prints_connection_events_status_posts_and_cho
     let output = stdout_of(gradient(&home, false, &["task", "repository", "show"]));
     for expected in [
         "FORGEJO",
-        "Commit status: failing, bad token",
+        "Commit Status: failing, bad token",
         "gradient task repository check-commit-status",
         "Commit status report: on",
         "https://gradient.example/api/v1/hooks/forgejo",

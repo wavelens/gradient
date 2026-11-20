@@ -65,7 +65,7 @@ pub enum GitHostConnectionSubcommands {
         /// Types of Git Host
         #[arg(long, value_parser = GIT_HOST_TYPES)]
         host_type: String,
-        /// ID of the GitHub App installation, the number at the end of the installation's settings URL on GitHub. Required for `--host-type github`, which works only with `--owner instance`.
+        /// GitHub App installation ID. The number at the end of the installation settings URL on GitHub. Required for `--host-type github`, which can only work with `--owner instance`.
         #[arg(long, required_if_eq("host_type", "github"))]
         installation_id: Option<i64>,
         #[command(flatten)]
@@ -99,7 +99,7 @@ pub enum GitHostConnectionSubcommands {
         /// Connection name or UUID
         connection: String,
     },
-    /// Sign in to the Git host with the stored access token and show the account or the error of the host.
+    /// Sign in to the Git host with the stored access token and print the account or the error from the host.
     Test {
         /// Connection name or UUID
         connection: String,
@@ -216,7 +216,7 @@ fn print_git_host_connection_fields(out: Output, connection: &GitHostConnectionR
             .map_or_else(|| "ok".to_owned(), |error| format!("failed: {error}"));
         out.human(format!("Last status post: {} {result}", post.delivered_at));
     }
-    out.human(format!("Tasks using it: {}", connection.task_count));
+    out.human(format!("Tasks that use this: {}", connection.task_count));
     if connection.managed {
         out.human(
             "This connection is under declarative state management. Edits from the CLI fail.",
@@ -299,7 +299,7 @@ pub async fn resolve_git_host_connection_available_to_project(
             out.err(
                 ExitKind::Usage,
                 format!(
-                    "Project {project} can't use a connection to a Git host named '{reference}'. `gradient project git-host-connection list` shows the connections it can use."
+                    "Project {project} can't use the Git host connection named '{reference}'. Run `gradient project git-host-connection list` to list the available connections."
                 ),
             )
         })
@@ -463,13 +463,13 @@ pub async fn run_git_host_connection_subcommand(
                     ExitKind::Api,
                     checked
                         .error
-                        .unwrap_or_else(|| "The Git host refused the access token.".to_owned()),
+                        .unwrap_or_else(|| "The Git host rejected the access token.".to_owned()),
                 );
             }
             out.ok(&checked);
             match &checked.account {
                 Some(account) => out.human(format!("Signed in as {account}.")),
-                None => out.human("The Git host accepted the access token."),
+                None => out.human("Git host accepted the access token."),
             }
         }
 
@@ -487,7 +487,7 @@ pub async fn run_git_host_connection_subcommand(
                 .unwrap_or_else(|e| out.fail(e));
             out.ok(&tasks);
             if tasks.is_empty() {
-                out.human("No task uses this connection.");
+                out.human("No tasks use this connection.");
             }
             for task in &tasks {
                 out.human(format!(
