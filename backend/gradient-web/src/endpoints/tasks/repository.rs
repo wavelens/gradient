@@ -128,10 +128,13 @@ async fn repository_response(
 
     let available_connections = connections::project::available_summaries(
         &db.web_db,
-        &db.config.server.serve_url,
+        &connections::ConnectionReader::new(user, api_key),
+        &connections::SummaryOptions {
+            serve_url: &db.config.server.serve_url,
+            repository: Some(&task.repository),
+        },
         project,
         can_manage_integrations,
-        Some(&task.repository),
     )
     .await?;
     let git_host_connection = task
