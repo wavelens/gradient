@@ -204,12 +204,12 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(el.querySelector('gr-select')).toBeNull();
   });
 
-  it('offers to install the GitHub App on the account instead of a new connection and reloads after the user returns', () => {
+  it("suggest installing the GitHub App on the account instead of 'New connection'", () => {
     const install = {
       ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection,
       connection: { state: 'attention' as const, detail: 'GitHub App not installed (acme)', action: { type: 'install_github_app' as const, account: 'acme' } },
     };
-    const { fixture, el, component } = render(
+    const { fixture, el } = render(
       { repository: 'https://github.com/acme/app', available_connections: [], can_create_connection: true, chain: install },
       {},
       'https://github.com/apps/gradient-ci/installations/new',
@@ -219,12 +219,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
     const link = testId(el, 'github-app-install')!;
     expect(link.getAttribute('href')).toBe('https://github.com/apps/gradient-ci/installations/new');
     expect(link.classList).toContain('gr-button--primary');
+    expect(link.hasAttribute('target')).toBe(false);
     expect(testId(el, 'new-connection')).toBeNull();
-    const changes: unknown[] = [];
-    component.changed.subscribe(() => changes.push(true));
-    link.addEventListener('click', (event) => event.preventDefault());
-    link.click();
-    window.dispatchEvent(new Event('focus'));
-    expect(changes).toHaveLength(1);
   });
 });

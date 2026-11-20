@@ -39,6 +39,7 @@ import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import { docsUrl } from '@core/docs';
 import { GitHostConnectionListComponent } from '@shared/git-host-connections/git-host-connection-list.component';
+import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 import type { AccessState, GitHostConnectionOwner, GitHostConnectionSummary, GitHostConnectionTaskResponse, ManifestResult } from '@core/models';
 
 const INSTANCE: GitHostConnectionOwner = { type: 'instance' };
@@ -67,6 +68,7 @@ type InstallationReturnState =
     CopyFieldComponent,
     FormFieldComponent,
     GitHostConnectionListComponent,
+    GithubAppInstallLinkComponent,
   ],
   templateUrl: './github-app.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -87,7 +89,6 @@ export class GithubAppComponent implements OnInit {
   protected readonly superuserAccess: AccessState = { managed: false, canEdit: true, canTrigger: true };
   protected readonly githubAppConfigured = this.config.githubAppEnabled;
   protected readonly appPageUrl = this.config.githubAppPageUrl;
-  protected readonly installUrl = this.config.githubAppInstallUrl;
   protected readonly appName = this.appPageUrl?.split('/').pop() ?? null;
   protected readonly githubAppServerConfigurationDocsUrl = docsUrl('guides/github/#2-configure-the-server');
 
