@@ -66,6 +66,22 @@ describe('IncomingDeliveriesComponent', () => {
     expect(text).toContain('Refused with HTTP 401: bad');
   });
 
+  it('shows a refused signature newer than every delivery first, also when nothing was delivered', () => {
+    const list = vi.fn(() => of<IncomingWebhookDeliveryResponse[]>([]));
+    TestBed.configureTestingModule({
+      imports: [IncomingDeliveriesComponent],
+      providers: [{ provide: GitHostConnectionsApi, useValue: { listDeliveries: list } }],
+    });
+    const fixture = TestBed.createComponent(IncomingDeliveriesComponent);
+    fixture.componentRef.setInput('gitHostConnectionOwner', { type: 'project', name: 'acme' });
+    fixture.componentRef.setInput('connectionId', 'i1');
+    fixture.componentRef.setInput('refusedSignature', { at: '2026-01-02T10:00:00', count: 3 });
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).not.toContain('No deliveries yet.');
+    expect(element.querySelector('[data-testid="refused-signature"]')?.textContent).toContain('Refused 3 deliveries with a wrong signature');
+  });
+
   it('says in one line without a heading that nothing was delivered yet', () => {
     TestBed.configureTestingModule({
       imports: [IncomingDeliveriesComponent],

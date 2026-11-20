@@ -51,6 +51,19 @@ export function gitHostConnectionPickerOptions(
   ];
 }
 
+export interface RefusedSignature {
+  at: string;
+  count: number;
+}
+
+export function refusedSignatureNewerThanLastDelivery(connection: GitHostConnectionSummary): RefusedSignature | null {
+  const at = connection.last_refused_signature_at;
+  if (!at) return null;
+  const delivered = connection.last_delivery?.created_at;
+  if (delivered && serverTime(delivered).getTime() >= serverTime(at).getTime()) return null;
+  return { at, count: connection.refused_signature_count ?? 1 };
+}
+
 export interface AccessTokenState {
   text: string;
   expired: boolean;
