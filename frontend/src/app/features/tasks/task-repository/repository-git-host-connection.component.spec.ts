@@ -120,6 +120,20 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(savedStates).toEqual([saved]);
   });
 
+  it('leaves report status out of the body so the server keeps it', () => {
+    const updateTaskRepositoryConnection = vi.fn((_project: string, _task: string, _body: object) => of(state));
+    const { component } = render({ report_status: true }, { updateTaskRepositoryConnection });
+    component.selectConnection('c1');
+    expect(Object.keys(updateTaskRepositoryConnection.mock.calls[0][2])).toEqual(['git_host_connection']);
+  });
+
+  it('sends null to remove the connection', () => {
+    const updateTaskRepositoryConnection = vi.fn(() => of(state));
+    const { component } = render({ git_host_connection: reporting }, { updateTaskRepositoryConnection });
+    component.selectConnection(null);
+    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { git_host_connection: null });
+  });
+
   it('returns the picker to the saved connection when saving fails', () => {
     const updateTaskRepositoryConnection = vi.fn(() => throwError(() => new ApiError('nope', 400)));
     const { component, notify } = render({}, { updateTaskRepositoryConnection });
