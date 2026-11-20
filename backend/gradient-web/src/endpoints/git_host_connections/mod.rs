@@ -84,19 +84,27 @@ pub struct GitHostConnectionSummary {
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, utoipa::ToSchema)]
 pub struct RepositoryFit {
     pub fits: bool,
+    pub can_be_selected: bool,
     pub reason: Option<String>,
 }
 
 impl RepositoryFit {
     pub(crate) fn of(repository: &str, connection: &MGitHostConnection) -> Self {
         match check_task_repository_url_can_use_git_host_connection(repository, connection) {
-            Ok(()) => Self {
-                fits: true,
-                reason: None,
-            },
             Err(reason) => Self {
                 fits: false,
+                can_be_selected: false,
                 reason: Some(reason),
+            },
+            Ok(()) if expected_host(connection).is_none() => Self {
+                fits: false,
+                can_be_selected: true,
+                reason: Some("No host URL".to_owned()),
+            },
+            Ok(()) => Self {
+                fits: true,
+                can_be_selected: true,
+                reason: None,
             },
         }
     }
@@ -774,8 +782,7 @@ pub(crate) fn repository_fits_connection_with_known_host(
     repository: &str,
     connection: &MGitHostConnection,
 ) -> bool {
-    expected_host(connection).is_some()
-        && check_task_repository_url_can_use_git_host_connection(repository, connection).is_ok()
+    RepositoryFit::of(repository, connection).fits
 }
 
 pub(crate) fn check_task_repository_url_can_use_git_host_connection(
@@ -903,6 +910,22 @@ mod tests {
             "github:acme/infra",
             &connection(GitHostType::GitHub, None)
         ));
+    }
+
+    #[test]
+    fn a_connection_without_host_url_does_not_fit_but_can_be_selected() {
+        let fit = RepositoryFit::of(
+            "https://git.example.com/acme/infra",
+            &connection(GitHostType::Forgejo, None),
+        );
+        assert!(!fit.fits);
+        assert!(fit.can_be_selected);
+        assert_eq!(fit.reason.as_deref(), Some("No host URL"));
+        let other_host = RepositoryFit::of(
+            "https://github.com/acme/infra",
+            &connection(GitHostType::Gitea, Some("https://git.example.com")),
+        );
+        assert!(!other_host.fits && !other_host.can_be_selected);
     }
 
     #[test]

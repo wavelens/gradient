@@ -745,7 +745,7 @@ async fn view_members_see_connection_health_and_repository_fit_in_the_project_li
     assert_eq!(entry["last_delivery"]["result"], "queued", "{entry}");
     assert_eq!(
         entry["repository_fit"],
-        json!({ "fits": true, "reason": null })
+        json!({ "fits": true, "can_be_selected": true, "reason": null })
     );
 
     let res = list("https://github.com/acme/app").await;
