@@ -26,6 +26,7 @@ const NAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   denied: 'Access denied by the Git host.',
+  expired: 'The approval took longer than 10 minutes or ran in another browser. Start the connection again.',
   signed_out: 'Sign-out happened before the Git host responded. Sign in again and retry.',
   forbidden: 'Missing permission to manage connections for Git hosts in this project.',
   exists: 'There is already a connection with this name in this project. Select another name and try again.',

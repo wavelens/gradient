@@ -134,7 +134,7 @@ pub async fn redirect_signed_in_browser_to_git_host_for_project_oauth_approval(
         .unwrap_or(&name)
         .to_owned();
 
-    let csrf_state = random_url_safe(32);
+    let csrf_state = format!("{}.{}", random_url_safe(32), project.name);
     let pkce_verifier = random_url_safe(32);
     let pkce_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pkce_verifier.as_bytes()));
     let auth_url = build_git_host_oauth_authorization_url(
@@ -199,6 +199,18 @@ pub async fn get_git_host_oauth_callback(
     )
 }
 
+fn project_name_in_state(state: &str) -> Option<&str> {
+    state
+        .split_once('.')
+        .map(|(_, project)| project)
+        .filter(|project| {
+            !project.is_empty()
+                && project
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+}
+
 async fn complete_gitea_oauth2_callback_and_return_redirect_url(
     web_db: &WebDb,
     http: &reqwest::Client,
@@ -215,7 +227,10 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
                 .is_some_and(|s| s.as_bytes().ct_eq(claims.state.as_bytes()).into())
         });
     let Some(claims) = claims else {
-        return "/?oauth_error=expired".to_owned();
+        return match query.get("state").and_then(|s| project_name_in_state(s)) {
+            Some(project) => format!("/project/{project}/git-host-connections?oauth_error=expired"),
+            None => "/?oauth_error=expired".to_owned(),
+        };
     };
     let page = format!("/project/{}/git-host-connections", claims.project_name);
 

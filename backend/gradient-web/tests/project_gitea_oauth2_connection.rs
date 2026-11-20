@@ -120,6 +120,11 @@ async fn connect_redirects_to_the_git_host_with_pkce_and_a_signed_cookie() {
     .unwrap()
     .claims;
     assert_eq!(claims["state"], query["state"].as_str());
+    assert!(
+        query["state"].ends_with(".test-project"),
+        "{}",
+        query["state"]
+    );
     assert_eq!(claims["session_id"], json!(session_id));
     assert_eq!(claims["name"], "codeberg");
     assert_eq!(claims["display_name"], "codeberg");
@@ -191,7 +196,19 @@ async fn callback_with_an_expired_cookie_is_expired() {
     let server = with_gitea_app(TestState::new()).server();
     let cookie = signed_cookie(SessionId::now_v7(), -3600);
 
-    let res = callback(&server, "code=abc&state=s", Some(&cookie)).await;
+    let res = callback(&server, "code=abc&state=s.test-project", Some(&cookie)).await;
+
+    assert_eq!(
+        location(&res),
+        "/project/test-project/git-host-connections?oauth_error=expired"
+    );
+}
+
+#[tokio::test]
+async fn callback_with_a_state_naming_no_valid_project_returns_home() {
+    let server = with_gitea_app(TestState::new()).server();
+
+    let res = callback(&server, "code=abc&state=s.%2F%2Fevil.example", None).await;
 
     assert_eq!(location(&res), "/?oauth_error=expired");
 }
