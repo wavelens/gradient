@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { ButtonComponent, CopyFieldComponent, SettingsSectionComponent } from '@gradient/ui/ui';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
@@ -12,6 +12,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { deliveryBadgeSeverity, deliverySummary, gitHostSettingsLinks } from '@shared/git';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
+import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { StepHistoryLine, StepHistoryListComponent } from './step-history-list.component';
 
 const EARLIER_DELIVERIES_SHOWN = 5;
@@ -19,7 +20,7 @@ const EARLIER_DELIVERIES_SHOWN = 5;
 @Component({
   selector: 'app-repository-incoming-events',
   standalone: true,
-  imports: [ButtonComponent, ChainStepStateBadgeComponent, CopyFieldComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
+  imports: [ButtonComponent, ChainStepStateBadgeComponent, CopyFieldComponent, GitHostConnectionDialogComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <gr-settings-section title="Incoming events">
@@ -38,6 +39,10 @@ const EARLIER_DELIVERIES_SHOWN = 5;
             <button grButton label="Install webhook" icon="webhook" [severity]="hasPrimaryAction() ? 'primary' : 'secondary'"
               [loading]="installing()" [disabled]="installing()" (click)="installWebhook()" data-testid="install-webhook"></button>
           }
+          @if (step().action?.type === 'change_webhook_secret' && state().git_host_connection; as connection) {
+            <button grButton label="Change webhook secret" icon="key" [severity]="hasPrimaryAction() ? 'primary' : 'secondary'"
+              (click)="connectionDialog()?.openEdit(connection, { focusWebhookSecret: true })" data-testid="change-webhook-secret"></button>
+          }
         </div>
         @if (webhookUrlToAdd(); as url) {
           <div class="webhook-by-hand">
@@ -53,6 +58,9 @@ const EARLIER_DELIVERIES_SHOWN = 5;
         }
       }
     </gr-settings-section>
+    @if (state().git_host_connection; as connection) {
+      <app-git-host-connection-dialog [owner]="connection.owner" [repository]="state().repository" (saved)="changed.emit()" />
+    }
   `,
   styles: `
     @use '@gradient/ui/styles/variables' as *;
@@ -75,6 +83,7 @@ export class RepositoryIncomingEventsComponent {
   changed = output<void>();
 
   installing = signal(false);
+  connectionDialog = viewChild(GitHostConnectionDialogComponent);
 
   step = computed(() => this.state().chain.incoming_events);
   applies = computed(() => this.state().chain.connection.state === 'ok' && !!this.state().git_host_connection?.receives_events);
