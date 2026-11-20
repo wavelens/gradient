@@ -180,7 +180,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
 
   it('offers a new connection in place when none fits, or links to the connections page', () => {
     const createConnection = { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, git_host_type: 'forgejo', base_url: 'https://forgejo.example.com' } } };
-    const manager = render({ available_connections: [otherHost], can_manage_integrations: true, chain: createConnection });
+    const manager = render({ available_connections: [otherHost], can_manage_integrations: true, can_create_connection: true, chain: createConnection });
     manager.fixture.componentRef.setInput('hasPrimaryAction', true);
     manager.fixture.detectChanges();
     expect(testId(manager.el, 'no-connections')?.textContent).toContain('No connection to forgejo.example.com');
@@ -189,6 +189,12 @@ describe('RepositoryGitHostConnectionComponent', () => {
     const member = render({ available_connections: [] });
     expect(testId(member.el, 'new-connection')).toBeNull();
     expect(testId(member.el, 'no-connections')?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/git-host-connections');
+  });
+
+  it('links to the connections page for a task of declarative state even for a manager of integrations', () => {
+    const { el } = render({ available_connections: [], can_manage_integrations: true, can_create_connection: false });
+    expect(testId(el, 'new-connection')).toBeNull();
+    expect(testId(el, 'no-connections')?.querySelector('a')).not.toBeNull();
   });
 
   it('shows only its state while the repository step blocks it', () => {
