@@ -39,8 +39,17 @@
             }
             @case ('missing') {
               <gr-message-banner type="warning">
-                GitHub doesn't report the installation yet.
+                GitHub doesn't report the installation yet. Check failed deliveries under Advanced in the App settings on GitHub.
+                @if (appPageUrl) {
+                  <a grButton size="small" severity="secondary" icon="open_in_new" label="Open app on GitHub" [href]="appPageUrl" target="_blank" rel="noopener"></a>
+                }
                 <button grButton type="button" size="small" severity="secondary" label="Check again" (click)="checkInstallation()"></button>
+              </gr-message-banner>
+            }
+            @case ('serverNotConfigured') {
+              <gr-message-banner type="warning">
+                The GitHub App is on GitHub, but this server doesn't have it yet. Apply the server configuration, restart the server, then open this page again.
+                <a [href]="githubAppServerConfigurationDocsUrl" target="_blank" rel="noopener">Configure the Server</a>
               </gr-message-banner>
             }
             @case ('requested') {

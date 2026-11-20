@@ -37,6 +37,7 @@ import { Observable, Subscription, catchError, concatMap, defaultIfEmpty, filter
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
+import { docsUrl } from '@core/docs';
 import { GitHostConnectionListComponent } from '@shared/git-host-connections/git-host-connection-list.component';
 import type { AccessState, GitHostConnectionOwner, GitHostConnectionSummary, GitHostConnectionTaskResponse, ManifestResult } from '@core/models';
 
@@ -48,7 +49,8 @@ type InstallationReturnState =
   | { state: 'waiting' }
   | { state: 'installed'; connection: GitHostConnectionSummary; tasks: GitHostConnectionTaskResponse[] }
   | { state: 'missing' }
-  | { state: 'requested' };
+  | { state: 'requested' }
+  | { state: 'serverNotConfigured' };
 
 @Component({
   selector: 'app-admin-github-app',
@@ -87,6 +89,7 @@ export class GithubAppComponent implements OnInit {
   protected readonly appPageUrl = this.config.githubAppPageUrl;
   protected readonly installUrl = this.config.githubAppInstallUrl;
   protected readonly appName = this.appPageUrl?.split('/').pop() ?? null;
+  protected readonly githubAppServerConfigurationDocsUrl = docsUrl('guides/github/#2-configure-the-server');
 
   host = signal<string>('');
   organization = signal<string>('');
@@ -137,6 +140,8 @@ export class GithubAppComponent implements OnInit {
     const installationId = Number(query.get('installation_id'));
     if (query.get('setup_action') === 'request') {
       this.installationReturn.set({ state: 'requested' });
+    } else if (Number.isInteger(installationId) && installationId > 0 && !this.githubAppConfigured) {
+      this.installationReturn.set({ state: 'serverNotConfigured' });
     } else if (Number.isInteger(installationId) && installationId > 0) {
       this.returnedInstallationId = installationId;
       this.checkInstallation();
