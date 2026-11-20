@@ -36,7 +36,8 @@ fn connection_response(generated_secret: Option<&str>) -> serde_json::Value {
         "id": CONNECTION, "owner": {"type": "project", "name": "web"},
         "name": "forgejo", "display_name": "Forgejo", "git_host_type": "forgejo",
         "base_url": "https://git.example.com", "has_secret": true, "has_access_token": false,
-        "access_token_refreshes_automatically": false,
+        "access_token_refreshes_automatically": false, "can_manage": true,
+        "refused_signature_count": 0, "task_count": 0,
         "allowed_ips": [], "receives_events": true, "reports_status": false,
         "created_by": USER, "created_at": "2026-11-11T00:00:00Z", "managed": false,
         "webhook_url": "https://gradient.example/api/v1/hooks/forgejo",
@@ -63,7 +64,8 @@ async fn test_list_uses_the_path_of_each_owner_and_decodes_owner() {
             .respond_with(ok(serde_json::json!([{
                 "id": CONNECTION, "owner": owner, "name": "forgejo", "display_name": "Forgejo",
                 "git_host_type": "forgejo", "receives_events": true, "reports_status": true,
-                "can_manage": true
+                "can_manage": true, "access_token_refreshes_automatically": false,
+                "refused_signature_count": 0, "task_count": 0
             }])))
             .expect(1)
             .mount(&server)

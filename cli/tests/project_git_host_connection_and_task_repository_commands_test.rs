@@ -64,7 +64,9 @@ fn summary(id: &str, name: &str, owner: Value, reports_status: bool) -> Value {
     json!({
         "id": id, "owner": owner, "name": name, "display_name": name.to_uppercase(),
         "git_host_type": "forgejo", "base_url": "https://git.example.com",
-        "receives_events": true, "reports_status": reports_status, "can_manage": true
+        "receives_events": true, "reports_status": reports_status, "can_manage": true,
+        "access_token_refreshes_automatically": false, "refused_signature_count": 0,
+        "task_count": 0, "webhook_url": "https://gradient.example/api/v1/hooks/forgejo"
     })
 }
 
@@ -81,7 +83,8 @@ fn connection(id: &str, generated_secret: Option<&str>) -> Value {
         "id": id, "owner": project_owner(), "name": "forgejo", "display_name": "Forgejo",
         "git_host_type": "forgejo", "base_url": "https://git.example.com", "has_secret": true,
         "has_access_token": true, "access_token_refreshes_automatically": false,
-        "allowed_ips": [], "receives_events": true,
+        "allowed_ips": [], "receives_events": true, "can_manage": true,
+        "refused_signature_count": 0, "task_count": 0,
         "reports_status": true, "created_by": USER, "created_at": "2026-11-11T00:00:00Z",
         "managed": false, "webhook_url": "https://gradient.example/api/v1/hooks/forgejo",
         "generated_secret": generated_secret
@@ -339,12 +342,17 @@ fn task_repository(report_status: bool, current: Option<Value>) -> Value {
     json!({
         "repository": "https://git.example.com/org/repo.git", "uses_ssh": false,
         "git_host_connection": current,
-        "webhook_url": "https://gradient.example/api/v1/hooks/forgejo",
         "report_status": report_status,
-        "last_event": {
+        "chain": {
+            "repository": {"state": "ok", "detail": "git.example.com/org/repo"},
+            "connection": {"state": "ok", "detail": "forgejo"},
+            "incoming_events": {"state": "ok", "detail": "push"},
+            "commit_status": {"state": "failing", "detail": "bad token"}
+        },
+        "recent_deliveries": [{
             "id": DELIVERY, "event": "push", "status_code": 202, "result": "queued",
             "tasks_scanned": 1, "queued": 1, "created_at": "2026-11-11T00:00:00Z"
-        },
+        }],
         "status_posts": [{
             "id": ATTEMPT, "event": "evaluation.completed", "success": false,
             "response_status": 401, "error_message": "bad token",
