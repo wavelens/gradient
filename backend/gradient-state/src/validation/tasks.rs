@@ -175,7 +175,7 @@ fn validate_task_git_host_connection_reference(
                 format!("tasks.{}.report_status", task.name),
                 "A task with report_status needs a git_host_connection field.",
             ),
-            (Some(_), Some(connection)) if !connection.reports_status => errors.push(
+            (Some(_), Some(connection)) if !connection.reports_status() => errors.push(
                 format!("tasks.{}.report_status", task.name),
                 format!(
                     "report_status needs a connection to a Git host with reports_status set. The connection '{}' has reports_status = false.",

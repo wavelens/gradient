@@ -559,10 +559,10 @@
       };
 
       reports_status = mkOption {
-        type = types.bool;
-        default = false;
+        type = types.nullOr types.bool;
+        default = null;
         description = ''
-          Whether a task with `report_status` can report commit status through a connection. Set `base_url` and `access_token_file` together with that option on hosts other than GitHub.
+          Whether a task with `report_status` can report commit status through a connection. `null` means `true` for `github` and `false` for other Git hosts. Set `base_url` and `access_token_file` together with that option on hosts other than GitHub.
         '';
       };
 
