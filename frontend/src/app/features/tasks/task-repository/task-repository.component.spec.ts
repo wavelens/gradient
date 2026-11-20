@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { TaskRepositoryResponse } from '@core/models';
 import { chainWithoutConnection } from './task-git-host-chain.testing';
 import { TasksService } from '@core/services/tasks.service';
@@ -108,6 +108,18 @@ describe('TaskRepositoryComponent', () => {
     expect(fixture.componentInstance.canDeactivate()).toBeInstanceOf(Observable);
     access.cancelEdit();
     expect(fixture.componentInstance.canDeactivate()).toBe(true);
+  });
+
+  it('drops a reload that a newer reload replaced', () => {
+    const requests = [new Subject<TaskRepositoryResponse>(), new Subject<TaskRepositoryResponse>(), new Subject<TaskRepositoryResponse>()];
+    const getRepository = vi.fn(() => requests[getRepository.mock.calls.length - 1]);
+    const fixture = render(getRepository);
+    requests[0].next(state);
+    fixture.componentInstance.load();
+    fixture.componentInstance.load();
+    expect(requests[1].observed).toBe(false);
+    requests[2].next({ ...state, report_status: true });
+    expect(fixture.componentInstance.state()?.report_status).toBe(true);
   });
 
   it('reloads the page when a section changes the chain', () => {

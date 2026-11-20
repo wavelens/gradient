@@ -57,7 +57,9 @@
       }
       @case ('git-host') {
         <gr-settings-section title="Git host">
-          @if (connections() === null) {
+          @if (connectionsError(); as error) {
+            <gr-load-state [error]="error" errorTitle="Failed to load git host connections" (retry)="loadConnections()" />
+          } @else if (connections() === null) {
             <gr-load-state [loading]="true" loadingMessage="Loading git host connections..." />
           } @else if (connectionOptions().length > 1) {
             <gr-form-field label="Connection" for="connect-git-host-connection">
