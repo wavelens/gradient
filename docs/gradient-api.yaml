@@ -23564,8 +23564,11 @@ components:
       type: object
       required:
       - fits
+      - can_be_selected
       properties:
         fits:
+          type: boolean
+        can_be_selected:
           type: boolean
         reason:
           type:

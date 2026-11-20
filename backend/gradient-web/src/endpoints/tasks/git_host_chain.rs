@@ -185,7 +185,11 @@ fn connection_step(
         .can_edit_task
         .then_some(TaskGitHostChainStepAction::SelectConnection);
     if let Some(connection) = input.connection {
-        return match connection.repository_fit.as_ref().filter(|fit| !fit.fits) {
+        return match connection
+            .repository_fit
+            .as_ref()
+            .filter(|fit| !fit.can_be_selected)
+        {
             Some(misfit) => step(
                 TaskGitHostChainStepState::Failing,
                 misfit.reason.clone().unwrap_or_default(),
@@ -443,6 +447,7 @@ mod tests {
             task_count: 0,
             repository_fit: Some(RepositoryFit {
                 fits,
+                can_be_selected: fits,
                 reason: (!fits).then(|| "Points at another host".to_owned()),
             }),
         }
@@ -568,6 +573,21 @@ mod tests {
         assert_eq!(chain.connection.state, Failing);
         assert_eq!(chain.connection.detail, "Points at another host");
         assert_eq!(chain.incoming_events.state, Off);
+    }
+
+    #[test]
+    fn a_selected_connection_without_host_url_works_but_is_never_suggested() {
+        let mut without_host_url = connection(false);
+        without_host_url.repository_fit = Some(RepositoryFit {
+            fits: false,
+            can_be_selected: true,
+            reason: Some("No host URL".to_owned()),
+        });
+        let selected = task_git_host_chain(&input(GITEA_REPOSITORY, Some(&without_host_url), &[]));
+        let available = [without_host_url.clone()];
+        let suggested = task_git_host_chain(&input(GITEA_REPOSITORY, None, &available));
+        assert_eq!(selected.connection.state, Ok);
+        assert!(!suggested.connection.detail.contains("fits"), "{}", suggested.connection.detail);
     }
 
     #[test]
