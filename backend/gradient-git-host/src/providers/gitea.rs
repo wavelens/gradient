@@ -40,8 +40,8 @@ impl GitHostProvider for GiteaProvider {
     ) -> anyhow::Result<Arc<dyn CiReporter>> {
         let base_url = endpoint_url
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| anyhow!("Gitea/Forgejo connection missing endpoint_url"))?;
-        let token = token.ok_or_else(|| anyhow!("Gitea/Forgejo connection missing token"))?;
+            .ok_or_else(|| anyhow!("No `endpoint_url` on Gitea/Forgejo connection"))?;
+        let token = token.ok_or_else(|| anyhow!("Gitea/Forgejo connection has no token"))?;
 
         Ok(Arc::new(GiteaReporter::new(http, base_url, token)?))
     }

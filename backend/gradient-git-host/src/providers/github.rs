@@ -30,7 +30,7 @@ impl GitHostProvider for GithubProvider {
         endpoint_url: Option<&str>,
         token: Option<&str>,
     ) -> anyhow::Result<Arc<dyn CiReporter>> {
-        let token = token.ok_or_else(|| anyhow!("GitHub connection missing token"))?;
+        let token = token.ok_or_else(|| anyhow!("No token on the GitHub connection"))?;
 
         Ok(Arc::new(GithubReporter::new(
             http,
