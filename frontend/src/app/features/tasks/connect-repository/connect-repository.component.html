@@ -67,7 +67,16 @@
                 [ngModel]="selectedConnectionId() ?? ''" (ngModelChange)="selectedConnectionId.set($event ?? '')" />
             </gr-form-field>
           } @else if (gitHubAccount(); as account) {
-            <p class="gr-form-aside" data-testid="no-connection">The GitHub App isn't installed on {{ account }}</p>
+            <p class="gr-form-aside" data-testid="no-connection">
+              @if (!config.githubAppEnabled) {
+                <span>This server has no GitHub App</span>
+              } @else if (canInstallGithubApp()) {
+                <span>The GitHub App isn't installed on {{ account }}</span>
+                <app-github-app-install-link size="small" (returnedFromGitHub)="loadConnections()" />
+              } @else {
+                <span>An instance admin can install the GitHub App on {{ account }}</span>
+              }
+            </p>
           } @else {
             <p class="gr-form-aside" data-testid="no-connection">
               <span>No connection for {{ repositoryHostName() }}</span>
