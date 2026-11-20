@@ -8,6 +8,7 @@ use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::extension::postgres::PgExpr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, QueryOrder, Select,
@@ -95,7 +96,7 @@ pub async fn with_repository_containing<C: ConnectionTrait>(
     fragment: &str,
 ) -> Result<Vec<MTask>, DbErr> {
     ETask::find()
-        .filter(CTask::Repository.contains(fragment))
+        .filter(Expr::col(CTask::Repository).ilike(crate::dashboard::ilike_contains(fragment)))
         .all(db)
         .await
 }
@@ -108,4 +109,37 @@ pub async fn of_projects<C: ConnectionTrait>(
         .filter(CTask::Project.is_in(projects))
         .all(db)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+
+    #[tokio::test]
+    async fn repository_lookup_ignores_letter_case() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        crate::rows::insert::<EProject, _>(&conn, rows::project())
+            .await
+            .expect("the project is written");
+        crate::rows::insert::<ETask, _>(
+            &conn,
+            MTask {
+                repository: "https://git.example.com/Acme/App.git".into(),
+                ..rows::task()
+            },
+        )
+        .await
+        .expect("the task is written");
+        let tasks = with_repository_containing(&conn, "app")
+            .await
+            .expect("the lookup runs");
+        assert_eq!(tasks.len(), 1);
+        db.finish().await;
+    }
 }
