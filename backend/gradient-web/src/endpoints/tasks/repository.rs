@@ -13,6 +13,7 @@ use crate::authorization::ApiKeyContext;
 use crate::endpoints::git_host_connections::{
     self as connections, GitHostConnectionRefusal, GitHostConnectionSummary,
     IncomingWebhookDeliveryResponse, check_task_repository_url_can_use_git_host_connection,
+    repository_fits_connection_with_known_host,
 };
 use crate::endpoints::git_host_hooks::repo_identity;
 use crate::error::{WebError, WebResult};
@@ -269,9 +270,7 @@ pub(crate) async fn choose_git_host_connection_for_new_task(
             let mut fitting = list_git_host_connections_available_to_project(db, project)
                 .await?
                 .into_iter()
-                .filter(|row| {
-                    check_task_repository_url_can_use_git_host_connection(repository, row).is_ok()
-                });
+                .filter(|row| repository_fits_connection_with_known_host(repository, row));
             match (fitting.next(), fitting.next()) {
                 (Some(only), None) => Some(only),
                 _ => None,
