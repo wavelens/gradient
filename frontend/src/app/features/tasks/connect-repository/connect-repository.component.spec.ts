@@ -209,8 +209,8 @@ describe('ConnectRepositoryComponent', () => {
 
   it('preselects the single fitting connection and sends the choice with the task', () => {
     const fits = { id: 'c1', name: 'forgejo', display_name: 'Forgejo', owner: { type: 'project', name: 'acme' }, git_host_type: 'forgejo',
-      base_url: 'https://forgejo.example.com', repository_fit: { fits: true } } as GitHostConnectionSummary;
-    const other = { ...fits, id: 'c2', repository_fit: { fits: false, reason: 'Other host' } };
+      base_url: 'https://forgejo.example.com', repository_fit: { fits: true, can_be_selected: true } } as GitHostConnectionSummary;
+    const other = { ...fits, id: 'c2', repository_fit: { fits: false, can_be_selected: false, reason: 'Other host' } };
     const createTask = vi.fn(() => of({ id: 't1', name: 'app', url: '' }));
     const fixture = render({}, { createTask, getRepository: () => of({ repository: 'r', chain: chainWithoutConnection }) }, {}, undefined, undefined, [fits, other]);
     const comp = fixture.componentInstance;
@@ -220,6 +220,20 @@ describe('ConnectRepositoryComponent', () => {
     expect(comp.selectedConnectionId()).toBe('c1');
     comp.createTaskWithTriggersAndOpenTask();
     expect(createTask).toHaveBeenCalledWith('acme', expect.objectContaining({ git_host_connection: 'c1' }));
+  });
+
+  it('lists a connection without host URL marked and never preselects it', () => {
+    const withoutHostUrl = { id: 'c3', name: 'forge', display_name: 'Forge', owner: { type: 'project', name: 'acme' }, git_host_type: 'forgejo',
+      base_url: null, repository_fit: { fits: false, can_be_selected: true, reason: 'No host URL' } } as GitHostConnectionSummary;
+    const fixture = render({}, {}, {}, undefined, undefined, [withoutHostUrl]);
+    const comp = fixture.componentInstance;
+    comp.repositoryChanged('https://forgejo.example.com/acme/app');
+    comp.continueFromRepository();
+    expect(comp.connectionOptions().map((option) => [option.value, option.label])).toEqual([
+      ['', 'No connection'],
+      ['c3', 'Forge · Forgejo · Project acme · No host URL'],
+    ]);
+    expect(comp.selectedConnectionId()).toBeNull();
   });
 
   it('tells which GitHub account lacks the app and offers a new connection for other hosts', () => {

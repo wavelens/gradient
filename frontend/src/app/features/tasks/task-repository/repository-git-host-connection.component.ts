@@ -13,7 +13,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
 import { links } from '@shared/routing';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
-import { gitHostConnectionPickerLabel } from '@shared/git-host-connections/git-host-connection-health';
+import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
 import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
 
 @Component({
@@ -46,19 +46,12 @@ export class RepositoryGitHostConnectionComponent {
 
   step = computed(() => this.state().chain.connection);
   owner = computed<GitHostConnectionOwner>(() => ({ type: 'project', name: this.project() }));
-  fittingConnections = computed(() => {
-    const currentId = this.state().git_host_connection?.id;
-    return this.state().available_connections.filter((connection) => connection.repository_fit?.fits !== false || connection.id === currentId);
-  });
   onlyFittingConnection = computed(() => {
     if (this.step().action?.type !== 'select_connection') return null;
     const fitting = this.state().available_connections.filter((connection) => connection.repository_fit?.fits !== false);
     return fitting.length === 1 ? fitting[0] : null;
   });
-  pickerOptions = computed(() => [
-    { label: 'No connection', value: '' },
-    ...this.fittingConnections().map((connection) => ({ value: connection.id, label: gitHostConnectionPickerLabel(connection) })),
-  ]);
+  pickerOptions = computed(() => gitHostConnectionPickerOptions(this.state().available_connections, this.state().git_host_connection?.id));
   projectConnectionNames = computed(() =>
     this.state().available_connections.filter((connection) => connection.owner.type === 'project').map((connection) => connection.name),
   );

@@ -42,7 +42,7 @@ import { slugify } from '@shared/text';
 import { repositoryWebUrl } from '@shared/evaluation';
 import { repositoryHost } from '@shared/git';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
-import { gitHostConnectionPickerLabel } from '@shared/git-host-connections/git-host-connection-health';
+import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
 import { TaskGitHostChainComponent } from '@shared/git-host-connections/task-git-host-chain.component';
 
 export const RESERVED_TASK_NAMES = ['build-request'];
@@ -158,10 +158,7 @@ export class ConnectRepositoryComponent implements OnInit {
   connections = signal<GitHostConnectionSummary[] | null>(null);
   selectedConnectionId = signal<string | null>(null);
   fittingConnections = computed(() => (this.connections() ?? []).filter((connection) => connection.repository_fit?.fits));
-  connectionOptions = computed(() => [
-    { label: 'No connection', value: '' },
-    ...this.fittingConnections().map((connection) => ({ value: connection.id, label: gitHostConnectionPickerLabel(connection) })),
-  ]);
+  connectionOptions = computed(() => gitHostConnectionPickerOptions(this.connections() ?? []));
   projectConnectionNames = computed(() =>
     (this.connections() ?? []).filter((connection) => connection.owner.type === 'project').map((connection) => connection.name),
   );

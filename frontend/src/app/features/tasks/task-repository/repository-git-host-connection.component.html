@@ -8,7 +8,7 @@
   <app-chain-step-state-badge slot="after-title" [state]="step().state" />
   @if (step().state === 'off') {
     <span class="text-secondary">{{ step().detail }}</span>
-  } @else if (fittingConnections().length === 0) {
+  } @else if (pickerOptions().length === 1) {
     <p class="gr-form-aside" data-testid="no-connections">
       <span>{{ step().detail }}</span>
       @if (state().can_manage_integrations) {
