@@ -5,7 +5,7 @@
  */
 
 import { ActivatedRouteSnapshot, PRIMARY_OUTLET, Params, UrlSegment, UrlSegmentGroup, UrlTree } from '@angular/router';
-import type { GitHostConnectionOwner } from '@core/models';
+import type { GitHostConnectionOwner, TriggerType } from '@core/models';
 
 export type ProjectPage = 'settings' | 'members' | 'connect' | 'workers' | 'git-host-connections' | 'secrets' | 'webhooks' | 'caches';
 export type TaskPage = 'settings' | 'repository' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
@@ -70,6 +70,8 @@ export const links = {
   task: (project: string, task: string, evaluation?: string | null) =>
     url(['project', project, 'task', task], { eval: evaluation }),
   taskPage: (project: string, task: string, page: TaskPage) => url(['project', project, 'task', task, page]),
+  taskTriggerCreate: (project: string, task: string, type: TriggerType) =>
+    url(['project', project, 'task', task, 'triggers'], { new_trigger: type }),
   entryPointMetrics: (project: string, task: string, entryPoint: string) =>
     url(['project', project, 'task', task, 'entry-point-metrics'], { eval: entryPoint }),
   execJob: (project: string, task: string, job: string, options: { node?: number; terminal?: boolean } = {}) =>

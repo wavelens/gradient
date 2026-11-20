@@ -5,6 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { GitHostConnectionSummary, IncomingWebhookDeliveryResponse, TaskGitHostChain, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
@@ -67,6 +68,7 @@ function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object =
   TestBed.configureTestingModule({
     imports: [RepositoryIncomingEventsComponent],
     providers: [
+      provideRouter([]),
       { provide: TasksService, useValue: tasks },
       { provide: NotifyService, useValue: notify },
       { provide: GitHostConnectionsApi, useValue: {} },
@@ -129,6 +131,12 @@ describe('RepositoryIncomingEventsComponent', () => {
     fixture.detectChanges();
     expect(get).toHaveBeenCalledWith(connection.owner, 'c1');
     expect(document.getElementById('connection-secret')?.hasAttribute('cdkFocusInitial')).toBe(true);
+  });
+
+  it('links to a new trigger of the missing type when a push matched no task', () => {
+    const chain = { ...waiting, incoming_events: { state: 'attention' as const, detail: 'push event matched no task', action: { type: 'add_trigger' as const, trigger_type: 'reporter_push' as const } } };
+    const { el } = render({ chain });
+    expect(el.querySelector('[data-testid="add-trigger"]')?.getAttribute('href')).toBe('/project/acme/task/app/triggers?new_trigger=reporter_push');
   });
 
   it('shows the last delivery with its time and the earlier deliveries below', () => {
