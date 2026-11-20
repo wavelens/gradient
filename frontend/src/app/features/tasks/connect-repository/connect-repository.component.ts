@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { links } from '@shared/routing';
@@ -21,10 +21,12 @@ import {
   LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
+  SelectComponent,
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { TriggerConfig } from '@core/models';
+import { GitHostConnectionOwner, GitHostConnectionSummary, TaskRepositoryResponse, TriggerConfig } from '@core/models';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TriggersService } from '@core/services/triggers.service';
@@ -37,14 +39,20 @@ import { wildcardError } from '../wildcard-error';
 import { LabelHelpComponent, ProjectReadinessCardComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { slugify } from '@shared/text';
+import { repositoryWebUrl } from '@shared/evaluation';
+import { repositoryHost } from '@shared/git';
+import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
+import { gitHostConnectionPickerLabel } from '@shared/git-host-connections/git-host-connection-health';
+import { TaskGitHostChainComponent } from '@shared/git-host-connections/task-git-host-chain.component';
 
 export const RESERVED_TASK_NAMES = ['build-request'];
 const DEFAULT_WILDCARD = 'packages.x86_64-linux.**';
 const DEFAULT_POLLING_INTERVAL_SECS = 300;
 
-export type ConnectStep = 'repository' | 'access' | 'triggers';
+export type ConnectStep = 'repository' | 'git-host' | 'access' | 'triggers';
 const STEPS: { id: ConnectStep; label: string }[] = [
   { id: 'repository', label: 'Repository' },
+  { id: 'git-host', label: 'Git host' },
   { id: 'access', label: 'Access' },
   { id: 'triggers', label: 'Triggers and Settings' },
 ];
@@ -97,6 +105,9 @@ export function buildTaskCreationTriggersFromWizardChoices(choices: {
     SubmitDirective,
     NameFieldsComponent,
     LabelHelpComponent,
+    SelectComponent,
+    GitHostConnectionDialogComponent,
+    TaskGitHostChainComponent,
   ],
   templateUrl: './connect-repository.component.html',
   styleUrl: './connect-repository.component.scss',
@@ -111,6 +122,8 @@ export class ConnectRepositoryComponent implements OnInit {
   private triggers = inject(TriggersService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private gitHostConnections = inject(GitHostConnectionsApi);
+  private connectionDialog = viewChild(GitHostConnectionDialogComponent);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private revealFirstInvalid = injectRevealFirstInvalid();
   protected project = injectProject();
@@ -118,6 +131,7 @@ export class ConnectRepositoryComponent implements OnInit {
 
   readonly steps = STEPS;
   access = computed(() => accessTo(this.project(), 'createTask'));
+  canManageIntegrations = computed(() => accessTo(this.project(), 'manageIntegrations').canEdit);
   missingPermission = computed(() => createMissingPermissionLoadStateError('project', isViewerProjectMember(this.project()), 'createTask'));
   projectName = '';
   step = signal<ConnectStep>('repository');
@@ -139,6 +153,19 @@ export class ConnectRepositoryComponent implements OnInit {
   repositoryAccessTestPassedForCurrentUrl = signal(false);
   testError = signal<string | null>(null);
   suggestions = signal<SuggestedTriggerChoice[]>([]);
+
+  connectionOwner = computed<GitHostConnectionOwner>(() => ({ type: 'project', name: this.projectName }));
+  connections = signal<GitHostConnectionSummary[] | null>(null);
+  selectedConnectionId = signal<string | null>(null);
+  fittingConnections = computed(() => (this.connections() ?? []).filter((connection) => connection.repository_fit?.fits));
+  connectionOptions = computed(() => [
+    { label: 'No connection', value: '' },
+    ...this.fittingConnections().map((connection) => ({ value: connection.id, label: gitHostConnectionPickerLabel(connection) })),
+  ]);
+  projectConnectionNames = computed(() =>
+    (this.connections() ?? []).filter((connection) => connection.owner.type === 'project').map((connection) => connection.name),
+  );
+  created = signal<{ name: string; repository: TaskRepositoryResponse | null } | null>(null);
 
   get repositoryError(): string | null {
     const url = this.form.repository.trim();
@@ -185,6 +212,37 @@ export class ConnectRepositoryComponent implements OnInit {
       this.revealFirstInvalid(() => this.host.nativeElement);
       return;
     }
+    this.step.set('git-host');
+    this.loadConnections();
+  }
+
+  repositoryHostName(): string {
+    return repositoryHost(this.form.repository) ?? this.form.repository.trim();
+  }
+
+  gitHubAccount(): string | null {
+    if (this.repositoryHostName() !== 'github.com') return null;
+    const web = repositoryWebUrl(this.form.repository.trim());
+    return web ? (new URL(web).pathname.split('/')[1] ?? null) : null;
+  }
+
+  loadConnections(selectId: string | null = null): void {
+    this.connections.set(null);
+    this.gitHostConnections.list(this.connectionOwner(), this.form.repository.trim()).subscribe({
+      next: (list) => {
+        this.connections.set(list);
+        const fitting = this.fittingConnections();
+        this.selectedConnectionId.set(selectId ?? (fitting.length === 1 ? fitting[0].id : null));
+      },
+      error: () => this.connections.set([]),
+    });
+  }
+
+  openCreateConnection(): void {
+    this.connectionDialog()?.openCreate({ base_url: this.form.repository.trim() });
+  }
+
+  continueFromGitHost(): void {
     this.step.set('access');
     if (this.usesSsh() && this.deployKey() === null) {
       this.projects.getSSHKey(this.projectName).subscribe({
@@ -246,12 +304,17 @@ export class ConnectRepositoryComponent implements OnInit {
         wildcard: this.form.wildcard.trim() || DEFAULT_WILDCARD,
         exec_enabled: this.form.exec_enabled,
         triggers: buildTaskCreationTriggersFromWizardChoices({ ...this.form, suggestions: this.suggestions() }),
+        ...(this.selectedConnectionId() === null ? {} : { git_host_connection: this.selectedConnectionId() || null }),
       })
       .subscribe({
         next: (task) => {
           this.creating.set(false);
           this.notify.success('Task created');
-          this.router.navigateByUrl(links.task(this.projectName, task.name));
+          this.created.set({ name: task.name, repository: null });
+          this.tasks.getRepository(this.projectName, task.name).subscribe({
+            next: (repository) => this.created.set({ name: task.name, repository }),
+            error: () => this.router.navigateByUrl(links.task(this.projectName, task.name)),
+          });
         },
         error: (error: unknown) => {
           this.creating.set(false);
