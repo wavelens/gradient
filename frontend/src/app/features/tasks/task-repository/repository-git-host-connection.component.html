@@ -9,7 +9,7 @@
   @if (step().state === 'off') {
     <span class="text-secondary">{{ step().detail }}</span>
   } @else if (pickerOptions().length === 1) {
-    <p class="gr-form-aside" data-testid="no-connections">
+    <p class="no-connections" data-testid="no-connections">
       <span>{{ step().detail }}</span>
       @if (state().can_manage_integrations) {
         <button grButton size="small" label="New connection" icon="add" [severity]="isPrimary('create_connection') ? 'primary' : 'secondary'"

@@ -27,6 +27,7 @@ import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain
 
     .connection-picker { display: flex; flex-wrap: wrap; gap: $spacing-sm; align-items: center; }
     .connection-picker > gr-select { flex: 1 1 12rem; min-width: 0; }
+    .no-connections { display: flex; flex-wrap: wrap; align-items: center; gap: $spacing-sm; margin: 0; overflow-wrap: anywhere; }
   `,
 })
 export class RepositoryGitHostConnectionComponent {
