@@ -132,6 +132,7 @@ pub fn install_url(app_page_url: &str) -> String {
 }
 
 const GITHUB_APP_PAGE_URL_LOOKUP_RETRY_DELAY_AFTER_FAILURE: Duration = Duration::from_secs(300);
+const GITHUB_APP_PAGE_URL_LOOKUP_INTERVAL_AFTER_FOUND: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Default)]
 struct GitHubAppPageUrlLookupState {
@@ -153,13 +154,15 @@ impl GitHubAppPageUrlCache {
         F: Future<Output = Result<String>> + Send + 'static,
     {
         let mut state = self.lock_page_url_lookup_state();
-        if state.page_url.is_some() {
-            return state.page_url.clone();
-        }
-        let retry_due = state
+        let delay = if state.page_url.is_some() {
+            GITHUB_APP_PAGE_URL_LOOKUP_INTERVAL_AFTER_FOUND
+        } else {
+            GITHUB_APP_PAGE_URL_LOOKUP_RETRY_DELAY_AFTER_FAILURE
+        };
+        let lookup_due = state
             .last_page_url_lookup_finished_at
-            .is_none_or(|at| at.elapsed() >= GITHUB_APP_PAGE_URL_LOOKUP_RETRY_DELAY_AFTER_FAILURE);
-        if retry_due && !state.page_url_lookup_task_is_running {
+            .is_none_or(|at| at.elapsed() >= delay);
+        if lookup_due && !state.page_url_lookup_task_is_running {
             state.page_url_lookup_task_is_running = true;
             let finish = PageUrlLookupFinishOnDrop(Arc::clone(self));
             let lookup = look_up();
@@ -168,7 +171,7 @@ impl GitHubAppPageUrlCache {
                 finish.store_page_url(result);
             });
         }
-        None
+        state.page_url.clone()
     }
 
     fn lock_page_url_lookup_state(&self) -> MutexGuard<'_, GitHubAppPageUrlLookupState> {
@@ -380,9 +383,11 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn cached_page_url_is_returned_without_new_lookup_after_retry_delay() {
+    async fn found_page_url_is_refreshed_after_one_day_and_last_found_url_is_returned_until_renamed_app_url_refresh_succeeds()
+     {
         let cache = Arc::new(GitHubAppPageUrlCache::default());
         let lookups = Arc::new(AtomicUsize::new(0));
+        let renamed = "https://github.com/apps/gradient-renamed";
 
         get_cached_page_url_and_count_started_background_lookups(
             &cache,
@@ -398,6 +403,33 @@ mod tests {
         );
         assert_eq!(cached.as_deref(), Some(EXAMPLE_GITHUB_APP_PAGE_URL));
         assert_eq!(lookups.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(GITHUB_APP_PAGE_URL_LOOKUP_INTERVAL_AFTER_FOUND).await;
+        let cached = get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            page_url_lookup_fails_when_github_is_unreachable(),
+        );
+        assert_eq!(cached.as_deref(), Some(EXAMPLE_GITHUB_APP_PAGE_URL));
+        assert_eq!(lookups.load(Ordering::SeqCst), 2);
+        wait_until_cache_lookup_task_finishes(&cache).await;
+
+        tokio::time::advance(GITHUB_APP_PAGE_URL_LOOKUP_INTERVAL_AFTER_FOUND).await;
+        let cached = get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            async move { Ok(renamed.to_owned()) },
+        );
+        assert_eq!(cached.as_deref(), Some(EXAMPLE_GITHUB_APP_PAGE_URL));
+        assert_eq!(lookups.load(Ordering::SeqCst), 3);
+        wait_until_cache_lookup_task_finishes(&cache).await;
+        let cached = get_cached_page_url_and_count_started_background_lookups(
+            &cache,
+            &lookups,
+            page_url_lookup_fails_when_github_is_unreachable(),
+        );
+        assert_eq!(cached.as_deref(), Some(renamed));
+        assert_eq!(lookups.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
