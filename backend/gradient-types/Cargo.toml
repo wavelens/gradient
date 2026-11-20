@@ -27,6 +27,7 @@ base64     = { workspace = true }
 chrono     = { workspace = true }
 clap       = { workspace = true }
 hex        = { workspace = true }
+percent-encoding = { workspace = true }
 ipnet      = { workspace = true }
 rand       = { workspace = true }
 serde      = { workspace = true }

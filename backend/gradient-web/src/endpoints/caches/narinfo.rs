@@ -48,7 +48,7 @@ fn with_narinfo_headers(mut response: Response, cache_status: &'static str) -> R
     operation_id = "getCacheRoot",
     tag = "nix-cache",
     summary = "Cache root",
-    description = "Redirects to `nix-cache-info`.",
+    description = "The response is a redirect to `nix-cache-info`. A request for an HTML page goes to the cache page of the web frontend instead.",
     params(("cache" = String, Path)),
     responses((status = FOUND, description = "Redirect to `/cache/{cache}/nix-cache-info`"))
 )]

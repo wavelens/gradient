@@ -606,14 +606,27 @@ pub(crate) fn metrics_api() -> OpenApiRouter<Arc<ServerState>> {
     )
 }
 
+pub(crate) fn cache_metadata_routes() -> OpenApiRouter<Arc<ServerState>> {
+    optionally_secured(
+        OpenApiRouter::new()
+            .routes(routes!(caches::narinfo::cache_root))
+            .route("/cache/{cache}/", get(caches::narinfo::cache_root))
+            .routes(routes!(caches::narinfo::gradient_cache_info))
+            .routes(routes!(caches::narinfo::nix_cache_info)),
+        CACHE_BASIC,
+    )
+}
+
+pub(crate) fn narinfo_routes() -> OpenApiRouter<Arc<ServerState>> {
+    optionally_secured(
+        OpenApiRouter::new().routes(routes!(caches::narinfo::path)),
+        CACHE_BASIC,
+    )
+}
+
 pub(crate) fn cache_routes() -> OpenApiRouter<Arc<ServerState>> {
     let router = OpenApiRouter::new()
-        .routes(routes!(caches::narinfo::cache_root))
-        .route("/cache/{cache}/", get(caches::narinfo::cache_root))
-        .routes(routes!(caches::narinfo::gradient_cache_info))
-        .routes(routes!(caches::narinfo::nix_cache_info))
         .routes(routes!(caches::debuginfo::debuginfo))
-        .routes(routes!(caches::narinfo::path))
         .routes(routes!(caches::realisation::realisation))
         .routes(routes!(caches::nar::nar));
     optionally_secured(
@@ -622,9 +635,18 @@ pub(crate) fn cache_routes() -> OpenApiRouter<Arc<ServerState>> {
     )
 }
 
+pub(crate) fn cache_nar_file_listing_route() -> OpenApiRouter<Arc<ServerState>> {
+    optionally_secured(
+        OpenApiRouter::new().routes(routes!(caches::narlist::ls)),
+        CACHE_BASIC,
+    )
+}
+
 pub(crate) fn cache_inspect() -> OpenApiRouter<Arc<ServerState>> {
-    let router = OpenApiRouter::new().routes(routes!(caches::narlist::ls));
-    optionally_secured(wildcard(router, routes!(caches::serve::serve)), CACHE_BASIC)
+    optionally_secured(
+        wildcard(OpenApiRouter::new(), routes!(caches::serve::serve)),
+        CACHE_BASIC,
+    )
 }
 
 pub(crate) fn cache_log() -> OpenApiRouter<Arc<ServerState>> {

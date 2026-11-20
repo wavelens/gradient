@@ -5,6 +5,7 @@
  */
 
 mod admit;
+pub(crate) mod binary_cache_browser_redirect;
 pub mod build_log;
 pub(crate) mod debuginfo;
 mod helpers;

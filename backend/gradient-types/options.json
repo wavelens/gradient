@@ -51,6 +51,19 @@
   },
   {
     "group": "",
+    "field": "frontend_redirect_browser_requests_to_frontend_pages",
+    "flag": "frontend-redirect-browser-requests-to-frontend-pages",
+    "env": "GRADIENT_FRONTEND_REDIRECT_BROWSER_REQUESTS_TO_FRONTEND_PAGES",
+    "type": "bool",
+    "description": "Whether requests for an HTML page on a URL of a binary cache redirect to the matching page in\nthe web frontend. A click on a link to a store path in a terminal is one example. Redirects\nhappen on the cache root, `nix-cache-info`, `gradient-cache-info`, `<hash>.narinfo` and\n`ls/<hash>`. Requests ask for an HTML page when their `Accept` headers list `text/html`. Nix,\ncurl and API clients receive the plain response unchanged. Set this option to `false` on a\nserver without a web frontend.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
     "field": "source_commit_hash",
     "flag": "source-commit-hash",
     "env": "GRADIENT_SOURCE_COMMIT_HASH",

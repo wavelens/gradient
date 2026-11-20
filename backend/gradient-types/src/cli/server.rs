@@ -29,6 +29,14 @@ pub struct ServerArgs {
     /// URL of an image to display instead of the Gradient logo on the sign-in pages, in its
     /// original colors. Set it to `null` to keep the Gradient logo.
     pub frontend_logo_url: Option<String>,
+    /// Whether requests for an HTML page on a URL of a binary cache redirect to the matching page in
+    /// the web frontend. A click on a link to a store path in a terminal is one example. Redirects
+    /// happen on the cache root, `nix-cache-info`, `gradient-cache-info`, `<hash>.narinfo` and
+    /// `ls/<hash>`. Requests ask for an HTML page when their `Accept` headers list `text/html`. Nix,
+    /// curl and API clients receive the plain response unchanged. Set this option to `false` on a
+    /// server without a web frontend.
+    #[arg(default_value = "true")]
+    pub frontend_redirect_browser_requests_to_frontend_pages: bool,
     /// Git commit of the Gradient source on this server. The web interface can display this commit
     /// next to the version in the footer. The NixOS module of the Gradient flake can set this value
     /// from the flake revision. Set this value to `null` to show the version only.
