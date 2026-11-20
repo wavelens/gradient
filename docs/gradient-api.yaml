@@ -24563,6 +24563,25 @@ components:
           type:
             type: string
             enum:
+            - change_webhook_secret
+      - type: object
+        required:
+        - trigger_type
+        - type
+        properties:
+          trigger_type:
+            $ref: '#/components/schemas/TriggerType'
+          type:
+            type: string
+            enum:
+            - add_trigger
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
             - turn_on_report_status
       - type: object
         required:
