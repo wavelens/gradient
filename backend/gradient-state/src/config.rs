@@ -5,6 +5,8 @@
  */
 
 use gradient_entity::project_cache::CacheSubscriptionMode;
+use gradient_git_host::repository_fit::GitHostConnectionAddress;
+use gradient_types::git_host::GitHostConnectionCapabilities;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerType};
 use gradient_types::{
     DEFAULT_TASK_WILDCARD, GitHostType, NIXOS_CACHE_NAME, NIXOS_CACHE_PUBLIC_KEY, NIXOS_CACHE_URL,
@@ -201,6 +203,31 @@ impl StateGitHostConnection {
     pub fn reports_status(&self) -> bool {
         self.reports_status
             .unwrap_or(self.git_host_type() == Some(GitHostType::GitHub))
+    }
+
+    pub fn address(&self) -> Option<GitHostConnectionAddress<'_>> {
+        Some(GitHostConnectionAddress {
+            git_host_type: self.git_host_type()?,
+            base_url: self
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|url| !url.is_empty()),
+            github_app_account: self.installation_id.and(self.account_login.as_deref()),
+        })
+    }
+
+    pub fn capabilities(&self) -> GitHostConnectionCapabilities {
+        GitHostConnectionCapabilities {
+            github_app: self.installation_id.is_some(),
+            receives_events: self.receives_events,
+            reports_status: self.reports_status(),
+            has_base_url: self
+                .address()
+                .is_some_and(|address| address.base_url.is_some()),
+            has_access_token: self.access_token_file.is_some(),
+            has_webhook_secret: self.secret_file.is_some(),
+        }
     }
 }
 

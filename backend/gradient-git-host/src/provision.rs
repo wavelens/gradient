@@ -125,8 +125,7 @@ pub async fn install_webhook(
         GitHostType::GitLab => "per_page=100",
         _ => "limit=50",
     };
-    let installed: Vec<InstalledWebhook> =
-        client.get_json(&format!("{hooks_path}?{page}")).await?;
+    let installed: Vec<InstalledWebhook> = client.get_json(&format!("{hooks_path}?{page}")).await?;
     let mut same_url = installed
         .into_iter()
         .filter(|hook| hook.url() == Some(webhook_url));
@@ -346,7 +345,9 @@ mod tests {
             .await;
         Mock::given(method("PUT"))
             .and(path("/api/v4/projects/group%2Fapp/hooks/3"))
-            .and(body_partial_json(json!({ "url": "https://ci/hook", "token": "new" })))
+            .and(body_partial_json(
+                json!({ "url": "https://ci/hook", "token": "new" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 3 })))
             .expect(1)
             .mount(&server)
