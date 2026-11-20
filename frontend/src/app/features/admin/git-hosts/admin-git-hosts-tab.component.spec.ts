@@ -64,14 +64,14 @@ describe('AdminGitHostsTabComponent', () => {
     expect(fixture.componentInstance.canDeactivate()).toBe(true);
   });
 
-  it('lists GitHub App installations only under the GitHub App', () => {
+  it('lists only installations of the GitHub App under the GitHub App', () => {
     const { root } = setup([connection('github-acme', 'github'), connection('gitea-main', 'gitea')], true);
     const instanceList = root.querySelector(':scope > gr-settings-section app-git-host-connection-list')!;
     expect(instanceList.textContent).toContain('gitea-main');
     expect(instanceList.textContent).not.toContain('github-acme');
   });
 
-  it('offers New connection only when the instance list shows a row', () => {
+  it('provides New connection only when the instance list has a row', () => {
     const { root } = setup([connection('github-acme', 'github')], true);
     const header = root.querySelector(':scope > gr-settings-section .settings-section__actions')!;
     expect(header.textContent).not.toContain('New connection');

@@ -54,7 +54,7 @@ function render(getRepository: () => unknown, member = true, canEdit = member, t
 }
 
 describe('TaskRepositoryComponent', () => {
-  it('lays the four chain steps out as the sections of the page, in chain order', () => {
+  it('places the four chain steps in chain order as page sections', () => {
     const getRepository = vi.fn(() => of(state));
     const el = render(getRepository).nativeElement as HTMLElement;
     expect(getRepository).toHaveBeenCalledWith('acme', 'app');
@@ -68,7 +68,7 @@ describe('TaskRepositoryComponent', () => {
     expect(Array.from(el.querySelectorAll('textarea')).map((t) => t.value)).toContain('ssh-ed25519 AAAAkey');
   });
 
-  it('gives the page one primary button, on the first step that needs action', () => {
+  it('provides the page with one primary button at the first step that needs action', () => {
     const chain = {
       ...chainWithoutConnection,
       repository: { state: 'failing' as const, detail: 'Repository fetch failed', action: { type: 'edit_repository_url' as const } },
@@ -111,7 +111,7 @@ describe('TaskRepositoryComponent', () => {
     expect(fixture.componentInstance.canDeactivate()).toBe(true);
   });
 
-  it('drops a reload that a newer reload replaced', () => {
+  it('discards a reload that a new reload replaced', () => {
     const requests = [new Subject<TaskRepositoryResponse>(), new Subject<TaskRepositoryResponse>(), new Subject<TaskRepositoryResponse>()];
     const getRepository = vi.fn(() => requests[getRepository.mock.calls.length - 1]);
     const fixture = render(getRepository);

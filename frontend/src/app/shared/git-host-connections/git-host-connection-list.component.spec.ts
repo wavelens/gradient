@@ -98,20 +98,20 @@ describe('GitHostConnectionListComponent', () => {
     github_installation_id: 42,
   };
 
-  it('lists only the connections of the chosen git host types', () => {
+  it('shows only the connections of the selected type of git host', () => {
     const { el } = render(writable, [own, installation], {}, { gitHostTypes: ['github'] });
     const names = Array.from(el.querySelectorAll('.connection-row')).map((row) => row.textContent);
     expect(names).toHaveLength(1);
     expect(names[0]).toContain('acme');
   });
 
-  it('shows nothing for an empty list without an empty state', () => {
+  it('shows nothing for an empty list with no empty-state placeholder', () => {
     const { el } = render(writable, [own], {}, { gitHostTypes: ['github'], showsEmptyState: false });
     expect(el.querySelector('gr-empty-state')).toBeNull();
     expect(el.querySelector('.connection-row')).toBeNull();
   });
 
-  it('marks a connection shown on request and loads the list again', () => {
+  it('marks the connection shown on request and reloads the list', () => {
     const { fixture, el, component, list } = render(writable, [own, installation]);
     component.showConnection('c3');
     fixture.detectChanges();
@@ -119,7 +119,7 @@ describe('GitHostConnectionListComponent', () => {
     expect(el.querySelector('#connection-c3')?.classList).toContain('connection-row-linked');
   });
 
-  it('lists the own connections first and names the owner of inherited ones without actions', () => {
+  it('lists own connections first and shows the owner of inherited connections without actions', () => {
     const { el, list } = render(writable, [inherited, own]);
     expect(list).toHaveBeenCalledWith(project);
     const all = Array.from(el.querySelectorAll<HTMLElement>('.connection-row'));
@@ -129,7 +129,7 @@ describe('GitHostConnectionListComponent', () => {
     expect(el.querySelectorAll('h2').length).toBe(0);
   });
 
-  it('shows the health of a connection in one line', () => {
+  it('shows connection health in one line', () => {
     const healthy: GitHostConnectionSummary = {
       ...own,
       access_token_refreshes_automatically: true,
@@ -159,7 +159,7 @@ describe('GitHostConnectionListComponent', () => {
     expect(healthLine.querySelector('time.connection-delivery-time')?.getAttribute('datetime')).toBe('2026-01-02T00:00:00Z');
   });
 
-  it('shows a refused signature instead of no events yet', () => {
+  it("displays rejected signatures instead of 'No events yet'", () => {
     const health = render(writable, [{ ...own, refused_signature_count: 1, last_refused_signature_at: '2026-01-02T00:00:00Z' }]).el
       .querySelector('[data-testid="connection-health"]')!.textContent!;
     expect(health).toContain('Refused a delivery with a wrong signature');
@@ -173,7 +173,7 @@ describe('GitHostConnectionListComponent', () => {
     expect(health).not.toContain('1 refused signatures');
   });
 
-  it('expands the tasks of a connection with links to their Repository page', () => {
+  it('shows the connection tasks, each with a link to its Repository page', () => {
     const listTasks = vi.fn(() => of([{ id: 't1', project: 'acme', name: 'app', display_name: 'App', repository: 'r', report_status: true }]));
     const { fixture, el } = render(writable, [{ ...own, task_count: 1 }], { listTasks });
     el.querySelector<HTMLButtonElement>('[data-testid="connection-tasks"]')!.click();
@@ -182,13 +182,13 @@ describe('GitHostConnectionListComponent', () => {
     expect(el.querySelector('[data-testid="connection-task-list"] a')?.getAttribute('href')).toBe('/project/acme/task/app/repository');
   });
 
-  it('offers a new connection in the empty state only', () => {
+  it('offers a new connection only in the empty state', () => {
     expect(rows(render(writable, []).el, 'new-connection')).toHaveLength(1);
     TestBed.resetTestingModule();
     expect(rows(render(writable, [inherited]).el, 'new-connection')).toHaveLength(0);
   });
 
-  it('tests a connection and reports the result as a toast', () => {
+  it('tests the connection and reports the result in a toast', () => {
     const test = vi.fn(() => of({ success: true, account: 'ci-bot' }));
     const { el, component, notify } = render(writable, [own], { test });
     el.querySelector<HTMLButtonElement>('[aria-label="Actions for Forgejo"]')!.click();
@@ -197,14 +197,14 @@ describe('GitHostConnectionListComponent', () => {
     expect(notify.success).toHaveBeenCalledWith('Forgejo: signed in as ci-bot');
   });
 
-  it('opens the edit dialog with the full connection', () => {
+  it('opens the edit dialog with the full connection info', () => {
     const get = vi.fn(() => of(full));
     const { el } = render(writable, [own], { get });
     el.querySelector<HTMLButtonElement>('[aria-label="Edit Forgejo"]')!.click();
     expect(get).toHaveBeenCalledWith(project, 'c1');
   });
 
-  it('removes a connection from the actions menu after the confirmation', () => {
+  it('deletes the connection from the actions menu after confirmation', () => {
     const remove = vi.fn(() => of(true));
     const { fixture, el, component, confirm } = render(writable, [own], { delete: remove });
     component.remove(own);
@@ -215,27 +215,27 @@ describe('GitHostConnectionListComponent', () => {
     expect(el.querySelector('[aria-label="Actions for Forgejo"]')).toBeNull();
   });
 
-  it('hides edit and the actions menu from a member who cannot manage connections', () => {
+  it("hides edit and action menu from members who can't manage connections", () => {
     const { el } = render(readOnly, [own]);
     expect(el.querySelector('[aria-label="Edit Forgejo"]')).toBeNull();
     expect(el.querySelector('[aria-label="Actions for Forgejo"]')).toBeNull();
     expect(el.querySelector('[aria-label="Deliveries of Forgejo"]')).not.toBeNull();
   });
 
-  it('tests but never edits a GitHub App connection', () => {
+  it('tests a connection from a GitHub App but never edits that connection', () => {
     const { el } = render(writable, [{ ...own, git_host_type: 'github', display_name: 'GitHub' }]);
     expect(el.querySelector('[aria-label="Actions for GitHub"]')).not.toBeNull();
     expect(el.querySelector('[aria-label="Edit GitHub"]')).toBeNull();
   });
 
-  it('tests but never edits or deletes a connection of declarative state', () => {
+  it('tests connections in declarative state with no edit or delete', () => {
     const { el, component } = render(writable, [{ ...own, managed: true }]);
     expect(el.querySelector('[aria-label="Edit Forgejo"]')).toBeNull();
     el.querySelector<HTMLButtonElement>('[aria-label="Actions for Forgejo"]')!.click();
     expect(component.menuItems().map((item) => item.label)).toEqual(['Test']);
   });
 
-  it('badges the event of the last delivery by its outcome', () => {
+  it('gives the event name of the last delivery a badge for the delivery outcome', () => {
     const failed = {
       ...own,
       last_delivery: { id: 'd1', created_at: '2026-01-01T00:00:00Z', event: 'push', result: 'queued', queued: 1, status_code: 500 } as never,
@@ -245,7 +245,7 @@ describe('GitHostConnectionListComponent', () => {
     expect(badge?.querySelector('.badge')?.classList).toContain('is-danger');
   });
 
-  it('places the opened task list right below the tasks toggle', () => {
+  it('shows the opened task list right below the task toggle', () => {
     const listTasks = vi.fn(() => of([]));
     const { fixture, el } = render(writable, [{ ...own, task_count: 1 }], { listTasks });
     el.querySelector<HTMLButtonElement>('[data-testid="connection-tasks"]')!.click();
@@ -255,7 +255,7 @@ describe('GitHostConnectionListComponent', () => {
     expect(list.previousElementSibling?.getAttribute('data-testid')).toBe('connection-health');
   });
 
-  it('copies the webhook URL from the actions menu and shows it only in the deliveries panel', () => {
+  it('copies the Webhook URL from the action menu and shows that URL only in the delivery panel', () => {
     const withUrl = { ...own, webhook_url: 'https://ci.example.com/hooks/c1' };
     const { fixture, el, component, notify } = render(readOnly, [withUrl]);
     expect(el.querySelector('gr-copy-field')).toBeNull();
@@ -275,7 +275,7 @@ describe('GitHostConnectionListComponent', () => {
     expect(el.querySelector('[aria-label="Actions for GitHub"]')).toBeNull();
   });
 
-  it('shows the OAuth result banner on a project page only', () => {
+  it('shows the banner for the OAuth result only on project pages', () => {
     expect(render().el.querySelector('app-git-host-oauth-return-banner')).not.toBeNull();
   });
 });

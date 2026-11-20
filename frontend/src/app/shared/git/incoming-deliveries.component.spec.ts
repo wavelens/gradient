@@ -32,7 +32,7 @@ describe('deliverySummary', () => {
     expect(deliverySummary(delivery)).toBe(expected);
   });
 
-  it('gives the reason the server found for a delivery that matched no task', () => {
+  it('gives the reason that the server found for a delivery that matched no task', () => {
     const delivery = { ...base, result: 'no_matching_task' as const, queued: 0, detail: 'app tracks acme/app but uses either no connection or a different connection.' };
     expect(deliverySummary(delivery)).toBe('app tracks acme/app but uses either no connection or a different connection.');
   });
@@ -66,7 +66,7 @@ describe('IncomingDeliveriesComponent', () => {
     expect(text).toContain('Refused with HTTP 401: bad');
   });
 
-  it('shows a refused signature newer than every delivery first, also when nothing was delivered', () => {
+  it('shows first a refused signature that is newer than all deliveries even when no deliveries exist', () => {
     const list = vi.fn(() => of<IncomingWebhookDeliveryResponse[]>([]));
     TestBed.configureTestingModule({
       imports: [IncomingDeliveriesComponent],

@@ -40,25 +40,25 @@ const existing: GitHostConnectionResponse = {
   created_at: '2026-01-01T00:00:00Z',
 };
 
-describe('git host connection form', () => {
-  it('reduces a repository URL to the host URL', () => {
+describe('form to connect to a git host', () => {
+  it('shortens repository URL to host URL', () => {
     expect(gitHostBaseUrl('https://git.example.com/acme/app.git')).toBe('https://git.example.com');
     expect(gitHostBaseUrl('git@git.example.com:acme/app.git')).toBe('https://git.example.com');
     expect(gitHostBaseUrl('https://example.com/forgejo')).toBe('https://example.com/forgejo');
   });
 
-  it('prefills type and host from a repository URL', () => {
+  it('prefills type and host from the repository URL', () => {
     const form = emptyGitHostConnectionForm({ base_url: 'https://gitlab.com/acme/app' });
     expect(form.base_url).toBe('https://gitlab.com');
     expect(form.git_host_type).toBe('gitlab');
   });
 
-  it('derives a free name from the host', () => {
+  it('derives an unused name from the host', () => {
     expect(gitHostConnectionNameFromHost('https://git.example.com', [])).toBe('git-example');
     expect(gitHostConnectionNameFromHost('https://git.example.com', ['git-example'])).toBe('git-example-2');
   });
 
-  it('asks for the host URL and refuses a taken name', () => {
+  it('requires a host URL and rejects a name already used by another connection', () => {
     const form = { ...emptyGitHostConnectionForm(), name: 'taken' };
     expect(gitHostConnectionFormErrors(form, { editing: null, existingNames: ['taken'] })).toEqual({
       base_url: 'Enter the host URL.',
@@ -66,13 +66,13 @@ describe('git host connection form', () => {
     });
   });
 
-  it('asks for a token once reporting status is turned on and refuses a connection without capabilities', () => {
+  it('needs a token when status reporting is enabled and denies connections that lack capabilities', () => {
     const form = { ...emptyGitHostConnectionForm({ base_url: 'https://git.example.com' }), reports_status: true };
     expect(gitHostConnectionFormErrors(form, creating)).toEqual({ access_token: 'Enter an access token to report status.' });
     expect(gitHostConnectionFormErrors({ ...form, reports_status: false, receives_events: false }, creating).capabilities).toBeDefined();
   });
 
-  it('creates with the derived name and reports status exactly when a token is given', () => {
+  it('creates with the derived name and reports status exactly when the request has an access token', () => {
     const form = { ...emptyGitHostConnectionForm({ base_url: 'https://git.example.com/acme/app' }), access_token: ' tok ' };
     expect(createGitHostConnectionRequest(form, creating)).toEqual({
       name: 'git-example',
@@ -86,14 +86,14 @@ describe('git host connection form', () => {
     expect(createGitHostConnectionRequest({ ...form, access_token: '' }, creating).reports_status).toBe(false);
   });
 
-  it('patches only the changed fields', () => {
+  it('patches only changed fields', () => {
     const form = { ...gitHostConnectionFormFromResponse(existing), display_name: 'Example', reports_status: false };
     const context = { editing: existing, existingNames: ['git-example'] };
     expect(gitHostConnectionFormErrors(form, context)).toEqual({});
     expect(patchGitHostConnectionRequest(form, existing, context)).toEqual({ display_name: 'Example', reports_status: false });
   });
 
-  it('finds advanced settings only when one differs from its default', () => {
+  it('detects advanced settings only when one setting is not the default', () => {
     const context = { editing: existing, existingNames: [] };
     const saved = gitHostConnectionFormFromResponse(existing);
     expect(hasNonDefaultAdvancedSettings(emptyGitHostConnectionForm(), creating)).toBe(false);

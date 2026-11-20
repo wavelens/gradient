@@ -85,14 +85,14 @@ function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object =
 }
 
 describe('RepositoryIncomingEventsComponent', () => {
-  it('heads the section with the incoming events step and its state', () => {
+  it('shows the section heading with the incoming events step and its state', () => {
     const { el } = render();
     expect(el.querySelector('h2')?.textContent).toBe('Incoming events');
     expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Incomplete');
     expect(el.querySelector('[data-testid="step-status"]')?.textContent).toContain('No webhook events yet');
   });
 
-  it('shows only its state while the connection step blocks it', () => {
+  it('shows only its own state with the connection step blocking it', () => {
     const chain = { ...waiting, connection: { state: 'attention' as const, detail: 'No connection' }, incoming_events: { state: 'off' as const, detail: 'Connection required' } };
     const { el } = render({ chain, git_host_connection: null });
     expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Connection required');
@@ -111,7 +111,7 @@ describe('RepositoryIncomingEventsComponent', () => {
     expect(changed).toHaveBeenCalled();
   });
 
-  it('gives the webhook URL and the host webhook settings when the webhook must be added by hand', () => {
+  it('shows the webhook URL and a link to the page with webhook settings on the Git host when a webhook requires manual setup', () => {
     const chain = { ...waiting, incoming_events: { ...waiting.incoming_events, action: { type: 'add_webhook_on_host' as const, webhook_url: 'https://ci.example.com/api/v1/hooks/c1' } } };
     const { el } = render({ chain, can_manage_integrations: false });
     expect((el.querySelector('gr-copy-field input') as HTMLInputElement).value).toBe('https://ci.example.com/api/v1/hooks/c1');
@@ -133,13 +133,13 @@ describe('RepositoryIncomingEventsComponent', () => {
     expect(document.getElementById('connection-secret')?.hasAttribute('cdkFocusInitial')).toBe(true);
   });
 
-  it('links to a new trigger of the missing type when a push matched no task', () => {
+  it('links to a new trigger of the missing type when no tasks match a push', () => {
     const chain = { ...waiting, incoming_events: { state: 'attention' as const, detail: 'push event matched no task', action: { type: 'add_trigger' as const, trigger_type: 'reporter_push' as const } } };
     const { el } = render({ chain });
     expect(el.querySelector('[data-testid="add-trigger"]')?.getAttribute('href')).toBe('/project/acme/task/app/triggers?new_trigger=reporter_push');
   });
 
-  it('shows the last delivery with its time and the earlier deliveries below', () => {
+  it('shows the last delivery with its time and earlier deliveries below', () => {
     const chain = {
       ...waiting,
       incoming_events: { state: 'attention' as const, detail: 'push event matched no task: app has no trigger for push events', at: '2026-11-20T10:00:00' },
