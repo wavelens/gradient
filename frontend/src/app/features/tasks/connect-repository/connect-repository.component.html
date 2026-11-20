@@ -7,6 +7,19 @@
 <gr-page-layout width="form" [breadcrumb]="breadcrumb()" title="Connect repository">
   @if (!access().canEdit) {
     <gr-load-state [error]="missingPermission()" />
+  } @else if (created(); as task) {
+    <gr-settings-section [title]="form.display_name" data-testid="created-task">
+      @if (task.repository; as repository) {
+        <app-task-git-host-chain [chain]="repository.chain" [repository]="repository.repository"
+          [gitHostType]="repository.git_host_connection?.git_host_type ?? null"
+          [repositoryPageLink]="links.taskPage(projectName, task.name, 'repository')" />
+      } @else {
+        <gr-load-state [loading]="true" loadingMessage="Loading the task..." />
+      }
+      <div class="gr-form-actions gr-form-actions--end">
+        <a grButton label="Open task" icon="arrow_forward" [routerLink]="links.task(projectName, task.name)" data-testid="open-task"></a>
+      </div>
+    </gr-settings-section>
   } @else {
     <ol class="connect-steps" aria-label="Steps">
       @for (s of steps; track s.id; let i = $index) {
@@ -43,6 +56,33 @@
           </div>
         </gr-settings-section>
       }
+      @case ('git-host') {
+        <gr-settings-section title="Git host">
+          @if (connections() === null) {
+            <gr-load-state [loading]="true" loadingMessage="Loading git host connections..." />
+          } @else if (fittingConnections().length > 0) {
+            <gr-form-field label="Connection" for="connect-git-host-connection">
+              <gr-select inputId="connect-git-host-connection" [options]="connectionOptions()" optionLabel="label" optionValue="value"
+                [ngModel]="selectedConnectionId() ?? ''" (ngModelChange)="selectedConnectionId.set($event ?? '')" />
+            </gr-form-field>
+          } @else if (gitHubAccount(); as account) {
+            <p class="gr-form-aside" data-testid="no-connection">The GitHub App isn't installed on {{ account }}</p>
+          } @else {
+            <p class="gr-form-aside" data-testid="no-connection">
+              <span>No connection for {{ repositoryHostName() }}</span>
+              @if (canManageIntegrations()) {
+                <button grButton size="small" label="New connection" icon="add" (click)="openCreateConnection()" data-testid="new-connection"></button>
+              }
+            </p>
+          }
+          <div class="gr-form-actions gr-form-actions--end">
+            <button grButton label="Back" severity="secondary" (click)="back()"></button>
+            <button grButton label="Continue" icon="arrow_forward" (click)="continueFromGitHost()"></button>
+          </div>
+        </gr-settings-section>
+        <app-git-host-connection-dialog [owner]="connectionOwner()" [existingNames]="projectConnectionNames()"
+          [repository]="form.repository.trim()" (saved)="loadConnections($event.id)" />
+      }
       @case ('access') {
         <gr-settings-section title="Repository access">
           <gr-form-field label="Repository URL">
@@ -71,7 +111,7 @@
         </gr-settings-section>
       }
       @case ('triggers') {
-        <gr-settings-section title="Triggers and Settings" description="The task and its triggers exist only after `Create task`. No evaluation can run before that.">
+        <gr-settings-section title="Triggers and Settings">
           @if (createError(); as error) {
             <gr-message-banner type="error">{{ error }}</gr-message-banner>
           }
