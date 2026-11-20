@@ -33,9 +33,9 @@ sequenceDiagram
 - Connections with `receives_events` off and unknown connections return `404`.
 - The crypt file can decrypt secrets on the server.
 - Requests from other sources fail at `allowed_ips` with `403`.
-- GitHub `installation` / `installation_repositories` events create or update instance connection `github-<login>` with `save_github_app_installation_and_link_tasks_when_new` (with `github-<installation_id>` if the name is in use). `deleted` events delete that connection.
-- A newly inserted installation can link every unmanaged task without a connection whose GitHub repository belongs to the account, in the same transaction. Updates of an existing installation link nothing.
-- Project connections created through the API or OAuth2 link the unmanaged project tasks on the same known host the same way (`insert_and_link_fitting_tasks`). Team connections, instance connections without a GitHub installation and declarative state never link tasks.
+- GitHub `installation` / `installation_repositories` events create or update an instance connection `github-<login>` with `save_github_app_installation_and_link_tasks_when_new` (with `github-<installation_id>` when the name is in use). GitHub `deleted` events delete that connection.
+- A new install links every unmanaged task that has no connection and has a GitHub repository in the account. The install and link run in one transaction. An update to an existing install links nothing.
+- The API or OAuth2 create project connections. Those connections link unmanaged project tasks on the same known host in the same way (`insert_and_link_fitting_tasks`). Team connections, instance connections without a GitHub install, and declarative state don't link tasks.
 
 ## GitHub App Events
 
