@@ -131,6 +131,25 @@ describe('GitHostConnectionDialogComponent', () => {
     expect(document.getElementById('connection-advanced')).not.toBeNull();
   });
 
+  it('opens Advanced with the webhook secret field marked for focus when asked to change the secret', () => {
+    const { fixture, component } = render();
+    component.openEdit(saved, { focusWebhookSecret: true });
+    fixture.detectChanges();
+    expect(document.getElementById('connection-secret')?.hasAttribute('cdkFocusInitial')).toBe(true);
+  });
+
+  it('shows the webhook URL and the new secret after an edit that changes the secret', () => {
+    const { fixture, component, find, notify } = render();
+    component.openEdit(saved, { focusWebhookSecret: true });
+    component.form.update((form) => ({ ...form, secret: 'whsec-new' }));
+    component.save();
+    fixture.detectChanges();
+    expect(notify.success).not.toHaveBeenCalled();
+    const copied = Array.from(find('webhook-setup')!.querySelectorAll('input'), (input) => input.value);
+    expect(copied).toEqual(['https://ci.example.com/hooks/c1', 'whsec-new']);
+    expect(component.open()).toBe(true);
+  });
+
   it('sends nothing and shows the errors of an incomplete form', () => {
     const { fixture, component, create } = render();
     component.openCreate();
