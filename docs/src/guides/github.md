@@ -46,7 +46,8 @@ Click **Install on GitHub** in the **GitHub App** section. Select the account wi
 |---|---|
 | "Installed on <account>" | Installation is active. The tasks that Gradient linked to the installation open from the link. |
 | "Ask the owner of the account to approve the installation on GitHub." | Installations from a non-owner await approval on GitHub. |
-| "GitHub doesn't report the installation yet." | Events from GitHub haven't arrived yet. Reload the list with **Check again**. |
+| "GitHub doesn't report the installation yet." | Events from GitHub haven't arrived yet. **Open app on GitHub** leads to the App. Failed deliveries show under **Advanced** in the App settings. Reload the list with **Check again**. |
+| "The GitHub App is on GitHub, but this server doesn't have it yet." | The server configuration from step 2 isn't active yet. Apply it and restart the server, then open the page again. |
 
 - Each installation is a connection named `github-<account>` with the instance as owner.
 - Every project can use that connection. The connection can receive events and report status.
