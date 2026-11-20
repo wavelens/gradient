@@ -56,7 +56,7 @@ const full: GitHostConnectionResponse = {
 };
 
 function render(access: AccessState = writable, connections: GitHostConnectionSummary[] = [own, inherited], api: object = {}) {
-  const notify = { success: vi.fn(), failure: vi.fn() };
+  const notify = { success: vi.fn(), failure: vi.fn(), copyToClipboard: vi.fn(() => Promise.resolve()) };
   const confirm = vi.fn((request: ConfirmRequest) => request.action());
   const list = vi.fn(() => of(connections));
   TestBed.configureTestingModule({
@@ -160,6 +160,46 @@ describe('GitHostConnectionListComponent', () => {
     const { el } = render(writable, [{ ...own, git_host_type: 'github', display_name: 'GitHub' }]);
     expect(el.querySelector('[aria-label="Actions for GitHub"]')).not.toBeNull();
     expect(el.querySelector('[aria-label="Edit GitHub"]')).toBeNull();
+  });
+
+  it('badges the event of the last delivery by its outcome', () => {
+    const failed = {
+      ...own,
+      last_delivery: { id: 'd1', created_at: '2026-01-01T00:00:00Z', event: 'push', result: 'queued', queued: 1, status_code: 500 } as never,
+    };
+    const badge = render(writable, [failed]).el.querySelector('[data-testid="connection-health"] gr-badge');
+    expect(badge?.textContent?.trim()).toBe('push');
+    expect(badge?.querySelector('.badge')?.classList).toContain('is-danger');
+  });
+
+  it('places the opened task list right below the tasks toggle', () => {
+    const listTasks = vi.fn(() => of([]));
+    const { fixture, el } = render(writable, [{ ...own, task_count: 1 }], { listTasks });
+    el.querySelector<HTMLButtonElement>('[data-testid="connection-tasks"]')!.click();
+    fixture.detectChanges();
+    const list = el.querySelector('[data-testid="connection-task-list"]')!;
+    expect(list.parentElement?.classList).toContain('connection-summary');
+    expect(list.previousElementSibling?.getAttribute('data-testid')).toBe('connection-health');
+  });
+
+  it('copies the webhook URL from the actions menu and shows it only in the deliveries panel', () => {
+    const withUrl = { ...own, webhook_url: 'https://ci.example.com/hooks/c1' };
+    const { fixture, el, component, notify } = render(readOnly, [withUrl]);
+    expect(el.querySelector('gr-copy-field')).toBeNull();
+    el.querySelector<HTMLButtonElement>('[aria-label="Actions for Forgejo"]')!.click();
+    expect(component.menuItems().map((item) => item.label)).toEqual(['Copy webhook URL']);
+    component.menuItems()[0].command!();
+    expect(notify.copyToClipboard).toHaveBeenCalledWith('https://ci.example.com/hooks/c1', 'webhook URL');
+    el.querySelector<HTMLButtonElement>('[aria-label="Deliveries of Forgejo"]')!.click();
+    fixture.detectChanges();
+    const field = el.querySelector('gr-copy-field');
+    expect(field).not.toBeNull();
+    expect(field!.nextElementSibling?.tagName.toLowerCase()).toBe('app-incoming-deliveries');
+  });
+
+  it('offers no webhook URL for a GitHub App connection', () => {
+    const { el } = render(readOnly, [{ ...own, git_host_type: 'github', display_name: 'GitHub', webhook_url: 'https://ci.example.com/hooks/c1' }]);
+    expect(el.querySelector('[aria-label="Actions for GitHub"]')).toBeNull();
   });
 
   it('shows the OAuth result banner on a project page only', () => {
