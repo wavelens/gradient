@@ -65,6 +65,9 @@ pub enum GitHostConnectionSubcommands {
         /// Types of Git Host
         #[arg(long, value_parser = GIT_HOST_TYPES)]
         host_type: String,
+        /// ID of the GitHub App installation, the number at the end of the installation's settings URL on GitHub. Required for `--host-type github`, which works only with `--owner instance`.
+        #[arg(long, required_if_eq("host_type", "github"))]
+        installation_id: Option<i64>,
         #[command(flatten)]
         settings: GitHostConnectionArgs,
     },
@@ -96,21 +99,57 @@ pub enum GitHostConnectionSubcommands {
         /// Connection name or UUID
         connection: String,
     },
+    /// Sign in to the Git host with the stored access token and show the account or the error of the host.
+    Test {
+        /// Connection name or UUID
+        connection: String,
+    },
+    /// List the tasks that use the connection.
+    Tasks {
+        /// Connection name or UUID
+        connection: String,
+    },
 }
 
 fn on_off(active: bool) -> &'static str {
     if active { "on" } else { "off" }
 }
 
+fn health_of(connection: &GitHostConnectionSummary) -> String {
+    let mut parts = Vec::new();
+    if let Some(account) = &connection.account_login {
+        parts.push(format!("account {account}"));
+    }
+    if let Some(delivery) = &connection.last_delivery {
+        parts.push(format!("last event {} {}", delivery.event, delivery.result));
+    }
+    if connection.refused_signature_count > 0 {
+        parts.push(format!(
+            "{} refused signatures",
+            connection.refused_signature_count
+        ));
+    }
+    match connection.task_count {
+        0 => {}
+        1 => parts.push("1 task".to_owned()),
+        count => parts.push(format!("{count} tasks")),
+    }
+    if connection.managed {
+        parts.push("declarative state".to_owned());
+    }
+    parts.iter().map(|part| format!(", {part}")).collect()
+}
+
 pub fn print_git_host_connection_line(out: Output, connection: &GitHostConnectionSummary) {
     out.human(format!(
-        "{} ({}) {} {}, receives events {}, reports status {}: {}",
+        "{} ({}) {} {}, receives events {}, reports status {}{}: {}",
         connection.name,
         connection.display_name,
         connection.git_host_type,
         GitHostConnectionSetOwner::from(&connection.owner),
         on_off(connection.receives_events),
         on_off(connection.reports_status),
+        health_of(connection),
         connection.id
     ));
 }
@@ -154,6 +193,30 @@ fn print_git_host_connection_fields(out: Output, connection: &GitHostConnectionR
         "Access token setting: {}",
         yes_no(connection.has_access_token)
     ));
+    if let Some(account) = &connection.account_login {
+        out.human(format!("Account: {account}"));
+    }
+    if let Some(expires_at) = &connection.access_token_expires_at {
+        out.human(format!("Access token expires: {expires_at}"));
+    }
+    if let Some(delivery) = &connection.last_delivery {
+        out.human("Last event");
+        print_incoming_webhook_delivery_line(out, delivery);
+    }
+    if let Some(refused_at) = &connection.last_refused_signature_at {
+        out.human(format!(
+            "Refused signatures: {}, last at {refused_at}",
+            connection.refused_signature_count
+        ));
+    }
+    if let Some(post) = &connection.last_status_post {
+        let result = post
+            .error_message
+            .as_deref()
+            .map_or_else(|| "ok".to_owned(), |error| format!("failed: {error}"));
+        out.human(format!("Last status post: {} {result}", post.delivered_at));
+    }
+    out.human(format!("Tasks using it: {}", connection.task_count));
     if connection.managed {
         out.human(
             "This connection is under declarative state management. Edits from the CLI fail.",
@@ -234,6 +297,7 @@ pub async fn run_git_host_connection_subcommand(
         GitHostConnectionSubcommands::Create {
             name,
             host_type,
+            installation_id,
             settings,
         } => {
             let body = CreateGitHostConnectionRequest {
@@ -246,7 +310,7 @@ pub async fn run_git_host_connection_subcommand(
                 secret: settings.secret,
                 receives_events: settings.receives_events,
                 reports_status: settings.reports_status,
-                installation_id: None,
+                installation_id,
             };
             let created = connections
                 .create(&owner, &body)
@@ -347,6 +411,61 @@ pub async fn run_git_host_connection_subcommand(
             deliveries
                 .iter()
                 .for_each(|delivery| print_incoming_webhook_delivery_line(out, delivery));
+        }
+
+        GitHostConnectionSubcommands::Test { connection } => {
+            let id = resolve_git_host_connection_uuid_from_name_or_uuid(
+                &client,
+                &owner,
+                &connection,
+                out,
+            )
+            .await;
+            let checked = connections
+                .check(&owner, &id)
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            if !checked.success {
+                out.err(
+                    ExitKind::Api,
+                    checked
+                        .error
+                        .unwrap_or_else(|| "The Git host refused the access token.".to_owned()),
+                );
+            }
+            out.ok(&checked);
+            match &checked.account {
+                Some(account) => out.human(format!("Signed in as {account}.")),
+                None => out.human("The Git host accepted the access token."),
+            }
+        }
+
+        GitHostConnectionSubcommands::Tasks { connection } => {
+            let id = resolve_git_host_connection_uuid_from_name_or_uuid(
+                &client,
+                &owner,
+                &connection,
+                out,
+            )
+            .await;
+            let tasks = connections
+                .list_tasks(&owner, &id)
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&tasks);
+            if tasks.is_empty() {
+                out.human("No task uses this connection.");
+            }
+            for task in &tasks {
+                out.human(format!(
+                    "{}/{} ({}) {}, commit status report {}",
+                    task.project,
+                    task.name,
+                    task.display_name,
+                    task.repository,
+                    on_off(task.report_status)
+                ));
+            }
         }
     }
 }

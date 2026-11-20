@@ -18,6 +18,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const CONNECTION: &str = "00000000-0000-0000-0000-000000006100";
 const USER: &str = "00000000-0000-0000-0000-000000006101";
 const DELIVERY: &str = "00000000-0000-0000-0000-000000006102";
+const TASK: &str = "00000000-0000-0000-0000-000000006103";
 
 fn ok<T: serde::Serialize>(m: T) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(serde_json::json!({ "error": false, "message": m }))
@@ -186,6 +187,39 @@ async fn test_get_update_delete_and_deliveries_address_one_connection() {
         .await
         .unwrap();
     assert_eq!(deliveries[0].result, DeliveryResult::Queued);
+}
+
+#[tokio::test]
+async fn test_check_and_tasks_address_one_connection() {
+    let server = MockServer::start().await;
+    let one = format!("/api/v1/projects/web/git-host-connections/{CONNECTION}");
+    Mock::given(method("POST"))
+        .and(path(format!("{one}/test")))
+        .respond_with(ok(
+            serde_json::json!({"success": true, "account": "gradient-bot"}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{one}/tasks")))
+        .respond_with(ok(serde_json::json!([{
+            "id": TASK, "project": "web", "name": "app", "display_name": "App",
+            "repository": "https://git.example.com/org/app.git", "report_status": true
+        }])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client(&server);
+    let api = client.git_host_connections();
+    let owner = GitHostConnectionSetOwner::Project("web".into());
+    let checked = api.check(&owner, CONNECTION).await.unwrap();
+    assert!(checked.success);
+    assert_eq!(checked.account.as_deref(), Some("gradient-bot"));
+    let tasks = api.list_tasks(&owner, CONNECTION).await.unwrap();
+    assert_eq!(tasks[0].name, "app");
+    assert!(tasks[0].report_status);
 }
 
 #[test]
