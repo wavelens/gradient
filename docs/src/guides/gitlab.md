@@ -67,8 +67,8 @@ The **Repository** page of the task has a section for each step from connection 
 | Section | Actions |
 |---|---|
 | **Connection** | Pick another fitting connection. **New connection** when none fit |
-| **Incoming events** | **Install webhook** for a token with the Maintainer role. **Add trigger** for the recommended push and merge request triggers |
-| **Commit status** | **Report commit status** on or off. **Test status report** can post a `pending` status to the latest evaluated commit |
+| **Incoming Events** | **Install webhook** for a token with the Maintainer role. **Add trigger** for the recommended push and merge request triggers |
+| **Commit Status** | **Report commit status** on or off. **Test the status report** can post a `pending` status to the latest evaluated commit |
 
 A Developer token needs a manual webhook. **Open webhook settings** can open **Settings -> Webhooks** of the GitLab project. Add a webhook with these values.
 
@@ -149,7 +149,7 @@ Only project members with the Developer role or higher can use `/gradient` comma
 | `403 forbidden_source_ip` | The connection's allowed source IPs do not include the GitLab address |
 | `404` | The webhook URL names a wrong connection, or the connection has **Receives events** off |
 | `200`, but no evaluation | No task with a matching trigger uses this connection, or no task repository URL matches |
-| No status on the commit | **Report commit status** is off on the task's **Repository** page, or the token lacks the `api` scope or the Developer role. **Test status report** shows GitLab's answer |
+| No status on the commit | **Report commit status** is off on the task's **Repository** page, or the token lacks the `api` scope or the Developer role. **Test the status report** shows GitLab's answer |
 
 ## Next Steps
 

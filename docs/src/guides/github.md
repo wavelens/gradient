@@ -45,8 +45,8 @@ Click **Install on GitHub** in the **GitHub App** section and pick the account w
 | Message | Meaning |
 |---|---|
 | "Installed on <account>" | The installation is active. Links lead to the tasks Gradient linked to the installation |
-| "An owner of the account has to approve the install on GitHub." | Installs by non-owners wait for approval on GitHub |
-| "GitHub has not reported the installation yet." | The event from GitHub is still on the way. **Check again** can reload the list |
+| "Ask the owner of the account to approve the installation on GitHub." | Installs by non-owners wait for approval on GitHub |
+| "GitHub doesn't report the installation yet." | The event from GitHub is still on the way. **Check again** can reload the list |
 
 - Each installation is a connection named `github-<account>` with the instance as owner.
 - All projects can use the connection. The connection can receive events and report status.
@@ -69,8 +69,8 @@ Tasks map to one Git host connection each. Push triggers and pull request trigge
     | Section | Actions |
     |---|---|
     | **Connection** | Pick another installation. **Install on GitHub** when none fit |
-    | **Incoming events** | **Add trigger** for the push and pull request triggers |
-    | **Commit status** | **Report commit status** on or off. **Test status report** can post a `pending` status to the head commit of the last evaluation |
+    | **Incoming Events** | **Add trigger** for the push and pull request triggers |
+    | **Commit Status** | **Report commit status** on or off. **Test the status report** can post a `pending` status to the head commit of the last evaluation |
 
     The **Triggers** page and the last step of **Connect repository** also offer the same triggers.
 
@@ -152,7 +152,7 @@ GitHub can merge an entry after a passed check, or drop the entry after a failed
 | `403 superuser required` | The account lacks the superuser flag |
 | Approved reviews don't start evaluation of pull requests from forks | The App predates the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
 | Merge queue entries wait for the Gradient check without end | The App predates the `merge_group` event. Grant **Merge queues** read access and enable **Merge group** under the App's **Permissions & events** |
-| "GitHub has not reported the installation yet." stays after **Check again** | The App webhook doesn't reach `https://gradient.example.com/api/v1/hooks/github`. Check **Advanced -> Recent Deliveries** of the App on GitHub |
+| "GitHub doesn't report the installation yet." stays after **Check again** | The App webhook doesn't reach `https://gradient.example.com/api/v1/hooks/github`. Check **Advanced -> Recent Deliveries** of the App on GitHub |
 | "An instance admin can install the GitHub App on <account>" | Only instance admins can install the App. An instance admin must click **Install on GitHub** |
 | Pushes arrive but no evaluation starts | The task's **Repository** page marks the failing step: no connection, no push trigger, or a repository outside the installation account |
 | No status on the commit | **Report commit status** is off on the task's **Repository** page |

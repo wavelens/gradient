@@ -88,8 +88,8 @@ The **Repository** page of the task has a section for each step from connection 
 | Section | Actions |
 |---|---|
 | **Connection** | Pick another fitting connection. **New connection** when none fit |
-| **Incoming events** | **Install webhook** for a token with admin rights. **Add trigger** for the recommended push and pull request triggers |
-| **Commit status** | **Report commit status** on or off. **Test status report** can post a `pending` status to the latest evaluated commit |
+| **Incoming Events** | **Install webhook** for a token with admin rights. **Add trigger** for the recommended push and pull request triggers |
+| **Commit Status** | **Report commit status** on or off. **Test the status report** can post a `pending` status to the latest evaluated commit |
 
 A token without admin rights needs a manual webhook. **Open webhook settings** can open **Settings -> Webhooks** on the Git host. Add a webhook with these values.
 
@@ -209,7 +209,7 @@ Only repository writers can send `/gradient` commands. Accepted commands receive
 | `403 forbidden_source_ip` | Add the Git host's address to the connection's allowed source IPs |
 | `404` | The webhook URL names a wrong connection, or the connection has **Receives events** off |
 | `200`, but no evaluation | No task with a matching trigger uses this connection, or no task repository URL matches |
-| No status on the commit | **Report commit status** is off on the task's **Repository** page, or the token lacks `write:repository`. **Test status report** shows the Git host's answer |
+| No status on the commit | **Report commit status** is off on the task's **Repository** page, or the token lacks `write:repository`. **Test the status report** shows the Git host's answer |
 | 😕 on a maintainer's `/gradient` comment | The bot account lack admin access to the repository |
 
 ## Next Steps
