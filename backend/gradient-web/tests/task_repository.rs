@@ -783,3 +783,58 @@ async fn an_empty_patch_changes_nothing() {
     assert!(row.report_status);
     s.db.finish().await;
 }
+
+#[tokio::test]
+async fn a_task_of_declarative_state_shows_its_repository_read_only() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let declared = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            true,
+        ),
+    )
+    .await;
+    insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            true,
+        ),
+    )
+    .await;
+    s.db.execute(&format!(
+        "UPDATE task SET managed = true, git_host_connection = '{}'",
+        declared.id
+    ))
+    .await;
+
+    let view = s.server.get(URL).add_header("authorization", &s.auth).await;
+    let patch = s
+        .server
+        .patch(URL)
+        .add_header("authorization", &s.auth)
+        .json(&json!({ "report_status": true }))
+        .await;
+    let status_test = s
+        .server
+        .post(&format!("{URL}/status-test"))
+        .add_header("authorization", &s.auth)
+        .await;
+
+    view.assert_status_ok();
+    let repo = view.json::<Value>()["message"].clone();
+    assert_eq!(repo["can_edit"], false);
+    assert_eq!(repo["chain"]["connection"]["action"], Value::Null, "{repo}");
+    assert_eq!(
+        repo["chain"]["commit_status"]["action"],
+        Value::Null,
+        "{repo}"
+    );
+    patch.assert_status_forbidden();
+    status_test.assert_status_forbidden();
+    assert!(!read_test_task_row_from_database(&s).await.report_status);
+    s.db.finish().await;
+}
