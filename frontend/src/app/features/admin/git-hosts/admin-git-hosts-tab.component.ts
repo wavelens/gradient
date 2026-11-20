@@ -24,9 +24,10 @@ import { GithubAppComponent } from './github-app/github-app.component';
       [card]="false"
     >
       @if (gitHostConnectionList()?.sortedConnections()?.length) {
-        <button slot="actions" grButton label="New connection" icon="add" (click)="gitHostConnectionList()?.openCreate()"></button>
+        <button slot="actions" grButton severity="secondary" label="New connection" icon="add" (click)="gitHostConnectionList()?.openCreate()"></button>
       }
-      <app-git-host-connection-list [gitHostConnectionOwner]="instanceOwner" [access]="superuserAccess" [gitHostTypes]="gitHostTypes" />
+      <app-git-host-connection-list [gitHostConnectionOwner]="instanceOwner" [access]="superuserAccess" [gitHostTypes]="gitHostTypes"
+        [isNewConnectionButtonPrimary]="false" />
     </gr-settings-section>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,

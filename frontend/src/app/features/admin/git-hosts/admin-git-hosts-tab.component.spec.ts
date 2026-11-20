@@ -76,4 +76,13 @@ describe('AdminGitHostsTabComponent', () => {
     const header = root.querySelector(':scope > gr-settings-section .settings-section__actions')!;
     expect(header.textContent).not.toContain('New connection');
   });
+
+  it('Provide New connection as a secondary action next to the section for the GitHub App.', () => {
+    const empty = setup().root.querySelector('[data-testid="new-connection"]');
+    expect(empty?.classList).toContain('gr-button--secondary');
+    TestBed.resetTestingModule();
+    const { root } = setup([connection('gitea-main', 'gitea')]);
+    const header = Array.from(root.querySelectorAll(':scope > gr-settings-section .settings-section__actions button')).find((b) => b.textContent?.includes('New connection'));
+    expect(header?.classList).toContain('gr-button--secondary');
+  });
 });

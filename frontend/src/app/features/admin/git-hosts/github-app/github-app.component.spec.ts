@@ -228,29 +228,65 @@ describe('GithubAppComponent', () => {
       sessionStorage.clear();
     });
 
-    it('Link back to wizard with repository from saved wizard input', () => {
-      setup({ installation_id: '42', setup_action: 'install' }, {});
-      const { root: withoutInput } = render();
-      expect(withoutInput.querySelector('[data-testid="connect-repository-wizard-return"]')).toBeNull();
-      TestBed.resetTestingModule();
-
+    function saveWizardInput(): void {
       saveProjectWizardDraftToSessionStorage({
         project: 'acme',
         step: 'git-host',
-        form: { repository: 'https://github.com/acme/app.git', display_name: 'app', name: 'app', wildcard: 'packages.**', branch: '', polling: true, cron: '', exec_enabled: false },
+        form: { repository: 'https://github.com/acme/hello-world.git', display_name: 'hello-world', name: 'hello-world', wildcard: 'packages.**', branch: '', polling: true, cron: '', exec_enabled: false },
         selectedConnectionId: null,
       });
-      setup({ installation_id: '42', setup_action: 'install' }, {});
-      const { root } = render();
-      const back = root.querySelector('[data-testid="connect-repository-wizard-return"]');
-      expect(back?.getAttribute('href')).toBe('/project/acme/connect');
-      expect(back?.textContent).toContain('github.com/acme/app');
-      expect(back?.classList).toContain('gr-button--primary');
-      expect(root.querySelector('[data-testid="github-app-install"]')?.classList).not.toContain('gr-button--primary');
+    }
 
+    function wizardReturnLink(root: HTMLElement): Element | null {
+      return root.querySelector('[data-testid="connect-repository-wizard-return"]');
+    }
+
+    function primaryButtons(root: HTMLElement): Element[] {
+      return Array.from(root.querySelectorAll('.gr-button--primary:not(.gr-button--text)'));
+    }
+
+    it('Keep one primary action without an App and while no App is on the server', () => {
+      setup({ installation_id: '42', setup_action: 'install' }, {});
+      expect(wizardReturnLink(render().root)).toBeNull();
       TestBed.resetTestingModule();
+
+      saveWizardInput();
       setup();
-      expect(render().root.querySelector('[data-testid="connect-repository-wizard-return"]')?.getAttribute('href')).toBe('/project/acme/connect');
+      const withoutApp = render().root;
+      expect(wizardReturnLink(withoutApp)?.getAttribute('href')).toBe('/project/acme/connect');
+      expect(wizardReturnLink(withoutApp)?.classList).toContain('gr-button--secondary');
+      expect(primaryButtons(withoutApp).map((b) => b.getAttribute('data-testid'))).toEqual(['github-app-create-button']);
+      TestBed.resetTestingModule();
+
+      setup({ installation_id: '42', setup_action: 'install' });
+      const serverWithoutApp = render().root;
+      expect(wizardReturnLink(serverWithoutApp)?.classList).toContain('gr-button--secondary');
+      expect(primaryButtons(serverWithoutApp)).toEqual([]);
+    });
+
+    it('Make the link back to the wizard primary next to a new installation', () => {
+      saveWizardInput();
+      setup({}, {});
+      const withoutReturn = render().root;
+      expect(wizardReturnLink(withoutReturn)?.classList).toContain('gr-button--secondary');
+      expect(primaryButtons(withoutReturn).map((b) => b.getAttribute('data-testid'))).toEqual(['github-app-install']);
+      TestBed.resetTestingModule();
+
+      setup({ installation_id: '42', setup_action: 'install' }, {});
+      connections.list.mockReturnValue(of([installation]));
+      const { root } = render();
+      const links = root.querySelectorAll('[data-testid="connect-repository-wizard-return"]');
+      expect(links).toHaveLength(1);
+      expect(root.querySelector('[data-testid="github-app-returned"]')?.contains(links[0])).toBe(true);
+      expect(primaryButtons(root)).toEqual([links[0]]);
+      expect(root.querySelector('[data-testid="github-app-install"]')?.classList).toContain('gr-button--secondary');
+    });
+
+    it('Hide the link back to the wizard while the App credentials are on screen', () => {
+      saveWizardInput();
+      setup({ ready: '1' });
+      admin.fetchGithubAppCredentials.mockReturnValue(of(credentials));
+      expect(wizardReturnLink(render().root)).toBeNull();
     });
 
     it('shows the new installation and the tasks linked to that installation', () => {
