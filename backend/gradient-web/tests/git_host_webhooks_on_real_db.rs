@@ -592,3 +592,80 @@ async fn a_new_github_app_installation_links_tasks_of_the_installed_account() {
     assert_eq!(foreign.git_host_connection, None);
     db.finish().await;
 }
+
+#[tokio::test]
+async fn a_repeated_installation_event_leaves_task_connection_choices_alone() {
+    let secret = "github-webhook-secret";
+    let secret_file = write_content_to_new_temp_file(secret);
+    let db = TestDatabase::create().await;
+    let conn = db.connection();
+    gradient_db::rows::insert::<gradient_entity::user::Entity, _>(&conn, rows::superuser())
+        .await
+        .unwrap();
+    gradient_db::rows::insert::<gradient_entity::project::Entity, _>(&conn, rows::project())
+        .await
+        .unwrap();
+    for name in ["unlinked", "silent"] {
+        gradient_db::rows::insert::<task::Entity, _>(
+            &conn,
+            task::Model {
+                id: TaskId::now_v7(),
+                name: name.into(),
+                repository: format!("https://github.com/gh-org/{name}"),
+                ..rows::task()
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let server = TestState::new()
+        .web_db(conn.clone())
+        .worker_db(conn.clone())
+        .cli(|cli| {
+            cli.github_app.id = std::num::NonZeroU64::new(1234);
+            cli.github_app.private_key_file = Some("/dev/null".into());
+            cli.github_app.webhook_secret_file = Some(secret_file);
+        })
+        .server();
+    let send = |event: &'static str, action: &str| {
+        let body = serde_json::to_vec(&json!({
+            "action": action,
+            "installation": { "id": 9999, "account": { "login": "gh-org" } },
+            "sender": { "login": "some-user" },
+        }))
+        .unwrap();
+        let signature = format!(
+            "sha256={}",
+            compute_gitea_webhook_signature_hex(secret, &body)
+        );
+        server
+            .post("/api/v1/hooks/github")
+            .add_header("X-GitHub-Event", event)
+            .add_header("X-Hub-Signature-256", signature)
+            .bytes(body.into())
+    };
+
+    send("installation", "created").await.assert_status_ok();
+    db.execute(
+        "UPDATE task SET git_host_connection = NULL, report_status = false WHERE name = 'unlinked'; \
+         UPDATE task SET report_status = false WHERE name = 'silent'",
+    )
+    .await;
+    send("installation", "suspend").await.assert_status_ok();
+    send("installation", "new_permissions_accepted")
+        .await
+        .assert_status_ok();
+    send("installation_repositories", "removed")
+        .await
+        .assert_status_ok();
+
+    let connection = db.rows::<git_host_connection::Entity>().await.remove(0);
+    let tasks = db.rows::<task::Entity>().await;
+    let unlinked = tasks.iter().find(|t| t.name == "unlinked").unwrap();
+    let silent = tasks.iter().find(|t| t.name == "silent").unwrap();
+    assert_eq!(unlinked.git_host_connection, None);
+    assert!(!unlinked.report_status);
+    assert_eq!(silent.git_host_connection, Some(connection.id));
+    assert!(!silent.report_status);
+    db.finish().await;
+}

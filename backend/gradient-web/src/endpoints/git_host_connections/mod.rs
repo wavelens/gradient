@@ -32,6 +32,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::*;
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -293,10 +294,43 @@ pub(crate) async fn response(
     })
 }
 
-pub(crate) async fn link_fitting_tasks_without_connection(
+pub(crate) async fn insert_and_link_fitting_tasks(
+    db: &sea_orm::DatabaseConnection,
+    connection: MGitHostConnection,
+) -> Result<(MGitHostConnection, Vec<MTask>), sea_orm::DbErr> {
+    let txn = db.begin().await?;
+    let created = gradient_db::rows::insert::<EGitHostConnection, _>(&txn, connection).await?;
+    let linked = link_fitting_tasks_without_connection(&txn, &created).await?;
+    txn.commit().await?;
+    Ok((created, linked))
+}
+
+pub(crate) async fn save_github_app_installation_and_link_tasks_when_new(
+    db: &sea_orm::DatabaseConnection,
+    installation_id: i64,
+    account_login: Option<&str>,
+    creator: UserId,
+) -> Result<MGitHostConnection, sea_orm::DbErr> {
+    let txn = db.begin().await?;
+    let saved =
+        gradient_ci::github_app_connection::upsert_github_app_installation_git_host_connection(
+            &txn,
+            installation_id,
+            account_login,
+            creator,
+        )
+        .await?;
+    if saved.inserted {
+        link_fitting_tasks_without_connection(&txn, &saved.connection).await?;
+    }
+    txn.commit().await?;
+    Ok(saved.connection)
+}
+
+async fn link_fitting_tasks_without_connection(
     db: &impl sea_orm::ConnectionTrait,
     connection: &MGitHostConnection,
-) -> WebResult<Vec<MTask>> {
+) -> Result<Vec<MTask>, sea_orm::DbErr> {
     let candidates = match GitHostConnectionOwnerByDatabaseId::of(connection) {
         GitHostConnectionOwnerByDatabaseId::Project(project) => {
             gradient_db::tasks::of_project(project).all(db).await?
@@ -444,15 +478,13 @@ async fn create_github_app_connection(
     .map_err(|e| GitHostConnectionRefusal::InvalidInstallationId {
         reason: e.to_string(),
     })?;
-    Ok(
-        gradient_ci::github_app_connection::upsert_github_app_installation_git_host_connection(
-            ci.db.web_db.inner(),
-            installation_id,
-            Some(&account),
-            user,
-        )
-        .await?,
+    Ok(save_github_app_installation_and_link_tasks_when_new(
+        ci.db.web_db.inner(),
+        installation_id,
+        Some(&account),
+        user,
     )
+    .await?)
 }
 
 pub(crate) async fn create(
@@ -467,7 +499,6 @@ pub(crate) async fn create(
     if git_host == GitHostType::GitHub {
         let created = create_github_app_connection(ci, owner, user, body.installation_id).await?;
         write_audit(audit, Action::GitHostConnectionCreate, &created).await;
-        link_fitting_tasks_without_connection(&ci.db.web_db, &created).await?;
         return response(&ci.db.web_db, serve_url, created).await;
     }
 
@@ -520,11 +551,10 @@ pub(crate) async fn create(
         last_refused_signature_at: None,
     };
     check_capabilities(&connection)?;
-    let created = gradient_db::rows::insert::<EGitHostConnection, _>(&ci.db.web_db, connection)
+    let (created, _) = insert_and_link_fitting_tasks(ci.db.web_db.inner(), connection)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GitHostConnectionName))?;
     write_audit(audit, Action::GitHostConnectionCreate, &created).await;
-    link_fitting_tasks_without_connection(&ci.db.web_db, &created).await?;
     let mut out = response(&ci.db.web_db, serve_url, created).await?;
     out.generated_secret = generated_secret;
     Ok(out)
