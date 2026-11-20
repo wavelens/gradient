@@ -20,9 +20,15 @@ fn ok<T: serde::Serialize>(m: T) -> serde_json::Value {
 }
 
 fn repository() -> serde_json::Value {
+    let off = serde_json::json!({"state": "off", "detail": ""});
     serde_json::json!({
         "repository": "https://git.example.com/org/repo.git", "uses_ssh": false,
         "report_status": false, "status_posts": [], "available_connections": [],
+        "recent_deliveries": [],
+        "chain": {
+            "repository": {"state": "ok", "detail": "git.example.com/org/repo"},
+            "connection": off, "incoming_events": off, "commit_status": off
+        },
         "can_edit": true, "can_manage_integrations": true
     })
 }
