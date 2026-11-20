@@ -63,10 +63,6 @@
               </div>
             </div>
             <div class="connection-actions">
-              @if (canManageRow(connection)) {
-                <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" [attr.aria-label]="'Test ' + connection.display_name"
-                  [loading]="testingId() === connection.id" [disabled]="!!testingId()" (click)="test(connection)"></button>
-              }
               @if (canReadDeliveries(connection)) {
                 <button grButton label="Deliveries" icon="list" severity="secondary" size="small"
                   [attr.aria-label]="'Deliveries of ' + connection.display_name"
