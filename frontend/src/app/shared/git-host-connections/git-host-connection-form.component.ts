@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, booleanAttribute, computed, inject, input, linkedSignal, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, booleanAttribute, computed, inject, input, linkedSignal, model, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BadgeComponent, ButtonComponent, CheckboxComponent, DividerComponent, FormFieldComponent, InputDirective, SelectComponent } from '@gradient/ui/ui';
 import { ConfigService } from '@core/services/config.service';
@@ -16,6 +16,7 @@ import {
   effectiveReportsStatus,
   gitHostBaseUrl,
   gitHostConnectionFormErrors,
+  hasNonDefaultAdvancedSettings,
 } from './git-host-connection-form';
 import { GitHostOAuthSignInComponent } from './git-host-oauth-sign-in.component';
 
@@ -107,9 +108,14 @@ export class GitHostConnectionFormComponent {
   errors = computed(() => gitHostConnectionFormErrors(this.value(), this.context()));
   shownErrors = computed(() => (this.showErrors() ? this.errors() : {}));
   hasErrors = computed(() => Object.keys(this.errors()).length > 0);
-  advancedOpen = linkedSignal(() => {
+  private advancedHasShownErrors = computed(() => {
     const errors = this.shownErrors();
     return !!(errors.capabilities || errors.secret || errors.allowed_ips);
+  });
+  advancedOpen = linkedSignal<boolean, boolean>({
+    source: this.advancedHasShownErrors,
+    computation: (hasErrors, previous) =>
+      hasErrors || (previous ? previous.value : untracked(() => hasNonDefaultAdvancedSettings(this.value(), this.context()))),
   });
 
   offersOAuthSignIn = computed(() => {
