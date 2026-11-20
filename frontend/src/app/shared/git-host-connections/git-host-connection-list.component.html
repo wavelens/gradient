@@ -22,6 +22,7 @@
     <div class="connection-list">
       @for (connection of sortedConnections(); track connection.id) {
         @let own = isOwn(connection);
+        @let latestRefusedDeliveryNewerThanLastAccepted = refusedSignatureNewerThanLastDelivery(connection);
         <div class="connection-row" [class.connection-row-linked]="linkedId() === connection.id" [id]="'connection-' + connection.id"
           [attr.data-testid]="own ? 'own-connection' : 'inherited-connection'">
           <div class="connection-main">
@@ -41,7 +42,7 @@
               </div>
               <div class="connection-meta" data-testid="connection-health">
                 @if (connection.receives_events) {
-                  @if (refusedSignatureNewerThanLastDelivery(connection); as refused) {
+                  @if (latestRefusedDeliveryNewerThanLastAccepted; as refused) {
                     <span>
                       <gr-badge severity="danger">signature</gr-badge>
                       Rejected delivery with invalid signature <time class="connection-delivery-time" [attr.datetime]="refused.at">{{ refused.at | relativeTime }}</time>
@@ -62,7 +63,7 @@
                     <span class="text-secondary">{{ token.text }}</span>
                   }
                 }
-                @if (connection.refused_signature_count; as refused) {
+                @if (!latestRefusedDeliveryNewerThanLastAccepted && connection.refused_signature_count; as refused) {
                   <gr-badge severity="warning">{{ refused === 1 ? '1 refused signature' : refused + ' refused signatures' }}</gr-badge>
                 }
                 @if (connection.task_count; as taskCount) {
@@ -101,7 +102,7 @@
               <gr-copy-field label="Webhook URL" [value]="url" />
             }
             <app-incoming-deliveries [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id"
-              [refusedSignature]="refusedSignatureNewerThanLastDelivery(connection)" />
+              [refusedSignature]="latestRefusedDeliveryNewerThanLastAccepted" />
           }
         </div>
       }
