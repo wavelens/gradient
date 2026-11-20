@@ -218,12 +218,12 @@ fn connection_step(
         ),
         [_, ..] => step(
             TaskGitHostChainStepState::Attention,
-            format!("{} connections match. None selected.", fitting.len()),
+            format!("{} matching connections, none selected", fitting.len()),
             select,
         ),
         [] if repository.host == "github.com" && !input.github_app_configured => step(
             TaskGitHostChainStepState::Attention,
-            "This server doesn't have a GitHub App. An instance admin can configure one.",
+            "No GitHub App, instance admin can configure",
             None,
         ),
         [] if repository.host == "github.com" && input.can_install_github_app => step(
@@ -236,7 +236,7 @@ fn connection_step(
         [] if repository.host == "github.com" => step(
             TaskGitHostChainStepState::Attention,
             format!(
-                "{} does not have the GitHub App. An instance admin can install it.",
+                "GitHub App not installed on {} - instance admin can install",
                 repository.owner
             ),
             None,
@@ -333,7 +333,7 @@ fn incoming_events_step(
             at: Some(refused_at),
             ..step(
                 TaskGitHostChainStepState::Failing,
-                "The last delivery had an invalid signature. The webhook secret doesn't match.",
+                "Rejected last delivery: webhook secret does not match",
                 (!github_app)
                     .then(|| secret_mismatch_action(input, connection))
                     .flatten(),
@@ -367,7 +367,7 @@ fn commit_status_step(
     connection: &GitHostConnectionSummary,
 ) -> TaskGitHostChainStep {
     if !connection.reports_status {
-        return off("The connection doesn't report commit status.");
+        return off("Connection doesn't report commit status");
     }
     if !input.report_status {
         return step(
@@ -395,18 +395,18 @@ fn commit_status_step(
             ..step(
                 TaskGitHostChainStepState::Failing,
                 match (&post.error_message, post.response_status) {
-                    (Some(error), _) => format!("The previous status post failed with {error}"),
+                    (Some(error), _) => format!("Last status post failed: {error}"),
                     (None, Some(status)) => {
-                        format!("The last status post failed with HTTP {status}")
+                        format!("Last status post failed with HTTP {status}")
                     }
-                    (None, None) => "The last status post failed.".to_owned(),
+                    (None, None) => "Last status post failed".to_owned(),
                 },
                 test,
             )
         },
         None => step(
             TaskGitHostChainStepState::Attention,
-            "Gradient has not posted a commit status yet.",
+            "No commit status posted yet",
             test,
         ),
     }
@@ -583,7 +583,7 @@ mod tests {
         });
         assert_eq!(chain.connection.state, Attention);
         assert_eq!(chain.connection.action, None);
-        assert!(chain.connection.detail.contains("doesn't have a GitHub App"));
+        assert!(chain.connection.detail.contains("No GitHub App"));
     }
 
     #[test]

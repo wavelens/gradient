@@ -107,7 +107,7 @@ describe('RepositoryCommitStatusComponent', () => {
   });
 
   it('makes the status report test the primary button when no status was posted yet', () => {
-    const chain = { ...linked, commit_status: { state: 'attention' as const, detail: 'Gradient has not posted a commit status yet.', action: { type: 'test_status_report' as const } } };
+    const chain = { ...linked, commit_status: { state: 'attention' as const, detail: 'No commit status posted yet', action: { type: 'test_status_report' as const } } };
     const postPendingTestCommitStatus = vi.fn(() => of({ success: true, response_status: 201 }));
     const { el, component, notify } = render({ chain, report_status: true }, { postPendingTestCommitStatus }, true);
     const changed = vi.fn();

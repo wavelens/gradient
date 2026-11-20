@@ -45,7 +45,7 @@ const waiting: TaskGitHostChain = {
   repository: { state: 'ok', detail: 'acme/app on forgejo.example.com' },
   connection: { state: 'ok', detail: 'Forgejo' },
   incoming_events: { state: 'attention', detail: 'No webhook events yet', action: { type: 'install_webhook' } },
-  commit_status: { state: 'attention', detail: 'Gradient has not posted a commit status yet.' },
+  commit_status: { state: 'attention', detail: 'No commit status posted yet' },
 };
 
 const state: TaskRepositoryResponse = {
