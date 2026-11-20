@@ -116,7 +116,7 @@ services.gradient.state = {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `access_token_file` | null or path | `null` | Path to a file with an API token for the git host. Needed to post commit statuses and create pull requests. |
-| `account_login` | null or string | `null` | GitHub login of the installation account. Used for naming only. |
+| `account_login` | null or string | `null` | GitHub user or organization the App is installed on. Required for `git_host_type = "github"`. Only repositories of this account fit the connection. |
 | `base_url` | null or string | `null` | Base URL for the Git host API (for example, `https://gitea.example.com`). |
 | `created_by` | string | - | Name of the user who created the connection. |
 | `display_name` | null or string | `null` | A human-readable name to display for the connection. |

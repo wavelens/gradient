@@ -78,6 +78,17 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 "git_host_type 'github' requires a positive installation_id",
             );
         }
+        if is_github
+            && connection
+                .account_login
+                .as_deref()
+                .is_none_or(|login| login.trim().is_empty())
+        {
+            errors.push(
+                field("account_login"),
+                "git_host_type 'github' requires the account_login of the installation. Only repositories of that account fit the connection.",
+            );
+        }
         if connection.installation_id.is_some()
             && !(is_github && owner == Some(GitHostConnectionOwner::Instance))
         {
