@@ -24,7 +24,6 @@ fn repository() -> serde_json::Value {
     serde_json::json!({
         "repository": "https://git.example.com/org/repo.git", "uses_ssh": false,
         "report_status": false, "status_posts": [], "available_connections": [],
-        "recent_deliveries": [],
         "chain": {
             "repository": {"state": "ok", "detail": "git.example.com/org/repo"},
             "connection": off, "incoming_events": off, "commit_status": off

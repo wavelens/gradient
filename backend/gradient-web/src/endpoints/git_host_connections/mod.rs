@@ -64,15 +64,19 @@ pub struct GitHostConnectionSummary {
     pub base_url: Option<String>,
     pub receives_events: bool,
     pub reports_status: bool,
+    #[schema(required = false, default = false)]
     pub can_manage: bool,
     pub account_login: Option<String>,
     pub webhook_url: Option<String>,
     pub access_token_expires_at: Option<chrono::NaiveDateTime>,
+    #[schema(required = false, default = false)]
     pub access_token_refreshes_automatically: bool,
     pub last_delivery: Option<IncomingWebhookDeliveryResponse>,
+    #[schema(required = false, default = 0)]
     pub refused_signature_count: i64,
     pub last_refused_signature_at: Option<chrono::NaiveDateTime>,
     pub last_status_post: Option<TaskCommitStatusPostAttempt>,
+    #[schema(required = false, default = 0)]
     pub task_count: u64,
     pub repository_fit: Option<RepositoryFit>,
 }

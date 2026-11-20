@@ -20535,10 +20535,6 @@ components:
       - git_host_type
       - receives_events
       - reports_status
-      - can_manage
-      - access_token_refreshes_automatically
-      - refused_signature_count
-      - task_count
       properties:
         id:
           $ref: '#/components/schemas/GitHostConnectionId'
@@ -20560,6 +20556,7 @@ components:
           type: boolean
         can_manage:
           type: boolean
+          default: false
         account_login:
           type:
           - string
@@ -20575,6 +20572,7 @@ components:
           format: date-time
         access_token_refreshes_automatically:
           type: boolean
+          default: false
         last_delivery:
           oneOf:
           - $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
@@ -20582,6 +20580,7 @@ components:
         refused_signature_count:
           type: integer
           format: int64
+          default: 0
         last_refused_signature_at:
           type:
           - string
@@ -20594,6 +20593,7 @@ components:
         task_count:
           type: integer
           format: int64
+          default: 0
           minimum: 0
         repository_fit:
           oneOf:
@@ -24653,7 +24653,6 @@ components:
       - uses_ssh
       - report_status
       - chain
-      - recent_deliveries
       - status_posts
       - available_connections
       - can_edit
@@ -24683,6 +24682,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+          default: []
         status_posts:
           type: array
           items:
