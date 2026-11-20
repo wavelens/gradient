@@ -7,7 +7,9 @@
 @use '@gradient/ui/styles/variables' as *;
 
 :host {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
 }
 
 .connection-list {
@@ -25,6 +27,26 @@
   background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
+}
+
+.connection-row-linked {
+  border-color: var(--gr-accent);
+}
+
+.connection-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-sm $spacing-md;
+}
+
+.connection-summary {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  min-width: 0;
+  flex: 1 1 20rem;
 }
 
 .connection-name,
@@ -54,12 +76,8 @@
   }
 }
 
-.field-with-button {
-  display: flex;
-  gap: $spacing-sm;
-
-  input {
-    flex: 1;
-    min-width: 0;
-  }
+.connection-tasks {
+  margin: 0;
+  padding-left: $spacing-lg;
+  font-size: $font-size-sm;
 }

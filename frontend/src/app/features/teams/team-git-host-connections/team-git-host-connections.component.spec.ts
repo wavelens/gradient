@@ -40,7 +40,7 @@ function setup(role: TeamResponse['role'], superuser = false) {
       {
         provide: ActivatedRoute,
         useValue: {
-          snapshot: { paramMap: convertToParamMap({ team: 'platform' }), data: { teamAccess: { team: resolved } } },
+          snapshot: { paramMap: convertToParamMap({ team: 'platform' }), queryParamMap: convertToParamMap({}), data: { teamAccess: { team: resolved } } },
           data: of({ teamAccess: { team: resolved } }),
         },
       },

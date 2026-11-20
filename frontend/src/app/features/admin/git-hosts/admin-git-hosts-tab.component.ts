@@ -19,10 +19,9 @@ import { GithubAppComponent } from './github-app/github-app.component';
     <app-admin-github-app />
     <gr-settings-section
       title="Instance Connections"
-      description="All projects on this instance can use these connections. Installations of GitHub Apps add their connections here."
       [card]="false"
     >
-      @if (gitHostConnectionList()?.ownConnections()?.length) {
+      @if (gitHostConnectionList()?.connections()?.length) {
         <button slot="actions" grButton label="New connection" icon="add" (click)="gitHostConnectionList()?.openCreate()"></button>
       }
       <app-git-host-connection-list [gitHostConnectionOwner]="instanceOwner" [access]="superuserAccess" />
