@@ -34,8 +34,10 @@ flowchart LR
 |---|---|---|
 | Project | **Project settings -> Git host connections** | Tasks of the project |
 | Team | Team settings, tab **Git host connections** (team admins) | Tasks of every project the team owns |
-| Instance | **Admin**, tab **Git hosts** (instance admins) | Tasks of every project |
+| Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
 
+- Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for a connection with an access token.
+- A new connection can link the tasks of its owner on the same host that have no connection yet.
 - Webhook URL `/api/v1/hooks/<connection-id>` can receive events for all tasks with that connection. Events map to tasks by the `owner/repo` part of the repository URL.
 - Calls to the Git host act as the token account. Statuses and comments appear under that account name.
 - The writer check and comment reactions use the Git host connection of the task.
@@ -75,15 +77,21 @@ The token needs these scopes.
 
 ## 2. Connect the Repository
 
-1. Open **Project settings -> Git host connections** and add a connection. Use the team settings tab **Git host connections** instead to share it with every project of the team. Select Gitea or Forgejo, enter the base URL and paste the bot token. Keep **Receives events** on, turn on **Reports status** and save. Gradient shows the webhook URL and secret once.
+1. Open **Project settings -> Git host connections** and click **New connection**. The team settings page **Git host connections** can share the connection with every project of the team.
+2. Select Gitea or Forgejo in **Host type**. Enter the **Host URL**, paste the bot token into **Access token** and click **Create**.
+3. Gradient checked the token and named the bot account in "Signed in as gradient-bot". The **Webhook URL** and **Webhook secret** appear a single time.
+4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. A **Connection** select appears for more than one fitting connection.
+5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for a connection with **Reports status** on.
 
-2. Click **Connect repository** in the project. Enter the repository URL. Follow the steps, then click **Create task**.
+The **Repository** page of the task has a section for each step from connection to commit status. Each section has a state and one action.
 
-3. Open the **Settings -> Repository** page for the task. Select the connection in **Git host connection**, turn on **Report commit status** and save. Gradient can reject a connection when the host and the repository URL differ. **Test status report** can post a `pending` status to the latest evaluated commit.
+| Section | Actions |
+|---|---|
+| **Connection** | Pick another fitting connection. **New connection** when none fit |
+| **Incoming events** | **Install webhook** for a token with admin rights. **Add trigger** for the recommended push and pull request triggers |
+| **Commit status** | **Report commit status** on or off. **Test status report** can post a `pending` status to the latest evaluated commit |
 
-4. Add the recommended push trigger and pull request trigger on the Triggers page for the task.
-
-The task **Repository** page can show the **Install webhook** and **Install deploy key** buttons for a token with admin rights. Add the webhook URL and secret in the Git host's **Settings -> Webhooks -> Add Webhook** for a token without admin rights.
+A token without admin rights needs a manual webhook. **Open webhook settings** can open **Settings -> Webhooks** on the Git host. Add a webhook with these values.
 
 | Field | Value |
 |---|---|
@@ -92,7 +100,7 @@ The task **Repository** page can show the **Install webhook** and **Install depl
 | Secret | The secret |
 | Trigger on | Custom events: **Push**, **Pull Request**, **Issue Comment**, **Pull Request Comment**, **Pull Request Review**, **Release** |
 
-Add the deploy key from step **Access** under **Settings -> Deploy Keys** for repository URLs over SSH without **Install deploy key**. Then click **Test access**.
+Add the deploy key from step **Repository access** under **Settings -> Deploy Keys** for repository URLs over SSH without **Install deploy key**. Then click **Test access**.
 
 ## OAuth2 Connection
 
@@ -116,9 +124,9 @@ services.gradient.giteaApp = {
 
 Project members:
 
-1. Open **Git host connections** in the project. Click **Connect with Forgejo (codeberg.org)**.
-2. Enter a name and click **Continue**. Approve access on the Git host.
-3. Gradient created a connection with this name. That connection can receive webhooks and report commit status. The browser returned to the connection page of the Git host.
+1. Open **Git host connections** in the project and click **New connection**.
+2. Click **Sign in with Forgejo (codeberg.org)** in the dialog. Approve access on the Git host.
+3. Gradient created a connection named after the host. That connection can receive webhooks and report commit status. The browser returned to **Git host connections** of the project.
 
 - Forgejo and Gitea don't add scopes to OAuth2 tokens. An OAuth2 token can access the full account that approved it. Approve the token with the bot account from Step 1.
 - Gradient can refresh access tokens automatically. A connection can show **Automatic refresh of the token**. Enter a token in **Edit** to replace the OAuth2 token and end the refresh.
@@ -147,7 +155,7 @@ services.gradient.state.git_host_connections.gitea = {
 
 Connection pages show webhook URL `https://gradient.example.com/api/v1/hooks/<connection-id>`. Project connections also accept old URL `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea` (for Forgejo, `forgejo` instead of `gitea`).
 
-Declared tasks come with no trigger and no connection. Set both on each task.
+Declared tasks come with no trigger and no connection. Set both on each task. Declarative state never picks or links a connection on its own and declared values always win.
 
 ```nix
 services.gradient.state.tasks.app = {

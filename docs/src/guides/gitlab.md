@@ -34,8 +34,10 @@ flowchart LR
 |---|---|---|
 | Project | **Project settings -> Git host connections** | Tasks of the project |
 | Team | Team settings, tab **Git host connections** (team admins) | Tasks of every project the team owns |
-| Instance | **Admin**, tab **Git hosts** (instance admins) | Tasks of every project |
+| Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
 
+- Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for a connection with an access token.
+- A new connection can link the tasks of its owner on the same host that have no connection yet.
 - Events for all tasks that use the connection reach the webhook URL `/api/v1/hooks/<connection-id>`. Gradient can match events to tasks by the `owner/repo` part of the repository URL.
 - Calls to GitLab use the account of the token. Statuses and comments appear under that account name.
 - The writer check and reactions to comments use the task's connection to its Git host.
@@ -54,12 +56,21 @@ A personal access token from a dedicated account works as an alternative. That a
 
 ## 2. Connect the Repository
 
-1. Open **Project settings -> Git host connections** and add a connection. Use **Git host connections** on the team settings tab instead to share the connection across all team projects. Select GitLab, leave the base URL as is, and paste the token. Keep **Receives events** on. Turn on **Reports status**. Save. The webhook URL and secret appear only once.
-2. Click **Connect repository** in the project. Enter the repository URL. Follow the steps and click **Create task**.
-3. Open **Settings -> Repository** for the task. Select a connection in **Git host connection**. Turn on **Report commit status**. Save. Gradient can reject a connection when the host does not match the repository URL. Use **Test status report** to post a `pending` status to the latest evaluated commit.
-4. Add the recommended push trigger and merge request trigger on the Triggers page for the task.
+1. Open **Project settings -> Git host connections** and click **New connection**. The team settings page **Git host connections** can share the connection with every project of the team.
+2. Select GitLab in **Host type**. Enter `https://gitlab.com` or the self-hosted address in **Host URL**. Paste the token into **Access token** and click **Create**.
+3. Gradient checked the token and named the bot user in "Signed in as <account>". The **Webhook URL** and **Webhook secret** appear a single time.
+4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. A **Connection** select appears for more than one fitting connection.
+5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for a connection with **Reports status** on.
 
-The Install webhook and Install deploy key buttons appear on the Repository page of the task for a connection token with the Maintainer role. Developer tokens need manual setup. Add the Webhook URL and secret by hand in the GitLab project or group under Settings -> Webhooks -> Add new webhook.
+The **Repository** page of the task has a section for each step from connection to commit status. Each section has a state and one action.
+
+| Section | Actions |
+|---|---|
+| **Connection** | Pick another fitting connection. **New connection** when none fit |
+| **Incoming events** | **Install webhook** for a token with the Maintainer role. **Add trigger** for the recommended push and merge request triggers |
+| **Commit status** | **Report commit status** on or off. **Test status report** can post a `pending` status to the latest evaluated commit |
+
+A Developer token needs a manual webhook. **Open webhook settings** can open **Settings -> Webhooks** of the GitLab project. Add a webhook with these values.
 
 | Field | Value |
 |---|---|
@@ -67,7 +78,7 @@ The Install webhook and Install deploy key buttons appear on the Repository page
 | Secret token | The secret |
 | Trigger | **Push events**, **Tag push events**, **Comments**, **Merge request events**, **Releases events** |
 
-Repository URLs over SSH with a developer token use the deploy key from the Access step. Copy that key to GitLab Settings -> Repository -> Deploy keys. Click Test access.
+Repository URLs over SSH with a developer token use the deploy key from the **Repository access** step. Copy that key to GitLab Settings -> Repository -> Deploy keys. Click Test access.
 
 ## Declarative Setup
 
@@ -90,7 +101,7 @@ services.gradient.state.git_host_connections.gitlab = {
 
 Connection pages display the Webhook URL `https://gradient.example.com/api/v1/hooks/<connection-id>`. Project connections also accept the old URL `https://gradient.example.com/api/v1/hooks/gitlab/acme/gitlab`.
 
-Declared tasks come with no trigger and no connection. Set both on each task.
+Declared tasks come with no trigger and no connection. Set both on each task. Declarative state never picks or links a connection on its own and declared values always win.
 
 ```nix
 services.gradient.state.tasks.app = {
