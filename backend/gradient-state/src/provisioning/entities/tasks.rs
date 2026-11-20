@@ -1864,3 +1864,90 @@ mod declared_task_trigger_application_tests {
         db.finish().await;
     }
 }
+
+#[cfg(test)]
+mod declared_task_git_host_connection_application_tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::ids::project_id;
+    use gradient_fixtures::rows;
+    use tempfile::TempDir;
+
+    fn project_connection(name: &str) -> MGitHostConnection {
+        MGitHostConnection {
+            id: GitHostConnectionId::now_v7(),
+            project: Some(project_id()),
+            name: name.into(),
+            display_name: name.into(),
+            git_host_type: GitHostType::Gitea,
+            receives_events: true,
+            reports_status: true,
+            created_by: rows::user().id,
+            created_at: now(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn declared_connection_and_report_status_replace_an_automatic_link() {
+        let db = TestDatabase::create().await;
+        let connection = db.connection();
+        rows::user()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        rows::project()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let declared = project_connection("declared");
+        let linked = project_connection("linked");
+        for row in [&declared, &linked] {
+            row.clone()
+                .into_active_model()
+                .insert(&connection)
+                .await
+                .unwrap();
+        }
+        task::Model {
+            git_host_connection: Some(linked.id),
+            report_status: true,
+            ..rows::task()
+        }
+        .into_active_model()
+        .insert(&connection)
+        .await
+        .unwrap();
+
+        let dir = TempDir::new().unwrap();
+        let crypt_file = dir.path().join("crypt");
+        std::fs::write(&crypt_file, "this-is-a-32-byte-crypt-key!!!!").unwrap();
+        let app = StateApplicator {
+            db: &connection,
+            crypt_secret_file: crypt_file.to_str().unwrap(),
+            credentials_dir: dir.path(),
+            email_enabled: false,
+        };
+        let state_task: StateTask = serde_json::from_value(serde_json::json!({
+            "name": "test-task",
+            "project": "test-project",
+            "display_name": "Test Task",
+            "repository": "https://github.com/test/repo",
+            "created_by": rows::user().username,
+            "git_host_connection": "declared",
+            "report_status": false,
+        }))
+        .unwrap();
+        app.apply_tasks(&HashMap::from([(state_task.name.clone(), state_task)]))
+            .await
+            .unwrap();
+
+        let task = db.rows::<ETask>().await.remove(0);
+        assert_eq!(task.git_host_connection, Some(declared.id));
+        assert!(!task.report_status);
+        assert!(task.managed);
+        db.finish().await;
+    }
+}
