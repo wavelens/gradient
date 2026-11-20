@@ -156,6 +156,6 @@ describe('GitHostConnectionDialogComponent', () => {
     component.save();
     fixture.detectChanges();
     expect(create).not.toHaveBeenCalled();
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Enter the host URL.');
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Enter the Host URL.');
   });
 });

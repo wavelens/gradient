@@ -81,7 +81,7 @@ export class RepositoryGitHostConnectionComponent {
       error: (error: unknown) => {
         this.savingSelection.set(false);
         this.selectedId.set(this.state().git_host_connection?.id ?? '');
-        this.notify.failure("Couldn't save the git host connection of the task", error);
+        this.notify.failure('Failed to save the connection to the Git host for the task', error);
       },
     });
   }

@@ -70,10 +70,10 @@ export interface AccessTokenState {
 }
 
 export function accessTokenState(connection: GitHostConnectionSummary, now: number): AccessTokenState | null {
-  if (connection.access_token_refreshes_automatically) return { text: 'Token refreshes automatically', expired: false };
+  if (connection.access_token_refreshes_automatically) return { text: 'Automatic token renewal', expired: false };
   const expiresAt = connection.access_token_expires_at;
   if (!expiresAt) return null;
   return serverTime(expiresAt).getTime() <= now
-    ? { text: 'Token expired', expired: true }
-    : { text: `Token expires ${dateTimeText(expiresAt)}`, expired: false };
+    ? { text: 'Access token expired', expired: true }
+    : { text: `Token expiration: ${dateTimeText(expiresAt)}`, expired: false };
 }

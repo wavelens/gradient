@@ -9,12 +9,12 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { MessageBannerComponent } from '@gradient/ui/ui';
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
-  denied: 'Access denied by the Git host.',
-  expired: 'The approval took longer than 10 minutes or ran in another browser. Start the connection again.',
+  denied: 'The Git host denied access.',
+  expired: 'Approval took more than 10 minutes, or the approval happened in a different browser. Start the connection again.',
   signed_out: 'Sign-out happened before the Git host responded. Sign in again and retry.',
-  forbidden: 'Missing permission to manage git host connections in this project.',
-  exists: 'There is already a connection with this name in this project. Select another name and try again.',
-  failed: 'Connection to the Git host failed. Try again.',
+  forbidden: 'No permission to manage connections to Git hosts for this project.',
+  exists: 'There is already a connection with this name in this project. Choose another name and try again.',
+  failed: 'Failed to connect to the Git host. Try again.',
 };
 
 @Component({
@@ -43,8 +43,9 @@ export class GitHostOAuthReturnBannerComponent implements OnInit {
       this.outcome.set({ severity: 'error', text: OAUTH_ERROR_MESSAGES[error] ?? OAUTH_ERROR_MESSAGES['failed'] });
     } else {
       const installed = Number(query.get('webhooks_installed') ?? 0);
-      const webhooks = installed > 0 ? ` Installed webhooks in ${installed} repositories.` : '';
-      this.outcome.set({ severity: 'success', text: `Connected ${connected}.${webhooks}` });
+      const webhooks = installed > 0 ? `Installed webhooks in ${installed} repositories.` : '';
+      const text = [`Connected ${connected}.`, webhooks].filter(Boolean).join(' ');
+      this.outcome.set({ severity: 'success', text });
     }
     void this.router.navigate([], {
       relativeTo: this.route,

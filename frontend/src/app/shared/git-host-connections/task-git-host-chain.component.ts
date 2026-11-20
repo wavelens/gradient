@@ -16,8 +16,8 @@ export type ChainStepKey = keyof TaskGitHostChain;
 export const CHAIN_STEP_TITLES: Record<ChainStepKey, string> = {
   repository: 'Repository',
   connection: 'Connection',
-  incoming_events: 'Incoming events',
-  commit_status: 'Commit status',
+  incoming_events: 'Incoming Events',
+  commit_status: 'Commit Status',
 };
 
 const STATES_WORST_FIRST: TaskGitHostChainStepState[] = ['failing', 'attention', 'off', 'ok'];

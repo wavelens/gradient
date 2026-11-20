@@ -293,7 +293,7 @@ describe('ConnectRepositoryComponent', () => {
 
     it('shows when the server has no GitHub App', () => {
       const { notice, link } = gitHostStep({ githubAppEnabled: false }, true);
-      expect(notice).toContain('This server has no GitHub App');
+      expect(notice).toContain('No GitHub App on this server');
       expect(link).toBeNull();
     });
 

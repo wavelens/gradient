@@ -13,7 +13,7 @@
         <app-task-git-host-chain [chain]="repository.chain"
           [repositoryPageLink]="links.taskPage(projectName, task.name, 'repository')" />
       } @else {
-        <gr-load-state [loading]="true" loadingMessage="Loading the task..." />
+        <gr-load-state [loading]="true" loadingMessage="Loading task..." />
       }
       <div class="gr-form-actions gr-form-actions--end">
         <a grButton label="Open task" icon="arrow_forward" [routerLink]="links.task(projectName, task.name)" data-testid="open-task"></a>
@@ -56,11 +56,11 @@
         </gr-settings-section>
       }
       @case ('git-host') {
-        <gr-settings-section title="Git host">
+        <gr-settings-section title="Git Host">
           @if (connectionsError(); as error) {
             <gr-load-state [error]="error" errorTitle="Failed to load git host connections" (retry)="loadConnections()" />
           } @else if (connections() === null) {
-            <gr-load-state [loading]="true" loadingMessage="Loading git host connections..." />
+            <gr-load-state [loading]="true" loadingMessage="Loading Git host connections..." />
           } @else if (connectionOptions().length > 1) {
             <gr-form-field label="Connection" for="connect-git-host-connection">
               <gr-select inputId="connect-git-host-connection" [options]="connectionOptions()" optionLabel="label" optionValue="value"
@@ -69,9 +69,9 @@
           } @else if (gitHubAccount(); as account) {
             <p class="gr-form-aside" data-testid="no-connection">
               @if (!config.githubAppEnabled) {
-                <span>This server has no GitHub App</span>
+                <span>No GitHub App on this server</span>
               } @else if (canInstallGithubApp()) {
-                <span>The GitHub App isn't installed on {{ account }}</span>
+                <span>{{ account }} has no GitHub App installed</span>
                 <app-github-app-install-link size="small" (returnedFromGitHub)="loadConnections()" />
               } @else {
                 <span>An instance admin can install the GitHub App on {{ account }}</span>

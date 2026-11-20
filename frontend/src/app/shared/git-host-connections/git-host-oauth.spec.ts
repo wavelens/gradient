@@ -65,7 +65,7 @@ describe('GitHostOAuthReturnBannerComponent', () => {
   it('reports the connection failure and substitutes generic text for an unknown code', () => {
     expect(renderBanner({ oauth_error: 'exists' }).banner()).toContain('There is already a connection with this name');
     TestBed.resetTestingModule();
-    expect(renderBanner({ oauth_error: 'teapot' }).banner()).toContain('Connection to the Git host failed. Try again.');
+    expect(renderBanner({ oauth_error: 'teapot' }).banner()).toContain('Failed to connect to the Git host. Try again.');
   });
 
   it('shows nothing when the URL has no OAuth result', () => {

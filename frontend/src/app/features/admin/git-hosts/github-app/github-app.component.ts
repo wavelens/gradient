@@ -96,10 +96,10 @@ export class GithubAppComponent implements OnInit {
   githubHostInvalidCharacterErrorMessage = computed(() =>
     /^[A-Za-z0-9.-]*$/.test(this.normalizedGithubEnterpriseHost())
       ? ''
-      : 'Use only letters, numbers, dots and dashes (for example: ghe.example.com).',
+      : 'Use only letters, numbers, dots and dashes (for example, ghe.example.com).',
   );
   organizationErrorMessage = computed(() =>
-    /^[A-Za-z0-9-]*$/.test(this.organization().trim()) ? '' : 'Use only letters, numbers and dashes.',
+    /^[A-Za-z0-9-]*$/.test(this.organization().trim()) ? '' : 'Use only letters, numbers and hyphens.',
   );
   showsCreateForm = computed(() => !this.githubAppConfigured || this.replacing());
   loading = signal(false);
@@ -187,10 +187,10 @@ export class GithubAppComponent implements OnInit {
       .confirm({
         title: 'Replace GitHub App',
         target: this.appName ?? 'GitHub App',
-        consequence: 'Installations of the current App stop sending events once the server uses the new App.',
+        consequence: 'Installations of the current App stop delivering webhook events after a switch to the new App on the CI server.',
         confirmLabel: 'Replace',
         severity: 'danger',
-        failure: "Couldn't start replacing the GitHub App.",
+        failure: 'Failed to start replacing the GitHub App.',
         action: () => of(true),
       })
       .subscribe(() => this.replacing.set(true));

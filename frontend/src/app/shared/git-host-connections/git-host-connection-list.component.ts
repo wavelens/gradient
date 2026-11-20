@@ -169,7 +169,7 @@ export class GitHostConnectionListComponent implements OnInit {
       },
       error: (error: unknown) => {
         this.tasksShownFor.set(null);
-        this.notify.failure("Couldn't load the tasks of the connection", error);
+        this.notify.failure('Failed to load connection tasks', error);
       },
     });
   }
@@ -180,7 +180,7 @@ export class GitHostConnectionListComponent implements OnInit {
     this.api.test(this.gitHostConnectionOwner(), connection.id).subscribe({
       next: (result) => {
         this.testingId.set(null);
-        if (result.success) this.notify.success(`${connection.display_name}: signed in as ${result.account ?? 'an unknown account'}`);
+        if (result.success) this.notify.success(`${connection.display_name}: Signed in as ${result.account ?? 'an unknown account'}`);
         else this.notify.failure(`${connection.display_name}: ${result.error ?? 'the Git host refused the access token.'}`, null);
       },
       error: (error: unknown) => {

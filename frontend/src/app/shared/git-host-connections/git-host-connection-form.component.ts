@@ -42,7 +42,7 @@ import { GitHostOAuthSignInComponent } from './git-host-oauth-sign-in.component'
       <input grInput id="connection-access-token" type="password" autocomplete="off" [ngModel]="value().access_token"
         (ngModelChange)="patch({ access_token: $event })" [placeholder]="context().editing?.has_access_token ? 'Unchanged' : ''" />
       @if (context().editing?.access_token_refreshes_automatically) {
-        <gr-badge data-testid="token-refreshes-badge">Refreshes automatically</gr-badge>
+        <gr-badge data-testid="token-refreshes-badge">Automatic renewal</gr-badge>
       }
     </gr-form-field>
     <gr-form-field label="Name" for="connection-name" required [invalid]="!!shownErrors().name" [error]="shownErrors().name ?? ''">

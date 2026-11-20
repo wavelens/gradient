@@ -141,7 +141,7 @@ describe('GitHostConnectionListComponent', () => {
     const health = healthLine.textContent!;
     expect(healthLine.querySelector('time.connection-delivery-time')?.getAttribute('datetime')).toBe('2026-01-01T00:00:00Z');
     expect(health).toContain('Queued 1 evaluation');
-    expect(health).toContain('Token refreshes automatically');
+    expect(health).toContain('Automatic token renewal');
     expect(health).toContain('3 refused signatures');
     expect(health).toContain('2 tasks');
   });
@@ -154,7 +154,7 @@ describe('GitHostConnectionListComponent', () => {
       last_delivery: { id: 'd1', created_at: '2026-01-01T00:00:00Z', result: 'queued', queued: 1, status_code: 200 } as never,
     };
     const healthLine = render(writable, [refusedLast]).el.querySelector('[data-testid="connection-health"]')!;
-    expect(healthLine.textContent).toContain('Refused a delivery with a wrong signature');
+    expect(healthLine.textContent).toContain('Rejected delivery with invalid signature');
     expect(healthLine.textContent).not.toContain('Queued 1 evaluation');
     expect(healthLine.querySelector('time.connection-delivery-time')?.getAttribute('datetime')).toBe('2026-01-02T00:00:00Z');
   });
@@ -162,7 +162,7 @@ describe('GitHostConnectionListComponent', () => {
   it("displays rejected signatures instead of 'No events yet'", () => {
     const health = render(writable, [{ ...own, refused_signature_count: 1, last_refused_signature_at: '2026-01-02T00:00:00Z' }]).el
       .querySelector('[data-testid="connection-health"]')!.textContent!;
-    expect(health).toContain('Refused a delivery with a wrong signature');
+    expect(health).toContain('Rejected delivery with invalid signature');
     expect(health).not.toContain('No events yet');
   });
 
@@ -194,7 +194,7 @@ describe('GitHostConnectionListComponent', () => {
     el.querySelector<HTMLButtonElement>('[aria-label="Actions for Forgejo"]')!.click();
     component.menuItems().find((item) => item.label === 'Test')!.command!();
     expect(test).toHaveBeenCalledWith(project, 'c1');
-    expect(notify.success).toHaveBeenCalledWith('Forgejo: signed in as ci-bot');
+    expect(notify.success).toHaveBeenCalledWith('Forgejo: Signed in as ci-bot');
   });
 
   it('opens the edit dialog with the full connection info', () => {

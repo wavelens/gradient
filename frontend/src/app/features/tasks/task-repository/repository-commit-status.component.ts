@@ -23,7 +23,7 @@ const EARLIER_POSTS_SHOWN = 4;
   imports: [FormsModule, ButtonComponent, CheckboxComponent, ChainStepStateBadgeComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <gr-settings-section title="Commit status">
+    <gr-settings-section title="Commit Status">
       <app-chain-step-state-badge slot="after-title" [state]="step().state" />
       @if (!applies()) {
         <span class="text-secondary">{{ step().detail }}</span>
@@ -32,7 +32,7 @@ const EARLIER_POSTS_SHOWN = 4;
           <gr-checkbox inputId="task-report-commit-status" label="Report commit status" [ngModel]="reportStatus()"
             (ngModelChange)="setReportStatus($event)" [disabled]="!state().can_edit || savingReportStatus()" />
           @if (state().can_edit && state().report_status) {
-            <button grButton size="small" label="Test status report" icon="send" [severity]="testIsPrimary() ? 'primary' : 'secondary'"
+            <button grButton size="small" label="Test the status report" icon="send" [severity]="testIsPrimary() ? 'primary' : 'secondary'"
               (click)="testStatusReport()" [loading]="testingStatusReport()" [disabled]="testingStatusReport()" data-testid="test-status-report"></button>
           }
         </div>
@@ -99,7 +99,7 @@ export class RepositoryCommitStatusComponent {
       error: (error: unknown) => {
         this.savingReportStatus.set(false);
         this.reportStatus.set(this.state().report_status);
-        this.notify.failure("Couldn't save the commit status setting of the task", error);
+        this.notify.failure('Failed to save commit status setting for task', error);
       },
     });
   }
@@ -116,7 +116,7 @@ export class RepositoryCommitStatusComponent {
       },
       error: (error: unknown) => {
         this.testingStatusReport.set(false);
-        this.notify.failure("Couldn't test the status report", error);
+        this.notify.failure('Status report test failed', error);
         this.changed.emit();
       },
     });

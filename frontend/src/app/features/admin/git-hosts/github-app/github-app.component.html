@@ -39,12 +39,12 @@
             }
             @case ('missing') {
               <gr-message-banner type="warning">
-                GitHub has not reported the installation yet.
+                GitHub doesn't report the installation yet.
                 <button grButton type="button" size="small" severity="secondary" label="Check again" (click)="checkInstallation()"></button>
               </gr-message-banner>
             }
             @case ('requested') {
-              <gr-message-banner type="info">An owner of the account has to approve the install on GitHub.</gr-message-banner>
+              <gr-message-banner type="info">Ask the owner of the account to approve the installation on GitHub.</gr-message-banner>
             }
           }
         </div>
@@ -82,7 +82,7 @@
 
         @if (advancedOpen()) {
           <gr-form-field
-            label="GitHub Enterprise host"
+            label="Host for GitHub Enterprise"
             for="github-host"
             [invalid]="!!githubHostInvalidCharacterErrorMessage()"
             [error]="githubHostInvalidCharacterErrorMessage()"
@@ -121,7 +121,7 @@
         />
         @if (installationsList(); as list) {
           @if (!list.loading() && !list.loadError() && list.sortedConnections().length === 0) {
-            <p class="text-secondary" data-testid="github-app-no-installations">No installations yet.</p>
+            <p class="text-secondary" data-testid="github-app-no-installations">Not installed yet.</p>
           }
         }
       }
