@@ -121,7 +121,7 @@ export class GitHostConnectionListComponent implements OnInit {
   }
 
   canEditRow(connection: GitHostConnectionSummary): boolean {
-    return this.canManageRow(connection) && connection.git_host_type !== 'github';
+    return this.canManageRow(connection) && !connection.managed && connection.git_host_type !== 'github';
   }
 
   canReadDeliveries(connection: GitHostConnectionSummary): boolean {
@@ -188,10 +188,10 @@ export class GitHostConnectionListComponent implements OnInit {
       ? [{ label: 'Copy webhook URL', icon: 'content_copy', command: () => void this.notify.copyToClipboard(url, 'webhook URL') }]
       : [];
     if (this.canManageRow(connection)) {
-      items.push(
-        { label: 'Test', icon: 'play_arrow', command: () => this.test(connection) },
-        { label: 'Delete', icon: 'delete', danger: true, command: () => this.remove(connection) },
-      );
+      items.push({ label: 'Test', icon: 'play_arrow', command: () => this.test(connection) });
+      if (!connection.managed) {
+        items.push({ label: 'Delete', icon: 'delete', danger: true, command: () => this.remove(connection) });
+      }
     }
     this.menuItems.set(items);
     menu.toggle(event);
