@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { GitHostConnectionSummary, TaskRepositoryResponse } from '@core/models';
-import { chainWithoutConnection } from './task-git-host-chain.testing';
+import { taskRepositoryStatusRepositoryReadableWithoutGitHostConnection } from './task-repository-status-check-test-fixtures.testing';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
@@ -20,7 +20,7 @@ const state: TaskRepositoryResponse = {
   deploy_key: 'ssh-ed25519 AAAAkey',
   fetch: null,
   recent_deliveries: [],
-  chain: chainWithoutConnection,
+  chain: taskRepositoryStatusRepositoryReadableWithoutGitHostConnection,
   report_status: false,
   status_posts: [],
   available_connections: [],
@@ -46,12 +46,12 @@ describe('RepositoryAccessComponent', () => {
   it('heads the section with the repository step and its state', () => {
     const el = render({}, {}).nativeElement as HTMLElement;
     expect(el.querySelector('h2')?.textContent).toBe('Repository');
-    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Working');
+    expect(el.querySelector('.settings-section__heading app-task-repository-status-check-step-state-badge')?.textContent).toContain('Working');
   });
 
   it('makes Edit URL the primary button when the fetch failure is the first step to a fix', () => {
     const chain = {
-      ...chainWithoutConnection,
+      ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection,
       repository: { state: 'failing' as const, detail: 'Repository fetch failed', action: { type: 'edit_repository_url' as const } },
     };
     const fixture = render({ chain }, {});
@@ -60,7 +60,7 @@ describe('RepositoryAccessComponent', () => {
     const el = fixture.nativeElement as HTMLElement;
     const edit = el.querySelector('[data-testid="edit-repository-url"]') as HTMLElement;
     expect(edit.classList).toContain('gr-button--primary');
-    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Failing');
+    expect(el.querySelector('.settings-section__heading app-task-repository-status-check-step-state-badge')?.textContent).toContain('Failing');
   });
 
   it('keeps a successful fetch to the status badge without a sentence', () => {

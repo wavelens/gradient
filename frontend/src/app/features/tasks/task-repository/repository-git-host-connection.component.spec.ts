@@ -14,7 +14,7 @@ import { ConfigService } from '@core/services/config.service';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { ApiError } from '@core/services/api.service';
 import { RepositoryGitHostConnectionComponent } from './repository-git-host-connection.component';
-import { chainWithoutConnection } from './task-git-host-chain.testing';
+import { taskRepositoryStatusRepositoryReadableWithoutGitHostConnection } from './task-repository-status-check-test-fixtures.testing';
 
 const reporting: GitHostConnectionSummary = {
   id: 'c1',
@@ -59,7 +59,7 @@ const state: TaskRepositoryResponse = {
   git_host_connection: null,
   report_status: false,
   recent_deliveries: [],
-  chain: chainWithoutConnection,
+  chain: taskRepositoryStatusRepositoryReadableWithoutGitHostConnection,
   status_posts: [],
   available_connections: [reporting, eventsOnly, otherHost],
   can_edit: true,
@@ -97,7 +97,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
   it('shows the section heading with the Connection step and its state badge', () => {
     const { el } = render();
     expect(el.querySelector('h2')?.textContent).toBe('Connection');
-    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Incomplete');
+    expect(el.querySelector('.settings-section__heading app-task-repository-status-check-step-state-badge')?.textContent).toContain('Incomplete');
   });
 
   it('offers only connections that fit the repository host plus the currently selected connection', () => {
@@ -119,7 +119,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
       base_url: null,
       repository_fit: { fits: false, can_be_selected: true, reason: 'No host URL' },
     };
-    const chain = { ...chainWithoutConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
+    const chain = { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
     const { component } = render({ available_connections: [withoutHostUrl, reporting], chain });
     expect(component.pickerOptions().map((option) => option.label)).toEqual([
       'No connection',
@@ -162,7 +162,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
 
   it('selects the only matching connection with the primary button', () => {
     const updateTaskRepositoryConnection = vi.fn(() => of(state));
-    const chain = { ...chainWithoutConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
+    const chain = { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
     const { fixture, el } = render({ available_connections: [reporting, otherHost], chain }, { updateTaskRepositoryConnection });
     fixture.componentRef.setInput('hasPrimaryAction', true);
     fixture.detectChanges();
@@ -179,7 +179,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
   });
 
   it('provides a New connection inline or links to the connections page when no matching connection exists', () => {
-    const createConnection = { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, git_host_type: 'forgejo', base_url: 'https://forgejo.example.com' } } };
+    const createConnection = { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection, connection: { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection.connection, action: { type: 'create_connection' as const, git_host_type: 'forgejo', base_url: 'https://forgejo.example.com' } } };
     const manager = render({ available_connections: [otherHost], can_manage_integrations: true, can_create_connection: true, chain: createConnection });
     manager.fixture.componentRef.setInput('hasPrimaryAction', true);
     manager.fixture.detectChanges();
@@ -198,7 +198,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
   });
 
   it('shows only its state while the repository step blocks it', () => {
-    const chain = { ...chainWithoutConnection, connection: { state: 'off' as const, detail: 'Readable repository URL required' } };
+    const chain = { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection, connection: { state: 'off' as const, detail: 'Readable repository URL required' } };
     const { el } = render({ chain });
     expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Readable repository URL required');
     expect(el.querySelector('gr-select')).toBeNull();
@@ -206,7 +206,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
 
   it('offers to install the GitHub App on the account instead of a new connection and reloads after the user returns', () => {
     const install = {
-      ...chainWithoutConnection,
+      ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection,
       connection: { state: 'attention' as const, detail: 'GitHub App not installed (acme)', action: { type: 'install_github_app' as const, account: 'acme' } },
     };
     const { fixture, el, component } = render(

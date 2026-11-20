@@ -365,7 +365,7 @@
     />
 
   @if ((form.type === 'reporter_push' || form.type === 'reporter_pull_request') && repository(); as repo) {
-    <app-task-git-host-chain class="trigger-chain" [chain]="repo.chain" [repositoryPageLink]="links.taskPage(projectName, taskName, 'repository')"
+    <app-task-repository-status-check-summary class="repository-status-check-summary" [chain]="repo.chain" [repositoryPageLink]="links.taskPage(projectName, taskName, 'repository')"
       [dialogToCloseFirst]="dialog" data-testid="trigger-connection-chain" />
   }
 </ng-template>

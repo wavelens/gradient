@@ -9,7 +9,7 @@ import { By } from '@angular/platform-browser';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { TaskRepositoryResponse } from '@core/models';
-import { chainWithoutConnection } from './task-git-host-chain.testing';
+import { taskRepositoryStatusRepositoryReadableWithoutGitHostConnection } from './task-repository-status-check-test-fixtures.testing';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
@@ -25,7 +25,7 @@ const state: TaskRepositoryResponse = {
   deploy_key: 'ssh-ed25519 AAAAkey',
   fetch: { checked_at: '2026-01-01T10:00:00', ok_at: '2026-01-01T10:00:00', failed: false, error: null },
   recent_deliveries: [],
-  chain: chainWithoutConnection,
+  chain: taskRepositoryStatusRepositoryReadableWithoutGitHostConnection,
   report_status: false,
   status_posts: [],
   available_connections: [],
@@ -64,15 +64,15 @@ describe('TaskRepositoryComponent', () => {
       'Incoming Events',
       'Commit Status',
     ]);
-    expect(el.querySelector('app-task-git-host-chain')).toBeNull();
+    expect(el.querySelector('app-task-repository-status-check-summary')).toBeNull();
     expect(Array.from(el.querySelectorAll('textarea')).map((t) => t.value)).toContain('ssh-ed25519 AAAAkey');
   });
 
   it('provides the page with one primary button at the first step that needs action', () => {
     const chain = {
-      ...chainWithoutConnection,
+      ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection,
       repository: { state: 'failing' as const, detail: 'Repository fetch failed', action: { type: 'edit_repository_url' as const } },
-      connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, base_url: 'https://forgejo.example.com' } },
+      connection: { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection.connection, action: { type: 'create_connection' as const, base_url: 'https://forgejo.example.com' } },
     };
     const el = render(() => of({ ...state, chain })).nativeElement as HTMLElement;
     const primary = Array.from(el.querySelectorAll('.gr-button--primary'));

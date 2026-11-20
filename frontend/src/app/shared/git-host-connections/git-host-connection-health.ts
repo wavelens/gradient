@@ -38,13 +38,13 @@ export function gitHostConnectionPickerOptions(
   currentId: string | null = null,
 ): { label: string; value: string }[] {
   const fitting = connections.filter((connection) => connection.repository_fit?.fits !== false);
-  const pickableByHand = connections.filter(
+  const manuallySelectableGitHostConnections = connections.filter(
     (connection) => connection.repository_fit?.fits === false && (connection.repository_fit.can_be_selected || connection.id === currentId),
   );
   return [
     { label: 'No connection', value: '' },
     ...fitting.map((connection) => ({ value: connection.id, label: gitHostConnectionPickerLabel(connection) })),
-    ...pickableByHand.map((connection) => ({
+    ...manuallySelectableGitHostConnections.map((connection) => ({
       value: connection.id,
       label: [gitHostConnectionPickerLabel(connection), connection.repository_fit?.reason].filter(Boolean).join(' · '),
     })),

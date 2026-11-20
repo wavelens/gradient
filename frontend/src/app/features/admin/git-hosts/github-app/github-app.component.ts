@@ -44,7 +44,7 @@ const INSTANCE: GitHostConnectionOwner = { type: 'instance' };
 const INSTALLATION_CHECK_INTERVAL_MILLISECONDS = 2000;
 const INSTALLATION_CHECK_ATTEMPTS = 8;
 
-type InstallationReturn =
+type InstallationReturnState =
   | { state: 'waiting' }
   | { state: 'installed'; connection: GitHostConnectionSummary; tasks: GitHostConnectionTaskResponse[] }
   | { state: 'missing' }
@@ -110,7 +110,7 @@ export class GithubAppComponent implements OnInit {
   credentialsLoading = signal(false);
   credentialsError = signal<unknown>(null);
 
-  installationReturn = signal<InstallationReturn | null>(null);
+  installationReturn = signal<InstallationReturnState | null>(null);
   protected installationsList = viewChild(GitHostConnectionListComponent);
   private installationCheck?: Subscription;
   private returnedInstallationId: number | null = null;
@@ -159,10 +159,10 @@ export class GithubAppComponent implements OnInit {
         switchMap((connection) =>
           this.connections.listTasks(INSTANCE, connection.id).pipe(
             catchError(() => of<GitHostConnectionTaskResponse[]>([])),
-            map((tasks): InstallationReturn => ({ state: 'installed', connection, tasks })),
+            map((tasks): InstallationReturnState => ({ state: 'installed', connection, tasks })),
           ),
         ),
-        defaultIfEmpty<InstallationReturn, InstallationReturn>({ state: 'missing' }),
+        defaultIfEmpty<InstallationReturnState, InstallationReturnState>({ state: 'missing' }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((result) => this.installationReturn.set(result));

@@ -11,7 +11,7 @@ import { TaskRepositoryResponse, eventNameToReadableText } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
+import { TaskRepositoryStatusCheckStepStateBadgeComponent } from '@shared/git-host-connections/task-repository-status-check-step-state-badge.component';
 import { statusPostSummary } from '@shared/git-host-connections/git-host-connection-health';
 import { StepHistoryLine, StepHistoryListComponent } from './step-history-list.component';
 
@@ -20,11 +20,11 @@ const EARLIER_POSTS_SHOWN = 4;
 @Component({
   selector: 'app-repository-commit-status',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, CheckboxComponent, ChainStepStateBadgeComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
+  imports: [FormsModule, ButtonComponent, CheckboxComponent, TaskRepositoryStatusCheckStepStateBadgeComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <gr-settings-section title="Commit Status">
-      <app-chain-step-state-badge slot="after-title" [state]="step().state" />
+      <app-task-repository-status-check-step-state-badge slot="after-title" [state]="step().state" />
       @if (!applies()) {
         <span class="text-secondary">{{ step().detail }}</span>
       } @else {

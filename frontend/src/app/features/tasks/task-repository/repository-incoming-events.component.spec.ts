@@ -88,7 +88,7 @@ describe('RepositoryIncomingEventsComponent', () => {
   it('shows the section heading with the incoming events step and its state', () => {
     const { el } = render();
     expect(el.querySelector('h2')?.textContent).toBe('Incoming Events');
-    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Incomplete');
+    expect(el.querySelector('.settings-section__heading app-task-repository-status-check-step-state-badge')?.textContent).toContain('Incomplete');
     expect(el.querySelector('[data-testid="step-status"]')?.textContent).toContain('No webhook events yet');
   });
 

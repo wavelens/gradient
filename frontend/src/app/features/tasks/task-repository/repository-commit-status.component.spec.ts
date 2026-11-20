@@ -78,7 +78,7 @@ describe('RepositoryCommitStatusComponent', () => {
   it('heads the section with the commit status step and its state', () => {
     const { el } = render();
     expect(el.querySelector('h2')?.textContent).toBe('Commit Status');
-    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Off');
+    expect(el.querySelector('.settings-section__heading app-task-repository-status-check-step-state-badge')?.textContent).toContain('Off');
   });
 
   it('shows only its state while the connection step blocks it', () => {

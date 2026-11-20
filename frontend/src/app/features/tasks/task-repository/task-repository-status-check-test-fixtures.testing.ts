@@ -6,7 +6,7 @@
 
 import { TaskGitHostChain } from '@core/models';
 
-export const chainWithoutConnection: TaskGitHostChain = {
+export const taskRepositoryStatusRepositoryReadableWithoutGitHostConnection: TaskGitHostChain = {
   repository: { state: 'ok', detail: 'acme/app on forgejo.example.com' },
   connection: { state: 'attention', detail: 'No connection to forgejo.example.com' },
   incoming_events: { state: 'off', detail: 'Connection required' },

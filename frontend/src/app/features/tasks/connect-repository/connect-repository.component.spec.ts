@@ -17,7 +17,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ApiError } from '@core/services/api.service';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import type { GitHostConnectionSummary } from '@core/models';
-import { chainWithoutConnection } from '../task-repository/task-git-host-chain.testing';
+import { taskRepositoryStatusRepositoryReadableWithoutGitHostConnection } from '../task-repository/task-repository-status-check-test-fixtures.testing';
 import { ConnectRepositoryComponent, buildTaskCreationTriggersFromWizardChoices } from './connect-repository.component';
 
 const pushSuggestion = { type: 'reporter_push' as const };
@@ -57,7 +57,7 @@ describe('ConnectRepositoryComponent', () => {
   it('creates nothing before the last step and then creates the task with exactly the chosen triggers', () => {
     const createTask = vi.fn(() => of({ id: 't1', name: 'my-app-1', url: '' }));
     const testRepositoryCloneAccess = vi.fn(() => of('abc123'));
-    const getRepository = vi.fn(() => of({ repository: 'ssh://git@forgejo.example.com/acme/my-app.git', chain: chainWithoutConnection }));
+    const getRepository = vi.fn(() => of({ repository: 'ssh://git@forgejo.example.com/acme/my-app.git', chain: taskRepositoryStatusRepositoryReadableWithoutGitHostConnection }));
     const fixture = render({}, { createTask, testRepositoryCloneAccess, getRepository });
     const comp = fixture.componentInstance;
     comp.repositoryChanged('ssh://git@forgejo.example.com/acme/my-app.git');
@@ -95,7 +95,7 @@ describe('ConnectRepositoryComponent', () => {
     expect(createTask).toHaveBeenCalledWith('acme', expect.not.objectContaining({ git_host_connection: expect.anything() }));
     expect(getRepository).toHaveBeenCalledWith('acme', 'my-app-1');
     fixture.detectChanges();
-    expect(el.querySelector('app-task-git-host-chain')).not.toBeNull();
+    expect(el.querySelector('app-task-repository-status-check-summary')).not.toBeNull();
     expect(el.querySelector('[data-testid="open-task"]')?.getAttribute('href')).toBe('/project/acme/task/my-app-1');
   });
 
@@ -214,7 +214,7 @@ describe('ConnectRepositoryComponent', () => {
       base_url: 'https://forgejo.example.com', repository_fit: { fits: true, can_be_selected: true } } as GitHostConnectionSummary;
     const other = { ...fits, id: 'c2', repository_fit: { fits: false, can_be_selected: false, reason: 'Other host' } };
     const createTask = vi.fn(() => of({ id: 't1', name: 'app', url: '' }));
-    const fixture = render({}, { createTask, getRepository: () => of({ repository: 'r', chain: chainWithoutConnection }) }, {}, undefined, undefined, [fits, other]);
+    const fixture = render({}, { createTask, getRepository: () => of({ repository: 'r', chain: taskRepositoryStatusRepositoryReadableWithoutGitHostConnection }) }, {}, undefined, undefined, [fits, other]);
     const comp = fixture.componentInstance;
     comp.repositoryChanged('https://forgejo.example.com/acme/app');
     comp.continueFromRepository();
