@@ -6,6 +6,7 @@
 
 //! Each step carries at most one action. Actions the caller may not run are left out.
 
+use super::RepositoryFetchStatus;
 use super::repository::TaskCommitStatusPostAttempt;
 use crate::endpoints::git_host_connections::{
     GitHostConnectionSummary, IncomingWebhookDeliveryResponse, url_host,
@@ -61,6 +62,7 @@ pub struct TaskGitHostChain {
 
 pub(crate) struct TaskGitHostChainInput<'a> {
     pub(crate) repository: &'a str,
+    pub(crate) fetch: Option<&'a RepositoryFetchStatus>,
     pub(crate) connection: Option<&'a GitHostConnectionSummary>,
     pub(crate) connection_has_access_token: bool,
     pub(crate) available_connections: &'a [GitHostConnectionSummary],
@@ -134,24 +136,41 @@ fn repository_step(
     input: &TaskGitHostChainInput<'_>,
     repository: Option<&RepositoryOnHost>,
 ) -> TaskGitHostChainStep {
+    let edit = input
+        .can_edit_task
+        .then_some(TaskGitHostChainStepAction::EditRepositoryUrl);
     match repository {
-        Some(repository) => step(
-            TaskGitHostChainStepState::Ok,
-            format!(
-                "{}/{} on {}",
-                repository.owner, repository.name, repository.host
+        Some(repository) => match input.fetch.filter(|fetch| fetch.failed) {
+            Some(fetch) => TaskGitHostChainStep {
+                at: Some(fetch.checked_at),
+                ..step(
+                    TaskGitHostChainStepState::Failing,
+                    match &fetch.error {
+                        Some(error) => format!("Can't fetch the repository: {error}"),
+                        None => format!(
+                            "Can't fetch {}/{} from {}",
+                            repository.owner, repository.name, repository.host
+                        ),
+                    },
+                    edit,
+                )
+            },
+            None => step(
+                TaskGitHostChainStepState::Ok,
+                format!(
+                    "{}/{} on {}",
+                    repository.owner, repository.name, repository.host
+                ),
+                None,
             ),
-            None,
-        ),
+        },
         None => step(
             TaskGitHostChainStepState::Failing,
             format!(
                 "Can't read host, owner and repository from {}",
                 input.repository
             ),
-            input
-                .can_edit_task
-                .then_some(TaskGitHostChainStepAction::EditRepositoryUrl),
+            edit,
         ),
     }
 }
@@ -214,8 +233,14 @@ fn connection_step(
     }
 }
 
-fn delivery_failed(delivery: &IncomingWebhookDeliveryResponse) -> bool {
-    delivery.status_code >= 400 || delivery.result == DeliveryResult::Refused
+fn delivery_state(delivery: &IncomingWebhookDeliveryResponse) -> TaskGitHostChainStepState {
+    if delivery.status_code >= 400 || delivery.result == DeliveryResult::Refused {
+        TaskGitHostChainStepState::Failing
+    } else if delivery.result == DeliveryResult::NoMatchingTask {
+        TaskGitHostChainStepState::Attention
+    } else {
+        TaskGitHostChainStepState::Ok
+    }
 }
 
 fn delivery_outcome(delivery: &IncomingWebhookDeliveryResponse) -> String {
@@ -275,15 +300,7 @@ fn incoming_events_step(
     match input.newest_delivery {
         Some(delivery) => TaskGitHostChainStep {
             at: Some(delivery.created_at),
-            ..step(
-                if delivery_failed(delivery) {
-                    TaskGitHostChainStepState::Failing
-                } else {
-                    TaskGitHostChainStepState::Ok
-                },
-                delivery_outcome(delivery),
-                None,
-            )
+            ..step(delivery_state(delivery), delivery_outcome(delivery), None)
         },
         None if github_app => step(
             TaskGitHostChainStepState::Attention,
@@ -437,6 +454,7 @@ mod tests {
     ) -> TaskGitHostChainInput<'a> {
         TaskGitHostChainInput {
             repository,
+            fetch: None,
             connection,
             connection_has_access_token: true,
             available_connections,
@@ -553,6 +571,81 @@ mod tests {
         assert_eq!(
             chain.incoming_events.detail,
             "push event queued an evaluation"
+        );
+    }
+
+    fn failed_fetch(error: Option<&str>) -> RepositoryFetchStatus {
+        RepositoryFetchStatus {
+            checked_at: test_date(),
+            ok_at: None,
+            failed: true,
+            error: error.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn failed_fetch_fails_the_repository_step_with_its_error() {
+        let fetch = failed_fetch(Some("Name or service not known"));
+        let chain = task_git_host_chain(&TaskGitHostChainInput {
+            fetch: Some(&fetch),
+            ..input(GITEA_REPOSITORY, None, &[])
+        });
+        assert_eq!(chain.repository.state, Failing);
+        assert_eq!(
+            chain.repository.detail,
+            "Can't fetch the repository: Name or service not known"
+        );
+        assert_eq!(chain.repository.at, Some(test_date()));
+        assert_eq!(
+            chain.repository.action,
+            Some(TaskGitHostChainStepAction::EditRepositoryUrl)
+        );
+    }
+
+    #[test]
+    fn failed_fetch_with_hidden_error_names_repository_and_host() {
+        let fetch = failed_fetch(None);
+        let chain = task_git_host_chain(&TaskGitHostChainInput {
+            fetch: Some(&fetch),
+            ..input(GITEA_REPOSITORY, None, &[])
+        });
+        assert_eq!(
+            chain.repository.detail,
+            "Can't fetch acme/app from git.example.com"
+        );
+    }
+
+    #[test]
+    fn successful_fetch_keeps_the_repository_step_ok() {
+        let fetch = RepositoryFetchStatus {
+            ok_at: Some(test_date()),
+            failed: false,
+            ..failed_fetch(None)
+        };
+        let chain = task_git_host_chain(&TaskGitHostChainInput {
+            fetch: Some(&fetch),
+            ..input(GITEA_REPOSITORY, None, &[])
+        });
+        assert_eq!(chain.repository.state, Ok);
+    }
+
+    #[test]
+    fn delivery_that_matched_no_task_needs_attention_with_its_reason() {
+        let selected = connection(true);
+        let newest = IncomingWebhookDeliveryResponse {
+            result: DeliveryResult::NoMatchingTask,
+            detail: Some("app has no trigger for push events".to_owned()),
+            queued: 0,
+            ..delivery()
+        };
+        let chain = task_git_host_chain(&TaskGitHostChainInput {
+            newest_delivery: Some(&newest),
+            ..input(GITEA_REPOSITORY, Some(&selected), &[])
+        });
+        assert_eq!(chain.incoming_events.state, Attention);
+        assert_eq!(
+            chain.incoming_events.detail,
+            "push event matched no task: app has no trigger for push events"
         );
     }
 
