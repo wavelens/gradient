@@ -40,9 +40,12 @@ import {
   ChangedFilePathFilter,
   CreateTriggerRequest,
   UpdateTriggerRequest,
+  TaskRepositoryResponse,
 } from '@core/models';
 import { CurrentTimeSignal, RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
+import { TasksService } from '@core/services/tasks.service';
+import { TaskGitHostChainComponent } from '@shared/git-host-connections/task-git-host-chain.component';
 import { splitList } from '@shared/forms';
 import { getCiTriggerTypeLabel, getNextPollTime, nextPollText } from '@shared/evaluation';
 import { cronExpressionToPlainEnglish } from './cron-expression-description';
@@ -125,6 +128,7 @@ function getPathFilterSummaryParts(filter: ChangedFilePathFilter): string[] {
     TooltipDirective,
     MessageBannerComponent,
     SettingsSectionComponent,
+    TaskGitHostChainComponent,
   ],
   templateUrl: './task-triggers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -134,6 +138,7 @@ export class TaskTriggersComponent implements OnInit {
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private triggersService = inject(TriggersService);
+  private tasks = inject(TasksService);
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private notify = inject(NotifyService);
@@ -177,6 +182,7 @@ export class TaskTriggersComponent implements OnInit {
   error = signal<string | null>(null);
 
   private suggestions = signal<TriggerConfig[]>([]);
+  repository = signal<TaskRepositoryResponse | null>(null);
   missingTriggerConfigSuggestions = computed(() =>
     this.suggestions().filter((suggestion) =>
       !this.triggers().some((t) => t.type === suggestion.type),
@@ -201,6 +207,14 @@ export class TaskTriggersComponent implements OnInit {
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.loadTriggers();
     this.loadSuggestions();
+    this.loadRepository();
+  }
+
+  private loadRepository(): void {
+    requestIfProjectMember(this.taskAccessData()?.task, () => this.tasks.getRepository(this.projectName, this.taskName)).subscribe({
+      next: (repository) => this.repository.set(repository),
+      error: () => this.repository.set(null),
+    });
   }
 
   loadTriggers(): void {

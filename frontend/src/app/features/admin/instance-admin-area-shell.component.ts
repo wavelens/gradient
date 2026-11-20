@@ -28,7 +28,7 @@ export class InstanceAdminAreaShellComponent {
     { label: 'Overview', link: links.admin('overview') },
     { label: 'Workers', link: links.admin('workers') },
     { label: 'Storage', link: links.admin('storage') },
-    { label: 'Git hosts', link: links.admin('git-hosts') },
+    { label: 'Git host connections', link: links.admin('git-host-connections') },
     { label: 'Settings', link: links.admin('settings') },
   ];
 }

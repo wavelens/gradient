@@ -15,6 +15,12 @@ import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
+import { chainWithoutConnection } from '../task-repository/task-git-host-chain.testing';
+
+const repositoryWithChain = {
+  repository: 'https://forgejo.example.com/acme/app',
+  chain: { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'select_connection' as const } } },
+};
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
@@ -67,7 +73,7 @@ function setup(
       { provide: ActivatedRoute, useValue: activatedRouteStub(access, query, task) },
       { provide: TriggersService, useValue: { list, update, getSuggestedPushAndPullRequestTriggerConfigs } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
-      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
+      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }), getRepository: () => of(repositoryWithChain) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskTriggersComponent);
@@ -112,14 +118,14 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(fixture.nativeElement.textContent ?? '').toContain('branches: main / tags: v*');
   });
 
-  it('points a push trigger to the git host connection on the Repository page', () => {
+  it('shows the git host chain in a push trigger and leads its actions to the Repository page', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
     fixture.componentInstance.startCreate();
     fixture.componentInstance.form.type = 'reporter_push';
     fixture.detectChanges();
-    const hint = document.querySelector('[data-testid="trigger-connection-hint"]');
-    expect(hint?.textContent).toContain('git host connection');
-    expect(hint?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
+    const chain = document.querySelector('[data-testid="trigger-connection-chain"]');
+    expect(chain?.textContent).toContain('No connection to forgejo.example.com');
+    expect(chain?.querySelector('[data-testid="chain-action-select_connection"]')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
   });
 
   it('hides write buttons under state-managed access', () => {
