@@ -48,7 +48,8 @@ describe('DashboardActivityComponent', () => {
   it('names each day in a native title, so the blocks add no tab stops', () => {
     const { root } = render(() => of({ days: DAYS }));
     const day = root.querySelectorAll('rect.day')[1];
-    expect(day.querySelector('title')!.textContent).toBe('2026-09-23: 2 evaluations, 2 failed');
+    const date = new Date('2026-09-23T00:00:00').toLocaleDateString();
+    expect(day.querySelector('title')!.textContent).toBe(`${date}: 2 evaluations, 2 failed`);
     expect(day.hasAttribute('tabindex')).toBe(false);
   });
 
