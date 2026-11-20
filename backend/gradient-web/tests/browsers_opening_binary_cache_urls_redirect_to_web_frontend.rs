@@ -7,9 +7,13 @@
 use axum::http::StatusCode;
 use axum_test::{TestResponse, TestServer};
 use gradient_core::ServerState;
-use gradient_test_support::cache_fixture::{FIXTURE_CACHE_NAME, private_cache_state};
+use gradient_test_support::cache_fixture::{
+    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_state, public_cache_state,
+    public_cache_with_nar, public_cache_with_narinfo,
+};
 use gradient_test_support::state::TestState;
 use gradient_web::create_router;
+use std::pin::Pin;
 use std::sync::Arc;
 
 const FIREFOX_PAGE_ACCEPT_HEADER: &str =
@@ -17,6 +21,8 @@ const FIREFOX_PAGE_ACCEPT_HEADER: &str =
 const ACCEPT_HEADER_VALUE_ALL_MEDIA_TYPES: &str = "*/*";
 const TEST_SERVER_FRONTEND_URL: &str = "https://ci.example";
 const VALID_NIX_STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+type CacheTestFixtureStarterFunction = fn() -> Pin<Box<dyn Future<Output = Arc<ServerState>>>>;
 
 fn build_test_server_with_frontend_url_and_browser_redirect_flag(enabled: bool) -> TestServer {
     TestState::new()
@@ -273,5 +279,62 @@ async fn narinfo_and_ls_urls_with_invalid_store_hash_are_not_redirected() {
         assert_ne!(response.status_code(), StatusCode::FOUND, "{path}");
         assert!(response.maybe_header("location").is_none(), "{path}");
         response.assert_header("vary", "Accept");
+    }
+}
+
+#[tokio::test]
+async fn non_browser_requests_ignore_web_frontend_redirect_setting() {
+    let fixtures: [(String, CacheTestFixtureStarterFunction); 3] = [
+        (
+            format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info"),
+            || Box::pin(public_cache_state()),
+        ),
+        (
+            format!("/cache/{FIXTURE_CACHE_NAME}/{FIXTURE_PATH_HASH}.narinfo"),
+            || Box::pin(public_cache_with_narinfo()),
+        ),
+        (
+            format!("/cache/{FIXTURE_CACHE_NAME}/ls/{FIXTURE_PATH_HASH}"),
+            || Box::pin(public_cache_with_nar()),
+        ),
+    ];
+    for (path, fixture) in fixtures {
+        let mut responses = Vec::new();
+        for enabled in [true, false] {
+            let server = start_test_server_with_frontend_url_and_browser_redirect_setting(
+                fixture(),
+                enabled,
+            )
+            .await;
+            responses.push(server.get(&path).await);
+        }
+        let [with_redirect, without_redirect] = responses.as_slice() else {
+            unreachable!()
+        };
+        with_redirect.assert_status_ok();
+        assert_eq!(
+            with_redirect.status_code(),
+            without_redirect.status_code(),
+            "{path}"
+        );
+        assert_eq!(
+            with_redirect.as_bytes(),
+            without_redirect.as_bytes(),
+            "{path}"
+        );
+        let [mut headers_with_redirect, mut headers_without_redirect] =
+            [with_redirect, without_redirect].map(|response| response.headers().clone());
+        for headers in [&mut headers_with_redirect, &mut headers_without_redirect] {
+            headers.remove("x-request-id");
+        }
+        assert_eq!(
+            headers_with_redirect
+                .remove("vary")
+                .as_ref()
+                .map(|v| v.as_bytes()),
+            Some(&b"Accept"[..]),
+            "{path}"
+        );
+        assert_eq!(headers_with_redirect, headers_without_redirect, "{path}");
     }
 }
