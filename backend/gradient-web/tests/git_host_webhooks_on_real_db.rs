@@ -242,6 +242,38 @@ async fn push_webhook_with_wrong_signature_counts_on_the_connection_without_a_de
 }
 
 #[tokio::test]
+async fn push_for_untracked_repository_records_which_repository_no_task_tracks() {
+    let secret = "webhook-secret-plaintext";
+    let s =
+        create_test_database_with_user_project_task_gitea_webhook_secret_push_trigger_and_http_server(
+            secret,
+            "https://gitea.example.com/test-org/another-repo",
+            ChangedFilePathFilter::default(),
+        )
+        .await;
+
+    post_signed_gitea_push_webhook(
+        &s.server,
+        &format!("/api/v1/hooks/{}", s.connection.id),
+        secret,
+        GITEA_PUSH_WEBHOOK_JSON_BODY_FOR_MAIN_BRANCH.as_bytes(),
+    )
+    .await
+    .assert_status_ok();
+
+    let deliveries =
+        gradient_db::incoming_deliveries::of_connection(&s.db.connection(), s.connection.id, 50)
+            .await
+            .unwrap();
+    assert_eq!(deliveries.len(), 1, "{deliveries:?}");
+    assert_eq!(
+        deliveries[0].detail.as_deref(),
+        Some("No task tracks test-org/repo")
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn test_signed_push_webhook_at_old_gitea_hook_path_queues_evaluation() {
     let secret = "webhook-secret-plaintext";
     let s =
