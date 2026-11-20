@@ -165,8 +165,10 @@ async fn repository_response(
     let deploy_key =
         uses_ssh.then(|| format_public_key(project.clone(), &db.config.server.serve_url));
     let can_edit = can_edit_task && !task.managed;
+    let fetch = RepositoryFetchStatus::of(task, can_edit_task);
     let chain = task_git_host_chain(&TaskGitHostChainInput {
         repository: &task.repository,
+        fetch: fetch.as_ref(),
         connection: git_host_connection.as_ref(),
         connection_has_access_token,
         available_connections: &available_connections,
@@ -181,7 +183,7 @@ async fn repository_response(
         repository: task.repository.clone(),
         uses_ssh,
         deploy_key,
-        fetch: RepositoryFetchStatus::of(task, can_edit_task),
+        fetch,
         git_host_connection,
         report_status: task.report_status,
         chain,
