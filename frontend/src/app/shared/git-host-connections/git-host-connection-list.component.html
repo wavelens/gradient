@@ -39,7 +39,12 @@
               </div>
               <div class="connection-meta" data-testid="connection-health">
                 @if (connection.receives_events) {
-                  @if (connection.last_delivery; as delivery) {
+                  @if (refusedSignatureNewerThanLastDelivery(connection); as refused) {
+                    <span>
+                      <gr-badge severity="danger">signature</gr-badge>
+                      Refused a delivery with a wrong signature <time class="connection-delivery-time" [attr.datetime]="refused.at">{{ refused.at | relativeTime }}</time>
+                    </span>
+                  } @else if (connection.last_delivery; as delivery) {
                     <span>
                       <gr-badge [severity]="deliveryBadgeSeverity(delivery)">{{ delivery.event }}</gr-badge>
                       {{ deliverySummary(delivery) }} <time class="connection-delivery-time" [attr.datetime]="delivery.created_at">{{ delivery.created_at | relativeTime }}</time>
@@ -93,7 +98,8 @@
             @if (webhookUrl(connection); as url) {
               <gr-copy-field label="Webhook URL" [value]="url" />
             }
-            <app-incoming-deliveries [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id" />
+            <app-incoming-deliveries [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id"
+              [refusedSignature]="refusedSignatureNewerThanLastDelivery(connection)" />
           }
         </div>
       }

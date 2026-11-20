@@ -32,7 +32,7 @@ import { links } from '@shared/routing';
 import { CurrentTimeSignal, RelativeTimePipe } from '@shared/text';
 import { formatEntityLabel } from '@shared/ui';
 import { GitHostConnectionDialogComponent } from './git-host-connection-dialog.component';
-import { accessTokenState, gitHostConnectionHost } from './git-host-connection-health';
+import { accessTokenState, gitHostConnectionHost, refusedSignatureNewerThanLastDelivery } from './git-host-connection-health';
 import { GitHostOAuthReturnBannerComponent } from './git-host-oauth-return-banner.component';
 
 @Component({
@@ -71,6 +71,7 @@ export class GitHostConnectionListComponent implements OnInit {
   protected readonly gitHostLabel = gitHostLabel;
   protected readonly ownerText = getGitHostConnectionOwnerReadableText;
   protected readonly deliverySummary = deliverySummary;
+  protected readonly refusedSignatureNewerThanLastDelivery = refusedSignatureNewerThanLastDelivery;
   protected readonly deliveryBadgeSeverity = deliveryBadgeSeverity;
   protected readonly host = gitHostConnectionHost;
   protected readonly links = links;
