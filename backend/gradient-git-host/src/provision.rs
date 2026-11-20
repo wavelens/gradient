@@ -50,16 +50,43 @@ pub struct ForgeAccess<'a> {
     pub repository: &'a str,
 }
 
+fn token_client(
+    http: reqwest::Client,
+    git_host: GitHostType,
+    endpoint_url: &str,
+    token: &str,
+) -> Result<HostClient, ProvisionError> {
+    let base = endpoint_url.trim_end_matches('/');
+    match git_host {
+        GitHostType::Gitea | GitHostType::Forgejo => Ok(HostClient::gitea(http, base, token)),
+        GitHostType::GitLab => Ok(HostClient::gitlab(http, base, token)),
+        GitHostType::GitHub => Err(ProvisionError::Unsupported("GitHub")),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct TokenAccount {
+    login: Option<String>,
+    username: Option<String>,
+}
+
+pub async fn token_account_login(
+    http: reqwest::Client,
+    git_host: GitHostType,
+    endpoint_url: &str,
+    token: &str,
+) -> Result<String, ProvisionError> {
+    let client = token_client(http, git_host, endpoint_url, token)?;
+    let account: TokenAccount = client.get_json("/user").await?;
+    account
+        .login
+        .or(account.username)
+        .ok_or_else(|| ProvisionError::Host("The Git host returned no account name".to_owned()))
+}
+
 impl ForgeAccess<'_> {
     fn client(&self, http: reqwest::Client) -> Result<HostClient, ProvisionError> {
-        let base = self.endpoint_url.trim_end_matches('/');
-        match self.git_host {
-            GitHostType::Gitea | GitHostType::Forgejo => {
-                Ok(HostClient::gitea(http, base, self.token))
-            }
-            GitHostType::GitLab => Ok(HostClient::gitlab(http, base, self.token)),
-            GitHostType::GitHub => Err(ProvisionError::Unsupported("GitHub")),
-        }
+        token_client(http, self.git_host, self.endpoint_url, self.token)
     }
 
     fn project_path(&self) -> String {
@@ -144,6 +171,52 @@ mod tests {
 
     fn http() -> reqwest::Client {
         gradient_util::http::build_client().expect("build test http client")
+    }
+
+    #[tokio::test]
+    async fn token_account_login_reads_gitea_login_and_gitlab_username() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/user"))
+            .and(header("Authorization", "token gitea-token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "login": "ci-bot", "username": "ci-bot" })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/user"))
+            .and(header("PRIVATE-TOKEN", "gitlab-token"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "username": "lab-bot" })),
+            )
+            .mount(&server)
+            .await;
+
+        let gitea =
+            token_account_login(http(), GitHostType::Forgejo, &server.uri(), "gitea-token").await;
+        let gitlab =
+            token_account_login(http(), GitHostType::GitLab, &server.uri(), "gitlab-token").await;
+
+        assert_eq!(gitea.unwrap(), "ci-bot");
+        assert_eq!(gitlab.unwrap(), "lab-bot");
+    }
+
+    #[tokio::test]
+    async fn token_account_login_reports_a_rejected_token_by_status() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/user"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let error = token_account_login(http(), GitHostType::Gitea, &server.uri(), "stale")
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("401"), "{error}");
     }
 
     #[test]

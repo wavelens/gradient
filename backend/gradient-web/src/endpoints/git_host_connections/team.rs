@@ -6,7 +6,8 @@
 
 use super::{
     CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    GitHostConnectionTaskResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
+    PatchGitHostConnectionRequest,
 };
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
@@ -195,5 +196,24 @@ pub async fn list_team_git_host_connection_tasks(
         super::load_of_owner(&db.web_db, Owner::Team(team.id), params.param("id")?).await?;
     Ok(ok_json(
         super::tasks_using_connection_visible_to_user(&db.web_db, connection.id, &user).await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/teams/{team}/git-host-connections/{id}/test",
+    operation_id = "testTeamGitHostConnection",
+    tag = "git-host-connections",
+    summary = "Test a connection",
+    description = "Sign in to the Git host with the credentials of a connection of the team. Return the account name on success, or the reason for the failure.",
+    params(TeamPath, ("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Result of the sign-in", body = GitHostConnectionTestResponse), WebError)
+)]
+pub async fn test_team_git_host_connection(
+    TeamScope { team, params, .. }: TeamScope<Admin>,
+    State(state): State<Arc<ServerState>>,
+) -> WebResult<Json<BaseResponse<GitHostConnectionTestResponse>>> {
+    Ok(ok_json(
+        super::test(&state.ci(), Owner::Team(team.id), params.param("id")?).await?,
     ))
 }
