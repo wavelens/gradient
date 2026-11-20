@@ -11,7 +11,7 @@
   } @else if (pickerOptions().length === 1) {
     <p class="no-connections" data-testid="no-connections">
       <span>{{ step().detail }}</span>
-      @if (state().can_manage_integrations) {
+      @if (state().can_create_connection) {
         <button grButton size="small" label="New connection" icon="add" [severity]="isPrimary('create_connection') ? 'primary' : 'secondary'"
           (click)="openCreateConnection()" data-testid="new-connection"></button>
       } @else {
