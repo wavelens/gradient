@@ -2550,6 +2550,7 @@ export interface RepositoryFetchStatus {
 
 export interface RepositoryFit {
   fits: boolean;
+  can_be_selected: boolean;
   reason?: string | null;
 }
 
