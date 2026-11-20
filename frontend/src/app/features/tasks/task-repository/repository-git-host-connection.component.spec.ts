@@ -29,7 +29,7 @@ const reporting: GitHostConnectionSummary = {
   access_token_refreshes_automatically: false,
   refused_signature_count: 0,
   task_count: 0,
-  repository_fit: { fits: true },
+  repository_fit: { fits: true, can_be_selected: true },
 };
 
 const eventsOnly: GitHostConnectionSummary = {
@@ -48,7 +48,7 @@ const otherHost: GitHostConnectionSummary = {
   name: 'gitlab',
   display_name: 'GitLab',
   base_url: 'https://gitlab.com',
-  repository_fit: { fits: false, reason: 'Other host' },
+  repository_fit: { fits: false, can_be_selected: false, reason: 'Other host' },
 };
 
 const state: TaskRepositoryResponse = {
@@ -109,6 +109,24 @@ describe('RepositoryGitHostConnectionComponent', () => {
     TestBed.resetTestingModule();
     const current = render({ git_host_connection: otherHost });
     expect(current.component.pickerOptions().map((option) => option.value)).toEqual(['', 'c1', 'c2', 'c3']);
+  });
+
+  it('lists a connection without host URL after the fitting ones, marked and never offers it as the fitting one', () => {
+    const withoutHostUrl: GitHostConnectionSummary = {
+      ...reporting,
+      id: 'c4',
+      display_name: 'Forge',
+      base_url: null,
+      repository_fit: { fits: false, can_be_selected: true, reason: 'No host URL' },
+    };
+    const chain = { ...chainWithoutConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
+    const { component } = render({ available_connections: [withoutHostUrl, reporting], chain });
+    expect(component.pickerOptions().map((option) => option.label)).toEqual([
+      'No connection',
+      'Forgejo · forgejo.example.com · Team platform',
+      'Forge · Forgejo · Team platform · No host URL',
+    ]);
+    expect(component.onlyFittingConnection()?.id).toBe('c1');
   });
 
   it('saves the picked connection at once and passes the new state on', () => {

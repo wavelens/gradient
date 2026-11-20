@@ -59,7 +59,7 @@
         <gr-settings-section title="Git host">
           @if (connections() === null) {
             <gr-load-state [loading]="true" loadingMessage="Loading git host connections..." />
-          } @else if (fittingConnections().length > 0) {
+          } @else if (connectionOptions().length > 1) {
             <gr-form-field label="Connection" for="connect-git-host-connection">
               <gr-select inputId="connect-git-host-connection" [options]="connectionOptions()" optionLabel="label" optionValue="value"
                 [ngModel]="selectedConnectionId() ?? ''" (ngModelChange)="selectedConnectionId.set($event ?? '')" />

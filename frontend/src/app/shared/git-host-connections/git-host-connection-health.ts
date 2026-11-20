@@ -33,6 +33,24 @@ export function gitHostConnectionPickerLabel(connection: GitHostConnectionSummar
   ].join(' · ');
 }
 
+export function gitHostConnectionPickerOptions(
+  connections: GitHostConnectionSummary[],
+  currentId: string | null = null,
+): { label: string; value: string }[] {
+  const fitting = connections.filter((connection) => connection.repository_fit?.fits !== false);
+  const pickableByHand = connections.filter(
+    (connection) => connection.repository_fit?.fits === false && (connection.repository_fit.can_be_selected || connection.id === currentId),
+  );
+  return [
+    { label: 'No connection', value: '' },
+    ...fitting.map((connection) => ({ value: connection.id, label: gitHostConnectionPickerLabel(connection) })),
+    ...pickableByHand.map((connection) => ({
+      value: connection.id,
+      label: [gitHostConnectionPickerLabel(connection), connection.repository_fit?.reason].filter(Boolean).join(' · '),
+    })),
+  ];
+}
+
 export interface AccessTokenState {
   text: string;
   expired: boolean;
