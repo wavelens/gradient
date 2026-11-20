@@ -78,6 +78,9 @@ const every: UrlTree[] = [
   links.userAccessPageUrl(),
   links.userAccessPageUrl('carol'),
   links.jobBoardPendingViewUrl(),
+  links.gitHostConnection({ type: 'project', name: 'p' }, 'c'),
+  links.gitHostConnection({ type: 'team', name: 't' }, 'c'),
+  links.gitHostConnection({ type: 'instance' }, 'c'),
 ];
 
 describe('links', () => {

@@ -5,6 +5,7 @@
  */
 
 import { ActivatedRouteSnapshot, PRIMARY_OUTLET, Params, UrlSegment, UrlSegmentGroup, UrlTree } from '@angular/router';
+import type { GitHostConnectionOwner } from '@core/models';
 
 export type ProjectPage = 'settings' | 'members' | 'connect' | 'workers' | 'git-host-connections' | 'secrets' | 'webhooks' | 'caches';
 export type TaskPage = 'settings' | 'repository' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
@@ -117,6 +118,11 @@ export const links = {
   settings: (page: SettingsPage = 'profile') => url(['settings', page]),
   createApiKeyPageForCache: (cache: string) => url(['settings', 'keys'], { cache }),
   admin: (page: AdminPage) => url(['admin', page]),
+  gitHostConnection: (owner: GitHostConnectionOwner, id: string) => {
+    const query = { connection: id };
+    if (owner.type === 'instance') return url(['admin', 'git-hosts'], query);
+    return url([owner.type, owner.name, 'git-host-connections'], query);
+  },
   userAccessPageUrl: (username?: string) => url(username ? ['admin', 'users', username, 'access'] : ['admin', 'users']),
 } as const;
 

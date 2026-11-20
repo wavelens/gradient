@@ -79,22 +79,23 @@ interface SavedConnectionOutcome {
             }
           </div>
         }
-        <div grDialogFooter>
-          <button grButton label="Done" icon="check" (click)="setOpen(false)" data-testid="connection-done"></button>
-        </div>
       } @else {
         @if (editing()?.managed) {
           <gr-message-banner type="info">{{ managedReason }}</gr-message-banner>
         }
         <app-git-host-connection-form [(value)]="form" [context]="context()" [showErrors]="attempted()" [oauthProject]="oauthProject()" />
-        <div grDialogFooter>
+      }
+      <div grDialogFooter>
+        @if (outcome()) {
+          <button grButton label="Done" icon="check" (click)="setOpen(false)" data-testid="connection-done"></button>
+        } @else {
           <button grButton label="Cancel" severity="secondary" (click)="dialog.close()" [disabled]="saving()"></button>
           @if (!editing()?.managed) {
             <button grButton [label]="editing() ? 'Save' : 'Create'" icon="check" (grSubmit)="save()" [loading]="saving()"
               [disabled]="saving()" data-testid="save-connection"></button>
           }
-        </div>
-      }
+        }
+      </div>
     </gr-dialog>
   `,
   styles: `
