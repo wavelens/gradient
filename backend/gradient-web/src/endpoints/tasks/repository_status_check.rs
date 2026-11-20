@@ -322,13 +322,13 @@ fn secret_mismatch_detail(
     let visible_task_count = connection.task_count;
     let used_in_hidden_projects = input.total_task_count_for_connection > visible_task_count;
     match (input.total_task_count_for_connection, visible_task_count) {
-        (0 | 1, _) => "Rejected last delivery: webhook secret does not match".to_owned(),
-        (_, 0 | 1) => "Rejected last delivery: webhook secret does not match. Other projects use this connection too.".to_owned(),
+        (0 | 1, _) => "Refused last delivery: webhook secret does not match".to_owned(),
+        (_, 0 | 1) => "Refused last delivery: webhook secret does not match. Other projects also use this connection.".to_owned(),
         _ if used_in_hidden_projects => format!(
-            "Rejected last delivery: webhook secret does not match. {visible_task_count} tasks share this connection. Other projects use the same connection too."
+            "Refused last delivery: webhook secret does not match. {visible_task_count} tasks share this connection. Other projects use the same connection too."
         ),
         _ => format!(
-            "Rejected last delivery: webhook secret does not match. {visible_task_count} tasks share this connection"
+            "Refused last delivery: webhook secret does not match. {visible_task_count} tasks share this connection."
         ),
     }
 }

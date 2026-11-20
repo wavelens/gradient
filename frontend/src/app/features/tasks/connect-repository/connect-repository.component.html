@@ -56,7 +56,7 @@
         </gr-settings-section>
       }
       @case ('git-host') {
-        <gr-settings-section title="Git Host">
+        <gr-settings-section title="Git host">
           @if (connectionsError(); as error) {
             <gr-load-state [error]="error" errorTitle="Failed to load git host connections" (retry)="loadConnections()" />
           } @else if (connections() === null) {
@@ -123,7 +123,7 @@
         </gr-settings-section>
       }
       @case ('triggers') {
-        <gr-settings-section title="Triggers and Settings">
+        <gr-settings-section title="Triggers and settings">
           @if (createError(); as error) {
             <gr-message-banner type="error">{{ error }}</gr-message-banner>
           }

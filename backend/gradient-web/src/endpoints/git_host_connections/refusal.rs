@@ -55,7 +55,7 @@ pub(crate) enum GitHostConnectionRefusal {
         "Connection {name} doesn't report commit statuses. Turn on commit status reporting for this connection, or choose another connection."
     )]
     ConnectionCannotReportStatus { name: String },
-    #[error("Select a connection to the git host before enabling commit status reporting.")]
+    #[error("Select a connection to a Git host before enabling commit status reporting.")]
     ReportStatusNeedsConnection,
     #[error("{0}")]
     StatusTestNotPossible(String),
