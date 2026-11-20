@@ -215,7 +215,12 @@ pub struct ServerConfig {
 pub async fn get_config(
     State(state): State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<ServerConfig>>> {
-    let github_app_page_url = github_app_page_url(&state).await;
+    let github_app_page_url = github_app_page_url(
+        state.config.github_app.as_ref(),
+        &state.http,
+        &state.memory.github_app_page_url,
+    )
+    .await;
     let res = BaseResponse {
         error: false,
         message: ServerConfig {
@@ -276,24 +281,24 @@ pub async fn get_config(
 
 const GITHUB_APP_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
-async fn github_app_page_url(state: &ServerState) -> Option<String> {
-    let app = state.config.github_app.as_ref()?;
+async fn github_app_page_url(
+    app: Option<&gradient_types::config::GitHubAppConfig>,
+    http: &reqwest::Client,
+    cache: &gradient_git_host::github_app::GitHubAppPageUrlCache,
+) -> Option<String> {
+    let app = app?;
     let look_up = async {
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
             .context("read GitHub App private key")?;
         tokio::time::timeout(
             GITHUB_APP_LOOKUP_TIMEOUT,
-            gradient_git_host::github_app::get_app_page_url(&state.http, app.app_id, &pem),
+            gradient_git_host::github_app::get_app_page_url(http, app.app_id, &pem),
         )
         .await
         .context("GitHub App lookup timed out")?
     };
-    state
-        .memory
-        .github_app_page_url
-        .get_or_look_up(look_up)
-        .await
+    cache.get_or_look_up(look_up).await
 }
 
 #[cfg(test)]
