@@ -228,12 +228,9 @@ pub(crate) async fn summary(
         .next()
         .map(Into::into);
     let last_status_post =
-        connections::newest_commit_status_post_attempt_of_tasks_using_connection(
-            db,
-            connection.id,
-        )
-        .await?
-        .map(|row| TaskCommitStatusPostAttempt::of(row, options.can_manage));
+        connections::newest_commit_status_post_attempt_of_tasks_using_connection(db, connection.id)
+            .await?
+            .map(|row| TaskCommitStatusPostAttempt::of(row, options.can_manage));
     Ok(GitHostConnectionSummary {
         id: connection.id,
         owner,
@@ -637,6 +634,50 @@ pub(crate) async fn deliveries_of_connection(
             .map(Into::into)
             .collect(),
     )
+}
+
+pub(crate) async fn tasks_using_connection_visible_to_user(
+    db: &impl sea_orm::ConnectionTrait,
+    connection: GitHostConnectionId,
+    user: &MUser,
+) -> WebResult<Vec<GitHostConnectionTaskResponse>> {
+    let tasks = connections::tasks_using_connection(db, connection).await?;
+    let project_ids: Vec<ProjectId> = tasks
+        .iter()
+        .map(|task| task.project)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let grants = gradient_db::access::project_grants(db, user.id, project_ids.clone()).await?;
+    let visible_project_names: std::collections::HashMap<ProjectId, String> =
+        gradient_db::projects::with_ids(db, &project_ids)
+            .await?
+            .into_iter()
+            .filter(|project| {
+                user.superuser
+                    || project.public
+                    || grants.get(&project.id).is_some_and(|grant| {
+                        crate::permissions::mask_grants(
+                            grant.permissions,
+                            crate::permissions::Permission::ViewProject,
+                        )
+                    })
+            })
+            .map(|project| (project.id, project.name))
+            .collect();
+    Ok(tasks
+        .into_iter()
+        .filter_map(|task| {
+            Some(GitHostConnectionTaskResponse {
+                project: visible_project_names.get(&task.project)?.clone(),
+                id: task.id,
+                name: task.name,
+                display_name: task.display_name,
+                repository: task.repository,
+                report_status: task.report_status,
+            })
+        })
+        .collect())
 }
 
 pub(crate) fn url_host(url: &str) -> Option<String> {

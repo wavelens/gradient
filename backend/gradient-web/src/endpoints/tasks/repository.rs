@@ -257,8 +257,8 @@ pub(crate) async fn choose_git_host_connection_for_new_task(
             }
         }
     };
-    let report_status = report_status
-        .unwrap_or_else(|| connection.as_ref().is_some_and(|row| row.reports_status));
+    let report_status =
+        report_status.unwrap_or_else(|| connection.as_ref().is_some_and(|row| row.reports_status));
     check_report_status_is_possible(connection.as_ref(), report_status)?;
     Ok((connection.map(|row| row.id), report_status))
 }
