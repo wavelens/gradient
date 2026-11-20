@@ -222,9 +222,6 @@
       optionValue="value"
       [disabled]="isEdit"
     />
-    @if (isEdit) {
-      <small class="text-secondary">Trigger type cannot be changed after creation.</small>
-  }
   </gr-form-field>
 
   @if (form.type === 'polling' || form.type === 'time' || form.type === 'post_request') {
@@ -257,8 +254,10 @@
 
   @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {
     @if (repository(); as repo) {
-      <app-task-git-host-chain [chain]="repo.chain" [repository]="repo.repository" [gitHostType]="repo.git_host_connection?.git_host_type ?? null"
-        [repositoryPageLink]="links.taskPage(projectName, taskName, 'repository')" data-testid="trigger-connection-chain" />
+      <div class="trigger-chain">
+        <app-task-git-host-chain [chain]="repo.chain" [repository]="repo.repository" [gitHostType]="repo.git_host_connection?.git_host_type ?? null"
+          [repositoryPageLink]="links.taskPage(projectName, taskName, 'repository')" data-testid="trigger-connection-chain" />
+      </div>
     }
     <gr-form-field label="Branches" for="trig-branches" hint="Comma-separated list. Leave blank to match any branch.">
       <input
