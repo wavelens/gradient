@@ -15,7 +15,7 @@
       <button grButton label="Save URL" icon="check" (click)="saveUrl()" [loading]="saving()" [disabled]="saving() || !!urlError()"></button>
     </div>
   } @else {
-    <gr-copy-field [value]="state().repository" label="Repository URL" />
+    <gr-copy-field class="repository-url" [value]="state().repository" label="Repository URL" />
   }
 
   <app-repository-fetch-banner [status]="state().fetch" [canEdit]="state().can_edit" />
