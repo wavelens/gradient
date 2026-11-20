@@ -493,7 +493,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          The name of the connection to the Git host for the task. Webhooks for push and pull requests arrive at this connection. This connection can report commit statuses. Gradient can search for that name in the task project, then in the team owning the project, then in the instance. Triggers `reporter_push` and `reporter_pull_request` need a connection with `receives_events = true`. Connections for a GitHub App also count. Declare the connection in `git_host_connections`. Use `null` to leave the task without a connection. Gradient never picks or links a connection on its own for a declared task.
+          The name of the connection to the Git host for the task. Webhooks for push and pull requests arrive at this connection. This connection can report commit statuses. Gradient can search for that name in the task project, then in the team owning the project, then in the instance. Triggers `reporter_push` and `reporter_pull_request` need a connection with `receives_events = true`. Connections for a GitHub App also count. Declare the connection in `git_host_connections`. Use `null` to leave the task without a connection. Gradient doesn't automatically select or link a connection for declared tasks.
         '';
       };
 
@@ -562,7 +562,7 @@
         type = types.nullOr types.bool;
         default = null;
         description = ''
-          Whether a task with `report_status` can report commit status through a connection. `null` means `true` for `github` and `false` for other Git hosts. Set `base_url` and `access_token_file` together with that option on hosts other than GitHub.
+          Whether a task with `report_status` can report commit status over the connection. `null` means `true` on `github` and `false` on other Git hosts. Set `base_url` and `access_token_file` together with this option on hosts other than GitHub.
         '';
       };
 
@@ -578,7 +578,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          GitHub user or organization the App is installed on. Required for `git_host_type = "github"`. Only repositories of this account fit the connection.
+          The GitHub user or organization that has the App installed. Required for `git_host_type = "github"`. Only repositories of this account fit this connection.
         '';
       };
 
