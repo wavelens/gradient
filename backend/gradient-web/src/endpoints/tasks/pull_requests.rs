@@ -46,16 +46,12 @@ pub struct PullRequestResponse {
     pub branch: String,
 }
 
-const RESERVED_BRANCH_PREFIX: &str = "gradient/";
-
 #[derive(Debug, thiserror::Error)]
 enum PullRequestRefusal {
     #[error("commit is required outside an exec job")]
     CommitRequired,
-    #[error(
-        "Values of `branch` start with `gradient/` and contain only letters, digits and `. _ - /`."
-    )]
-    BranchNameNotUnderGradientPrefixOrContainsInvalidCharacters,
+    #[error("Values of `branch` contain only letters, digits and `. _ - /`.")]
+    BranchNameContainsInvalidCharacters,
 }
 
 impl Refusal for PullRequestRefusal {
@@ -96,7 +92,7 @@ pub async fn post_task_pull_request(
 ) -> WebResult<Json<BaseResponse<PullRequestResponse>>> {
     let job = principal.and_then(|Extension(principal)| principal.job().map(|job| job.job));
     if let Some(branch) = &body.branch {
-        check_branch_name_has_reserved_prefix_and_safe_ref_characters(branch)?;
+        check_branch_name_has_safe_ref_characters(branch)?;
     }
     let start_commit = start_commit(&db.web_db, job, body.commit.as_deref()).await?;
     let git_host_connection = pull_request_git_host_connection(&db.web_db, task.id)
@@ -137,26 +133,20 @@ pub async fn post_task_pull_request(
     }))
 }
 
-fn check_branch_name_has_reserved_prefix_and_safe_ref_characters(
-    branch: &str,
-) -> Result<(), PullRequestRefusal> {
-    let valid = branch
-        .strip_prefix(RESERVED_BRANCH_PREFIX)
-        .is_some_and(|rest| {
-            rest.split('/').all(|segment| {
-                !segment.is_empty()
-                    && !segment.starts_with('.')
-                    && !segment.ends_with(".lock")
-                    && !segment.contains("..")
-                    && segment
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-            })
-        });
+fn check_branch_name_has_safe_ref_characters(branch: &str) -> Result<(), PullRequestRefusal> {
+    let valid = branch.split('/').all(|segment| {
+        !segment.is_empty()
+            && !segment.starts_with('.')
+            && !segment.ends_with(".lock")
+            && !segment.contains("..")
+            && segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    });
     if valid {
         Ok(())
     } else {
-        Err(PullRequestRefusal::BranchNameNotUnderGradientPrefixOrContainsInvalidCharacters)
+        Err(PullRequestRefusal::BranchNameContainsInvalidCharacters)
     }
 }
 
@@ -189,7 +179,7 @@ mod tests {
             "gradient/a/b-c_d.e",
             "gradient/patch/0123abcd",
         ] {
-            assert!(check_branch_name_has_reserved_prefix_and_safe_ref_characters(branch).is_ok());
+            assert!(check_branch_name_has_safe_ref_characters(branch).is_ok());
         }
     }
 
@@ -211,7 +201,7 @@ mod tests {
             "Gradient/x",
         ] {
             assert!(
-                check_branch_name_has_reserved_prefix_and_safe_ref_characters(branch).is_err(),
+                check_branch_name_has_safe_ref_characters(branch).is_err(),
                 "{branch}"
             );
         }
