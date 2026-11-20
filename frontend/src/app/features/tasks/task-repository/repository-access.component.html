@@ -40,8 +40,6 @@
     @if (isGitHub()) {
       <p class="text-secondary" data-testid="github-deploy-key">GitHub can accept each deploy key for only one repository. Add the key to an account for a machine user or connect GitHub through a GitHub App to cover more repositories.</p>
     }
-  } @else {
-    <p class="text-secondary">Repositories over HTTPS or git:// need no key.</p>
   }
 
   @if (state().can_edit) {
