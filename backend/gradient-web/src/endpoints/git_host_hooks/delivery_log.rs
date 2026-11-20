@@ -169,13 +169,23 @@ fn describe_tasks_tracking_repository(
         .iter()
         .partition(|task| task.git_host_connection == Some(connection));
     if using.is_empty() {
+        let (track, uses) = if not_using.len() == 1 {
+            ("tracks", "uses")
+        } else {
+            ("track", "use")
+        };
         format!(
-            "{} track {identity} but use no or another connection",
+            "{} {track} {identity} but {uses} no or another connection",
             task_list_visible_to_connection(&not_using, connection_project)
         )
     } else {
+        let (uses, has) = if using.len() == 1 {
+            ("uses", "has")
+        } else {
+            ("use", "have")
+        };
         format!(
-            "{} use this connection for {identity} but have no trigger for {event} events",
+            "{} {uses} this connection for {identity} but {has} no trigger for {event} events",
             task_list_visible_to_connection(&using, connection_project)
         )
     }
@@ -291,7 +301,40 @@ mod tests {
         );
         assert_eq!(
             detail,
-            "main use this connection for acme/app but have no trigger for pull_request events"
+            "main uses this connection for acme/app but has no trigger for pull_request events"
+        );
+    }
+
+    #[test]
+    fn several_linked_tasks_read_in_plural() {
+        let own = ProjectId::now_v7();
+        let connection = GitHostConnectionId::now_v7();
+        let tasks = [
+            tracking_task("main", own, Some(connection)),
+            tracking_task("docs", own, Some(connection)),
+        ];
+        let detail =
+            describe_tasks_tracking_repository("acme/app", "push", connection, Some(own), &tasks);
+        assert_eq!(
+            detail,
+            "main, docs use this connection for acme/app but have no trigger for push events"
+        );
+    }
+
+    #[test]
+    fn one_task_on_another_connection_reads_in_singular() {
+        let own = ProjectId::now_v7();
+        let tasks = [tracking_task("main", own, None)];
+        let detail = describe_tasks_tracking_repository(
+            "acme/app",
+            "push",
+            GitHostConnectionId::now_v7(),
+            Some(own),
+            &tasks,
+        );
+        assert_eq!(
+            detail,
+            "main tracks acme/app but uses no or another connection"
         );
     }
 
