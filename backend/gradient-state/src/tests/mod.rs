@@ -265,6 +265,23 @@ fn a_declared_connection_needs_the_credentials_of_its_capabilities() {
 }
 
 #[test]
+fn gitea_connection_without_secret_file_error_mentions_receives_events_false() {
+    let cfg = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "no-secret": { "name": "no-secret", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" }
+        }"#,
+    );
+    let errors = errors_of(&cfg);
+    assert!(
+        errors.iter().any(
+            |(field, message)| field == "git_host_connections.no-secret.secret_file"
+                && message.contains("receives_events = false")
+        ),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn state_reporter_trigger_rejects_unknown_connection() {
     let cfg = reporter_cfg("ghost", "{}");
     let errors = errors_of(&cfg);
