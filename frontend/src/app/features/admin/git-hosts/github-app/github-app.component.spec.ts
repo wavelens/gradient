@@ -19,6 +19,7 @@ import { ConfigService } from '@core/services/config.service';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
+import { saveProjectWizardDraftToSessionStorage } from '@shared/git-host-connections/connect-repository-wizard-unfinished-input-session-storage';
 
 type MockedAdmin = {
   requestGithubAppManifest: ReturnType<typeof vi.fn>;
@@ -222,7 +223,36 @@ describe('GithubAppComponent', () => {
   });
 
   describe('after GitHub redirected back from installation', () => {
-    afterEach(() => vi.useRealTimers());
+    afterEach(() => {
+      vi.useRealTimers();
+      sessionStorage.clear();
+    });
+
+    it('Link back to wizard with repository from saved wizard input', () => {
+      setup({ installation_id: '42', setup_action: 'install' }, {});
+      const { root: withoutInput } = render();
+      expect(withoutInput.querySelector('[data-testid="connect-repository-wizard-return"]')).toBeNull();
+      TestBed.resetTestingModule();
+
+      saveProjectWizardDraftToSessionStorage({
+        project: 'acme',
+        step: 'git-host',
+        form: { repository: 'https://github.com/acme/app.git', display_name: 'app', name: 'app', wildcard: 'packages.**', branch: '', polling: true, cron: '', exec_enabled: false },
+        selectedConnectionId: null,
+        savedAt: 1,
+      });
+      setup({ installation_id: '42', setup_action: 'install' }, {});
+      const { root } = render();
+      const back = root.querySelector('[data-testid="connect-repository-wizard-return"]');
+      expect(back?.getAttribute('href')).toBe('/project/acme/connect');
+      expect(back?.textContent).toContain('github.com/acme/app');
+      expect(back?.classList).toContain('gr-button--primary');
+      expect(root.querySelector('[data-testid="github-app-install"]')?.classList).not.toContain('gr-button--primary');
+
+      TestBed.resetTestingModule();
+      setup();
+      expect(render().root.querySelector('[data-testid="connect-repository-wizard-return"]')?.getAttribute('href')).toBe('/project/acme/connect');
+    });
 
     it('shows the new installation and the tasks linked to that installation', () => {
       setup({ installation_id: '42', setup_action: 'install' }, {});

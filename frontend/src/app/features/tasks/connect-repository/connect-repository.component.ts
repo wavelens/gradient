@@ -47,13 +47,18 @@ import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/g
 import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
 import { TaskRepositoryStatusCheckSummaryComponent } from '@shared/git-host-connections/task-repository-status-check-summary.component';
 import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
+import {
+  ConnectRepositoryWizardStep,
+  readProjectConnectRepositoryDraftFromSessionStorage,
+  removeProjectWizardDraftFromSessionStorage,
+  saveProjectWizardDraftToSessionStorage,
+} from '@shared/git-host-connections/connect-repository-wizard-unfinished-input-session-storage';
 
 export const RESERVED_TASK_NAMES = ['build-request'];
 const DEFAULT_WILDCARD = 'packages.x86_64-linux.**';
 const DEFAULT_POLLING_INTERVAL_SECS = 300;
 
-export type ConnectStep = 'repository' | 'git-host' | 'access' | 'triggers';
-const STEPS: { id: ConnectStep; label: string }[] = [
+const STEPS: { id: ConnectRepositoryWizardStep; label: string }[] = [
   { id: 'repository', label: 'Repository' },
   { id: 'git-host', label: 'Git host' },
   { id: 'access', label: 'Access' },
@@ -141,7 +146,7 @@ export class ConnectRepositoryComponent implements OnInit {
   canManageIntegrations = computed(() => accessTo(this.project(), 'manageIntegrations').canEdit);
   missingPermission = computed(() => createMissingPermissionLoadStateError('project', isViewerProjectMember(this.project()), 'createTask'));
   projectName = '';
-  step = signal<ConnectStep>('repository');
+  step = signal<ConnectRepositoryWizardStep>('repository');
   stepIndex = computed(() => STEPS.findIndex((s) => s.id === this.step()));
   breadcrumb = computed(() => this.crumbs.project(this.projectName, { label: 'Connect repository' }));
 
@@ -197,6 +202,33 @@ export class ConnectRepositoryComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') ?? '';
+    if (this.access().canEdit) this.loadSavedWizardInputAndReopenSavedStep();
+  }
+
+  saveWizardInputAndStepToSessionStorage(): void {
+    saveProjectWizardDraftToSessionStorage({
+      project: this.projectName,
+      step: this.step(),
+      form: { ...this.form },
+      selectedConnectionId: this.selectedConnectionId(),
+      savedAt: Date.now(),
+    });
+  }
+
+  clearSavedWizardInput(): void {
+    removeProjectWizardDraftFromSessionStorage(this.projectName);
+  }
+
+  private loadSavedWizardInputAndReopenSavedStep(): void {
+    const saved = readProjectConnectRepositoryDraftFromSessionStorage(this.projectName);
+    if (!saved) return;
+    this.form = { ...saved.form };
+    this.autofilledDisplayName = repositoryName(saved.form.repository) === saved.form.display_name ? saved.form.display_name : '';
+    const savedStepIndex = STEPS.findIndex((s) => s.id === saved.step);
+    if (savedStepIndex >= 1) this.loadConnections(saved.selectedConnectionId);
+    if (savedStepIndex >= 2) this.loadProjectSshDeployKeyIfRepositoryUrlUsesSshAndNoKeyLoaded();
+    if (savedStepIndex >= 3) this.fetchSuggestedPushAndPullRequestTriggers();
+    this.step.set(saved.step);
   }
 
   repositoryChanged(url: string): void {
@@ -219,6 +251,7 @@ export class ConnectRepositoryComponent implements OnInit {
       return;
     }
     this.step.set('git-host');
+    this.saveWizardInputAndStepToSessionStorage();
     this.loadConnections();
   }
 
@@ -252,12 +285,16 @@ export class ConnectRepositoryComponent implements OnInit {
 
   continueFromGitHost(): void {
     this.step.set('access');
-    if (this.usesSsh() && this.deployKey() === null) {
-      this.projects.getSSHKey(this.projectName).subscribe({
-        next: (key) => this.deployKey.set(key),
-        error: () => this.deployKey.set(null),
-      });
-    }
+    this.saveWizardInputAndStepToSessionStorage();
+    this.loadProjectSshDeployKeyIfRepositoryUrlUsesSshAndNoKeyLoaded();
+  }
+
+  private loadProjectSshDeployKeyIfRepositoryUrlUsesSshAndNoKeyLoaded(): void {
+    if (!this.usesSsh() || this.deployKey() !== null) return;
+    this.projects.getSSHKey(this.projectName).subscribe({
+      next: (key) => this.deployKey.set(key),
+      error: () => this.deployKey.set(null),
+    });
   }
 
   testAccess(): void {
@@ -279,6 +316,11 @@ export class ConnectRepositoryComponent implements OnInit {
 
   continueToTriggers(): void {
     this.step.set('triggers');
+    this.saveWizardInputAndStepToSessionStorage();
+    this.fetchSuggestedPushAndPullRequestTriggers();
+  }
+
+  private fetchSuggestedPushAndPullRequestTriggers(): void {
     this.triggers.getSuggestedPushAndPullRequestTriggerConfigs(this.projectName, this.form.repository.trim()).subscribe({
       next: (configs) => this.suggestions.set(configs.map((config) => ({ config, selected: false }))),
       error: () => this.suggestions.set([]),
@@ -296,7 +338,9 @@ export class ConnectRepositoryComponent implements OnInit {
 
   back(): void {
     const previous = STEPS[this.stepIndex() - 1];
-    if (previous) this.step.set(previous.id);
+    if (!previous) return;
+    this.step.set(previous.id);
+    this.saveWizardInputAndStepToSessionStorage();
   }
 
   createTaskWithTriggersAndOpenTask(): void {
@@ -317,6 +361,7 @@ export class ConnectRepositoryComponent implements OnInit {
       .subscribe({
         next: (task) => {
           this.creating.set(false);
+          this.clearSavedWizardInput();
           this.notify.success('Task created');
           this.created.set({ name: task.name, repository: null });
           this.tasks.getRepository(this.projectName, task.name).subscribe({
