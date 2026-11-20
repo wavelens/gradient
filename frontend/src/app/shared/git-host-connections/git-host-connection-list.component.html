@@ -14,7 +14,8 @@
     @if (showsEmptyState()) {
       <gr-empty-state icon="hub" title="No Git host connections">
         @if (writable()) {
-          <button slot="action" grButton label="New connection" icon="add" (click)="openCreate()" data-testid="new-connection"></button>
+          <button slot="action" grButton label="New connection" icon="add" [severity]="isNewConnectionButtonPrimary() ? 'primary' : 'secondary'"
+            (click)="openCreate()" data-testid="new-connection"></button>
         }
       </gr-empty-state>
     }

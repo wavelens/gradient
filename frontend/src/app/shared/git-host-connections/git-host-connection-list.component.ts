@@ -70,6 +70,7 @@ export class GitHostConnectionListComponent implements OnInit {
   access = input.required<AccessState>();
   gitHostTypes = input<readonly GitHostType[] | null>(null);
   showsEmptyState = input(true);
+  isNewConnectionButtonPrimary = input(true);
 
   protected readonly gitHostLabel = gitHostLabel;
   protected readonly ownerText = getGitHostConnectionOwnerReadableText;

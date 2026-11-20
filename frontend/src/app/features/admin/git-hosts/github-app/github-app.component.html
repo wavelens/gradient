@@ -14,11 +14,10 @@
     <button slot="actions" grButton type="button" severity="secondary" label="Replace" data-testid="github-app-replace" (click)="replace()"></button>
   }
   @if (!showResult() && githubAppConfigured && !replacing()) {
-    <app-github-app-install-link slot="actions" [primary]="!connectedRepositoryWizardInput" />
+    <app-github-app-install-link slot="actions" [primary]="installationReturn()?.state !== 'installed'" />
   }
-  @if (connectedRepositoryWizardInput; as saved) {
-    @let repository = getShortRepositoryNameFromUrl(saved.form.repository);
-    <a slot="actions" grButton icon="arrow_back" [label]="'Continue connecting ' + repository"
+  @if (!showResult() && installationReturn()?.state !== 'installed' && connectedRepositoryWizardInput; as saved) {
+    <a slot="actions" grButton severity="secondary" icon="arrow_back" [label]="'Continue connecting ' + getShortRepositoryNameFromUrl(saved.form.repository)"
       [routerLink]="links.projectPage(saved.project, 'connect')" data-testid="connect-repository-wizard-return"></a>
   }
 
@@ -39,6 +38,10 @@
                       <a [routerLink]="links.taskPage(task.project, task.name, 'repository')">{{ task.project }} / {{ task.display_name }}</a>
                     }
                   </span>
+                }
+                @if (connectedRepositoryWizardInput; as saved) {
+                  <a grButton icon="arrow_back" [label]="'Continue connecting ' + getShortRepositoryNameFromUrl(saved.form.repository)"
+                    [routerLink]="links.projectPage(saved.project, 'connect')" data-testid="connect-repository-wizard-return"></a>
                 }
               </gr-message-banner>
             }
