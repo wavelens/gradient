@@ -21,3 +21,29 @@
   color: var(--gr-status-danger);
   border-radius: 0.5rem;
 }
+
+.app-page-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+
+  .material-symbols-outlined {
+    font-size: 1rem;
+  }
+}
+
+.advanced-toggle {
+  align-self: flex-start;
+}
+
+.returned-tasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm $spacing-md;
+  margin-top: $spacing-xs;
+}
+
+.result-panel h3 {
+  margin: 0;
+}

@@ -4,49 +4,129 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-settings-section
-  title="GitHub App"
-  description="Register a new GitHub App for this Gradient instance using GitHub's manifest flow."
->
+<gr-settings-section title="GitHub App">
+  @if (!showResult()) {
+    @if (githubAppConfigured && appPageUrl) {
+      <a slot="after-title" class="app-page-link" [href]="appPageUrl" target="_blank" rel="noopener" data-testid="github-app-page">
+        {{ appName }}<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+      </a>
+    }
+    @if (githubAppConfigured && !replacing()) {
+      <button slot="actions" grButton type="button" severity="secondary" label="Replace" data-testid="github-app-replace" (click)="replace()"></button>
+      @if (installUrl) {
+        <a slot="actions" grButton label="Install on GitHub" icon="add" [href]="installUrl" data-testid="github-app-install"></a>
+      }
+    }
+  }
 
   @if (!showResult()) {
     <div class="setup-panel">
-      <p class="text-secondary" data-testid="github-app-current-state">
-        @if (githubAppAlreadyConfigured) {
-          This server already has a GitHub App. Create a different GitHub App only to replace the current one.
-        } @else {
-          This server has no GitHub App set up yet.
-        }
-      </p>
+      @if (installationReturn(); as returned) {
+        <div data-testid="github-app-returned">
+          @switch (returned.state) {
+            @case ('waiting') {
+              <gr-message-banner type="info" icon="hourglass_top">Waiting for GitHub to report the installation...</gr-message-banner>
+            }
+            @case ('installed') {
+              <gr-message-banner type="success">
+                Installed on {{ returned.connection.account_login }}
+                @if (returned.tasks.length) {
+                  <span class="returned-tasks">
+                    @for (task of returned.tasks; track task.id) {
+                      <a [routerLink]="links.taskPage(task.project, task.name, 'repository')">{{ task.project }} / {{ task.display_name }}</a>
+                    }
+                  </span>
+                }
+              </gr-message-banner>
+            }
+            @case ('missing') {
+              <gr-message-banner type="warning">
+                GitHub has not reported the installation yet.
+                <button grButton type="button" size="small" severity="secondary" label="Check again" (click)="checkInstallation()"></button>
+              </gr-message-banner>
+            }
+            @case ('requested') {
+              <gr-message-banner type="info">An owner of the account has to approve the install on GitHub.</gr-message-banner>
+            }
+          }
+        </div>
+      }
 
-      <gr-form-field
-        label="GitHub Enterprise host (optional)"
-        for="github-host"
-        [invalid]="!!githubHostInvalidCharacterErrorMessage()"
-        [error]="githubHostInvalidCharacterErrorMessage()"
-      >
-        <input
-          id="github-host"
-          grInput
-          type="text"
-          placeholder="github.com"
-          [ngModel]="host()"
-          (ngModelChange)="host.set($event)"
-        />
-      </gr-form-field>
+      @if (showsCreateForm()) {
+        <gr-form-field
+          label="Organization"
+          for="github-organization"
+          [invalid]="!!organizationErrorMessage()"
+          [error]="organizationErrorMessage()"
+        >
+          <input
+            id="github-organization"
+            grInput
+            type="text"
+            placeholder="Personal account"
+            [ngModel]="organization()"
+            (ngModelChange)="organization.set($event)"
+          />
+        </gr-form-field>
 
-      <div class="gr-form-actions">
         <button
           grButton
           type="button"
+          text
           severity="secondary"
-          label="Create on GitHub"
-          data-testid="github-app-create-button"
-          [loading]="loading()"
-          [disabled]="!!githubHostInvalidCharacterErrorMessage()"
-          (click)="create()"
+          label="Advanced"
+          [icon]="advancedOpen() ? 'expand_less' : 'expand_more'"
+          iconPos="right"
+          class="advanced-toggle"
+          [attr.aria-expanded]="advancedOpen()"
+          (click)="advancedOpen.set(!advancedOpen())"
         ></button>
-      </div>
+
+        @if (advancedOpen()) {
+          <gr-form-field
+            label="GitHub Enterprise host"
+            for="github-host"
+            [invalid]="!!githubHostInvalidCharacterErrorMessage()"
+            [error]="githubHostInvalidCharacterErrorMessage()"
+          >
+            <input
+              id="github-host"
+              grInput
+              type="text"
+              placeholder="github.com"
+              [ngModel]="host()"
+              (ngModelChange)="host.set($event)"
+            />
+          </gr-form-field>
+        }
+
+        <div class="gr-form-actions">
+          @if (replacing()) {
+            <button grButton type="button" severity="secondary" label="Cancel" (click)="replacing.set(false)"></button>
+          }
+          <button
+            grButton
+            type="button"
+            label="Create on GitHub"
+            data-testid="github-app-create-button"
+            [loading]="loading()"
+            [disabled]="!!githubHostInvalidCharacterErrorMessage() || !!organizationErrorMessage()"
+            (click)="create()"
+          ></button>
+        </div>
+      } @else {
+        <app-git-host-connection-list
+          [gitHostConnectionOwner]="instanceOwner"
+          [access]="superuserAccess"
+          [gitHostTypes]="['github']"
+          [showsEmptyState]="false"
+        />
+        @if (installationsList(); as list) {
+          @if (!list.loading() && !list.loadError() && list.sortedConnections().length === 0) {
+            <p class="text-secondary" data-testid="github-app-no-installations">No installations yet.</p>
+          }
+        }
+      }
     </div>
   } @else {
     <gr-load-state
@@ -66,29 +146,23 @@
       </div>
     } @else if (credentials(); as c) {
       <div class="result-panel">
-        <h2>App created - {{ c.slug }}</h2>
+        <h3>
+          App created:
+          <a [href]="c.html_url" target="_blank" rel="noopener" data-testid="github-app-page">{{ c.slug }}</a>
+        </h3>
         <gr-message-banner type="warning">These credentials show only once. Copy them now.</gr-message-banner>
-        <p><a [href]="c.html_url" target="_blank" rel="noopener">{{ c.html_url }}</a></p>
 
         <gr-form-field label="App ID">
           <gr-label-help slot="label" doc="guides/github/#1-register-the-github-app" title="Register the GitHub App" />
           <gr-copy-field [value]="c.id" />
         </gr-form-field>
 
-        <gr-form-field label="Webhook secret">
-          <gr-copy-field [value]="c.webhook_secret" />
-        </gr-form-field>
-
         <gr-form-field label="Private key (PEM)">
           <gr-copy-field [value]="c.pem" multiline />
         </gr-form-field>
 
-        <gr-form-field label="Client ID">
-          <gr-copy-field [value]="c.client_id" />
-        </gr-form-field>
-
-        <gr-form-field label="Client secret">
-          <gr-copy-field [value]="c.client_secret" />
+        <gr-form-field label="Webhook secret">
+          <gr-copy-field [value]="c.webhook_secret" />
         </gr-form-field>
 
         <h3>Server configuration</h3>
