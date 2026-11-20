@@ -5,18 +5,16 @@
 -->
 
 <gr-settings-section title="GitHub App">
-  @if (!showResult()) {
-    @if (githubAppConfigured && appPageUrl) {
-      <a slot="after-title" class="app-page-link" [href]="appPageUrl" target="_blank" rel="noopener" data-testid="github-app-page">
-        {{ appName }}<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
-      </a>
-    }
-    @if (githubAppConfigured && !replacing()) {
-      <button slot="actions" grButton type="button" severity="secondary" label="Replace" data-testid="github-app-replace" (click)="replace()"></button>
-      @if (installUrl) {
-        <a slot="actions" grButton label="Install on GitHub" icon="add" [href]="installUrl" data-testid="github-app-install"></a>
-      }
-    }
+  @if (!showResult() && githubAppConfigured && appPageUrl) {
+    <a slot="after-title" class="app-page-link" [href]="appPageUrl" target="_blank" rel="noopener" data-testid="github-app-page">
+      {{ appName }}<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+    </a>
+  }
+  @if (!showResult() && githubAppConfigured && !replacing()) {
+    <button slot="actions" grButton type="button" severity="secondary" label="Replace" data-testid="github-app-replace" (click)="replace()"></button>
+  }
+  @if (!showResult() && githubAppConfigured && !replacing() && installUrl) {
+    <a slot="actions" grButton label="Install on GitHub" icon="add" [href]="installUrl" data-testid="github-app-install"></a>
   }
 
   @if (!showResult()) {
