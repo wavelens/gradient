@@ -119,8 +119,55 @@ pub async fn install_webhook(
     secret: &str,
 ) -> Result<(), ProvisionError> {
     let client = access.client(http)?;
-    let path = format!("{}/hooks", access.project_path());
-    let body = match access.git_host {
+    let hooks_path = format!("{}/hooks", access.project_path());
+    let body = webhook_body(access.git_host, webhook_url, secret);
+    let page = match access.git_host {
+        GitHostType::GitLab => "per_page=100",
+        _ => "limit=50",
+    };
+    let installed: Vec<InstalledWebhook> =
+        client.get_json(&format!("{hooks_path}?{page}")).await?;
+    let mut same_url = installed
+        .into_iter()
+        .filter(|hook| hook.url() == Some(webhook_url));
+    match same_url.next() {
+        Some(existing) => {
+            let path = format!("{hooks_path}/{}", existing.id);
+            match access.git_host {
+                GitHostType::GitLab => client.put(&path, &body).await?,
+                _ => client.patch(&path, &body).await?,
+            }
+        }
+        None => client.post(&hooks_path, &body).await?,
+    }
+    for copy in same_url {
+        client.delete(&format!("{hooks_path}/{}", copy.id)).await?;
+    }
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct InstalledWebhook {
+    id: u64,
+    url: Option<String>,
+    config: Option<InstalledWebhookConfig>,
+}
+
+#[derive(serde::Deserialize)]
+struct InstalledWebhookConfig {
+    url: Option<String>,
+}
+
+impl InstalledWebhook {
+    fn url(&self) -> Option<&str> {
+        self.url
+            .as_deref()
+            .or_else(|| self.config.as_ref()?.url.as_deref())
+    }
+}
+
+fn webhook_body(git_host: GitHostType, webhook_url: &str, secret: &str) -> serde_json::Value {
+    match git_host {
         GitHostType::GitLab => json!({
             "name": WEBHOOK_DISPLAY_NAME,
             "url": webhook_url,
@@ -139,8 +186,7 @@ pub async fn install_webhook(
             "events": GITEA_EVENTS,
             "config": { "url": webhook_url, "content_type": "json", "secret": secret },
         }),
-    };
-    Ok(client.post(&path, &body).await?)
+    }
 }
 
 pub async fn install_deploy_key(
@@ -244,8 +290,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn installing_again_updates_the_existing_forgejo_webhook_and_deletes_copies() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/app/hooks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "id": 7, "config": { "url": "https://other/hook" } },
+                { "id": 8, "config": { "url": "https://ci/hook" } },
+                { "id": 9, "config": { "url": "https://ci/hook" } },
+            ])))
+            .mount(&server)
+            .await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v1/repos/acme/app/hooks/8"))
+            .and(body_partial_json(
+                json!({ "active": true, "config": { "url": "https://ci/hook", "secret": "new" } }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 8 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v1/repos/acme/app/hooks/9"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let access = ForgeAccess {
+            git_host: GitHostType::Forgejo,
+            endpoint_url: &server.uri(),
+            token: "tok",
+            repository: "acme/app",
+        };
+        install_webhook(http(), &access, "https://ci/hook", "new")
+            .await
+            .expect("replace webhook");
+    }
+
+    #[tokio::test]
+    async fn installing_again_updates_the_existing_gitlab_webhook() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/projects/group%2Fapp/hooks"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!([{ "id": 3, "url": "https://ci/hook" }])),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v4/projects/group%2Fapp/hooks/3"))
+            .and(body_partial_json(json!({ "url": "https://ci/hook", "token": "new" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 3 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let access = ForgeAccess {
+            git_host: GitHostType::GitLab,
+            endpoint_url: &server.uri(),
+            token: "tok",
+            repository: "group/app",
+        };
+        install_webhook(http(), &access, "https://ci/hook", "new")
+            .await
+            .expect("replace webhook");
+    }
+
+    #[tokio::test]
     async fn forgejo_webhook_carries_url_secret_and_events() {
         let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/app/hooks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
         Mock::given(method("POST"))
             .and(path("/api/v1/repos/acme/app/hooks"))
             .and(header("Authorization", "token tok"))
