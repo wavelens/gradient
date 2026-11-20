@@ -14,7 +14,12 @@
     <button slot="actions" grButton type="button" severity="secondary" label="Replace" data-testid="github-app-replace" (click)="replace()"></button>
   }
   @if (!showResult() && githubAppConfigured && !replacing()) {
-    <app-github-app-install-link slot="actions" [primary]="true" />
+    <app-github-app-install-link slot="actions" [primary]="!connectedRepositoryWizardInput" />
+  }
+  @if (connectedRepositoryWizardInput; as saved) {
+    @let repository = getShortRepositoryNameFromUrl(saved.form.repository);
+    <a slot="actions" grButton icon="arrow_back" [label]="'Continue connecting ' + repository"
+      [routerLink]="links.projectPage(saved.project, 'connect')" data-testid="connect-repository-wizard-return"></a>
   }
 
   @if (!showResult()) {
