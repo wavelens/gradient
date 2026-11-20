@@ -206,6 +206,11 @@ impl HostClient {
         Ok(())
     }
 
+    pub(crate) async fn delete(&self, path: &str) -> Result<(), HostError> {
+        self.succeed(Method::DELETE, path, NO_BODY).await?;
+        Ok(())
+    }
+
     pub(crate) async fn put<B: Serialize + ?Sized>(
         &self,
         path: &str,
