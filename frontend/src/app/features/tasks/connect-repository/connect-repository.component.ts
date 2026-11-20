@@ -133,7 +133,8 @@ export class ConnectRepositoryComponent implements OnInit {
   protected project = injectProject();
   protected readonly config = inject(ConfigService);
   private auth = inject(AuthService);
-  protected canInstallGithubApp = computed(() => !!this.auth.user()?.superuser && !!this.config.githubAppInstallUrl);
+  protected isInstanceSuperuser = computed(() => !!this.auth.user()?.superuser);
+  protected canInstallGithubApp = computed(() => this.isInstanceSuperuser() && !!this.config.githubAppInstallUrl);
 
   readonly steps = STEPS;
   access = computed(() => accessTo(this.project(), 'createTask'));

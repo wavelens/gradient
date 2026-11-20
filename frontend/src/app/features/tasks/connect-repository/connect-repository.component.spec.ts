@@ -297,6 +297,13 @@ describe('ConnectRepositoryComponent', () => {
       expect(link).toBeNull();
     });
 
+    it('link the instance admin to the admin page for a server with no GitHub App', () => {
+      const setupLink = (superuser: boolean) => gitHostStep({ githubAppEnabled: false }, superuser).el.querySelector('[data-testid="github-app-setup-link"]');
+      expect(setupLink(true)?.getAttribute('href')).toBe('/admin/git-host-connections');
+      TestBed.resetTestingModule();
+      expect(setupLink(false)).toBeNull();
+    });
+
     it('allow instance admins to install the app in the same tab', () => {
       const { link } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, true);
       expect(link?.getAttribute('href')).toBe(installUrl);

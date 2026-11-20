@@ -70,6 +70,10 @@
             <p class="gr-form-aside" data-testid="no-connection">
               @if (!config.githubAppEnabled) {
                 <span>No GitHub App on this server</span>
+                @if (isInstanceSuperuser()) {
+                  <a grButton severity="secondary" size="small" label="Set up GitHub App" icon="settings"
+                    [routerLink]="links.admin('git-host-connections')" data-testid="github-app-setup-link"></a>
+                }
               } @else if (canInstallGithubApp()) {
                 <span>{{ account }} has no GitHub App installed</span>
                 <app-github-app-install-link size="small" />
