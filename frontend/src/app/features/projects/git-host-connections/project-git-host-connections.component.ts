@@ -24,7 +24,7 @@ import { ProjectSettingsNavigationComponent } from '../project-settings-navigati
       @if (isMember()) {
         <app-settings-access-state-badge slot="after-title" [access]="access()" kind="project" showReadOnlyNote permission="manageIntegrations" />
       }
-      @if (gitHostConnectionList()?.ownConnections()?.length) {
+      @if (gitHostConnectionList()?.connections()?.length) {
         <button slot="actions" *appWritable="access()" grButton label="New connection" icon="add"
           (click)="gitHostConnectionList()?.openCreate()"></button>
       }
