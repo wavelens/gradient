@@ -88,6 +88,20 @@ sequenceDiagram
 - A miss falls through to the upstream caches. The `archive` value gets rewritten to `nar/upstream/{id}/...` paths.
 - Absolute `archive` values and paths outside the upstream root get rejected.
 
+## Browser Redirect
+
+| Request path | Redirect for an HTML page request |
+|---|---|
+| `/cache/{cache}`, `nix-cache-info`, `gradient-cache-info` | `{frontend_url}/caches/{cache}` |
+| `{hash}.narinfo`, `ls/{hash}` | `{frontend_url}/caches/{cache}/nars?hash={hash}` |
+
+- HTML page requests have `text/html` in their `Accept` header. The `*/*` wildcard alone cannot match. Calls from Nix, curl, and `fetch()` keep the response unchanged.
+- Middleware in `binary_cache_browser_redirect.rs` can decide before authentication and before cache lookup. Private caches don't send a Basic auth prompt to the browser.
+- Redirects include `Cache-Control: no-store`. All responses on these routes include `Vary: Accept`. Shared HTTP caches keep both responses separate.
+- NAR downloads, `serve`, `log`, `debuginfo`, `build-trace-v2`, and `proto` never redirect.
+- Cache names and hashes use percent encoding. Narinfo files and listings with an invalid store hash keep the response unchanged.
+- `GRADIENT_FRONTEND_REDIRECT_BROWSER_REQUESTS_TO_FRONTEND_PAGES=false` can disable redirects. The NixOS module can disable redirects with `frontend.enable` off and `frontend.url` still equal to `serveUrl`.
+
 ## Status Codes
 
 | Case | Answer |
