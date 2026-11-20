@@ -47,7 +47,7 @@ pub struct InstanceMemory {
     pub eval_progress: Arc<Latest<EvaluationId, EvaluationProgress>>,
     pub eval_member_thunks: Arc<EvalMemberThunks>,
     pub build_status_counts: Arc<BuildStatusCountsCache>,
-    pub github_app_install_url: Arc<tokio::sync::OnceCell<String>>,
+    pub github_app_page_url: Arc<gradient_git_host::github_app::GitHubAppPageUrlCache>,
     pub manifest_state: ManifestStateStore,
     pub pending_credentials: PendingCredentialsStore,
     pub pending_project_memberships: PendingProjectMemberships,

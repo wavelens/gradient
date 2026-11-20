@@ -40,6 +40,36 @@ async fn config_reports_a_configured_github_app() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["message"]["github_app_enabled"], true);
+    assert!(body["message"]["github_app_page_url"].is_null());
+    assert!(body["message"]["github_app_install_url"].is_null());
+}
+
+#[tokio::test]
+async fn config_links_the_page_and_the_install_page_of_the_github_app() {
+    let state = TestState::new()
+        .web_db(mock_db().into_connection())
+        .cli(|cli| {
+            cli.github_app.id = std::num::NonZeroU64::new(1);
+            cli.github_app.private_key_file = Some("/run/key.pem".into());
+            cli.github_app.webhook_secret_file = Some("/run/secret".into());
+        })
+        .build();
+    state
+        .memory
+        .github_app_page_url
+        .get_or_look_up(async { Ok("https://github.com/apps/gradient-ci/".to_owned()) })
+        .await;
+    let server = axum_test::TestServer::new(gradient_web::create_router(state).unwrap());
+
+    let body: Value = server.get("/api/v1/config").await.json();
+    assert_eq!(
+        body["message"]["github_app_page_url"],
+        "https://github.com/apps/gradient-ci"
+    );
+    assert_eq!(
+        body["message"]["github_app_install_url"],
+        "https://github.com/apps/gradient-ci/installations/new"
+    );
 }
 
 #[tokio::test]

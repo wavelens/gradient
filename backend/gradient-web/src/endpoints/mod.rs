@@ -48,6 +48,7 @@ pub mod worker_tokens;
 pub mod yearly_instance_summary;
 
 use crate::error::{WebError, WebResult};
+use anyhow::Context;
 use axum::extract::{Json, State};
 use gradient_core::ServerState;
 use gradient_types::{BaseResponse, CreatePermission};
@@ -185,6 +186,8 @@ pub struct ServerConfig {
     pub create_team: CreatePermission,
     pub create_cache: CreatePermission,
     pub github_app_enabled: bool,
+    pub github_app_page_url: Option<String>,
+    pub github_app_install_url: Option<String>,
     pub gitea_oauth_app: Option<GiteaOAuthAppConfig>,
     pub ssh_enabled: bool,
     pub ssh_port: Option<u16>,
@@ -212,6 +215,7 @@ pub struct ServerConfig {
 pub async fn get_config(
     State(state): State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<ServerConfig>>> {
+    let github_app_page_url = github_app_page_url(&state).await;
     let res = BaseResponse {
         error: false,
         message: ServerConfig {
@@ -242,6 +246,10 @@ pub async fn get_config(
             create_team: state.config.permissions.create_team,
             create_cache: state.config.permissions.create_cache,
             github_app_enabled: state.config.github_app.is_some(),
+            github_app_install_url: github_app_page_url
+                .as_deref()
+                .map(gradient_git_host::github_app::install_url),
+            github_app_page_url,
             gitea_oauth_app: state
                 .config
                 .gitea_app
@@ -264,6 +272,28 @@ pub async fn get_config(
     };
 
     Ok(Json(res))
+}
+
+const GITHUB_APP_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+async fn github_app_page_url(state: &ServerState) -> Option<String> {
+    let app = state.config.github_app.as_ref()?;
+    let look_up = async {
+        let pem = tokio::fs::read_to_string(&app.private_key_file)
+            .await
+            .context("read GitHub App private key")?;
+        tokio::time::timeout(
+            GITHUB_APP_LOOKUP_TIMEOUT,
+            gradient_git_host::github_app::get_app_page_url(&state.http, app.app_id, &pem),
+        )
+        .await
+        .context("GitHub App lookup timed out")?
+    };
+    state
+        .memory
+        .github_app_page_url
+        .get_or_look_up(look_up)
+        .await
 }
 
 #[cfg(test)]

@@ -2359,8 +2359,6 @@ export interface ProjectResponse {
   owner_team?: TeamNameAndDisplayName | null;
   created_by: UserId;
   created_at: string;
-  github_app_available: boolean;
-  github_app_install_url?: string | null;
   role?: string | null;
   permissions: Permission[];
 }
@@ -2702,6 +2700,8 @@ export interface ServerConfig {
   create_team: CreatePermission;
   create_cache: CreatePermission;
   github_app_enabled: boolean;
+  github_app_page_url?: string | null;
+  github_app_install_url?: string | null;
   gitea_oauth_app?: GiteaOAuthAppConfig | null;
   ssh_enabled: boolean;
   ssh_port?: number | null;
