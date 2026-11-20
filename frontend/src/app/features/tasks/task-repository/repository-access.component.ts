@@ -39,6 +39,10 @@ import { canInstallWebhookOrDeployKeyForTask } from './provisioning';
     RepositoryFetchBannerComponent,
   ],
   templateUrl: './repository-access.component.html',
+  styles: `
+    @use '@gradient/ui/styles/variables' as *;
+    .repository-url { margin-bottom: $space-block; }
+  `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RepositoryAccessComponent {
