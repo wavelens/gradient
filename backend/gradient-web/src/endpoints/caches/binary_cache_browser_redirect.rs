@@ -11,7 +11,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_entity::StoreHash;
-use gradient_types::frontend_page_urls;
+use gradient_types::{ServerArgs, frontend_page_urls};
 use std::sync::Arc;
 
 pub(crate) fn request_accepts_html_explicitly(headers: &HeaderMap) -> bool {
@@ -39,7 +39,8 @@ pub(crate) async fn redirect_browser_to_cache_frontend_page(
     let target = path
         .ok()
         .map(|Path(cache)| frontend_page_urls::cache(&state.config.server.frontend_url, &cache));
-    redirect_browser_html_request_to_binary_cache_url(&state, target, request, next).await
+    redirect_browser_html_request_to_binary_cache_url(&state.config.server, target, request, next)
+        .await
 }
 
 pub(crate) async fn redirect_browser_to_cached_store_path_page(
@@ -50,9 +51,10 @@ pub(crate) async fn redirect_browser_to_cached_store_path_page(
 ) -> Response {
     let target = path.ok().and_then(|Path((cache, file))| {
         let hash = file.strip_suffix(".narinfo")?;
-        frontend_store_path_page_url_for_cache_and_hash(&state, &cache, hash)
+        frontend_store_path_page_url_for_cache_and_hash(&state.config.server, &cache, hash)
     });
-    redirect_browser_html_request_to_binary_cache_url(&state, target, request, next).await
+    redirect_browser_html_request_to_binary_cache_url(&state.config.server, target, request, next)
+        .await
 }
 
 pub(crate) async fn redirect_browser_from_nar_listing_to_store_path_page(
@@ -62,35 +64,32 @@ pub(crate) async fn redirect_browser_from_nar_listing_to_store_path_page(
     next: Next,
 ) -> Response {
     let target = path.ok().and_then(|Path((cache, hash))| {
-        frontend_store_path_page_url_for_cache_and_hash(&state, &cache, &hash)
+        frontend_store_path_page_url_for_cache_and_hash(&state.config.server, &cache, &hash)
     });
-    redirect_browser_html_request_to_binary_cache_url(&state, target, request, next).await
+    redirect_browser_html_request_to_binary_cache_url(&state.config.server, target, request, next)
+        .await
 }
 
 fn frontend_store_path_page_url_for_cache_and_hash(
-    state: &ServerState,
+    server: &ServerArgs,
     cache: &str,
     hash: &str,
 ) -> Option<String> {
     let hash = StoreHash::parse(hash).ok()?;
     Some(frontend_page_urls::cached_store_path_page_url(
-        &state.config.server.frontend_url,
+        &server.frontend_url,
         cache,
         &hash.to_string(),
     ))
 }
 
 async fn redirect_browser_html_request_to_binary_cache_url(
-    state: &ServerState,
+    server: &ServerArgs,
     target: Option<String>,
     request: Request,
     next: Next,
 ) -> Response {
-    if !state
-        .config
-        .server
-        .frontend_redirect_browser_requests_to_frontend_pages
-    {
+    if !server.frontend_redirect_browser_requests_to_frontend_pages {
         return next.run(request).await;
     }
 
