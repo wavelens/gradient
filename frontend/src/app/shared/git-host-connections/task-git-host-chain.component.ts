@@ -44,6 +44,7 @@ export function nextChainStepKey(chain: TaskGitHostChain): ChainStepKey | undefi
     :host { display: block; }
     .chain-summary { display: flex; flex-wrap: wrap; align-items: center; gap: $spacing-sm; margin: 0; }
     .chain-summary__text { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+    .chain-summary__link { text-decoration: underline; white-space: nowrap; }
   `,
 })
 export class TaskGitHostChainComponent {
