@@ -5,7 +5,7 @@
  */
 
 use super::{
-    ConnectionReader, CreateGitHostConnectionRequest, GitHostConnectionResponse,
+    CreateGitHostConnectionRequest, GitHostConnectionReaderScope, GitHostConnectionResponse,
     GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
     IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
@@ -36,7 +36,7 @@ pub async fn list_instance_git_host_connections(
     Ok(ok_json(
         super::summaries_of_owner(
             &state.web_db,
-            &ConnectionReader::new(&user, None),
+            &GitHostConnectionReaderScope::new(&user, None),
             Owner::Instance,
             &super::SummaryOptions {
                 serve_url: &state.config.server.serve_url,
@@ -68,7 +68,7 @@ pub async fn create_instance_git_host_connection(
         super::create(
             &state.ci(),
             Owner::Instance,
-            &ConnectionReader::new(&user, None),
+            &GitHostConnectionReaderScope::new(&user, None),
             body,
             &audit,
         )
@@ -94,7 +94,7 @@ pub async fn get_instance_git_host_connection(
     Ok(ok_json(
         super::response(
             &state.web_db,
-            &ConnectionReader::new(&user, None),
+            &GitHostConnectionReaderScope::new(&user, None),
             &state.config.server.serve_url,
             row,
         )
@@ -124,7 +124,7 @@ pub async fn patch_instance_git_host_connection(
         super::patch(
             &state.ci(),
             Owner::Instance,
-            &ConnectionReader::new(&user, None),
+            &GitHostConnectionReaderScope::new(&user, None),
             id,
             body,
             &audit,
@@ -170,7 +170,7 @@ pub async fn list_instance_git_host_connection_deliveries(
     Ok(ok_json(
         super::deliveries(
             &state.web_db,
-            &ConnectionReader::new(&user, None),
+            &GitHostConnectionReaderScope::new(&user, None),
             Owner::Instance,
             id,
         )
@@ -198,7 +198,7 @@ pub async fn list_instance_git_host_connection_tasks(
         super::tasks_using_connection_visible_to_reader(
             &state.web_db,
             connection.id,
-            &ConnectionReader::new(&user, None),
+            &GitHostConnectionReaderScope::new(&user, None),
         )
         .await?,
     ))

@@ -7,13 +7,13 @@
 pub mod actions;
 pub mod evaluations;
 pub mod flake_inputs;
-pub mod git_host_chain;
 pub mod management;
 pub mod metrics;
 pub mod provision;
 pub mod pull_requests;
 mod refusal;
 pub mod repository;
+pub mod repository_status_check;
 pub mod triggers;
 
 pub use self::evaluations::{

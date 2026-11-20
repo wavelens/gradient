@@ -66,7 +66,7 @@ pub struct TaskGitHostChain {
     pub commit_status: TaskGitHostChainStep,
 }
 
-pub(crate) struct TaskGitHostChainInput<'a> {
+pub(crate) struct TaskRepositoryStatusCheckInput<'a> {
     pub(crate) repository: &'a str,
     pub(crate) fetch: Option<&'a RepositoryFetchStatus>,
     pub(crate) connection: Option<&'a GitHostConnectionSummary>,
@@ -135,7 +135,7 @@ fn connection_label(connection: &GitHostConnectionSummary) -> String {
 }
 
 fn repository_step(
-    input: &TaskGitHostChainInput<'_>,
+    input: &TaskRepositoryStatusCheckInput<'_>,
     repository: Option<&RepositoryOnHost>,
 ) -> TaskGitHostChainStep {
     let edit = input
@@ -178,7 +178,7 @@ fn repository_step(
 }
 
 fn connection_step(
-    input: &TaskGitHostChainInput<'_>,
+    input: &TaskRepositoryStatusCheckInput<'_>,
     repository: &RepositoryOnHost,
 ) -> TaskGitHostChainStep {
     let select = input
@@ -280,7 +280,7 @@ fn delivery_outcome(delivery: &IncomingWebhookDeliveryResponse) -> String {
 }
 
 fn webhook_action(
-    input: &TaskGitHostChainInput<'_>,
+    input: &TaskRepositoryStatusCheckInput<'_>,
     connection: &GitHostConnectionSummary,
 ) -> Option<TaskGitHostChainStepAction> {
     if input.can_manage_integrations && input.connection_has_access_token {
@@ -294,7 +294,7 @@ fn webhook_action(
 }
 
 fn secret_mismatch_action(
-    input: &TaskGitHostChainInput<'_>,
+    input: &TaskRepositoryStatusCheckInput<'_>,
     connection: &GitHostConnectionSummary,
 ) -> Option<TaskGitHostChainStepAction> {
     if input.can_manage_integrations && input.connection_has_access_token {
@@ -306,7 +306,7 @@ fn secret_mismatch_action(
 }
 
 fn add_trigger_action(
-    input: &TaskGitHostChainInput<'_>,
+    input: &TaskRepositoryStatusCheckInput<'_>,
     delivery: &IncomingWebhookDeliveryResponse,
 ) -> Option<TaskGitHostChainStepAction> {
     let trigger_type = input.missing_trigger_type?;
@@ -315,7 +315,7 @@ fn add_trigger_action(
 }
 
 fn incoming_events_step(
-    input: &TaskGitHostChainInput<'_>,
+    input: &TaskRepositoryStatusCheckInput<'_>,
     connection: &GitHostConnectionSummary,
 ) -> TaskGitHostChainStep {
     if !connection.receives_events {
@@ -363,7 +363,7 @@ fn incoming_events_step(
 }
 
 fn commit_status_step(
-    input: &TaskGitHostChainInput<'_>,
+    input: &TaskRepositoryStatusCheckInput<'_>,
     connection: &GitHostConnectionSummary,
 ) -> TaskGitHostChainStep {
     if !connection.reports_status {
@@ -412,7 +412,9 @@ fn commit_status_step(
     }
 }
 
-pub(crate) fn task_git_host_chain(input: &TaskGitHostChainInput<'_>) -> TaskGitHostChain {
+pub(crate) fn check_task_repository_readable_git_host_webhook_and_commit_status(
+    input: &TaskRepositoryStatusCheckInput<'_>,
+) -> TaskGitHostChain {
     let repository = read_repository(input.repository);
     let repository_step = repository_step(input, repository.as_ref());
     let Some(repository) = repository else {
@@ -501,8 +503,8 @@ mod tests {
         repository: &'a str,
         connection: Option<&'a GitHostConnectionSummary>,
         available_connections: &'a [GitHostConnectionSummary],
-    ) -> TaskGitHostChainInput<'a> {
-        TaskGitHostChainInput {
+    ) -> TaskRepositoryStatusCheckInput<'a> {
+        TaskRepositoryStatusCheckInput {
             repository,
             fetch: None,
             connection,
@@ -522,7 +524,11 @@ mod tests {
 
     #[test]
     fn unreadable_repository_fails_and_turns_off_the_rest() {
-        let chain = task_git_host_chain(&input("not a url", None, &[]));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
+            "not a url",
+            None,
+            &[],
+        ));
         assert_eq!(chain.repository.state, Failing);
         assert_eq!(
             chain.repository.action,
@@ -536,7 +542,11 @@ mod tests {
     #[test]
     fn single_fitting_connection_asks_to_be_selected() {
         let available = [connection(true), connection(false)];
-        let chain = task_git_host_chain(&input(GITEA_REPOSITORY, None, &available));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
+            GITEA_REPOSITORY,
+            None,
+            &available,
+        ));
         assert_eq!(chain.repository.state, Ok);
         assert_eq!(chain.connection.state, Attention);
         assert_eq!(
@@ -548,7 +558,11 @@ mod tests {
 
     #[test]
     fn github_repository_without_installation_asks_to_install_the_app() {
-        let chain = task_git_host_chain(&input("github:acme/app", None, &[]));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
+            "github:acme/app",
+            None,
+            &[],
+        ));
         assert_eq!(chain.connection.state, Attention);
         assert_eq!(
             chain.connection.action,
@@ -561,10 +575,12 @@ mod tests {
     #[test]
     fn github_repository_without_installation_names_the_instance_admin_when_the_caller_may_not_install()
      {
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            can_install_github_app: false,
-            ..input("github:acme/app", None, &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                can_install_github_app: false,
+                ..input("github:acme/app", None, &[])
+            },
+        );
         assert_eq!(chain.connection.state, Attention);
         assert_eq!(chain.connection.action, None);
         assert!(
@@ -577,10 +593,12 @@ mod tests {
 
     #[test]
     fn github_repository_on_a_server_without_github_app_offers_no_install() {
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            github_app_configured: false,
-            ..input("github:acme/app", None, &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                github_app_configured: false,
+                ..input("github:acme/app", None, &[])
+            },
+        );
         assert_eq!(chain.connection.state, Attention);
         assert_eq!(chain.connection.action, None);
         assert!(chain.connection.detail.contains("No GitHub App"));
@@ -588,7 +606,11 @@ mod tests {
 
     #[test]
     fn unknown_host_without_connection_offers_to_create_one() {
-        let chain = task_git_host_chain(&input(GITEA_REPOSITORY, None, &[]));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
+            GITEA_REPOSITORY,
+            None,
+            &[],
+        ));
         assert_eq!(
             chain.connection.action,
             Some(TaskGitHostChainStepAction::CreateConnection {
@@ -601,7 +623,11 @@ mod tests {
     #[test]
     fn misfitting_selected_connection_fails() {
         let selected = connection(false);
-        let chain = task_git_host_chain(&input(GITEA_REPOSITORY, Some(&selected), &[]));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
+            GITEA_REPOSITORY,
+            Some(&selected),
+            &[],
+        ));
         assert_eq!(chain.connection.state, Failing);
         assert_eq!(chain.connection.detail, "Different host");
         assert_eq!(chain.incoming_events.state, Off);
@@ -615,9 +641,17 @@ mod tests {
             can_be_selected: true,
             reason: Some("No host URL".to_owned()),
         });
-        let selected = task_git_host_chain(&input(GITEA_REPOSITORY, Some(&without_host_url), &[]));
+        let selected = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
+            GITEA_REPOSITORY,
+            Some(&without_host_url),
+            &[],
+        ));
         let available = [without_host_url.clone()];
-        let suggested = task_git_host_chain(&input(GITEA_REPOSITORY, None, &available));
+        let suggested = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
+            GITEA_REPOSITORY,
+            None,
+            &available,
+        ));
         assert_eq!(selected.connection.state, Ok);
         assert!(
             !suggested.connection.detail.contains("fits"),
@@ -629,10 +663,12 @@ mod tests {
     #[test]
     fn report_status_off_offers_to_turn_it_on() {
         let selected = connection(true);
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            report_status: false,
-            ..input(GITEA_REPOSITORY, Some(&selected), &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                report_status: false,
+                ..input(GITEA_REPOSITORY, Some(&selected), &[])
+            },
+        );
         assert_eq!(chain.commit_status.state, Off);
         assert_eq!(
             chain.commit_status.action,
@@ -646,10 +682,12 @@ mod tests {
         selected.last_delivery = Some(delivery());
         selected.last_refused_signature_at = Some(test_date() + chrono::Duration::minutes(1));
         let newest = delivery();
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            newest_delivery: Some(&newest),
-            ..input(GITEA_REPOSITORY, Some(&selected), &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                newest_delivery: Some(&newest),
+                ..input(GITEA_REPOSITORY, Some(&selected), &[])
+            },
+        );
         assert_eq!(chain.incoming_events.state, Failing);
         assert_eq!(chain.incoming_events.at, selected.last_refused_signature_at);
         assert_eq!(
@@ -662,35 +700,44 @@ mod tests {
     fn refused_signature_without_access_token_offers_to_change_the_secret() {
         let mut selected = connection(true);
         selected.last_refused_signature_at = Some(test_date());
-        let without_token = TaskGitHostChainInput {
+        let without_token = TaskRepositoryStatusCheckInput {
             connection_has_access_token: false,
             ..input(GITEA_REPOSITORY, Some(&selected), &[])
         };
         assert_eq!(
-            task_git_host_chain(&without_token).incoming_events.action,
+            check_task_repository_readable_git_host_webhook_and_commit_status(&without_token)
+                .incoming_events
+                .action,
             Some(TaskGitHostChainStepAction::ChangeWebhookSecret)
         );
         let unmanageable_connection = GitHostConnectionSummary {
             can_manage: false,
             ..selected.clone()
         };
-        let unmanageable = TaskGitHostChainInput {
+        let unmanageable = TaskRepositoryStatusCheckInput {
             connection: Some(&unmanageable_connection),
             ..without_token
         };
         assert_eq!(
-            task_git_host_chain(&unmanageable).incoming_events.action,
+            check_task_repository_readable_git_host_webhook_and_commit_status(&unmanageable)
+                .incoming_events
+                .action,
             None
         );
         let declared_connection = GitHostConnectionSummary {
             managed: true,
             ..selected.clone()
         };
-        let declared = TaskGitHostChainInput {
+        let declared = TaskRepositoryStatusCheckInput {
             connection: Some(&declared_connection),
             ..without_token
         };
-        assert_eq!(task_git_host_chain(&declared).incoming_events.action, None);
+        assert_eq!(
+            check_task_repository_readable_git_host_webhook_and_commit_status(&declared)
+                .incoming_events
+                .action,
+            None
+        );
     }
 
     #[test]
@@ -699,10 +746,12 @@ mod tests {
         selected.last_refused_signature_at = Some(test_date() - chrono::Duration::minutes(1));
         selected.last_delivery = Some(delivery());
         let newest = delivery();
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            newest_delivery: Some(&newest),
-            ..input(GITEA_REPOSITORY, Some(&selected), &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                newest_delivery: Some(&newest),
+                ..input(GITEA_REPOSITORY, Some(&selected), &[])
+            },
+        );
         assert_eq!(chain.incoming_events.state, Ok);
         assert_eq!(
             chain.incoming_events.detail,
@@ -722,10 +771,12 @@ mod tests {
     #[test]
     fn failed_fetch_fails_the_repository_step_with_its_error() {
         let fetch = failed_fetch(Some("Name or service not known"));
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            fetch: Some(&fetch),
-            ..input(GITEA_REPOSITORY, None, &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                fetch: Some(&fetch),
+                ..input(GITEA_REPOSITORY, None, &[])
+            },
+        );
         assert_eq!(chain.repository.state, Failing);
         assert_eq!(
             chain.repository.detail,
@@ -741,10 +792,12 @@ mod tests {
     #[test]
     fn failed_fetch_with_hidden_error_names_repository_and_host() {
         let fetch = failed_fetch(None);
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            fetch: Some(&fetch),
-            ..input(GITEA_REPOSITORY, None, &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                fetch: Some(&fetch),
+                ..input(GITEA_REPOSITORY, None, &[])
+            },
+        );
         assert_eq!(
             chain.repository.detail,
             "Cannot fetch acme/app from git.example.com"
@@ -758,10 +811,12 @@ mod tests {
             failed: false,
             ..failed_fetch(None)
         };
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            fetch: Some(&fetch),
-            ..input(GITEA_REPOSITORY, None, &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                fetch: Some(&fetch),
+                ..input(GITEA_REPOSITORY, None, &[])
+            },
+        );
         assert_eq!(chain.repository.state, Ok);
     }
 
@@ -774,10 +829,12 @@ mod tests {
             queued: 0,
             ..delivery()
         };
-        let chain = task_git_host_chain(&TaskGitHostChainInput {
-            newest_delivery: Some(&newest),
-            ..input(GITEA_REPOSITORY, Some(&selected), &[])
-        });
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+            &TaskRepositoryStatusCheckInput {
+                newest_delivery: Some(&newest),
+                ..input(GITEA_REPOSITORY, Some(&selected), &[])
+            },
+        );
         assert_eq!(chain.incoming_events.state, Attention);
         assert_eq!(
             chain.incoming_events.detail,
@@ -794,22 +851,29 @@ mod tests {
             queued: 0,
             ..delivery()
         };
-        let missing = TaskGitHostChainInput {
+        let missing = TaskRepositoryStatusCheckInput {
             newest_delivery: Some(&newest),
             missing_trigger_type: Some(TriggerType::ReporterPush),
             ..input(GITEA_REPOSITORY, Some(&selected), &[])
         };
         assert_eq!(
-            task_git_host_chain(&missing).incoming_events.action,
+            check_task_repository_readable_git_host_webhook_and_commit_status(&missing)
+                .incoming_events
+                .action,
             Some(TaskGitHostChainStepAction::AddTrigger {
                 trigger_type: TriggerType::ReporterPush
             })
         );
-        let view_only = TaskGitHostChainInput {
+        let view_only = TaskRepositoryStatusCheckInput {
             can_edit_task: false,
             ..missing
         };
-        assert_eq!(task_git_host_chain(&view_only).incoming_events.action, None);
+        assert_eq!(
+            check_task_repository_readable_git_host_webhook_and_commit_status(&view_only)
+                .incoming_events
+                .action,
+            None
+        );
     }
 
     #[test]
@@ -818,8 +882,8 @@ mod tests {
             repository: &'a str,
             connection: Option<&'a GitHostConnectionSummary>,
             available: &'a [GitHostConnectionSummary],
-        ) -> TaskGitHostChainInput<'a> {
-            TaskGitHostChainInput {
+        ) -> TaskRepositoryStatusCheckInput<'a> {
+            TaskRepositoryStatusCheckInput {
                 can_edit_task: false,
                 can_manage_integrations: false,
                 can_create_connection: false,
@@ -829,14 +893,30 @@ mod tests {
             }
         }
         let available = [connection(true)];
-        let chain = task_git_host_chain(&view_only("not a url", None, &available));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&view_only(
+            "not a url",
+            None,
+            &available,
+        ));
         assert_eq!(chain.repository.action, None);
-        let chain = task_git_host_chain(&view_only(GITEA_REPOSITORY, None, &available));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&view_only(
+            GITEA_REPOSITORY,
+            None,
+            &available,
+        ));
         assert_eq!(chain.connection.action, None);
-        let chain = task_git_host_chain(&view_only("github:acme/app", None, &[]));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&view_only(
+            "github:acme/app",
+            None,
+            &[],
+        ));
         assert_eq!(chain.connection.action, None);
         let selected = connection(true);
-        let chain = task_git_host_chain(&view_only(GITEA_REPOSITORY, Some(&selected), &[]));
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&view_only(
+            GITEA_REPOSITORY,
+            Some(&selected),
+            &[],
+        ));
         assert_eq!(chain.commit_status.action, None);
         assert_eq!(
             chain.incoming_events.action,

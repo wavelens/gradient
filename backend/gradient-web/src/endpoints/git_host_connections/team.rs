@@ -5,7 +5,7 @@
  */
 
 use super::{
-    ConnectionReader, CreateGitHostConnectionRequest, GitHostConnectionResponse,
+    CreateGitHostConnectionRequest, GitHostConnectionReaderScope, GitHostConnectionResponse,
     GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
     IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
@@ -46,7 +46,7 @@ pub async fn list_team_git_host_connections(
     Ok(ok_json(
         super::summaries_of_owner(
             &db.web_db,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             Owner::Team(team.id),
             &super::SummaryOptions {
                 serve_url: &db.config.server.serve_url,
@@ -84,7 +84,7 @@ pub async fn create_team_git_host_connection(
         super::create(
             &state.ci(),
             Owner::Team(team.id),
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             body,
             &audit,
         )
@@ -115,7 +115,7 @@ pub async fn get_team_git_host_connection(
     Ok(ok_json(
         super::response(
             &db.web_db,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             &db.config.server.serve_url,
             row,
         )
@@ -150,7 +150,7 @@ pub async fn patch_team_git_host_connection(
         super::patch(
             &state.ci(),
             Owner::Team(team.id),
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             params.param("id")?,
             body,
             &audit,
@@ -208,7 +208,7 @@ pub async fn list_team_git_host_connection_deliveries(
     Ok(ok_json(
         super::deliveries(
             &db.web_db,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             Owner::Team(team.id),
             params.param("id")?,
         )
@@ -242,7 +242,7 @@ pub async fn list_team_git_host_connection_tasks(
         super::tasks_using_connection_visible_to_reader(
             &db.web_db,
             connection.id,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
         )
         .await?,
     ))
