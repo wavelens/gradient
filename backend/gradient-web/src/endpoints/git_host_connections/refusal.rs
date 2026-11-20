@@ -13,7 +13,9 @@ pub(crate) enum GitHostConnectionRefusal {
         "Invalid Git host type '{host_type}': expected 'gitea', 'forgejo', 'gitlab', or 'github'."
     )]
     InvalidGitHostType { host_type: String },
-    #[error("Create a connection of type GitHub with the ID of the installation of the GitHub App.")]
+    #[error(
+        "Create a connection of type GitHub with the ID of the installation of the GitHub App."
+    )]
     InstallationIdRequired,
     #[error(
         "This server has no GitHub App. GitHub connections don't work. Ask the instance admin to set up a GitHub App."
