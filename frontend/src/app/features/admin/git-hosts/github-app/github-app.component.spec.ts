@@ -239,7 +239,6 @@ describe('GithubAppComponent', () => {
         step: 'git-host',
         form: { repository: 'https://github.com/acme/app.git', display_name: 'app', name: 'app', wildcard: 'packages.**', branch: '', polling: true, cron: '', exec_enabled: false },
         selectedConnectionId: null,
-        savedAt: 1,
       });
       setup({ installation_id: '42', setup_action: 'install' }, {});
       const { root } = render();

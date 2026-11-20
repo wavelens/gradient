@@ -24,14 +24,9 @@ export interface SavedConnectRepositoryWizardInput {
     exec_enabled: boolean;
   };
   selectedConnectionId: string | null;
-  savedAt: number;
 }
 
-const unfinishedConnectRepositoryInputSessionStorageKeyPrefix = 'gradient.connect-repository-draft:';
-
-function storageKey(project: string): string {
-  return unfinishedConnectRepositoryInputSessionStorageKeyPrefix + project;
-}
+const CONNECT_REPOSITORY_WIZARD_UNFINISHED_INPUT_SESSION_STORAGE_KEY = 'gradient.connect-repository-draft';
 
 function parse(raw: string | null): SavedConnectRepositoryWizardInput | null {
   if (!raw) return null;
@@ -42,7 +37,6 @@ function parse(raw: string | null): SavedConnectRepositoryWizardInput | null {
       !value ||
       typeof value.project !== 'string' ||
       !WIZARD_STEPS.includes(value.step as ConnectRepositoryWizardStep) ||
-      typeof value.savedAt !== 'number' ||
       !form ||
       typeof form.repository !== 'string' ||
       typeof form.display_name !== 'string' ||
@@ -60,7 +54,6 @@ function parse(raw: string | null): SavedConnectRepositoryWizardInput | null {
       step: value.step as ConnectRepositoryWizardStep,
       form: { ...form },
       selectedConnectionId: typeof value.selectedConnectionId === 'string' ? value.selectedConnectionId : null,
-      savedAt: value.savedAt,
     };
   } catch {
     return null;
@@ -69,41 +62,25 @@ function parse(raw: string | null): SavedConnectRepositoryWizardInput | null {
 
 export function saveProjectWizardDraftToSessionStorage(input: SavedConnectRepositoryWizardInput): void {
   try {
-    sessionStorage.setItem(storageKey(input.project), JSON.stringify(input));
+    sessionStorage.setItem(CONNECT_REPOSITORY_WIZARD_UNFINISHED_INPUT_SESSION_STORAGE_KEY, JSON.stringify(input));
   } catch {
     return;
   }
 }
 
-export function readProjectConnectRepositoryDraftFromSessionStorage(project: string): SavedConnectRepositoryWizardInput | null {
+export function readConnectRepositoryWizardInputFromSessionStorage(): SavedConnectRepositoryWizardInput | null {
   try {
-    const saved = parse(sessionStorage.getItem(storageKey(project)));
-    return saved?.project === project ? saved : null;
+    return parse(sessionStorage.getItem(CONNECT_REPOSITORY_WIZARD_UNFINISHED_INPUT_SESSION_STORAGE_KEY));
   } catch {
     return null;
   }
 }
 
-export function removeProjectWizardDraftFromSessionStorage(project: string): void {
+export function removeSavedConnectRepositoryWizardInput(): void {
   try {
-    sessionStorage.removeItem(storageKey(project));
+    sessionStorage.removeItem(CONNECT_REPOSITORY_WIZARD_UNFINISHED_INPUT_SESSION_STORAGE_KEY);
   } catch {
     return;
-  }
-}
-
-export function getMostRecentlySavedUnfinishedConnectRepositoryWizardInputAcrossProjects(): SavedConnectRepositoryWizardInput | null {
-  try {
-    let newest: SavedConnectRepositoryWizardInput | null = null;
-    for (let index = 0; index < sessionStorage.length; index++) {
-      const key = sessionStorage.key(index);
-      if (!key?.startsWith(unfinishedConnectRepositoryInputSessionStorageKeyPrefix)) continue;
-      const saved = parse(sessionStorage.getItem(key));
-      if (saved && (!newest || saved.savedAt > newest.savedAt)) newest = saved;
-    }
-    return newest;
-  } catch {
-    return null;
   }
 }
 

@@ -41,7 +41,7 @@ import { docsUrl } from '@core/docs';
 import { GitHostConnectionListComponent } from '@shared/git-host-connections/git-host-connection-list.component';
 import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 import {
-  getMostRecentlySavedUnfinishedConnectRepositoryWizardInputAcrossProjects,
+  readConnectRepositoryWizardInputFromSessionStorage,
   getShortRepositoryNameFromUrl,
 } from '@shared/git-host-connections/connect-repository-wizard-unfinished-input-session-storage';
 import type { AccessState, GitHostConnectionOwner, GitHostConnectionSummary, GitHostConnectionTaskResponse, ManifestResult } from '@core/models';
@@ -95,7 +95,7 @@ export class GithubAppComponent implements OnInit {
   protected readonly appPageUrl = this.config.githubAppPageUrl;
   protected readonly appName = this.appPageUrl?.split('/').pop() ?? null;
   protected readonly githubAppServerConfigurationDocsUrl = docsUrl('guides/github/#2-configure-the-server');
-  protected readonly connectedRepositoryWizardInput = getMostRecentlySavedUnfinishedConnectRepositoryWizardInputAcrossProjects();
+  protected readonly connectedRepositoryWizardInput = readConnectRepositoryWizardInputFromSessionStorage();
   protected readonly getShortRepositoryNameFromUrl = getShortRepositoryNameFromUrl;
 
   host = signal<string>('');

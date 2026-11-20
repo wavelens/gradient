@@ -49,8 +49,8 @@ import { TaskRepositoryStatusCheckSummaryComponent } from '@shared/git-host-conn
 import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 import {
   ConnectRepositoryWizardStep,
-  readProjectConnectRepositoryDraftFromSessionStorage,
-  removeProjectWizardDraftFromSessionStorage,
+  readConnectRepositoryWizardInputFromSessionStorage,
+  removeSavedConnectRepositoryWizardInput,
   saveProjectWizardDraftToSessionStorage,
 } from '@shared/git-host-connections/connect-repository-wizard-unfinished-input-session-storage';
 
@@ -202,7 +202,7 @@ export class ConnectRepositoryComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') ?? '';
-    if (this.access().canEdit) this.loadSavedWizardInputAndReopenSavedStep();
+    this.loadSavedWizardInputAndReopenSavedStep();
   }
 
   saveWizardInputAndStepToSessionStorage(): void {
@@ -211,17 +211,18 @@ export class ConnectRepositoryComponent implements OnInit {
       step: this.step(),
       form: { ...this.form },
       selectedConnectionId: this.selectedConnectionId(),
-      savedAt: Date.now(),
     });
   }
 
   clearSavedWizardInput(): void {
-    removeProjectWizardDraftFromSessionStorage(this.projectName);
+    removeSavedConnectRepositoryWizardInput();
   }
 
   private loadSavedWizardInputAndReopenSavedStep(): void {
-    const saved = readProjectConnectRepositoryDraftFromSessionStorage(this.projectName);
+    const saved = readConnectRepositoryWizardInputFromSessionStorage();
     if (!saved) return;
+    removeSavedConnectRepositoryWizardInput();
+    if (saved.project !== this.projectName || !this.access().canEdit) return;
     this.form = { ...saved.form };
     this.autofilledDisplayName = repositoryName(saved.form.repository) === saved.form.display_name ? saved.form.display_name : '';
     const savedStepIndex = STEPS.findIndex((s) => s.id === saved.step);
@@ -251,7 +252,6 @@ export class ConnectRepositoryComponent implements OnInit {
       return;
     }
     this.step.set('git-host');
-    this.saveWizardInputAndStepToSessionStorage();
     this.loadConnections();
   }
 
@@ -273,7 +273,8 @@ export class ConnectRepositoryComponent implements OnInit {
       next: (list) => {
         this.connections.set(list);
         const fitting = this.fittingConnections();
-        this.selectedConnectionId.set(selectId ?? (fitting.length === 1 ? fitting[0].id : null));
+        const listed = list.some((connection) => connection.id === selectId);
+        this.selectedConnectionId.set(listed ? selectId : fitting.length === 1 ? fitting[0].id : null);
       },
       error: (error: unknown) => this.connectionsError.set(error),
     });
@@ -285,7 +286,6 @@ export class ConnectRepositoryComponent implements OnInit {
 
   continueFromGitHost(): void {
     this.step.set('access');
-    this.saveWizardInputAndStepToSessionStorage();
     this.loadProjectSshDeployKeyIfRepositoryUrlUsesSshAndNoKeyLoaded();
   }
 
@@ -316,7 +316,6 @@ export class ConnectRepositoryComponent implements OnInit {
 
   continueToTriggers(): void {
     this.step.set('triggers');
-    this.saveWizardInputAndStepToSessionStorage();
     this.fetchSuggestedPushAndPullRequestTriggers();
   }
 
@@ -340,7 +339,6 @@ export class ConnectRepositoryComponent implements OnInit {
     const previous = STEPS[this.stepIndex() - 1];
     if (!previous) return;
     this.step.set(previous.id);
-    this.saveWizardInputAndStepToSessionStorage();
   }
 
   createTaskWithTriggersAndOpenTask(): void {
