@@ -127,7 +127,7 @@ describe('ConnectRepositoryComponent', () => {
     comp.continueFromGitHost();
     fixture.detectChanges();
     expect(getSSHKey).not.toHaveBeenCalled();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Repositories over HTTPS or git:// need no key.');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Deploy key');
   });
 
   it('refuses a cron schedule with the wrong number of fields', () => {

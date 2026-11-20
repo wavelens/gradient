@@ -94,8 +94,6 @@
                 <gr-copy-field multiline [value]="key" />
               </gr-form-field>
             }
-          } @else {
-            <p class="text-secondary">Repositories over HTTPS or git:// need no key.</p>
           }
           @if (repositoryAccessTestPassedForCurrentUrl()) {
             <p class="text-secondary" role="status" data-testid="access-ok">Gradient can access this repository.</p>
