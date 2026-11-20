@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, booleanAttribute, computed, inject,
 import { FormsModule } from '@angular/forms';
 import { BadgeComponent, ButtonComponent, CheckboxComponent, DividerComponent, FormFieldComponent, InputDirective, SelectComponent } from '@gradient/ui/ui';
 import { ConfigService } from '@core/services/config.service';
-import { SELF_HOSTED_GIT_HOSTS, repositoryHost } from '@shared/git/git-host';
+import { SELF_HOSTED_GIT_HOSTS, knownGitHostType, repositoryHost } from '@shared/git/git-host';
 import {
   GitHostConnectionFormContext,
   GitHostConnectionFormValue,
@@ -16,7 +16,6 @@ import {
   effectiveReportsStatus,
   gitHostBaseUrl,
   gitHostConnectionFormErrors,
-  knownGitHostType,
 } from './git-host-connection-form';
 import { GitHostOAuthSignInComponent } from './git-host-oauth-sign-in.component';
 

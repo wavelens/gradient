@@ -5,7 +5,7 @@
  */
 
 import { CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostType, PatchGitHostConnectionRequest } from '@core/models';
-import { repositoryHost } from '@shared/git/git-host';
+import { knownGitHostType, repositoryHost } from '@shared/git/git-host';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 import { slugify } from '@shared/text';
 
@@ -59,14 +59,6 @@ export function gitHostConnectionFormFromResponse(connection: GitHostConnectionR
     secret: '',
     allowed_ips: connection.allowed_ips.join('\n'),
   };
-}
-
-export function knownGitHostType(url: string): GitHostType | null {
-  const host = repositoryHost(url) ?? '';
-  if (host === 'gitlab.com' || host.includes('gitlab')) return 'gitlab';
-  if (host === 'codeberg.org' || host.includes('forgejo')) return 'forgejo';
-  if (host === 'gitea.com' || host.includes('gitea')) return 'gitea';
-  return null;
 }
 
 export function gitHostBaseUrl(text: string): string {

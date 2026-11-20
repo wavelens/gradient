@@ -35,19 +35,12 @@ export function repositoryHost(repository: string): string | null {
   }
 }
 
-export function firstRepositoryHost(repositories: string[]): string | null {
-  for (const repository of repositories) {
-    const host = repositoryHost(repository);
-    if (host) return host;
-  }
-  return null;
-}
-
-export function guessGitHost(host: string): GitHostType {
+export function knownGitHostType(url: string): GitHostType | null {
+  const host = repositoryHost(url) ?? '';
   if (host === 'gitlab.com' || host.includes('gitlab')) return 'gitlab';
   if (host === 'codeberg.org' || host.includes('forgejo')) return 'forgejo';
-  if (host.includes('gitea')) return 'gitea';
-  return 'forgejo';
+  if (host === 'gitea.com' || host.includes('gitea')) return 'gitea';
+  return null;
 }
 
 export function webhookEvents(gitHost: string): string {

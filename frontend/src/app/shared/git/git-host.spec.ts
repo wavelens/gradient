@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { firstRepositoryHost, gitHostSettingsLinks, guessGitHost, repositoryHost } from './git-host';
+import { gitHostSettingsLinks, knownGitHostType, repositoryHost } from './git-host';
 
 describe('git host helpers', () => {
   it.each([
@@ -17,14 +17,14 @@ describe('git host helpers', () => {
     expect(repositoryHost(url)).toBe(host);
   });
 
-  it('takes the first parseable host', () => {
-    expect(firstRepositoryHost(['nope', 'git@host.example:a/b'])).toBe('host.example');
-  });
-
-  it('guesses the Git host type from the host name', () => {
-    expect(guessGitHost('github.com')).toBe('forgejo');
-    expect(guessGitHost('gitlab.example.com')).toBe('gitlab');
-    expect(guessGitHost('git.example.com')).toBe('forgejo');
+  it.each([
+    ['https://github.com', null],
+    ['https://gitlab.example.com', 'gitlab'],
+    ['https://codeberg.org', 'forgejo'],
+    ['https://gitea.com', 'gitea'],
+    ['https://git.example.com', null],
+  ])('knows the Git host type of %s', (url, type) => {
+    expect(knownGitHostType(url)).toBe(type);
   });
 
   it('links to the deploy key and webhook settings of the repository', () => {
