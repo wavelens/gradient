@@ -133,6 +133,13 @@ describe('RepositoryIncomingEventsComponent', () => {
     expect(document.getElementById('connection-secret')?.hasAttribute('cdkFocusInitial')).toBe(true);
   });
 
+  it('link to the connection row when multiple tasks share the connection', () => {
+    const chain = { ...waiting, incoming_events: { state: 'failing' as const, detail: 'Wrong signature', action: { type: 'open_connection_shared_by_tasks' as const, task_count: 3 } } };
+    const { el } = render({ chain });
+    expect(el.querySelector('[data-testid="change-webhook-secret"]')).toBeNull();
+    expect(el.querySelector('[data-testid="open-shared-connection"]')?.getAttribute('href')).toBe('/project/acme/git-host-connections?connection=c1');
+  });
+
   it('links to a new trigger of the missing type when no tasks match a push', () => {
     const chain = { ...waiting, incoming_events: { state: 'attention' as const, detail: 'push event matched no task', action: { type: 'add_trigger' as const, trigger_type: 'reporter_push' as const } } };
     const { el } = render({ chain });
