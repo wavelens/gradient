@@ -3417,6 +3417,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-fixtures",
+ "gradient-git-host",
  "gradient-sources",
  "gradient-types",
  "gradient-util",

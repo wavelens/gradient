@@ -9,9 +9,10 @@
 use super::RepositoryFetchStatus;
 use super::repository::TaskCommitStatusPostAttempt;
 use crate::endpoints::git_host_connections::{
-    GitHostConnectionSummary, IncomingWebhookDeliveryResponse, url_host,
+    GitHostConnectionSummary, IncomingWebhookDeliveryResponse,
 };
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
+use gradient_git_host::repository_fit::repository_host;
 use gradient_types::GitHostType;
 use gradient_types::triggers::TriggerType;
 use serde::Serialize;
@@ -105,15 +106,7 @@ fn off(detail: &str) -> TaskGitHostChainStep {
 }
 
 fn read_repository(repository: &str) -> Option<RepositoryOnHost> {
-    let lower = repository.trim().to_ascii_lowercase();
-    let lower = lower.strip_prefix("git+").unwrap_or(&lower);
-    let host = if lower.starts_with("github:") {
-        "github.com".to_owned()
-    } else if lower.starts_with("gitlab:") {
-        "gitlab.com".to_owned()
-    } else {
-        url_host(repository)?
-    };
+    let host = repository_host(repository)?;
     let (owner, name) = gradient_ci::parse_owner_repo(repository)?;
     Some(RepositoryOnHost { host, owner, name })
 }

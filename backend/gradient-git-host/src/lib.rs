@@ -14,6 +14,7 @@ pub mod providers;
 pub mod provision;
 pub mod registry;
 pub mod reporter;
+pub mod repository_fit;
 pub mod webhook;
 
 pub use github_app::*;

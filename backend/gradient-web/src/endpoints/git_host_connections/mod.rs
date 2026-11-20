@@ -33,9 +33,13 @@ use gradient_ci::actions::{encrypt_secret_with_file, new_webhook_secret};
 use gradient_db::git_host_connections::{self as connections, GitHostConnectionOwnerByDatabaseId};
 use gradient_db::lookup::by_id;
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
+use gradient_git_host::repository_fit::GitHostConnectionAddress;
+pub(crate) use gradient_git_host::repository_fit::url_host;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
-use gradient_types::git_host::GitHostConnectionOwner;
+use gradient_types::git_host::{
+    GitHostConnectionCapabilities, GitHostConnectionOwner, MissingGitHostConnectionSetting,
+};
 use gradient_types::*;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
@@ -96,7 +100,7 @@ impl RepositoryFit {
                 can_be_selected: false,
                 reason: Some(reason),
             },
-            Ok(()) if expected_host(connection).is_none() => Self {
+            Ok(()) if address_of(connection).expected_host().is_none() => Self {
                 fits: false,
                 can_be_selected: true,
                 reason: Some("No host URL".to_owned()),
@@ -388,22 +392,27 @@ fn non_blank(value: Option<&str>) -> Option<&str> {
 }
 
 fn check_capabilities(connection: &MGitHostConnection) -> WebResult<()> {
-    if !connection.receives_events && !connection.reports_status {
-        return Err(GitHostConnectionRefusal::NoCapability.into());
+    GitHostConnectionCapabilities {
+        github_app: connection.github_installation_id.is_some(),
+        receives_events: connection.receives_events,
+        reports_status: connection.reports_status,
+        has_base_url: connection.base_url.is_some(),
+        has_access_token: connection.access_token.is_some(),
+        has_webhook_secret: connection.secret.is_some(),
     }
-    if connection.github_installation_id.is_none()
-        && connection.reports_status
-        && (connection.base_url.is_none() || connection.access_token.is_none())
-    {
-        return Err(GitHostConnectionRefusal::StatusNeedsBaseUrlAndToken.into());
-    }
-    if connection.github_installation_id.is_none()
-        && connection.receives_events
-        && connection.secret.is_none()
-    {
-        return Err(GitHostConnectionRefusal::WebhookSecretRequired.into());
-    }
-    Ok(())
+    .check()
+    .map_err(|missing| {
+        match missing {
+            MissingGitHostConnectionSetting::Capability => GitHostConnectionRefusal::NoCapability,
+            MissingGitHostConnectionSetting::BaseUrlOrAccessTokenForStatus => {
+                GitHostConnectionRefusal::StatusNeedsBaseUrlAndToken
+            }
+            MissingGitHostConnectionSetting::WebhookSecretForEvents => {
+                GitHostConnectionRefusal::WebhookSecretRequired
+            }
+        }
+        .into()
+    })
 }
 
 fn encrypt(ci: &CiContext, plain: &str) -> WebResult<String> {
@@ -738,43 +747,13 @@ pub(crate) async fn tasks_using_connection_visible_to_reader(
         .collect())
 }
 
-pub(crate) fn url_host(url: &str) -> Option<String> {
-    let s = url.trim();
-    let s = s.strip_prefix("git+").unwrap_or(s);
-
-    let authority = match ["https://", "http://", "ssh://", "git://"]
-        .iter()
-        .find_map(|scheme| s.strip_prefix(scheme))
-    {
-        Some(rest) => rest.split(['/', '?', '#']).next().unwrap_or(""),
-        None => s.split_once(':')?.0,
-    };
-    if authority.contains('/') {
-        return None;
-    }
-    let host_and_port = authority.rsplit('@').next().unwrap_or(authority);
-    let host = host_and_port.split(':').next().unwrap_or("");
-    (!host.is_empty()).then(|| host.to_ascii_lowercase())
-}
-
-fn flake_shorthand_host(repository: &str) -> Option<&'static str> {
-    let lower = repository.trim().to_ascii_lowercase();
-    let lower = lower.strip_prefix("git+").unwrap_or(&lower);
-    if lower.starts_with("github:") {
-        Some("github.com")
-    } else if lower.starts_with("gitlab:") {
-        Some("gitlab.com")
-    } else {
-        None
-    }
-}
-
-fn expected_host(connection: &MGitHostConnection) -> Option<String> {
-    match (&connection.base_url, connection.git_host_type) {
-        (Some(base_url), _) => url_host(base_url),
-        (None, GitHostType::GitHub) => Some("github.com".to_owned()),
-        (None, GitHostType::GitLab) => Some("gitlab.com".to_owned()),
-        (None, GitHostType::Gitea | GitHostType::Forgejo) => None,
+fn address_of(connection: &MGitHostConnection) -> GitHostConnectionAddress<'_> {
+    GitHostConnectionAddress {
+        git_host_type: connection.git_host_type,
+        base_url: connection.base_url.as_deref(),
+        github_app_account: connection
+            .github_installation_id
+            .and(connection.account_login.as_deref()),
     }
 }
 
@@ -789,28 +768,7 @@ pub(crate) fn check_task_repository_url_can_use_git_host_connection(
     repository: &str,
     connection: &MGitHostConnection,
 ) -> Result<(), String> {
-    let host = flake_shorthand_host(repository)
-        .map(str::to_owned)
-        .or_else(|| url_host(repository))
-        .ok_or_else(|| format!("Cannot read the host of {repository}"))?;
-    if let Some(expected) = expected_host(connection)
-        && expected != host
-    {
-        return Err(format!(
-            "Repository host {host} and connection host {expected} differ"
-        ));
-    }
-    let Some((owner, _)) = gradient_ci::parse_owner_repo(repository) else {
-        return Err(format!("Can't read owner and repository from {repository}"));
-    };
-    if let (Some(_), Some(account)) = (connection.github_installation_id, &connection.account_login)
-        && !owner.eq_ignore_ascii_case(account)
-    {
-        return Err(format!(
-            "The GitHub App installation on {account} has no access to repositories of {owner}"
-        ));
-    }
-    Ok(())
+    address_of(connection).check_repository(repository)
 }
 
 #[cfg(test)]
@@ -940,23 +898,6 @@ mod tests {
         assert!(
             check_task_repository_url_can_use_git_host_connection("not a url", &gitea).is_err()
         );
-    }
-
-    #[test]
-    fn host_parsing_covers_url_shapes() {
-        assert_eq!(
-            url_host("https://github.com/foo/bar").as_deref(),
-            Some("github.com")
-        );
-        assert_eq!(
-            url_host("git@gitea.example.com:foo/bar.git").as_deref(),
-            Some("gitea.example.com")
-        );
-        assert_eq!(
-            url_host("ssh://git@gitlab.com:2222/foo/bar").as_deref(),
-            Some("gitlab.com")
-        );
-        assert_eq!(url_host("not a url"), None);
     }
 
     #[test]
