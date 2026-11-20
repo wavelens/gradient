@@ -25,11 +25,11 @@
 .app-page-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: 0.875rem;
+  gap: $spacing-xs;
+  font-size: $font-size-sm;
 
   .material-symbols-outlined {
-    font-size: 1rem;
+    font-size: $font-size-md;
   }
 }
 
