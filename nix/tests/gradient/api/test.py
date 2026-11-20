@@ -13,6 +13,7 @@
 import hashlib
 import json
 import time
+from urllib.parse import quote
 
 API = "http://gradient.local/api/v1"
 CLI = "gradient"
@@ -653,6 +654,17 @@ assert not any(g["team"] == "runtimeteam" for g in api("GET", "projects/teamproj
 project_connections = {c["name"]: c for c in api("GET", "projects/stateproject/git-host-connections", token=sa_token)}
 assert project_connections["state-events"]["receives_events"], project_connections
 assert project_connections["state-events"]["owner"] == {"type": "project", "name": "stateproject"}, project_connections
+assert project_connections["state-events"]["managed"] is True, project_connections
+assert project_connections["state-events"]["task_count"] == 1, project_connections
+fitted_connections = {c["name"]: c for c in api(
+    "GET", "projects/stateproject/git-host-connections?repository=" + quote(proj["repository"], safe=""), token=sa_token)}
+assert fitted_connections["state-events"]["repository_fit"] == {
+    "fits": False, "can_be_selected": True, "reason": "No host URL"}, fitted_connections
+state_repository = api("GET", "tasks/stateproject/statetask/repository", token=sa_token)
+assert state_repository["git_host_connection"]["name"] == "state-events", state_repository
+assert state_repository["chain"]["connection"]["state"], state_repository
+assert state_repository["can_edit"] is False, state_repository
+assert state_repository["can_create_connection"] is False, state_repository
 team_connections = {c["name"]: c for c in api("GET", "teams/stateteam/git-host-connections", token=sa_token)}
 assert team_connections["state-status"]["reports_status"], team_connections
 assert not team_connections["state-status"]["receives_events"], team_connections
