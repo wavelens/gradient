@@ -35,7 +35,7 @@ import { TemplateRef } from '@angular/core';
 
 let dialogSeq = 0;
 
-/// CDK modal overlay. Esc/backdrop/close-button dismiss. Close confirmation: `busy` set during request, `closable` off for one-time secret, `confirmDiscard` on unsaved-edit form. Ctrl+Enter doesn't resubmit while busy.
+/// CDK modal overlay. Esc/backdrop/close-button dismiss. Close confirmation: `busy` set during request, `closable` off for one-time secret, `confirmDiscard` on unsaved-edit form. `close(afterClose)` runs `afterClose` once the dialog closes and drops it when the user keeps editing. Ctrl+Enter doesn't resubmit while busy.
 @Component({
   selector: 'gr-dialog',
   standalone: true,
@@ -99,6 +99,7 @@ export class DialogComponent implements OnDestroy {
   private leaving = false;
   private elementFocusedBeforeDialogOpened: HTMLElement | null = null;
   protected isDiscardChangesPromptVisible = signal(false);
+  private runAfterClose: (() => void) | null = null;
 
   constructor() {
     effect(() => (this.visible() ? this.open() : this.detach()));
@@ -108,10 +109,11 @@ export class DialogComponent implements OnDestroy {
     this.ref?.dispose();
   }
 
-  close(): void {
+  close(afterClose?: () => void): void {
     if (!this.closable() || this.busy()) return;
+    this.runAfterClose = afterClose ?? null;
     if (!this.confirmDiscard()) {
-      this.visible.set(false);
+      this.hideAndRunAfterClose();
       return;
     }
     this.isDiscardChangesPromptVisible.set(true);
@@ -121,18 +123,27 @@ export class DialogComponent implements OnDestroy {
   }
 
   protected hideDiscardPromptAndReturnToForm(): void {
+    this.runAfterClose = null;
     this.isDiscardChangesPromptVisible.set(false);
     afterNextRender(() => this.focusInitialElementThenFirstFormFieldThenFooterButton(), { injector: this.injector });
   }
 
   protected discardEditsAndClose(): void {
     this.isDiscardChangesPromptVisible.set(false);
+    this.hideAndRunAfterClose();
+  }
+
+  private hideAndRunAfterClose(): void {
+    const afterClose = this.runAfterClose;
+    this.runAfterClose = null;
     this.visible.set(false);
+    afterClose?.();
   }
 
   private open(): void {
     if (this.ref?.hasAttached()) return;
     this.isDiscardChangesPromptVisible.set(false);
+    this.runAfterClose = null;
     this.elementFocusedBeforeDialogOpened = document.activeElement as HTMLElement | null;
     this.ref ??= this.createOverlay();
     this.ref.attach(new TemplatePortal(this.panel(), this.vcr));
