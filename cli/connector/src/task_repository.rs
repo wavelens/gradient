@@ -48,7 +48,12 @@ impl TaskRepositoryConnectionApi<'_> {
         task: &str,
         body: &TaskRepositoryConnectionAndCommitStatusPatchRequest,
     ) -> Result<TaskRepositoryResponse, ConnectorError> {
-        let req = self.request(Method::PATCH, project, task, "")?.json(body);
+        let req = self
+            .request(Method::PATCH, project, task, "")?
+            .json(&serde_json::json!({
+                "git_host_connection": body.git_host_connection,
+                "report_status": body.report_status,
+            }));
         http::decode(req.send().await?).await
     }
 

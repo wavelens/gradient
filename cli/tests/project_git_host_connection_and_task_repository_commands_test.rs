@@ -515,7 +515,7 @@ async fn test_task_repository_set_report_status_alone_keeps_the_current_connecti
 }
 
 #[tokio::test]
-async fn test_task_repository_set_no_connection_omits_the_connection_and_stops_reports() {
+async fn test_task_repository_set_no_connection_sends_null_and_stops_reports() {
     let server = MockServer::start().await;
     mount_task_repository(
         &server,
@@ -528,7 +528,12 @@ async fn test_task_repository_set_no_connection_omits_the_connection_and_stops_r
         )),
     )
     .await;
-    mount_task_repository_patch(&server, json!({"report_status": false}), 1).await;
+    mount_task_repository_patch(
+        &server,
+        json!({"git_host_connection": null, "report_status": false}),
+        1,
+    )
+    .await;
 
     let home = home_with(&server);
     gradient(
