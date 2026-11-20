@@ -40,8 +40,10 @@
               <div class="connection-meta" data-testid="connection-health">
                 @if (connection.receives_events) {
                   @if (connection.last_delivery; as delivery) {
-                    <gr-badge [severity]="deliveryBadgeSeverity(delivery)">{{ delivery.event }}</gr-badge>
-                    <span>{{ deliverySummary(delivery) }} {{ delivery.created_at | relativeTime }}</span>
+                    <span class="connection-last-delivery">
+                      <gr-badge [severity]="deliveryBadgeSeverity(delivery)">{{ delivery.event }}</gr-badge>
+                      {{ deliverySummary(delivery) }} {{ delivery.created_at | relativeTime }}
+                    </span>
                   } @else {
                     <span class="text-secondary">No events yet</span>
                   }
