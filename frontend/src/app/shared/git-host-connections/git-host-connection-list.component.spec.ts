@@ -191,6 +191,13 @@ describe('GitHostConnectionListComponent', () => {
     expect(el.querySelector('[aria-label="Edit GitHub"]')).toBeNull();
   });
 
+  it('tests but never edits or deletes a connection of declarative state', () => {
+    const { el, component } = render(writable, [{ ...own, managed: true }]);
+    expect(el.querySelector('[aria-label="Edit Forgejo"]')).toBeNull();
+    el.querySelector<HTMLButtonElement>('[aria-label="Actions for Forgejo"]')!.click();
+    expect(component.menuItems().map((item) => item.label)).toEqual(['Test']);
+  });
+
   it('badges the event of the last delivery by its outcome', () => {
     const failed = {
       ...own,
