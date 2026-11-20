@@ -141,7 +141,7 @@
     </div>
   </gr-load-state>
   @if (missingTriggerConfigSuggestions().length && access().canEdit && !access().managed) {
-    <gr-settings-section title="Recommended Triggers" description="Events arrive at the Git host connection for the repository of this task. Add a trigger to start an evaluation on push or pull request.">
+    <gr-settings-section title="Recommended Triggers">
       <div class="triggers-list" data-testid="trigger-suggestions">
         @for (suggestion of missingTriggerConfigSuggestions(); track suggestion.type) {
           <div class="trigger-row">
@@ -256,10 +256,10 @@
   }
 
   @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {
-    <p class="gr-form-aside" data-testid="trigger-connection-hint">
-      Events for this trigger go to the git host connection for this task. Select the connection on the
-      <a [routerLink]="links.taskPage(projectName, taskName, 'repository')">Repository page</a>.
-    </p>
+    @if (repository(); as repo) {
+      <app-task-git-host-chain [chain]="repo.chain" [repository]="repo.repository" [gitHostType]="repo.git_host_connection?.git_host_type ?? null"
+        [repositoryPageLink]="links.taskPage(projectName, taskName, 'repository')" data-testid="trigger-connection-chain" />
+    }
     <gr-form-field label="Branches" for="trig-branches" hint="Comma-separated list. Leave blank to match any branch.">
       <input
         grInput
