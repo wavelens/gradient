@@ -290,7 +290,7 @@ async fn github_app_page_url(
     let look_up = async {
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
-            .context("read GitHub App private key")?;
+            .context("reading the GitHub App private key")?;
         tokio::time::timeout(
             GITHUB_APP_LOOKUP_TIMEOUT,
             gradient_git_host::github_app::get_app_page_url(http, app.app_id, &pem),

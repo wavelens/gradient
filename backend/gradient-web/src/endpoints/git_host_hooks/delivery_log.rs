@@ -150,7 +150,7 @@ fn task_list_visible_to_connection(
     match other.len() {
         0 => {}
         1 => labels.push("1 task in another project".to_owned()),
-        n => labels.push(format!("{n} tasks of other projects")),
+        n => labels.push(format!("{n} tasks in other projects")),
     }
     labels.join(", ")
 }
