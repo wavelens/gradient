@@ -133,12 +133,15 @@ export class TaskGitHostChainComponent {
   protected readonly badges = STATE_BADGES;
   protected historyShownFor = signal<ChainStepKey | null>(null);
 
-  steps = computed<ChainStepView[]>(() =>
-    (Object.keys(STEP_TITLES) as ChainStepKey[]).map((key) => {
+  steps = computed<ChainStepView[]>(() => {
+    const keys = Object.keys(STEP_TITLES) as ChainStepKey[];
+    const nextKey = keys.find((key) => this.chain()[key].action);
+    return keys.map((key) => {
       const step = this.chain()[key];
-      return { ...step, key, title: STEP_TITLES[key], actionLabel: step.action ? ACTION_LABELS[step.action.type] : null };
-    }),
-  );
+      const action = key === nextKey ? step.action : null;
+      return { ...step, key, action, title: STEP_TITLES[key], actionLabel: action ? ACTION_LABELS[action.type] : null };
+    });
+  });
 
   webhookUrlToAdd = computed(() => {
     const action = this.chain().incoming_events.action;
