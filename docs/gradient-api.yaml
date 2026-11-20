@@ -15094,7 +15094,7 @@ paths:
       tags:
       - nix-cache
       summary: Cache root
-      description: Redirects to `nix-cache-info`.
+      description: The response is a redirect to `nix-cache-info`. A request for an HTML page goes to the cache page of the web frontend instead.
       operationId: getCacheRoot
       parameters:
       - name: cache

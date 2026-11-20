@@ -101,6 +101,7 @@ The cache endpoints sit at the host root and carry no `/api/v1` prefix. Private 
 | `GET` | `/cache/{cache}/serve/{hash}/{path}` | A single file from a NAR, or a whole directory as `tar.zst` |
 
 - A request for an unknown key answers with `404`, and Nix then tries the next substituter.
+- Requests for an HTML page get a `302` to the web frontend at the cache root, together with `nix-cache-info`, `gradient-cache-info`, `{hash}.narinfo`, and `ls/{hash}`. Clicks on store path links in the terminal open the page for that path. The `frontend.redirectBrowserRequestsToFrontendPages` option can disable redirects.
 - `log` and `debuginfo` fall back to upstream caches for substituted paths.
 - Every client IP can make 1000 `narinfo` and NAR requests per second, after a burst of 20000. The options `http.cacheRequestsPerSecond` and `http.cacheRequestBurst` can raise both limits.
 - Requests over a limit receive `429`. Clients behind one proxy share a single limit unless the proxy is in `http.trustedProxies`.
