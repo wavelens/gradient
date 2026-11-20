@@ -32,6 +32,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TriggersService } from '@core/services/triggers.service';
 import { ConfigService } from '@core/services/config.service';
+import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -45,6 +46,7 @@ import { repositoryHost } from '@shared/git';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
 import { TaskGitHostChainComponent } from '@shared/git-host-connections/task-git-host-chain.component';
+import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 
 export const RESERVED_TASK_NAMES = ['build-request'];
 const DEFAULT_WILDCARD = 'packages.x86_64-linux.**';
@@ -109,6 +111,7 @@ export function buildTaskCreationTriggersFromWizardChoices(choices: {
     SelectComponent,
     GitHostConnectionDialogComponent,
     TaskGitHostChainComponent,
+    GithubAppInstallLinkComponent,
   ],
   templateUrl: './connect-repository.component.html',
   styleUrl: './connect-repository.component.scss',
@@ -129,6 +132,8 @@ export class ConnectRepositoryComponent implements OnInit {
   private revealFirstInvalid = injectRevealFirstInvalid();
   protected project = injectProject();
   protected readonly config = inject(ConfigService);
+  private auth = inject(AuthService);
+  protected canInstallGithubApp = computed(() => !!this.auth.user()?.superuser && !!this.config.githubAppInstallUrl);
 
   readonly steps = STEPS;
   access = computed(() => accessTo(this.project(), 'createTask'));

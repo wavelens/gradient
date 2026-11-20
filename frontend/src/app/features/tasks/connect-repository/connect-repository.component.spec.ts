@@ -13,6 +13,7 @@ import { TeamsService } from '@core/services/teams.service';
 import type { ProjectReadinessResponse } from '@core/models';
 import { TriggersService } from '@core/services/triggers.service';
 import { ConfigService } from '@core/services/config.service';
+import { AuthService } from '@core/services/auth.service';
 import { ApiError } from '@core/services/api.service';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import type { GitHostConnectionSummary } from '@core/models';
@@ -28,7 +29,7 @@ const MISSING_CACHE: ProjectReadinessResponse = {
   repository: { status: 'unchecked', tasks: [] },
 };
 
-function render(query: Record<string, string>, tasks: object, projects: object = {}, permissions: string[] = ['createTask', 'editTask'], suggestions: unknown[] = [pushSuggestion, pullRequestSuggestion], connections: GitHostConnectionSummary[] = [], listConnections: () => Observable<GitHostConnectionSummary[]> = () => of(connections)) {
+function render(query: Record<string, string>, tasks: object, projects: object = {}, permissions: string[] = ['createTask', 'editTask'], suggestions: unknown[] = [pushSuggestion, pullRequestSuggestion], connections: GitHostConnectionSummary[] = [], listConnections: () => Observable<GitHostConnectionSummary[]> = () => of(connections), config: object = {}, superuser = false) {
   const data = { projectAccess: { project: { managed: false, permissions } } };
   TestBed.configureTestingModule({
     imports: [ConnectRepositoryComponent],
@@ -42,7 +43,8 @@ function render(query: Record<string, string>, tasks: object, projects: object =
       { provide: ProjectsService, useValue: { getProjectReadiness: () => of(MISSING_CACHE), getProject: () => of({ display_name: 'Acme' }), getSSHKey: () => of('ssh-ed25519 AAAA'), ...projects } },
       { provide: TeamsService, useValue: {} },
       { provide: GitHostConnectionsApi, useValue: { list: listConnections } },
-      { provide: ConfigService, useValue: { execEnabled: false } },
+      { provide: ConfigService, useValue: { execEnabled: false, ...config } },
+      { provide: AuthService, useValue: { user: () => ({ superuser }) } },
       { provide: TriggersService, useValue: { getSuggestedPushAndPullRequestTriggerConfigs: vi.fn(() => of(suggestions)) } },
     ],
   });
@@ -262,12 +264,12 @@ describe('ConnectRepositoryComponent', () => {
   });
 
   it('tells which GitHub account lacks the app and offers a new connection for other hosts', () => {
-    const github = render({}, {}, {}, ['createTask', 'manageIntegrations']);
+    const github = render({}, {}, {}, ['createTask', 'manageIntegrations'], undefined, [], undefined, { githubAppEnabled: true });
     github.componentInstance.repositoryChanged('https://github.com/acme/app');
     github.componentInstance.continueFromRepository();
     github.detectChanges();
     const githubEl = github.nativeElement as HTMLElement;
-    expect(githubEl.querySelector('[data-testid="no-connection"]')?.textContent).toContain("The GitHub App isn't installed on acme");
+    expect(githubEl.querySelector('[data-testid="no-connection"]')?.textContent).toContain('install the GitHub App on acme');
     expect(githubEl.querySelector('[data-testid="new-connection"]')).toBeNull();
     TestBed.resetTestingModule();
     const forgejo = render({}, {}, {}, ['createTask', 'manageIntegrations']);
@@ -275,5 +277,40 @@ describe('ConnectRepositoryComponent', () => {
     forgejo.componentInstance.continueFromRepository();
     forgejo.detectChanges();
     expect((forgejo.nativeElement as HTMLElement).querySelector('[data-testid="new-connection"]')).not.toBeNull();
+  });
+
+  describe('for a GitHub repository without an installation', () => {
+    const installUrl = 'https://github.com/apps/gradient-ci/installations/new';
+
+    function gitHostStep(config: object, superuser: boolean, list = vi.fn(() => of<GitHostConnectionSummary[]>([]))) {
+      const fixture = render({}, {}, {}, ['createTask', 'manageIntegrations'], undefined, [], list, config, superuser);
+      fixture.componentInstance.repositoryChanged('https://github.com/acme/app');
+      fixture.componentInstance.continueFromRepository();
+      fixture.detectChanges();
+      const el = fixture.nativeElement as HTMLElement;
+      return { el, list, notice: el.querySelector('[data-testid="no-connection"]')?.textContent ?? '', link: el.querySelector<HTMLAnchorElement>('[data-testid="github-app-install"]') };
+    }
+
+    it('says when the server has no GitHub App', () => {
+      const { notice, link } = gitHostStep({ githubAppEnabled: false }, true);
+      expect(notice).toContain('This server has no GitHub App');
+      expect(link).toBeNull();
+    });
+
+    it('lets an instance admin install the App and lists the connections again after the return', () => {
+      const { link, list } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, true);
+      expect(link?.getAttribute('href')).toBe(installUrl);
+      expect(link?.getAttribute('target')).toBe('_blank');
+      link!.addEventListener('click', (event) => event.preventDefault());
+      link!.click();
+      window.dispatchEvent(new Event('focus'));
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it('names the instance admin as the one who installs it for everyone else', () => {
+      const { notice, link } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, false);
+      expect(notice).toContain('An instance admin can install the GitHub App on acme');
+      expect(link).toBeNull();
+    });
   });
 });
