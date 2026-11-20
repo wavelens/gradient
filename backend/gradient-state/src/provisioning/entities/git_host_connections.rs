@@ -331,6 +331,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn applying_state_again_keeps_the_refused_signature_count_and_time() {
+        let db = database_with_user().await;
+        apply(&db.connection(), state_connection("forge", None))
+            .await
+            .unwrap();
+        let refused_at = gradient_fixtures::test_date();
+        let mut row = db
+            .rows::<EGitHostConnection>()
+            .await
+            .remove(0)
+            .into_active_model();
+        row.refused_signature_count = Set(3);
+        row.last_refused_signature_at = Set(Some(refused_at));
+        row.update(&db.connection()).await.unwrap();
+
+        apply(&db.connection(), state_connection("forge", None))
+            .await
+            .unwrap();
+
+        let row = db.rows::<EGitHostConnection>().await.remove(0);
+        assert_eq!(row.refused_signature_count, 3);
+        assert_eq!(row.last_refused_signature_at, Some(refused_at));
+        db.finish().await;
+    }
+
+    #[tokio::test]
     async fn apply_git_host_connection_with_mismatched_id_fails_and_leaves_existing_row_unchanged()
     {
         let db = database_with_user().await;
