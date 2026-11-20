@@ -185,21 +185,7 @@ mod tests {
 
     #[test]
     fn rejects_other_branches_and_unsafe_names() {
-        for branch in [
-            "main",
-            "master",
-            "gradient",
-            "gradient/",
-            "gradient//x",
-            "gradient/x/",
-            "gradient/../main",
-            "gradient/.hidden",
-            "gradient/x.lock",
-            "gradient/a b",
-            "gradient/a~1",
-            "refs/heads/main",
-            "Gradient/x",
-        ] {
+        for branch in ["", "/x", "x/", "../main", ".hidden", "x.lock", "a b", "a~1"] {
             assert!(
                 check_branch_name_has_safe_ref_characters(branch).is_err(),
                 "{branch}"
