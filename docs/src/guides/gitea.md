@@ -37,7 +37,7 @@ flowchart LR
 | Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
 
 - Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for a connection with an access token.
-- A new connection can link the tasks of its owner on the same host that have no connection yet.
+- A new project connection can link the project tasks on the same host that have no connection yet.
 - Webhook URL `/api/v1/hooks/<connection-id>` can receive events for all tasks with that connection. Events map to tasks by the `owner/repo` part of the repository URL.
 - Calls to the Git host act as the token account. Statuses and comments appear under that account name.
 - The writer check and comment reactions use the Git host connection of the task.

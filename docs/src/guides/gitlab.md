@@ -37,7 +37,7 @@ flowchart LR
 | Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
 
 - Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for a connection with an access token.
-- A new connection can link the tasks of its owner on the same host that have no connection yet.
+- A new project connection can link the project tasks on the same host that have no connection yet.
 - Events for all tasks that use the connection reach the webhook URL `/api/v1/hooks/<connection-id>`. Gradient can match events to tasks by the `owner/repo` part of the repository URL.
 - Calls to GitLab use the account of the token. Statuses and comments appear under that account name.
 - The writer check and reactions to comments use the task's connection to its Git host.
