@@ -181,6 +181,11 @@ async fn repository_response(
         newest_status_post: status_posts.first(),
         can_edit_task: can_edit,
         can_manage_integrations,
+        github_app_configured: db.config.github_app.is_some(),
+        can_install_github_app: user.superuser
+            && api_key.is_none_or(|key| {
+                key.may_use_owner_superuser_rights_for_method(&axum::http::Method::POST)
+            }),
     });
 
     Ok(TaskRepositoryResponse {
