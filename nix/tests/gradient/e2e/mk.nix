@@ -1457,6 +1457,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             break
         client.sleep(5)
     print(client.succeed(f"{CURL} {CACHE}/{store_hash}.narinfo -i --fail"))
+    browser_redirect = client.succeed(
+        f"{CURL} -s -o /dev/null -w '%{{http_code}} %{{redirect_url}}' "
+        f"-H 'Accept: text/html,application/xhtml+xml,*/*;q=0.8' {CACHE}/{store_hash}.narinfo"
+    ).strip()
+    assert browser_redirect.startswith("302 "), browser_redirect
+    assert browser_redirect.endswith(f"/caches/main/nars?hash={store_hash}"), browser_redirect
 
     banner("Phase 8: client realizes hello from gradient cache")
     client.succeed(f"nix-store --delete {store_path} || true")

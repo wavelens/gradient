@@ -92,6 +92,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 |---|---|---|---|---|
 | `frontend.enable` | bool | `true` | - | Whether to enable the Gradient web frontend. |
 | `frontend.logoUrl` | null or string | `null` | `GRADIENT_FRONTEND_LOGO_URL` | URL of an image to display instead of the Gradient logo on the sign-in pages, in its original colors. Set it to `null` to keep the Gradient logo. |
+| `frontend.redirectBrowserRequestsToFrontendPages` | bool | `frontend.enable || frontend.url != serveUrl` | `GRADIENT_FRONTEND_REDIRECT_BROWSER_REQUESTS_TO_FRONTEND_PAGES` | Whether requests for HTML pages at the binary cache URL redirect to the matching page in the web frontend. One example is clicking a link to a store path in the terminal. Redirects happen at the cache root, `nix-cache-info`, `gradient-cache-info`, `<hash>.narinfo` and `ls/<hash>`. Requests for an HTML page carry `text/html` in their `Accept` header. Nix, curl and API clients receive the plain response unchanged. Default off with `frontend.enable` disabled and `frontend.url` that can still point to `serveUrl`, because no frontend pages exist there. |
 | `frontend.url` | string | `serveUrl` | `GRADIENT_FRONTEND_URL` | Public URL of the Gradient frontend, used for links in CI status reports. |
 
 ## `gc`

@@ -32,6 +32,7 @@
       [ "serveUrl" ]
       [ "credentialsDir" ]
       [ "frontend" "url" ]
+      [ "frontend" "redirectBrowserRequestsToFrontendPages" ]
       [ "database" "url" ]
       [ "nar" "chunkBytes" ]
       [ "email" "smtp" "host" ]
@@ -261,6 +262,15 @@ in {
           defaultText = lib.literalExpression "config.services.gradient.serveUrl";
           example = "https://gradient.example.com";
           description = "Public URL of the Gradient frontend, used for links in CI status reports.";
+        };
+
+        redirectBrowserRequestsToFrontendPages = lib.mkOption {
+          type = lib.types.bool;
+          default = cfg.frontend.enable || cfg.frontend.url != cfg.serveUrl;
+          defaultText = lib.literalExpression "config.services.gradient.frontend.enable || config.services.gradient.frontend.url != config.services.gradient.serveUrl";
+          description = ''
+            Whether requests for HTML pages at the binary cache URL redirect to the matching page in the web frontend. One example is clicking a link to a store path in the terminal. Redirects happen at the cache root, `nix-cache-info`, `gradient-cache-info`, `<hash>.narinfo` and `ls/<hash>`. Requests for an HTML page carry `text/html` in their `Accept` header. Nix, curl and API clients receive the plain response unchanged. Default off with {option}`services.gradient.frontend.enable` disabled and {option}`services.gradient.frontend.url` that can still point to {option}`services.gradient.serveUrl`, because no frontend pages exist there.
+          '';
         };
 
       };
