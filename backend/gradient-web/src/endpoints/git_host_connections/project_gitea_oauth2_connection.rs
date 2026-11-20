@@ -322,21 +322,22 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
             refused_signature_count: 0,
             last_refused_signature_at: None,
         };
-        let created = gradient_db::rows::insert::<EGitHostConnection, _>(web_db, connection)
-            .await
-            .map_err(|e| {
-                if is_unique_violation(&e) {
-                    "exists"
-                } else {
-                    failed(&e)
-                }
-            })?;
+        let (created, linked_tasks) =
+            super::insert_and_link_fitting_tasks(web_db.inner(), connection)
+                .await
+                .map_err(|e| {
+                    if is_unique_violation(&e) {
+                        "exists"
+                    } else {
+                        failed(&e)
+                    }
+                })?;
 
         Ok(
             install_gradient_webhooks_on_project_task_repositories_for_new_gitea_connection(
-                web_db,
                 &config.server.serve_url,
                 &created,
+                linked_tasks,
                 &webhook_secret,
                 &tokens.access_token,
             )
@@ -355,9 +356,9 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
 }
 
 async fn install_gradient_webhooks_on_project_task_repositories_for_new_gitea_connection(
-    web_db: &WebDb,
     serve_url: &str,
     connection: &MGitHostConnection,
+    tasks: Vec<MTask>,
     webhook_secret: &str,
     access_token: &str,
 ) -> usize {
@@ -366,13 +367,6 @@ async fn install_gradient_webhooks_on_project_task_repositories_for_new_gitea_co
         super::webhook_url(serve_url, connection),
     ) else {
         return 0;
-    };
-    let tasks = match super::link_fitting_tasks_without_connection(web_db, connection).await {
-        Ok(tasks) => tasks,
-        Err(e) => {
-            tracing::warn!(connection = %connection.id, error = %e, "Failed to link the tasks of the project to the new connection");
-            return 0;
-        }
     };
 
     let mut installed = 0;
