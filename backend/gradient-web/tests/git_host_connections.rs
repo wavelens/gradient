@@ -459,7 +459,7 @@ async fn testing_a_connection_reports_why_sign_in_is_impossible() {
         result["error"]
             .as_str()
             .unwrap()
-            .starts_with("Gradient doesn't call http://127.0.0.1:9"),
+            .starts_with("Gradient does not call http://127.0.0.1:9"),
         "{result}"
     );
 

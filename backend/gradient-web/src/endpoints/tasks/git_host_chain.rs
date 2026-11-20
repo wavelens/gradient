@@ -150,7 +150,7 @@ fn repository_step(
                     match &fetch.error {
                         Some(error) => format!("Repository fetch failed: {error}"),
                         None => format!(
-                            "Can't fetch {}/{} from {}",
+                            "Cannot fetch {}/{} from {}",
                             repository.owner, repository.name, repository.host
                         ),
                     },
@@ -397,7 +397,7 @@ fn commit_status_step(
                 match (&post.error_message, post.response_status) {
                     (Some(error), _) => format!("The previous status post failed with {error}"),
                     (None, Some(status)) => {
-                        format!("Last status post failed with HTTP {status}")
+                        format!("The last status post failed with HTTP {status}")
                     }
                     (None, None) => "The last status post failed.".to_owned(),
                 },
@@ -418,7 +418,7 @@ pub(crate) fn task_git_host_chain(input: &TaskGitHostChainInput<'_>) -> TaskGitH
     let Some(repository) = repository else {
         return TaskGitHostChain {
             repository: repository_step,
-            connection: off("Needs a readable repository URL"),
+            connection: off("Readable repository URL required"),
             incoming_events: off("Connection required"),
             commit_status: off("Connection required"),
         };
@@ -747,7 +747,7 @@ mod tests {
         });
         assert_eq!(
             chain.repository.detail,
-            "Can't fetch acme/app from git.example.com"
+            "Cannot fetch acme/app from git.example.com"
         );
     }
 

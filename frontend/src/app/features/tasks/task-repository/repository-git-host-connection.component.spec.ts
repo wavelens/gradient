@@ -198,9 +198,9 @@ describe('RepositoryGitHostConnectionComponent', () => {
   });
 
   it('shows only its state while the repository step blocks it', () => {
-    const chain = { ...chainWithoutConnection, connection: { state: 'off' as const, detail: 'Needs a readable repository URL' } };
+    const chain = { ...chainWithoutConnection, connection: { state: 'off' as const, detail: 'Readable repository URL required' } };
     const { el } = render({ chain });
-    expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Needs a readable repository URL');
+    expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Readable repository URL required');
     expect(el.querySelector('gr-select')).toBeNull();
   });
 

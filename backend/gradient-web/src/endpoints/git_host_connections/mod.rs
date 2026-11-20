@@ -653,9 +653,9 @@ async fn sign_in_account(
     let base_url = connection
         .base_url
         .as_deref()
-        .ok_or_else(|| "The connection has no base URL".to_owned())?;
+        .ok_or_else(|| "The connection has no base URL.".to_owned())?;
     gradient_util::http_validation::validate_webhook_url(base_url)
-        .map_err(|e| format!("Gradient doesn't call {base_url}: {e}"))?;
+        .map_err(|e| format!("Gradient does not call {base_url}: {e}"))?;
     let token = gradient_ci::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token(
         ci.db.web_db.inner(),
         &ci.db.config,
