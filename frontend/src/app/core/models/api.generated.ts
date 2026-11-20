@@ -1555,6 +1555,7 @@ export interface GiteaOAuthAppConfig {
 
 export interface GithubAppManifestRequest {
   host?: string | null;
+  organization?: string | null;
 }
 
 export interface GithubAppManifestResponse {

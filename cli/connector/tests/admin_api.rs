@@ -73,6 +73,31 @@ async fn worker_drain_patches_the_one_worker() {
 }
 
 #[tokio::test]
+async fn github_app_manifest_posts_host_and_organization() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/admin/github-app/manifest"))
+        .and(body_json(serde_json::json!({"organization": "acme"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+                "manifest": {},
+                "post_url": "https://github.com/organizations/acme/settings/apps/new",
+                "state": "s"
+            }))),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let manifest = client(&server)
+        .admin()
+        .github_app_manifest(None, Some("acme"))
+        .await
+        .unwrap();
+    assert_eq!(manifest.state, "s");
+}
+
+#[tokio::test]
 async fn admin_config_decodes_options_with_their_source() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

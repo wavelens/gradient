@@ -21,6 +21,7 @@ use std::sync::Arc;
 #[derive(Deserialize, Default, Debug, utoipa::ToSchema)]
 pub struct GithubAppManifestRequest {
     pub host: Option<String>,
+    pub organization: Option<String>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -70,13 +71,26 @@ pub fn clean_github_enterprise_host(raw: &str) -> Result<String, WebError> {
     Ok(host.to_owned())
 }
 
+pub fn clean_github_organization(raw: Option<&str>) -> Result<Option<String>, WebError> {
+    let Some(organization) = raw.map(str::trim).filter(|o| !o.is_empty()) else {
+        return Ok(None);
+    };
+    let ok = organization
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !ok {
+        return Err(AdminRefusal::InvalidOrganizationCharacters.into());
+    }
+    Ok(Some(organization.to_owned()))
+}
+
 #[utoipa::path(
     post,
     path = "/github-app/manifest",
     operation_id = "createGithubAppManifest",
     tag = "admin",
     summary = "Build GitHub App manifest",
-    description = "Builds a GitHub App manifest pre-filled with this server's URLs,\npermissions, and events, and returns a one-shot CSRF state token plus\nthe GitHub URL the browser should POST the manifest to.\n\nRequires `superuser`. The state token is consumed by the matching\n`GET /admin/github-app/callback` invocation; it expires after 10\nminutes.",
+    description = "Builds a GitHub App manifest pre-filled with this server URLs, permissions and events. With\n`organization` set, the App belongs to that GitHub organization instead\nof the personal account of the admin. Returns a one-shot CSRF state token plus\nthe GitHub URL the browser should POST the manifest to.\n\nRequires `superuser`. The state token is consumed by the matching\n`GET /admin/github-app/callback` invocation; it expires after 10\nminutes.",
     request_body = GithubAppManifestRequest,
     responses((status = OK, description = "Manifest, post URL, and CSRF state", body = GithubAppManifestResponse), WebError)
 )]
@@ -86,10 +100,15 @@ pub async fn request_manifest(
     JsonBody(body): JsonBody<GithubAppManifestRequest>,
 ) -> WebResult<Json<BaseResponse<GithubAppManifestResponse>>> {
     let host = clean_github_enterprise_host(&body.host.unwrap_or_else(default_host))?;
+    let organization = clean_github_organization(body.organization.as_deref())?;
 
     let manifest = gradient_ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
     let token = state.memory.manifest_state.issue_state(user.id).await;
-    let post_url = gradient_ci::github_app_manifest::manifest_post_url(&host, &token);
+    let post_url = gradient_ci::github_app_manifest::manifest_post_url(
+        &host,
+        organization.as_deref(),
+        &token,
+    );
 
     Ok(ok_json(GithubAppManifestResponse {
         manifest,
@@ -104,9 +123,9 @@ pub async fn request_manifest(
     operation_id = "githubAppManifestCallback",
     tag = "admin",
     summary = "GitHub App manifest callback",
-    description = "Receives the redirect from GitHub after the operator submits the\nmanifest. Validates the `state` token, exchanges the temporary `code`\nfor the App's permanent credentials, stashes them in a one-shot\nin-memory store per superuser who initiated the manifest\nflow, and redirects the browser to `/admin/github-app?ready=1`.\n\n**Unauthenticated** - GitHub redirects the operator's browser here\nfrom `https://github.com/...` and that cross-site navigation does not\ncarry a bearer token. CSRF and identity binding are provided by the\none-shot `state` token issued at `POST /admin/github-app/manifest`,\nwhich is bound to the initiating superuser at issuance.",
+    description = "Receives the redirect from GitHub after the operator submits the\nmanifest. Validates the `state` token, exchanges the temporary `code`\nfor the App's permanent credentials, stashes them in a one-shot\nin-memory store per superuser who initiated the manifest\nflow, and redirects the browser to `/admin/git-host-connections?ready=1`.\n\n**Unauthenticated** - GitHub redirects the operator's browser here\nfrom `https://github.com/...` and that cross-site navigation does not\ncarry a bearer token. CSRF and identity binding are provided by the\none-shot `state` token issued at `POST /admin/github-app/manifest`,\nwhich is bound to the initiating superuser at issuance.",
     params(CallbackQuery),
-    responses((status = FOUND, description = "Redirect to `/admin/github-app?ready=1` on success."), WebError)
+    responses((status = FOUND, description = "Redirect to `/admin/git-host-connections?ready=1` on success."), WebError)
 )]
 pub async fn callback(
     State(state): State<Arc<ServerState>>,
@@ -133,7 +152,7 @@ pub async fn callback(
         .store_credentials(user_id, creds)
         .await;
 
-    Ok(Redirect::to("/admin/github-app?ready=1"))
+    Ok(Redirect::to("/admin/git-host-connections?ready=1"))
 }
 
 #[utoipa::path(
@@ -189,6 +208,22 @@ mod tests {
         assert!(clean_github_enterprise_host("evil.com/inject").is_err());
         assert!(clean_github_enterprise_host("evil.com?x=1").is_err());
         assert!(clean_github_enterprise_host("evil com").is_err());
+    }
+
+    #[test]
+    fn an_empty_organization_means_the_personal_account() {
+        assert_eq!(clean_github_organization(None).unwrap(), None);
+        assert_eq!(clean_github_organization(Some("  ")).unwrap(), None);
+        assert_eq!(
+            clean_github_organization(Some(" acme-corp ")).unwrap().as_deref(),
+            Some("acme-corp")
+        );
+    }
+
+    #[test]
+    fn an_organization_with_path_characters_is_refused() {
+        assert!(clean_github_organization(Some("acme/../evil")).is_err());
+        assert!(clean_github_organization(Some("acme?x=1")).is_err());
     }
 
     #[test]

@@ -432,7 +432,7 @@ paths:
         manifest. Validates the `state` token, exchanges the temporary `code`
         for the App's permanent credentials, stashes them in a one-shot
         in-memory store per superuser who initiated the manifest
-        flow, and redirects the browser to `/admin/github-app?ready=1`.
+        flow, and redirects the browser to `/admin/git-host-connections?ready=1`.
 
         **Unauthenticated** - GitHub redirects the operator's browser here
         from `https://github.com/...` and that cross-site navigation does not
@@ -458,7 +458,7 @@ paths:
           type: string
       responses:
         '302':
-          description: Redirect to `/admin/github-app?ready=1` on success.
+          description: Redirect to `/admin/git-host-connections?ready=1` on success.
         default:
           $ref: '#/components/responses/Error'
       security: []
@@ -500,8 +500,9 @@ paths:
       - admin
       summary: Build GitHub App manifest
       description: |-
-        Builds a GitHub App manifest pre-filled with this server's URLs,
-        permissions, and events, and returns a one-shot CSRF state token plus
+        Builds a GitHub App manifest pre-filled with this server URLs, permissions and events. With
+        `organization` set, the App belongs to that GitHub organization instead
+        of the personal account of the admin. Returns a one-shot CSRF state token plus
         the GitHub URL the browser should POST the manifest to.
 
         Requires `superuser`. The state token is consumed by the matching
@@ -20700,6 +20701,10 @@ components:
       type: object
       properties:
         host:
+          type:
+          - string
+          - 'null'
+        organization:
           type:
           - string
           - 'null'
