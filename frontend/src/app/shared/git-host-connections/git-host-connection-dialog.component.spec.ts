@@ -110,6 +110,27 @@ describe('GitHostConnectionDialogComponent', () => {
     expect(component.open()).toBe(false);
   });
 
+  it('starts each opening with Advanced collapsed', () => {
+    const { fixture, component, find } = render();
+    component.openEdit(saved);
+    fixture.detectChanges();
+    find('connection-advanced-toggle')!.click();
+    fixture.detectChanges();
+    expect(document.getElementById('connection-advanced')).not.toBeNull();
+    component.setOpen(false);
+    fixture.detectChanges();
+    component.openEdit(saved);
+    fixture.detectChanges();
+    expect(document.getElementById('connection-advanced')).toBeNull();
+  });
+
+  it('opens Advanced when a setting inside differs from its default', () => {
+    const { fixture, component } = render({ get: { ...saved, allowed_ips: ['10.0.0.0/8'] } });
+    component.openEdit(saved);
+    fixture.detectChanges();
+    expect(document.getElementById('connection-advanced')).not.toBeNull();
+  });
+
   it('sends nothing and shows the errors of an incomplete form', () => {
     const { fixture, component, create } = render();
     component.openCreate();
