@@ -66,7 +66,7 @@ const state: TaskRepositoryResponse = {
   can_manage_integrations: false,
 };
 
-function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object = {}) {
+function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object = {}, installUrl: string | null = null) {
   const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [RepositoryGitHostConnectionComponent],
@@ -75,7 +75,7 @@ function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object =
       { provide: TasksService, useValue: tasks },
       { provide: NotifyService, useValue: notify },
       { provide: GitHostConnectionsApi, useValue: {} },
-      { provide: ConfigService, useValue: { giteaOauthAppConfig: null } },
+      { provide: ConfigService, useValue: { giteaOauthAppConfig: null, githubAppInstallUrl: installUrl } },
     ],
   });
   const fixture = TestBed.createComponent(RepositoryGitHostConnectionComponent);
@@ -202,5 +202,29 @@ describe('RepositoryGitHostConnectionComponent', () => {
     const { el } = render({ chain });
     expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Needs a readable repository URL');
     expect(el.querySelector('gr-select')).toBeNull();
+  });
+
+  it('installs the GitHub App on the account in place of a new connection and reloads after the return', () => {
+    const install = {
+      ...chainWithoutConnection,
+      connection: { state: 'attention' as const, detail: "The GitHub App isn't installed on acme", action: { type: 'install_github_app' as const, account: 'acme' } },
+    };
+    const { fixture, el, component } = render(
+      { repository: 'https://github.com/acme/app', available_connections: [], can_create_connection: true, chain: install },
+      {},
+      'https://github.com/apps/gradient-ci/installations/new',
+    );
+    fixture.componentRef.setInput('hasPrimaryAction', true);
+    fixture.detectChanges();
+    const link = testId(el, 'github-app-install')!;
+    expect(link.getAttribute('href')).toBe('https://github.com/apps/gradient-ci/installations/new');
+    expect(link.classList).toContain('gr-button--primary');
+    expect(testId(el, 'new-connection')).toBeNull();
+    const changes: unknown[] = [];
+    component.changed.subscribe(() => changes.push(true));
+    link.addEventListener('click', (event) => event.preventDefault());
+    link.click();
+    window.dispatchEvent(new Event('focus'));
+    expect(changes).toHaveLength(1);
   });
 });

@@ -45,7 +45,7 @@ import { RepositoryCommitStatusComponent } from './repository-commit-status.comp
         <app-repository-access [project]="projectName" [task]="taskName" [state]="repo" [gitHost]="gitHost()"
           [hasPrimaryAction]="stepWithPrimaryAction() === 'repository'" (changed)="load()" />
         <app-repository-git-host-connection [project]="projectName" [task]="taskName" [state]="repo"
-          [hasPrimaryAction]="stepWithPrimaryAction() === 'connection'" (saved)="state.set($event)" />
+          [hasPrimaryAction]="stepWithPrimaryAction() === 'connection'" (saved)="state.set($event)" (changed)="load()" />
         <app-repository-incoming-events [project]="projectName" [task]="taskName" [state]="repo"
           [hasPrimaryAction]="stepWithPrimaryAction() === 'incoming_events'" (changed)="load()" />
         <app-repository-commit-status [project]="projectName" [task]="taskName" [state]="repo"
