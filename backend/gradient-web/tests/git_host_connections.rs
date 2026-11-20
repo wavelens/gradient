@@ -335,7 +335,7 @@ async fn git_host_connection_for_commit_status_requires_base_url_and_access_toke
     res.assert_status_bad_request();
     assert_eq!(
         error_message_from_response(&res),
-        "Commit status reports need `base_url` and `access_token`."
+        "Reporting commit status needs the Git host URL and an access token."
     );
     assert!(s.db.rows::<git_host_connection::Entity>().await.is_empty());
     s.db.finish().await;
