@@ -36,8 +36,8 @@ flowchart LR
 | Team | Team settings, tab **Git host connections** (team admins) | Tasks of every project the team owns |
 | Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
 
-- Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for a connection with an access token.
-- A new project connection can link the project tasks on the same host that have no connection yet.
+- Both switches sit under **Advanced** in the connection dialog. A connection with an access token has **Reports status** on by default.
+- A new project connection can link project tasks on the same host that don't have a connection yet.
 - Webhook URL `/api/v1/hooks/<connection-id>` can receive events for all tasks with that connection. Events map to tasks by the `owner/repo` part of the repository URL.
 - Calls to the Git host act as the token account. Statuses and comments appear under that account name.
 - The writer check and comment reactions use the Git host connection of the task.
@@ -77,21 +77,21 @@ The token needs these scopes.
 
 ## 2. Connect the Repository
 
-1. Open **Project settings -> Git host connections** and click **New connection**. The team settings page **Git host connections** can share the connection with every project of the team.
-2. Select Gitea or Forgejo in **Host type**. Enter the **Host URL**, paste the bot token into **Access token** and click **Create**.
+1. Open **Project settings -> Git host connections** and click **New connection**. On the team settings page for **Git host connections**, share the connection with all projects in the team.
+2. In **Host type**, select Gitea or Forgejo. Enter **Host URL**. Paste the bot token into **Access token** and click **Create**.
 3. Gradient checked the token and named the bot account in "Signed in as gradient-bot". The **Webhook URL** and **Webhook secret** appear a single time.
 4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. Two or more fitting connections come with a **Connection** select.
-5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for a connection with **Reports status** on.
+5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for the connection that has **Reports status** on.
 
-The **Repository** page of the task has a section for each step from connection to commit status. Each section has a state and one action.
+Steps from Connection to Commit Status map to one section each on the **Repository** page of a task. A status and one action appear in each section.
 
 | Section | Actions |
 |---|---|
-| **Connection** | Pick another fitting connection. **New connection** when none fit |
-| **Incoming Events** | **Install webhook** for a token with admin rights. **Add trigger** for the recommended push and pull request triggers |
-| **Commit Status** | **Report commit status** on or off. **Test the status report** can post a `pending` status to the latest evaluated commit |
+| **Connection** | Choose another fitting connection. If no connection matches, use **New connection** |
+| **Incoming Events** | **Install webhook** for tokens with admin permissions. **Add trigger** for the recommended push and pull request triggers. |
+| **Commit Status** | Turn **Report commit status** on or off. **Test the status report** can post a `pending` status to the latest evaluated commit. |
 
-A token without admin rights needs a manual webhook. **Open webhook settings** can open **Settings -> Webhooks** on the Git host. Add a webhook with these values.
+Tokens without admin rights need manual webhook setup. Open **Settings -> Webhooks** on the Git host from **Open webhook settings**. Add the webhook with these values.
 
 | Field | Value |
 |---|---|
@@ -124,7 +124,7 @@ services.gradient.giteaApp = {
 
 Project members:
 
-1. Open **Git host connections** in the project and click **New connection**.
+1. Open **Git host connections** in the project. Click **New connection**.
 2. Click **Sign in with Forgejo (codeberg.org)** in the dialog. Approve access on the Git host.
 3. Gradient created a connection named after the host. That connection can receive webhooks and report commit status. The browser returned to **Git host connections** of the project.
 
@@ -155,7 +155,7 @@ services.gradient.state.git_host_connections.gitea = {
 
 Connection pages show webhook URL `https://gradient.example.com/api/v1/hooks/<connection-id>`. Project connections also accept old URL `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea` (for Forgejo, `forgejo` instead of `gitea`).
 
-Declared tasks come with no trigger and no connection. Set both on each task. Declarative state never picks or links a connection on its own and declared values always win.
+Declared tasks have no trigger and no connection. Set both for each task. Declarative state can never choose a connection or link one on its own. Declared values always take precedence.
 
 ```nix
 services.gradient.state.tasks.app = {
@@ -209,7 +209,7 @@ Only repository writers can send `/gradient` commands. Accepted commands receive
 | `403 forbidden_source_ip` | Add the Git host's address to the connection's allowed source IPs |
 | `404` | The webhook URL names a wrong connection, or the connection has **Receives events** off |
 | `200`, but no evaluation | No task with a matching trigger uses this connection, or no task repository URL matches |
-| No status on the commit | **Report commit status** is off on the task's **Repository** page, or the token lacks `write:repository`. **Test the status report** shows the Git host's answer |
+| No status on the commit | Either **Report commit status** is off on the task's **Repository** page, or `write:repository` is missing from the token. The response from the Git host is in **Test the status report**. |
 | 😕 on a maintainer's `/gradient` comment | The bot account lack admin access to the repository |
 
 ## Next Steps
