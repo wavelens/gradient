@@ -100,7 +100,9 @@ describe('GitHostConnectionListComponent', () => {
       task_count: 2,
       last_delivery: { id: 'd1', created_at: '2026-01-01T00:00:00Z', result: 'queued', queued: 1, status_code: 200 } as never,
     };
-    const health = render(writable, [healthy]).el.querySelector('[data-testid="connection-health"]')!.textContent!;
+    const healthLine = render(writable, [healthy]).el.querySelector('[data-testid="connection-health"]')!;
+    const health = healthLine.textContent!;
+    expect(healthLine.querySelector('time.connection-delivery-time')?.getAttribute('datetime')).toBe('2026-01-01T00:00:00Z');
     expect(health).toContain('Queued 1 evaluation');
     expect(health).toContain('Token refreshes automatically');
     expect(health).toContain('3 refused signatures');
