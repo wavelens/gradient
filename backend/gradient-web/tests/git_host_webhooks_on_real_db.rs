@@ -669,3 +669,108 @@ async fn a_repeated_installation_event_leaves_task_connection_choices_alone() {
     assert!(!silent.report_status);
     db.finish().await;
 }
+
+async fn database_and_github_app_server_with_task(
+    task_managed: bool,
+    secret: &str,
+) -> (TestDatabase, TestServer) {
+    let secret_file = write_content_to_new_temp_file(secret);
+    let db = TestDatabase::create().await;
+    let conn = db.connection();
+    gradient_db::rows::insert::<gradient_entity::user::Entity, _>(&conn, rows::superuser())
+        .await
+        .unwrap();
+    gradient_db::rows::insert::<gradient_entity::project::Entity, _>(&conn, rows::project())
+        .await
+        .unwrap();
+    gradient_db::rows::insert::<task::Entity, _>(
+        &conn,
+        task::Model {
+            repository: "https://github.com/gh-org/app".into(),
+            managed: task_managed,
+            ..rows::task()
+        },
+    )
+    .await
+    .unwrap();
+    let server = TestState::new()
+        .web_db(conn.clone())
+        .worker_db(conn)
+        .cli(|cli| {
+            cli.github_app.id = std::num::NonZeroU64::new(1234);
+            cli.github_app.private_key_file = Some("/dev/null".into());
+            cli.github_app.webhook_secret_file = Some(secret_file);
+        })
+        .server();
+    (db, server)
+}
+
+async fn send_installation_created_event(server: &TestServer, secret: &str) {
+    let body = serde_json::to_vec(&json!({
+        "action": "created",
+        "installation": { "id": 9999, "account": { "login": "gh-org" } },
+        "sender": { "login": "some-user" },
+    }))
+    .unwrap();
+    let signature = format!(
+        "sha256={}",
+        compute_gitea_webhook_signature_hex(secret, &body)
+    );
+    server
+        .post("/api/v1/hooks/github")
+        .add_header("X-GitHub-Event", "installation")
+        .add_header("X-Hub-Signature-256", signature)
+        .bytes(body.into())
+        .await
+        .assert_status_ok();
+}
+
+#[tokio::test]
+async fn a_new_github_app_installation_leaves_a_task_of_declarative_state_alone() {
+    let secret = "github-webhook-secret";
+    let (db, server) = database_and_github_app_server_with_task(true, secret).await;
+
+    send_installation_created_event(&server, secret).await;
+
+    assert_eq!(db.rows::<git_host_connection::Entity>().await.len(), 1);
+    let task = db.find::<task::Entity>(task_id()).await.unwrap();
+    assert_eq!(task.git_host_connection, None);
+    assert!(!task.report_status);
+    db.finish().await;
+}
+
+#[tokio::test]
+async fn an_installation_event_for_a_declared_installation_links_no_task_and_keeps_it_declared() {
+    let secret = "github-webhook-secret";
+    let (db, server) = database_and_github_app_server_with_task(false, secret).await;
+    let declared = gradient_db::rows::insert::<git_host_connection::Entity, _>(
+        &db.connection(),
+        git_host_connection::Model {
+            id: GitHostConnectionId::now_v7(),
+            name: "github".into(),
+            display_name: "GitHub".into(),
+            git_host_type: GitHostType::GitHub,
+            receives_events: true,
+            reports_status: true,
+            github_installation_id: Some(9999),
+            account_login: Some("old-name".into()),
+            created_by: user_id(),
+            created_at: test_date(),
+            managed: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    send_installation_created_event(&server, secret).await;
+
+    let rows = db.rows::<git_host_connection::Entity>().await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].id, declared.id);
+    assert!(rows[0].managed);
+    assert_eq!(rows[0].account_login.as_deref(), Some("gh-org"));
+    let task = db.find::<task::Entity>(task_id()).await.unwrap();
+    assert_eq!(task.git_host_connection, None);
+    db.finish().await;
+}
