@@ -14,6 +14,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
 import { RepositoryAccessComponent } from './repository-access.component';
+import { RepositoryIncomingEventsComponent } from './repository-incoming-events.component';
 import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 
@@ -52,13 +53,29 @@ function render(getRepository: () => unknown, member = true, canEdit = member, t
 }
 
 describe('TaskRepositoryComponent', () => {
-  it('shows access, deploy key and the event settings of the task in one page', () => {
+  it('lays the four chain steps out as the sections of the page, in chain order', () => {
     const getRepository = vi.fn(() => of(state));
     const el = render(getRepository).nativeElement as HTMLElement;
     expect(getRepository).toHaveBeenCalledWith('acme', 'app');
-    expect(el.querySelector('[data-testid="fetch-ok"]')).not.toBeNull();
+    expect(Array.from(el.querySelectorAll('h2')).map((heading) => heading.textContent)).toEqual([
+      'Repository',
+      'Connection',
+      'Incoming events',
+      'Commit status',
+    ]);
+    expect(el.querySelector('app-task-git-host-chain')).toBeNull();
     expect(Array.from(el.querySelectorAll('textarea')).map((t) => t.value)).toContain('ssh-ed25519 AAAAkey');
-    expect(el.textContent).toContain('Git host connection');
+  });
+
+  it('gives the page one primary button, on the first step that needs action', () => {
+    const chain = {
+      ...chainWithoutConnection,
+      repository: { state: 'failing' as const, detail: "Can't fetch the repository", action: { type: 'edit_repository_url' as const } },
+      connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, base_url: 'https://forgejo.example.com' } },
+    };
+    const el = render(() => of({ ...state, chain })).nativeElement as HTMLElement;
+    const primary = Array.from(el.querySelectorAll('.gr-button--primary'));
+    expect(primary.map((button) => button.getAttribute('data-testid'))).toEqual(['edit-repository-url']);
   });
 
   it('shows a load error with a retry instead of an empty page', () => {
@@ -93,18 +110,11 @@ describe('TaskRepositoryComponent', () => {
     expect(fixture.componentInstance.canDeactivate()).toBe(true);
   });
 
-  it('shows the chain first and runs its actions on the sections below', () => {
-    Element.prototype.scrollIntoView = vi.fn();
+  it('reloads the page when a section changes the chain', () => {
     const getRepository = vi.fn(() => of(state));
-    const installWebhook = vi.fn(() => of('ok'));
-    const fixture = render(getRepository, true, true, { installWebhook });
-    const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('gr-settings-section app-task-git-host-chain')).not.toBeNull();
-    const access = fixture.debugElement.query(By.directive(RepositoryAccessComponent)).componentInstance as RepositoryAccessComponent;
-    fixture.componentInstance.runChainAction({ type: 'edit_repository_url' });
-    expect(access.editing()).toBe(true);
-    fixture.componentInstance.runChainAction({ type: 'install_webhook' });
-    expect(installWebhook).toHaveBeenCalledWith('acme', 'app');
+    const fixture = render(getRepository);
+    const events = fixture.debugElement.query(By.directive(RepositoryIncomingEventsComponent)).componentInstance as RepositoryIncomingEventsComponent;
+    events.changed.emit();
     expect(getRepository).toHaveBeenCalledTimes(2);
   });
 });

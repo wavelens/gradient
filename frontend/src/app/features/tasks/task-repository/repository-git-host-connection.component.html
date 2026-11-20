@@ -4,39 +4,38 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (pickerOptions().length > 1 || chainOffers() !== 'create_connection') {
-  <gr-settings-section title="Git host connection">
-    @if (pickerOptions().length === 1) {
-      <p class="gr-form-aside" data-testid="no-connections">
-        <span>No connection for {{ host() }}</span>
-        @if (state().can_manage_integrations) {
-          <button grButton size="small" label="New connection" icon="add" (click)="openCreateConnection()" data-testid="new-connection"></button>
-        } @else {
-          <a [routerLink]="links.projectPage(project(), 'git-host-connections')">Git host connections</a>
-        }
-      </p>
-    } @else {
-      <gr-form-field label="Connection" for="task-git-host-connection">
-        <div class="connection-picker">
-          <gr-select inputId="task-git-host-connection" [options]="pickerOptions()" optionLabel="label" optionValue="value"
-            [ngModel]="selectedId()" (ngModelChange)="selectConnection($event)" [disabled]="!state().can_edit || savingSelection()" />
-          @if (connectionLink(); as link) {
-            <a grButton severity="secondary" icon="open_in_new" [attr.aria-label]="'Open ' + state().git_host_connection?.display_name"
-              [routerLink]="link" data-testid="open-connection"></a>
-          }
-        </div>
-      </gr-form-field>
-      <div class="report-status">
-        <gr-checkbox inputId="task-report-commit-status" label="Report commit status" [ngModel]="reportStatus()"
-          (ngModelChange)="setReportStatus($event)" [disabled]="!state().can_edit || !connectionReportsStatus() || savingReportStatus()" />
-        @if (state().can_edit && state().report_status && chainOffers() !== 'test_status_report') {
-          <button grButton severity="secondary" size="small" label="Test status report" icon="send" (click)="testStatusReport()"
-            [loading]="testingStatusReport()" [disabled]="testingStatusReport()" data-testid="test-status-report"></button>
-        }
-      </div>
+<gr-settings-section title="Connection">
+  <app-chain-step-state-badge slot="after-title" [state]="step().state" />
+  @if (step().state === 'off') {
+    <span class="text-secondary">{{ step().detail }}</span>
+  } @else if (fittingConnections().length === 0) {
+    <p class="gr-form-aside" data-testid="no-connections">
+      <span>{{ step().detail }}</span>
+      @if (state().can_manage_integrations) {
+        <button grButton size="small" label="New connection" icon="add" [severity]="isPrimary('create_connection') ? 'primary' : 'secondary'"
+          (click)="openCreateConnection()" data-testid="new-connection"></button>
+      } @else {
+        <a [routerLink]="links.projectPage(project(), 'git-host-connections')">Git host connections</a>
+      }
+    </p>
+  } @else {
+    <div class="connection-picker">
+      <gr-select inputId="task-git-host-connection" ariaLabel="Connection" [options]="pickerOptions()" optionLabel="label" optionValue="value"
+        [ngModel]="selectedId()" (ngModelChange)="selectConnection($event)" [disabled]="!state().can_edit || savingSelection()" />
+      @if (connectionLink(); as link) {
+        <a grButton severity="secondary" icon="open_in_new" [attr.aria-label]="'Open ' + state().git_host_connection?.display_name"
+          [routerLink]="link" data-testid="open-connection"></a>
+      }
+      @if (onlyFittingConnection(); as only) {
+        <button grButton [label]="'Use ' + (only.display_name || only.name)" [severity]="isPrimary('select_connection') ? 'primary' : 'secondary'"
+          [loading]="savingSelection()" [disabled]="savingSelection()" (click)="selectConnection(only.id)" data-testid="use-fitting-connection"></button>
+      }
+    </div>
+    @if (step().state === 'failing') {
+      <p class="text-secondary" role="alert">{{ step().detail }}</p>
     }
-  </gr-settings-section>
-}
+  }
+</gr-settings-section>
 
 <app-git-host-connection-dialog [owner]="owner()" [existingNames]="projectConnectionNames()" [repository]="state().repository"
   [offersOAuthSignIn]="true" (saved)="selectConnection($event.id)" />
