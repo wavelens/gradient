@@ -42,7 +42,7 @@
                   @if (connection.last_delivery; as delivery) {
                     <span class="connection-last-delivery">
                       <gr-badge [severity]="deliveryBadgeSeverity(delivery)">{{ delivery.event }}</gr-badge>
-                      {{ deliverySummary(delivery) }} {{ delivery.created_at | relativeTime }}
+                      {{ deliverySummary(delivery) }} <time class="connection-delivery-time" [attr.datetime]="delivery.created_at">{{ delivery.created_at | relativeTime }}</time>
                     </span>
                   } @else {
                     <span class="text-secondary">No events yet</span>
