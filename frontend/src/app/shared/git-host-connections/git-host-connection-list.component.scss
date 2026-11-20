@@ -10,6 +10,11 @@
   display: flex;
   flex-direction: column;
   gap: $spacing-md;
+
+  > gr-menu,
+  > app-git-host-connection-dialog {
+    position: absolute;
+  }
 }
 
 .connection-list {
