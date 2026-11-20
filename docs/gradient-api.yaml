@@ -356,6 +356,72 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/admin/git-host-connections/{id}/tasks:
+    get:
+      tags:
+      - admin
+      summary: List tasks using a connection
+      description: List the tasks of every project that use a connection of the instance.
+      operationId: listInstanceGitHostConnectionTasks
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Tasks using the connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitHostConnectionTaskResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/admin/git-host-connections/{id}/test:
+    post:
+      tags:
+      - admin
+      summary: Test a connection
+      description: Sign in to the Git host with the credentials of a connection of the instance. Return the account name on success, or the reason for the failure.
+      operationId: testInstanceGitHostConnection
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Result of the sign-in
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionTestResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/admin/github-app/callback:
     get:
       tags:
@@ -7924,12 +7990,17 @@ paths:
         - connections of its owner team
         - connections of the instance, with installations of the GitHub App
 
-        Credentials don't appear. `can_manage` is true for the connections of the project when the caller can manage integrations.
+        Credentials don't appear. `can_manage` is true for the connections of the project when the caller can manage integrations. With `repository`, each connection has `repository_fit`: whether a task with this repository URL can use the connection and the reason when it can't.
       operationId: listProjectGitHostConnections
       parameters:
       - name: project
         in: path
         required: true
+        schema:
+          type: string
+      - name: repository
+        in: query
+        required: false
         schema:
           type: string
       responses:
@@ -8171,6 +8242,82 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/git-host-connections/{id}/tasks:
+    get:
+      tags:
+      - git-host-connections
+      summary: List tasks using a connection
+      description: List the tasks that use a connection the project can use. The list holds only tasks of projects the caller can see.
+      operationId: listProjectGitHostConnectionTasks
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Tasks using the connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitHostConnectionTaskResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/git-host-connections/{id}/test:
+    post:
+      tags:
+      - git-host-connections
+      summary: Test a connection
+      description: Sign in to the Git host with the credentials of a connection of the project. Return the account name on success, or the reason for the failure.
+      operationId: testProjectGitHostConnection
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Result of the sign-in
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionTestResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -10293,7 +10440,7 @@ paths:
       tags:
       - tasks
       summary: Create task
-      description: Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers.
+      description: Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. `git_host_connection` selects the connection to the Git host. Without it, the task gets the one connection that fits the repository, if exactly one fits. `report_status` defaults to whether that connection reports commit status.
       operationId: createTask
       parameters:
       - name: project
@@ -12819,6 +12966,82 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/git-host-connections/{id}/tasks:
+    get:
+      tags:
+      - git-host-connections
+      summary: List tasks using a connection
+      description: List the tasks that use a connection of the team. The list holds only tasks of projects the caller can see.
+      operationId: listTeamGitHostConnectionTasks
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Tasks using the connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitHostConnectionTaskResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/git-host-connections/{id}/test:
+    post:
+      tags:
+      - git-host-connections
+      summary: Test a connection
+      description: Sign in to the Git host with the credentials of a connection of the team. Return the account name on success, or the reason for the failure.
+      operationId: testTeamGitHostConnection
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Result of the sign-in
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/GitHostConnectionTestResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -20267,75 +20490,41 @@ components:
             enum:
             - project
     GitHostConnectionResponse:
-      type: object
-      required:
-      - id
-      - owner
-      - name
-      - display_name
-      - git_host_type
-      - has_secret
-      - has_access_token
-      - access_token_refreshes_automatically
-      - allowed_ips
-      - receives_events
-      - reports_status
-      - created_by
-      - created_at
-      - managed
-      properties:
-        id:
-          $ref: '#/components/schemas/GitHostConnectionId'
-        owner:
-          $ref: '#/components/schemas/GitHostConnectionOwner'
-        name:
-          type: string
-        display_name:
-          type: string
-        git_host_type:
-          type: string
-        base_url:
-          type:
-          - string
-          - 'null'
-        has_secret:
-          type: boolean
-        has_access_token:
-          type: boolean
-        access_token_refreshes_automatically:
-          type: boolean
-        allowed_ips:
-          type: array
-          items:
+      allOf:
+      - $ref: '#/components/schemas/GitHostConnectionSummary'
+      - type: object
+        required:
+        - has_secret
+        - has_access_token
+        - allowed_ips
+        - created_by
+        - created_at
+        - managed
+        properties:
+          has_secret:
+            type: boolean
+          has_access_token:
+            type: boolean
+          allowed_ips:
+            type: array
+            items:
+              type: string
+          installation_id:
+            type:
+            - integer
+            - 'null'
+            format: int64
+          created_by:
+            $ref: '#/components/schemas/UserId'
+          created_at:
             type: string
-        receives_events:
-          type: boolean
-        reports_status:
-          type: boolean
-        installation_id:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        account_login:
-          type:
-          - string
-          - 'null'
-        created_by:
-          $ref: '#/components/schemas/UserId'
-        created_at:
-          type: string
-          format: date-time
-        managed:
-          type: boolean
-        webhook_url:
-          type:
-          - string
-          - 'null'
-        generated_secret:
-          type:
-          - string
-          - 'null'
+            format: date-time
+          managed:
+            type: boolean
+          generated_secret:
+            type:
+            - string
+            - 'null'
     GitHostConnectionSummary:
       type: object
       required:
@@ -20347,6 +20536,9 @@ components:
       - receives_events
       - reports_status
       - can_manage
+      - access_token_refreshes_automatically
+      - refused_signature_count
+      - task_count
       properties:
         id:
           $ref: '#/components/schemas/GitHostConnectionId'
@@ -20368,6 +20560,82 @@ components:
           type: boolean
         can_manage:
           type: boolean
+        account_login:
+          type:
+          - string
+          - 'null'
+        webhook_url:
+          type:
+          - string
+          - 'null'
+        access_token_expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        access_token_refreshes_automatically:
+          type: boolean
+        last_delivery:
+          oneOf:
+          - $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+          - type: 'null'
+        refused_signature_count:
+          type: integer
+          format: int64
+        last_refused_signature_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_status_post:
+          oneOf:
+          - $ref: '#/components/schemas/TaskCommitStatusPostAttempt'
+          - type: 'null'
+        task_count:
+          type: integer
+          format: int64
+          minimum: 0
+        repository_fit:
+          oneOf:
+          - $ref: '#/components/schemas/RepositoryFit'
+          - type: 'null'
+    GitHostConnectionTaskResponse:
+      type: object
+      required:
+      - id
+      - project
+      - name
+      - display_name
+      - repository
+      - report_status
+      properties:
+        id:
+          $ref: '#/components/schemas/TaskId'
+        project:
+          type: string
+        name:
+          type: string
+        display_name:
+          type: string
+        repository:
+          type: string
+        report_status:
+          type: boolean
+    GitHostConnectionTestResponse:
+      type: object
+      required:
+      - success
+      properties:
+        success:
+          type: boolean
+        account:
+          type:
+          - string
+          - 'null'
+        error:
+          type:
+          - string
+          - 'null'
     GitHttpsCredentialResponse:
       type: object
       required:
@@ -21351,6 +21619,14 @@ components:
           - 'null'
           items:
             $ref: '#/components/schemas/TriggerConfig'
+        git_host_connection:
+          oneOf:
+          - $ref: '#/components/schemas/GitHostConnectionId'
+          - type: 'null'
+        report_status:
+          type:
+          - boolean
+          - 'null'
     MakeTeamRequest:
       type: object
       required:
@@ -23284,6 +23560,17 @@ components:
           type:
           - string
           - 'null'
+    RepositoryFit:
+      type: object
+      required:
+      - fits
+      properties:
+        fits:
+          type: boolean
+        reason:
+          type:
+          - string
+          - 'null'
     RequestKind:
       type: string
       enum:
@@ -24168,6 +24455,127 @@ components:
       - input_update_running
       - input_update_not_configured
       - fork_pull_request_commit_waits_for_maintainer_approval
+    TaskGitHostChain:
+      type: object
+      required:
+      - repository
+      - connection
+      - incoming_events
+      - commit_status
+      properties:
+        repository:
+          $ref: '#/components/schemas/TaskGitHostChainStep'
+        connection:
+          $ref: '#/components/schemas/TaskGitHostChainStep'
+        incoming_events:
+          $ref: '#/components/schemas/TaskGitHostChainStep'
+        commit_status:
+          $ref: '#/components/schemas/TaskGitHostChainStep'
+    TaskGitHostChainStep:
+      type: object
+      required:
+      - state
+      - detail
+      properties:
+        state:
+          $ref: '#/components/schemas/TaskGitHostChainStepState'
+        detail:
+          type: string
+        at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        action:
+          oneOf:
+          - $ref: '#/components/schemas/TaskGitHostChainStepAction'
+          - type: 'null'
+    TaskGitHostChainStepAction:
+      oneOf:
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - edit_repository_url
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - select_connection
+      - type: object
+        required:
+        - base_url
+        - type
+        properties:
+          git_host_type:
+            type:
+            - string
+            - 'null'
+          base_url:
+            type: string
+          type:
+            type: string
+            enum:
+            - create_connection
+      - type: object
+        required:
+        - account
+        - type
+        properties:
+          account:
+            type: string
+          type:
+            type: string
+            enum:
+            - install_github_app
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - install_webhook
+      - type: object
+        required:
+        - webhook_url
+        - type
+        properties:
+          webhook_url:
+            type: string
+          type:
+            type: string
+            enum:
+            - add_webhook_on_host
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - turn_on_report_status
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - test_status_report
+    TaskGitHostChainStepState:
+      type: string
+      enum:
+      - ok
+      - attention
+      - failing
+      - off
     TaskId:
       type: string
       format: uuid
@@ -24244,6 +24652,8 @@ components:
       - repository
       - uses_ssh
       - report_status
+      - chain
+      - recent_deliveries
       - status_posts
       - available_connections
       - can_edit
@@ -24265,16 +24675,14 @@ components:
           oneOf:
           - $ref: '#/components/schemas/GitHostConnectionSummary'
           - type: 'null'
-        webhook_url:
-          type:
-          - string
-          - 'null'
         report_status:
           type: boolean
-        last_event:
-          oneOf:
-          - $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
-          - type: 'null'
+        chain:
+          $ref: '#/components/schemas/TaskGitHostChain'
+        recent_deliveries:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
         status_posts:
           type: array
           items:

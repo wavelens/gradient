@@ -54,7 +54,7 @@
   }
 
   @if (savedGitHostConnectionReceivesEvents()) {
-    @if (state().webhook_url; as url) {
+    @if (state().git_host_connection?.webhook_url; as url) {
       <gr-form-field label="Webhook URL">
         <span slot="hint">Events to enable: {{ events() }}</span>
         <gr-copy-field [value]="url" />

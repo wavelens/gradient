@@ -8,6 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { GitHostConnectionSummary, TaskRepositoryResponse } from '@core/models';
+import { chainWithoutConnection } from './task-git-host-chain.testing';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
@@ -18,7 +19,8 @@ const state: TaskRepositoryResponse = {
   uses_ssh: true,
   deploy_key: 'ssh-ed25519 AAAAkey',
   fetch: null,
-  last_event: null,
+  recent_deliveries: [],
+  chain: chainWithoutConnection,
   report_status: false,
   status_posts: [],
   available_connections: [],
@@ -179,6 +181,9 @@ describe('RepositoryAccessComponent', () => {
       receives_events: true,
       reports_status: true,
       can_manage: true,
+      access_token_refreshes_automatically: false,
+      refused_signature_count: 0,
+      task_count: 0,
     };
     const installDeployKey = vi.fn(() => of('acme/app'));
     const checkRepository = vi.fn(() => of('1a2b'));
