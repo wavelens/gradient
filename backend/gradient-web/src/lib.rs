@@ -56,6 +56,7 @@ use tracing::Span;
 use uuid::Uuid;
 
 use authorization::{RateLimitBucketOwner, WebSocketCredentialRecheckDependencies};
+use endpoints::caches::binary_cache_browser_redirect;
 use endpoints::{handle_404, metrics};
 use gradient_core::{InitError, ServerState};
 use gradient_scheduler::Scheduler;
@@ -384,14 +385,36 @@ pub fn create_router_with_scheduler(
             http.cache_request_burst.get(),
         )
     };
+    let (cache_metadata_routes, _) = routes::cache_metadata_routes().split_for_parts();
+    let (narinfo_routes, _) = routes::narinfo_routes().split_for_parts();
     let (cache_routes, _) = routes::cache_routes().split_for_parts();
-    let cache_routes = cache_routes.route_layer(GovernorLayer::new(nar_cache_limit()?));
+    let cache_routes = cache_routes
+        .merge(
+            cache_metadata_routes.route_layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                binary_cache_browser_redirect::redirect_browser_to_cache_frontend_page,
+            )),
+        )
+        .merge(narinfo_routes.route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            binary_cache_browser_redirect::redirect_browser_to_cached_store_path_page,
+        )))
+        .route_layer(GovernorLayer::new(nar_cache_limit()?));
 
+    let (cache_nar_file_listing_route, _) =
+        routes::cache_nar_file_listing_route().split_for_parts();
     let (cache_inspect, _) = routes::cache_inspect().split_for_parts();
-    let cache_inspect = cache_inspect.route_layer(GovernorLayer::new(rate_limit(
-        Duration::from_millis(333),
-        180,
-    )?));
+    let cache_inspect = cache_inspect
+        .merge(
+            cache_nar_file_listing_route.route_layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                binary_cache_browser_redirect::redirect_browser_from_nar_listing_to_store_path_page,
+            )),
+        )
+        .route_layer(GovernorLayer::new(rate_limit(
+            Duration::from_millis(333),
+            180,
+        )?));
 
     let (cache_log, _) = routes::cache_log().split_for_parts();
     let cache_log = cache_log.route_layer(GovernorLayer::new(rate_limit(
