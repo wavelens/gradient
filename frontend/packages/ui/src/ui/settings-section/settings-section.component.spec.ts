@@ -76,6 +76,14 @@ describe('gr-settings-section', () => {
     const action = root.querySelector('.settings-section__actions button');
     expect(action?.textContent).toContain('Add Member');
   });
+  it('projects a state badge right after the title', async () => {
+    TestBed.configureTestingModule({ imports: [ActionHost] });
+    const fixture = TestBed.createComponent(ActionHost);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.settings-section__heading h2 + [slot=after-title]')?.textContent).toBe('Failing');
+  });
 });
 
 @Component({
@@ -83,6 +91,7 @@ describe('gr-settings-section', () => {
   imports: [SettingsSectionComponent],
   template: `
     <gr-settings-section title="Members">
+      <span slot="after-title">Failing</span>
       <button slot="actions">Add Member</button>
       <p>body</p>
     </gr-settings-section>
