@@ -767,6 +767,45 @@ async fn view_members_see_connection_health_and_repository_fit_in_the_project_li
 }
 
 #[tokio::test]
+async fn a_github_app_installation_names_its_installation_id_in_the_list() {
+    let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
+    insert_test_git_host_connection(
+        &s,
+        git_host_connection::Model {
+            id: GitHostConnectionId::now_v7(),
+            name: "github-acme".into(),
+            display_name: "GitHub".into(),
+            git_host_type: GitHostType::GitHub,
+            receives_events: true,
+            reports_status: true,
+            github_installation_id: Some(4242),
+            account_login: Some("acme".into()),
+            created_by: user_id(),
+            created_at: test_date(),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let res = s
+        .server
+        .get(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH)
+        .add_header("authorization", &s.auth)
+        .await;
+
+    res.assert_status_ok();
+    let list = res.json::<Value>()["message"].clone();
+    let installation = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "github-acme")
+        .unwrap_or_else(|| panic!("{list}"));
+    assert_eq!(installation["github_installation_id"], 4242);
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn creating_a_project_connection_links_fitting_tasks_without_a_connection() {
     let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
 

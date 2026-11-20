@@ -1504,6 +1504,7 @@ export interface GitHostConnectionSummary {
   can_manage?: boolean;
   managed?: boolean;
   account_login?: string | null;
+  github_installation_id?: number | null;
   webhook_url?: string | null;
   access_token_expires_at?: string | null;
   access_token_refreshes_automatically?: boolean;
