@@ -24637,6 +24637,7 @@ components:
         git_host_connection:
           oneOf:
           - $ref: '#/components/schemas/GitHostConnectionId'
+            description: Omitted fields stay unchanged. JSON null removes the connection and turns commit status off.
           - type: 'null'
         report_status:
           type: boolean
