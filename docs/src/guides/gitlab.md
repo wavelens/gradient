@@ -36,8 +36,8 @@ flowchart LR
 | Team | Team settings, tab **Git host connections** (team admins) | Tasks of every project the team owns |
 | Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
 
-- Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for a connection with an access token.
-- A new project connection can link the project tasks on the same host that have no connection yet.
+- Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for connections with an access token.
+- A new project connection can link project tasks on the same host that still have no connection.
 - Events for all tasks that use the connection reach the webhook URL `/api/v1/hooks/<connection-id>`. Gradient can match events to tasks by the `owner/repo` part of the repository URL.
 - Calls to GitLab use the account of the token. Statuses and comments appear under that account name.
 - The writer check and reactions to comments use the task's connection to its Git host.
@@ -56,21 +56,21 @@ A personal access token from a dedicated account works as an alternative. That a
 
 ## 2. Connect the Repository
 
-1. Open **Project settings -> Git host connections** and click **New connection**. The team settings page **Git host connections** can share the connection with every project of the team.
-2. Select GitLab in **Host type**. Enter `https://gitlab.com` or the self-hosted address in **Host URL**. Paste the token into **Access token** and click **Create**.
-3. Gradient checked the token and named the bot user in "Signed in as <account>". The **Webhook URL** and **Webhook secret** appear a single time.
+1. Open **Project settings -> Git host connections** and click **New connection**. On the team settings page for **Git host connections**, share the connection with all projects in the team.
+2. Select GitLab in **Host type**. Enter `https://gitlab.com` or a self-hosted address in **Host URL**. Paste the token into **Access token** and click **Create**.
+3. Gradient checked the token and identified the bot user by the "Signed in as <account>" message. **Webhook URL** and **Webhook secret** only appear once.
 4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. Two or more fitting connections come with a **Connection** select.
-5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for a connection with **Reports status** on.
+5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for the connection that has **Reports status** on.
 
-The **Repository** page of the task has a section for each step from connection to commit status. Each section has a state and one action.
+Steps from Connection to Commit Status map to one section each on the **Repository** page of a task. A status and one action appear in each section.
 
 | Section | Actions |
 |---|---|
-| **Connection** | Pick another fitting connection. **New connection** when none fit |
-| **Incoming Events** | **Install webhook** for a token with the Maintainer role. **Add trigger** for the recommended push and merge request triggers |
-| **Commit Status** | **Report commit status** on or off. **Test the status report** can post a `pending` status to the latest evaluated commit |
+| **Connection** | Choose another fitting connection. If no connection matches, use **New connection** |
+| **Incoming Events** | **Install webhook** for tokens with the Maintainer role. **Add trigger** for the recommended push and merge request triggers. |
+| **Commit Status** | Turn **Report commit status** on or off. **Test the status report** can post a `pending` status to the latest evaluated commit. |
 
-A Developer token needs a manual webhook. **Open webhook settings** can open **Settings -> Webhooks** of the GitLab project. Add a webhook with these values.
+A Developer token needs a manual webhook. Use **Open webhook settings** to open **Settings -> Webhooks** in the GitLab project. Add a webhook with these values.
 
 | Field | Value |
 |---|---|
@@ -78,7 +78,7 @@ A Developer token needs a manual webhook. **Open webhook settings** can open **S
 | Secret token | The secret |
 | Trigger | **Push events**, **Tag push events**, **Comments**, **Merge request events**, **Releases events** |
 
-Repository URLs over SSH with a developer token use the deploy key from the **Repository access** step. Copy that key to GitLab Settings -> Repository -> Deploy keys. Click Test access.
+Repository URLs over SSH with a developer token use the deploy key from the **Repository access** step. Copy that key to **Settings -> Repository -> Deploy keys** in GitLab. Click **Test access**.
 
 ## Declarative Setup
 
@@ -101,7 +101,7 @@ services.gradient.state.git_host_connections.gitlab = {
 
 Connection pages display the Webhook URL `https://gradient.example.com/api/v1/hooks/<connection-id>`. Project connections also accept the old URL `https://gradient.example.com/api/v1/hooks/gitlab/acme/gitlab`.
 
-Declared tasks come with no trigger and no connection. Set both on each task. Declarative state never picks or links a connection on its own and declared values always win.
+Declared tasks have no trigger and no connection. Set both for each task. Declarative state can never choose a connection or link one on its own. Declared values always take precedence.
 
 ```nix
 services.gradient.state.tasks.app = {
@@ -149,7 +149,7 @@ Only project members with the Developer role or higher can use `/gradient` comma
 | `403 forbidden_source_ip` | The connection's allowed source IPs do not include the GitLab address |
 | `404` | The webhook URL names a wrong connection, or the connection has **Receives events** off |
 | `200`, but no evaluation | No task with a matching trigger uses this connection, or no task repository URL matches |
-| No status on the commit | **Report commit status** is off on the task's **Repository** page, or the token lacks the `api` scope or the Developer role. **Test the status report** shows GitLab's answer |
+| No status on the commit | Either **Report commit status** is off on the **Repository** page of the task, or the token does not have the `api` scope or the Developer role. See the response from GitLab in **Test the status report**. |
 
 ## Next Steps
 

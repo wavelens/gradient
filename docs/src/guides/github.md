@@ -17,13 +17,13 @@ A GitHub App can link a Gradient instance to GitHub. With this connection in pla
 
 ### 1. Register the GitHub App
 
-Register the App once for each instance in the **GitHub App** section of **Administration -> Git host connections**.
+Register an App once per instance in the **GitHub App** section of **Administration -> Git host connections**.
 
-1. Enter the GitHub organization in **Organization**. An empty field means the personal account.
-2. GitHub Enterprise users enter the host under **Advanced -> GitHub Enterprise host**.
+1. Enter the GitHub organization in **Organization**. Leave the field empty for a personal account.
+2. Users of GitHub Enterprise enter the host in **Advanced -> GitHub Enterprise host**.
 3. Click **Create on GitHub** and confirm the registration on GitHub.
 
-The **App ID**, **Private key (PEM)** and **Webhook secret** appear a single time, next to a `services.gradient.githubApp` snippet. Save the key and the secret as files on the server.
+Gradient shows **App ID**, **Private key (PEM)**, and **Webhook secret** only once, next to the `services.gradient.githubApp` snippet. Store the key and secret as files on the server.
 
 ### 2. Configure the Server
 
@@ -40,21 +40,21 @@ services.gradient.githubApp = {
 
 ### 3. Install the App
 
-Click **Install on GitHub** in the **GitHub App** section and pick the account with the repositories. GitHub returned the browser to **Git host connections** afterwards.
+Click **Install on GitHub** in the **GitHub App** section. Select the account with the repository. GitHub then returned the browser to **Git host connections**.
 
 | Message | Meaning |
 |---|---|
-| "Installed on <account>" | The installation is active. Links lead to the tasks Gradient linked to the installation |
-| "Ask the owner of the account to approve the installation on GitHub." | Installs by non-owners wait for approval on GitHub |
-| "GitHub doesn't report the installation yet." | The event from GitHub is still on the way. **Check again** can reload the list |
+| "Installed on <account>" | Installation is active. The tasks that Gradient linked to the installation open from the link. |
+| "Ask the owner of the account to approve the installation on GitHub." | Installations from a non-owner await approval on GitHub. |
+| "GitHub doesn't report the installation yet." | Events from GitHub haven't arrived yet. Reload the list with **Check again**. |
 
 - Each installation is a connection named `github-<account>` with the instance as owner.
-- All projects can use the connection. The connection can receive events and report status.
-- A new installation can link every task with a repository of that account and no connection yet.
-- Installations appear below the App with account, last event and task count.
-- The connection is gone after removal of the installation on GitHub.
+- Every project can use that connection. The connection can receive events and report status.
+- A new installation can link every task with no connection yet and a repository of that account.
+- All installations appear under the App with their account, last event and task count.
+- Deletions of a GitHub installation remove the connection.
 
-**Connect repository** and the **Repository** page of a task without a fitting installation also offer **Install on GitHub**. Other users see "An instance admin can install the GitHub App on <account>".
+**Connect repository** and the **Repository** page of the task both offer **Install on GitHub** when no installation can fit the repository. Other users see "An instance admin can install the GitHub App on <account>".
 
 ### 4. Choose the Connection on the Task
 
@@ -64,13 +64,13 @@ Tasks map to one Git host connection each. Push triggers and pull request trigge
 
     Gradient can pick the fitting installation for a new task with a GitHub repository. **Report commit status** is then on.
 
-    The **Repository** page of the task has a section for each step from connection to commit status. Each section has a state and one action.
+    Steps from Connection to Commit Status map to one section each on the **Repository** page of a task. A status and one action appear in each section.
 
     | Section | Actions |
     |---|---|
-    | **Connection** | Pick another installation. **Install on GitHub** when none fit |
+    | **Connection** | Choose another installation. Use **Install on GitHub** if no installation matches. |
     | **Incoming Events** | **Add trigger** for the push and pull request triggers |
-    | **Commit Status** | **Report commit status** on or off. **Test the status report** can post a `pending` status to the head commit of the last evaluation |
+    | **Commit Status** | Turn **Report commit status** on or off. **Test the status report** can post a `pending` status to the head commit of the last evaluation. |
 
     The **Triggers** page and the last step of **Connect repository** also offer the same triggers.
 
@@ -78,7 +78,7 @@ Tasks map to one Git host connection each. Push triggers and pull request trigge
 
     A declarative task has no connection and no triggers by default. Declare a connection for the app installation with the installation ID, then add both triggers to the task. The installation webhook can reuse the declared connection.
 
-    Declarative state never picks or links a connection on its own and declared values always win. A declared installation can report status by default. The repository of the task must belong to `account_login`.
+    Declarative state does not select or link a connection on its own. Declared values always take precedence. A declared installation can report status by default. Keep the task repository under `account_login`.
 
     ```nix
     services.gradient.state.git_host_connections.github-acme = {
@@ -152,9 +152,9 @@ GitHub can merge an entry after a passed check, or drop the entry after a failed
 | `403 superuser required` | The account lacks the superuser flag |
 | Approved reviews don't start evaluation of pull requests from forks | The App predates the `pull_request_review` event. Enable **Pull request review** under the App's **Permissions & events** |
 | Merge queue entries wait for the Gradient check without end | The App predates the `merge_group` event. Grant **Merge queues** read access and enable **Merge group** under the App's **Permissions & events** |
-| "GitHub doesn't report the installation yet." stays after **Check again** | The App webhook doesn't reach `https://gradient.example.com/api/v1/hooks/github`. Check **Advanced -> Recent Deliveries** of the App on GitHub |
-| "An instance admin can install the GitHub App on <account>" | Only instance admins can install the App. An instance admin must click **Install on GitHub** |
-| Pushes arrive but no evaluation starts | The task's **Repository** page marks the failing step: no connection, no push trigger, or a repository outside the installation account |
+| "GitHub doesn't report the installation yet." stays after **Check again** | App webhook doesn't arrive at `https://gradient.example.com/api/v1/hooks/github`. Check the App's **Advanced -> Recent Deliveries** on GitHub |
+| "An instance admin can install the GitHub App on <account>" | Only instance administrators can install an App. An instance administrator needs to click **Install on GitHub** |
+| Pushes arrive but no evaluation starts | The task's **Repository** page shows the failing step (no connection, no push trigger, or a repository outside the installation account) |
 | No status on the commit | **Report commit status** is off on the task's **Repository** page |
 | `403 forbidden_source_ip` | The connection's allowed source IPs don't cover the GitHub `hooks` ranges from `https://api.github.com/meta` |
 
