@@ -12,6 +12,8 @@ import {
   GitHostConnectionOwner,
   GitHostConnectionResponse,
   GitHostConnectionSummary,
+  GitHostConnectionTaskResponse,
+  GitHostConnectionTestResponse,
   IncomingWebhookDeliveryResponse,
   PatchGitHostConnectionRequest,
 } from '@core/models';
@@ -21,9 +23,9 @@ export function getOwnerGitHostConnectionsPathPrefix(owner: GitHostConnectionOwn
     case 'instance':
       return 'admin/git-host-connections';
     case 'team':
-      return `teams/${owner.name}/git-host-connections`;
+      return `teams/${encodeURIComponent(owner.name)}/git-host-connections`;
     case 'project':
-      return `projects/${owner.name}/git-host-connections`;
+      return `projects/${encodeURIComponent(owner.name)}/git-host-connections`;
   }
 }
 
@@ -31,8 +33,9 @@ export function getOwnerGitHostConnectionsPathPrefix(owner: GitHostConnectionOwn
 export class GitHostConnectionsApi {
   private api = inject(ApiService);
 
-  list(owner: GitHostConnectionOwner): Observable<GitHostConnectionSummary[]> {
-    return this.api.get<GitHostConnectionSummary[]>(getOwnerGitHostConnectionsPathPrefix(owner));
+  list(owner: GitHostConnectionOwner, repository?: string): Observable<GitHostConnectionSummary[]> {
+    const query = repository ? `?repository=${encodeURIComponent(repository)}` : '';
+    return this.api.get<GitHostConnectionSummary[]>(`${getOwnerGitHostConnectionsPathPrefix(owner)}${query}`);
   }
 
   create(owner: GitHostConnectionOwner, body: CreateGitHostConnectionRequest): Observable<GitHostConnectionResponse> {
@@ -53,5 +56,13 @@ export class GitHostConnectionsApi {
 
   listDeliveries(owner: GitHostConnectionOwner, id: string): Observable<IncomingWebhookDeliveryResponse[]> {
     return this.api.get<IncomingWebhookDeliveryResponse[]>(`${getOwnerGitHostConnectionsPathPrefix(owner)}/${id}/deliveries`);
+  }
+
+  listTasks(viewer: GitHostConnectionOwner, id: string): Observable<GitHostConnectionTaskResponse[]> {
+    return this.api.get<GitHostConnectionTaskResponse[]>(`${getOwnerGitHostConnectionsPathPrefix(viewer)}/${id}/tasks`);
+  }
+
+  test(owner: GitHostConnectionOwner, id: string): Observable<GitHostConnectionTestResponse> {
+    return this.api.post<GitHostConnectionTestResponse>(`${getOwnerGitHostConnectionsPathPrefix(owner)}/${id}/test`);
   }
 }
