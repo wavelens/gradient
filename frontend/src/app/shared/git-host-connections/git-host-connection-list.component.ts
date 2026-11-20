@@ -27,7 +27,7 @@ import { GitHostConnectionsApi } from '@core/services/git-host-connections.servi
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService } from '@shared/access/access.service';
-import { IncomingDeliveriesComponent, deliverySummary, gitHostLabel } from '@shared/git';
+import { IncomingDeliveriesComponent, deliveryBadgeSeverity, deliverySummary, gitHostLabel } from '@shared/git';
 import { links } from '@shared/routing';
 import { CurrentTimeSignal, RelativeTimePipe } from '@shared/text';
 import { formatEntityLabel } from '@shared/ui';
@@ -71,6 +71,7 @@ export class GitHostConnectionListComponent implements OnInit {
   protected readonly gitHostLabel = gitHostLabel;
   protected readonly ownerText = getGitHostConnectionOwnerReadableText;
   protected readonly deliverySummary = deliverySummary;
+  protected readonly deliveryBadgeSeverity = deliveryBadgeSeverity;
   protected readonly host = gitHostConnectionHost;
   protected readonly links = links;
 
@@ -176,11 +177,22 @@ export class GitHostConnectionListComponent implements OnInit {
     });
   }
 
+  webhookUrl(connection: GitHostConnectionSummary): string | null {
+    return connection.receives_events && connection.git_host_type !== 'github' ? (connection.webhook_url ?? null) : null;
+  }
+
   openMenu(event: Event, connection: GitHostConnectionSummary, menu: MenuComponent): void {
-    this.menuItems.set([
-      { label: 'Test', icon: 'play_arrow', command: () => this.test(connection) },
-      { label: 'Delete', icon: 'delete', danger: true, command: () => this.remove(connection) },
-    ]);
+    const url = this.webhookUrl(connection);
+    const items: MenuItem[] = url
+      ? [{ label: 'Copy webhook URL', icon: 'content_copy', command: () => void this.notify.copyToClipboard(url, 'webhook URL') }]
+      : [];
+    if (this.canManageRow(connection)) {
+      items.push(
+        { label: 'Test', icon: 'play_arrow', command: () => this.test(connection) },
+        { label: 'Delete', icon: 'delete', danger: true, command: () => this.remove(connection) },
+      );
+    }
+    this.menuItems.set(items);
     menu.toggle(event);
   }
 

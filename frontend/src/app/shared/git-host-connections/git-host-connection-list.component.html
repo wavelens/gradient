@@ -40,6 +40,7 @@
               <div class="connection-meta" data-testid="connection-health">
                 @if (connection.receives_events) {
                   @if (connection.last_delivery; as delivery) {
+                    <gr-badge [severity]="deliveryBadgeSeverity(delivery)">{{ delivery.event }}</gr-badge>
                     <span>{{ deliverySummary(delivery) }} {{ delivery.created_at | relativeTime }}</span>
                   } @else {
                     <span class="text-secondary">No events yet</span>
@@ -61,6 +62,13 @@
                     [attr.aria-expanded]="tasksShownFor() === connection.id" (click)="toggleTasks(connection)" data-testid="connection-tasks"></button>
                 }
               </div>
+              @if (tasksShownFor() === connection.id) {
+                <ul class="connection-tasks" data-testid="connection-task-list">
+                  @for (task of tasks() ?? []; track task.id) {
+                    <li><a [routerLink]="links.taskPage(task.project, task.name, 'repository')">{{ task.project }} / {{ task.display_name || task.name }}</a></li>
+                  }
+                </ul>
+              }
             </div>
             <div class="connection-actions">
               @if (canReadDeliveries(connection)) {
@@ -73,23 +81,16 @@
                   [attr.aria-label]="'Edit ' + connection.display_name" [loading]="connectionDialog.openingId() === connection.id"
                   (click)="openEdit(connection)"></button>
               }
-              @if (canManageRow(connection)) {
+              @if (canManageRow(connection) || webhookUrl(connection)) {
                 <button grButton icon="more_vert" severity="secondary" size="small" text [attr.aria-label]="'Actions for ' + connection.display_name"
                   (click)="openMenu($event, connection, connectionMenu)"></button>
               }
             </div>
           </div>
-          @if (tasksShownFor() === connection.id) {
-            <ul class="connection-tasks" data-testid="connection-task-list">
-              @for (task of tasks() ?? []; track task.id) {
-                <li><a [routerLink]="links.taskPage(task.project, task.name, 'repository')">{{ task.project }} / {{ task.display_name || task.name }}</a></li>
-              }
-            </ul>
-          }
-          @if (connection.receives_events && connection.git_host_type !== 'github' && connection.webhook_url; as webhookUrl) {
-            <gr-copy-field label="Webhook URL" [value]="webhookUrl" />
-          }
           @if (deliveriesShownFor() === connection.id) {
+            @if (webhookUrl(connection); as url) {
+              <gr-copy-field label="Webhook URL" [value]="url" />
+            }
             <app-incoming-deliveries [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id" />
           }
         </div>
