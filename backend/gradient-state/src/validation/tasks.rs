@@ -168,6 +168,18 @@ fn validate_task_git_host_connection_reference(
             format_unknown_connection_name_error_message(name, &task.project),
         );
     }
+    if let Some(connection) = connection
+        && let Some(address) = connection.address()
+        && let Err(reason) = address.check_repository(&task.repository)
+    {
+        errors.push(
+            format!("tasks.{}.git_host_connection", task.name),
+            format!(
+                "The repository does not match the connection '{}': {}",
+                connection.name, reason
+            ),
+        );
+    }
 
     if task.report_status {
         match (name, connection) {

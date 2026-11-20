@@ -5,7 +5,9 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use gradient_types::git_host::{GitHostConnectionOwner, GitHostType};
+use gradient_types::git_host::{
+    GitHostConnectionOwner, GitHostType, MissingGitHostConnectionSetting,
+};
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
@@ -88,6 +90,28 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 field("account_login"),
                 "git_host_type 'github' requires the account_login of the installation. Only repositories of that account fit the connection.",
             );
+        }
+        let capabilities = connection.capabilities();
+        if let Err(missing) = capabilities.check() {
+            let (key, message) = match missing {
+                MissingGitHostConnectionSetting::Capability => (
+                    "receives_events",
+                    "Turn on receives_events, reports_status, or both.",
+                ),
+                MissingGitHostConnectionSetting::BaseUrlOrAccessTokenForStatus => (
+                    if capabilities.has_base_url {
+                        "access_token_file"
+                    } else {
+                        "base_url"
+                    },
+                    "reports_status needs base_url and access_token_file.",
+                ),
+                MissingGitHostConnectionSetting::WebhookSecretForEvents => (
+                    "secret_file",
+                    "receives_events needs a secret_file with the webhook secret.",
+                ),
+            };
+            errors.push(field(key), message);
         }
         if connection.installation_id.is_some()
             && !(is_github && owner == Some(GitHostConnectionOwner::Instance))

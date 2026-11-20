@@ -8,8 +8,8 @@ mod fixtures;
 
 use super::StateConfiguration;
 use fixtures::{
-    make_state_with_git_host_connections_and_web_task_extra_fields, reporter_cfg,
-    state_with_one_user_one_project_and_git_host_connections, worker_cfg,
+    github_reporter_cfg, make_state_with_git_host_connections_and_web_task_extra_fields,
+    reporter_cfg, state_with_one_user_one_project_and_git_host_connections, worker_cfg,
 };
 
 const WITHOUT_OPTIONAL_FIELDS: &str = r#"{
@@ -215,11 +215,53 @@ fn state_validation_rejects_extra_allowed_url_prefix_with_whitespace() {
 #[test]
 fn state_reporter_trigger_accepts_declared_receiving_connection() {
     let connections = r#"{
-        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "created_by": "alice" }
+        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "secret_file": "/dev/null", "created_by": "alice" }
     }"#;
     let cfg = reporter_cfg("git-host", connections);
     let v = cfg.validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
+}
+
+#[test]
+fn a_task_repository_must_fit_its_declared_connection() {
+    let other_host = r#"{
+        "forge": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "base_url": "https://gitea.example.com", "secret_file": "/dev/null", "created_by": "alice" }
+    }"#;
+    let other_account = r#"{
+        "forge": { "name": "forge", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "globex", "created_by": "alice" }
+    }"#;
+    for (connections, expected) in [(other_host, "gitea.example.com"), (other_account, "globex")] {
+        let errors = errors_of(&github_reporter_cfg("forge", connections));
+        assert!(
+            errors
+                .iter()
+                .any(|(field, message)| field == "tasks.web.git_host_connection"
+                    && message.contains(expected)),
+            "expected a fit error naming {expected}, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn a_declared_connection_needs_the_credentials_of_its_capabilities() {
+    let cfg = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "silent": { "name": "silent", "owner": "instance", "git_host_type": "gitea", "receives_events": false, "created_by": "alice" },
+            "no-secret": { "name": "no-secret", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" },
+            "no-token": { "name": "no-token", "owner": "instance", "git_host_type": "gitea", "receives_events": false, "reports_status": true, "base_url": "https://gitea.example.com", "created_by": "alice" }
+        }"#,
+    );
+    let errors = errors_of(&cfg);
+    for field in [
+        "git_host_connections.silent.receives_events",
+        "git_host_connections.no-secret.secret_file",
+        "git_host_connections.no-token.access_token_file",
+    ] {
+        assert!(
+            errors.iter().any(|(f, _)| f == field),
+            "expected an error on {field}, got: {errors:?}"
+        );
+    }
 }
 
 #[test]
@@ -295,7 +337,7 @@ fn state_reporter_trigger_accepts_declared_github_app_connection() {
     let connections = r#"{
         "github-acme": { "name": "github-acme", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
     }"#;
-    let v = reporter_cfg("github-acme", connections).validate();
+    let v = github_reporter_cfg("github-acme", connections).validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
 }
 
@@ -303,7 +345,7 @@ fn state_reporter_trigger_accepts_declared_github_app_connection() {
 fn task_connection_name_resolves_to_project_before_owner_team_before_instance() {
     let connection = |owner: &str, reports_status: bool| {
         format!(
-            r#"{{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "reports_status": {reports_status}, "created_by": "alice" }}"#
+            r#"{{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "base_url": "https://example.com", "access_token_file": "/dev/null", "secret_file": "/dev/null", "reports_status": {reports_status}, "created_by": "alice" }}"#
         )
     };
     let reporting = r#""git_host_connection": "forge", "report_status": true"#;
@@ -387,7 +429,7 @@ fn rejects_owner_naming_undeclared_team_or_project() {
 fn rejects_duplicate_connection_name_for_same_owner_but_allows_it_for_different_owners() {
     let duplicated = state_with_one_user_one_project_and_git_host_connections(
         r#"{
-            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "created_by": "alice" },
+            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "secret_file": "/dev/null", "created_by": "alice" },
             "b": { "name": "forge", "owner": "project/acme", "git_host_type": "gitlab", "created_by": "alice" }
         }"#,
     );
@@ -403,8 +445,8 @@ fn rejects_duplicate_connection_name_for_same_owner_but_allows_it_for_different_
 
     let spread = state_with_one_user_one_project_and_git_host_connections(
         r#"{
-            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "created_by": "alice" },
-            "b": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" }
+            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "secret_file": "/dev/null", "created_by": "alice" },
+            "b": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "secret_file": "/dev/null", "created_by": "alice" }
         }"#,
     );
     let v = spread.validate();

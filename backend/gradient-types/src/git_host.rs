@@ -41,9 +41,64 @@ impl std::fmt::Display for GitHostConnectionOwner {
     }
 }
 
+pub struct GitHostConnectionCapabilities {
+    pub github_app: bool,
+    pub receives_events: bool,
+    pub reports_status: bool,
+    pub has_base_url: bool,
+    pub has_access_token: bool,
+    pub has_webhook_secret: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissingGitHostConnectionSetting {
+    Capability,
+    BaseUrlOrAccessTokenForStatus,
+    WebhookSecretForEvents,
+}
+
+impl GitHostConnectionCapabilities {
+    pub fn check(&self) -> Result<(), MissingGitHostConnectionSetting> {
+        if !self.receives_events && !self.reports_status {
+            return Err(MissingGitHostConnectionSetting::Capability);
+        }
+        if !self.github_app && self.reports_status && !(self.has_base_url && self.has_access_token)
+        {
+            return Err(MissingGitHostConnectionSetting::BaseUrlOrAccessTokenForStatus);
+        }
+        if !self.github_app && self.receives_events && !self.has_webhook_secret {
+            return Err(MissingGitHostConnectionSetting::WebhookSecretForEvents);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::GitHostConnectionOwner;
+    use super::*;
+
+    #[test]
+    fn a_github_app_installation_needs_no_credentials() {
+        let installation = GitHostConnectionCapabilities {
+            github_app: true,
+            receives_events: true,
+            reports_status: true,
+            has_base_url: false,
+            has_access_token: false,
+            has_webhook_secret: false,
+        };
+        assert_eq!(installation.check(), Ok(()));
+        let token_without_url = GitHostConnectionCapabilities {
+            github_app: false,
+            receives_events: false,
+            has_access_token: true,
+            ..installation
+        };
+        assert_eq!(
+            token_without_url.check(),
+            Err(MissingGitHostConnectionSetting::BaseUrlOrAccessTokenForStatus)
+        );
+    }
 
     #[test]
     fn an_owner_reads_back_from_its_text_form() {

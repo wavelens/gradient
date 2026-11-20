@@ -18,6 +18,14 @@ pub fn reporter_cfg(connection_name: &str, connections_json: &str) -> StateConfi
     )
 }
 
+pub fn github_reporter_cfg(connection_name: &str, connections_json: &str) -> StateConfiguration {
+    let mut cfg = reporter_cfg(connection_name, connections_json);
+    if let Some(task) = cfg.tasks.get_mut("web") {
+        task.repository = "https://github.com/acme/web.git".into();
+    }
+    cfg
+}
+
 pub fn make_state_with_git_host_connections_and_web_task_extra_fields(
     connections_json: &str,
     task_fields_json: &str,
