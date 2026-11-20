@@ -17,7 +17,7 @@
     <app-github-app-install-link slot="actions" [primary]="installationReturn()?.state !== 'installed'" />
   }
   @if (!showResult() && installationReturn()?.state !== 'installed' && connectedRepositoryWizardInput; as saved) {
-    <a slot="actions" grButton severity="secondary" icon="arrow_back" [label]="'Continue connecting ' + getShortRepositoryNameFromUrl(saved.form.repository)"
+    <a slot="actions" grButton class="continue-connecting-link" severity="secondary" icon="arrow_back" [label]="'Continue connecting ' + repositoryName(saved.form.repository)" [attr.title]="getShortRepositoryNameFromUrl(saved.form.repository)"
       [routerLink]="links.projectPage(saved.project, 'connect')" data-testid="connect-repository-wizard-return"></a>
   }
 
@@ -39,11 +39,11 @@
                     }
                   </span>
                 }
-                @if (connectedRepositoryWizardInput; as saved) {
-                  <a grButton icon="arrow_back" [label]="'Continue connecting ' + getShortRepositoryNameFromUrl(saved.form.repository)"
-                    [routerLink]="links.projectPage(saved.project, 'connect')" data-testid="connect-repository-wizard-return"></a>
-                }
               </gr-message-banner>
+              @if (connectedRepositoryWizardInput; as saved) {
+                <a grButton class="continue-connecting-link" icon="arrow_back" [label]="'Continue connecting ' + repositoryName(saved.form.repository)" [attr.title]="getShortRepositoryNameFromUrl(saved.form.repository)"
+                  [routerLink]="links.projectPage(saved.project, 'connect')" data-testid="connect-repository-wizard-return"></a>
+              }
             }
             @case ('missing') {
               <gr-message-banner type="warning">

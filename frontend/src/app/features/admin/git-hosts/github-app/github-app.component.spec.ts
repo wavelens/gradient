@@ -282,6 +282,14 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-install"]')?.classList).toContain('gr-button--secondary');
     });
 
+    it('Show only repository name on link back to wizard', () => {
+      saveWizardInput();
+      setup({}, {});
+      const link = wizardReturnLink(render().root);
+      expect(link?.querySelector('.gr-button__label')?.textContent?.trim()).toBe('Continue connecting hello-world');
+      expect(link?.getAttribute('title')).toBe('github.com/acme/hello-world');
+    });
+
     it('Hide the link back to the wizard while the App credentials are on screen', () => {
       saveWizardInput();
       setup({ ready: '1' });

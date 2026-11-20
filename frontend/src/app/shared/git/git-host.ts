@@ -35,6 +35,11 @@ export function repositoryHost(repository: string): string | null {
   }
 }
 
+export function repositoryName(url: string): string {
+  const path = url.trim().replace(/\?.*$/, '').replace(/\/+$/, '').replace(/\.git$/, '');
+  return path.split(/[/:]/).pop() ?? '';
+}
+
 export function knownGitHostType(url: string): GitHostType | null {
   const host = repositoryHost(url) ?? '';
   if (host === 'gitlab.com' || host.includes('gitlab')) return 'gitlab';

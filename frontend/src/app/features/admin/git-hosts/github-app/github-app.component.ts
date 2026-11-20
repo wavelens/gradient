@@ -38,6 +38,7 @@ import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import { docsUrl } from '@core/docs';
+import { repositoryName } from '@shared/git';
 import { GitHostConnectionListComponent } from '@shared/git-host-connections/git-host-connection-list.component';
 import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 import {
@@ -97,6 +98,7 @@ export class GithubAppComponent implements OnInit {
   protected readonly githubAppServerConfigurationDocsUrl = docsUrl('guides/github/#2-configure-the-server');
   protected readonly connectedRepositoryWizardInput = readConnectRepositoryWizardInputFromSessionStorage();
   protected readonly getShortRepositoryNameFromUrl = getShortRepositoryNameFromUrl;
+  protected readonly repositoryName = repositoryName;
 
   host = signal<string>('');
   organization = signal<string>('');
