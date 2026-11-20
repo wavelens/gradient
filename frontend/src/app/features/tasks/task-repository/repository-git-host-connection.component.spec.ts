@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { GitHostConnectionSummary, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
-import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { ApiError } from '@core/services/api.service';
 import { RepositoryGitHostConnectionAndCommitStatusComponent } from './repository-git-host-connection.component';
 import { chainWithoutConnection } from './task-git-host-chain.testing';
@@ -23,12 +22,14 @@ const reporting: GitHostConnectionSummary = {
   name: 'forgejo',
   display_name: 'Forgejo',
   git_host_type: 'forgejo',
+  base_url: 'https://forgejo.example.com',
   receives_events: true,
   reports_status: true,
   can_manage: false,
   access_token_refreshes_automatically: false,
   refused_signature_count: 0,
   task_count: 0,
+  repository_fit: { fits: true },
 };
 
 const eventsOnly: GitHostConnectionSummary = {
@@ -41,6 +42,15 @@ const eventsOnly: GitHostConnectionSummary = {
   can_manage: true,
 };
 
+const otherHost: GitHostConnectionSummary = {
+  ...reporting,
+  id: 'c3',
+  name: 'gitlab',
+  display_name: 'GitLab',
+  base_url: 'https://gitlab.com',
+  repository_fit: { fits: false, reason: 'Other host' },
+};
+
 const state: TaskRepositoryResponse = {
   repository: 'https://forgejo.example.com/acme/app.git',
   uses_ssh: false,
@@ -51,12 +61,12 @@ const state: TaskRepositoryResponse = {
   recent_deliveries: [],
   chain: chainWithoutConnection,
   status_posts: [],
-  available_connections: [reporting, eventsOnly],
+  available_connections: [reporting, eventsOnly, otherHost],
   can_edit: true,
   can_manage_integrations: false,
 };
 
-function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object = {}, superuser = false, githubAppEnabled = false) {
+function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object = {}) {
   const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [RepositoryGitHostConnectionAndCommitStatusComponent],
@@ -64,17 +74,19 @@ function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object =
       provideRouter([]),
       { provide: TasksService, useValue: tasks },
       { provide: NotifyService, useValue: notify },
-      { provide: AuthService, useValue: { user: signal({ superuser }) } },
+      { provide: GitHostConnectionsApi, useValue: {} },
+      { provide: ConfigService, useValue: { giteaOauthAppConfig: null } },
     ],
   });
-  TestBed.inject(ConfigService).githubAppEnabled = githubAppEnabled;
   const fixture = TestBed.createComponent(RepositoryGitHostConnectionAndCommitStatusComponent);
   fixture.componentRef.setInput('project', 'acme');
   fixture.componentRef.setInput('task', 'app');
   fixture.componentRef.setInput('state', { ...state, ...overrides });
   fixture.detectChanges();
   const el = fixture.nativeElement as HTMLElement;
-  return { fixture, el, component: fixture.componentInstance, notify };
+  const savedStates: TaskRepositoryResponse[] = [];
+  fixture.componentInstance.saved.subscribe((saved) => savedStates.push(saved));
+  return { fixture, el, component: fixture.componentInstance, notify, savedStates };
 }
 
 function testId(el: HTMLElement, id: string): HTMLElement | null {
@@ -82,166 +94,68 @@ function testId(el: HTMLElement, id: string): HTMLElement | null {
 }
 
 describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
-  it('labels each connection with its owner, host and capabilities', () => {
-    const { component } = render();
-    expect(component.gitHostConnectionDropdownOptions().map((option) => option.label)).toEqual([
+  it('offers only the connections that fit the repository, plus the current one', () => {
+    expect(render().component.pickerOptions().map((option) => option.label)).toEqual([
       'No connection',
-      'Forgejo · Team platform · Forgejo · events · status',
-      'Hooks · Project acme · Forgejo · events',
+      'Forgejo · forgejo.example.com · Team platform',
+      'Hooks · forgejo.example.com · Project acme',
     ]);
-  });
-
-  it('lets a writer without the permission to manage git host connections save the chosen connection with commit status', () => {
-    const saved: TaskRepositoryResponse = { ...state, git_host_connection: reporting, report_status: true };
-    const updateTaskRepositoryConnection = vi.fn(() => of(saved));
-    const { fixture, el, component, notify } = render({}, { updateTaskRepositoryConnection });
-    const emitted = vi.fn();
-    component.taskRepositoryResponseAfterGitHostSave.subscribe(emitted);
-
-    component.selectGitHostConnectionAndUpdateReportCommitStatus('c1');
-    component.reportCommitStatusChecked.set(true);
-    fixture.detectChanges();
-    (testId(el, 'save-repository-connection') as HTMLButtonElement).click();
-
-    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { git_host_connection: 'c1', report_status: true });
-    expect(notify.success).toHaveBeenCalledWith('Repository connection saved');
-    expect(emitted).toHaveBeenCalledWith(saved);
-  });
-
-  it('turns commit status off and blocks the switch for a connection that cannot report status', async () => {
-    const { fixture, el, component } = render({ git_host_connection: reporting, report_status: true });
-    component.selectGitHostConnectionAndUpdateReportCommitStatus('c2');
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    expect(component.reportCommitStatusChecked()).toBe(false);
-    expect(el.querySelector<HTMLInputElement>('#task-report-commit-status')?.disabled).toBe(true);
-    expect(el.textContent).toContain("The selected connection can't report status.");
-  });
-
-  it('reports a refused save as a toast with the reason from the server', () => {
-    const failure = new ApiError('The connection is not available to this project', 400);
-    const { component, notify } = render({}, { updateTaskRepositoryConnection: vi.fn(() => throwError(() => failure)) });
-    component.selectGitHostConnectionAndUpdateReportCommitStatus('c1');
-    component.save();
-    expect(notify.failure).toHaveBeenCalledWith("Couldn't save repository connection", failure);
-    expect(component.saving()).toBe(false);
-  });
-
-  it('sends a test status report only for a saved connection with reporting on', () => {
-    const postPendingTestCommitStatus = vi.fn(() =>
-      of({ id: 'p1', event: 'evaluation.queued', success: true, response_status: 201, delivered_at: '2026-01-01T10:00:00Z' }));
-    const { fixture, el, component } = render({ git_host_connection: reporting, report_status: true }, { postPendingTestCommitStatus });
-    const changed = vi.fn();
-    component.changed.subscribe(changed);
-
-    component.reportCommitStatusChecked.set(false);
-    expect(component.testStatusReportButtonDisabledReason()).toBe('Save the connection before the test.');
-    component.reportCommitStatusChecked.set(true);
-    expect(component.testStatusReportButtonDisabledReason()).toBeNull();
-
-    (testId(el, 'test-status-report') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    expect(postPendingTestCommitStatus).toHaveBeenCalledWith('acme', 'app');
-    expect(testId(el, 'test-status-report-result')?.textContent?.trim()).toBe('Status report sent · HTTP 201');
-    expect(changed).toHaveBeenCalled();
-  });
-
-  it('asks to turn reporting on before a test status report', () => {
-    const { component } = render({ git_host_connection: eventsOnly });
-    expect(component.testStatusReportButtonDisabledReason()).toBe('Turn on reporting of commit status and save first.');
-  });
-
-  it('reports a test status report the server refuses as a toast', () => {
-    const failure = new ApiError('No commit to report on yet', 409);
-    const { component, notify } = render(
-      { git_host_connection: reporting, report_status: true },
-      { postPendingTestCommitStatus: vi.fn(() => throwError(() => failure)) },
-    );
-    component.postPendingTestCommitStatusAndShowResultOnTestStatusReportButtonClick();
-    expect(notify.failure).toHaveBeenCalledWith('Could not test the status report', failure);
-  });
-
-  it('lists the status posts of the task with outcome and HTTP status', () => {
-    const { el } = render({
-      git_host_connection: reporting,
-      report_status: true,
-      status_posts: [
-        { id: 'p1', event: 'evaluation.completed', success: true, response_status: 201, delivered_at: '2026-01-01T10:00:00Z' },
-        { id: 'p2', event: 'evaluation.failed', success: false, response_status: 401, error_message: 'Bad credentials', delivered_at: '2026-01-01T09:00:00Z' },
-      ],
-    });
-    const rows = Array.from(el.querySelectorAll('[data-testid="status-posts"] li'));
-    expect(rows).toHaveLength(2);
-    expect(rows[0].querySelector('gr-badge .badge')?.className).toContain('is-success');
-    expect(rows[0].textContent).toContain('HTTP 201');
-    expect(rows[1].querySelector('gr-badge .badge')?.className).toContain('is-danger');
-    expect(rows[1].textContent).toContain('Bad credentials');
-  });
-
-  it('says so when no status posts exist yet', () => {
-    const { el } = render({ git_host_connection: reporting });
-    expect(testId(el, 'no-status-posts')?.textContent).toContain('No status posts yet.');
-  });
-
-  it('points to the connection page or a project member when no connection is available', () => {
-    const manager = render({ available_connections: [], can_manage_integrations: true }).el;
-    expect(testId(manager, 'no-connections')?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/git-host-connections');
     TestBed.resetTestingModule();
-    const writer = render({ available_connections: [] }).el;
-    expect(testId(writer, 'no-connections')?.textContent).toContain('Ask a project member with Write or Admin to create a connection.');
+    const current = render({ git_host_connection: otherHost });
+    expect(current.component.pickerOptions().map((option) => option.value)).toEqual(['', 'c1', 'c2', 'c3']);
   });
 
-  it('shows read-only members the choice without a way to save it', async () => {
-    const { fixture, el } = render({ git_host_connection: reporting, report_status: true, can_edit: false });
-    await fixture.whenStable();
-    fixture.detectChanges();
-    expect(testId(el, 'save-repository-connection')).toBeNull();
+  it('saves the picked connection at once and passes the new state on', () => {
+    const saved = { ...state, git_host_connection: reporting };
+    const updateTaskRepositoryConnection = vi.fn(() => of(saved));
+    const { component, savedStates } = render({}, { updateTaskRepositoryConnection });
+    component.selectConnection('c1');
+    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { git_host_connection: 'c1' });
+    expect(savedStates).toEqual([saved]);
+  });
+
+  it('returns the picker to the saved connection when saving fails', () => {
+    const updateTaskRepositoryConnection = vi.fn(() => throwError(() => new ApiError('nope', 400)));
+    const { component, notify } = render({}, { updateTaskRepositoryConnection });
+    component.selectConnection('c1');
+    expect(component.selectedId()).toBe('');
+    expect(notify.failure).toHaveBeenCalled();
+  });
+
+  it('selects the single fitting connection directly', () => {
+    const updateTaskRepositoryConnection = vi.fn(() => of(state));
+    const { component } = render({ available_connections: [reporting, otherHost] }, { updateTaskRepositoryConnection });
+    component.selectFittingConnectionOrFocusPicker();
+    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { git_host_connection: 'c1' });
+  });
+
+  it('saves report status at once and tests it beside the checkbox', () => {
+    const updateTaskRepositoryConnection = vi.fn(() => of({ ...state, git_host_connection: reporting, report_status: true }));
+    const postPendingTestCommitStatus = vi.fn(() => of({ success: true, response_status: 201 }));
+    const { fixture, el, component, notify } = render({ git_host_connection: reporting }, { updateTaskRepositoryConnection, postPendingTestCommitStatus });
     expect(testId(el, 'test-status-report')).toBeNull();
-    expect(el.querySelector<HTMLInputElement>('#task-report-commit-status')?.disabled).toBe(true);
-  });
-
-  it('leads a superuser to the instance git hosts for a GitHub repository without a GitHub App', () => {
-    const { el } = render({ repository: 'https://github.com/acme/app.git' }, {}, true);
-    expect(testId(el, 'github-hint')?.querySelector('a')?.getAttribute('href')).toBe('/admin/git-hosts');
-  });
-
-  it('tells how to connect a GitHub repository once the instance has a GitHub App', () => {
-    const { el } = render({ repository: 'https://github.com/acme/app.git' }, {}, false, true);
-    expect(testId(el, 'github-hint')?.textContent).toContain('Install the GitHub App on the GitHub account for this repository.');
-  });
-
-  it('shows the webhook URL and installs the webhook through a saved connection that reports status', () => {
-    const installWebhook = vi.fn(() => of('ok'));
-    const { el, notify, fixture } = render(
-      { git_host_connection: { ...reporting, webhook_url: 'https://ci.example.com/hooks/c1' }, report_status: true, can_manage_integrations: true },
-      { installWebhook },
-    );
-    const urls = Array.from(el.querySelectorAll<HTMLInputElement>('gr-copy-field input')).map((input) => input.value);
-    expect(urls).toContain('https://ci.example.com/hooks/c1');
-    (testId(el, 'install-webhook') as HTMLButtonElement).click();
+    component.setReportStatus(true);
+    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { report_status: true });
+    fixture.componentRef.setInput('state', { ...state, git_host_connection: reporting, report_status: true });
     fixture.detectChanges();
-    expect(installWebhook).toHaveBeenCalledWith('acme', 'app');
-    expect(notify.success).toHaveBeenCalledWith('Webhook installed');
-    expect(testId(el, 'webhook-installed')?.textContent).toContain('Webhook installation on the Git host is complete');
-    expect(testId(el, 'install-webhook')).toBeNull();
+    testId(el, 'test-status-report')!.click();
+    expect(postPendingTestCommitStatus).toHaveBeenCalledWith('acme', 'app');
+    expect(notify.success).toHaveBeenCalledWith('Status report sent');
   });
 
-  it('keep Install webhook button after event from Git host', () => {
-    const { el } = render({
-      git_host_connection: reporting,
-      report_status: true,
-      can_manage_integrations: true,
-      recent_deliveries: [{ id: 'd1', event: 'push', status_code: 200, result: 'queued', tasks_scanned: 1, queued: 1, created_at: '2026-01-01T00:00:00Z' }],
-    });
-    expect(testId(el, 'last-event')?.textContent).toContain('Queued 1 evaluation');
-    expect(testId(el, 'install-webhook')).not.toBeNull();
+  it('links to the connection only where the viewer can open it', () => {
+    expect(testId(render({ git_host_connection: eventsOnly }).el, 'open-connection')).not.toBeNull();
+    TestBed.resetTestingModule();
+    expect(testId(render({ git_host_connection: reporting }).el, 'open-connection')).toBeNull();
   });
 
-  it('asks before leaving with an unsaved connection choice', () => {
-    const { component } = render();
-    expect(component.unsaved.changed()).toBe(false);
-    component.selectGitHostConnectionAndUpdateReportCommitStatus('c1');
-    expect(component.unsaved.changed()).toBe(true);
+  it('offers a new connection in place when none fits, or links to the connections page', () => {
+    const manager = render({ available_connections: [otherHost], can_manage_integrations: true });
+    expect(testId(manager.el, 'no-connections')?.textContent).toContain('No connection for forgejo.example.com');
+    expect(testId(manager.el, 'new-connection')).not.toBeNull();
+    TestBed.resetTestingModule();
+    const member = render({ available_connections: [] });
+    expect(testId(member.el, 'new-connection')).toBeNull();
+    expect(testId(member.el, 'no-connections')?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/git-host-connections');
   });
 });
