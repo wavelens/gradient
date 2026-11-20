@@ -3,7 +3,8 @@
 
 use crate::api::{
     CreateGitHostConnectionRequest, GitHostConnectionOwner, GitHostConnectionResponse,
-    GitHostConnectionSummary, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
+    IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -146,6 +147,32 @@ impl GitHostConnections<'_> {
             Method::DELETE,
             owner,
             &format!("/{}", encode_url_component(id)),
+        )?)
+        .await
+    }
+
+    pub async fn check(
+        &self,
+        owner: &GitHostConnectionSetOwner,
+        id: &str,
+    ) -> Result<GitHostConnectionTestResponse, ConnectorError> {
+        Self::send(self.request(
+            Method::POST,
+            owner,
+            &format!("/{}/test", encode_url_component(id)),
+        )?)
+        .await
+    }
+
+    pub async fn list_tasks(
+        &self,
+        owner: &GitHostConnectionSetOwner,
+        id: &str,
+    ) -> Result<Vec<GitHostConnectionTaskResponse>, ConnectorError> {
+        Self::send(self.request(
+            Method::GET,
+            owner,
+            &format!("/{}/tasks", encode_url_component(id)),
         )?)
         .await
     }

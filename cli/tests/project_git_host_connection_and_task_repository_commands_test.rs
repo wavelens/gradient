@@ -628,3 +628,155 @@ async fn test_task_repository_install_webhook_and_deploy_key_post_without_body()
     gradient(&home, true, &["task", "repository", "install-webhook"]).success();
     gradient(&home, true, &["task", "repository", "install-deploy-key"]).success();
 }
+
+#[tokio::test]
+async fn test_git_host_connection_create_for_github_sends_the_installation_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/admin/git-host-connections"))
+        .and(body_json(json!({
+            "name": "github-acme", "git_host_type": "github", "installation_id": 42
+        })))
+        .respond_with(ok(connection(OTHER_CONNECTION, None)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    gradient(
+        &home,
+        true,
+        &[
+            "project",
+            "git-host-connection",
+            "create",
+            "--owner",
+            "instance",
+            "--name",
+            "github-acme",
+            "--host-type",
+            "github",
+            "--installation-id",
+            "42",
+        ],
+    )
+    .success();
+}
+
+#[tokio::test]
+async fn test_git_host_connection_create_for_github_without_installation_id_names_the_flag() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .respond_with(ok(json!({})))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    let assert = gradient(
+        &home,
+        true,
+        &[
+            "project",
+            "git-host-connection",
+            "create",
+            "--owner",
+            "instance",
+            "--name",
+            "github-acme",
+            "--host-type",
+            "github",
+        ],
+    )
+    .code(2);
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("--installation-id"), "{stderr}");
+}
+
+#[tokio::test]
+async fn test_git_host_connection_list_shows_health_tasks_and_declarative_state() {
+    let server = MockServer::start().await;
+    let mut declared = summary(PROJECT_CONNECTION, "forgejo", project_owner(), true);
+    declared["managed"] = json!(true);
+    declared["task_count"] = json!(2);
+    declared["last_delivery"] = json!({
+        "id": DELIVERY, "event": "push", "status_code": 202, "result": "queued",
+        "tasks_scanned": 1, "queued": 1, "created_at": "2026-11-11T00:00:00Z"
+    });
+    Mock::given(method("GET"))
+        .and(path(CONNECTIONS))
+        .respond_with(ok(json!([declared])))
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    let output = stdout_of(gradient(
+        &home,
+        false,
+        &["project", "git-host-connection", "list"],
+    ));
+    for expected in ["2 tasks", "declarative state", "last event push queued"] {
+        assert!(output.contains(expected), "{expected} missing in {output}");
+    }
+}
+
+#[tokio::test]
+async fn test_git_host_connection_test_prints_the_account_and_fails_on_a_host_error() {
+    let server = MockServer::start().await;
+    mount_project_connections_with_same_name_in_team(&server).await;
+    Mock::given(method("POST"))
+        .and(path(format!("{CONNECTIONS}/{PROJECT_CONNECTION}/test")))
+        .respond_with(ok(json!({"success": true, "account": "gradient-bot"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{CONNECTIONS}/{OTHER_CONNECTION}/test")))
+        .respond_with(ok(json!({"success": false, "error": "401 Unauthorized"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    let output = stdout_of(gradient(
+        &home,
+        false,
+        &["project", "git-host-connection", "test", "forgejo"],
+    ));
+    assert!(output.contains("gradient-bot"), "{output}");
+    let assert = gradient(
+        &home,
+        false,
+        &["project", "git-host-connection", "test", OTHER_CONNECTION],
+    )
+    .code(1);
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("401 Unauthorized"), "{stderr}");
+}
+
+#[tokio::test]
+async fn test_git_host_connection_tasks_lists_the_tasks_using_it() {
+    let server = MockServer::start().await;
+    mount_project_connections_with_same_name_in_team(&server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{CONNECTIONS}/{PROJECT_CONNECTION}/tasks")))
+        .respond_with(ok(json!([{
+            "id": ATTEMPT, "project": "web", "name": "app", "display_name": "App",
+            "repository": "https://git.example.com/org/app.git", "report_status": true
+        }])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    let output = stdout_of(gradient(
+        &home,
+        false,
+        &["project", "git-host-connection", "tasks", "forgejo"],
+    ));
+    assert!(output.contains("web/app"), "{output}");
+    assert!(
+        output.contains("https://git.example.com/org/app.git"),
+        "{output}"
+    );
+}
