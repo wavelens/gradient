@@ -1502,16 +1502,16 @@ export interface GitHostConnectionSummary {
   base_url?: string | null;
   receives_events: boolean;
   reports_status: boolean;
-  can_manage: boolean;
+  can_manage?: boolean;
   account_login?: string | null;
   webhook_url?: string | null;
   access_token_expires_at?: string | null;
-  access_token_refreshes_automatically: boolean;
+  access_token_refreshes_automatically?: boolean;
   last_delivery?: IncomingWebhookDeliveryResponse | null;
-  refused_signature_count: number;
+  refused_signature_count?: number;
   last_refused_signature_at?: string | null;
   last_status_post?: TaskCommitStatusPostAttempt | null;
-  task_count: number;
+  task_count?: number;
   repository_fit?: RepositoryFit | null;
 }
 
@@ -2946,7 +2946,7 @@ export interface TaskRepositoryResponse {
   git_host_connection?: GitHostConnectionSummary | null;
   report_status: boolean;
   chain: TaskGitHostChain;
-  recent_deliveries: IncomingWebhookDeliveryResponse[];
+  recent_deliveries?: IncomingWebhookDeliveryResponse[];
   status_posts: TaskCommitStatusPostAttempt[];
   available_connections: GitHostConnectionSummary[];
   can_edit: boolean;

@@ -77,6 +77,7 @@ pub struct TaskRepositoryResponse {
     pub git_host_connection: Option<GitHostConnectionSummary>,
     pub report_status: bool,
     pub chain: TaskGitHostChain,
+    #[schema(required = false, default = json!([]))]
     pub recent_deliveries: Vec<IncomingWebhookDeliveryResponse>,
     pub status_posts: Vec<TaskCommitStatusPostAttempt>,
     pub available_connections: Vec<GitHostConnectionSummary>,
