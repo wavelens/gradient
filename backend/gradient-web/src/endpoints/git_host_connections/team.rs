@@ -221,10 +221,10 @@ pub async fn list_team_git_host_connection_deliveries(
     path = "/teams/{team}/git-host-connections/{id}/tasks",
     operation_id = "listTeamGitHostConnectionTasks",
     tag = "git-host-connections",
-    summary = "List tasks using a connection",
-    description = "List the tasks that use a connection of the team. The list holds only tasks of projects the caller can see.",
+    summary = "List tasks that use a connection",
+    description = "List the tasks that use the team's connection. Only tasks in projects that the caller can view appear in the list.",
     params(TeamPath, ("id" = GitHostConnectionId, Path)),
-    responses((status = OK, description = "Tasks using the connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
+    responses((status = OK, description = "Tasks that use a connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
 )]
 pub async fn list_team_git_host_connection_tasks(
     TeamScope {
@@ -253,10 +253,10 @@ pub async fn list_team_git_host_connection_tasks(
     path = "/teams/{team}/git-host-connections/{id}/test",
     operation_id = "testTeamGitHostConnection",
     tag = "git-host-connections",
-    summary = "Test a connection",
-    description = "Sign in to the Git host with the credentials of a connection of the team. Return the account name on success, or the reason for the failure.",
+    summary = "Test connection",
+    description = "Sign in to the Git host with the credentials for the team connection. Return the account name for a successful sign-in. Return the reason for a failed sign-in.",
     params(TeamPath, ("id" = GitHostConnectionId, Path)),
-    responses((status = OK, description = "Result of the sign-in", body = GitHostConnectionTestResponse), WebError)
+    responses((status = OK, description = "Sign-in result", body = GitHostConnectionTestResponse), WebError)
 )]
 pub async fn test_team_git_host_connection(
     TeamScope { team, params, .. }: TeamScope<Admin>,
