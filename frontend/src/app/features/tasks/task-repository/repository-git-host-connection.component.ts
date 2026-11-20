@@ -15,6 +15,7 @@ import { repositoryHost } from '@shared/git';
 import { links } from '@shared/routing';
 import { GitHostConnectionDialogComponent, GitHostConnectionDialogPrefill } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { gitHostConnectionPickerLabel } from '@shared/git-host-connections/git-host-connection-health';
+import { nextChainAction } from '@shared/git-host-connections/task-git-host-chain.component';
 
 @Component({
   selector: 'app-repository-git-host-connection',
@@ -66,6 +67,7 @@ export class RepositoryGitHostConnectionAndCommitStatusComponent {
   projectConnectionNames = computed(() =>
     this.state().available_connections.filter((connection) => connection.owner.type === 'project').map((connection) => connection.name),
   );
+  chainOffers = computed(() => nextChainAction(this.state().chain)?.type ?? null);
   connectionReportsStatus = computed(() => this.state().git_host_connection?.reports_status ?? false);
   connectionLink = computed(() => {
     const connection = this.state().git_host_connection;
