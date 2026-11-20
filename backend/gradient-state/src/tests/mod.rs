@@ -450,6 +450,21 @@ fn state_github_connection_requires_installation_id() {
 }
 
 #[test]
+fn state_github_connection_requires_account_login() {
+    let connections = r#"{
+        "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "installation_id": 42, "created_by": "alice" }
+    }"#;
+    let cfg = state_with_one_user_one_project_and_git_host_connections(connections);
+    let errors = errors_of(&cfg);
+    assert!(
+        errors
+            .iter()
+            .any(|(field, _)| field == "git_host_connections.gh.account_login"),
+        "expected account_login requirement, got: {errors:?}"
+    );
+}
+
+#[test]
 fn state_github_connection_with_installation_id_is_valid() {
     let connections = r#"{
         "gh": { "name": "gh", "owner": "instance", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
