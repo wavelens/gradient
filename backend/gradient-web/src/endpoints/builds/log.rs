@@ -5,6 +5,7 @@
  */
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::endpoints::accept_header_parsing::request_accepts_media_type;
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
 use crate::helpers::ok_json;
@@ -83,7 +84,7 @@ pub async fn get_build_log(
         log = gradient_sources::replace_nix_log_pointer_with_web_log_link(&log, &link);
     }
 
-    let wants_text = accepts_plain_text(&headers);
+    let wants_text = request_accepts_media_type(&headers, "text/plain");
     let format = query.format.unwrap_or(if wants_text {
         BuildLogOutputFormat::Plain
     } else {
@@ -98,20 +99,6 @@ pub async fn get_build_log(
     } else {
         ok_json(log).into_response()
     })
-}
-
-fn accepts_plain_text(headers: &HeaderMap) -> bool {
-    headers
-        .get_all(header::ACCEPT)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .any(|media| {
-            media
-                .split(';')
-                .next()
-                .is_some_and(|m| m.trim() == "text/plain")
-        })
 }
 
 #[utoipa::path(
