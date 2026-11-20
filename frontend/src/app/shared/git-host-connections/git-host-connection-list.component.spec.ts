@@ -107,6 +107,13 @@ describe('GitHostConnectionListComponent', () => {
     expect(health).toContain('2 tasks');
   });
 
+  it('names a single refused signature in the singular', () => {
+    const health = render(writable, [{ ...own, refused_signature_count: 1 }]).el
+      .querySelector('[data-testid="connection-health"]')!.textContent!;
+    expect(health).toContain('1 refused signature');
+    expect(health).not.toContain('1 refused signatures');
+  });
+
   it('expands the tasks of a connection with links to their Repository page', () => {
     const listTasks = vi.fn(() => of([{ id: 't1', project: 'acme', name: 'app', display_name: 'App', repository: 'r', report_status: true }]));
     const { fixture, el } = render(writable, [{ ...own, task_count: 1 }], { listTasks });
