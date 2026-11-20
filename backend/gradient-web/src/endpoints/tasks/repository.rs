@@ -30,6 +30,9 @@ use gradient_ci::task_commit_status_posting::{
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_db::git_host_connections::list_git_host_connections_available_to_project;
+use gradient_entity::incoming_webhook_delivery::DeliveryResult;
+use gradient_git_host::{GitHostRegistry, WebhookEventKind};
+use gradient_types::triggers::TriggerType;
 use gradient_sources::format_public_key;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -122,6 +125,35 @@ async fn recent_incoming_webhook_deliveries_for_task_repository(
         .collect())
 }
 
+async fn missing_trigger_type_for_delivery(
+    db: &impl sea_orm::ConnectionTrait,
+    task: &MTask,
+    connection: Option<&GitHostConnectionSummary>,
+    delivery: Option<&IncomingWebhookDeliveryResponse>,
+) -> WebResult<Option<TriggerType>> {
+    let (Some(connection), Some(delivery)) = (connection, delivery) else {
+        return Ok(None);
+    };
+    if delivery.result != DeliveryResult::NoMatchingTask {
+        return Ok(None);
+    }
+    let Some(provider) = GitHostType::from_path_segment(&connection.git_host_type)
+        .and_then(|host| GitHostRegistry::with_builtin().get(host).cloned())
+    else {
+        return Ok(None);
+    };
+    let trigger_type = match provider.classify_event(&delivery.event) {
+        WebhookEventKind::Push => TriggerType::ReporterPush,
+        WebhookEventKind::PullRequest => TriggerType::ReporterPullRequest,
+        _ => return Ok(None),
+    };
+    let has_trigger = gradient_db::triggers::of_task(db, task.id)
+        .await?
+        .iter()
+        .any(|trigger| trigger.active && trigger.trigger_type == trigger_type);
+    Ok((!has_trigger).then_some(trigger_type))
+}
+
 async fn repository_response(
     db: &DbContext,
     project: &MProject,
@@ -186,6 +218,13 @@ async fn repository_response(
         available_connections: &available_connections,
         report_status: task.report_status,
         newest_delivery: recent_deliveries.first(),
+        missing_trigger_type: missing_trigger_type_for_delivery(
+            &db.web_db,
+            task,
+            git_host_connection.as_ref(),
+            recent_deliveries.first(),
+        )
+        .await?,
         newest_status_post: status_posts.first(),
         can_edit_task: can_edit,
         can_manage_integrations,

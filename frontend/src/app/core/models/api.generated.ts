@@ -2907,6 +2907,11 @@ export type TaskGitHostChainStepAction = {
   webhook_url: string;
   type: "add_webhook_on_host";
 } | {
+  type: "change_webhook_secret";
+} | {
+  trigger_type: TriggerType;
+  type: "add_trigger";
+} | {
   type: "turn_on_report_status";
 } | {
   type: "test_status_report";
