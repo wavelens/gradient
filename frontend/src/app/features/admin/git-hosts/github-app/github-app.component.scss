@@ -33,6 +33,14 @@
   }
 }
 
+.continue-connecting-link {
+  max-width: 100%;
+  height: auto;
+  min-height: $control-height;
+  padding-block: $spacing-xs;
+  white-space: normal;
+}
+
 .advanced-toggle {
   align-self: flex-start;
 }

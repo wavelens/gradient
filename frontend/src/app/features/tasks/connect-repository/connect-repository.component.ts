@@ -42,7 +42,7 @@ import { LabelHelpComponent, ProjectReadinessCardComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { slugify } from '@shared/text';
 import { repositoryWebUrl } from '@shared/evaluation';
-import { repositoryHost } from '@shared/git';
+import { repositoryHost, repositoryName } from '@shared/git';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
 import { TaskRepositoryStatusCheckSummaryComponent } from '@shared/git-host-connections/task-repository-status-check-summary.component';
@@ -68,11 +68,6 @@ const STEPS: { id: ConnectRepositoryWizardStep; label: string }[] = [
 interface SuggestedTriggerChoice {
   config: TriggerConfig;
   selected: boolean;
-}
-
-function repositoryName(url: string): string {
-  const path = url.trim().replace(/\?.*$/, '').replace(/\/+$/, '').replace(/\.git$/, '');
-  return path.split(/[/:]/).pop() ?? '';
 }
 
 export function buildTaskCreationTriggersFromWizardChoices(choices: {
