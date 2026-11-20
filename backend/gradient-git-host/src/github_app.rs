@@ -147,7 +147,11 @@ impl GitHubAppPageUrlCache {
         &self,
         look_up: impl Future<Output = Result<String>>,
     ) -> Option<String> {
-        let cached = self.0.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let cached = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         match cached {
             Some(PageUrlLookup::Found(url)) => return Some(url),
             Some(PageUrlLookup::FailedAt(at)) if at.elapsed() < RETRY_PAGE_URL_LOOKUP_AFTER => {

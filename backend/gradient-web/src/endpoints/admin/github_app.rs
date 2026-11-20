@@ -104,11 +104,8 @@ pub async fn request_manifest(
 
     let manifest = gradient_ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
     let token = state.memory.manifest_state.issue_state(user.id).await;
-    let post_url = gradient_ci::github_app_manifest::manifest_post_url(
-        &host,
-        organization.as_deref(),
-        &token,
-    );
+    let post_url =
+        gradient_ci::github_app_manifest::manifest_post_url(&host, organization.as_deref(), &token);
 
     Ok(ok_json(GithubAppManifestResponse {
         manifest,
@@ -215,7 +212,9 @@ mod tests {
         assert_eq!(clean_github_organization(None).unwrap(), None);
         assert_eq!(clean_github_organization(Some("  ")).unwrap(), None);
         assert_eq!(
-            clean_github_organization(Some(" acme-corp ")).unwrap().as_deref(),
+            clean_github_organization(Some(" acme-corp "))
+                .unwrap()
+                .as_deref(),
             Some("acme-corp")
         );
     }
