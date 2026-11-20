@@ -54,7 +54,7 @@ Click **Install on GitHub** in the **GitHub App** section and pick the account w
 - Installations appear below the App with account, last event and task count.
 - The connection is gone after removal of the installation on GitHub.
 
-**Install on GitHub** also appears in **Connect repository** and on the **Repository** page of a task without a fitting installation. Other users see "An instance admin can install the GitHub App on <account>".
+**Connect repository** and the **Repository** page of a task without a fitting installation also offer **Install on GitHub**. Other users see "An instance admin can install the GitHub App on <account>".
 
 ### 4. Choose the Connection on the Task
 
