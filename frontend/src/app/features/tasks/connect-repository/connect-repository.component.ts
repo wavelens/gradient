@@ -6,6 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { links } from '@shared/routing';
 import { createMissingPermissionLoadStateError, isViewerProjectMember } from '@shared/access';
@@ -156,6 +157,8 @@ export class ConnectRepositoryComponent implements OnInit {
 
   connectionOwner = computed<GitHostConnectionOwner>(() => ({ type: 'project', name: this.projectName }));
   connections = signal<GitHostConnectionSummary[] | null>(null);
+  connectionsError = signal<unknown>(null);
+  private connectionsRequest?: Subscription;
   selectedConnectionId = signal<string | null>(null);
   fittingConnections = computed(() => (this.connections() ?? []).filter((connection) => connection.repository_fit?.fits));
   connectionOptions = computed(() => gitHostConnectionPickerOptions(this.connections() ?? []));
@@ -225,13 +228,15 @@ export class ConnectRepositoryComponent implements OnInit {
 
   loadConnections(selectId: string | null = null): void {
     this.connections.set(null);
-    this.gitHostConnections.list(this.connectionOwner(), this.form.repository.trim()).subscribe({
+    this.connectionsError.set(null);
+    this.connectionsRequest?.unsubscribe();
+    this.connectionsRequest = this.gitHostConnections.list(this.connectionOwner(), this.form.repository.trim()).subscribe({
       next: (list) => {
         this.connections.set(list);
         const fitting = this.fittingConnections();
         this.selectedConnectionId.set(selectId ?? (fitting.length === 1 ? fitting[0].id : null));
       },
-      error: () => this.connections.set([]),
+      error: (error: unknown) => this.connectionsError.set(error),
     });
   }
 

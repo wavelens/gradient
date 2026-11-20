@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TeamsService } from '@core/services/teams.service';
@@ -28,7 +28,7 @@ const MISSING_CACHE: ProjectReadinessResponse = {
   repository: { status: 'unchecked', tasks: [] },
 };
 
-function render(query: Record<string, string>, tasks: object, projects: object = {}, permissions: string[] = ['createTask', 'editTask'], suggestions: unknown[] = [pushSuggestion, pullRequestSuggestion], connections: GitHostConnectionSummary[] = []) {
+function render(query: Record<string, string>, tasks: object, projects: object = {}, permissions: string[] = ['createTask', 'editTask'], suggestions: unknown[] = [pushSuggestion, pullRequestSuggestion], connections: GitHostConnectionSummary[] = [], listConnections: () => Observable<GitHostConnectionSummary[]> = () => of(connections)) {
   const data = { projectAccess: { project: { managed: false, permissions } } };
   TestBed.configureTestingModule({
     imports: [ConnectRepositoryComponent],
@@ -41,7 +41,7 @@ function render(query: Record<string, string>, tasks: object, projects: object =
       { provide: TasksService, useValue: { checkTaskNameAvailable: () => of(true), ...tasks } },
       { provide: ProjectsService, useValue: { getProjectReadiness: () => of(MISSING_CACHE), getProject: () => of({ display_name: 'Acme' }), getSSHKey: () => of('ssh-ed25519 AAAA'), ...projects } },
       { provide: TeamsService, useValue: {} },
-      { provide: GitHostConnectionsApi, useValue: { list: vi.fn(() => of(connections)) } },
+      { provide: GitHostConnectionsApi, useValue: { list: listConnections } },
       { provide: ConfigService, useValue: { execEnabled: false } },
       { provide: TriggersService, useValue: { getSuggestedPushAndPullRequestTriggerConfigs: vi.fn(() => of(suggestions)) } },
     ],
@@ -234,6 +234,31 @@ describe('ConnectRepositoryComponent', () => {
       ['c3', 'Forge · Forgejo · Project acme · No host URL'],
     ]);
     expect(comp.selectedConnectionId()).toBeNull();
+  });
+
+  it('drops a connection list that a newer request replaced', () => {
+    const requests = [new Subject<GitHostConnectionSummary[]>(), new Subject<GitHostConnectionSummary[]>()];
+    const list = vi.fn(() => requests[list.mock.calls.length - 1]);
+    const comp = render({}, {}, {}, undefined, undefined, [], list).componentInstance;
+    comp.repositoryChanged('https://forgejo.example.com/acme/app');
+    comp.continueFromRepository();
+    comp.loadConnections();
+    expect(requests[0].observed).toBe(false);
+    requests[1].next([]);
+    expect(comp.connections()).toEqual([]);
+  });
+
+  it('shows a failed connection list with a retry instead of an empty list', () => {
+    const list = vi.fn(() => throwError(() => new Error('boom')));
+    const fixture = render({}, {}, {}, undefined, undefined, [], list);
+    fixture.componentInstance.repositoryChanged('https://forgejo.example.com/acme/app');
+    fixture.componentInstance.continueFromRepository();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.textContent).toContain('Failed to load git host connections');
+    expect(el.querySelector('[data-testid="no-connection"]')).toBeNull();
+    el.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    expect(list).toHaveBeenCalledTimes(2);
   });
 
   it('tells which GitHub account lacks the app and offers a new connection for other hosts', () => {
