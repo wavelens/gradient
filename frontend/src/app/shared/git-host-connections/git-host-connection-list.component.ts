@@ -177,7 +177,10 @@ export class GitHostConnectionListComponent implements OnInit {
   }
 
   openMenu(event: Event, connection: GitHostConnectionSummary, menu: MenuComponent): void {
-    this.menuItems.set([{ label: 'Delete', icon: 'delete', danger: true, command: () => this.remove(connection) }]);
+    this.menuItems.set([
+      { label: 'Test', icon: 'play_arrow', command: () => this.test(connection) },
+      { label: 'Delete', icon: 'delete', danger: true, command: () => this.remove(connection) },
+    ]);
     menu.toggle(event);
   }
 

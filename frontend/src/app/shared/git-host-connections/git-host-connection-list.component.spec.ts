@@ -124,8 +124,9 @@ describe('GitHostConnectionListComponent', () => {
 
   it('tests a connection and reports the result as a toast', () => {
     const test = vi.fn(() => of({ success: true, account: 'ci-bot' }));
-    const { el, notify } = render(writable, [own], { test });
-    el.querySelector<HTMLButtonElement>('[aria-label="Test Forgejo"]')!.click();
+    const { el, component, notify } = render(writable, [own], { test });
+    el.querySelector<HTMLButtonElement>('[aria-label="Actions for Forgejo"]')!.click();
+    component.menuItems().find((item) => item.label === 'Test')!.command!();
     expect(test).toHaveBeenCalledWith(project, 'c1');
     expect(notify.success).toHaveBeenCalledWith('Forgejo: signed in as ci-bot');
   });
@@ -148,9 +149,8 @@ describe('GitHostConnectionListComponent', () => {
     expect(el.querySelector('[aria-label="Actions for Forgejo"]')).toBeNull();
   });
 
-  it('hides test, edit and the actions menu from a member who cannot manage connections', () => {
+  it('hides edit and the actions menu from a member who cannot manage connections', () => {
     const { el } = render(readOnly, [own]);
-    expect(el.querySelector('[aria-label="Test Forgejo"]')).toBeNull();
     expect(el.querySelector('[aria-label="Edit Forgejo"]')).toBeNull();
     expect(el.querySelector('[aria-label="Actions for Forgejo"]')).toBeNull();
     expect(el.querySelector('[aria-label="Deliveries of Forgejo"]')).not.toBeNull();
@@ -158,7 +158,7 @@ describe('GitHostConnectionListComponent', () => {
 
   it('tests but never edits a GitHub App connection', () => {
     const { el } = render(writable, [{ ...own, git_host_type: 'github', display_name: 'GitHub' }]);
-    expect(el.querySelector('[aria-label="Test GitHub"]')).not.toBeNull();
+    expect(el.querySelector('[aria-label="Actions for GitHub"]')).not.toBeNull();
     expect(el.querySelector('[aria-label="Edit GitHub"]')).toBeNull();
   });
 
