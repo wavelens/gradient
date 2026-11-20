@@ -88,7 +88,7 @@ describe('RepositoryCommitStatusComponent', () => {
     expect(el.querySelector('gr-checkbox')).toBeNull();
   });
 
-  it('saves report status at once and passes the new state on', () => {
+  it("saves the 'Report commit status' checkbox at once and emits the new state to the parent", () => {
     const saved = { ...state, report_status: true };
     const updateTaskRepositoryConnection = vi.fn(() => of(saved));
     const { component } = render({}, { updateTaskRepositoryConnection });
@@ -99,7 +99,7 @@ describe('RepositoryCommitStatusComponent', () => {
     expect(savedStates).toEqual([saved]);
   });
 
-  it('leaves the connection out of the body so the server keeps it', () => {
+  it('leaves the connection field out of the request body, so the server can keep the current connection', () => {
     const updateTaskRepositoryConnection = vi.fn((_project: string, _task: string, _body: object) => of(state));
     const { component } = render({ report_status: true }, { updateTaskRepositoryConnection });
     component.setReportStatus(false);
@@ -120,7 +120,7 @@ describe('RepositoryCommitStatusComponent', () => {
     expect(changed).toHaveBeenCalled();
   });
 
-  it('shows the last status post with its time and the earlier posts below', () => {
+  it('shows the latest status post with its time and lists earlier posts below', () => {
     const chain = { ...linked, commit_status: { state: 'ok' as const, detail: 'Last posted push status', at: '2026-11-20T10:00:00' } };
     const status_posts = [post('2026-11-20T10:00:00', true), post('2026-11-20T09:00:00', false)];
     const { el } = render({ chain, report_status: true, status_posts });

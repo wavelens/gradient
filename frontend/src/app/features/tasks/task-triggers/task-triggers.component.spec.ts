@@ -128,7 +128,7 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(chain?.querySelector('[data-testid="open-repository"]')?.getAttribute('href')).toBe('/project/acme/task/demo/repository');
   });
 
-  it('asks before the Repository link drops trigger edits and opens the page after Discard', () => {
+  it('shows a confirmation prompt before the Repository link can discard trigger edits, then can open the page after Discard', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     fixture.componentInstance.startCreate('reporter_push');
@@ -143,13 +143,13 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(navigate).toHaveBeenCalledWith(links.taskPage('acme', 'demo', 'repository'));
   });
 
-  it('opens the new trigger dialog with the type from the link', () => {
+  it('opens the new trigger dialog with the link type', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [trigger], undefined, { new_trigger: 'reporter_push' });
     expect(fixture.componentInstance.showCreateDialog()).toBe(true);
     expect(fixture.componentInstance.form.type).toBe('reporter_push');
   });
 
-  it('ignores a new trigger link without edit access or with an unknown type', () => {
+  it('ignores new trigger links that have an unknown type or no edit permission', () => {
     expect(setup({ managed: false, canEdit: false, canTrigger: false }, [trigger], undefined, { new_trigger: 'reporter_push' })
       .componentInstance.showCreateDialog()).toBe(false);
     TestBed.resetTestingModule();

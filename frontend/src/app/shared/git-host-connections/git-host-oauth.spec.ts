@@ -53,7 +53,7 @@ describe('GitHostOAuthSignInComponent', () => {
 });
 
 describe('GitHostOAuthReturnBannerComponent', () => {
-  it('reports the connection and the installed webhooks and removes the result from the URL', () => {
+  it('reports the connection and installed webhooks, then removes the result from the URL', () => {
     const { banner, navigate } = renderBanner({ oauth_connected: 'codeberg', webhooks_installed: '2' });
     expect(banner()).toContain('Connected codeberg. Installed webhooks in 2 repositories.');
     expect(navigate).toHaveBeenCalledWith(
@@ -62,13 +62,13 @@ describe('GitHostOAuthReturnBannerComponent', () => {
     );
   });
 
-  it('explains a failed connection and falls back to a generic text for an unknown code', () => {
+  it('reports the connection failure and substitutes generic text for an unknown code', () => {
     expect(renderBanner({ oauth_error: 'exists' }).banner()).toContain('There is already a connection with this name');
     TestBed.resetTestingModule();
     expect(renderBanner({ oauth_error: 'teapot' }).banner()).toContain('Connection to the Git host failed. Try again.');
   });
 
-  it('shows nothing without an OAuth result in the URL', () => {
+  it('shows nothing when the URL has no OAuth result', () => {
     const { banner, navigate } = renderBanner({});
     expect(banner()).toBeUndefined();
     expect(navigate).not.toHaveBeenCalled();

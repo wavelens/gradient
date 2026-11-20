@@ -102,7 +102,7 @@ describe('GithubAppComponent', () => {
     return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes(label));
   }
 
-  describe('without a GitHub App', () => {
+  describe('without GitHub App', () => {
     it('offers Create on GitHub as the primary action', () => {
       setup();
       const { root } = render();
@@ -111,7 +111,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-install"]')).toBeNull();
     });
 
-    it('creates the App under an organization or the personal account', () => {
+    it('creates an app under an organization or personal account', () => {
       setup();
       admin.requestGithubAppManifest.mockReturnValue(EMPTY);
       const { fixture } = render();
@@ -122,7 +122,7 @@ describe('GithubAppComponent', () => {
       expect(admin.requestGithubAppManifest).toHaveBeenLastCalledWith(undefined, 'acme-corp');
     });
 
-    it('blocks Create for an organization name with other characters', () => {
+    it('blocks Create for organization names that contain characters other than letters, numbers and dashes', () => {
       setup();
       const { fixture, root } = render();
       fixture.componentInstance.organization.set('acme/evil');
@@ -130,7 +130,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector<HTMLButtonElement>('[data-testid="github-app-create-button"]')!.disabled).toBe(true);
     });
 
-    it('keeps the GitHub Enterprise host under Advanced', () => {
+    it('keeps a host for GitHub Enterprise under Advanced', () => {
       setup();
       admin.requestGithubAppManifest.mockReturnValue(EMPTY);
       const { fixture, root } = render();
@@ -148,7 +148,7 @@ describe('GithubAppComponent', () => {
       expect(root.textContent).toContain('Use only letters, numbers, dots and dashes');
     });
 
-    it('reports a refused manifest request as a toast and enables the button again', () => {
+    it('reports a refused manifest request with a toast and enables the button again', () => {
       setup();
       const failure = new ApiError('GitHub App is already configured', 409);
       admin.requestGithubAppManifest.mockReturnValue(throwError(() => failure));
@@ -159,7 +159,7 @@ describe('GithubAppComponent', () => {
       expect(fixture.nativeElement.querySelector('[data-testid="github-app-create-button"]').getAttribute('aria-busy')).toBeNull();
     });
 
-    it('ignores a second click on Create on GitHub while the manifest request runs', () => {
+    it("ignores a second click on 'Create on GitHub' during the manifest request", () => {
       setup();
       admin.requestGithubAppManifest.mockReturnValue(new Subject());
       const { fixture } = render();
@@ -172,7 +172,7 @@ describe('GithubAppComponent', () => {
   });
 
   describe('with a GitHub App', () => {
-    it('makes Install on GitHub the primary action and links the App', () => {
+    it('makes Install on GitHub the primary action and links the app', () => {
       setup({}, {});
       const { root } = render();
       expect(root.querySelector('[data-testid="github-app-install"]')?.getAttribute('href')).toBe('https://github.com/apps/gradient-ci/installations/new');
@@ -180,7 +180,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-create-button"]')).toBeNull();
     });
 
-    it('offers no install link when the server could not look up the App', () => {
+    it("does not provide an install link when the server can't find the app", () => {
       setup({}, { installUrl: null });
       const { root } = render();
       expect(root.querySelector('[data-testid="github-app-install"]')).toBeNull();
@@ -202,7 +202,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-no-installations"]')).not.toBeNull();
     });
 
-    it('replaces the App only after a confirmation', () => {
+    it('replaces the app only after confirmation', () => {
       setup({}, {});
       confirm.mockImplementation(() => EMPTY);
       const { fixture, root } = render();
@@ -221,10 +221,10 @@ describe('GithubAppComponent', () => {
     });
   });
 
-  describe('after GitHub returns from an install', () => {
+  describe('after GitHub redirected back from installation', () => {
     afterEach(() => vi.useRealTimers());
 
-    it('shows the new installation and the tasks it linked', () => {
+    it('shows the new installation and the tasks linked to that installation', () => {
       setup({ installation_id: '42', setup_action: 'install' }, {});
       connections.list.mockReturnValue(of([installation]));
       connections.listTasks.mockReturnValue(of([{ id: 't1', project: 'acme', name: 'app', display_name: 'App', repository: 'https://github.com/acme/app', report_status: true }]));
@@ -236,7 +236,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('#connection-c1')?.classList).toContain('connection-row-linked');
     });
 
-    it('waits for the installation event from GitHub', () => {
+    it('waits for installation event from GitHub', () => {
       vi.useFakeTimers();
       setup({ installation_id: '42', setup_action: 'install' }, {});
       const { fixture, root } = render();
@@ -247,7 +247,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-returned"]')?.textContent).toContain('Installed on acme');
     });
 
-    it('offers to check again when GitHub never reports the installation', () => {
+    it('offers a recheck when GitHub never reports an installation', () => {
       vi.useFakeTimers();
       setup({ installation_id: '42', setup_action: 'install' }, {});
       const { fixture, root } = render();
@@ -261,15 +261,15 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-returned"]')?.textContent).toContain('Installed on acme');
     });
 
-    it('tells that an owner of the account has to approve a requested install', () => {
+    it('shows that the account owner needs to approve the requested installation', () => {
       setup({ setup_action: 'request' }, {});
       const { root } = render();
       expect(root.querySelector('[data-testid="github-app-returned"]')?.textContent).toContain('approve');
     });
   });
 
-  describe('after GitHub created the App', () => {
-    it('shows only the values the server configuration uses', async () => {
+  describe('after GitHub created the app', () => {
+    it('shows only the values that the server configuration can use', async () => {
       setup({ ready: '1' });
       admin.fetchGithubAppCredentials.mockReturnValue(of(credentials));
       const { fixture, root } = render();
@@ -284,7 +284,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('pre')?.textContent).toContain('id = 7;');
     });
 
-    it('shows a friendly error when credentials are no longer available', async () => {
+    it('shows a clear error when credentials become unavailable', async () => {
       setup({ ready: '1' });
       admin.fetchGithubAppCredentials.mockReturnValue(throwError(() => ({ status: 404 })));
       const { fixture, root } = render();
@@ -299,7 +299,7 @@ describe('GithubAppComponent', () => {
       expect(root.querySelector('[data-testid="github-app-create-button"]')).toBeTruthy();
     });
 
-    it('shows a spinner while credentials load and a failed load with Try Again', () => {
+    it('shows a spinner while credentials load and Try Again when loading does not succeed', () => {
       setup({ ready: '1' });
       admin.fetchGithubAppCredentials.mockReturnValueOnce(throwError(() => ({ status: 500, message: 'database is down' })));
       const { fixture, root } = render();

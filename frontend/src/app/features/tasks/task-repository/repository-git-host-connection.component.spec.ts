@@ -94,13 +94,13 @@ function testId(el: HTMLElement, id: string): HTMLElement | null {
 }
 
 describe('RepositoryGitHostConnectionComponent', () => {
-  it('heads the section with the connection step and its state', () => {
+  it('shows the section heading with the Connection step and its state badge', () => {
     const { el } = render();
     expect(el.querySelector('h2')?.textContent).toBe('Connection');
     expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Incomplete');
   });
 
-  it('offers only the connections that fit the repository, plus the current one', () => {
+  it('offers only connections that fit the repository host plus the currently selected connection', () => {
     expect(render().component.pickerOptions().map((option) => option.label)).toEqual([
       'No connection',
       'Forgejo · forgejo.example.com · Team platform',
@@ -138,7 +138,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(savedStates).toEqual([saved]);
   });
 
-  it('leaves report status out of the body so the server keeps it', () => {
+  it('omits report_status from the body so the server can keep the current value', () => {
     const updateTaskRepositoryConnection = vi.fn((_project: string, _task: string, _body: object) => of(state));
     const { component } = render({ report_status: true }, { updateTaskRepositoryConnection });
     component.selectConnection('c1');
@@ -152,7 +152,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { git_host_connection: null });
   });
 
-  it('returns the picker to the saved connection when saving fails', () => {
+  it('resets picker to saved connection after failed save', () => {
     const updateTaskRepositoryConnection = vi.fn(() => throwError(() => new ApiError('nope', 400)));
     const { component, notify } = render({}, { updateTaskRepositoryConnection });
     component.selectConnection('c1');
@@ -160,7 +160,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(notify.failure).toHaveBeenCalled();
   });
 
-  it('selects the single fitting connection with the primary button', () => {
+  it('selects the only matching connection with the primary button', () => {
     const updateTaskRepositoryConnection = vi.fn(() => of(state));
     const chain = { ...chainWithoutConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
     const { fixture, el } = render({ available_connections: [reporting, otherHost], chain }, { updateTaskRepositoryConnection });
@@ -178,7 +178,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(testId(render({ git_host_connection: reporting }).el, 'open-connection')).toBeNull();
   });
 
-  it('offers a new connection in place when none fits, or links to the connections page', () => {
+  it('provides a New connection inline or links to the connections page when no matching connection exists', () => {
     const createConnection = { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, git_host_type: 'forgejo', base_url: 'https://forgejo.example.com' } } };
     const manager = render({ available_connections: [otherHost], can_manage_integrations: true, can_create_connection: true, chain: createConnection });
     manager.fixture.componentRef.setInput('hasPrimaryAction', true);
@@ -204,7 +204,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(el.querySelector('gr-select')).toBeNull();
   });
 
-  it('installs the GitHub App on the account in place of a new connection and reloads after the return', () => {
+  it('offers to install the GitHub App on the account instead of a new connection and reloads after the user returns', () => {
     const install = {
       ...chainWithoutConnection,
       connection: { state: 'attention' as const, detail: 'GitHub App not installed (acme)', action: { type: 'install_github_app' as const, account: 'acme' } },

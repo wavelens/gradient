@@ -110,7 +110,7 @@ describe('links', () => {
     expect(String(links.evaluationLog('p', 'e1', { messages: true }))).toBe('/project/p/log/e1?eval=1');
   });
 
-  it('opens the new trigger dialog of a task with the given trigger type', () => {
+  it('opens a new trigger dialog for a task with the specified trigger type', () => {
     expect(String(links.taskTriggerCreate('p', 't', 'reporter_push'))).toBe('/project/p/task/t/triggers?new_trigger=reporter_push');
   });
 

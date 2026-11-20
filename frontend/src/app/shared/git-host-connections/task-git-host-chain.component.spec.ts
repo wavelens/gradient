@@ -30,7 +30,7 @@ function render(inputs: Record<string, unknown> = {}) {
 const summary = (el: HTMLElement) => el.querySelector('[data-testid="chain-summary"]')?.textContent ?? '';
 
 describe('TaskGitHostChainComponent', () => {
-  it('sums the chain up in one line by its worst step', () => {
+  it('summarizes the chain in one line with the worst step', () => {
     const el = render();
     expect(summary(el)).toContain('Incomplete');
     expect(summary(el)).toContain('Incoming events');
@@ -38,13 +38,13 @@ describe('TaskGitHostChainComponent', () => {
     expect(el.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('puts a failing step before an earlier incomplete one', () => {
+  it('puts a failed step before an earlier incomplete step', () => {
     const el = render({ chain: { ...chain, commit_status: { state: 'failing', detail: 'The host refused the status' } } });
     expect(summary(el)).toContain('Commit status');
     expect(summary(el)).toContain('The host refused the status');
   });
 
-  it('shows the first step when every step works', () => {
+  it('shows the first step when all steps work', () => {
     const working = { ...chain, incoming_events: { state: 'ok' as const, detail: 'push queued 1 evaluation' }, commit_status: { state: 'ok' as const, detail: 'Posted' } };
     const el = render({ chain: working });
     expect(summary(el)).toContain('Working');
@@ -56,7 +56,7 @@ describe('TaskGitHostChainComponent', () => {
     expect(el.querySelector('[data-testid="open-repository"]')?.getAttribute('href')).toBe('/project/acme/task/app/repository');
   });
 
-  it('closes the given dialog before it opens the repository page', () => {
+  it('closes the specified dialog before opening the repository page', () => {
     const close = vi.fn();
     const el = render({ dialogToCloseFirst: { close } });
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);

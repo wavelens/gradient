@@ -22,17 +22,17 @@ function render(installUrl: string | null) {
 }
 
 describe('GithubAppInstallLinkComponent', () => {
-  it('opens the install page of the App in a new tab', () => {
+  it('opens the install page for the App in a new tab', () => {
     const { link } = render('https://github.com/apps/gradient-ci/installations/new');
     expect(link?.getAttribute('href')).toBe('https://github.com/apps/gradient-ci/installations/new');
     expect(link?.getAttribute('target')).toBe('_blank');
   });
 
-  it('shows nothing without an install page', () => {
+  it('shows nothing when no install page is available', () => {
     expect(render(null).link).toBeNull();
   });
 
-  it('reports the return to the window once after a click', () => {
+  it('reports one return to the window after a click', () => {
     const { link, returns } = render('https://github.com/apps/gradient-ci/installations/new');
     window.dispatchEvent(new Event('focus'));
     expect(returns).toHaveLength(0);

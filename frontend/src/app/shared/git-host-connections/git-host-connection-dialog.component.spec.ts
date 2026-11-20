@@ -61,7 +61,7 @@ function render(api: { create?: unknown; patch?: unknown; get?: unknown; test?: 
 }
 
 describe('GitHostConnectionDialogComponent', () => {
-  it('creates from the prefilled host, checks the token and skips the manual webhook setup', () => {
+  it('creates a connection from the prefilled host, checks the token and skips manual Webhook setup', () => {
     const { fixture, component, create, test, find, savedEvents } = render();
     component.openCreate({ base_url: 'https://git.example.com/acme/app' });
     component.form.update((form) => ({ ...form, access_token: 'tok' }));
@@ -74,7 +74,7 @@ describe('GitHostConnectionDialogComponent', () => {
     expect(find('webhook-setup')).toBeNull();
   });
 
-  it('shows the webhook setup with the one-time secret when no token is set and keeps the dialog open until Done', () => {
+  it('shows Webhook settings with a one-time secret when no token value is present, with the dialog open until a press of Done', () => {
     const created = { ...saved, has_access_token: false, reports_status: false, generated_secret: 'whsec-123' };
     const { fixture, component, test, find } = render({ create: created });
     component.openCreate({ base_url: 'https://git.example.com' });
@@ -89,7 +89,7 @@ describe('GitHostConnectionDialogComponent', () => {
     expect(component.open()).toBe(false);
   });
 
-  it('shows the host error and the webhook setup when the token check fails', () => {
+  it('shows the host error and webhook settings if the token check fails', () => {
     const { fixture, component, find } = render({ test: { success: false, error: 'bad credentials' } });
     component.openCreate({ base_url: 'https://git.example.com' });
     component.form.update((form) => ({ ...form, access_token: 'tok' }));
@@ -99,7 +99,7 @@ describe('GitHostConnectionDialogComponent', () => {
     expect(find('webhook-setup')).not.toBeNull();
   });
 
-  it('saves an edit without a new token and closes', () => {
+  it('stores edits and closes without a new token', () => {
     const { component, patch, notify, test } = render();
     component.openEdit(saved);
     component.form.update((form) => ({ ...form, display_name: 'Example' }));
@@ -124,21 +124,21 @@ describe('GitHostConnectionDialogComponent', () => {
     expect(document.getElementById('connection-advanced')).toBeNull();
   });
 
-  it('opens Advanced when a setting inside differs from its default', () => {
+  it('opens Advanced when internal settings differ from defaults', () => {
     const { fixture, component } = render({ get: { ...saved, allowed_ips: ['10.0.0.0/8'] } });
     component.openEdit(saved);
     fixture.detectChanges();
     expect(document.getElementById('connection-advanced')).not.toBeNull();
   });
 
-  it('opens Advanced with the webhook secret field marked for focus when asked to change the secret', () => {
+  it('opens Advanced with the Webhook secret field marked as the focus target on a secret change request', () => {
     const { fixture, component } = render();
     component.openEdit(saved, { focusWebhookSecret: true });
     fixture.detectChanges();
     expect(document.getElementById('connection-secret')?.hasAttribute('cdkFocusInitial')).toBe(true);
   });
 
-  it('shows the webhook URL and the new secret after an edit that changes the secret', () => {
+  it('shows the Webhook URL and the new secret after an edit that changes the secret', () => {
     const { fixture, component, find, notify } = render();
     component.openEdit(saved, { focusWebhookSecret: true });
     component.form.update((form) => ({ ...form, secret: 'whsec-new' }));
@@ -150,7 +150,7 @@ describe('GitHostConnectionDialogComponent', () => {
     expect(component.open()).toBe(true);
   });
 
-  it('sends nothing and shows the errors of an incomplete form', () => {
+  it('does not send anything and shows errors for an incomplete form', () => {
     const { fixture, component, create } = render();
     component.openCreate();
     component.save();

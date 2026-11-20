@@ -209,7 +209,7 @@ describe('ConnectRepositoryComponent', () => {
     expect(el.querySelector('gr-load-state')?.textContent).not.toContain('permission');
   });
 
-  it('preselects the single fitting connection and sends the choice with the task', () => {
+  it('preselects the only matching connection and sends that selection with the task', () => {
     const fits = { id: 'c1', name: 'forgejo', display_name: 'Forgejo', owner: { type: 'project', name: 'acme' }, git_host_type: 'forgejo',
       base_url: 'https://forgejo.example.com', repository_fit: { fits: true, can_be_selected: true } } as GitHostConnectionSummary;
     const other = { ...fits, id: 'c2', repository_fit: { fits: false, can_be_selected: false, reason: 'Other host' } };
@@ -238,7 +238,7 @@ describe('ConnectRepositoryComponent', () => {
     expect(comp.selectedConnectionId()).toBeNull();
   });
 
-  it('drops a connection list that a newer request replaced', () => {
+  it('discards the connection list that a newer request replaced', () => {
     const requests = [new Subject<GitHostConnectionSummary[]>(), new Subject<GitHostConnectionSummary[]>()];
     const list = vi.fn(() => requests[list.mock.calls.length - 1]);
     const comp = render({}, {}, {}, undefined, undefined, [], list).componentInstance;
@@ -263,7 +263,7 @@ describe('ConnectRepositoryComponent', () => {
     expect(list).toHaveBeenCalledTimes(2);
   });
 
-  it('tells which GitHub account lacks the app and offers a new connection for other hosts', () => {
+  it("shows which GitHub accounts don't have the app and offers a new connection for other hosts", () => {
     const github = render({}, {}, {}, ['createTask', 'manageIntegrations'], undefined, [], undefined, { githubAppEnabled: true });
     github.componentInstance.repositoryChanged('https://github.com/acme/app');
     github.componentInstance.continueFromRepository();
@@ -279,7 +279,7 @@ describe('ConnectRepositoryComponent', () => {
     expect((forgejo.nativeElement as HTMLElement).querySelector('[data-testid="new-connection"]')).not.toBeNull();
   });
 
-  describe('for a GitHub repository without an installation', () => {
+  describe('for a GitHub repository with no installation', () => {
     const installUrl = 'https://github.com/apps/gradient-ci/installations/new';
 
     function gitHostStep(config: object, superuser: boolean, list = vi.fn(() => of<GitHostConnectionSummary[]>([]))) {
@@ -291,13 +291,13 @@ describe('ConnectRepositoryComponent', () => {
       return { el, list, notice: el.querySelector('[data-testid="no-connection"]')?.textContent ?? '', link: el.querySelector<HTMLAnchorElement>('[data-testid="github-app-install"]') };
     }
 
-    it('says when the server has no GitHub App', () => {
+    it('shows when the server has no GitHub App', () => {
       const { notice, link } = gitHostStep({ githubAppEnabled: false }, true);
       expect(notice).toContain('This server has no GitHub App');
       expect(link).toBeNull();
     });
 
-    it('lets an instance admin install the App and lists the connections again after the return', () => {
+    it('lets the instance admin install the app and shows the connection list again after the admin returns', () => {
       const { link, list } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, true);
       expect(link?.getAttribute('href')).toBe(installUrl);
       expect(link?.getAttribute('target')).toBe('_blank');
@@ -307,7 +307,7 @@ describe('ConnectRepositoryComponent', () => {
       expect(list).toHaveBeenCalledTimes(2);
     });
 
-    it('names the instance admin as the one who installs it for everyone else', () => {
+    it('identifies the instance admin as the person who can install the GitHub App for everyone else', () => {
       const { notice, link } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, false);
       expect(notice).toContain('An instance admin can install the GitHub App on acme');
       expect(link).toBeNull();
