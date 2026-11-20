@@ -86,7 +86,7 @@ export class RepositoryIncomingEventsComponent {
     () => gitHostSettingsLinks(this.state().repository, this.state().git_host_connection?.git_host_type ?? null)?.webhooks ?? null,
   );
   earlierDeliveries = computed<StepHistoryLine[]>(() => {
-    const deliveries = this.state().recent_deliveries;
+    const deliveries = this.state().recent_deliveries ?? [];
     const earlier = deliveries[0]?.created_at === this.step().at ? deliveries.slice(1) : deliveries;
     return earlier.slice(0, EARLIER_DELIVERIES_SHOWN).map((delivery) => ({
       id: delivery.id,

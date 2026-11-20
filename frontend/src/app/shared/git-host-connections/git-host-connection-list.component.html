@@ -55,11 +55,11 @@
                     <span class="text-secondary">{{ token.text }}</span>
                   }
                 }
-                @if (connection.refused_signature_count > 0) {
-                  <gr-badge severity="warning">{{ connection.refused_signature_count }} refused signatures</gr-badge>
+                @if (connection.refused_signature_count; as refused) {
+                  <gr-badge severity="warning">{{ refused }} refused signatures</gr-badge>
                 }
-                @if (connection.task_count > 0) {
-                  <button grButton text size="small" [label]="connection.task_count === 1 ? '1 task' : connection.task_count + ' tasks'"
+                @if (connection.task_count; as taskCount) {
+                  <button grButton text size="small" [label]="taskCount === 1 ? '1 task' : taskCount + ' tasks'"
                     [icon]="tasksShownFor() === connection.id ? 'expand_less' : 'expand_more'"
                     [attr.aria-expanded]="tasksShownFor() === connection.id" (click)="toggleTasks(connection)" data-testid="connection-tasks"></button>
                 }
