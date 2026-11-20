@@ -4,7 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-settings-section title="Repository access">
+<gr-settings-section title="Repository">
+  <app-chain-step-state-badge slot="after-title" [state]="state().chain.repository.state" />
   @if (editing()) {
     <gr-form-field label="Repository URL" for="repo-url" required [invalid]="!!urlError()" [error]="urlError() ?? ''">
       <input grInput id="repo-url" [ngModel]="draftUrl()" (ngModelChange)="draftUrl.set($event); unsavedRepositoryUrlAccessTestPassed.set(false)" (keyup.enter)="saveUrl()" />
@@ -14,20 +15,12 @@
       <button grButton label="Save URL" icon="check" (click)="saveUrl()" [loading]="saving()" [disabled]="saving() || !!urlError()"></button>
     </div>
   } @else {
-    <gr-form-field label="Repository URL">
-      <gr-copy-field [value]="state().repository" />
-    </gr-form-field>
+    <gr-copy-field [value]="state().repository" label="Repository URL" />
   }
 
   <app-repository-fetch-banner [status]="state().fetch" [canEdit]="state().can_edit" />
-  @if (editing()) {
-    @if (unsavedRepositoryUrlAccessTestPassed()) {
-      <p class="text-secondary" role="status" data-testid="draft-fetch-ok">Gradient can fetch this URL. Save the URL before use.</p>
-    }
-  } @else if (fetchOk(); as fetch) {
-    <p class="text-secondary" role="status" data-testid="fetch-ok">Gradient can fetch the repository. Verified {{ fetch.checked_at | relativeTime }}</p>
-  } @else if (!state().fetch) {
-    <p class="text-secondary" role="status">No access test yet.@if (state().deploy_key) { Add the deploy key, then test access.}</p>
+  @if (editing() && unsavedRepositoryUrlAccessTestPassed()) {
+    <p class="text-secondary" role="status" data-testid="draft-fetch-ok">Gradient can fetch this URL. Save the URL before use.</p>
   }
   @if (testError(); as error) {
     <p class="text-secondary" role="alert">{{ error }}</p>
@@ -54,7 +47,8 @@
           [disabled]="installingKey()" data-testid="install-deploy-key"></button>
       }
       @if (!editing()) {
-        <button grButton label="Edit URL" icon="edit" severity="secondary" (click)="startEdit()"></button>
+        <button grButton label="Edit URL" icon="edit" [severity]="editIsPrimary() ? 'primary' : 'secondary'" (click)="startEdit()"
+          data-testid="edit-repository-url"></button>
       }
       <button grButton severity="secondary" label="Test access" icon="lan" (click)="testAccess()" [loading]="testing()" [disabled]="testing()"></button>
     </div>

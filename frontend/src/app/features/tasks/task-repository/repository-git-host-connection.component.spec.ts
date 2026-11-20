@@ -13,7 +13,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfigService } from '@core/services/config.service';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { ApiError } from '@core/services/api.service';
-import { RepositoryGitHostConnectionAndCommitStatusComponent } from './repository-git-host-connection.component';
+import { RepositoryGitHostConnectionComponent } from './repository-git-host-connection.component';
 import { chainWithoutConnection } from './task-git-host-chain.testing';
 
 const reporting: GitHostConnectionSummary = {
@@ -69,7 +69,7 @@ const state: TaskRepositoryResponse = {
 function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object = {}) {
   const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
-    imports: [RepositoryGitHostConnectionAndCommitStatusComponent],
+    imports: [RepositoryGitHostConnectionComponent],
     providers: [
       provideRouter([]),
       { provide: TasksService, useValue: tasks },
@@ -78,7 +78,7 @@ function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object =
       { provide: ConfigService, useValue: { giteaOauthAppConfig: null } },
     ],
   });
-  const fixture = TestBed.createComponent(RepositoryGitHostConnectionAndCommitStatusComponent);
+  const fixture = TestBed.createComponent(RepositoryGitHostConnectionComponent);
   fixture.componentRef.setInput('project', 'acme');
   fixture.componentRef.setInput('task', 'app');
   fixture.componentRef.setInput('state', { ...state, ...overrides });
@@ -93,7 +93,13 @@ function testId(el: HTMLElement, id: string): HTMLElement | null {
   return el.querySelector(`[data-testid="${id}"]`);
 }
 
-describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
+describe('RepositoryGitHostConnectionComponent', () => {
+  it('heads the section with the connection step and its state', () => {
+    const { el } = render();
+    expect(el.querySelector('h2')?.textContent).toBe('Connection');
+    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Incomplete');
+  });
+
   it('offers only the connections that fit the repository, plus the current one', () => {
     expect(render().component.pickerOptions().map((option) => option.label)).toEqual([
       'No connection',
@@ -122,25 +128,16 @@ describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
     expect(notify.failure).toHaveBeenCalled();
   });
 
-  it('selects the single fitting connection directly', () => {
+  it('selects the single fitting connection with the primary button', () => {
     const updateTaskRepositoryConnection = vi.fn(() => of(state));
-    const { component } = render({ available_connections: [reporting, otherHost] }, { updateTaskRepositoryConnection });
-    component.selectFittingConnectionOrFocusPicker();
-    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { git_host_connection: 'c1' });
-  });
-
-  it('saves report status at once and tests it beside the checkbox', () => {
-    const updateTaskRepositoryConnection = vi.fn(() => of({ ...state, git_host_connection: reporting, report_status: true }));
-    const postPendingTestCommitStatus = vi.fn(() => of({ success: true, response_status: 201 }));
-    const { fixture, el, component, notify } = render({ git_host_connection: reporting }, { updateTaskRepositoryConnection, postPendingTestCommitStatus });
-    expect(testId(el, 'test-status-report')).toBeNull();
-    component.setReportStatus(true);
-    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { report_status: true });
-    fixture.componentRef.setInput('state', { ...state, git_host_connection: reporting, report_status: true });
+    const chain = { ...chainWithoutConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
+    const { fixture, el } = render({ available_connections: [reporting, otherHost], chain }, { updateTaskRepositoryConnection });
+    fixture.componentRef.setInput('hasPrimaryAction', true);
     fixture.detectChanges();
-    testId(el, 'test-status-report')!.click();
-    expect(postPendingTestCommitStatus).toHaveBeenCalledWith('acme', 'app');
-    expect(notify.success).toHaveBeenCalledWith('Status report sent');
+    const use = testId(el, 'use-fitting-connection')!;
+    expect(use.classList).toContain('gr-button--primary');
+    use.click();
+    expect(updateTaskRepositoryConnection).toHaveBeenCalledWith('acme', 'app', { git_host_connection: 'c1' });
   });
 
   it('links to the connection only where the viewer can open it', () => {
@@ -150,22 +147,22 @@ describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
   });
 
   it('offers a new connection in place when none fits, or links to the connections page', () => {
-    const manager = render({ available_connections: [otherHost], can_manage_integrations: true });
-    expect(testId(manager.el, 'no-connections')?.textContent).toContain('No connection for forgejo.example.com');
-    expect(testId(manager.el, 'new-connection')).not.toBeNull();
+    const createConnection = { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, git_host_type: 'forgejo', base_url: 'https://forgejo.example.com' } } };
+    const manager = render({ available_connections: [otherHost], can_manage_integrations: true, chain: createConnection });
+    manager.fixture.componentRef.setInput('hasPrimaryAction', true);
+    manager.fixture.detectChanges();
+    expect(testId(manager.el, 'no-connections')?.textContent).toContain('No connection to forgejo.example.com');
+    expect(testId(manager.el, 'new-connection')?.classList).toContain('gr-button--primary');
     TestBed.resetTestingModule();
     const member = render({ available_connections: [] });
     expect(testId(member.el, 'new-connection')).toBeNull();
     expect(testId(member.el, 'no-connections')?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/git-host-connections');
   });
 
-  it('leaves the next action to the chain instead of offering it twice', () => {
-    const createConnection = { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, git_host_type: 'forgejo', base_url: 'https://forgejo.example.com' } } };
-    const manager = render({ available_connections: [], can_manage_integrations: true, chain: createConnection });
-    expect(manager.el.querySelector('gr-settings-section')).toBeNull();
-    TestBed.resetTestingModule();
-    const testReport = { ...chainWithoutConnection, commit_status: { state: 'attention' as const, detail: 'No status posted yet', action: { type: 'test_status_report' as const } } };
-    const reporter = render({ git_host_connection: reporting, report_status: true, chain: testReport });
-    expect(testId(reporter.el, 'test-status-report')).toBeNull();
+  it('shows only its state while the repository step blocks it', () => {
+    const chain = { ...chainWithoutConnection, connection: { state: 'off' as const, detail: 'Needs a readable repository URL' } };
+    const { el } = render({ chain });
+    expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Needs a readable repository URL');
+    expect(el.querySelector('gr-select')).toBeNull();
   });
 });
