@@ -12,7 +12,7 @@
     <p class="no-connections" data-testid="no-connections">
       <span>{{ step().detail }}</span>
       @if (step().action?.type === 'install_github_app') {
-        <app-github-app-install-link size="small" [primary]="isPrimary('install_github_app')" (returnedFromGitHub)="changed.emit()" />
+        <app-github-app-install-link size="small" [primary]="isPrimary('install_github_app')" />
       } @else if (state().can_create_connection) {
         <button grButton size="small" label="New connection" icon="add" [severity]="isPrimary('create_connection') ? 'primary' : 'secondary'"
           (click)="openCreateConnection()" data-testid="new-connection"></button>
@@ -33,7 +33,7 @@
           [loading]="savingSelection()" [disabled]="savingSelection()" (click)="selectConnection(only.id)" data-testid="use-fitting-connection"></button>
       }
       @if (step().action?.type === 'install_github_app') {
-        <app-github-app-install-link [primary]="isPrimary('install_github_app')" (returnedFromGitHub)="changed.emit()" />
+        <app-github-app-install-link [primary]="isPrimary('install_github_app')" />
       }
     </div>
     @if (step().state === 'attention' && step().action?.type === 'install_github_app') {

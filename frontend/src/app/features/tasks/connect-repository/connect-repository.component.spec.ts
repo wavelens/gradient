@@ -297,14 +297,10 @@ describe('ConnectRepositoryComponent', () => {
       expect(link).toBeNull();
     });
 
-    it('lets the instance admin install the app and shows the connection list again after the admin returns', () => {
-      const { link, list } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, true);
+    it('allow instance admins to install the app in the same tab', () => {
+      const { link } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, true);
       expect(link?.getAttribute('href')).toBe(installUrl);
-      expect(link?.getAttribute('target')).toBe('_blank');
-      link!.addEventListener('click', (event) => event.preventDefault());
-      link!.click();
-      window.dispatchEvent(new Event('focus'));
-      expect(list).toHaveBeenCalledTimes(2);
+      expect(link?.hasAttribute('target')).toBe(false);
     });
 
     it('identifies the instance admin as the person who can install the GitHub App for everyone else', () => {

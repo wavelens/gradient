@@ -72,7 +72,7 @@
                 <span>No GitHub App on this server</span>
               } @else if (canInstallGithubApp()) {
                 <span>{{ account }} has no GitHub App installed</span>
-                <app-github-app-install-link size="small" (returnedFromGitHub)="loadConnections()" />
+                <app-github-app-install-link size="small" />
               } @else {
                 <span>An instance admin can install the GitHub App on {{ account }}</span>
               }

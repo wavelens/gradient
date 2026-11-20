@@ -15,31 +15,17 @@ function render(installUrl: string | null) {
   });
   const fixture = TestBed.createComponent(GithubAppInstallLinkComponent);
   fixture.detectChanges();
-  const returns: unknown[] = [];
-  fixture.componentInstance.returnedFromGitHub.subscribe(() => returns.push(true));
-  const link = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="github-app-install"]');
-  return { fixture, link, returns };
+  return (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="github-app-install"]');
 }
 
 describe('GithubAppInstallLinkComponent', () => {
-  it('opens the install page for the App in a new tab', () => {
-    const { link } = render('https://github.com/apps/gradient-ci/installations/new');
+  it('open the install page of the app in the same tab', () => {
+    const link = render('https://github.com/apps/gradient-ci/installations/new');
     expect(link?.getAttribute('href')).toBe('https://github.com/apps/gradient-ci/installations/new');
-    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.hasAttribute('target')).toBe(false);
   });
 
   it('shows nothing when no install page is available', () => {
-    expect(render(null).link).toBeNull();
-  });
-
-  it('reports one return to the window after a click', () => {
-    const { link, returns } = render('https://github.com/apps/gradient-ci/installations/new');
-    window.dispatchEvent(new Event('focus'));
-    expect(returns).toHaveLength(0);
-    link!.addEventListener('click', (event) => event.preventDefault());
-    link!.click();
-    window.dispatchEvent(new Event('focus'));
-    window.dispatchEvent(new Event('focus'));
-    expect(returns).toHaveLength(1);
+    expect(render(null)).toBeNull();
   });
 });

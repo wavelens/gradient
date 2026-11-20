@@ -13,8 +13,8 @@
   @if (!showResult() && githubAppConfigured && !replacing()) {
     <button slot="actions" grButton type="button" severity="secondary" label="Replace" data-testid="github-app-replace" (click)="replace()"></button>
   }
-  @if (!showResult() && githubAppConfigured && !replacing() && installUrl) {
-    <a slot="actions" grButton label="Install on GitHub" icon="add" [href]="installUrl" data-testid="github-app-install"></a>
+  @if (!showResult() && githubAppConfigured && !replacing()) {
+    <app-github-app-install-link slot="actions" [primary]="true" />
   }
 
   @if (!showResult()) {
