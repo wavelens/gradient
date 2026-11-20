@@ -227,11 +227,10 @@ async fn push_webhook_with_wrong_signature_counts_on_the_connection_without_a_de
         res.assert_status(axum::http::StatusCode::UNAUTHORIZED);
     }
 
-    let connection = s
-        .db
-        .find::<git_host_connection::Entity>(s.connection.id)
-        .await
-        .unwrap();
+    let connection =
+        s.db.find::<git_host_connection::Entity>(s.connection.id)
+            .await
+            .unwrap();
     assert_eq!(connection.refused_signature_count, 3);
     assert!(connection.last_refused_signature_at.is_some());
     let deliveries =

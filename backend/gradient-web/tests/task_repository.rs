@@ -476,12 +476,11 @@ async fn create_task_and_read_its_row(
         .add_header("authorization", &s.auth)
         .json(&body)
         .await;
-    let row = s
-        .db
-        .rows::<task::Entity>()
-        .await
-        .into_iter()
-        .find(|task| task.name == "new-task");
+    let row =
+        s.db.rows::<task::Entity>()
+            .await
+            .into_iter()
+            .find(|task| task.name == "new-task");
     (res.status_code(), row)
 }
 

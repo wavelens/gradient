@@ -668,12 +668,18 @@ async fn view_members_see_connection_health_and_repository_fit_in_the_project_li
     assert_eq!(entry["task_count"], 1, "{entry}");
     assert_eq!(entry["refused_signature_count"], 3, "{entry}");
     assert_eq!(entry["last_delivery"]["result"], "queued", "{entry}");
-    assert_eq!(entry["repository_fit"], json!({ "fits": true, "reason": null }));
+    assert_eq!(
+        entry["repository_fit"],
+        json!({ "fits": true, "reason": null })
+    );
 
     let res = list("https://github.com/acme/app").await;
     let fit = res.json::<Value>()["message"][0]["repository_fit"].clone();
     assert_eq!(fit["fits"], false, "{fit}");
-    assert!(fit["reason"].as_str().unwrap().contains("github.com"), "{fit}");
+    assert!(
+        fit["reason"].as_str().unwrap().contains("github.com"),
+        "{fit}"
+    );
     s.db.finish().await;
 }
 
@@ -697,16 +703,75 @@ async fn creating_a_project_connection_links_fitting_tasks_without_a_connection(
     res.assert_status_ok();
     let created = res.json::<Value>()["message"].clone();
     assert_eq!(created["task_count"], 1, "{created}");
-    let task = s
-        .db
-        .find::<task::Entity>(gradient_fixtures::ids::task_id())
-        .await
-        .unwrap();
+    let task =
+        s.db.find::<task::Entity>(gradient_fixtures::ids::task_id())
+            .await
+            .unwrap();
     assert_eq!(
         task.git_host_connection.map(|id| id.to_string()),
         created["id"].as_str().map(str::to_owned)
     );
     assert!(task.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn the_task_list_of_a_connection_hides_tasks_of_projects_the_caller_cannot_see() {
+    let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
+    let connection = insert_test_git_host_connection(
+        &s,
+        git_host_connection::Model {
+            project: None,
+            ..build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+                project_id(),
+                "https://gitea.example.com",
+                false,
+            )
+        },
+    )
+    .await;
+    let hidden_project = ProjectId::now_v7();
+    gradient_db::rows::insert::<project::Entity, _>(
+        &s.db.connection(),
+        project::Model {
+            id: hidden_project,
+            name: "hidden-project".into(),
+            public: false,
+            ..rows::project()
+        },
+    )
+    .await
+    .unwrap();
+    gradient_db::rows::insert::<task::Entity, _>(
+        &s.db.connection(),
+        task::Model {
+            id: TaskId::now_v7(),
+            project: hidden_project,
+            ..rows::task()
+        },
+    )
+    .await
+    .unwrap();
+    s.db.execute(&format!(
+        "UPDATE task SET git_host_connection = '{}'",
+        connection.id
+    ))
+    .await;
+
+    let res = s
+        .server
+        .get(&format!(
+            "{TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH}/{}/tasks",
+            connection.id
+        ))
+        .add_header("authorization", &s.auth)
+        .await;
+
+    res.assert_status_ok();
+    let tasks = res.json::<Value>()["message"].as_array().unwrap().clone();
+    assert_eq!(tasks.len(), 1, "{tasks:?}");
+    assert_eq!(tasks[0]["project"], "test-project");
+    assert_eq!(tasks[0]["name"], "test-task");
     s.db.finish().await;
 }
 

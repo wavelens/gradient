@@ -6,7 +6,7 @@
 
 use super::{
     CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    GitHostConnectionTaskResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
@@ -165,9 +165,35 @@ pub async fn delete_team_git_host_connection(
 pub async fn list_team_git_host_connection_deliveries(
     TeamScope {
         team, db, params, ..
-    }: TeamScope<Admin>,
+    }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<IncomingWebhookDeliveryResponse>>>> {
     Ok(ok_json(
         super::deliveries(&db.web_db, Owner::Team(team.id), params.param("id")?).await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/git-host-connections/{id}/tasks",
+    operation_id = "listTeamGitHostConnectionTasks",
+    tag = "git-host-connections",
+    summary = "List tasks using a connection",
+    description = "List the tasks that use a connection of the team. The list holds only tasks of projects the caller can see.",
+    params(TeamPath, ("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Tasks using the connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
+)]
+pub async fn list_team_git_host_connection_tasks(
+    TeamScope {
+        team,
+        user,
+        db,
+        params,
+        ..
+    }: TeamScope<Member>,
+) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionTaskResponse>>>> {
+    let connection =
+        super::load_of_owner(&db.web_db, Owner::Team(team.id), params.param("id")?).await?;
+    Ok(ok_json(
+        super::tasks_using_connection_visible_to_user(&db.web_db, connection.id, &user).await?,
     ))
 }

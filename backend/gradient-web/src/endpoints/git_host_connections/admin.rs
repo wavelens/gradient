@@ -6,7 +6,7 @@
 
 use super::{
     CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    GitHostConnectionTaskResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -142,5 +142,26 @@ pub async fn list_instance_git_host_connection_deliveries(
 ) -> WebResult<Json<BaseResponse<Vec<IncomingWebhookDeliveryResponse>>>> {
     Ok(ok_json(
         super::deliveries(&state.web_db, Owner::Instance, id).await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/git-host-connections/{id}/tasks",
+    operation_id = "listInstanceGitHostConnectionTasks",
+    tag = "admin",
+    summary = "List tasks using a connection",
+    description = "List the tasks of every project that use a connection of the instance.",
+    params(("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Tasks using the connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
+)]
+pub async fn list_instance_git_host_connection_tasks(
+    State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(id): Path<GitHostConnectionId>,
+) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionTaskResponse>>>> {
+    let connection = super::load_of_owner(&state.web_db, Owner::Instance, id).await?;
+    Ok(ok_json(
+        super::tasks_using_connection_visible_to_user(&state.web_db, connection.id, &user).await?,
     ))
 }

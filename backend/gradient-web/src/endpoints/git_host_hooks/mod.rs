@@ -494,11 +494,9 @@ async fn verify_webhook_signature_and_ip_allowlist_then_trigger_event_evaluation
     let signature = first_header(headers, provider.signature_headers());
     if !provider.verify_signature(plaintext_secret.expose(), signature, body) {
         warn!(connection = %connection.id, "Git host webhook: invalid signature");
-        if let Err(e) = gradient_db::git_host_connections::count_refused_signature(
-            &ci.db.web_db,
-            connection.id,
-        )
-        .await
+        if let Err(e) =
+            gradient_db::git_host_connections::count_refused_signature(&ci.db.web_db, connection.id)
+                .await
         {
             warn!(error = %e, connection = %connection.id, "Failed to count a refused webhook signature");
         }

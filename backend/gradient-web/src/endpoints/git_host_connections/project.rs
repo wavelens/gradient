@@ -6,7 +6,7 @@
 
 use super::{
     CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    GitHostConnectionTaskResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::ProjectPath;
@@ -15,6 +15,7 @@ use crate::error::{WebError, WebResult};
 use crate::extractors::{JsonBody, Query};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{Permission, mask_grants};
+use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, can};
 use axum::Json;
 use axum::extract::State;
@@ -22,7 +23,6 @@ use gradient_core::ServerState;
 use gradient_db::git_host_connections::{
     GitHostConnectionOwnerByDatabaseId as Owner, list_git_host_connections_available_to_project,
 };
-use crate::resource::Resource;
 use gradient_types::*;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -235,5 +235,30 @@ pub async fn list_project_git_host_connection_deliveries(
     let connection = load_available_to_project(&db.web_db, &project, params.param("id")?).await?;
     Ok(ok_json(
         super::deliveries_of_connection(&db.web_db, connection.id).await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/git-host-connections/{id}/tasks",
+    operation_id = "listProjectGitHostConnectionTasks",
+    tag = "git-host-connections",
+    summary = "List tasks using a connection",
+    description = "List the tasks that use a connection the project can use. The list holds only tasks of projects the caller can see.",
+    params(ProjectPath, ("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Tasks using the connection", body = Vec<GitHostConnectionTaskResponse>), WebError)
+)]
+pub async fn list_project_git_host_connection_tasks(
+    ProjectScope {
+        project,
+        user,
+        db,
+        params,
+        ..
+    }: ProjectScope<Member>,
+) -> WebResult<Json<BaseResponse<Vec<GitHostConnectionTaskResponse>>>> {
+    let connection = load_available_to_project(&db.web_db, &project, params.param("id")?).await?;
+    Ok(ok_json(
+        super::tasks_using_connection_visible_to_user(&db.web_db, connection.id, &user).await?,
     ))
 }
