@@ -158,7 +158,7 @@ The **Report commit status** option on the **Repository** page of a task can pos
 
 An evaluation started with `/gradient run <wildcard>` reports as `gradient/<task>: Evaluation: <wildcard>` in addition to the default checks.
 
-Use **Test status report** to post a `pending` status to the newest evaluated commit and show the response from the Git host.
+Use **Test the status report** to post a `pending` status to the newest evaluated commit and show the response from the Git host.
 
 ## Verify Deployment
 
