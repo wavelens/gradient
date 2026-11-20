@@ -5,9 +5,9 @@
  */
 
 use super::{
-    CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
-    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
-    PatchGitHostConnectionRequest,
+    ConnectionReader, CreateGitHostConnectionRequest, GitHostConnectionResponse,
+    GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
+    IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
 };
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
@@ -37,6 +37,7 @@ pub async fn list_team_git_host_connections(
         team,
         role,
         user,
+        api_key,
         db,
         ..
     }: TeamScope<Member>,
@@ -45,12 +46,13 @@ pub async fn list_team_git_host_connections(
     Ok(ok_json(
         super::summaries_of_owner(
             &db.web_db,
+            &ConnectionReader::new(&user, api_key.as_ref()),
             Owner::Team(team.id),
             &super::SummaryOptions {
                 serve_url: &db.config.server.serve_url,
-                can_manage,
                 repository: None,
             },
+            can_manage,
         )
         .await?,
     ))
@@ -68,13 +70,25 @@ pub async fn list_team_git_host_connections(
     responses((status = OK, description = "Connection created", body = GitHostConnectionResponse), WebError)
 )]
 pub async fn create_team_git_host_connection(
-    TeamScope { team, user, .. }: TeamScope<AdminUnmanaged>,
+    TeamScope {
+        team,
+        user,
+        api_key,
+        ..
+    }: TeamScope<AdminUnmanaged>,
     State(state): State<Arc<ServerState>>,
     audit: Audit,
     JsonBody(body): JsonBody<CreateGitHostConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     Ok(ok_json(
-        super::create(&state.ci(), Owner::Team(team.id), user.id, body, &audit).await?,
+        super::create(
+            &state.ci(),
+            Owner::Team(team.id),
+            &ConnectionReader::new(&user, api_key.as_ref()),
+            body,
+            &audit,
+        )
+        .await?,
     ))
 }
 
@@ -89,12 +103,23 @@ pub async fn create_team_git_host_connection(
 )]
 pub async fn get_team_git_host_connection(
     TeamScope {
-        team, db, params, ..
+        team,
+        user,
+        api_key,
+        db,
+        params,
+        ..
     }: TeamScope<Admin>,
 ) -> WebResult<Json<BaseResponse<GitHostConnectionResponse>>> {
     let row = super::load_of_owner(&db.web_db, Owner::Team(team.id), params.param("id")?).await?;
     Ok(ok_json(
-        super::response(&db.web_db, &db.config.server.serve_url, row).await?,
+        super::response(
+            &db.web_db,
+            &ConnectionReader::new(&user, api_key.as_ref()),
+            &db.config.server.serve_url,
+            row,
+        )
+        .await?,
     ))
 }
 
@@ -110,7 +135,13 @@ pub async fn get_team_git_host_connection(
     responses((status = OK, description = "Updated Connection", body = GitHostConnectionResponse), WebError)
 )]
 pub async fn patch_team_git_host_connection(
-    TeamScope { team, params, .. }: TeamScope<Admin>,
+    TeamScope {
+        team,
+        user,
+        api_key,
+        params,
+        ..
+    }: TeamScope<Admin>,
     State(state): State<Arc<ServerState>>,
     audit: Audit,
     JsonBody(body): JsonBody<PatchGitHostConnectionRequest>,
@@ -119,6 +150,7 @@ pub async fn patch_team_git_host_connection(
         super::patch(
             &state.ci(),
             Owner::Team(team.id),
+            &ConnectionReader::new(&user, api_key.as_ref()),
             params.param("id")?,
             body,
             &audit,
@@ -165,11 +197,22 @@ pub async fn delete_team_git_host_connection(
 )]
 pub async fn list_team_git_host_connection_deliveries(
     TeamScope {
-        team, db, params, ..
+        team,
+        user,
+        api_key,
+        db,
+        params,
+        ..
     }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<IncomingWebhookDeliveryResponse>>>> {
     Ok(ok_json(
-        super::deliveries(&db.web_db, Owner::Team(team.id), params.param("id")?).await?,
+        super::deliveries(
+            &db.web_db,
+            &ConnectionReader::new(&user, api_key.as_ref()),
+            Owner::Team(team.id),
+            params.param("id")?,
+        )
+        .await?,
     ))
 }
 
@@ -187,6 +230,7 @@ pub async fn list_team_git_host_connection_tasks(
     TeamScope {
         team,
         user,
+        api_key,
         db,
         params,
         ..
@@ -195,7 +239,12 @@ pub async fn list_team_git_host_connection_tasks(
     let connection =
         super::load_of_owner(&db.web_db, Owner::Team(team.id), params.param("id")?).await?;
     Ok(ok_json(
-        super::tasks_using_connection_visible_to_user(&db.web_db, connection.id, &user).await?,
+        super::tasks_using_connection_visible_to_reader(
+            &db.web_db,
+            connection.id,
+            &ConnectionReader::new(&user, api_key.as_ref()),
+        )
+        .await?,
     ))
 }
 

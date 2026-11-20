@@ -865,9 +865,174 @@ async fn the_task_list_of_a_connection_hides_tasks_of_projects_the_caller_cannot
 
     res.assert_status_ok();
     let tasks = res.json::<Value>()["message"].as_array().unwrap().clone();
+    let summaries = s
+        .server
+        .get(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH)
+        .add_header("authorization", &s.auth)
+        .await
+        .json::<Value>()["message"]
+        .clone();
     assert_eq!(tasks.len(), 1, "{tasks:?}");
     assert_eq!(tasks[0]["project"], "test-project");
     assert_eq!(tasks[0]["name"], "test-task");
+    assert_eq!(summaries[0]["task_count"], 1, "{summaries}");
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn an_api_key_pinned_to_a_project_reads_only_that_project_on_a_shared_connection() {
+    use sha2::{Digest, Sha256};
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let conn = s.db.connection();
+    let connection = insert_test_git_host_connection(
+        &s,
+        git_host_connection::Model {
+            project: None,
+            ..build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+                project_id(),
+                "https://gitea.example.com",
+                false,
+            )
+        },
+    )
+    .await;
+    let other_project = ProjectId::now_v7();
+    gradient_db::rows::insert::<project::Entity, _>(
+        &conn,
+        project::Model {
+            id: other_project,
+            name: "other-project".into(),
+            ..rows::project()
+        },
+    )
+    .await
+    .unwrap();
+    gradient_db::rows::insert::<gradient_entity::project_user::Entity, _>(
+        &conn,
+        gradient_entity::project_user::Model {
+            id: ProjectUserId::now_v7(),
+            project: other_project,
+            ..rows::project_member(rows::admin_role().id)
+        },
+    )
+    .await
+    .unwrap();
+    let other_task = TaskId::now_v7();
+    gradient_db::rows::insert::<task::Entity, _>(
+        &conn,
+        task::Model {
+            id: other_task,
+            project: other_project,
+            name: "other-task".into(),
+            repository: "https://gitea.example.com/acme/other".into(),
+            ..rows::task()
+        },
+    )
+    .await
+    .unwrap();
+    s.db.execute(&format!(
+        "UPDATE task SET git_host_connection = '{}'",
+        connection.id
+    ))
+    .await;
+    for (offset, repository) in [(0, "acme/app"), (60, "acme/other")] {
+        gradient_db::rows::insert::<incoming_webhook_delivery::Entity, _>(
+            &conn,
+            incoming_webhook_delivery::Model {
+                id: IncomingWebhookDeliveryId::now_v7(),
+                git_host_connection: connection.id,
+                event: "push".into(),
+                status_code: 200,
+                result: DeliveryResult::Queued,
+                repository: Some(format!("https://gitea.example.com/{repository}")),
+                created_at: test_date() + chrono::Duration::seconds(offset),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+    gradient_db::rows::insert::<gradient_entity::task_commit_status_post_attempt::Entity, _>(
+        &conn,
+        gradient_entity::task_commit_status_post_attempt::Model {
+            id: TaskCommitStatusPostAttemptId::now_v7(),
+            task: other_task,
+            git_host_connection: Some(connection.id),
+            event: "success".into(),
+            success: true,
+            delivered_at: test_date(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let raw = "p".repeat(64);
+    gradient_db::rows::insert::<gradient_entity::api::Entity, _>(
+        &conn,
+        gradient_entity::api::Model {
+            id: ApiId::now_v7(),
+            owned_by: user_id(),
+            name: "pinned".into(),
+            key: Sha256::digest(raw.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+            last_used_at: test_date(),
+            created_at: test_date(),
+            permission: gradient_types::permissions::admin_mask(),
+            project: Some(project_id()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let get = |path: String, auth: String| {
+        let request = s.server.get(&path).add_header("authorization", auth);
+        async move {
+            let res = request.await;
+            res.assert_status_ok();
+            res.json::<Value>()["message"].clone()
+        }
+    };
+    let key = format!("Bearer GRAD{raw}");
+    let tasks_path = format!(
+        "{TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH}/{}/tasks",
+        connection.id
+    );
+    let deliveries_path = format!(
+        "{TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH}/{}/deliveries",
+        connection.id
+    );
+
+    let summary = get(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH.into(), key.clone()).await[0].clone();
+    let tasks = get(tasks_path.clone(), key.clone()).await;
+    let deliveries = get(deliveries_path.clone(), key).await;
+    let session_summary = get(
+        TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH.into(),
+        s.auth.clone(),
+    )
+    .await[0]
+        .clone();
+    let session_tasks = get(tasks_path, s.auth.clone()).await;
+    let session_deliveries = get(deliveries_path, s.auth.clone()).await;
+
+    assert_eq!(summary["task_count"], 1, "{summary}");
+    assert_eq!(summary["last_status_post"], Value::Null, "{summary}");
+    assert_eq!(
+        summary["last_delivery"]["repository"], "https://gitea.example.com/acme/app",
+        "{summary}"
+    );
+    assert_eq!(tasks.as_array().unwrap().len(), 1, "{tasks}");
+    assert_eq!(tasks[0]["name"], "test-task");
+    assert_eq!(deliveries.as_array().unwrap().len(), 1, "{deliveries}");
+    assert_eq!(session_summary["task_count"], 2, "{session_summary}");
+    assert_eq!(
+        session_summary["last_delivery"]["repository"], "https://gitea.example.com/acme/other",
+        "{session_summary}"
+    );
+    assert_ne!(session_summary["last_status_post"], Value::Null);
+    assert_eq!(session_tasks.as_array().unwrap().len(), 2);
+    assert_eq!(session_deliveries.as_array().unwrap().len(), 2);
     s.db.finish().await;
 }
 
