@@ -89,7 +89,8 @@ mod m20261217_000000_create_project_git_https_credential_table;
 mod m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently;
 mod m20261219_000000_add_encrypted_secret_to_task_trigger;
 mod m20261220_000000_create_fork_pull_request_approval_table_and_convert_evaluations_waiting_for_approval;
-mod m20261221_000000_add_refused_signature_count_and_last_refused_signature_at_to_git_host_connection;
+mod m20261221_000000_add_refused_signature_columns_to_git_host_connection;
+mod m20261222_000000_add_recent_git_host_connection_indexes_to_incoming_webhook_delivery_and_task_commit_status_post_concurrently;
 mod sql_on_one_connection;
 
 pub struct UpgradeFloor {
@@ -207,7 +208,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently::Migration),
             Box::new(m20261219_000000_add_encrypted_secret_to_task_trigger::Migration),
             Box::new(m20261220_000000_create_fork_pull_request_approval_table_and_convert_evaluations_waiting_for_approval::Migration),
-            Box::new(m20261221_000000_add_refused_signature_count_and_last_refused_signature_at_to_git_host_connection::Migration),
+            Box::new(m20261221_000000_add_refused_signature_columns_to_git_host_connection::Migration),
+            Box::new(m20261222_000000_add_recent_git_host_connection_indexes_to_incoming_webhook_delivery_and_task_commit_status_post_concurrently::Migration),
         ]
     }
 }
