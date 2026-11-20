@@ -71,7 +71,7 @@
             <p class="gr-form-aside" data-testid="no-connection">
               <span>No connection for {{ repositoryHostName() }}</span>
               @if (canManageIntegrations()) {
-                <button grButton size="small" label="New connection" icon="add" (click)="openCreateConnection()" data-testid="new-connection"></button>
+                <button grButton severity="secondary" size="small" label="New connection" icon="add" (click)="openCreateConnection()" data-testid="new-connection"></button>
               }
             </p>
           }
