@@ -61,7 +61,7 @@ interface SavedConnectionOutcome {
       @if (outcome(); as outcome) {
         @switch (tokenCheckState()) {
           @case ('running') {
-            <gr-message-banner type="info" data-testid="token-check">Checking the access token...</gr-message-banner>
+            <gr-message-banner type="info" data-testid="token-check">Checking access token...</gr-message-banner>
           }
           @case ('success') {
             <gr-message-banner type="success" data-testid="token-check">Signed in as {{ tokenCheckAccount() }}</gr-message-banner>
@@ -144,7 +144,7 @@ export class GitHostConnectionDialogComponent {
   });
   header = computed(() => {
     if (this.outcome()) return 'Git host connection saved';
-    return this.editing() ? 'Edit git host connection' : 'New git host connection';
+    return this.editing() ? 'Edit Git host connection' : 'New git host connection';
   });
 
   tokenCheckState = computed(() => {
@@ -155,11 +155,11 @@ export class GitHostConnectionDialogComponent {
   });
   tokenCheckAccount = computed(() => {
     const check = this.outcome()?.tokenCheck;
-    return check && check !== 'running' ? (check.account ?? 'an unknown account') : '';
+    return check && check !== 'running' ? (check.account ?? 'unknown account') : '';
   });
   tokenCheckError = computed(() => {
     const check = this.outcome()?.tokenCheck;
-    return check && check !== 'running' ? `The access token doesn't work: ${check.error ?? 'the Git host refused it.'}` : '';
+    return check && check !== 'running' ? `Access token doesn't work: ${check.error ?? 'the Git host refused it.'}` : '';
   });
   showsWebhookSetup = computed(() => {
     const outcome = this.outcome();
@@ -197,7 +197,7 @@ export class GitHostConnectionDialogComponent {
       },
       error: (error: unknown) => {
         this.openingId.set(null);
-        this.notify.failure("Couldn't load git host connection", error);
+        this.notify.failure('Failed to load connection to Git host', error);
       },
     });
   }
@@ -233,7 +233,7 @@ export class GitHostConnectionDialogComponent {
       },
       error: (error: unknown) => {
         this.saving.set(false);
-        this.error.set(apiErrorMessage(error, "Couldn't save git host connection"));
+        this.error.set(apiErrorMessage(error, 'Failed to save the connection to the Git host'));
       },
     });
   }

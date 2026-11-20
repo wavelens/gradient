@@ -111,7 +111,7 @@ export function hasNonDefaultAdvancedSettings(form: GitHostConnectionFormValue, 
 export function gitHostConnectionFormErrors(form: GitHostConnectionFormValue, context: GitHostConnectionFormContext): GitHostConnectionFormErrors {
   const errors: GitHostConnectionFormErrors = {};
   const baseUrl = form.base_url.trim();
-  if (!baseUrl) errors.base_url = 'Enter the host URL.';
+  if (!baseUrl) errors.base_url = 'Enter the Host URL.';
   else {
     const urlError = fieldChecks.httpUrl(gitHostBaseUrl(baseUrl));
     if (urlError) errors.base_url = urlError;
@@ -124,16 +124,16 @@ export function gitHostConnectionFormErrors(form: GitHostConnectionFormValue, co
 
   const name = effectiveConnectionName(form, context).trim();
   if (!name) errors.name = 'Enter a name.';
-  else if (!NAME_PATTERN.test(name)) errors.name = "Use lowercase letters, digits and dashes. Don't start or end with a dash.";
+  else if (!NAME_PATTERN.test(name)) errors.name = "Only lowercase letters, numbers and dashes are valid. A dash can't be first or last.";
   else if (context.existingNames.some((existing) => existing === name && existing !== context.editing?.name)) {
-    errors.name = 'This owner already has a connection with this name.';
+    errors.name = "This owner can't have two connections with the same name.";
   }
 
   if (!form.receives_events && !reportsStatus) errors.capabilities = 'Turn on receiving events or reporting status.';
 
   const editing = context.editing;
   if (editing && form.receives_events && !editing.has_secret && !form.secret.trim()) {
-    errors.secret = 'Enter or generate a webhook secret to receive events.';
+    errors.secret = 'Enter or generate a Webhook secret to receive events.';
   }
 
   const invalidIps = splitLines(form.allowed_ips).filter((entry) => !isIpNetwork(entry));

@@ -77,7 +77,7 @@ function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object =
 describe('RepositoryCommitStatusComponent', () => {
   it('heads the section with the commit status step and its state', () => {
     const { el } = render();
-    expect(el.querySelector('h2')?.textContent).toBe('Commit status');
+    expect(el.querySelector('h2')?.textContent).toBe('Commit Status');
     expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Off');
   });
 

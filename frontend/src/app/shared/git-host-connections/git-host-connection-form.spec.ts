@@ -61,8 +61,8 @@ describe('form to connect to a git host', () => {
   it('requires a host URL and rejects a name already used by another connection', () => {
     const form = { ...emptyGitHostConnectionForm(), name: 'taken' };
     expect(gitHostConnectionFormErrors(form, { editing: null, existingNames: ['taken'] })).toEqual({
-      base_url: 'Enter the host URL.',
-      name: 'This owner already has a connection with this name.',
+      base_url: 'Enter the Host URL.',
+      name: "This owner can't have two connections with the same name.",
     });
   });
 

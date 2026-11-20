@@ -61,8 +61,8 @@ describe('TaskRepositoryComponent', () => {
     expect(Array.from(el.querySelectorAll('h2')).map((heading) => heading.textContent)).toEqual([
       'Repository',
       'Connection',
-      'Incoming events',
-      'Commit status',
+      'Incoming Events',
+      'Commit Status',
     ]);
     expect(el.querySelector('app-task-git-host-chain')).toBeNull();
     expect(Array.from(el.querySelectorAll('textarea')).map((t) => t.value)).toContain('ssh-ed25519 AAAAkey');

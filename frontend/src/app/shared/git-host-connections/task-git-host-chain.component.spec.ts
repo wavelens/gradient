@@ -33,14 +33,14 @@ describe('TaskGitHostChainComponent', () => {
   it('summarizes the chain in one line with the worst step', () => {
     const el = render();
     expect(summary(el)).toContain('Incomplete');
-    expect(summary(el)).toContain('Incoming events');
+    expect(summary(el)).toContain('Incoming Events');
     expect(summary(el)).toContain('No webhook events yet');
     expect(el.querySelectorAll('button')).toHaveLength(0);
   });
 
   it('puts a failed step before an earlier incomplete step', () => {
     const el = render({ chain: { ...chain, commit_status: { state: 'failing', detail: 'The host refused the status' } } });
-    expect(summary(el)).toContain('Commit status');
+    expect(summary(el)).toContain('Commit Status');
     expect(summary(el)).toContain('The host refused the status');
   });
 

@@ -25,7 +25,7 @@ const EARLIER_DELIVERIES_SHOWN = 5;
   imports: [RouterLink, ButtonComponent, ChainStepStateBadgeComponent, CopyFieldComponent, GitHostConnectionDialogComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <gr-settings-section title="Incoming events">
+    <gr-settings-section title="Incoming Events">
       <app-chain-step-state-badge slot="after-title" [state]="step().state" />
       @if (!applies()) {
         <span class="text-secondary">{{ step().detail }}</span>
@@ -127,7 +127,7 @@ export class RepositoryIncomingEventsComponent {
       },
       error: (error: unknown) => {
         this.installing.set(false);
-        this.notify.failure("Couldn't install webhook", error);
+        this.notify.failure('Webhook installation failed', error);
       },
     });
   }
