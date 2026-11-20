@@ -620,7 +620,11 @@ mod tests {
         let available = [without_host_url.clone()];
         let suggested = task_git_host_chain(&input(GITEA_REPOSITORY, None, &available));
         assert_eq!(selected.connection.state, Ok);
-        assert!(!suggested.connection.detail.contains("fits"), "{}", suggested.connection.detail);
+        assert!(
+            !suggested.connection.detail.contains("fits"),
+            "{}",
+            suggested.connection.detail
+        );
     }
 
     #[test]
@@ -675,7 +679,10 @@ mod tests {
             connection: Some(&unmanageable_connection),
             ..without_token
         };
-        assert_eq!(task_git_host_chain(&unmanageable).incoming_events.action, None);
+        assert_eq!(
+            task_git_host_chain(&unmanageable).incoming_events.action,
+            None
+        );
     }
 
     #[test]

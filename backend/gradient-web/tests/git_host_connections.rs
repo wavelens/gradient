@@ -791,6 +791,35 @@ async fn creating_a_project_connection_links_fitting_tasks_without_a_connection(
 }
 
 #[tokio::test]
+async fn creating_a_project_connection_leaves_a_task_of_declarative_state_without_a_connection() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    s.db.execute("UPDATE task SET managed = true").await;
+
+    let res = s
+        .server
+        .put(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH)
+        .add_header("authorization", &s.auth)
+        .json(&json!({
+            "name": "gitea",
+            "git_host_type": "gitea",
+            "base_url": "https://gitea.example.com",
+            "access_token": "token",
+            "reports_status": true,
+        }))
+        .await;
+
+    res.assert_status_ok();
+    assert_eq!(res.json::<Value>()["message"]["task_count"], 0);
+    let task =
+        s.db.find::<task::Entity>(gradient_fixtures::ids::task_id())
+            .await
+            .unwrap();
+    assert_eq!(task.git_host_connection, None);
+    assert!(!task.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn a_connection_without_a_known_host_links_no_task() {
     let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
 
