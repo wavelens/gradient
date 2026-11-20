@@ -8,6 +8,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output, si
 import {
   ButtonComponent,
   CopyFieldComponent,
+  FormFieldComponent,
   DialogComponent,
   MessageBannerComponent,
   SubmitDirective,
@@ -48,7 +49,7 @@ interface SavedConnectionOutcome {
 @Component({
   selector: 'app-git-host-connection-dialog',
   standalone: true,
-  imports: [ButtonComponent, CopyFieldComponent, DialogComponent, MessageBannerComponent, SubmitDirective, GitHostConnectionFormComponent],
+  imports: [ButtonComponent, CopyFieldComponent, DialogComponent, FormFieldComponent, MessageBannerComponent, SubmitDirective, GitHostConnectionFormComponent],
   template: `
     <gr-dialog #dialog [header]="header()" [visible]="open()" (visibleChange)="setOpen($event)" [error]="error()" [busy]="saving()"
       [confirmDiscard]="!outcome() && formChanges.changed()" [closable]="!webhookSecret()" width="560px">
@@ -67,10 +68,10 @@ interface SavedConnectionOutcome {
         @if (showsWebhookSetup()) {
           <div class="connection-dialog-webhook" data-testid="webhook-setup">
             @if (outcome.connection.webhook_url; as webhookUrl) {
-              <gr-copy-field label="Webhook URL" [value]="webhookUrl" />
+              <gr-form-field label="Webhook URL"><gr-copy-field [value]="webhookUrl" /></gr-form-field>
             }
             @if (webhookSecret(); as secret) {
-              <gr-copy-field label="Webhook secret" [value]="secret" data-testid="webhook-secret" />
+              <gr-form-field label="Webhook secret"><gr-copy-field [value]="secret" data-testid="webhook-secret" /></gr-form-field>
             }
             <p class="text-secondary">Events: {{ events() }}</p>
             @if (webhookSettingsUrl(); as href) {
