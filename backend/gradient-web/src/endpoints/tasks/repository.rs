@@ -87,9 +87,16 @@ pub struct TaskRepositoryResponse {
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct TaskRepositoryConnectionAndCommitStatusPatchRequest {
-    pub git_host_connection: Option<GitHostConnectionId>,
+    /// Omitted fields stay unchanged. JSON null removes the connection and turns commit status off.
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::deserialize_optional_field"
+    )]
+    #[schema(value_type = Option<GitHostConnectionId>)]
+    pub git_host_connection: Option<Option<GitHostConnectionId>>,
     #[serde(default)]
-    pub report_status: bool,
+    #[schema(required = false, value_type = bool)]
+    pub report_status: Option<bool>,
 }
 
 async fn recent_incoming_webhook_deliveries_for_task_repository(
@@ -316,16 +323,26 @@ pub async fn save_task_repository_connection_and_commit_status(
     JsonBody(body): JsonBody<TaskRepositoryConnectionAndCommitStatusPatchRequest>,
 ) -> WebResult<Json<BaseResponse<TaskRepositoryResponse>>> {
     let connection = match body.git_host_connection {
-        Some(id) => Some(
+        Some(Some(id)) => Some(
             check_git_host_connection_fits_task(&db.web_db, &project, &task.repository, id).await?,
         ),
-        None => None,
+        Some(None) => None,
+        None => match task.git_host_connection {
+            Some(current) => list_git_host_connections_available_to_project(&db.web_db, &project)
+                .await?
+                .into_iter()
+                .find(|row| row.id == current),
+            None => None,
+        },
     };
-    check_report_status_is_possible(connection.as_ref(), body.report_status)?;
+    let report_status = body.report_status.unwrap_or_else(|| {
+        task.report_status && connection.as_ref().is_some_and(|row| row.reports_status)
+    });
+    check_report_status_is_possible(connection.as_ref(), report_status)?;
 
     let mut active: ATask = task.into();
-    active.git_host_connection = Set(body.git_host_connection);
-    active.report_status = Set(body.report_status);
+    active.git_host_connection = Set(connection.as_ref().map(|row| row.id));
+    active.report_status = Set(report_status);
     let task = gradient_db::tasks::update(&db.web_db, active).await?;
     audit
         .write(

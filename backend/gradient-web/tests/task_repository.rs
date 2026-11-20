@@ -659,3 +659,95 @@ async fn a_new_task_takes_the_chosen_connection_and_refuses_one_that_does_not_fi
     assert!(!row.report_status);
     s.db.finish().await;
 }
+
+async fn database_with_task_using_a_status_reporting_connection() -> (
+    RealTestDatabaseHttpServerAndBearerAuthHeader,
+    git_host_connection::Model,
+) {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    let connection = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            true,
+        ),
+    )
+    .await;
+    s.server
+        .patch(URL)
+        .add_header("authorization", &s.auth)
+        .json(&json!({ "git_host_connection": connection.id, "report_status": true }))
+        .await
+        .assert_status_ok();
+    (s, connection)
+}
+
+async fn patch_task_repository(
+    s: &RealTestDatabaseHttpServerAndBearerAuthHeader,
+    body: Value,
+) -> task::Model {
+    s.server
+        .patch(URL)
+        .add_header("authorization", &s.auth)
+        .json(&body)
+        .await
+        .assert_status_ok();
+    read_test_task_row_from_database(s).await
+}
+
+#[tokio::test]
+async fn turning_commit_status_off_and_on_keeps_the_connection() {
+    let (s, connection) = database_with_task_using_a_status_reporting_connection().await;
+
+    let off = patch_task_repository(&s, json!({ "report_status": false })).await;
+    let on = patch_task_repository(&s, json!({ "report_status": true })).await;
+
+    assert_eq!(off.git_host_connection, Some(connection.id));
+    assert!(!off.report_status);
+    assert_eq!(on.git_host_connection, Some(connection.id));
+    assert!(on.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn choosing_another_connection_keeps_commit_status_on() {
+    let (s, _) = database_with_task_using_a_status_reporting_connection().await;
+    let other = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            true,
+        ),
+    )
+    .await;
+
+    let row = patch_task_repository(&s, json!({ "git_host_connection": other.id })).await;
+
+    assert_eq!(row.git_host_connection, Some(other.id));
+    assert!(row.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn an_explicit_null_connection_removes_the_connection_and_its_commit_status() {
+    let (s, _) = database_with_task_using_a_status_reporting_connection().await;
+
+    let row = patch_task_repository(&s, json!({ "git_host_connection": null })).await;
+
+    assert_eq!(row.git_host_connection, None);
+    assert!(!row.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn an_empty_patch_changes_nothing() {
+    let (s, connection) = database_with_task_using_a_status_reporting_connection().await;
+
+    let row = patch_task_repository(&s, json!({})).await;
+
+    assert_eq!(row.git_host_connection, Some(connection.id));
+    assert!(row.report_status);
+    s.db.finish().await;
+}
