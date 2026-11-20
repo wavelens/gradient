@@ -1489,7 +1489,6 @@ export type GitHostConnectionResponse = GitHostConnectionSummary & {
   installation_id?: number | null;
   created_by: UserId;
   created_at: string;
-  managed: boolean;
   generated_secret?: string | null;
 };
 
@@ -1503,6 +1502,7 @@ export interface GitHostConnectionSummary {
   receives_events: boolean;
   reports_status: boolean;
   can_manage?: boolean;
+  managed?: boolean;
   account_login?: string | null;
   webhook_url?: string | null;
   access_token_expires_at?: string | null;
@@ -2957,6 +2957,7 @@ export interface TaskRepositoryResponse {
   available_connections: GitHostConnectionSummary[];
   can_edit: boolean;
   can_manage_integrations: boolean;
+  can_create_connection?: boolean;
 }
 
 export interface TaskResponse {

@@ -86,6 +86,8 @@ pub struct TaskRepositoryResponse {
     pub available_connections: Vec<GitHostConnectionSummary>,
     pub can_edit: bool,
     pub can_manage_integrations: bool,
+    #[schema(required = false, default = false)]
+    pub can_create_connection: bool,
 }
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
@@ -209,6 +211,7 @@ async fn repository_response(
     let deploy_key =
         uses_ssh.then(|| format_public_key(project.clone(), &db.config.server.serve_url));
     let can_edit = can_edit_task && !task.managed;
+    let can_create_connection = can_manage_integrations && !project.managed && !task.managed;
     let fetch = RepositoryFetchStatus::of(task, can_edit_task);
     let chain = task_git_host_chain(&TaskGitHostChainInput {
         repository: &task.repository,
@@ -228,8 +231,10 @@ async fn repository_response(
         newest_status_post: status_posts.first(),
         can_edit_task: can_edit,
         can_manage_integrations,
+        can_create_connection,
         github_app_configured: db.config.github_app.is_some(),
-        can_install_github_app: user.superuser
+        can_install_github_app: !task.managed
+            && user.superuser
             && api_key.is_none_or(|key| {
                 key.may_use_owner_superuser_rights_for_method(&axum::http::Method::POST)
             }),
@@ -248,6 +253,7 @@ async fn repository_response(
         available_connections,
         can_edit,
         can_manage_integrations,
+        can_create_connection,
     })
 }
 

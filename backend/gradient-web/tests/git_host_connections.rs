@@ -357,6 +357,14 @@ async fn deleting_git_host_connection_managed_by_declarative_state_is_forbidden(
     )
     .await;
 
+    let listed = s
+        .server
+        .get(TEST_PROJECT_GIT_HOST_CONNECTIONS_PATH)
+        .add_header("authorization", &s.auth)
+        .await;
+    listed.assert_status_ok();
+    assert_eq!(listed.json::<Value>()["message"][0]["managed"], true);
+
     let res = s
         .server
         .delete(&format!(
