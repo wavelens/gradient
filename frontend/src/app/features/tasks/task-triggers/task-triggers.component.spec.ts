@@ -16,11 +16,11 @@ import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
-import { chainWithoutConnection } from '../task-repository/task-git-host-chain.testing';
+import { taskRepositoryStatusRepositoryReadableWithoutGitHostConnection } from '../task-repository/task-repository-status-check-test-fixtures.testing';
 
-const repositoryWithChain = {
+const taskRepositoryResponseRequiringGitHostConnection = {
   repository: 'https://forgejo.example.com/acme/app',
-  chain: { ...chainWithoutConnection, connection: { ...chainWithoutConnection.connection, action: { type: 'select_connection' as const } } },
+  chain: { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection, connection: { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection.connection, action: { type: 'select_connection' as const } } },
 };
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
@@ -74,7 +74,7 @@ function setup(
       { provide: ActivatedRoute, useValue: activatedRouteStub(access, query, task) },
       { provide: TriggersService, useValue: { list, update, getSuggestedPushAndPullRequestTriggerConfigs } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
-      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }), getRepository: () => of(repositoryWithChain) } },
+      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }), getRepository: () => of(taskRepositoryResponseRequiringGitHostConnection) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskTriggersComponent);

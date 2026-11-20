@@ -16,13 +16,13 @@ const STATE_BADGES: Record<TaskGitHostChainStepState, { label: string; severity:
 };
 
 @Component({
-  selector: 'app-chain-step-state-badge',
+  selector: 'app-task-repository-status-check-step-state-badge',
   standalone: true,
   imports: [BadgeComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<gr-badge [severity]="badge().severity">{{ badge().label }}</gr-badge>`,
 })
-export class ChainStepStateBadgeComponent {
+export class TaskRepositoryStatusCheckStepStateBadgeComponent {
   state = input.required<TaskGitHostChainStepState>();
   protected badge = computed(() => STATE_BADGES[this.state()]);
 }

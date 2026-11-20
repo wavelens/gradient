@@ -13,7 +13,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { deliveryBadgeSeverity, deliverySummary, gitHostSettingsLinks } from '@shared/git';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
-import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
+import { TaskRepositoryStatusCheckStepStateBadgeComponent } from '@shared/git-host-connections/task-repository-status-check-step-state-badge.component';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { StepHistoryLine, StepHistoryListComponent } from './step-history-list.component';
 
@@ -22,11 +22,11 @@ const EARLIER_DELIVERIES_SHOWN = 5;
 @Component({
   selector: 'app-repository-incoming-events',
   standalone: true,
-  imports: [RouterLink, ButtonComponent, ChainStepStateBadgeComponent, CopyFieldComponent, GitHostConnectionDialogComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
+  imports: [RouterLink, ButtonComponent, TaskRepositoryStatusCheckStepStateBadgeComponent, CopyFieldComponent, GitHostConnectionDialogComponent, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, SettingsSectionComponent, StepHistoryListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <gr-settings-section title="Incoming Events">
-      <app-chain-step-state-badge slot="after-title" [state]="step().state" />
+      <app-task-repository-status-check-step-state-badge slot="after-title" [state]="step().state" />
       @if (!applies()) {
         <span class="text-secondary">{{ step().detail }}</span>
       } @else {

@@ -5,7 +5,7 @@
 -->
 
 <gr-settings-section title="Connection">
-  <app-chain-step-state-badge slot="after-title" [state]="step().state" />
+  <app-task-repository-status-check-step-state-badge slot="after-title" [state]="step().state" />
   @if (step().state === 'off') {
     <span class="text-secondary">{{ step().detail }}</span>
   } @else if (pickerOptions().length === 1) {

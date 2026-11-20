@@ -15,7 +15,7 @@ import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { repositoryHost } from '@shared/git';
 import { SettingsAccessStateBadgeComponent, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccessData } from '@core/resolvers/inject-access';
-import { nextChainStepKey } from '@shared/git-host-connections/task-git-host-chain.component';
+import { getFirstTaskRepositoryStatusCheckStepWithSuggestedFixKey } from '@shared/git-host-connections/task-repository-status-check-summary.component';
 import { TaskSettingsNavigationComponent } from '../task-settings-navigation/task-settings-navigation.component';
 import { RepositoryAccessComponent } from './repository-access.component';
 import { RepositoryGitHostConnectionComponent } from './repository-git-host-connection.component';
@@ -75,7 +75,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
 
   stepWithPrimaryAction = computed(() => {
     const repo = this.state();
-    return repo ? nextChainStepKey(repo.chain) : undefined;
+    return repo ? getFirstTaskRepositoryStatusCheckStepWithSuggestedFixKey(repo.chain) : undefined;
   });
   breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName));
   gitHost = computed(() => {

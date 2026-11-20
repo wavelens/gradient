@@ -5,7 +5,7 @@
 -->
 
 <gr-settings-section title="Repository">
-  <app-chain-step-state-badge slot="after-title" [state]="state().chain.repository.state" />
+  <app-task-repository-status-check-step-state-badge slot="after-title" [state]="state().chain.repository.state" />
   @if (editing()) {
     <gr-form-field label="Repository URL" for="repo-url" required [invalid]="!!urlError()" [error]="urlError() ?? ''">
       <input grInput id="repo-url" [ngModel]="draftUrl()" (ngModelChange)="draftUrl.set($event); unsavedRepositoryUrlAccessTestPassed.set(false)" (keyup.enter)="saveUrl()" />

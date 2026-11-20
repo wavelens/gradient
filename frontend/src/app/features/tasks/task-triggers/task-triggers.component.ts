@@ -45,7 +45,7 @@ import {
 import { CurrentTimeSignal, RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { TasksService } from '@core/services/tasks.service';
-import { TaskGitHostChainComponent } from '@shared/git-host-connections/task-git-host-chain.component';
+import { TaskRepositoryStatusCheckSummaryComponent } from '@shared/git-host-connections/task-repository-status-check-summary.component';
 import { dialogFormChangesSinceOpen, splitList } from '@shared/forms';
 import { getCiTriggerTypeLabel, getNextPollTime, nextPollText } from '@shared/evaluation';
 import { cronExpressionToPlainEnglish } from './cron-expression-description';
@@ -128,7 +128,7 @@ function getPathFilterSummaryParts(filter: ChangedFilePathFilter): string[] {
     TooltipDirective,
     MessageBannerComponent,
     SettingsSectionComponent,
-    TaskGitHostChainComponent,
+    TaskRepositoryStatusCheckSummaryComponent,
   ],
   templateUrl: './task-triggers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

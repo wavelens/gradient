@@ -14,13 +14,13 @@ import { NotifyService } from '@core/services/notify.service';
 import { links } from '@shared/routing';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
-import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
+import { TaskRepositoryStatusCheckStepStateBadgeComponent } from '@shared/git-host-connections/task-repository-status-check-step-state-badge.component';
 import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 
 @Component({
   selector: 'app-repository-git-host-connection',
   standalone: true,
-  imports: [FormsModule, RouterLink, ButtonComponent, ChainStepStateBadgeComponent, SelectComponent, SettingsSectionComponent, GitHostConnectionDialogComponent, GithubAppInstallLinkComponent],
+  imports: [FormsModule, RouterLink, ButtonComponent, TaskRepositoryStatusCheckStepStateBadgeComponent, SelectComponent, SettingsSectionComponent, GitHostConnectionDialogComponent, GithubAppInstallLinkComponent],
   templateUrl: './repository-git-host-connection.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `

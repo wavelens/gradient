@@ -10,7 +10,7 @@
   } @else if (created(); as task) {
     <gr-settings-section [title]="form.display_name" data-testid="created-task">
       @if (task.repository; as repository) {
-        <app-task-git-host-chain [chain]="repository.chain"
+        <app-task-repository-status-check-summary [chain]="repository.chain"
           [repositoryPageLink]="links.taskPage(projectName, task.name, 'repository')" />
       } @else {
         <gr-load-state [loading]="true" loadingMessage="Loading task..." />

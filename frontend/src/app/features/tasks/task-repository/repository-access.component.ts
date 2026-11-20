@@ -14,7 +14,7 @@ import {
   InputDirective,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
+import { TaskRepositoryStatusCheckStepStateBadgeComponent } from '@shared/git-host-connections/task-repository-status-check-step-state-badge.component';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -29,7 +29,7 @@ import { canInstallWebhookOrDeployKeyForTask } from './provisioning';
   selector: 'app-repository-access',
   standalone: true,
   imports: [
-    ChainStepStateBadgeComponent,
+    TaskRepositoryStatusCheckStepStateBadgeComponent,
     FormsModule,
     ButtonComponent,
     CopyFieldComponent,

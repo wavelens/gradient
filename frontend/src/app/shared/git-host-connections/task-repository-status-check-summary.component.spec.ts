@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { TaskGitHostChain } from '@core/models';
 import { links } from '@shared/routing';
-import { TaskGitHostChainComponent } from './task-git-host-chain.component';
+import { TaskRepositoryStatusCheckSummaryComponent } from './task-repository-status-check-summary.component';
 
 const chain: TaskGitHostChain = {
   repository: { state: 'ok', detail: 'acme/app on git.example.com' },
@@ -18,8 +18,8 @@ const chain: TaskGitHostChain = {
 };
 
 function render(inputs: Record<string, unknown> = {}) {
-  TestBed.configureTestingModule({ imports: [TaskGitHostChainComponent], providers: [provideRouter([])] });
-  const fixture = TestBed.createComponent(TaskGitHostChainComponent);
+  TestBed.configureTestingModule({ imports: [TaskRepositoryStatusCheckSummaryComponent], providers: [provideRouter([])] });
+  const fixture = TestBed.createComponent(TaskRepositoryStatusCheckSummaryComponent);
   fixture.componentRef.setInput('chain', chain);
   fixture.componentRef.setInput('repositoryPageLink', links.taskPage('acme', 'app', 'repository'));
   for (const [name, value] of Object.entries(inputs)) fixture.componentRef.setInput(name, value);
@@ -27,9 +27,9 @@ function render(inputs: Record<string, unknown> = {}) {
   return fixture.nativeElement as HTMLElement;
 }
 
-const summary = (el: HTMLElement) => el.querySelector('[data-testid="chain-summary"]')?.textContent ?? '';
+const summary = (el: HTMLElement) => el.querySelector('[data-testid="status-check-summary"]')?.textContent ?? '';
 
-describe('TaskGitHostChainComponent', () => {
+describe('TaskRepositoryStatusCheckSummaryComponent', () => {
   it('summarizes the chain in one line with the worst step', () => {
     const el = render();
     expect(summary(el)).toContain('Incomplete');

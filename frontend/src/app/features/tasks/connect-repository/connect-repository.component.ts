@@ -45,7 +45,7 @@ import { repositoryWebUrl } from '@shared/evaluation';
 import { repositoryHost } from '@shared/git';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
-import { TaskGitHostChainComponent } from '@shared/git-host-connections/task-git-host-chain.component';
+import { TaskRepositoryStatusCheckSummaryComponent } from '@shared/git-host-connections/task-repository-status-check-summary.component';
 import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 
 export const RESERVED_TASK_NAMES = ['build-request'];
@@ -110,7 +110,7 @@ export function buildTaskCreationTriggersFromWizardChoices(choices: {
     LabelHelpComponent,
     SelectComponent,
     GitHostConnectionDialogComponent,
-    TaskGitHostChainComponent,
+    TaskRepositoryStatusCheckSummaryComponent,
     GithubAppInstallLinkComponent,
   ],
   templateUrl: './connect-repository.component.html',
