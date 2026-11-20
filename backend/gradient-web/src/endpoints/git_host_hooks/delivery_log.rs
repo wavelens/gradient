@@ -5,10 +5,13 @@
  */
 
 use super::IncomingWebhookResponse;
+use super::installation::repo_identity;
 use crate::error::WebResult;
 use gradient_db::WebDb;
 use gradient_entity::incoming_webhook_delivery::{DeliveryResult, Model};
-use gradient_types::{GitHostConnectionId, IncomingWebhookDeliveryId};
+use gradient_types::{
+    EGitHostConnection, GitHostConnectionId, IncomingWebhookDeliveryId, MTask, ProjectId,
+};
 use tracing::warn;
 
 const MAX_EVENT_NAME_LENGTH: usize = 64;
@@ -34,10 +37,30 @@ impl DeliveryLog {
             return;
         }
         let entry = entry(self.event.as_deref(), result);
+        let tracking_tasks = match (&entry.result, &entry.repository) {
+            (DeliveryResult::NoMatchingTask, Some(repository)) => {
+                tasks_tracking_repository(db, repository).await
+            }
+            _ => Vec::new(),
+        };
         for connection in &self.connections {
+            let detail = match (&entry.result, entry.repository.as_deref()) {
+                (DeliveryResult::NoMatchingTask, Some(repository)) => {
+                    no_matching_task_detail(
+                        db,
+                        *connection,
+                        repository,
+                        &entry.event,
+                        &tracking_tasks,
+                    )
+                    .await
+                }
+                _ => entry.detail.clone(),
+            };
             let row = Model {
                 id: IncomingWebhookDeliveryId::now_v7(),
                 git_host_connection: *connection,
+                detail,
                 ..entry.clone()
             };
             if let Err(e) = gradient_db::incoming_deliveries::record(db, row).await {
@@ -72,6 +95,89 @@ fn entry(event: Option<&str>, result: &WebResult<IncomingWebhookResponse>) -> Mo
                 ..Default::default()
             }
         }
+    }
+}
+
+async fn tasks_tracking_repository(db: &WebDb, repository: &str) -> Vec<MTask> {
+    let (Some(identity), Some((_, name))) = (
+        repo_identity(repository),
+        gradient_ci::parse_owner_repo(repository),
+    ) else {
+        return Vec::new();
+    };
+    match gradient_db::tasks::with_repository_containing(db, &name).await {
+        Ok(tasks) => tasks
+            .into_iter()
+            .filter(|task| repo_identity(&task.repository).as_ref() == Some(&identity))
+            .collect(),
+        Err(e) => {
+            warn!(error = %e, "Failed to look up the tasks that track a repository.");
+            Vec::new()
+        }
+    }
+}
+
+async fn no_matching_task_detail(
+    db: &WebDb,
+    connection: GitHostConnectionId,
+    repository: &str,
+    event: &str,
+    tracking_tasks: &[MTask],
+) -> Option<String> {
+    let connection_project = gradient_db::lookup::by_id::<EGitHostConnection, _>(db, connection)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.project);
+    let identity = repo_identity(repository).unwrap_or_else(|| repository.to_owned());
+    Some(describe_tasks_tracking_repository(
+        &identity,
+        event,
+        connection,
+        connection_project,
+        tracking_tasks,
+    ))
+}
+
+fn task_list_visible_to_connection(
+    tasks: &[&MTask],
+    connection_project: Option<ProjectId>,
+) -> String {
+    let (own, other): (Vec<&&MTask>, Vec<&&MTask>) = tasks
+        .iter()
+        .partition(|task| Some(task.project) == connection_project);
+    let mut labels: Vec<String> = own.iter().map(|task| task.name.clone()).collect();
+    match other.len() {
+        0 => {}
+        1 => labels.push("1 task of another project".to_owned()),
+        n => labels.push(format!("{n} tasks of other projects")),
+    }
+    labels.join(", ")
+}
+
+fn describe_tasks_tracking_repository(
+    identity: &str,
+    event: &str,
+    connection: GitHostConnectionId,
+    connection_project: Option<ProjectId>,
+    tracking_tasks: &[MTask],
+) -> String {
+    if tracking_tasks.is_empty() {
+        return format!("No task tracks {identity}");
+    }
+    let (using, not_using): (Vec<&MTask>, Vec<&MTask>) = tracking_tasks
+        .iter()
+        .partition(|task| task.git_host_connection == Some(connection));
+    if using.is_empty() {
+        format!(
+            "{} track {identity} but use no or another connection",
+            task_list_visible_to_connection(&not_using, connection_project)
+        )
+    } else {
+        format!(
+            "{} use this connection for {identity} but have no trigger for {event} events",
+            task_list_visible_to_connection(&using, connection_project)
+        )
     }
 }
 
@@ -123,6 +229,70 @@ mod tests {
         );
         assert_eq!(entry.result, DeliveryResult::NoMatchingTask);
         assert_eq!(entry.repository.as_deref(), Some("https://host/acme/other"));
+    }
+
+    fn tracking_task(
+        name: &str,
+        project: ProjectId,
+        connection: Option<GitHostConnectionId>,
+    ) -> MTask {
+        MTask {
+            name: name.into(),
+            project,
+            repository: "https://host/acme/app".into(),
+            git_host_connection: connection,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_tracking_task_names_the_repository() {
+        let detail = describe_tasks_tracking_repository(
+            "acme/app",
+            "push",
+            GitHostConnectionId::nil(),
+            None,
+            &[],
+        );
+        assert_eq!(detail, "No task tracks acme/app");
+    }
+
+    #[test]
+    fn tasks_on_another_connection_are_named_in_the_connection_project_only() {
+        let own = ProjectId::now_v7();
+        let connection = GitHostConnectionId::now_v7();
+        let tasks = [
+            tracking_task("main", own, None),
+            tracking_task(
+                "other",
+                ProjectId::now_v7(),
+                Some(GitHostConnectionId::now_v7()),
+            ),
+        ];
+        let detail =
+            describe_tasks_tracking_repository("acme/app", "push", connection, Some(own), &tasks);
+        assert_eq!(
+            detail,
+            "main, 1 task of another project track acme/app but use no or another connection"
+        );
+    }
+
+    #[test]
+    fn linked_tasks_without_matching_trigger_name_the_event() {
+        let own = ProjectId::now_v7();
+        let connection = GitHostConnectionId::now_v7();
+        let tasks = [tracking_task("main", own, Some(connection))];
+        let detail = describe_tasks_tracking_repository(
+            "acme/app",
+            "pull_request",
+            connection,
+            Some(own),
+            &tasks,
+        );
+        assert_eq!(
+            detail,
+            "main use this connection for acme/app but have no trigger for pull_request events"
+        );
     }
 
     #[test]
