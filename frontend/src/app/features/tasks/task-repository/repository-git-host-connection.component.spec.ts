@@ -15,6 +15,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ApiError } from '@core/services/api.service';
 import { RepositoryGitHostConnectionAndCommitStatusComponent } from './repository-git-host-connection.component';
+import { chainWithoutConnection } from './task-git-host-chain.testing';
 
 const reporting: GitHostConnectionSummary = {
   id: 'c1',
@@ -25,6 +26,9 @@ const reporting: GitHostConnectionSummary = {
   receives_events: true,
   reports_status: true,
   can_manage: false,
+  access_token_refreshes_automatically: false,
+  refused_signature_count: 0,
+  task_count: 0,
 };
 
 const eventsOnly: GitHostConnectionSummary = {
@@ -43,9 +47,9 @@ const state: TaskRepositoryResponse = {
   deploy_key: null,
   fetch: null,
   git_host_connection: null,
-  webhook_url: null,
   report_status: false,
-  last_event: null,
+  recent_deliveries: [],
+  chain: chainWithoutConnection,
   status_posts: [],
   available_connections: [reporting, eventsOnly],
   can_edit: true,
@@ -210,7 +214,7 @@ describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
   it('shows the webhook URL and installs the webhook through a saved connection that reports status', () => {
     const installWebhook = vi.fn(() => of('ok'));
     const { el, notify, fixture } = render(
-      { git_host_connection: reporting, report_status: true, webhook_url: 'https://ci.example.com/hooks/c1', can_manage_integrations: true },
+      { git_host_connection: { ...reporting, webhook_url: 'https://ci.example.com/hooks/c1' }, report_status: true, can_manage_integrations: true },
       { installWebhook },
     );
     const urls = Array.from(el.querySelectorAll<HTMLInputElement>('gr-copy-field input')).map((input) => input.value);
@@ -228,7 +232,7 @@ describe('RepositoryGitHostConnectionAndCommitStatusComponent', () => {
       git_host_connection: reporting,
       report_status: true,
       can_manage_integrations: true,
-      last_event: { id: 'd1', event: 'push', status_code: 200, result: 'queued', tasks_scanned: 1, queued: 1, created_at: '2026-01-01T00:00:00Z' },
+      recent_deliveries: [{ id: 'd1', event: 'push', status_code: 200, result: 'queued', tasks_scanned: 1, queued: 1, created_at: '2026-01-01T00:00:00Z' }],
     });
     expect(testId(el, 'last-event')?.textContent).toContain('Queued 1 evaluation');
     expect(testId(el, 'install-webhook')).not.toBeNull();

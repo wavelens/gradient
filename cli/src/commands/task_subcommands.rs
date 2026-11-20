@@ -136,13 +136,17 @@ fn print_repository(repository: &TaskRepositoryResponse, out: Output) {
         "off"
     };
     out.human(format!("Commit status report: {state}"));
-    if let Some(url) = &repository.webhook_url {
+    if let Some(url) = repository
+        .git_host_connection
+        .as_ref()
+        .and_then(|connection| connection.webhook_url.as_ref())
+    {
         out.human(format!("Webhook URL: {url}"));
     }
     if let Some(deploy_key) = &repository.deploy_key {
         out.human(format!("Deploy key: {deploy_key}"));
     }
-    if let Some(event) = &repository.last_event {
+    if let Some(event) = repository.recent_deliveries.first() {
         out.human("Last Webhook event");
         print_incoming_webhook_delivery_line(out, event);
     }

@@ -9,6 +9,7 @@ import { By } from '@angular/platform-browser';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Observable, of, throwError } from 'rxjs';
 import { TaskRepositoryResponse } from '@core/models';
+import { chainWithoutConnection } from './task-git-host-chain.testing';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
@@ -20,7 +21,8 @@ const state: TaskRepositoryResponse = {
   uses_ssh: true,
   deploy_key: 'ssh-ed25519 AAAAkey',
   fetch: { checked_at: '2026-01-01T10:00:00', ok_at: '2026-01-01T10:00:00', failed: false, error: null },
-  last_event: null,
+  recent_deliveries: [],
+  chain: chainWithoutConnection,
   report_status: false,
   status_posts: [],
   available_connections: [],

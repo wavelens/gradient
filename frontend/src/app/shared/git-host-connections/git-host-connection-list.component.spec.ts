@@ -27,6 +27,9 @@ const own: GitHostConnectionSummary = {
   receives_events: true,
   reports_status: true,
   can_manage: true,
+  access_token_refreshes_automatically: false,
+  refused_signature_count: 0,
+  task_count: 0,
 };
 
 const inherited: GitHostConnectionSummary = {

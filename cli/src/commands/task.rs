@@ -628,6 +628,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                         restrict_evaluation_fetches: None,
                         extra_allowed_uri_prefixes: None,
                         triggers,
+                        git_host_connection: None,
+                        report_status: None,
                     },
                 )
                 .await

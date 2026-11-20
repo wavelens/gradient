@@ -126,7 +126,7 @@ export class RepositoryGitHostConnectionAndCommitStatusComponent implements OnIn
   hostLinks = computed(() => gitHostSettingsLinks(this.state().repository, this.state().git_host_connection?.git_host_type ?? null));
   events = computed(() => webhookEvents(this.state().git_host_connection?.git_host_type ?? 'forgejo'));
   lastEvent = computed(() => {
-    const event = this.state().last_event;
+    const event = this.state().recent_deliveries[0];
     return event ? `${deliverySummary(event)} · ${relativeTime(event.created_at, this.clock.currentTimeMilliseconds())}` : null;
   });
   installingWebhook = signal(false);

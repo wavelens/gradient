@@ -129,6 +129,9 @@ describe('TaskActionsComponent', () => {
       receives_events: true,
       reports_status,
       can_manage: false,
+      access_token_refreshes_automatically: false,
+      refused_signature_count: 0,
+      task_count: 0,
     });
     const connections = [connection('reporting', true), connection('events-only', false)];
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [action], {}, connections);

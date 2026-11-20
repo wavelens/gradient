@@ -1482,27 +1482,16 @@ export type GitHostConnectionOwner = {
   type: "project";
 };
 
-export interface GitHostConnectionResponse {
-  id: GitHostConnectionId;
-  owner: GitHostConnectionOwner;
-  name: string;
-  display_name: string;
-  git_host_type: string;
-  base_url?: string | null;
+export type GitHostConnectionResponse = GitHostConnectionSummary & {
   has_secret: boolean;
   has_access_token: boolean;
-  access_token_refreshes_automatically: boolean;
   allowed_ips: string[];
-  receives_events: boolean;
-  reports_status: boolean;
   installation_id?: number | null;
-  account_login?: string | null;
   created_by: UserId;
   created_at: string;
   managed: boolean;
-  webhook_url?: string | null;
   generated_secret?: string | null;
-}
+};
 
 export interface GitHostConnectionSummary {
   id: GitHostConnectionId;
@@ -1514,6 +1503,31 @@ export interface GitHostConnectionSummary {
   receives_events: boolean;
   reports_status: boolean;
   can_manage: boolean;
+  account_login?: string | null;
+  webhook_url?: string | null;
+  access_token_expires_at?: string | null;
+  access_token_refreshes_automatically: boolean;
+  last_delivery?: IncomingWebhookDeliveryResponse | null;
+  refused_signature_count: number;
+  last_refused_signature_at?: string | null;
+  last_status_post?: TaskCommitStatusPostAttempt | null;
+  task_count: number;
+  repository_fit?: RepositoryFit | null;
+}
+
+export interface GitHostConnectionTaskResponse {
+  id: TaskId;
+  project: string;
+  name: string;
+  display_name: string;
+  repository: string;
+  report_status: boolean;
+}
+
+export interface GitHostConnectionTestResponse {
+  success: boolean;
+  account?: string | null;
+  error?: string | null;
 }
 
 export interface GitHttpsCredentialResponse {
@@ -1860,6 +1874,8 @@ export interface MakeTaskRequest {
   restrict_evaluation_fetches?: boolean | null;
   extra_allowed_uri_prefixes?: string[] | null;
   triggers?: TriggerConfig[] | null;
+  git_host_connection?: GitHostConnectionId | null;
+  report_status?: boolean | null;
 }
 
 export interface MakeTeamRequest {
@@ -2532,6 +2548,11 @@ export interface RepositoryFetchStatus {
   error?: string | null;
 }
 
+export interface RepositoryFit {
+  fits: boolean;
+  reason?: string | null;
+}
+
 export type RequestKind = "project" | "cache";
 
 export interface RetiredPublicKeyEntry {
@@ -2854,6 +2875,44 @@ export interface TaskDetailsResponse {
 
 export type TaskEvaluationNotStartedReason = "same_commit" | "filter" | "no_changed_file_matches_path_filter" | "tag_not_found" | "concurrency" | "commit_message" | "error" | "input_update_running" | "input_update_not_configured" | "fork_pull_request_commit_waits_for_maintainer_approval";
 
+export interface TaskGitHostChain {
+  repository: TaskGitHostChainStep;
+  connection: TaskGitHostChainStep;
+  incoming_events: TaskGitHostChainStep;
+  commit_status: TaskGitHostChainStep;
+}
+
+export interface TaskGitHostChainStep {
+  state: TaskGitHostChainStepState;
+  detail: string;
+  at?: string | null;
+  action?: TaskGitHostChainStepAction | null;
+}
+
+export type TaskGitHostChainStepAction = {
+  type: "edit_repository_url";
+} | {
+  type: "select_connection";
+} | {
+  git_host_type?: string | null;
+  base_url: string;
+  type: "create_connection";
+} | {
+  account: string;
+  type: "install_github_app";
+} | {
+  type: "install_webhook";
+} | {
+  webhook_url: string;
+  type: "add_webhook_on_host";
+} | {
+  type: "turn_on_report_status";
+} | {
+  type: "test_status_report";
+};
+
+export type TaskGitHostChainStepState = "ok" | "attention" | "failing" | "off";
+
 export type TaskId = string;
 
 export interface TaskMetricPoint {
@@ -2885,9 +2944,9 @@ export interface TaskRepositoryResponse {
   deploy_key?: string | null;
   fetch?: RepositoryFetchStatus | null;
   git_host_connection?: GitHostConnectionSummary | null;
-  webhook_url?: string | null;
   report_status: boolean;
-  last_event?: IncomingWebhookDeliveryResponse | null;
+  chain: TaskGitHostChain;
+  recent_deliveries: IncomingWebhookDeliveryResponse[];
   status_posts: TaskCommitStatusPostAttempt[];
   available_connections: GitHostConnectionSummary[];
   can_edit: boolean;
