@@ -6,6 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { LoadStateComponent, PageLayoutComponent } from '@gradient/ui/ui';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
@@ -64,6 +65,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   protected taskAccess = injectTaskAccessData();
 
   private access = viewChild(RepositoryAccessComponent);
+  private loadRequest?: Subscription;
 
   projectName = '';
   taskName = '';
@@ -92,7 +94,8 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   load(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    requestIfProjectMember(this.taskAccess()?.task, () => this.tasks.getRepository(this.projectName, this.taskName)).subscribe({
+    this.loadRequest?.unsubscribe();
+    this.loadRequest = requestIfProjectMember(this.taskAccess()?.task, () => this.tasks.getRepository(this.projectName, this.taskName)).subscribe({
       next: (state) => {
         this.state.set(state);
         this.loading.set(false);
