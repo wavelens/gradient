@@ -6,7 +6,11 @@
 
 use axum::http::StatusCode;
 use axum_test::{TestResponse, TestServer};
+use gradient_core::ServerState;
+use gradient_test_support::cache_fixture::{FIXTURE_CACHE_NAME, private_cache_state};
 use gradient_test_support::state::TestState;
+use gradient_web::create_router;
+use std::sync::Arc;
 
 const FIREFOX_PAGE_ACCEPT_HEADER: &str =
     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
@@ -23,6 +27,23 @@ fn build_test_server_with_frontend_url_and_browser_redirect_flag(enabled: bool) 
                 .frontend_redirect_browser_requests_to_frontend_pages = enabled;
         })
         .server()
+}
+
+async fn start_test_server_with_frontend_url_and_browser_redirect_setting(
+    fixture: impl Future<Output = Arc<ServerState>>,
+    enabled: bool,
+) -> TestServer {
+    let mut state = fixture.await;
+    let config = Arc::make_mut(
+        &mut Arc::get_mut(&mut state)
+            .expect("fixture state has a single owner")
+            .config,
+    );
+    config.server.frontend_url = TEST_SERVER_FRONTEND_URL.into();
+    config
+        .server
+        .frontend_redirect_browser_requests_to_frontend_pages = enabled;
+    TestServer::new(create_router(state).expect("router"))
 }
 
 async fn send_get_request_with_accept_header(
@@ -76,19 +97,55 @@ async fn binary_cache_metadata_narinfo_and_ls_urls_redirect_to_web_frontend_page
 }
 
 #[tokio::test]
-async fn browser_html_page_request_for_private_cache_redirects_without_basic_auth_prompt() {
-    let server = build_test_server_with_frontend_url_and_browser_redirect_flag(true);
+async fn browser_request_without_credentials_to_private_binary_cache_redirects_to_web_frontend() {
+    let server = start_test_server_with_frontend_url_and_browser_redirect_setting(
+        private_cache_state(),
+        true,
+    )
+    .await;
     let response = send_get_request_with_accept_header(
         &server,
-        "/cache/private-cache/nix-cache-info",
+        &format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info"),
         FIREFOX_PAGE_ACCEPT_HEADER,
     )
     .await;
     assert_302_redirect_to_location_with_no_store_and_vary_accept(
         &response,
-        &format!("{TEST_SERVER_FRONTEND_URL}/caches/private-cache"),
+        &format!("{TEST_SERVER_FRONTEND_URL}/caches/{FIXTURE_CACHE_NAME}"),
     );
-    assert!(response.maybe_header("www-authenticate").is_none());
+}
+
+#[tokio::test]
+async fn non_browser_unauthenticated_request_to_private_cache_gets_same_refusal_with_redirect_on_and_off()
+ {
+    let path = format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info");
+    let mut responses = Vec::new();
+    for enabled in [true, false] {
+        let server = start_test_server_with_frontend_url_and_browser_redirect_setting(
+            private_cache_state(),
+            enabled,
+        )
+        .await;
+        responses.push(
+            send_get_request_with_accept_header(
+                &server,
+                &path,
+                ACCEPT_HEADER_VALUE_ALL_MEDIA_TYPES,
+            )
+            .await,
+        );
+    }
+    let [with_redirect, without_redirect] = responses.as_slice() else {
+        unreachable!()
+    };
+    with_redirect.assert_status(StatusCode::UNAUTHORIZED);
+    assert_eq!(with_redirect.status_code(), without_redirect.status_code());
+    assert_eq!(with_redirect.text(), without_redirect.text());
+    assert_eq!(
+        with_redirect.maybe_header("www-authenticate"),
+        without_redirect.maybe_header("www-authenticate")
+    );
+    with_redirect.assert_header("vary", "Accept");
 }
 
 #[tokio::test]

@@ -96,7 +96,7 @@ sequenceDiagram
 | `{hash}.narinfo`, `ls/{hash}` | `{frontend_url}/caches/{cache}/nars?hash={hash}` |
 
 - HTML page requests have `text/html` in their `Accept` header. The `*/*` wildcard alone cannot match. Calls from Nix, curl, and `fetch()` keep the response unchanged.
-- Middleware in `binary_cache_browser_redirect.rs` can decide before authentication and before cache lookup. Private caches don't send a Basic auth prompt to the browser.
+- The `binary_cache_browser_redirect.rs` middleware can make this decision before authentication and before cache lookup. Redirect responses are the same for public caches, private caches, and caches that don't exist.
 - Redirects include `Cache-Control: no-store`. All responses on these routes include `Vary: Accept`. Shared HTTP caches keep both responses separate.
 - NAR downloads, `serve`, `log`, `debuginfo`, `build-trace-v2`, and `proto` never redirect.
 - Cache names and hashes use percent encoding. Narinfo files and listings with an invalid store hash keep the response unchanged.
