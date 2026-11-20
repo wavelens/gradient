@@ -59,7 +59,7 @@ A personal access token from a dedicated account works as an alternative. That a
 1. Open **Project settings -> Git host connections** and click **New connection**. The team settings page **Git host connections** can share the connection with every project of the team.
 2. Select GitLab in **Host type**. Enter `https://gitlab.com` or the self-hosted address in **Host URL**. Paste the token into **Access token** and click **Create**.
 3. Gradient checked the token and named the bot user in "Signed in as <account>". The **Webhook URL** and **Webhook secret** appear a single time.
-4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. A **Connection** select appears for more than one fitting connection.
+4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. Two or more fitting connections come with a **Connection** select.
 5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for a connection with **Reports status** on.
 
 The **Repository** page of the task has a section for each step from connection to commit status. Each section has a state and one action.
