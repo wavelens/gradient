@@ -121,7 +121,7 @@ fn print_commit_status_post_attempt_line(out: Output, attempt: &TaskCommitStatus
     ));
 }
 
-fn command_for_chain_action(
+fn status_check_fix_action_to_cli_command(
     action: &TaskGitHostChainStepAction,
     repository: &TaskRepositoryResponse,
 ) -> String {
@@ -167,7 +167,10 @@ fn command_for_chain_action(
     }
 }
 
-fn print_chain(repository: &TaskRepositoryResponse, out: Output) {
+fn print_task_repository_status_check_steps_with_state_and_fix_command(
+    repository: &TaskRepositoryResponse,
+    out: Output,
+) {
     let chain = &repository.chain;
     for (title, step) in [
         ("Repository", &chain.repository),
@@ -179,7 +182,7 @@ fn print_chain(repository: &TaskRepositoryResponse, out: Output) {
         if let Some(action) = &step.action {
             out.human(format!(
                 "  Next: {}",
-                command_for_chain_action(action, repository)
+                status_check_fix_action_to_cli_command(action, repository)
             ));
         }
     }
@@ -187,7 +190,7 @@ fn print_chain(repository: &TaskRepositoryResponse, out: Output) {
 
 fn print_repository(repository: &TaskRepositoryResponse, out: Output) {
     out.human(format!("Repository: {}", repository.repository));
-    print_chain(repository, out);
+    print_task_repository_status_check_steps_with_state_and_fix_command(repository, out);
     match &repository.git_host_connection {
         Some(connection) => {
             out.human("Connection");
