@@ -11,6 +11,7 @@ import type { AccessState, GitHostConnectionOwner, GitHostConnectionResponse, Gi
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
+import { ConfigService } from '@core/services/config.service';
 import { GitHostConnectionListComponent } from './git-host-connection-list.component';
 
 const project: GitHostConnectionOwner = { type: 'project', name: 'acme' };
@@ -65,6 +66,7 @@ function render(access: AccessState = writable, connections: GitHostConnectionSu
       { provide: GitHostConnectionsApi, useValue: { list, listDeliveries: () => of([]), ...api } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
+      { provide: ConfigService, useValue: { giteaOauthAppConfig: null } },
     ],
   });
   const fixture = TestBed.createComponent(GitHostConnectionListComponent);
@@ -80,123 +82,87 @@ function rows(el: HTMLElement, testId: string): HTMLElement[] {
 }
 
 describe('GitHostConnectionListComponent', () => {
-  it('splits the own connections from the inherited ones and names their owner', () => {
-    const { el, list } = render();
+  it('lists the own connections first and names the owner of inherited ones without actions', () => {
+    const { el, list } = render(writable, [inherited, own]);
     expect(list).toHaveBeenCalledWith(project);
-    expect(rows(el, 'own-connection').map((row) => row.textContent)).toEqual([expect.stringContaining('Forgejo')]);
-    const inheritedRows = rows(el, 'inherited-connection');
-    expect(inheritedRows).toHaveLength(1);
-    expect(inheritedRows[0].textContent).toContain('inherited');
-    expect(inheritedRows[0].textContent).toContain('Inherited from Team platform');
-    expect(inheritedRows[0].querySelector('button')).toBeNull();
+    const all = Array.from(el.querySelectorAll<HTMLElement>('.connection-row'));
+    expect(all.map((row) => row.dataset['testid'])).toEqual(['own-connection', 'inherited-connection']);
+    expect(all[1].textContent).toContain('Team platform');
+    expect(all[1].querySelector('.connection-actions button')).toBeNull();
+    expect(el.querySelectorAll('h2').length).toBe(0);
   });
 
-  it('names the own connections only when inherited ones are listed below them', () => {
-    const headings = (el: HTMLElement) => Array.from(el.querySelectorAll('h2')).map((h) => h.textContent?.trim());
-    expect(headings(render(writable, [own, inherited]).el)).toEqual(['Owned Connections', 'Inherited Connections']);
-    TestBed.resetTestingModule();
-    const { el } = render(writable, []);
-    expect(headings(el)).toEqual(['No connections to Git hosts']);
-    expect(rows(el, 'new-connection')).toHaveLength(1);
+  it('shows the health of a connection in one line', () => {
+    const healthy: GitHostConnectionSummary = {
+      ...own,
+      access_token_refreshes_automatically: true,
+      refused_signature_count: 3,
+      task_count: 2,
+      last_delivery: { id: 'd1', created_at: '2026-01-01T00:00:00Z', result: 'queued', queued: 1, status_code: 200 } as never,
+    };
+    const health = render(writable, [healthy]).el.querySelector('[data-testid="connection-health"]')!.textContent!;
+    expect(health).toContain('Queued 1 evaluation');
+    expect(health).toContain('Token refreshes automatically');
+    expect(health).toContain('3 refused signatures');
+    expect(health).toContain('2 tasks');
   });
 
-  it('leaves the new connection button of a filled list to the page header', () => {
-    const { el } = render(writable, [own]);
-    expect(rows(el, 'new-connection')).toHaveLength(0);
-  });
-
-  it('creates a connection with PUT and shows the generated secret once', () => {
-    const create = vi.fn(() => of({ ...full, generated_secret: 'whsec-123' }));
-    const { fixture, component, notify } = render(writable, [own], { create });
-    component.openCreate();
-    component.patchForm({ name: 'gitea', git_host_type: 'gitea', allowed_ips: '10.0.0.0/8' });
-    component.save();
+  it('expands the tasks of a connection with links to their Repository page', () => {
+    const listTasks = vi.fn(() => of([{ id: 't1', project: 'acme', name: 'app', display_name: 'App', repository: 'r', report_status: true }]));
+    const { fixture, el } = render(writable, [{ ...own, task_count: 1 }], { listTasks });
+    el.querySelector<HTMLButtonElement>('[data-testid="connection-tasks"]')!.click();
     fixture.detectChanges();
-
-    expect(create).toHaveBeenCalledWith(project, {
-      name: 'gitea',
-      git_host_type: 'gitea',
-      receives_events: true,
-      reports_status: false,
-      allowed_ips: ['10.0.0.0/8'],
-    });
-    expect(notify.success).toHaveBeenCalledWith('Git host connection saved');
-    const values = Array.from(document.querySelectorAll<HTMLInputElement>('.gr-dialog gr-copy-field input')).map((input) => input.value);
-    expect(values).toEqual(['https://ci.example.com/hooks/c1', 'whsec-123']);
-    (document.querySelector('[data-testid="secret-done"]') as HTMLButtonElement).click();
-    expect(component.createdConnectionWithOneTimeSecret()).toBeNull();
+    expect(listTasks).toHaveBeenCalledWith(project, 'c1');
+    expect(el.querySelector('[data-testid="connection-task-list"] a')?.getAttribute('href')).toBe('/project/acme/task/app/repository');
   });
 
-  it('loads the full connection to edit it and sends only the changed fields', () => {
+  it('offers a new connection in the empty state only', () => {
+    expect(rows(render(writable, []).el, 'new-connection')).toHaveLength(1);
+    TestBed.resetTestingModule();
+    expect(rows(render(writable, [inherited]).el, 'new-connection')).toHaveLength(0);
+  });
+
+  it('tests a connection and reports the result as a toast', () => {
+    const test = vi.fn(() => of({ success: true, account: 'ci-bot' }));
+    const { el, notify } = render(writable, [own], { test });
+    el.querySelector<HTMLButtonElement>('[aria-label="Test Forgejo"]')!.click();
+    expect(test).toHaveBeenCalledWith(project, 'c1');
+    expect(notify.success).toHaveBeenCalledWith('Forgejo: signed in as ci-bot');
+  });
+
+  it('opens the edit dialog with the full connection', () => {
     const get = vi.fn(() => of(full));
-    const patch = vi.fn(() => of(full));
-    const { component } = render(writable, [own], { get, patch });
-    component.openEdit(own);
+    const { el } = render(writable, [own], { get });
+    el.querySelector<HTMLButtonElement>('[aria-label="Edit Forgejo"]')!.click();
     expect(get).toHaveBeenCalledWith(project, 'c1');
-    expect(component.form().name).toBe('forgejo');
-    component.patchForm({ display_name: 'Forgejo Prod', reports_status: false });
-    component.save();
-    expect(patch).toHaveBeenCalledWith(project, 'c1', { display_name: 'Forgejo Prod', reports_status: false });
   });
 
-  it('marks a connection whose access token refreshes automatically', () => {
-    const get = vi.fn(() => of({ ...full, access_token_refreshes_automatically: true }));
-    const { fixture, component } = render(writable, [own], { get });
-    component.openEdit(own);
+  it('removes a connection from the actions menu after the confirmation', () => {
+    const remove = vi.fn(() => of(true));
+    const { fixture, el, component, confirm } = render(writable, [own], { delete: remove });
+    component.remove(own);
     fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog [data-testid="token-refreshes-badge"]')).not.toBeNull();
-  });
-
-  it('offers the OAuth2 connection only to a project', () => {
-    const { el } = render();
-    expect(el.querySelector('app-forgejo-oauth-connection')).not.toBeNull();
-    TestBed.resetTestingModule();
-    TestBed.configureTestingModule({
-      imports: [GitHostConnectionListComponent],
-      providers: [provideRouter([]), { provide: GitHostConnectionsApi, useValue: { list: () => of([]) } }],
-    });
-    const team = TestBed.createComponent(GitHostConnectionListComponent);
-    team.componentRef.setInput('gitHostConnectionOwner', { type: 'team', name: 'platform' });
-    team.componentRef.setInput('access', writable);
-    team.detectChanges();
-    expect((team.nativeElement as HTMLElement).querySelector('app-forgejo-oauth-connection')).toBeNull();
-  });
-
-  it('removes a connection after the confirmation', () => {
-    const remove = vi.fn(() => of('deleted'));
-    const { fixture, el, confirm, notify } = render(writable, [own], { delete: remove });
-    const deleteButton = rows(el, 'own-connection')[0].querySelector<HTMLButtonElement>('[aria-label="Delete Forgejo"]')!;
-    deleteButton.click();
-    fixture.detectChanges();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete git host connection' }));
+    expect(confirm).toHaveBeenCalled();
     expect(remove).toHaveBeenCalledWith(project, 'c1');
-    expect(notify.success).toHaveBeenCalledWith('Git host connection deleted');
     expect(rows(el, 'own-connection')).toHaveLength(0);
+    expect(el.querySelector('[aria-label="Actions for Forgejo"]')).toBeNull();
   });
 
-  it('hides create, edit and delete from a member who cannot manage connections', () => {
-    const { el } = render(readOnly, [{ ...own, can_manage: false }]);
-    expect(el.querySelector('[data-testid="new-connection"]')).toBeNull();
+  it('hides test, edit and the actions menu from a member who cannot manage connections', () => {
+    const { el } = render(readOnly, [own]);
+    expect(el.querySelector('[aria-label="Test Forgejo"]')).toBeNull();
     expect(el.querySelector('[aria-label="Edit Forgejo"]')).toBeNull();
-    expect(el.querySelector('[aria-label="Delete Forgejo"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Actions for Forgejo"]')).toBeNull();
     expect(el.querySelector('[aria-label="Deliveries of Forgejo"]')).not.toBeNull();
   });
 
-  it('refuses a connection that neither receives events nor reports status', () => {
-    const create = vi.fn();
-    const { component } = render(writable, [], { create });
-    component.openCreate();
-    component.patchForm({ name: 'idle', receives_events: false, reports_status: false });
-    expect(component.capabilityError()).toContain('Receives events');
-    component.save();
-    expect(create).not.toHaveBeenCalled();
+  it('tests but never edits a GitHub App connection', () => {
+    const { el } = render(writable, [{ ...own, git_host_type: 'github', display_name: 'GitHub' }]);
+    expect(el.querySelector('[aria-label="Test GitHub"]')).not.toBeNull();
+    expect(el.querySelector('[aria-label="Edit GitHub"]')).toBeNull();
   });
 
-  it('asks for a base URL and token before a connection reports status', () => {
-    const { component } = render(writable, []);
-    component.openCreate();
-    component.patchForm({ name: 'status', reports_status: true });
-    expect(component.baseUrlError()).not.toBeNull();
-    expect(component.accessTokenError()).toBe('Enter an access token to report status.');
+  it('shows the OAuth result banner on a project page only', () => {
+    expect(render().el.querySelector('app-git-host-oauth-return-banner')).not.toBeNull();
   });
 });

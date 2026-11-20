@@ -25,7 +25,7 @@ import { TeamSettingsNavigationComponent } from '../team-settings-navigation/tea
       @if (isMember()) {
         <app-settings-access-state-badge slot="after-title" [access]="access()" kind="team" showReadOnlyNote />
       }
-      @if (gitHostConnectionList()?.ownConnections()?.length) {
+      @if (gitHostConnectionList()?.connections()?.length) {
         <button slot="actions" *appWritable="access()" grButton label="New connection" icon="add"
           (click)="gitHostConnectionList()?.openCreate()"></button>
       }
