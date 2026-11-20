@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::git_host_chain::{TaskGitHostChain, TaskGitHostChainInput, task_git_host_chain};
+use super::repository_status_check::{
+    TaskGitHostChain, TaskRepositoryStatusCheckInput,
+    check_task_repository_readable_git_host_webhook_and_commit_status,
+};
 use super::{RepositoryFetchStatus, error_message_if_caller_can_edit_task};
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::TaskPath;
@@ -170,7 +173,7 @@ async fn repository_response(
 
     let available_connections = connections::project::available_summaries(
         &db.web_db,
-        &connections::ConnectionReader::new(user, api_key),
+        &connections::GitHostConnectionReaderScope::new(user, api_key),
         &connections::SummaryOptions {
             serve_url: &db.config.server.serve_url,
             repository: Some(&task.repository),
@@ -213,32 +216,34 @@ async fn repository_response(
     let can_edit = can_edit_task && !task.managed;
     let can_create_connection = can_manage_integrations && !project.managed && !task.managed;
     let fetch = RepositoryFetchStatus::of(task, can_edit_task);
-    let chain = task_git_host_chain(&TaskGitHostChainInput {
-        repository: &task.repository,
-        fetch: fetch.as_ref(),
-        connection: git_host_connection.as_ref(),
-        connection_has_access_token,
-        available_connections: &available_connections,
-        report_status: task.report_status,
-        newest_delivery: recent_deliveries.first(),
-        missing_trigger_type: missing_trigger_type_for_delivery(
-            &db.web_db,
-            task,
-            git_host_connection.as_ref(),
-            recent_deliveries.first(),
-        )
-        .await?,
-        newest_status_post: status_posts.first(),
-        can_edit_task: can_edit,
-        can_manage_integrations,
-        can_create_connection,
-        github_app_configured: db.config.github_app.is_some(),
-        can_install_github_app: !task.managed
-            && user.superuser
-            && api_key.is_none_or(|key| {
-                key.may_use_owner_superuser_rights_for_method(&axum::http::Method::POST)
-            }),
-    });
+    let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
+        &TaskRepositoryStatusCheckInput {
+            repository: &task.repository,
+            fetch: fetch.as_ref(),
+            connection: git_host_connection.as_ref(),
+            connection_has_access_token,
+            available_connections: &available_connections,
+            report_status: task.report_status,
+            newest_delivery: recent_deliveries.first(),
+            missing_trigger_type: missing_trigger_type_for_delivery(
+                &db.web_db,
+                task,
+                git_host_connection.as_ref(),
+                recent_deliveries.first(),
+            )
+            .await?,
+            newest_status_post: status_posts.first(),
+            can_edit_task: can_edit,
+            can_manage_integrations,
+            can_create_connection,
+            github_app_configured: db.config.github_app.is_some(),
+            can_install_github_app: !task.managed
+                && user.superuser
+                && api_key.is_none_or(|key| {
+                    key.may_use_owner_superuser_rights_for_method(&axum::http::Method::POST)
+                }),
+        },
+    );
 
     Ok(TaskRepositoryResponse {
         repository: task.repository.clone(),

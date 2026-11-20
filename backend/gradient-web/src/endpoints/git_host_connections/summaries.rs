@@ -21,12 +21,12 @@ use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::*;
 use std::collections::{HashMap, HashSet};
 
-pub(crate) struct ConnectionReader<'a> {
+pub(crate) struct GitHostConnectionReaderScope<'a> {
     pub(crate) user: &'a MUser,
     pub(crate) pinned_project: Option<ProjectId>,
 }
 
-impl<'a> ConnectionReader<'a> {
+impl<'a> GitHostConnectionReaderScope<'a> {
     pub(crate) fn new(user: &'a MUser, api_key: Option<&ApiKeyContext>) -> Self {
         Self {
             user,
@@ -44,7 +44,7 @@ impl<'a> ConnectionReader<'a> {
 
 pub(crate) async fn project_names_visible_to_reader(
     db: &impl sea_orm::ConnectionTrait,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     project_ids: impl IntoIterator<Item = ProjectId>,
 ) -> WebResult<HashMap<ProjectId, String>> {
     let candidates: Vec<ProjectId> = project_ids
@@ -80,12 +80,14 @@ pub(crate) async fn project_names_visible_to_reader(
         .collect())
 }
 
-pub(crate) struct DeliveryRepositoryLimits(HashMap<GitHostConnectionId, HashSet<String>>);
+pub(crate) struct VisibleWebhookDeliveryRepositoryUrlsByGitHostConnection(
+    HashMap<GitHostConnectionId, HashSet<String>>,
+);
 
-impl DeliveryRepositoryLimits {
+impl VisibleWebhookDeliveryRepositoryUrlsByGitHostConnection {
     pub(crate) async fn of(
         db: &impl sea_orm::ConnectionTrait,
-        reader: &ConnectionReader<'_>,
+        reader: &GitHostConnectionReaderScope<'_>,
         connections: &[&MGitHostConnection],
     ) -> WebResult<Self> {
         let mut limits: HashMap<GitHostConnectionId, HashSet<String>> = connections
@@ -135,7 +137,7 @@ pub(crate) struct ConnectionToSummarize {
 
 pub(crate) async fn summaries(
     db: &impl sea_orm::ConnectionTrait,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     options: &SummaryOptions<'_>,
     rows: Vec<ConnectionToSummarize>,
 ) -> WebResult<Vec<GitHostConnectionSummary>> {
@@ -166,7 +168,9 @@ pub(crate) async fn summaries(
 
     let connection_refs: Vec<&MGitHostConnection> =
         rows.iter().map(|row| &row.connection).collect();
-    let limits = DeliveryRepositoryLimits::of(db, reader, &connection_refs).await?;
+    let limits =
+        VisibleWebhookDeliveryRepositoryUrlsByGitHostConnection::of(db, reader, &connection_refs)
+            .await?;
     let mut last_deliveries: HashMap<GitHostConnectionId, incoming_webhook_delivery::Model> =
         HashMap::new();
     for delivery in gradient_db::incoming_deliveries::newest_per_connection_and_repository(db, &ids)
@@ -234,7 +238,7 @@ pub(crate) async fn summaries(
 
 pub(crate) async fn summaries_of_owner(
     db: &impl sea_orm::ConnectionTrait,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     owner: GitHostConnectionOwnerByDatabaseId,
     options: &SummaryOptions<'_>,
     can_manage: bool,

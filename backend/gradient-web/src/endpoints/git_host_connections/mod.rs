@@ -15,8 +15,8 @@ pub mod team;
 
 pub(crate) use refusal::GitHostConnectionRefusal;
 pub(crate) use summaries::{
-    ConnectionReader, ConnectionToSummarize, DeliveryRepositoryLimits, SummaryOptions, summaries,
-    summaries_of_owner,
+    ConnectionToSummarize, GitHostConnectionReaderScope, SummaryOptions,
+    VisibleWebhookDeliveryRepositoryUrlsByGitHostConnection, summaries, summaries_of_owner,
 };
 
 use crate::audit::Audit;
@@ -236,7 +236,7 @@ pub(crate) fn webhook_url(serve_url: &str, connection: &MGitHostConnection) -> O
 
 pub(crate) async fn response(
     db: &impl sea_orm::ConnectionTrait,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     serve_url: &str,
     connection: MGitHostConnection,
 ) -> WebResult<GitHostConnectionResponse> {
@@ -465,7 +465,7 @@ async fn create_github_app_connection(
 pub(crate) async fn create(
     ci: &CiContext,
     owner: GitHostConnectionOwnerByDatabaseId,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     body: CreateGitHostConnectionRequest,
     audit: &Audit,
 ) -> WebResult<GitHostConnectionResponse> {
@@ -539,7 +539,7 @@ pub(crate) async fn create(
 pub(crate) async fn patch(
     ci: &CiContext,
     owner: GitHostConnectionOwnerByDatabaseId,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     id: GitHostConnectionId,
     body: PatchGitHostConnectionRequest,
     audit: &Audit,
@@ -697,7 +697,7 @@ pub(crate) async fn test(
 
 pub(crate) async fn deliveries(
     db: &impl sea_orm::ConnectionTrait,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     owner: GitHostConnectionOwnerByDatabaseId,
     id: GitHostConnectionId,
 ) -> WebResult<Vec<IncomingWebhookDeliveryResponse>> {
@@ -707,10 +707,12 @@ pub(crate) async fn deliveries(
 
 pub(crate) async fn deliveries_of_connection(
     db: &impl sea_orm::ConnectionTrait,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     connection: &MGitHostConnection,
 ) -> WebResult<Vec<IncomingWebhookDeliveryResponse>> {
-    let limits = DeliveryRepositoryLimits::of(db, reader, &[connection]).await?;
+    let limits =
+        VisibleWebhookDeliveryRepositoryUrlsByGitHostConnection::of(db, reader, &[connection])
+            .await?;
     Ok(
         gradient_db::incoming_deliveries::of_connection(db, connection.id, DELIVERY_LIST_LIMIT)
             .await?
@@ -724,7 +726,7 @@ pub(crate) async fn deliveries_of_connection(
 pub(crate) async fn tasks_using_connection_visible_to_reader(
     db: &impl sea_orm::ConnectionTrait,
     connection: GitHostConnectionId,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
 ) -> WebResult<Vec<GitHostConnectionTaskResponse>> {
     let tasks = connections::tasks_using_connection(db, connection).await?;
     let visible_project_names = summaries::project_names_visible_to_reader(

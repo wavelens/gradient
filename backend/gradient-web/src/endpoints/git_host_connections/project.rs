@@ -5,7 +5,7 @@
  */
 
 use super::{
-    ConnectionReader, ConnectionToSummarize, CreateGitHostConnectionRequest,
+    ConnectionToSummarize, CreateGitHostConnectionRequest, GitHostConnectionReaderScope,
     GitHostConnectionResponse, GitHostConnectionSummary, GitHostConnectionTaskResponse,
     GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
     SummaryOptions,
@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 pub(crate) async fn available_summaries(
     db: &impl sea_orm::ConnectionTrait,
-    reader: &ConnectionReader<'_>,
+    reader: &GitHostConnectionReaderScope<'_>,
     options: &SummaryOptions<'_>,
     project: &MProject,
     can_manage_project_connections: bool,
@@ -92,7 +92,7 @@ pub async fn list_project_git_host_connections(
     Ok(ok_json(
         available_summaries(
             &db.web_db,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             &SummaryOptions {
                 serve_url: &db.config.server.serve_url,
                 repository: query.repository.as_deref().filter(|r| !r.trim().is_empty()),
@@ -130,7 +130,7 @@ pub async fn create_project_git_host_connection(
         super::create(
             &state.ci(),
             Owner::Project(project.id),
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             body,
             &audit,
         )
@@ -162,7 +162,7 @@ pub async fn get_project_git_host_connection(
     Ok(ok_json(
         super::response(
             &db.web_db,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             &db.config.server.serve_url,
             row,
         )
@@ -197,7 +197,7 @@ pub async fn patch_project_git_host_connection(
         super::patch(
             &state.ci(),
             Owner::Project(project.id),
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             params.param("id")?,
             body,
             &audit,
@@ -259,7 +259,7 @@ pub async fn list_project_git_host_connection_deliveries(
     Ok(ok_json(
         super::deliveries_of_connection(
             &db.web_db,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
             &connection,
         )
         .await?,
@@ -291,7 +291,7 @@ pub async fn list_project_git_host_connection_tasks(
         super::tasks_using_connection_visible_to_reader(
             &db.web_db,
             connection.id,
-            &ConnectionReader::new(&user, api_key.as_ref()),
+            &GitHostConnectionReaderScope::new(&user, api_key.as_ref()),
         )
         .await?,
     ))

@@ -226,7 +226,7 @@ async fn a_push_that_matched_no_task_offers_a_push_trigger_when_the_task_has_non
 }
 
 #[tokio::test]
-async fn task_repository_chain_uses_newest_delivery_for_the_task_repository_only() {
+async fn task_repository_status_check_uses_only_newest_webhook_delivery_for_task_repository() {
     let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
     let connection = insert_test_git_host_connection(
         &s,
