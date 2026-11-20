@@ -71,6 +71,8 @@ pub(crate) struct TaskGitHostChainInput<'a> {
     pub(crate) newest_status_post: Option<&'a TaskCommitStatusPostAttempt>,
     pub(crate) can_edit_task: bool,
     pub(crate) can_manage_integrations: bool,
+    pub(crate) github_app_configured: bool,
+    pub(crate) can_install_github_app: bool,
 }
 
 struct RepositoryOnHost {
@@ -212,12 +214,25 @@ fn connection_step(
             format!("{} connections fit; none is selected", fitting.len()),
             select,
         ),
-        [] if repository.host == "github.com" => step(
+        [] if repository.host == "github.com" && !input.github_app_configured => step(
+            TaskGitHostChainStepState::Attention,
+            "This server has no GitHub App. An instance admin can set one up.",
+            None,
+        ),
+        [] if repository.host == "github.com" && input.can_install_github_app => step(
             TaskGitHostChainStepState::Attention,
             format!("The GitHub App isn't installed on {}", repository.owner),
             Some(TaskGitHostChainStepAction::InstallGithubApp {
                 account: repository.owner.clone(),
             }),
+        ),
+        [] if repository.host == "github.com" => step(
+            TaskGitHostChainStepState::Attention,
+            format!(
+                "The GitHub App isn't installed on {}. An instance admin can install it.",
+                repository.owner
+            ),
+            None,
         ),
         [] => step(
             TaskGitHostChainStepState::Attention,
@@ -463,6 +478,8 @@ mod tests {
             newest_status_post: None,
             can_edit_task: true,
             can_manage_integrations: true,
+            github_app_configured: true,
+            can_install_github_app: true,
         }
     }
 
@@ -502,6 +519,34 @@ mod tests {
                 account: "acme".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn github_repository_without_installation_names_the_instance_admin_when_the_caller_may_not_install()
+     {
+        let chain = task_git_host_chain(&TaskGitHostChainInput {
+            can_install_github_app: false,
+            ..input("github:acme/app", None, &[])
+        });
+        assert_eq!(chain.connection.state, Attention);
+        assert_eq!(chain.connection.action, None);
+        assert!(
+            chain
+                .connection
+                .detail
+                .contains("instance admin can install")
+        );
+    }
+
+    #[test]
+    fn github_repository_on_a_server_without_github_app_offers_no_install() {
+        let chain = task_git_host_chain(&TaskGitHostChainInput {
+            github_app_configured: false,
+            ..input("github:acme/app", None, &[])
+        });
+        assert_eq!(chain.connection.state, Attention);
+        assert_eq!(chain.connection.action, None);
+        assert!(chain.connection.detail.contains("no GitHub App"));
     }
 
     #[test]
@@ -660,6 +705,7 @@ mod tests {
                 can_edit_task: false,
                 can_manage_integrations: false,
                 report_status: false,
+                can_install_github_app: false,
                 ..input(repository, connection, available)
             }
         }
@@ -667,6 +713,8 @@ mod tests {
         let chain = task_git_host_chain(&view_only("not a url", None, &available));
         assert_eq!(chain.repository.action, None);
         let chain = task_git_host_chain(&view_only(GITEA_REPOSITORY, None, &available));
+        assert_eq!(chain.connection.action, None);
+        let chain = task_git_host_chain(&view_only("github:acme/app", None, &[]));
         assert_eq!(chain.connection.action, None);
         let selected = connection(true);
         let chain = task_git_host_chain(&view_only(GITEA_REPOSITORY, Some(&selected), &[]));
