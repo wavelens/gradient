@@ -345,7 +345,7 @@ fn task_repository(report_status: bool, current: Option<Value>) -> Value {
             "repository": {"state": "ok", "detail": "git.example.com/org/repo"},
             "connection": {"state": "ok", "detail": "forgejo"},
             "incoming_events": {"state": "ok", "detail": "push"},
-            "commit_status": {"state": "failing", "detail": "bad token"}
+            "commit_status": {"state": "failing", "detail": "bad token", "action": {"type": "test_status_report"}}
         },
         "recent_deliveries": [{
             "id": DELIVERY, "event": "push", "status_code": 202, "result": "queued",
@@ -401,6 +401,8 @@ async fn test_task_repository_show_prints_connection_events_status_posts_and_cho
     let output = stdout_of(gradient(&home, false, &["task", "repository", "show"]));
     for expected in [
         "FORGEJO",
+        "Commit status: failing, bad token",
+        "gradient task repository check-commit-status",
         "Commit status report: on",
         "https://gradient.example/api/v1/hooks/forgejo",
         "push 202 queued",
@@ -422,7 +424,7 @@ async fn test_task_repository_set_connection_by_name_keeps_report_status_when_su
     .await;
     mount_task_repository_patch(
         &server,
-        json!({"git_host_connection": PROJECT_CONNECTION, "report_status": true}),
+        json!({"git_host_connection": PROJECT_CONNECTION}),
         1,
     )
     .await;
@@ -443,7 +445,7 @@ async fn test_task_repository_set_connection_by_name_keeps_report_status_when_su
 }
 
 #[tokio::test]
-async fn test_task_repository_set_connection_turns_report_status_off_for_a_connection_without_it() {
+async fn test_task_repository_set_connection_leaves_report_status_to_the_server() {
     let server = MockServer::start().await;
     mount_task_repository(
         &server,
@@ -456,12 +458,7 @@ async fn test_task_repository_set_connection_turns_report_status_off_for_a_conne
         )),
     )
     .await;
-    mount_task_repository_patch(
-        &server,
-        json!({"git_host_connection": OTHER_CONNECTION, "report_status": false}),
-        1,
-    )
-    .await;
+    mount_task_repository_patch(&server, json!({"git_host_connection": OTHER_CONNECTION}), 1).await;
 
     let home = home_with(&server);
     gradient(
@@ -492,12 +489,7 @@ async fn test_task_repository_set_report_status_alone_keeps_the_current_connecti
         )),
     )
     .await;
-    mount_task_repository_patch(
-        &server,
-        json!({"git_host_connection": PROJECT_CONNECTION, "report_status": true}),
-        1,
-    )
-    .await;
+    mount_task_repository_patch(&server, json!({"report_status": true}), 1).await;
 
     let home = home_with(&server);
     gradient(
@@ -528,12 +520,7 @@ async fn test_task_repository_set_no_connection_sends_null_and_stops_reports() {
         )),
     )
     .await;
-    mount_task_repository_patch(
-        &server,
-        json!({"git_host_connection": null, "report_status": false}),
-        1,
-    )
-    .await;
+    mount_task_repository_patch(&server, json!({"git_host_connection": null}), 1).await;
 
     let home = home_with(&server);
     gradient(
@@ -580,6 +567,7 @@ async fn test_task_repository_set_connection_refuses_unknown_name_and_conflictin
         ],
     )
     .code(2);
+    gradient(&home, true, &["task", "repository", "set-connection"]).code(2);
 }
 
 #[tokio::test]

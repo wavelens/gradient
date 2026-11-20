@@ -16,8 +16,8 @@ use connector::Client;
 use connector::api::{
     ActionConfig, CreateActionRequest, CreateFlakeInputOverrideRequest, CreateTriggerRequest,
     FlakeInputOverrideId, GitHostConnectionSummary, TaskActionId, TaskCommitStatusPostAttempt,
-    TaskRepositoryConnectionAndCommitStatusPatchRequest, TaskRepositoryResponse, TriggerConfig,
-    UpdateActionRequest, UpdateTriggerRequest,
+    TaskGitHostChainStepAction, TaskRepositoryResponse, TriggerConfig, UpdateActionRequest,
+    UpdateTriggerRequest,
 };
 use serde::de::DeserializeOwned;
 
@@ -121,8 +121,73 @@ fn print_commit_status_post_attempt_line(out: Output, attempt: &TaskCommitStatus
     ));
 }
 
+fn command_for_chain_action(
+    action: &TaskGitHostChainStepAction,
+    repository: &TaskRepositoryResponse,
+) -> String {
+    let connection = repository
+        .git_host_connection
+        .as_ref()
+        .map_or("<connection>", |connection| connection.name.as_str());
+    match action {
+        TaskGitHostChainStepAction::EditRepositoryUrl => {
+            "gradient task edit --repository <url>".to_owned()
+        }
+        TaskGitHostChainStepAction::SelectConnection => {
+            "gradient task repository set-connection --connection <connection>".to_owned()
+        }
+        TaskGitHostChainStepAction::CreateConnection {
+            git_host_type,
+            base_url,
+        } => format!(
+            "gradient project git-host-connection create --name <name> --host-type {} --base-url {base_url} --access-token <token>",
+            git_host_type.as_deref().unwrap_or("<type>")
+        ),
+        TaskGitHostChainStepAction::InstallGithubApp { account } => format!(
+            "An instance admin can install the GitHub App on {account} under Administration -> Git host connections"
+        ),
+        TaskGitHostChainStepAction::InstallWebhook => {
+            "gradient task repository install-webhook".to_owned()
+        }
+        TaskGitHostChainStepAction::AddWebhookOnHost { webhook_url } => {
+            format!("Add a webhook with the URL {webhook_url} on the Git host")
+        }
+        TaskGitHostChainStepAction::ChangeWebhookSecret => {
+            format!("gradient project git-host-connection edit {connection} --secret <secret>")
+        }
+        TaskGitHostChainStepAction::AddTrigger { trigger_type } => {
+            format!("gradient task trigger create --config '{{\"type\":\"{trigger_type}\"}}'")
+        }
+        TaskGitHostChainStepAction::TurnOnReportStatus => {
+            "gradient task repository set-connection --report-status true".to_owned()
+        }
+        TaskGitHostChainStepAction::TestStatusReport => {
+            "gradient task repository check-commit-status".to_owned()
+        }
+    }
+}
+
+fn print_chain(repository: &TaskRepositoryResponse, out: Output) {
+    let chain = &repository.chain;
+    for (title, step) in [
+        ("Repository", &chain.repository),
+        ("Connection", &chain.connection),
+        ("Incoming events", &chain.incoming_events),
+        ("Commit status", &chain.commit_status),
+    ] {
+        out.human(format!("{title}: {}, {}", step.state, step.detail));
+        if let Some(action) = &step.action {
+            out.human(format!(
+                "  Next: {}",
+                command_for_chain_action(action, repository)
+            ));
+        }
+    }
+}
+
 fn print_repository(repository: &TaskRepositoryResponse, out: Output) {
     out.human(format!("Repository: {}", repository.repository));
+    print_chain(repository, out);
     match &repository.git_host_connection {
         Some(connection) => {
             out.human("Connection");
@@ -188,28 +253,25 @@ pub async fn handle_task_repository_subcommand(cmd: TaskRepositoryCommands, out:
             no_connection,
             report_status,
         } => {
-            let repository = current().await;
             let chosen = match connection {
-                _ if no_connection => None,
-                Some(reference) => Some(find_git_host_connection_by_name_or_uuid(
-                    &reference,
-                    &repository,
-                    out,
-                )),
-                None => repository.git_host_connection.as_ref(),
+                Some(reference) => Some(
+                    find_git_host_connection_by_name_or_uuid(&reference, &current().await, out)
+                        .id
+                        .clone(),
+                ),
+                None => None,
             };
-            let report_status = report_status.unwrap_or(
-                repository.report_status
-                    && chosen.is_some_and(|connection| connection.reports_status),
-            );
+            let connection_change = if no_connection {
+                Some(None)
+            } else {
+                chosen.as_ref().map(Some)
+            };
             let saved = api
                 .set_task_repository_git_host_connection_and_commit_status_reporting(
                     &project,
                     &task,
-                    &TaskRepositoryConnectionAndCommitStatusPatchRequest {
-                        git_host_connection: chosen.map(|connection| connection.id.clone()),
-                        report_status: Some(report_status),
-                    },
+                    connection_change,
+                    report_status,
                 )
                 .await
                 .unwrap_or_else(|e| out.fail(e));
