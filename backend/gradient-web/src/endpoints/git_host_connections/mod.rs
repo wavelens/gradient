@@ -348,11 +348,7 @@ async fn link_fitting_tasks_without_connection(
         .filter(|task| {
             !task.managed
                 && task.git_host_connection.is_none()
-                && check_task_repository_url_can_use_git_host_connection(
-                    &task.repository,
-                    connection,
-                )
-                .is_ok()
+                && repository_fits_connection_with_known_host(&task.repository, connection)
         })
         .collect();
     let ids: Vec<TaskId> = linked.iter().map(|task| task.id).collect();
@@ -818,6 +814,14 @@ fn expected_host(connection: &MGitHostConnection) -> Option<String> {
     }
 }
 
+pub(crate) fn repository_fits_connection_with_known_host(
+    repository: &str,
+    connection: &MGitHostConnection,
+) -> bool {
+    expected_host(connection).is_some()
+        && check_task_repository_url_can_use_git_host_connection(repository, connection).is_ok()
+}
+
 pub(crate) fn check_task_repository_url_can_use_git_host_connection(
     repository: &str,
     connection: &MGitHostConnection,
@@ -917,6 +921,32 @@ mod tests {
             reason.contains("Acme") && reason.contains("other"),
             "{reason}"
         );
+    }
+
+    #[test]
+    fn only_a_connection_with_a_known_matching_host_fits_without_a_user_choice() {
+        let unknown_host = connection(GitHostType::Forgejo, None);
+        for repo in [
+            "https://github.com/acme/infra",
+            "https://git.example.com/acme/infra",
+        ] {
+            assert!(
+                check_task_repository_url_can_use_git_host_connection(repo, &unknown_host).is_ok()
+            );
+            assert!(
+                !repository_fits_connection_with_known_host(repo, &unknown_host),
+                "{repo}"
+            );
+        }
+        let gitea = connection(GitHostType::Gitea, Some("https://git.example.com"));
+        assert!(repository_fits_connection_with_known_host(
+            "https://git.example.com/acme/infra",
+            &gitea
+        ));
+        assert!(repository_fits_connection_with_known_host(
+            "github:acme/infra",
+            &connection(GitHostType::GitHub, None)
+        ));
     }
 
     #[test]
