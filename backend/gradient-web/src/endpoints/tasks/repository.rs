@@ -185,20 +185,29 @@ async fn repository_response(
     let git_host_connection = task
         .git_host_connection
         .and_then(|id| available_connections.iter().find(|c| c.id == id).cloned());
-    let (recent_deliveries, connection_has_access_token) = match &git_host_connection {
-        Some(selected) => (
-            recent_incoming_webhook_deliveries_for_task_repository(
-                &db.web_db,
-                selected.id,
-                &task.repository,
-            )
-            .await?,
-            gradient_db::lookup::by_id::<EGitHostConnection, _>(&db.web_db, selected.id)
+    let (recent_deliveries, connection_has_access_token, total_task_count_for_connection) =
+        match &git_host_connection {
+            Some(selected) => (
+                recent_incoming_webhook_deliveries_for_task_repository(
+                    &db.web_db,
+                    selected.id,
+                    &task.repository,
+                )
+                .await?,
+                gradient_db::lookup::by_id::<EGitHostConnection, _>(&db.web_db, selected.id)
+                    .await?
+                    .is_some_and(|row| row.access_token.is_some()),
+                gradient_db::git_host_connections::task_counts_by_connection_and_project(
+                    &db.web_db,
+                    &[selected.id],
+                )
                 .await?
-                .is_some_and(|row| row.access_token.is_some()),
-        ),
-        None => (Vec::new(), false),
-    };
+                .into_iter()
+                .map(|(_, _, count)| u64::try_from(count).unwrap_or(0))
+                .sum(),
+            ),
+            None => (Vec::new(), false, 0),
+        };
     let status_posts: Vec<TaskCommitStatusPostAttempt> =
         gradient_db::git_host_connections::commit_status_post_attempts_of_task(
             &db.web_db,
@@ -222,6 +231,7 @@ async fn repository_response(
             fetch: fetch.as_ref(),
             connection: git_host_connection.as_ref(),
             connection_has_access_token,
+            total_task_count_for_connection,
             available_connections: &available_connections,
             report_status: task.report_status,
             newest_delivery: recent_deliveries.first(),

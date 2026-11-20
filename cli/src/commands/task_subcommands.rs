@@ -155,6 +155,9 @@ fn status_check_fix_action_to_cli_command(
         TaskGitHostChainStepAction::ChangeWebhookSecret => {
             format!("gradient project git-host-connection edit {connection} --secret <secret>")
         }
+        TaskGitHostChainStepAction::OpenConnectionSharedByTasks { .. } => {
+            format!("gradient project git-host-connection tasks {connection}")
+        }
         TaskGitHostChainStepAction::AddTrigger { trigger_type } => {
             format!("gradient task trigger create --config '{{\"type\":\"{trigger_type}\"}}'")
         }
