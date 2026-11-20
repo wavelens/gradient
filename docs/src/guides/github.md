@@ -20,7 +20,7 @@ A GitHub App can link a Gradient instance to GitHub. With this connection in pla
 Register an App once per instance in the **GitHub App** section of **Administration -> Git host connections**.
 
 1. Enter the GitHub organization in **Organization**. Leave the field empty for a personal account.
-2. Users of GitHub Enterprise enter the host in **Advanced -> GitHub Enterprise host**.
+2. Enter the host in **Advanced -> Host for GitHub Enterprise** for GitHub Enterprise.
 3. Click **Create on GitHub** and confirm the registration on GitHub.
 
 Gradient shows **App ID**, **Private key (PEM)**, and **Webhook secret** only once, next to the `services.gradient.githubApp` snippet. Store the key and secret as files on the server.
@@ -40,7 +40,7 @@ services.gradient.githubApp = {
 
 ### 3. Install the App
 
-Click **Install on GitHub** in the **GitHub App** section. Select the account with the repository. GitHub then returned the browser to **Git host connections**.
+Click **Install on GitHub** in the **GitHub App** section. Select the account that has the repository. The GitHub servers then redirect the browser back to **Git host connections**.
 
 | Message | Meaning |
 |---|---|

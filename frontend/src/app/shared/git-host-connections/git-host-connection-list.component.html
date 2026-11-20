@@ -45,7 +45,7 @@
                   @if (latestRefusedDeliveryNewerThanLastAccepted; as refused) {
                     <span>
                       <gr-badge severity="danger">signature</gr-badge>
-                      Rejected delivery with invalid signature <time class="connection-delivery-time" [attr.datetime]="refused.at">{{ refused.at | relativeTime }}</time>
+                      Refused delivery with invalid signature <time class="connection-delivery-time" [attr.datetime]="refused.at">{{ refused.at | relativeTime }}</time>
                     </span>
                   } @else if (connection.last_delivery; as delivery) {
                     <span>

@@ -154,17 +154,17 @@ describe('GitHostConnectionListComponent', () => {
       last_delivery: { id: 'd1', created_at: '2026-01-01T00:00:00Z', result: 'queued', queued: 1, status_code: 200 } as never,
     };
     const healthLine = render(writable, [refusedLast]).el.querySelector('[data-testid="connection-health"]')!;
-    expect(healthLine.textContent).toContain('Rejected delivery with invalid signature');
+    expect(healthLine.textContent).toContain('Refused delivery with invalid signature');
     expect(healthLine.textContent).not.toContain('Queued 1 evaluation');
     expect(healthLine.textContent).not.toContain('2 refused signatures');
     expect(healthLine.querySelectorAll('gr-badge[severity="warning"]').length).toBe(0);
     expect(healthLine.querySelector('time.connection-delivery-time')?.getAttribute('datetime')).toBe('2026-01-02T00:00:00Z');
   });
 
-  it("displays rejected signatures instead of 'No events yet'", () => {
+  it("Show refused signatures instead of 'No events yet'", () => {
     const health = render(writable, [{ ...own, refused_signature_count: 1, last_refused_signature_at: '2026-01-02T00:00:00Z' }]).el
       .querySelector('[data-testid="connection-health"]')!.textContent!;
-    expect(health).toContain('Rejected delivery with invalid signature');
+    expect(health).toContain('Refused delivery with invalid signature');
     expect(health).not.toContain('No events yet');
   });
 

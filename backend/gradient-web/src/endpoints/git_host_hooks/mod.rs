@@ -498,7 +498,7 @@ async fn verify_webhook_signature_and_ip_allowlist_then_trigger_event_evaluation
             gradient_db::git_host_connections::count_refused_signature(&ci.db.web_db, connection.id)
                 .await
         {
-            warn!(error = %e, connection = %connection.id, "Failed to count rejected webhook signatures");
+            warn!(error = %e, connection = %connection.id, "Failed to count webhook deliveries with refused signatures");
         }
         return Err(GitHostHookRefusal::InvalidSignature.into());
     }

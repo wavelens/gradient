@@ -55,9 +55,9 @@ const DEFAULT_POLLING_INTERVAL_SECS = 300;
 export type ConnectStep = 'repository' | 'git-host' | 'access' | 'triggers';
 const STEPS: { id: ConnectStep; label: string }[] = [
   { id: 'repository', label: 'Repository' },
-  { id: 'git-host', label: 'Git Host' },
+  { id: 'git-host', label: 'Git host' },
   { id: 'access', label: 'Access' },
-  { id: 'triggers', label: 'Triggers and Settings' },
+  { id: 'triggers', label: 'Triggers and settings' },
 ];
 
 interface SuggestedTriggerChoice {
