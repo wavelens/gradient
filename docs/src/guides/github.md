@@ -57,6 +57,8 @@ Click **Install on GitHub** in the **GitHub App** section. Select the account wi
 
 **Connect repository** and the **Repository** page of the task both offer **Install on GitHub** when no installation can fit the repository. Other users see "An instance admin can install the GitHub App on <account>".
 
+Both pages open GitHub in the same tab. The next step is a redirect from GitHub back to **Git host connections** with a link to the tasks for the new installation. An instance administrator of a server without the GitHub App can get **Set up GitHub App** in **Connect repository**.
+
 ### 4. Choose the Connection on the Task
 
 Tasks map to one Git host connection each. Push triggers and pull request triggers fire for tasks on an event from their Git host connection. Commit statuses go through the same connection.
