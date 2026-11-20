@@ -20562,6 +20562,11 @@ components:
           type:
           - string
           - 'null'
+        github_installation_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
         webhook_url:
           type:
           - string

@@ -211,6 +211,7 @@ pub(crate) async fn summaries(
             can_manage,
             managed: connection.managed,
             account_login: connection.account_login.clone(),
+            github_installation_id: connection.github_installation_id,
             webhook_url: webhook_url(options.serve_url, &connection),
             access_token_expires_at: connection.access_token_expires_at,
             access_token_refreshes_automatically: connection.encrypted_refresh_token.is_some(),

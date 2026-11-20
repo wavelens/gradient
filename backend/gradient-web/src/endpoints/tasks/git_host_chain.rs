@@ -463,6 +463,7 @@ mod tests {
             can_manage: true,
             managed: false,
             account_login: None,
+            github_installation_id: None,
             webhook_url: Some("https://ci.example.com/api/v1/hooks/gitea/gitea".to_owned()),
             access_token_expires_at: None,
             access_token_refreshes_automatically: false,

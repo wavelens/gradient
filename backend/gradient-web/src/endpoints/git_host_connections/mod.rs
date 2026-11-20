@@ -72,6 +72,7 @@ pub struct GitHostConnectionSummary {
     #[schema(required = false, default = false)]
     pub managed: bool,
     pub account_login: Option<String>,
+    pub github_installation_id: Option<i64>,
     pub webhook_url: Option<String>,
     pub access_token_expires_at: Option<chrono::NaiveDateTime>,
     #[schema(required = false, default = false)]
