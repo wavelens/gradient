@@ -129,6 +129,16 @@ services.gradient.state = {
 | `reports_status` | null or bool | `null` | Whether the connection can post commit statuses to the Git host. Tasks that use `report_status` need this setting. `null` means `true` on `github` and `false` on other Git hosts. |
 | `secret_file` | null or path | `null` | Path to the file with the secret for HMAC signatures on incoming webhooks. |
 
+### Rejected Connection Settings
+
+These declarations stop the Nix build during validation. Server-side checks at `state apply` also reject them.
+
+| Declaration | Fix |
+|---|---|
+| `git_host_type = "github"` without `account_login` | Set `account_login` to the GitHub account of the installation. |
+| `git_host_type` `gitea`, `forgejo` or `gitlab` without `secret_file` | Set `secret_file`. A connection for commit status only can set `receives_events = false` instead. |
+| Task with a `repository` on a host other than the `base_url` host of its `git_host_connection` | Choose the connection for the host of the repository, or correct `base_url`. |
+
 ## `caches.<name>`
 
 | Option | Type | Default | Description |
