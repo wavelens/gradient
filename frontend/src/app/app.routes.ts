@@ -534,7 +534,7 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
   },
-  { path: 'admin/github-app', redirectTo: 'admin/git-hosts' },
+  ...['admin/github-app', 'admin/git-hosts'].map((path) => ({ path, redirectTo: 'admin/git-host-connections' })),
   ...['admin/users', 'admin/users/:username/access'].map((path) => ({
     path,
     title: 'User access (admin)',

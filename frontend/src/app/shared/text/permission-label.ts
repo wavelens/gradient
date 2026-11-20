@@ -9,6 +9,7 @@ const LABEL_OVERRIDES: Record<string, string> = {
   writeStore: 'write cache',
   manageWebhooks: 'manage event notifications',
   manageCacheWebhooks: 'manage event notifications',
+  manageIntegrations: 'manage git host connections',
 };
 
 const ACRONYMS: ReadonlySet<string> = new Set(['ssh']);

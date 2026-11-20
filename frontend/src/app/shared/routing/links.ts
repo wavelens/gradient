@@ -16,7 +16,7 @@ export type BoardTab =
   | 'overview' | 'live' | 'scheduler' | 'throughput' | 'durations' | 'workers' | 'cache'
   | 'network' | 'health' | 'storage' | 'expensive';
 export type MembersPageTab = 'people' | 'teams' | 'pending' | 'roles';
-export type AdminPage = 'overview' | 'workers' | 'storage' | 'settings' | 'git-hosts' | 'webhooks';
+export type AdminPage = 'overview' | 'workers' | 'storage' | 'settings' | 'git-host-connections' | 'webhooks';
 export type ClosureKind = 'build' | 'eval';
 export type LoginReason = 'expired' | 'deleted';
 
@@ -120,7 +120,7 @@ export const links = {
   admin: (page: AdminPage) => url(['admin', page]),
   gitHostConnection: (owner: GitHostConnectionOwner, id: string) => {
     const query = { connection: id };
-    if (owner.type === 'instance') return url(['admin', 'git-hosts'], query);
+    if (owner.type === 'instance') return url(['admin', 'git-host-connections'], query);
     return url([owner.type, owner.name, 'git-host-connections'], query);
   },
   userAccessPageUrl: (username?: string) => url(username ? ['admin', 'users', username, 'access'] : ['admin', 'users']),

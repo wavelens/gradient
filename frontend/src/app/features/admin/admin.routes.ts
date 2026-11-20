@@ -32,8 +32,8 @@ export const ADMIN_ROUTES: Routes = [
         loadComponent: () => import('./storage/admin-storage-tab.component').then((m) => m.AdminStorageTabComponent),
       },
       {
-        path: 'git-hosts',
-        title: 'Git hosts · Administration',
+        path: 'git-host-connections',
+        title: 'Git host connections · Administration',
         canDeactivate: [unsavedChangesGuard],
         loadComponent: () => import('./git-hosts/admin-git-hosts-tab.component').then((m) => m.AdminGitHostsTabComponent),
       },
