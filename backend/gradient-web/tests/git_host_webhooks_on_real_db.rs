@@ -268,7 +268,7 @@ async fn push_for_untracked_repository_records_which_repository_no_task_tracks()
     assert_eq!(deliveries.len(), 1, "{deliveries:?}");
     assert_eq!(
         deliveries[0].detail.as_deref(),
-        Some("No task tracks test-org/repo")
+        Some("No task tracks test-org/repo.")
     );
     s.db.finish().await;
 }

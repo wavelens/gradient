@@ -31,7 +31,7 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "active": true,
         },
         "redirect_url": format!("{base}/api/v1/admin/github-app/callback"),
-        // GitHub sends the browser to `setup_url` after an install. That page shows the new installation, not the form that creates an App.
+        // After installation, GitHub sends the browser to `setup_url`. That page shows the new installation. The form for creating the App doesn't appear there.
         "setup_url": format!("{base}/admin/git-host-connections"),
         "setup_on_update": false,
         "public": false,

@@ -296,7 +296,7 @@ async fn github_app_page_url(
             gradient_git_host::github_app::get_app_page_url(http, app.app_id, &pem),
         )
         .await
-        .context("GitHub App lookup timed out")?
+        .context("Timed out during the lookup of the GitHub App")?
     };
     cache.get_or_look_up(look_up).await
 }

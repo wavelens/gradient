@@ -52,7 +52,7 @@ pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
     .await
     {
         Ok(connection) => {
-            info!(installation_id, connection = %connection.id, account_login, "Saved a connection to the Git host for an installation of the GitHub App");
+            info!(installation_id, connection = %connection.id, account_login, "Stored a connection to the git host for the installation of the GitHub App.");
         }
         Err(e) => {
             warn!(error = %e, installation_id, "Failed to save the connection to the Git host for the installation of the GitHub App.")

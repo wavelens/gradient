@@ -16,10 +16,10 @@ pub(crate) enum GitHostConnectionRefusal {
     #[error("A GitHub connection needs the ID of a GitHub App installation.")]
     InstallationIdRequired,
     #[error(
-        "No GitHub App on this server. GitHub connections aren't available. Ask an instance admin to set up the GitHub App."
+        "This server has no GitHub App. GitHub connections don't work. Ask the instance admin to set up a GitHub App."
     )]
     GitHubAppNotConfigured,
-    #[error("GitHub doesn't know this App installation: {reason}")]
+    #[error("GitHub cannot find the installation of this app: {reason}")]
     InvalidInstallationId { reason: String },
     #[error(
         "Installations manage GitHub App connections. No edit options exist for this connection."
@@ -34,14 +34,14 @@ pub(crate) enum GitHostConnectionRefusal {
     )]
     GitHubNeedsInstanceApp,
     #[error(
-        "A connection that receives events needs a webhook secret. Enter a new webhook secret instead of removing it."
+        "Connections that receive events require a webhook secret. Enter a new webhook secret instead of clearing it."
     )]
     WebhookSecretRequired,
-    #[error("Use an http or https URL for the Git host URL.")]
+    #[error("Use an http or https URL as the address of the Git host.")]
     InvalidBaseUrl,
-    #[error("Turn on receiving events, reporting commit status, or both.")]
+    #[error("Enable receiving events, reporting commit status, or both.")]
     NoCapability,
-    #[error("Reporting commit status needs the Git host URL and an access token.")]
+    #[error("The Git host URL and access token are required to report commit status.")]
     StatusNeedsBaseUrlAndToken,
     #[error(
         "This project can't use Git host connection {id}. Select a connection for the project, its owner team, or the instance."
@@ -50,10 +50,10 @@ pub(crate) enum GitHostConnectionRefusal {
     #[error("The repository does not match the connection {name}: {reason}")]
     RepositoryDoesNotMatch { name: String, reason: String },
     #[error(
-        "Connection {name} does not report commit status. Turn on reporting commit status for the connection, or choose another connection."
+        "Connection {name} doesn't report commit statuses. Turn on commit status reporting for this connection, or choose another connection."
     )]
     ConnectionCannotReportStatus { name: String },
-    #[error("Select a connection to the Git host before turning on commit status reports.")]
+    #[error("Select a connection to the git host before enabling commit status reporting.")]
     ReportStatusNeedsConnection,
     #[error("{0}")]
     StatusTestNotPossible(String),

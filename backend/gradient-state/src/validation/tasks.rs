@@ -175,7 +175,7 @@ fn validate_task_git_host_connection_reference(
         errors.push(
             format!("tasks.{}.git_host_connection", task.name),
             format!(
-                "The repository does not match the connection '{}': {}",
+                "Repository does not match connection '{}': {}",
                 connection.name, reason
             ),
         );

@@ -640,7 +640,7 @@ async fn sign_in_account(
             .ok_or_else(|| GitHostConnectionRefusal::GitHubAppNotConfigured.to_string())?;
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
-            .map_err(|_| "Can't read the private key of the GitHub App".to_owned())?;
+            .map_err(|_| "Cannot read the private key for the GitHub App".to_owned())?;
         return gradient_git_host::github_app::get_installation(
             &ci.http,
             app.app_id,
@@ -663,8 +663,8 @@ async fn sign_in_account(
         connection,
     )
     .await
-    .map_err(|e| format!("Can't get a usable access token: {e}"))?
-    .ok_or_else(|| "The connection has no access token".to_owned())?;
+    .map_err(|e| format!("Gradient failed to obtain a working access token: {e}"))?
+    .ok_or_else(|| "The connection has no access token.".to_owned())?;
     gradient_git_host::provision::token_account_login(
         ci.http.clone(),
         connection.git_host_type,

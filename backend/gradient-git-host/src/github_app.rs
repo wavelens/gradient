@@ -165,7 +165,7 @@ impl GitHubAppPageUrlCache {
                 (PageUrlLookup::Found(url.clone()), Some(url))
             }
             Err(e) => {
-                warn!(error = %e, "GitHub App page lookup failed");
+                warn!(error = %e, "Failed to look up the page for the GitHub App.");
                 (PageUrlLookup::FailedAt(Instant::now()), None)
             }
         };

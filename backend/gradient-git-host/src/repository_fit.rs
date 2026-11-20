@@ -25,22 +25,24 @@ impl GitHostConnectionAddress<'_> {
 
     pub fn check_repository(&self, repository: &str) -> Result<(), String> {
         let host = repository_host(repository)
-            .ok_or_else(|| format!("Cannot read the host of {repository}"))?;
+            .ok_or_else(|| format!("Can't read the host of {repository}"))?;
         if let Some(expected) = self.expected_host()
             && expected != host
         {
             return Err(format!(
-                "Repository host {host} and connection host {expected} differ"
+                "Repository host {host} does not match connection host {expected}."
             ));
         }
         let Some((owner, _)) = parse_owner_repo(repository) else {
-            return Err(format!("Can't read owner and repository from {repository}"));
+            return Err(format!(
+                "Can't read the owner and repository from {repository}"
+            ));
         };
         if let Some(account) = self.github_app_account
             && !owner.eq_ignore_ascii_case(account)
         {
             return Err(format!(
-                "The GitHub App installation on {account} has no access to repositories of {owner}"
+                "The GitHub App installed on {account} does not have access to the repository of {owner}."
             ));
         }
         Ok(())
