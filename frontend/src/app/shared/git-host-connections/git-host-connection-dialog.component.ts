@@ -41,9 +41,14 @@ export interface GitHostConnectionDialogPrefill {
   base_url?: string | null;
 }
 
+export interface GitHostConnectionEditOptions {
+  focusWebhookSecret?: boolean;
+}
+
 interface SavedConnectionOutcome {
   connection: GitHostConnectionResponse;
   tokenCheck: GitHostConnectionTestResponse | 'running' | null;
+  newWebhookSecret: string | null;
 }
 
 @Component({
@@ -85,7 +90,8 @@ interface SavedConnectionOutcome {
           <gr-message-banner type="info">{{ managedReason }}</gr-message-banner>
         }
         @if (open()) {
-          <app-git-host-connection-form [(value)]="form" [context]="context()" [showErrors]="attempted()" [oauthProject]="oauthProject()" />
+          <app-git-host-connection-form [(value)]="form" [context]="context()" [showErrors]="attempted()" [oauthProject]="oauthProject()"
+            [focusWebhookSecret]="focusWebhookSecret()" />
         }
       }
       <div grDialogFooter>
@@ -123,6 +129,7 @@ export class GitHostConnectionDialogComponent {
   open = signal(false);
   editing = signal<GitHostConnectionResponse | null>(null);
   openingId = signal<string | null>(null);
+  focusWebhookSecret = signal(false);
   form = signal<GitHostConnectionFormValue>(emptyGitHostConnectionForm());
   attempted = signal(false);
   saving = signal(false);
@@ -157,9 +164,12 @@ export class GitHostConnectionDialogComponent {
   showsWebhookSetup = computed(() => {
     const outcome = this.outcome();
     if (!outcome?.connection.receives_events) return false;
-    return !outcome.connection.has_access_token || this.tokenCheckState() === 'failure';
+    return !!outcome.newWebhookSecret || !outcome.connection.has_access_token || this.tokenCheckState() === 'failure';
   });
-  webhookSecret = computed(() => (this.showsWebhookSetup() ? (this.outcome()?.connection.generated_secret ?? null) : null));
+  webhookSecret = computed(() => {
+    const outcome = this.outcome();
+    return this.showsWebhookSetup() ? (outcome?.newWebhookSecret ?? outcome?.connection.generated_secret ?? null) : null;
+  });
   events = computed(() => webhookEvents(this.outcome()?.connection.git_host_type ?? ''));
   webhookSettingsUrl = computed(() => {
     const repository = this.repository();
@@ -169,17 +179,19 @@ export class GitHostConnectionDialogComponent {
 
   openCreate(prefill: GitHostConnectionDialogPrefill = {}): void {
     this.editing.set(null);
+    this.focusWebhookSecret.set(false);
     this.form.set(emptyGitHostConnectionForm(prefill));
     this.show();
   }
 
-  openEdit(connection: GitHostConnectionSummary): void {
+  openEdit(connection: GitHostConnectionSummary, options: GitHostConnectionEditOptions = {}): void {
     if (this.openingId()) return;
     this.openingId.set(connection.id);
     this.api.get(this.owner(), connection.id).subscribe({
       next: (full) => {
         this.openingId.set(null);
         this.editing.set(full);
+        this.focusWebhookSecret.set(!!options.focusWebhookSecret);
         this.form.set(gitHostConnectionFormFromResponse(full));
         this.show();
       },
@@ -201,6 +213,7 @@ export class GitHostConnectionDialogComponent {
     const target = this.editing();
     if (target?.managed || Object.keys(gitHostConnectionFormErrors(this.form(), this.context())).length > 0) return;
     const tokenChanged = !!this.form().access_token.trim();
+    const sentSecret = this.form().secret.trim();
     const request = target
       ? this.api.patch(this.owner(), target.id, patchGitHostConnectionRequest(this.form(), target, this.context()))
       : this.api.create(this.owner(), createGitHostConnectionRequest(this.form(), this.context()));
@@ -210,12 +223,13 @@ export class GitHostConnectionDialogComponent {
       next: (connection) => {
         this.saving.set(false);
         this.saved.emit(connection);
-        if (target && !tokenChanged) {
+        const newWebhookSecret = target ? sentSecret || connection.generated_secret || null : null;
+        if (target && !tokenChanged && !newWebhookSecret) {
           this.notify.success('Git host connection saved');
           this.setOpen(false);
           return;
         }
-        this.showOutcome(connection, tokenChanged);
+        this.showOutcome(connection, tokenChanged, newWebhookSecret);
       },
       error: (error: unknown) => {
         this.saving.set(false);
@@ -224,8 +238,8 @@ export class GitHostConnectionDialogComponent {
     });
   }
 
-  private showOutcome(connection: GitHostConnectionResponse, checkToken: boolean): void {
-    this.outcome.set({ connection, tokenCheck: checkToken ? 'running' : null });
+  private showOutcome(connection: GitHostConnectionResponse, checkToken: boolean, newWebhookSecret: string | null): void {
+    this.outcome.set({ connection, tokenCheck: checkToken ? 'running' : null, newWebhookSecret });
     if (!checkToken) return;
     this.api.test(this.owner(), connection.id).subscribe({
       next: (result) => this.setTokenCheck(connection, result),
@@ -234,7 +248,8 @@ export class GitHostConnectionDialogComponent {
   }
 
   private setTokenCheck(connection: GitHostConnectionResponse, tokenCheck: GitHostConnectionTestResponse): void {
-    if (this.outcome()?.connection.id === connection.id) this.outcome.set({ connection, tokenCheck });
+    const outcome = this.outcome();
+    if (outcome?.connection.id === connection.id) this.outcome.set({ ...outcome, connection, tokenCheck });
   }
 
   private show(): void {

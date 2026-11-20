@@ -69,7 +69,7 @@ import { GitHostOAuthSignInComponent } from './git-host-oauth-sign-in.component'
         @if (value().receives_events) {
           <gr-form-field label="Webhook secret" for="connection-secret" [invalid]="!!shownErrors().secret" [error]="shownErrors().secret ?? ''">
             <div class="connection-form-secret">
-              <input grInput id="connection-secret" autocomplete="off" [ngModel]="value().secret" (ngModelChange)="patch({ secret: $event })"
+              <input grInput id="connection-secret" autocomplete="off" [attr.cdkFocusInitial]="focusWebhookSecret() ? '' : null" [ngModel]="value().secret" (ngModelChange)="patch({ secret: $event })"
                 [placeholder]="context().editing?.has_secret ? 'Unchanged' : 'Generated on save'" />
               <button grButton type="button" icon="refresh" severity="secondary" aria-label="Generate webhook secret" (click)="generateSecret()"></button>
             </div>
@@ -101,6 +101,7 @@ export class GitHostConnectionFormComponent {
   context = input.required<GitHostConnectionFormContext>();
   showErrors = input(false, { transform: booleanAttribute });
   oauthProject = input<string | null>(null);
+  focusWebhookSecret = input(false, { transform: booleanAttribute });
 
   name = computed(() => effectiveConnectionName(this.value(), this.context()));
   reportsStatus = computed(() => effectiveReportsStatus(this.value(), this.context()));
@@ -115,7 +116,7 @@ export class GitHostConnectionFormComponent {
   advancedOpen = linkedSignal<boolean, boolean>({
     source: this.advancedHasShownErrors,
     computation: (hasErrors, previous) =>
-      hasErrors || (previous ? previous.value : untracked(() => hasNonDefaultAdvancedSettings(this.value(), this.context()))),
+      hasErrors || (previous ? previous.value : untracked(() => this.focusWebhookSecret() || hasNonDefaultAdvancedSettings(this.value(), this.context()))),
   });
 
   offersOAuthSignIn = computed(() => {

@@ -9,6 +9,8 @@ import { of } from 'rxjs';
 import { GitHostConnectionSummary, IncomingWebhookDeliveryResponse, TaskGitHostChain, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ConfigService } from '@core/services/config.service';
+import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { RepositoryIncomingEventsComponent } from './repository-incoming-events.component';
 
 const connection: GitHostConnectionSummary = {
@@ -67,6 +69,8 @@ function render(overrides: Partial<TaskRepositoryResponse> = {}, tasks: object =
     providers: [
       { provide: TasksService, useValue: tasks },
       { provide: NotifyService, useValue: notify },
+      { provide: GitHostConnectionsApi, useValue: {} },
+      { provide: ConfigService, useValue: { giteaOauthAppConfig: null } },
     ],
   });
   const fixture = TestBed.createComponent(RepositoryIncomingEventsComponent);
@@ -111,6 +115,20 @@ describe('RepositoryIncomingEventsComponent', () => {
     expect((el.querySelector('gr-copy-field input') as HTMLInputElement).value).toBe('https://ci.example.com/api/v1/hooks/c1');
     expect(el.querySelector('a[href="https://forgejo.example.com/acme/app/settings/hooks"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="install-webhook"]')).toBeNull();
+  });
+
+  it('opens the connection with the webhook secret field focused when the host signs with another secret', () => {
+    const chain = { ...waiting, incoming_events: { state: 'failing' as const, detail: 'Wrong signature', action: { type: 'change_webhook_secret' as const } } };
+    const full = { ...connection, has_secret: true, has_access_token: true, allowed_ips: [], managed: false, created_by: 'u1', created_at: '2026-01-01T00:00:00Z' };
+    const get = vi.fn(() => of(full));
+    TestBed.overrideProvider(GitHostConnectionsApi, { useValue: { get } });
+    const { fixture, el } = render({ chain }, {}, true);
+    const change = el.querySelector('[data-testid="change-webhook-secret"]') as HTMLElement;
+    expect(change.classList).toContain('gr-button--primary');
+    change.click();
+    fixture.detectChanges();
+    expect(get).toHaveBeenCalledWith(connection.owner, 'c1');
+    expect(document.getElementById('connection-secret')?.hasAttribute('cdkFocusInitial')).toBe(true);
   });
 
   it('shows the last delivery with its time and the earlier deliveries below', () => {
