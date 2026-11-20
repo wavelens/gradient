@@ -91,7 +91,7 @@ services.gradient.state = {
 | `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, with one entry per input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |
-| `git_host_connection` | null or string | `null` | Name of the Git host connection for the task. A reference can check the task project first, then the owner team of the project, then the instance. The triggers for pushes and pull requests and `report_status` use this name. Gradient never picks or links a connection on its own for a declared task. Declared values win over the UI and the API. |
+| `git_host_connection` | null or string | `null` | Name of the connection for the Git host of a task. Lookup order is the task's project first, then the team for the project, then the instance. Push triggers, pull request triggers and `report_status` use this name. Gradient won't select or link a connection automatically for declared tasks. Declared values override the UI and API. |
 | `keep_evaluations` | int | `30` | Finished evaluations stay regardless of result, up to this number. Active evaluations don't block GC and don't count toward this number. Aborted evaluations go first during GC, then the oldest evaluations. The most recent evaluation and the most recent completed evaluation always stay, even above this number. Set this number in the range 1 to `eval.maxKeep`. |
 | `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
@@ -116,7 +116,7 @@ services.gradient.state = {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `access_token_file` | null or path | `null` | Path to a file with an API token for the git host. Needed to post commit statuses and create pull requests. |
-| `account_login` | null or string | `null` | GitHub user or organization the App is installed on. Required for `git_host_type = "github"`. Only repositories of this account fit the connection. |
+| `account_login` | null or string | `null` | The GitHub user or organization that has the App installed. Required for `git_host_type = "github"`. Only repositories of this account fit this connection. |
 | `base_url` | null or string | `null` | Base URL for the Git host API (for example, `https://gitea.example.com`). |
 | `created_by` | string | - | Name of the user who created the connection. |
 | `display_name` | null or string | `null` | A human-readable name to display for the connection. |
@@ -126,7 +126,7 @@ services.gradient.state = {
 | `name` | string | attribute name | Name of the connection. Unique per owner. |
 | `owner` | string | - | `instance`, `team/<name>` or `project/<name>`. All projects can use instance connections. A team's projects can use that team's connections. |
 | `receives_events` | bool | `true` | Whether the connection can receive webhooks from the Git host with HMAC verification. Triggers for push and pull requests need this. |
-| `reports_status` | null or bool | `null` | Whether the connection can post commit status to the Git host. Tasks that use `report_status` need the setting. `null` means `true` for `github` and `false` for other Git hosts. |
+| `reports_status` | null or bool | `null` | Whether the connection can post commit statuses to the Git host. Tasks that use `report_status` need this setting. `null` means `true` on `github` and `false` on other Git hosts. |
 | `secret_file` | null or path | `null` | Path to the file with the secret for HMAC signatures on incoming webhooks. |
 
 ## `caches.<name>`
