@@ -105,7 +105,6 @@ export class GithubAppComponent implements OnInit {
   organizationErrorMessage = computed(() =>
     /^[A-Za-z0-9-]*$/.test(this.organization().trim()) ? '' : 'Use only letters, numbers and hyphens.',
   );
-  showsCreateForm = computed(() => !this.githubAppConfigured || this.replacing());
   loading = signal(false);
 
   showResult = signal(false);
@@ -115,6 +114,9 @@ export class GithubAppComponent implements OnInit {
   credentialsError = signal<unknown>(null);
 
   installationReturn = signal<InstallationReturnState | null>(null);
+  showsCreateForm = computed(
+    () => (!this.githubAppConfigured && this.installationReturn()?.state !== 'serverNotConfigured') || this.replacing(),
+  );
   protected installationsList = viewChild(GitHostConnectionListComponent);
   private installationCheck?: Subscription;
   private returnedInstallationId: number | null = null;

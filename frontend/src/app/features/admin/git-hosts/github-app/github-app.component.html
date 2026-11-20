@@ -121,7 +121,7 @@
             (click)="create()"
           ></button>
         </div>
-      } @else {
+      } @else if (githubAppConfigured) {
         <app-git-host-connection-list
           [gitHostConnectionOwner]="instanceOwner"
           [access]="superuserAccess"
