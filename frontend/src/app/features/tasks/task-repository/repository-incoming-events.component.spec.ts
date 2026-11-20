@@ -44,8 +44,8 @@ const delivery = (id: string, at: string, result: IncomingWebhookDeliveryRespons
 const waiting: TaskGitHostChain = {
   repository: { state: 'ok', detail: 'acme/app on forgejo.example.com' },
   connection: { state: 'ok', detail: 'Forgejo' },
-  incoming_events: { state: 'attention', detail: 'No event received yet', action: { type: 'install_webhook' } },
-  commit_status: { state: 'attention', detail: 'No status posted yet' },
+  incoming_events: { state: 'attention', detail: 'No webhook events yet', action: { type: 'install_webhook' } },
+  commit_status: { state: 'attention', detail: 'Gradient has not posted a commit status yet.' },
 };
 
 const state: TaskRepositoryResponse = {
@@ -89,13 +89,13 @@ describe('RepositoryIncomingEventsComponent', () => {
     const { el } = render();
     expect(el.querySelector('h2')?.textContent).toBe('Incoming events');
     expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Incomplete');
-    expect(el.querySelector('[data-testid="step-status"]')?.textContent).toContain('No event received yet');
+    expect(el.querySelector('[data-testid="step-status"]')?.textContent).toContain('No webhook events yet');
   });
 
   it('shows only its state while the connection step blocks it', () => {
-    const chain = { ...waiting, connection: { state: 'attention' as const, detail: 'No connection' }, incoming_events: { state: 'off' as const, detail: 'Needs a connection' } };
+    const chain = { ...waiting, connection: { state: 'attention' as const, detail: 'No connection' }, incoming_events: { state: 'off' as const, detail: 'Connection required' } };
     const { el } = render({ chain, git_host_connection: null });
-    expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Needs a connection');
+    expect(el.querySelector('.settings-section__body')?.textContent?.trim()).toBe('Connection required');
   });
 
   it('installs the webhook through the server with the primary button and reloads', () => {

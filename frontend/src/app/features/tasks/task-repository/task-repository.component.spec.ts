@@ -71,7 +71,7 @@ describe('TaskRepositoryComponent', () => {
   it('gives the page one primary button, on the first step that needs action', () => {
     const chain = {
       ...chainWithoutConnection,
-      repository: { state: 'failing' as const, detail: "Can't fetch the repository", action: { type: 'edit_repository_url' as const } },
+      repository: { state: 'failing' as const, detail: 'Repository fetch failed', action: { type: 'edit_repository_url' as const } },
       connection: { ...chainWithoutConnection.connection, action: { type: 'create_connection' as const, base_url: 'https://forgejo.example.com' } },
     };
     const el = render(() => of({ ...state, chain })).nativeElement as HTMLElement;

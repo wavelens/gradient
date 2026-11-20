@@ -207,7 +207,7 @@ describe('RepositoryGitHostConnectionComponent', () => {
   it('installs the GitHub App on the account in place of a new connection and reloads after the return', () => {
     const install = {
       ...chainWithoutConnection,
-      connection: { state: 'attention' as const, detail: "The GitHub App isn't installed on acme", action: { type: 'install_github_app' as const, account: 'acme' } },
+      connection: { state: 'attention' as const, detail: 'GitHub App not installed (acme)', action: { type: 'install_github_app' as const, account: 'acme' } },
     };
     const { fixture, el, component } = render(
       { repository: 'https://github.com/acme/app', available_connections: [], can_create_connection: true, chain: install },

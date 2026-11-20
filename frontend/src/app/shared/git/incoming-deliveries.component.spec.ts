@@ -33,8 +33,8 @@ describe('deliverySummary', () => {
   });
 
   it('gives the reason the server found for a delivery that matched no task', () => {
-    const delivery = { ...base, result: 'no_matching_task' as const, queued: 0, detail: 'app tracks acme/app but uses no or another connection' };
-    expect(deliverySummary(delivery)).toBe('app tracks acme/app but uses no or another connection');
+    const delivery = { ...base, result: 'no_matching_task' as const, queued: 0, detail: 'app tracks acme/app but uses either no connection or a different connection.' };
+    expect(deliverySummary(delivery)).toBe('app tracks acme/app but uses either no connection or a different connection.');
   });
 });
 
