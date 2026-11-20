@@ -12,6 +12,7 @@ import { ApiError, ApiService } from './api.service';
 import { MakeUserRequest, UserInfoResponse } from '@core/models';
 import { asSectionRequest, asSessionProbe } from '@core/interceptors/request-context';
 import { links, type LoginReason } from '@shared/routing';
+import { removeSavedConnectRepositoryWizardInput } from '@shared/git-host-connections/connect-repository-wizard-unfinished-input-session-storage';
 
 const SIGNED_OUT_KEY = 'gradient-signed-out';
 
@@ -141,6 +142,7 @@ export class AuthService {
   private forget(): void {
     this.startupSessionCookieWasRejected = false;
     this.userSignal.set(null);
+    removeSavedConnectRepositoryWizardInput();
   }
 
   private toLogin(returnUrl: string, reason?: LoginReason): void {

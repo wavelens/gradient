@@ -19,7 +19,7 @@ import { GitHostConnectionsApi } from '@core/services/git-host-connections.servi
 import type { GitHostConnectionSummary } from '@core/models';
 import { taskRepositoryStatusRepositoryReadableWithoutGitHostConnection } from '../task-repository/task-repository-status-check-test-fixtures.testing';
 import {
-  readProjectConnectRepositoryDraftFromSessionStorage,
+  readConnectRepositoryWizardInputFromSessionStorage,
   saveProjectWizardDraftToSessionStorage,
 } from '@shared/git-host-connections/connect-repository-wizard-unfinished-input-session-storage';
 import { ConnectRepositoryComponent, buildTaskCreationTriggersFromWizardChoices } from './connect-repository.component';
@@ -322,60 +322,61 @@ describe('ConnectRepositoryComponent', () => {
       expect(link).toBeNull();
     });
 
-    it('Save input before the move to GitHub and clear it after task creation.', () => {
+    it('Save input only on exit through the link for the GitHub App', () => {
       const { el } = gitHostStep({ githubAppEnabled: true, githubAppInstallUrl: installUrl }, true);
-      sessionStorage.clear();
+      expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
       el.querySelector('app-github-app-install-link')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      expect(readProjectConnectRepositoryDraftFromSessionStorage('acme')).toEqual(expect.objectContaining({
+      expect(readConnectRepositoryWizardInputFromSessionStorage()).toEqual(expect.objectContaining({
         project: 'acme',
         step: 'git-host',
         form: expect.objectContaining({ repository: 'https://github.com/acme/app', name: 'app' }),
       }));
-    });
-
-    it('Restore saved input at the step that the user left.', () => {
-      const list = vi.fn(() => of<GitHostConnectionSummary[]>([]));
-      saveProjectWizardDraftToSessionStorage({
-        project: 'acme',
-        step: 'git-host',
-        form: { repository: 'https://github.com/acme/app', display_name: 'App', name: 'app', wildcard: 'checks.**', branch: 'main', polling: false, cron: '', exec_enabled: false },
-        selectedConnectionId: null,
-        savedAt: 1,
-      });
-      const fixture = render({}, {}, {}, ['createTask', 'manageIntegrations'], undefined, [], list);
-      const comp = fixture.componentInstance;
-      expect(comp.step()).toBe('git-host');
-      expect(comp.form).toEqual(expect.objectContaining({ repository: 'https://github.com/acme/app', display_name: 'App', wildcard: 'checks.**', branch: 'main', polling: false }));
-      expect(list).toHaveBeenCalled();
+      sessionStorage.clear();
+      TestBed.resetTestingModule();
+      const setup = gitHostStep({ githubAppEnabled: false }, true).el;
+      vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+      setup.querySelector<HTMLAnchorElement>('[data-testid="github-app-setup-link"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      expect(readConnectRepositoryWizardInputFromSessionStorage()?.step).toBe('git-host');
     });
   });
 
   describe('saved wizard input', () => {
-    it('Save input before the move to GitHub and clear it after task creation.', () => {
-      const createTask = vi.fn(() => of({ id: 't1', name: 'my-app', url: '' }));
-      const getRepository = vi.fn(() => of({ repository: 'https://forgejo.example.com/acme/my-app.git', chain: taskRepositoryStatusRepositoryReadableWithoutGitHostConnection }));
-      const comp = render({}, { createTask, getRepository }).componentInstance;
-      comp.repositoryChanged('https://forgejo.example.com/acme/my-app.git');
-      comp.continueFromRepository();
-      expect(readProjectConnectRepositoryDraftFromSessionStorage('acme')?.step).toBe('git-host');
-      comp.continueFromGitHost();
-      comp.continueToTriggers();
-      expect(readProjectConnectRepositoryDraftFromSessionStorage('acme')?.step).toBe('triggers');
-      comp.createTaskWithTriggersAndOpenTask();
-      expect(readProjectConnectRepositoryDraftFromSessionStorage('acme')).toBeNull();
+    const savedForm = { repository: 'https://github.com/acme/app', display_name: 'App', name: 'app', wildcard: 'checks.**', branch: 'main', polling: false, cron: '', exec_enabled: false };
+
+    it('Restore saved input once at the step that the user left', () => {
+      const list = vi.fn(() => of<GitHostConnectionSummary[]>([]));
+      saveProjectWizardDraftToSessionStorage({ project: 'acme', step: 'git-host', form: savedForm, selectedConnectionId: null });
+      const comp = render({}, {}, {}, ['createTask', 'manageIntegrations'], undefined, [], list).componentInstance;
+      expect(comp.step()).toBe('git-host');
+      expect(comp.form).toEqual(expect.objectContaining({ repository: 'https://github.com/acme/app', display_name: 'App', wildcard: 'checks.**', branch: 'main', polling: false }));
+      expect(list).toHaveBeenCalled();
+      expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
+    });
+
+    it('Delete saved input from another project or a project without access', () => {
+      saveProjectWizardDraftToSessionStorage({ project: 'other', step: 'git-host', form: savedForm, selectedConnectionId: null });
+      expect(render({}, {}).componentInstance.step()).toBe('repository');
+      expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
+      TestBed.resetTestingModule();
+      saveProjectWizardDraftToSessionStorage({ project: 'acme', step: 'git-host', form: savedForm, selectedConnectionId: null });
+      expect(render({}, {}, {}, []).componentInstance.step()).toBe('repository');
+      expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
+    });
+
+    it("Preselect as usual when the restored connection isn't in the list", () => {
+      const fits = { id: 'c1', name: 'github', display_name: 'GitHub', owner: { type: 'instance' }, git_host_type: 'github',
+        base_url: 'https://github.com', repository_fit: { fits: true, can_be_selected: true } } as GitHostConnectionSummary;
+      saveProjectWizardDraftToSessionStorage({ project: 'acme', step: 'git-host', form: savedForm, selectedConnectionId: 'gone' });
+      expect(render({}, {}, {}, undefined, undefined, [fits]).componentInstance.selectedConnectionId()).toBe('c1');
     });
 
     it('Clear saved input on wizard cancel', () => {
       const fixture = render({}, {});
-      fixture.componentInstance.repositoryChanged('https://forgejo.example.com/acme/my-app.git');
-      fixture.componentInstance.continueFromRepository();
-      fixture.componentInstance.back();
-      fixture.detectChanges();
-      expect(readProjectConnectRepositoryDraftFromSessionStorage('acme')?.step).toBe('repository');
+      fixture.componentInstance.saveWizardInputAndStepToSessionStorage();
       const cancel = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLAnchorElement>('a')).find((a) => a.textContent?.includes('Back'))!;
       vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
       cancel.click();
-      expect(readProjectConnectRepositoryDraftFromSessionStorage('acme')).toBeNull();
+      expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
     });
   });
 });

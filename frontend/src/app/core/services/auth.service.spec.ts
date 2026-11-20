@@ -11,6 +11,10 @@ import { Router, UrlTree, provideRouter } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from './auth.service';
 import { environment } from '@environments/environment';
+import {
+  readConnectRepositoryWizardInputFromSessionStorage,
+  saveProjectWizardDraftToSessionStorage,
+} from '@shared/git-host-connections/connect-repository-wizard-unfinished-input-session-storage';
 
 const userUrl = `${environment.apiUrl}/user`;
 
@@ -166,6 +170,15 @@ describe('AuthService session probe', () => {
     httpMock.expectNone(`${environment.apiUrl}/auth/logout`);
     expect(localStorage.getItem('gradient-signed-out')).toBeTruthy();
     expect(router.serializeUrl(navigate.mock.calls[0][0] as UrlTree)).toBe('/account/login?reason=deleted');
+  });
+
+  it('Removal of the saved wizard input on sign-out', () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    saveProjectWizardDraftToSessionStorage({ project: 'acme', step: 'git-host', form: { repository: 'https://github.com/acme/app', display_name: 'app', name: 'app', wildcard: 'packages.**', branch: '', polling: true, cron: '', exec_enabled: false }, selectedConnectionId: null });
+    service.logout().subscribe();
+    httpMock.expectOne(`${environment.apiUrl}/auth/logout`).flush({ error: false, message: 'ok' });
+    expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
   });
 
   it('signs out when another tab signs out', () => {

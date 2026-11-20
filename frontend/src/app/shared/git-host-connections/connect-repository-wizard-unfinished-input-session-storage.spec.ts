@@ -6,19 +6,17 @@
 
 import {
   SavedConnectRepositoryWizardInput,
-  getMostRecentlySavedUnfinishedConnectRepositoryWizardInputAcrossProjects,
-  readProjectConnectRepositoryDraftFromSessionStorage,
-  removeProjectWizardDraftFromSessionStorage,
+  readConnectRepositoryWizardInputFromSessionStorage,
+  removeSavedConnectRepositoryWizardInput,
   saveProjectWizardDraftToSessionStorage,
 } from './connect-repository-wizard-unfinished-input-session-storage';
 
-function savedInput(project: string, savedAt: number): SavedConnectRepositoryWizardInput {
+function savedInput(project: string): SavedConnectRepositoryWizardInput {
   return {
     project,
     step: 'git-host',
     form: { repository: `https://github.com/${project}/app`, display_name: 'app', name: 'app', wildcard: 'packages.**', branch: '', polling: true, cron: '', exec_enabled: false },
     selectedConnectionId: null,
-    savedAt,
   };
 }
 
@@ -28,15 +26,14 @@ describe('saved input of the connect repository wizard', () => {
     sessionStorage.clear();
   });
 
-  it('Return the input that was saved most recently across all projects.', () => {
-    saveProjectWizardDraftToSessionStorage(savedInput('older', 1));
-    saveProjectWizardDraftToSessionStorage(savedInput('newer', 2));
-    sessionStorage.setItem('gradient.connect-repository-draft:broken', '{not json');
-    expect(getMostRecentlySavedUnfinishedConnectRepositoryWizardInputAcrossProjects()?.project).toBe('newer');
-    expect(readProjectConnectRepositoryDraftFromSessionStorage('older')?.form.repository).toBe('https://github.com/older/app');
-    expect(readProjectConnectRepositoryDraftFromSessionStorage('broken')).toBeNull();
-    removeProjectWizardDraftFromSessionStorage('newer');
-    expect(getMostRecentlySavedUnfinishedConnectRepositoryWizardInputAcrossProjects()?.project).toBe('older');
+  it('Keep one saved input and ignore broken values', () => {
+    saveProjectWizardDraftToSessionStorage(savedInput('older'));
+    saveProjectWizardDraftToSessionStorage(savedInput('newer'));
+    expect(readConnectRepositoryWizardInputFromSessionStorage()?.project).toBe('newer');
+    removeSavedConnectRepositoryWizardInput();
+    expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
+    sessionStorage.setItem('gradient.connect-repository-draft', '{not json');
+    expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
   });
 
   it('No dependency on session storage', () => {
@@ -46,10 +43,8 @@ describe('saved input of the connect repository wizard', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked);
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked);
     vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(blocked);
-    vi.spyOn(Storage.prototype, 'key').mockImplementation(blocked);
-    expect(() => saveProjectWizardDraftToSessionStorage(savedInput('acme', 1))).not.toThrow();
-    expect(readProjectConnectRepositoryDraftFromSessionStorage('acme')).toBeNull();
-    expect(() => removeProjectWizardDraftFromSessionStorage('acme')).not.toThrow();
-    expect(getMostRecentlySavedUnfinishedConnectRepositoryWizardInputAcrossProjects()).toBeNull();
+    expect(() => saveProjectWizardDraftToSessionStorage(savedInput('acme'))).not.toThrow();
+    expect(readConnectRepositoryWizardInputFromSessionStorage()).toBeNull();
+    expect(() => removeSavedConnectRepositoryWizardInput()).not.toThrow();
   });
 });
