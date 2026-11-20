@@ -56,7 +56,7 @@
                   }
                 }
                 @if (connection.refused_signature_count; as refused) {
-                  <gr-badge severity="warning">{{ refused }} refused signatures</gr-badge>
+                  <gr-badge severity="warning">{{ refused === 1 ? '1 refused signature' : refused + ' refused signatures' }}</gr-badge>
                 }
                 @if (connection.task_count; as taskCount) {
                   <button grButton text size="small" [label]="taskCount === 1 ? '1 task' : taskCount + ' tasks'"
