@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::accept_header_parsing::request_accepts_media_type;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -13,22 +14,6 @@ use gradient_core::ServerState;
 use gradient_entity::StoreHash;
 use gradient_types::{ServerArgs, frontend_page_urls};
 use std::sync::Arc;
-
-pub(crate) fn request_accepts_html_explicitly(headers: &HeaderMap) -> bool {
-    headers
-        .get_all(header::ACCEPT)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .any(|media_range| {
-            media_range
-                .split(';')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .eq_ignore_ascii_case("text/html")
-        })
-}
 
 pub(crate) async fn redirect_browser_to_cache_frontend_page(
     State(state): State<Arc<ServerState>>,
@@ -94,7 +79,7 @@ async fn redirect_browser_html_request_to_binary_cache_url(
     }
 
     let location = target
-        .filter(|_| request_accepts_html_explicitly(request.headers()))
+        .filter(|_| request_accepts_media_type(request.headers(), "text/html"))
         .and_then(|target| HeaderValue::try_from(target).ok());
     let mut response = match location {
         Some(location) => (
@@ -152,7 +137,7 @@ mod tests {
             "text/html, text/*;q=0.5, image/*",
         ] {
             assert!(
-                request_accepts_html_explicitly(&header_map_with_accept_value(accept)),
+                request_accepts_media_type(&header_map_with_accept_value(accept), "text/html"),
                 "{accept}"
             );
         }
@@ -168,11 +153,11 @@ mod tests {
             ("fetch json", "application/json, text/plain, */*"),
         ] {
             assert!(
-                !request_accepts_html_explicitly(&header_map_with_accept_value(accept)),
+                !request_accepts_media_type(&header_map_with_accept_value(accept), "text/html"),
                 "{client}: {accept}"
             );
         }
-        assert!(!request_accepts_html_explicitly(&HeaderMap::new()));
+        assert!(!request_accepts_media_type(&HeaderMap::new(), "text/html"));
     }
 
     #[test]
