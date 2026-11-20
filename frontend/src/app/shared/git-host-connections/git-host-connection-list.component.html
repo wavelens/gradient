@@ -79,15 +79,15 @@
               }
             </div>
           </div>
-          @if (connection.receives_events && connection.git_host_type !== 'github' && connection.webhook_url; as webhookUrl) {
-            <gr-copy-field label="Webhook URL" [value]="webhookUrl" />
-          }
           @if (tasksShownFor() === connection.id) {
             <ul class="connection-tasks" data-testid="connection-task-list">
               @for (task of tasks() ?? []; track task.id) {
                 <li><a [routerLink]="links.taskPage(task.project, task.name, 'repository')">{{ task.project }} / {{ task.display_name || task.name }}</a></li>
               }
             </ul>
+          }
+          @if (connection.receives_events && connection.git_host_type !== 'github' && connection.webhook_url; as webhookUrl) {
+            <gr-copy-field label="Webhook URL" [value]="webhookUrl" />
           }
           @if (deliveriesShownFor() === connection.id) {
             <app-incoming-deliveries [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id" />
