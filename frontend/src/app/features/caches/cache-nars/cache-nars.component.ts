@@ -108,6 +108,7 @@ export class CacheNarsComponent implements OnInit {
   loadError = signal<unknown>(null);
 
   selected = signal<NarSummary | null>(null);
+  private storePathDetailsDrawerOpenedForHashQuery: string | null = null;
   pinDialogPackageRow = signal<NarSummary | null>(null);
 
   totalPages = computed(() => {
@@ -146,6 +147,7 @@ export class CacheNarsComponent implements OnInit {
       next: (r: Paginated<NarSummary[]>) => {
         this.rows.set(r.items);
         this.total.set(r.total);
+        this.openStorePathRowDetailsForQueryHashOnce(r.items);
         if (!r.items.length && r.total > 0 && this.page() > 1) this.goToPage(this.totalPages());
         this.loading.set(false);
       },
@@ -218,6 +220,15 @@ export class CacheNarsComponent implements OnInit {
 
   show(row: NarSummary): void {
     this.selected.set(row);
+  }
+
+  private openStorePathRowDetailsForQueryHashOnce(rows: NarSummary[]): void {
+    const hash = this.filter().hash;
+    if (!hash || hash === this.storePathDetailsDrawerOpenedForHashQuery) return;
+    const row = rows.find((candidate) => candidate.hash === hash);
+    if (!row) return;
+    this.storePathDetailsDrawerOpenedForHashQuery = hash;
+    this.show(row);
   }
 
   closeDrawer(): void {
