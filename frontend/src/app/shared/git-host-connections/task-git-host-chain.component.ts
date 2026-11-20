@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { RouterLink, UrlTree } from '@angular/router';
-import { ButtonComponent, RowComponent, RowListComponent } from '@gradient/ui/ui';
-import { TaskGitHostChain, TaskGitHostChainStep, TaskGitHostChainStepAction } from '@core/models';
-import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { LocationStrategy } from '@angular/common';
+import { Router, UrlTree } from '@angular/router';
+import type { DialogComponent } from '@gradient/ui/ui';
+import { TaskGitHostChain, TaskGitHostChainStepState } from '@core/models';
 import { ChainStepStateBadgeComponent } from './chain-step-state-badge.component';
 
 export type ChainStepKey = keyof TaskGitHostChain;
@@ -20,68 +20,54 @@ export const CHAIN_STEP_TITLES: Record<ChainStepKey, string> = {
   commit_status: 'Commit status',
 };
 
-const ACTION_LABELS: Record<TaskGitHostChainStepAction['type'], string | null> = {
-  edit_repository_url: 'Edit URL',
-  select_connection: 'Select connection',
-  create_connection: 'New connection',
-  install_github_app: null,
-  install_webhook: 'Install webhook',
-  add_webhook_on_host: 'Add webhook',
-  change_webhook_secret: 'Change secret',
-  add_trigger: 'Add trigger',
-  turn_on_report_status: 'Turn on',
-  test_status_report: 'Test status report',
-};
+const STATES_WORST_FIRST: TaskGitHostChainStepState[] = ['failing', 'attention', 'off', 'ok'];
 
 export function nextChainStepKey(chain: TaskGitHostChain): ChainStepKey | undefined {
   return (Object.keys(CHAIN_STEP_TITLES) as ChainStepKey[]).find((key) => chain[key].action);
 }
 
-interface ChainStepView extends TaskGitHostChainStep {
-  key: ChainStepKey;
-  title: string;
-  actionLabel: string | null;
-}
-
 @Component({
   selector: 'app-task-git-host-chain',
   standalone: true,
-  imports: [RouterLink, ButtonComponent, ChainStepStateBadgeComponent, RelativeTimePipe, RowComponent, RowListComponent, ServerTimestampToLocalDateTimePipe],
+  imports: [ChainStepStateBadgeComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <gr-row-list>
-      @for (step of steps(); track step.key) {
-        <gr-row [attr.data-testid]="'chain-' + step.key">
-          {{ step.title }}
-          <app-chain-step-state-badge [state]="step.state" />
-          <ng-container slot="meta">
-            <span data-testid="chain-detail">{{ step.detail }}</span>
-            @if (step.at) {
-              <span [title]="step.at | serverDate">{{ step.at | relativeTime }}</span>
-            }
-          </ng-container>
-          <ng-container slot="actions">
-            @if (step.action && step.actionLabel) {
-              <a grButton severity="secondary" size="small" [label]="step.actionLabel" [routerLink]="repositoryPageLink()"
-                [attr.data-testid]="'chain-action-' + step.action.type"></a>
-            }
-          </ng-container>
-        </gr-row>
-      }
-    </gr-row-list>
+    <p class="chain-summary" data-testid="chain-summary">
+      <app-chain-step-state-badge [state]="worstStep().state" />
+      <span class="chain-summary__text"><strong>{{ worstStep().title }}</strong> {{ worstStep().detail }}</span>
+      <a class="chain-summary__link" [href]="repositoryPageHref()" (click)="openRepositoryPage($event)" data-testid="open-repository">Open repository</a>
+    </p>
   `,
-  styles: `:host { display: block; }`,
+  styles: `
+    @use '@gradient/ui/styles/variables' as *;
+
+    :host { display: block; }
+    .chain-summary { display: flex; flex-wrap: wrap; align-items: center; gap: $spacing-sm; margin: 0; }
+    .chain-summary__text { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+  `,
 })
 export class TaskGitHostChainComponent {
+  private router = inject(Router);
+  private locationStrategy = inject(LocationStrategy);
+
   chain = input.required<TaskGitHostChain>();
   repositoryPageLink = input.required<UrlTree>();
+  dialogToCloseFirst = input<Pick<DialogComponent, 'close'> | null>(null);
 
-  steps = computed<ChainStepView[]>(() => {
-    const nextKey = nextChainStepKey(this.chain());
-    return (Object.keys(CHAIN_STEP_TITLES) as ChainStepKey[]).map((key) => {
-      const step = this.chain()[key];
-      const action = key === nextKey ? step.action : null;
-      return { ...step, key, action, title: CHAIN_STEP_TITLES[key], actionLabel: action ? ACTION_LABELS[action.type] : null };
-    });
+  worstStep = computed(() => {
+    const keys = Object.keys(CHAIN_STEP_TITLES) as ChainStepKey[];
+    const rank = (key: ChainStepKey) => STATES_WORST_FIRST.indexOf(this.chain()[key].state);
+    const key = keys.reduce((worst, candidate) => (rank(candidate) < rank(worst) ? candidate : worst));
+    return { ...this.chain()[key], title: CHAIN_STEP_TITLES[key] };
   });
+  repositoryPageHref = computed(() => this.locationStrategy.prepareExternalUrl(this.router.serializeUrl(this.repositoryPageLink())));
+
+  openRepositoryPage(event: MouseEvent): void {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const open = () => void this.router.navigateByUrl(this.repositoryPageLink());
+    const dialog = this.dialogToCloseFirst();
+    if (dialog) dialog.close(open);
+    else open();
+  }
 }

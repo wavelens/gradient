@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { TaskGitHostChain } from '@core/models';
 import { links } from '@shared/routing';
 import { TaskGitHostChainComponent } from './task-git-host-chain.component';
@@ -27,42 +27,42 @@ function render(inputs: Record<string, unknown> = {}) {
   return fixture.nativeElement as HTMLElement;
 }
 
+const summary = (el: HTMLElement) => el.querySelector('[data-testid="chain-summary"]')?.textContent ?? '';
+
 describe('TaskGitHostChainComponent', () => {
-  it('shows the four steps in order, each with its state beside the name', () => {
+  it('sums the chain up in one line by its worst step', () => {
     const el = render();
-    const rows = Array.from(el.querySelectorAll('gr-row'));
-    expect(rows.map((row) => row.getAttribute('data-testid'))).toEqual([
-      'chain-repository',
-      'chain-connection',
-      'chain-incoming_events',
-      'chain-commit_status',
-    ]);
-    expect(rows[2].textContent).toContain('Incoming events');
-    expect(rows[2].textContent).toContain('Incomplete');
-    expect(rows[2].textContent).toContain('No event received yet');
+    expect(summary(el)).toContain('Incomplete');
+    expect(summary(el)).toContain('Incoming events');
+    expect(summary(el)).toContain('No event received yet');
+    expect(el.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('links only the first step that needs action to the repository page', () => {
-    const el = render();
-    const actions = el.querySelectorAll('[data-testid^="chain-action-"]');
-    expect(actions).toHaveLength(1);
-    const action = actions[0] as HTMLAnchorElement;
-    expect(action.getAttribute('data-testid')).toBe('chain-action-install_webhook');
-    expect(action.getAttribute('href')).toBe('/project/acme/task/app/repository');
+  it('puts a failing step before an earlier incomplete one', () => {
+    const el = render({ chain: { ...chain, commit_status: { state: 'failing', detail: 'The host refused the status' } } });
+    expect(summary(el)).toContain('Commit status');
+    expect(summary(el)).toContain('The host refused the status');
   });
 
-  it('links a webhook added by hand to the repository page too', () => {
-    const el = render({
-      chain: { ...chain, incoming_events: { ...chain.incoming_events, action: { type: 'add_webhook_on_host', webhook_url: 'https://ci.example.com/hook/1' } } },
-    });
-    expect(el.querySelector('[data-testid="chain-action-add_webhook_on_host"]')?.getAttribute('href')).toBe('/project/acme/task/app/repository');
-    expect(el.querySelector('gr-copy-field')).toBeNull();
+  it('shows the first step when every step works', () => {
+    const working = { ...chain, incoming_events: { state: 'ok' as const, detail: 'push queued 1 evaluation' }, commit_status: { state: 'ok' as const, detail: 'Posted' } };
+    const el = render({ chain: working });
+    expect(summary(el)).toContain('Working');
+    expect(summary(el)).toContain('Repository');
   });
 
-  it('shows no link for an action this page cannot run', () => {
-    const el = render({
-      chain: { ...chain, connection: { state: 'attention', detail: "The GitHub App isn't installed on acme", action: { type: 'install_github_app', account: 'acme' } } },
-    });
-    expect(el.querySelector('[data-testid="chain-connection"] a')).toBeNull();
+  it('always links to the repository page', () => {
+    const el = render({ chain: { ...chain, incoming_events: { state: 'ok' as const, detail: 'ok' }, commit_status: { state: 'ok' as const, detail: 'ok' } } });
+    expect(el.querySelector('[data-testid="open-repository"]')?.getAttribute('href')).toBe('/project/acme/task/app/repository');
+  });
+
+  it('closes the given dialog before it opens the repository page', () => {
+    const close = vi.fn();
+    const el = render({ dialogToCloseFirst: { close } });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    el.querySelector<HTMLElement>('[data-testid="open-repository"]')!.click();
+    expect(navigate).not.toHaveBeenCalled();
+    close.mock.calls[0][0]();
+    expect(navigate).toHaveBeenCalledWith(links.taskPage('acme', 'app', 'repository'));
   });
 });
