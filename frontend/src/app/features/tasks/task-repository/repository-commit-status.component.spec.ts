@@ -99,6 +99,13 @@ describe('RepositoryCommitStatusComponent', () => {
     expect(savedStates).toEqual([saved]);
   });
 
+  it('leaves the connection out of the body so the server keeps it', () => {
+    const updateTaskRepositoryConnection = vi.fn((_project: string, _task: string, _body: object) => of(state));
+    const { component } = render({ report_status: true }, { updateTaskRepositoryConnection });
+    component.setReportStatus(false);
+    expect(Object.keys(updateTaskRepositoryConnection.mock.calls[0][2])).toEqual(['report_status']);
+  });
+
   it('makes the status report test the primary button when no status was posted yet', () => {
     const chain = { ...linked, commit_status: { state: 'attention' as const, detail: 'No status posted yet', action: { type: 'test_status_report' as const } } };
     const postPendingTestCommitStatus = vi.fn(() => of({ success: true, response_status: 201 }));
