@@ -321,16 +321,16 @@ fn secret_mismatch_detail(
 ) -> String {
     let visible_task_count = connection.task_count;
     let used_in_hidden_projects = input.total_task_count_for_connection > visible_task_count;
-    match (input.total_task_count_for_connection, visible_task_count) {
-        (0 | 1, _) => "Refused last delivery: webhook secret does not match".to_owned(),
-        (_, 0 | 1) => "Refused last delivery: webhook secret does not match. Other projects also use this connection.".to_owned(),
-        _ if used_in_hidden_projects => format!(
-            "Refused last delivery: webhook secret does not match. {visible_task_count} tasks share this connection. Other projects use the same connection too."
-        ),
-        _ => format!(
-            "Refused last delivery: webhook secret does not match. {visible_task_count} tasks share this connection."
-        ),
+    let mut parts = vec!["Refused last delivery: webhook secret does not match".to_owned()];
+    if input.total_task_count_for_connection > 1 {
+        if visible_task_count > 1 {
+            parts.push(format!("{visible_task_count} tasks share this connection"));
+        }
+        if used_in_hidden_projects {
+            parts.push("Other projects use this connection too".to_owned());
+        }
     }
+    parts.join(". ")
 }
 
 fn add_trigger_action(
@@ -785,10 +785,9 @@ mod tests {
             chain.incoming_events.action,
             Some(TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count: 3 })
         );
-        assert!(
-            chain.incoming_events.detail.contains("3 tasks"),
-            "{}",
-            chain.incoming_events.detail
+        assert_eq!(
+            chain.incoming_events.detail,
+            "Refused last delivery: webhook secret does not match. 3 tasks share this connection"
         );
         let unmanageable_connection = GitHostConnectionSummary {
             can_manage: false,
@@ -822,9 +821,10 @@ mod tests {
             chain.incoming_events.action,
             Some(TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count: 2 })
         );
-        assert!(chain.incoming_events.detail.contains("2 tasks"));
-        assert!(chain.incoming_events.detail.contains("Other projects"));
-        assert!(!chain.incoming_events.detail.contains('5'));
+        assert_eq!(
+            chain.incoming_events.detail,
+            "Refused last delivery: webhook secret does not match. 2 tasks share this connection. Other projects use this connection too"
+        );
 
         let only_this_task = GitHostConnectionSummary {
             task_count: 1,
@@ -835,8 +835,10 @@ mod tests {
             ..shared
         };
         let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&hidden_only);
-        assert!(chain.incoming_events.detail.contains("Other projects"));
-        assert!(!chain.incoming_events.detail.contains("tasks share"));
+        assert_eq!(
+            chain.incoming_events.detail,
+            "Refused last delivery: webhook secret does not match. Other projects use this connection too"
+        );
         assert_eq!(
             chain.incoming_events.action,
             Some(TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count: 1 })
