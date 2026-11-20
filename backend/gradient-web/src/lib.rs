@@ -589,7 +589,12 @@ pub async fn serve_web(
         Err(e) => tracing::error!(error = ?e, "failed to recover draining-parked evaluations"),
     }
 
-    endpoints::github_app_page_url_from_cache_or_refresh_in_background(&state);
+    endpoints::github_app_page_url_from_cache_or_refresh_in_background(
+        state.config.github_app.as_ref(),
+        &state.http,
+        &state.memory.github_app_page_url,
+        &state.shutdown,
+    );
     start_background_services(&state, &scheduler, &sessions).await?;
 
     let listener = tuned_listener(listener);
