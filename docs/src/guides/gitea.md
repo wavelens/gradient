@@ -80,7 +80,7 @@ The token needs these scopes.
 1. Open **Project settings -> Git host connections** and click **New connection**. On the team settings page for **Git host connections**, share the connection with all projects in the team.
 2. In **Host type**, select Gitea or Forgejo. Enter **Host URL**. Paste the bot token into **Access token** and click **Create**.
 3. Gradient checked the token and named the bot account in "Signed in as gradient-bot". The **Webhook URL** and **Webhook secret** appear a single time.
-4. Click **Connect repository** in the project and enter the repository URL. The **Git host** step can pick the single fitting connection for the repository host. Two or more fitting connections come with a **Connection** select.
+4. Click **Connect repository** in the project and enter the repository URL. The **Git Host** step can pick the single fitting connection for the repository host. Two or more fitting connections come with a **Connection** select.
 5. Follow the steps and click **Create task**. Gradient turned on **Report commit status** for the connection that has **Reports status** on.
 
 Steps from Connection to Commit Status map to one section each on the **Repository** page of a task. A status and one action appear in each section.
@@ -100,7 +100,7 @@ Tokens without admin rights need manual webhook setup. Open **Settings -> Webhoo
 | Secret | The secret |
 | Trigger on | Custom events: **Push**, **Pull Request**, **Issue Comment**, **Pull Request Comment**, **Pull Request Review**, **Release** |
 
-Add the deploy key from step **Repository access** under **Settings -> Deploy Keys** for repository URLs over SSH without **Install deploy key**. Then click **Test access**.
+Add the deploy key from step **Repository Access** under **Settings -> Deploy Keys** for repository URLs over SSH without **Install deploy key**. Then click **Test access**.
 
 ## OAuth2 Connection
 

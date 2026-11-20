@@ -56,7 +56,7 @@
         </gr-settings-section>
       }
       @case ('git-host') {
-        <gr-settings-section title="Git host">
+        <gr-settings-section title="Git Host">
           @if (connectionsError(); as error) {
             <gr-load-state [error]="error" errorTitle="Failed to load git host connections" (retry)="loadConnections()" />
           } @else if (connections() === null) {
@@ -98,7 +98,7 @@
           [repository]="form.repository.trim()" (saved)="loadConnections($event.id)" />
       }
       @case ('access') {
-        <gr-settings-section title="Repository access">
+        <gr-settings-section title="Repository Access">
           <gr-form-field label="Repository URL">
             <gr-copy-field [value]="form.repository.trim()" />
           </gr-form-field>
@@ -123,7 +123,7 @@
         </gr-settings-section>
       }
       @case ('triggers') {
-        <gr-settings-section title="Triggers and settings">
+        <gr-settings-section title="Triggers and Settings">
           @if (createError(); as error) {
             <gr-message-banner type="error">{{ error }}</gr-message-banner>
           }

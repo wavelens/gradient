@@ -21,14 +21,14 @@ async function createProjectThroughConnectRepositoryWizardAndReturnNewTaskPagePa
   await expect(main.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(task);
   await main.getByRole('button', { name: 'Continue' }).click();
 
-  await expect(main.getByRole('heading', { level: 2, name: 'Git host' })).toBeVisible();
+  await expect(main.getByRole('heading', { level: 2, name: 'Git Host' })).toBeVisible();
   await expect(main.getByTestId('no-connection')).toContainText('git.example.com');
   await main.getByRole('button', { name: 'Continue' }).click();
 
-  await expect(main.getByRole('heading', { level: 2, name: 'Repository access' })).toBeVisible();
+  await expect(main.getByRole('heading', { level: 2, name: 'Repository Access' })).toBeVisible();
   await main.getByRole('button', { name: 'Continue' }).click();
 
-  await expect(main.getByRole('heading', { level: 2, name: 'Triggers and settings' })).toBeVisible();
+  await expect(main.getByRole('heading', { level: 2, name: 'Triggers and Settings' })).toBeVisible();
   await main.getByRole('button', { name: 'Create task' }).click();
   await main.getByTestId('created-task').getByRole('link', { name: 'Open task' }).click();
 
