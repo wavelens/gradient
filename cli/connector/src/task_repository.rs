@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::api::{
-    TaskCommitStatusPostAttempt, TaskRepositoryConnectionAndCommitStatusPatchRequest,
-    TaskRepositoryResponse,
-};
+use crate::api::{GitHostConnectionId, TaskCommitStatusPostAttempt, TaskRepositoryResponse};
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::{Method, RequestBuilder};
@@ -46,14 +43,20 @@ impl TaskRepositoryConnectionApi<'_> {
         &self,
         project: &str,
         task: &str,
-        body: &TaskRepositoryConnectionAndCommitStatusPatchRequest,
+        connection: Option<Option<&GitHostConnectionId>>,
+        report_status: Option<bool>,
     ) -> Result<TaskRepositoryResponse, ConnectorError> {
-        let req = self
-            .request(Method::PATCH, project, task, "")?
-            .json(&serde_json::json!({
-                "git_host_connection": body.git_host_connection,
-                "report_status": body.report_status,
-            }));
+        let mut body = serde_json::Map::new();
+        if let Some(connection) = connection {
+            body.insert(
+                "git_host_connection".to_owned(),
+                serde_json::json!(connection),
+            );
+        }
+        if let Some(report_status) = report_status {
+            body.insert("report_status".to_owned(), report_status.into());
+        }
+        let req = self.request(Method::PATCH, project, task, "")?.json(&body);
         http::decode(req.send().await?).await
     }
 

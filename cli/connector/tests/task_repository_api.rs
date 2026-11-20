@@ -7,7 +7,7 @@
 )]
 
 use connector::Client;
-use connector::api::TaskRepositoryConnectionAndCommitStatusPatchRequest;
+use connector::api::GitHostConnectionId;
 use wiremock::matchers::{body_json, body_string, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -88,30 +88,47 @@ async fn test_install_deploy_key_and_webhook_post_without_body_and_return_reposi
 }
 
 #[tokio::test]
-async fn test_set_connection_patches_connection_and_report_status() {
+async fn test_set_connection_sends_only_the_given_fields_and_null_to_remove() {
     let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
-        .and(path(BASE))
-        .and(body_json(serde_json::json!({
-            "git_host_connection": CONNECTION, "report_status": true
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(repository())))
-        .expect(1)
-        .mount(&server)
-        .await;
+    let connection: GitHostConnectionId = CONNECTION.parse().unwrap();
+    for (connection, report_status, body) in [
+        (
+            Some(Some(&connection)),
+            Some(true),
+            serde_json::json!({"git_host_connection": CONNECTION, "report_status": true}),
+        ),
+        (
+            Some(None),
+            None,
+            serde_json::json!({"git_host_connection": null}),
+        ),
+        (
+            None,
+            Some(false),
+            serde_json::json!({"report_status": false}),
+        ),
+    ] {
+        server.reset().await;
+        Mock::given(method("PATCH"))
+            .and(path(BASE))
+            .and(body_json(body))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ok(repository())))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    client(&server)
-        .task_repository()
-        .set_task_repository_git_host_connection_and_commit_status_reporting(
-            "proj",
-            "nightly",
-            &TaskRepositoryConnectionAndCommitStatusPatchRequest {
-                git_host_connection: Some(CONNECTION.parse().unwrap()),
-                report_status: Some(true),
-            },
-        )
-        .await
-        .unwrap();
+        client(&server)
+            .task_repository()
+            .set_task_repository_git_host_connection_and_commit_status_reporting(
+                "proj",
+                "nightly",
+                connection,
+                report_status,
+            )
+            .await
+            .unwrap();
+        server.verify().await;
+    }
 }
 
 #[tokio::test]

@@ -131,6 +131,7 @@ pub enum TaskRepositoryCommands {
     /// Show the repository for the selected task, the connection to the Git host, commit status reports, and the latest webhook events.
     Show,
     /// Select the connection to the Git host for the selected task and turn commit status reports on or off. Flags not specified keep current values.
+    #[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["connection", "no_connection", "report_status"])))]
     SetConnection {
         /// Connection name or UUID from the connections available in `gradient task repository show`
         #[arg(long, conflicts_with = "no_connection")]
