@@ -21,7 +21,6 @@ use crate::permissions::{Permission, PermissionMask, mask_to_vec};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
-use anyhow::Context;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_types::events::EventOwner;
@@ -38,7 +37,6 @@ use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeProjectRequest {
@@ -150,8 +148,6 @@ pub struct ProjectResponse {
     pub owner_team: Option<TeamNameAndDisplayName>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
-    pub github_app_available: bool,
-    pub github_app_install_url: Option<String>,
     pub role: Option<String>,
     pub permissions: Vec<Permission>,
 }
@@ -162,8 +158,6 @@ impl ProjectResponse {
         owner_team: Option<TeamNameAndDisplayName>,
         role: Option<String>,
         permissions: PermissionMask,
-        github_app_available: bool,
-        github_app_install_url: Option<String>,
     ) -> Self {
         Self {
             owner_team,
@@ -178,8 +172,6 @@ impl ProjectResponse {
             managed: project.managed,
             created_by: project.created_by,
             created_at: project.created_at,
-            github_app_available,
-            github_app_install_url,
             role,
             permissions: mask_to_vec(permissions),
         }
@@ -452,12 +444,6 @@ pub async fn get_project(
     )
     .await?;
 
-    let install_url = github_app_install_url(
-        &state.config,
-        &state.http,
-        &state.memory.github_app_install_url,
-    )
-    .await;
     let owner_team = team_names(&state.web_db, project.owner_team)
         .await?
         .into_values()
@@ -468,35 +454,7 @@ pub async fn get_project(
         owner_team,
         role,
         permissions,
-        state.config.github_app.is_some(),
-        install_url,
     )))
-}
-
-const GITHUB_APP_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
-
-async fn github_app_install_url(
-    config: &RuntimeConfig,
-    http: &reqwest::Client,
-    github_app_install_url: &tokio::sync::OnceCell<String>,
-) -> Option<String> {
-    let app = config.github_app.as_ref()?;
-    let lookup = async {
-        let pem = tokio::fs::read_to_string(&app.private_key_file)
-            .await
-            .context("read GitHub App private key")?;
-        gradient_git_host::github_app::get_install_url(http, app.app_id, &pem).await
-    };
-    github_app_install_url
-        .get_or_try_init(|| async {
-            tokio::time::timeout(GITHUB_APP_LOOKUP_TIMEOUT, lookup)
-                .await
-                .context("GitHub App lookup timed out")?
-        })
-        .await
-        .inspect_err(|e| tracing::warn!(error = %e, "GitHub App install URL lookup failed"))
-        .ok()
-        .cloned()
 }
 
 #[utoipa::path(

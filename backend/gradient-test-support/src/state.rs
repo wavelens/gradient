@@ -167,7 +167,7 @@ impl TestState {
                 eval_progress: gradient_core::eval_progress(),
                 eval_member_thunks: gradient_core::eval_member_thunks(),
                 build_status_counts: gradient_core::build_status_counts(),
-                github_app_install_url: Default::default(),
+                github_app_page_url: Default::default(),
                 manifest_state: Default::default(),
                 pending_credentials: Default::default(),
                 pending_project_memberships: Default::default(),

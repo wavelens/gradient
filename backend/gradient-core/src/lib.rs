@@ -263,7 +263,7 @@ pub async fn init_state(
             eval_progress: eval_progress(),
             eval_member_thunks: eval_member_thunks(),
             build_status_counts: build_status_counts(),
-            github_app_install_url: Default::default(),
+            github_app_page_url: Default::default(),
             manifest_state: Default::default(),
             pending_credentials: Default::default(),
             pending_project_memberships,

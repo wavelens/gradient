@@ -10,9 +10,10 @@ use hmac::{Hmac, KeyInit, Mac};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
-use tracing::debug;
+use tracing::{debug, warn};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -117,16 +118,56 @@ pub async fn get_repository_installation(
     Ok(installation.map(|i| (i.id, i.account.login)))
 }
 
-pub async fn get_install_url(
+pub async fn get_app_page_url(
     client: &reqwest::Client,
     app_id: u64,
     private_key_pem: &str,
 ) -> Result<String> {
     let app: AppResponse = app_get(client, app_id, private_key_pem, "app").await?;
-    Ok(format!(
-        "{}/installations/new",
-        app.html_url.trim_end_matches('/')
-    ))
+    Ok(app.html_url.trim_end_matches('/').to_owned())
+}
+
+pub fn install_url(app_page_url: &str) -> String {
+    format!("{}/installations/new", app_page_url.trim_end_matches('/'))
+}
+
+const RETRY_PAGE_URL_LOOKUP_AFTER: Duration = Duration::from_secs(300);
+
+#[derive(Debug, Clone)]
+enum PageUrlLookup {
+    Found(String),
+    FailedAt(Instant),
+}
+
+#[derive(Debug, Default)]
+pub struct GitHubAppPageUrlCache(Mutex<Option<PageUrlLookup>>);
+
+impl GitHubAppPageUrlCache {
+    pub async fn get_or_look_up(
+        &self,
+        look_up: impl Future<Output = Result<String>>,
+    ) -> Option<String> {
+        let cached = self.0.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        match cached {
+            Some(PageUrlLookup::Found(url)) => return Some(url),
+            Some(PageUrlLookup::FailedAt(at)) if at.elapsed() < RETRY_PAGE_URL_LOOKUP_AFTER => {
+                return None;
+            }
+            _ => {}
+        }
+        let (stored, found) = match look_up.await {
+            Ok(url) => {
+                let url = url.trim_end_matches('/').to_owned();
+                (PageUrlLookup::Found(url.clone()), Some(url))
+            }
+            Err(e) => {
+                warn!(error = %e, "GitHub App page lookup failed");
+                (PageUrlLookup::FailedAt(Instant::now()), None)
+            }
+        };
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(stored);
+        found
+    }
 }
 
 async fn app_get<T: serde::de::DeserializeOwned>(
@@ -195,6 +236,32 @@ pub fn verify_request_against_plaintext_secret(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_found_page_url_is_kept() {
+        let cache = GitHubAppPageUrlCache::default();
+        let found = cache
+            .get_or_look_up(async { Ok("https://github.com/apps/gradient".to_owned()) })
+            .await;
+        assert_eq!(found.as_deref(), Some("https://github.com/apps/gradient"));
+        let kept = cache
+            .get_or_look_up(async { anyhow::bail!("must not look up again") })
+            .await;
+        assert_eq!(kept.as_deref(), Some("https://github.com/apps/gradient"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_lookup_is_not_repeated_right_away() {
+        let cache = GitHubAppPageUrlCache::default();
+        let failed = cache
+            .get_or_look_up(async { anyhow::bail!("GitHub is unreachable") })
+            .await;
+        assert_eq!(failed, None);
+        let skipped = cache
+            .get_or_look_up(async { Ok("https://github.com/apps/gradient".to_owned()) })
+            .await;
+        assert_eq!(skipped, None);
+    }
 
     const TEST_RSA_PEM_PKCS1: &str = "-----BEGIN RSA PRIVATE KEY-----\n\
 MIIEpAIBAAKCAQEAvGqpmY6nUPo1IQU0QWdpgD+9mJ6w0MqGk6ldyOLNlfieQust\n\

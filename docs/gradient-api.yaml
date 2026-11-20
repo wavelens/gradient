@@ -23034,7 +23034,6 @@ components:
       - managed
       - created_by
       - created_at
-      - github_app_available
       - permissions
       properties:
         id:
@@ -23066,12 +23065,6 @@ components:
         created_at:
           type: string
           format: date-time
-        github_app_available:
-          type: boolean
-        github_app_install_url:
-          type:
-          - string
-          - 'null'
         role:
           type:
           - string
@@ -23983,6 +23976,14 @@ components:
           $ref: '#/components/schemas/CreatePermission'
         github_app_enabled:
           type: boolean
+        github_app_page_url:
+          type:
+          - string
+          - 'null'
+        github_app_install_url:
+          type:
+          - string
+          - 'null'
         gitea_oauth_app:
           oneOf:
           - $ref: '#/components/schemas/GiteaOAuthAppConfig'
