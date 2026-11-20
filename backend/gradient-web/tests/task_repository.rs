@@ -193,6 +193,38 @@ async fn get_task_repository_shows_selected_git_host_connection_webhook_url_and_
 }
 
 #[tokio::test]
+async fn a_push_that_matched_no_task_offers_a_push_trigger_when_the_task_has_none() {
+    let (s, connection) = database_with_task_using_a_status_reporting_connection().await;
+    gradient_db::rows::insert::<gradient_entity::incoming_webhook_delivery::Entity, _>(
+        &s.db.connection(),
+        gradient_entity::incoming_webhook_delivery::Model {
+            id: IncomingWebhookDeliveryId::now_v7(),
+            git_host_connection: connection.id,
+            event: "push".into(),
+            status_code: 200,
+            result: gradient_entity::incoming_webhook_delivery::DeliveryResult::NoMatchingTask,
+            repository: Some("https://gitea.example.com/acme/app".into()),
+            tasks_scanned: 1,
+            created_at: test_date(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let res = s.server.get(URL).add_header("authorization", &s.auth).await;
+
+    res.assert_status_ok();
+    let events = res.json::<Value>()["message"]["chain"]["incoming_events"].clone();
+    assert_eq!(
+        events["action"],
+        json!({ "type": "add_trigger", "trigger_type": "reporter_push" }),
+        "{events}"
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn task_repository_chain_uses_newest_delivery_for_the_task_repository_only() {
     let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
     let connection = insert_test_git_host_connection(

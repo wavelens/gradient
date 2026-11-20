@@ -13,6 +13,7 @@ use crate::endpoints::git_host_connections::{
 };
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
 use gradient_types::GitHostType;
+use gradient_types::triggers::TriggerType;
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
@@ -39,6 +40,10 @@ pub enum TaskGitHostChainStepAction {
     InstallWebhook,
     AddWebhookOnHost {
         webhook_url: String,
+    },
+    ChangeWebhookSecret,
+    AddTrigger {
+        trigger_type: TriggerType,
     },
     TurnOnReportStatus,
     TestStatusReport,
@@ -68,6 +73,7 @@ pub(crate) struct TaskGitHostChainInput<'a> {
     pub(crate) available_connections: &'a [GitHostConnectionSummary],
     pub(crate) report_status: bool,
     pub(crate) newest_delivery: Option<&'a IncomingWebhookDeliveryResponse>,
+    pub(crate) missing_trigger_type: Option<TriggerType>,
     pub(crate) newest_status_post: Option<&'a TaskCommitStatusPostAttempt>,
     pub(crate) can_edit_task: bool,
     pub(crate) can_manage_integrations: bool,
@@ -290,6 +296,28 @@ fn webhook_action(
     }
 }
 
+fn secret_mismatch_action(
+    input: &TaskGitHostChainInput<'_>,
+    connection: &GitHostConnectionSummary,
+) -> Option<TaskGitHostChainStepAction> {
+    if input.can_manage_integrations && input.connection_has_access_token {
+        Some(TaskGitHostChainStepAction::InstallWebhook)
+    } else {
+        connection
+            .can_manage
+            .then_some(TaskGitHostChainStepAction::ChangeWebhookSecret)
+    }
+}
+
+fn add_trigger_action(
+    input: &TaskGitHostChainInput<'_>,
+    delivery: &IncomingWebhookDeliveryResponse,
+) -> Option<TaskGitHostChainStepAction> {
+    let trigger_type = input.missing_trigger_type?;
+    (input.can_edit_task && delivery.result == DeliveryResult::NoMatchingTask)
+        .then_some(TaskGitHostChainStepAction::AddTrigger { trigger_type })
+}
+
 fn incoming_events_step(
     input: &TaskGitHostChainInput<'_>,
     connection: &GitHostConnectionSummary,
@@ -311,7 +339,7 @@ fn incoming_events_step(
                 TaskGitHostChainStepState::Failing,
                 "The last delivery had a wrong signature; the webhook secrets differ",
                 (!github_app)
-                    .then(|| webhook_action(input, connection))
+                    .then(|| secret_mismatch_action(input, connection))
                     .flatten(),
             )
         };
@@ -319,7 +347,11 @@ fn incoming_events_step(
     match input.newest_delivery {
         Some(delivery) => TaskGitHostChainStep {
             at: Some(delivery.created_at),
-            ..step(delivery_state(delivery), delivery_outcome(delivery), None)
+            ..step(
+                delivery_state(delivery),
+                delivery_outcome(delivery),
+                add_trigger_action(input, delivery),
+            )
         },
         None if github_app => step(
             TaskGitHostChainStepState::Attention,
@@ -480,6 +512,7 @@ mod tests {
             available_connections,
             report_status: true,
             newest_delivery: None,
+            missing_trigger_type: None,
             newest_status_post: None,
             can_edit_task: true,
             can_manage_integrations: true,
@@ -623,6 +656,29 @@ mod tests {
     }
 
     #[test]
+    fn refused_signature_without_access_token_offers_to_change_the_secret() {
+        let mut selected = connection(true);
+        selected.last_refused_signature_at = Some(test_date());
+        let without_token = TaskGitHostChainInput {
+            connection_has_access_token: false,
+            ..input(GITEA_REPOSITORY, Some(&selected), &[])
+        };
+        assert_eq!(
+            task_git_host_chain(&without_token).incoming_events.action,
+            Some(TaskGitHostChainStepAction::ChangeWebhookSecret)
+        );
+        let unmanageable_connection = GitHostConnectionSummary {
+            can_manage: false,
+            ..selected.clone()
+        };
+        let unmanageable = TaskGitHostChainInput {
+            connection: Some(&unmanageable_connection),
+            ..without_token
+        };
+        assert_eq!(task_git_host_chain(&unmanageable).incoming_events.action, None);
+    }
+
+    #[test]
     fn delivery_after_refused_signature_is_ok() {
         let mut selected = connection(true);
         selected.last_refused_signature_at = Some(test_date() - chrono::Duration::minutes(1));
@@ -712,6 +768,33 @@ mod tests {
             chain.incoming_events.detail,
             "push event matched no task: app has no trigger for push events"
         );
+        assert_eq!(chain.incoming_events.action, None);
+    }
+
+    #[test]
+    fn delivery_without_a_trigger_for_its_event_offers_to_add_one() {
+        let selected = connection(true);
+        let newest = IncomingWebhookDeliveryResponse {
+            result: DeliveryResult::NoMatchingTask,
+            queued: 0,
+            ..delivery()
+        };
+        let missing = TaskGitHostChainInput {
+            newest_delivery: Some(&newest),
+            missing_trigger_type: Some(TriggerType::ReporterPush),
+            ..input(GITEA_REPOSITORY, Some(&selected), &[])
+        };
+        assert_eq!(
+            task_git_host_chain(&missing).incoming_events.action,
+            Some(TaskGitHostChainStepAction::AddTrigger {
+                trigger_type: TriggerType::ReporterPush
+            })
+        );
+        let view_only = TaskGitHostChainInput {
+            can_edit_task: false,
+            ..missing
+        };
+        assert_eq!(task_git_host_chain(&view_only).incoming_events.action, None);
     }
 
     #[test]
