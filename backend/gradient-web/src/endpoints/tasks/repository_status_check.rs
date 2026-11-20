@@ -309,15 +309,26 @@ fn secret_mismatch_action(
     }
     Some(match input.total_task_count_for_connection {
         0 | 1 => TaskGitHostChainStepAction::ChangeWebhookSecret,
-        task_count => TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count },
+        _ => TaskGitHostChainStepAction::OpenConnectionSharedByTasks {
+            task_count: connection.task_count,
+        },
     })
 }
 
-fn secret_mismatch_detail(input: &TaskRepositoryStatusCheckInput<'_>) -> String {
-    match input.total_task_count_for_connection {
-        0 | 1 => "Rejected last delivery: webhook secret does not match".to_owned(),
-        task_count => format!(
-            "Rejected last delivery: webhook secret does not match. {task_count} tasks share this connection"
+fn secret_mismatch_detail(
+    input: &TaskRepositoryStatusCheckInput<'_>,
+    connection: &GitHostConnectionSummary,
+) -> String {
+    let visible_task_count = connection.task_count;
+    let used_in_hidden_projects = input.total_task_count_for_connection > visible_task_count;
+    match (input.total_task_count_for_connection, visible_task_count) {
+        (0 | 1, _) => "Rejected last delivery: webhook secret does not match".to_owned(),
+        (_, 0 | 1) => "Rejected last delivery: webhook secret does not match. Other projects use this connection too.".to_owned(),
+        _ if used_in_hidden_projects => format!(
+            "Rejected last delivery: webhook secret does not match. {visible_task_count} tasks share this connection. Other projects use the same connection too."
+        ),
+        _ => format!(
+            "Rejected last delivery: webhook secret does not match. {visible_task_count} tasks share this connection"
         ),
     }
 }
@@ -350,7 +361,7 @@ fn incoming_events_step(
             at: Some(refused_at),
             ..step(
                 TaskGitHostChainStepState::Failing,
-                secret_mismatch_detail(input),
+                secret_mismatch_detail(input, connection),
                 (!github_app)
                     .then(|| secret_mismatch_action(input, connection))
                     .flatten(),
@@ -763,6 +774,7 @@ mod tests {
      {
         let mut selected = connection(true);
         selected.last_refused_signature_at = Some(test_date());
+        selected.task_count = 3;
         let shared = TaskRepositoryStatusCheckInput {
             connection_has_access_token: false,
             total_task_count_for_connection: 3,
@@ -791,6 +803,43 @@ mod tests {
                 .incoming_events
                 .action,
             None
+        );
+    }
+
+    #[test]
+    fn show_only_visible_task_count_for_webhook_secret_refusal_on_connection_that_hidden_projects_also_use()
+     {
+        let mut selected = connection(true);
+        selected.last_refused_signature_at = Some(test_date());
+        selected.task_count = 2;
+        let shared = TaskRepositoryStatusCheckInput {
+            connection_has_access_token: false,
+            total_task_count_for_connection: 5,
+            ..input(GITEA_REPOSITORY, Some(&selected), &[])
+        };
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&shared);
+        assert_eq!(
+            chain.incoming_events.action,
+            Some(TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count: 2 })
+        );
+        assert!(chain.incoming_events.detail.contains("2 tasks"));
+        assert!(chain.incoming_events.detail.contains("Other projects"));
+        assert!(!chain.incoming_events.detail.contains('5'));
+
+        let only_this_task = GitHostConnectionSummary {
+            task_count: 1,
+            ..selected.clone()
+        };
+        let hidden_only = TaskRepositoryStatusCheckInput {
+            connection: Some(&only_this_task),
+            ..shared
+        };
+        let chain = check_task_repository_readable_git_host_webhook_and_commit_status(&hidden_only);
+        assert!(chain.incoming_events.detail.contains("Other projects"));
+        assert!(!chain.incoming_events.detail.contains("tasks share"));
+        assert_eq!(
+            chain.incoming_events.action,
+            Some(TaskGitHostChainStepAction::OpenConnectionSharedByTasks { task_count: 1 })
         );
     }
 
