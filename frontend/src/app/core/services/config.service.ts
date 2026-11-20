@@ -33,6 +33,8 @@ export class ConfigService {
   createCache: CreatePermission = 'everyone';
   createTeam: CreatePermission = 'everyone';
   githubAppEnabled = false;
+  githubAppPageUrl: string | null = null;
+  githubAppInstallUrl: string | null = null;
   giteaOauthAppConfig: GiteaOAuthAppConfig | null = null;
   sshEnabled = false;
   sshPort: number | null = null;
@@ -85,6 +87,8 @@ export class ConfigService {
           this.createCache = res.message.create_cache ?? 'everyone';
           this.createTeam = res.message.create_team ?? 'everyone';
           this.githubAppEnabled = res.message.github_app_enabled ?? false;
+          this.githubAppPageUrl = res.message.github_app_page_url ?? null;
+          this.githubAppInstallUrl = res.message.github_app_install_url ?? null;
           this.giteaOauthAppConfig = res.message.gitea_oauth_app ?? null;
           this.sshEnabled = res.message.ssh_enabled ?? false;
           this.sshPort = res.message.ssh_port ?? null;

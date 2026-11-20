@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, viewChild } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ButtonComponent, SettingsSectionComponent } from '@gradient/ui/ui';
-import type { AccessState, GitHostConnectionOwner } from '@core/models';
+import type { AccessState, GitHostConnectionOwner, GitHostType } from '@core/models';
+import { ConfigService } from '@core/services/config.service';
+import { SELF_HOSTED_GIT_HOSTS } from '@shared/git/git-host';
 import { GitHostConnectionListComponent } from '@shared/git-host-connections/git-host-connection-list.component';
 import { GithubAppComponent } from './github-app/github-app.component';
 
@@ -21,10 +23,10 @@ import { GithubAppComponent } from './github-app/github-app.component';
       title="Instance Connections"
       [card]="false"
     >
-      @if (gitHostConnectionList()?.connections()?.length) {
+      @if (gitHostConnectionList()?.sortedConnections()?.length) {
         <button slot="actions" grButton label="New connection" icon="add" (click)="gitHostConnectionList()?.openCreate()"></button>
       }
-      <app-git-host-connection-list [gitHostConnectionOwner]="instanceOwner" [access]="superuserAccess" />
+      <app-git-host-connection-list [gitHostConnectionOwner]="instanceOwner" [access]="superuserAccess" [gitHostTypes]="gitHostTypes" />
     </gr-settings-section>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -33,6 +35,9 @@ import { GithubAppComponent } from './github-app/github-app.component';
 export class AdminGitHostsTabComponent {
   protected readonly instanceOwner: GitHostConnectionOwner = { type: 'instance' };
   protected readonly superuserAccess: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  protected readonly gitHostTypes: readonly GitHostType[] | null = inject(ConfigService).githubAppEnabled
+    ? SELF_HOSTED_GIT_HOSTS.map((gitHost) => gitHost.value)
+    : null;
   private readonly githubApp = viewChild.required(GithubAppComponent);
   protected readonly gitHostConnectionList = viewChild(GitHostConnectionListComponent);
 

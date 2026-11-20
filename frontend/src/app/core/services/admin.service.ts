@@ -24,8 +24,8 @@ import {
 export class AdminService {
   private api = inject(ApiService);
 
-  requestGithubAppManifest(host?: string): Observable<GithubAppManifestResponse> {
-    return this.api.post<GithubAppManifestResponse>('admin/github-app/manifest', { host });
+  requestGithubAppManifest(host?: string, organization?: string): Observable<GithubAppManifestResponse> {
+    return this.api.post<GithubAppManifestResponse>('admin/github-app/manifest', { host, organization });
   }
 
   fetchGithubAppCredentials(): Observable<ManifestResult> {

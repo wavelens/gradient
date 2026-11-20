@@ -9,12 +9,30 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
+import type { GitHostConnectionSummary } from '@core/models';
 import { AdminService } from '@core/services/admin.service';
+import { ConfigService } from '@core/services/config.service';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { AdminGitHostsTabComponent } from './admin-git-hosts-tab.component';
 
-function setup() {
-  const list = vi.fn().mockReturnValue(of([]));
+function connection(id: string, gitHostType: string): GitHostConnectionSummary {
+  return {
+    id,
+    owner: { type: 'instance' },
+    name: id,
+    display_name: id,
+    git_host_type: gitHostType,
+    receives_events: true,
+    reports_status: true,
+    can_manage: true,
+    access_token_refreshes_automatically: false,
+    refused_signature_count: 0,
+    task_count: 0,
+  };
+}
+
+function setup(connections: GitHostConnectionSummary[] = [], githubAppEnabled = false) {
+  const list = vi.fn().mockReturnValue(of(connections));
   TestBed.configureTestingModule({
     imports: [AdminGitHostsTabComponent],
     providers: [
@@ -22,10 +40,11 @@ function setup() {
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: AdminService, useValue: { requestGithubAppManifest: vi.fn(), fetchGithubAppCredentials: vi.fn() } },
-      { provide: GitHostConnectionsApi, useValue: { list } },
+      { provide: GitHostConnectionsApi, useValue: { list, listTasks: vi.fn(() => of([])), listDeliveries: vi.fn(() => of([])) } },
       { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({}) } } },
     ],
   });
+  TestBed.inject(ConfigService).githubAppEnabled = githubAppEnabled;
   const fixture = TestBed.createComponent(AdminGitHostsTabComponent);
   fixture.detectChanges();
   return { fixture, root: fixture.nativeElement as HTMLElement, list };
@@ -43,5 +62,18 @@ describe('AdminGitHostsTabComponent', () => {
   it('allows leaving the tab while the GitHub App setup has no unsaved changes', () => {
     const { fixture } = setup();
     expect(fixture.componentInstance.canDeactivate()).toBe(true);
+  });
+
+  it('lists GitHub App installations only under the GitHub App', () => {
+    const { root } = setup([connection('github-acme', 'github'), connection('gitea-main', 'gitea')], true);
+    const instanceList = root.querySelector(':scope > gr-settings-section app-git-host-connection-list')!;
+    expect(instanceList.textContent).toContain('gitea-main');
+    expect(instanceList.textContent).not.toContain('github-acme');
+  });
+
+  it('offers New connection only when the instance list shows a row', () => {
+    const { root } = setup([connection('github-acme', 'github')], true);
+    const header = root.querySelector(':scope > gr-settings-section .settings-section__actions')!;
+    expect(header.textContent).not.toContain('New connection');
   });
 });
