@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { IncomingWebhookDeliveryResponse } from '@core/models';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
-import { IncomingDeliveriesComponent, deliverySummary } from './incoming-deliveries.component';
+import { IncomingDeliveriesComponent, deliveryBadgeSeverity, deliverySummary } from './incoming-deliveries.component';
 
 const base: IncomingWebhookDeliveryResponse = {
   id: 'd1',
@@ -30,6 +30,22 @@ describe('deliverySummary', () => {
     [{ ...base, result: 'ignored' as const, event: 'ping', repository: null }, 'Received ping event'],
   ])('summarises a delivery', (delivery, expected) => {
     expect(deliverySummary(delivery)).toBe(expected);
+  });
+
+  it('gives the reason the server found for a delivery that matched no task', () => {
+    const delivery = { ...base, result: 'no_matching_task' as const, queued: 0, detail: 'app tracks acme/app but uses no or another connection' };
+    expect(deliverySummary(delivery)).toBe('app tracks acme/app but uses no or another connection');
+  });
+});
+
+describe('deliveryBadgeSeverity', () => {
+  it.each([
+    [base, 'success'],
+    [{ ...base, result: 'no_matching_task' as const }, 'warning'],
+    [{ ...base, result: 'skipped' as const, status_code: 500 }, 'danger'],
+    [{ ...base, result: 'refused' as const }, 'danger'],
+  ])('colours a delivery by its outcome', (delivery, expected) => {
+    expect(deliveryBadgeSeverity(delivery)).toBe(expected);
   });
 });
 

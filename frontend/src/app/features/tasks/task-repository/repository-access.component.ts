@@ -14,6 +14,7 @@ import {
   InputDirective,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
+import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -21,7 +22,6 @@ import { ApiError, apiErrorMessage } from '@core/services/api.service';
 import { RepositoryFetchBannerComponent, fetchFailureHint, gitHostSettingsLinks, repositoryHost } from '@shared/git';
 import { ConfirmService } from '@shared/confirm';
 import { repositoryUrlError } from '@shared/text/repository-url';
-import { RelativeTimePipe } from '@shared/text';
 import { fieldChecks, firstFieldError, unsavedChanges } from '@shared/forms';
 import { canInstallWebhookOrDeployKeyForTask } from './provisioning';
 
@@ -29,7 +29,7 @@ import { canInstallWebhookOrDeployKeyForTask } from './provisioning';
   selector: 'app-repository-access',
   standalone: true,
   imports: [
-    RelativeTimePipe,
+    ChainStepStateBadgeComponent,
     FormsModule,
     ButtonComponent,
     CopyFieldComponent,
@@ -50,6 +50,7 @@ export class RepositoryAccessComponent {
   task = input.required<string>();
   state = input.required<TaskRepositoryResponse>();
   gitHost = input<string | null>(null);
+  hasPrimaryAction = input(false);
   changed = output<void>();
 
   editing = signal(false);
@@ -69,10 +70,7 @@ export class RepositoryAccessComponent {
   links = computed(() => gitHostSettingsLinks(this.state().repository, this.gitHost()));
   isGitHub = computed(() => repositoryHost(this.state().repository) === 'github.com');
   shouldShowInstallDeployKeyButton = computed(() => !!this.state().deploy_key && canInstallWebhookOrDeployKeyForTask(this.state()));
-  fetchOk = computed(() => {
-    const fetch = this.state().fetch;
-    return fetch && !fetch.failed ? fetch : null;
-  });
+  editIsPrimary = computed(() => this.hasPrimaryAction() && this.state().chain.repository.action?.type === 'edit_repository_url');
 
   startEdit(): void {
     this.draftUrl.set(this.state().repository);

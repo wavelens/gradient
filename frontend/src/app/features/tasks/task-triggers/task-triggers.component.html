@@ -255,7 +255,7 @@
   @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {
     @if (repository(); as repo) {
       <div class="trigger-chain">
-        <app-task-git-host-chain [chain]="repo.chain" [repository]="repo.repository" [gitHostType]="repo.git_host_connection?.git_host_type ?? null"
+        <app-task-git-host-chain [chain]="repo.chain"
           [repositoryPageLink]="links.taskPage(projectName, taskName, 'repository')" data-testid="trigger-connection-chain" />
       </div>
     }

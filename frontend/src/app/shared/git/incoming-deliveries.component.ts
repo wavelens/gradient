@@ -5,20 +5,22 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, inject, input, signal } from '@angular/core';
-import { BadgeComponent, ButtonComponent, LoadStateComponent } from '@gradient/ui/ui';
+import { BadgeComponent, type BadgeSeverity, ButtonComponent, LoadStateComponent } from '@gradient/ui/ui';
 import { DeliveryResult, GitHostConnectionOwner, IncomingWebhookDeliveryResponse } from '@core/models';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { RelativeTimePipe } from '@shared/text';
 
-type Severity = 'success' | 'info' | 'warning' | 'danger';
-
-const SEVERITY: Record<DeliveryResult, Severity> = {
+const SEVERITY: Record<DeliveryResult, BadgeSeverity> = {
   queued: 'success',
   skipped: 'info',
   no_matching_task: 'warning',
   ignored: 'info',
   refused: 'danger',
 };
+
+export function deliveryBadgeSeverity(delivery: IncomingWebhookDeliveryResponse): BadgeSeverity {
+  return delivery.status_code >= 400 ? 'danger' : SEVERITY[delivery.result];
+}
 
 export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): string {
   switch (delivery.result) {
@@ -27,6 +29,7 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
     case 'skipped':
       return delivery.detail ? `Skipped: ${delivery.detail}` : 'Skipped';
     case 'no_matching_task':
+      if (delivery.detail) return delivery.detail;
       return delivery.repository ? `No task tracks ${delivery.repository}` : 'No task tracks this repository';
     case 'ignored':
       return `Received ${delivery.event || 'unknown'} event`;
@@ -59,7 +62,7 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
       <ul class="deliveries">
         @for (delivery of deliveries().slice(0, limit()); track delivery.id) {
           <li>
-            <gr-badge [severity]="severity(delivery.result)">{{ delivery.event || 'unknown' }}</gr-badge>
+            <gr-badge [severity]="severity(delivery)">{{ delivery.event || 'unknown' }}</gr-badge>
             <span class="summary">{{ summary(delivery) }}</span>
             <span class="text-secondary when">{{ delivery.created_at | relativeTime }}</span>
           </li>
@@ -108,8 +111,8 @@ export class IncomingDeliveriesComponent implements OnInit {
     });
   }
 
-  severity(result: DeliveryResult): Severity {
-    return SEVERITY[result];
+  severity(delivery: IncomingWebhookDeliveryResponse): BadgeSeverity {
+    return deliveryBadgeSeverity(delivery);
   }
 
   summary(delivery: IncomingWebhookDeliveryResponse): string {

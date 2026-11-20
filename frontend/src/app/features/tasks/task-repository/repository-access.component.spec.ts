@@ -43,6 +43,32 @@ function render(overrides: Partial<TaskRepositoryResponse>, tasks: object) {
 }
 
 describe('RepositoryAccessComponent', () => {
+  it('heads the section with the repository step and its state', () => {
+    const el = render({}, {}).nativeElement as HTMLElement;
+    expect(el.querySelector('h2')?.textContent).toBe('Repository');
+    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Working');
+  });
+
+  it('makes Edit URL the primary button when a failed fetch is the first step to fix', () => {
+    const chain = {
+      ...chainWithoutConnection,
+      repository: { state: 'failing' as const, detail: "Can't fetch the repository", action: { type: 'edit_repository_url' as const } },
+    };
+    const fixture = render({ chain }, {});
+    fixture.componentRef.setInput('hasPrimaryAction', true);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const edit = el.querySelector('[data-testid="edit-repository-url"]') as HTMLElement;
+    expect(edit.classList).toContain('gr-button--primary');
+    expect(el.querySelector('.settings-section__heading app-chain-step-state-badge')?.textContent).toContain('Failing');
+  });
+
+  it('keeps a working fetch to the state badge without a sentence', () => {
+    const fetch = { checked_at: '2026-01-01T10:00:00', ok_at: '2026-01-01T10:00:00', failed: false, error: null };
+    const el = render({ fetch }, {}).nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="fetch-ok"]')).toBeNull();
+  });
+
   it('links to the deploy key settings of the repository on the Git host', () => {
     const el = render({}, {}).nativeElement as HTMLElement;
     const hrefs = Array.from(el.querySelectorAll('a')).map((a) => a.getAttribute('href'));
@@ -146,7 +172,7 @@ describe('RepositoryAccessComponent', () => {
     (Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Cancel')) as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(el.querySelector('[role=alert]')).toBeNull();
-    expect(el.querySelector('[data-testid=fetch-ok]')).not.toBeNull();
+    expect(el.querySelector('gr-copy-field')).not.toBeNull();
   });
 
   it('refuses a local path as repository URL without saving', () => {
