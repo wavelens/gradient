@@ -15,11 +15,12 @@ import { links } from '@shared/routing';
 import { GitHostConnectionDialogComponent } from '@shared/git-host-connections/git-host-connection-dialog.component';
 import { gitHostConnectionPickerOptions } from '@shared/git-host-connections/git-host-connection-health';
 import { ChainStepStateBadgeComponent } from '@shared/git-host-connections/chain-step-state-badge.component';
+import { GithubAppInstallLinkComponent } from '@shared/git-host-connections/github-app-install-link.component';
 
 @Component({
   selector: 'app-repository-git-host-connection',
   standalone: true,
-  imports: [FormsModule, RouterLink, ButtonComponent, ChainStepStateBadgeComponent, SelectComponent, SettingsSectionComponent, GitHostConnectionDialogComponent],
+  imports: [FormsModule, RouterLink, ButtonComponent, ChainStepStateBadgeComponent, SelectComponent, SettingsSectionComponent, GitHostConnectionDialogComponent, GithubAppInstallLinkComponent],
   templateUrl: './repository-git-host-connection.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
@@ -41,6 +42,7 @@ export class RepositoryGitHostConnectionComponent {
   state = input.required<TaskRepositoryResponse>();
   hasPrimaryAction = input(false);
   saved = output<TaskRepositoryResponse>();
+  changed = output<void>();
 
   selectedId = linkedSignal(() => this.state().git_host_connection?.id ?? '');
   savingSelection = signal(false);

@@ -14,6 +14,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
 import { RepositoryAccessComponent } from './repository-access.component';
+import { RepositoryGitHostConnectionComponent } from './repository-git-host-connection.component';
 import { RepositoryIncomingEventsComponent } from './repository-incoming-events.component';
 import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
@@ -128,5 +129,8 @@ describe('TaskRepositoryComponent', () => {
     const events = fixture.debugElement.query(By.directive(RepositoryIncomingEventsComponent)).componentInstance as RepositoryIncomingEventsComponent;
     events.changed.emit();
     expect(getRepository).toHaveBeenCalledTimes(2);
+    const connection = fixture.debugElement.query(By.directive(RepositoryGitHostConnectionComponent)).componentInstance as RepositoryGitHostConnectionComponent;
+    connection.changed.emit();
+    expect(getRepository).toHaveBeenCalledTimes(3);
   });
 });
