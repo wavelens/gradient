@@ -45,6 +45,10 @@ const EARLIER_DELIVERIES_SHOWN = 5;
             <button grButton label="Change webhook secret" icon="key" [severity]="hasPrimaryAction() ? 'primary' : 'secondary'"
               (click)="connectionDialog()?.openEdit(connection, { focusWebhookSecret: true })" data-testid="change-webhook-secret"></button>
           }
+          @if (sharedConnectionOwnerConnectionRowLink(); as link) {
+            <a grButton label="Open connection" icon="link" [severity]="hasPrimaryAction() ? 'primary' : 'secondary'" [routerLink]="link"
+              data-testid="open-shared-connection"></a>
+          }
           @if (newTriggerLink(); as link) {
             <a grButton label="Add trigger" icon="add" [severity]="hasPrimaryAction() ? 'primary' : 'secondary'" [routerLink]="link"
               data-testid="add-trigger"></a>
@@ -100,6 +104,10 @@ export class RepositoryIncomingEventsComponent {
   newTriggerLink = computed(() => {
     const action = this.step().action;
     return action?.type === 'add_trigger' ? links.taskTriggerCreate(this.project(), this.task(), action.trigger_type) : null;
+  });
+  sharedConnectionOwnerConnectionRowLink = computed(() => {
+    const connection = this.state().git_host_connection;
+    return this.step().action?.type === 'open_connection_shared_by_tasks' && connection ? links.gitHostConnection(connection.owner, connection.id) : null;
   });
   webhookSettingsUrl = computed(
     () => gitHostSettingsLinks(this.state().repository, this.state().git_host_connection?.git_host_type ?? null)?.webhooks ?? null,
