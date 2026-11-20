@@ -209,6 +209,7 @@ pub(crate) async fn summaries(
             receives_events: connection.receives_events,
             reports_status: connection.reports_status,
             can_manage,
+            managed: connection.managed,
             account_login: connection.account_login.clone(),
             webhook_url: webhook_url(options.serve_url, &connection),
             access_token_expires_at: connection.access_token_expires_at,

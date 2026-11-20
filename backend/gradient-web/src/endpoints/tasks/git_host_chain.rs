@@ -78,6 +78,7 @@ pub(crate) struct TaskGitHostChainInput<'a> {
     pub(crate) newest_status_post: Option<&'a TaskCommitStatusPostAttempt>,
     pub(crate) can_edit_task: bool,
     pub(crate) can_manage_integrations: bool,
+    pub(crate) can_create_connection: bool,
     pub(crate) github_app_configured: bool,
     pub(crate) can_install_github_app: bool,
 }
@@ -241,7 +242,7 @@ fn connection_step(
             TaskGitHostChainStepState::Attention,
             format!("No connection to {}", repository.host),
             input
-                .can_manage_integrations
+                .can_create_connection
                 .then(|| TaskGitHostChainStepAction::CreateConnection {
                     git_host_type: guess_git_host_type(&repository.host)
                         .map(|t| t.as_path_segment().to_owned()),
@@ -296,8 +297,7 @@ fn secret_mismatch_action(
     if input.can_manage_integrations && input.connection_has_access_token {
         Some(TaskGitHostChainStepAction::InstallWebhook)
     } else {
-        connection
-            .can_manage
+        (connection.can_manage && !connection.managed)
             .then_some(TaskGitHostChainStepAction::ChangeWebhookSecret)
     }
 }
@@ -461,6 +461,7 @@ mod tests {
             receives_events: true,
             reports_status: true,
             can_manage: true,
+            managed: false,
             account_login: None,
             webhook_url: Some("https://ci.example.com/api/v1/hooks/gitea/gitea".to_owned()),
             access_token_expires_at: None,
@@ -509,6 +510,7 @@ mod tests {
             newest_status_post: None,
             can_edit_task: true,
             can_manage_integrations: true,
+            can_create_connection: true,
             github_app_configured: true,
             can_install_github_app: true,
         }
@@ -676,6 +678,15 @@ mod tests {
             task_git_host_chain(&unmanageable).incoming_events.action,
             None
         );
+        let declared_connection = GitHostConnectionSummary {
+            managed: true,
+            ..selected.clone()
+        };
+        let declared = TaskGitHostChainInput {
+            connection: Some(&declared_connection),
+            ..without_token
+        };
+        assert_eq!(task_git_host_chain(&declared).incoming_events.action, None);
     }
 
     #[test]
@@ -807,6 +818,7 @@ mod tests {
             TaskGitHostChainInput {
                 can_edit_task: false,
                 can_manage_integrations: false,
+                can_create_connection: false,
                 report_status: false,
                 can_install_github_app: false,
                 ..input(repository, connection, available)

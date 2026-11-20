@@ -172,6 +172,7 @@ async fn get_task_repository_shows_selected_git_host_connection_webhook_url_and_
     assert_eq!(repo["recent_deliveries"], json!([]));
     assert_eq!(repo["can_edit"], true);
     assert_eq!(repo["can_manage_integrations"], true);
+    assert_eq!(repo["can_create_connection"], true);
     let chain = &repo["chain"];
     assert_eq!(chain["repository"]["state"], "ok", "{chain}");
     assert_eq!(
@@ -837,4 +838,39 @@ async fn a_task_of_declarative_state_shows_its_repository_read_only() {
     status_test.assert_status_forbidden();
     assert!(!read_test_task_row_from_database(&s).await.report_status);
     s.db.finish().await;
+}
+
+async fn read_task_repository_without_connection_after(statement: &str) -> Value {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    if !statement.is_empty() {
+        s.db.execute(statement).await;
+    }
+    let res = s.server.get(URL).add_header("authorization", &s.auth).await;
+    res.assert_status_ok();
+    let repo = res.json::<Value>()["message"].clone();
+    s.db.finish().await;
+    repo
+}
+
+#[tokio::test]
+async fn only_tasks_and_projects_outside_declarative_state_offer_to_create_a_connection() {
+    let editable = read_task_repository_without_connection_after("").await;
+    assert_eq!(editable["can_create_connection"], true);
+    assert_eq!(
+        editable["chain"]["connection"]["action"]["type"], "create_connection",
+        "{editable}"
+    );
+
+    for statement in [
+        "UPDATE task SET managed = true",
+        "UPDATE project SET managed = true",
+    ] {
+        let declared = read_task_repository_without_connection_after(statement).await;
+        assert_eq!(declared["can_create_connection"], false, "{statement}");
+        assert_eq!(
+            declared["chain"]["connection"]["action"],
+            Value::Null,
+            "{statement}: {declared}"
+        );
+    }
 }

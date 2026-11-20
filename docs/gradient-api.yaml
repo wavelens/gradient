@@ -20499,7 +20499,6 @@ components:
         - allowed_ips
         - created_by
         - created_at
-        - managed
         properties:
           has_secret:
             type: boolean
@@ -20519,8 +20518,6 @@ components:
           created_at:
             type: string
             format: date-time
-          managed:
-            type: boolean
           generated_secret:
             type:
             - string
@@ -20555,6 +20552,9 @@ components:
         reports_status:
           type: boolean
         can_manage:
+          type: boolean
+          default: false
+        managed:
           type: boolean
           default: false
         account_login:
@@ -24718,6 +24718,9 @@ components:
           type: boolean
         can_manage_integrations:
           type: boolean
+        can_create_connection:
+          type: boolean
+          default: false
     TaskResponse:
       type: object
       required:
