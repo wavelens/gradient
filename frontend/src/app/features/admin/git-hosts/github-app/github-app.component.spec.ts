@@ -274,6 +274,14 @@ describe('GithubAppComponent', () => {
       expect(button(root, 'Check again')).toBeUndefined();
     });
 
+    it('hide the create form while the server has no App configured', () => {
+      setup({ installation_id: '42', setup_action: 'install' });
+      const { root } = render();
+      expect(root.querySelector('[data-testid="github-app-create-button"]')).toBeNull();
+      expect(root.querySelector('#github-organization')).toBeNull();
+      expect(root.querySelector('[data-testid="github-app-no-installations"]')).toBeNull();
+    });
+
     it("the 'missing' banner points to the App installation on GitHub when GitHub reports no installation", () => {
       vi.useFakeTimers();
       setup({ installation_id: '42', setup_action: 'install' }, {});
