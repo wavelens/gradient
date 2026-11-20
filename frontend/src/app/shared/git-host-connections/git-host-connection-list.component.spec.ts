@@ -109,6 +109,26 @@ describe('GitHostConnectionListComponent', () => {
     expect(health).toContain('2 tasks');
   });
 
+  it('shows a refused signature newer than the last delivery as the latest event', () => {
+    const refusedLast: GitHostConnectionSummary = {
+      ...own,
+      refused_signature_count: 2,
+      last_refused_signature_at: '2026-01-02T00:00:00Z',
+      last_delivery: { id: 'd1', created_at: '2026-01-01T00:00:00Z', result: 'queued', queued: 1, status_code: 200 } as never,
+    };
+    const healthLine = render(writable, [refusedLast]).el.querySelector('[data-testid="connection-health"]')!;
+    expect(healthLine.textContent).toContain('Refused a delivery with a wrong signature');
+    expect(healthLine.textContent).not.toContain('Queued 1 evaluation');
+    expect(healthLine.querySelector('time.connection-delivery-time')?.getAttribute('datetime')).toBe('2026-01-02T00:00:00Z');
+  });
+
+  it('shows a refused signature instead of no events yet', () => {
+    const health = render(writable, [{ ...own, refused_signature_count: 1, last_refused_signature_at: '2026-01-02T00:00:00Z' }]).el
+      .querySelector('[data-testid="connection-health"]')!.textContent!;
+    expect(health).toContain('Refused a delivery with a wrong signature');
+    expect(health).not.toContain('No events yet');
+  });
+
   it('names a single refused signature in the singular', () => {
     const health = render(writable, [{ ...own, refused_signature_count: 1 }]).el
       .querySelector('[data-testid="connection-health"]')!.textContent!;

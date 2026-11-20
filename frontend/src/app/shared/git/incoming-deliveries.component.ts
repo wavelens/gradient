@@ -46,9 +46,9 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
   imports: [BadgeComponent, ButtonComponent, LoadStateComponent, RelativeTimePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (!error() && (deliveries().length > 0 || !loading())) {
+    @if (!error() && (deliveries().length > 0 || refusedSignature() || !loading())) {
       <div class="deliveries-head">
-        @if (deliveries().length > 0) {
+        @if (deliveries().length > 0 || refusedSignature()) {
           <strong>Recent deliveries</strong>
         } @else {
           <span class="text-secondary">No deliveries yet. Send a test delivery from the webhook settings of the Git host.</span>
@@ -58,8 +58,15 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
       </div>
     }
     <gr-load-state flat [loading]="loading() && deliveries().length === 0" [error]="error()"
-                   [empty]="deliveries().length === 0" errorTitle="Failed to load deliveries" (retry)="load()">
+                   [empty]="deliveries().length === 0 && !refusedSignature()" errorTitle="Failed to load deliveries" (retry)="load()">
       <ul class="deliveries">
+        @if (refusedSignature(); as refused) {
+          <li data-testid="refused-signature">
+            <gr-badge severity="danger">signature</gr-badge>
+            <span class="summary">{{ refused.count === 1 ? 'Refused 1 delivery' : 'Refused ' + refused.count + ' deliveries' }} with a wrong signature</span>
+            <span class="text-secondary when">{{ refused.at | relativeTime }}</span>
+          </li>
+        }
         @for (delivery of deliveries().slice(0, limit()); track delivery.id) {
           <li>
             <gr-badge [severity]="severity(delivery)">{{ delivery.event || 'unknown' }}</gr-badge>
@@ -87,6 +94,7 @@ export class IncomingDeliveriesComponent implements OnInit {
   gitHostConnectionOwner = input.required<GitHostConnectionOwner>();
   connectionId = input.required<string>();
   limit = input(10);
+  refusedSignature = input<{ at: string; count: number } | null>(null);
 
   deliveries = signal<IncomingWebhookDeliveryResponse[]>([]);
   loading = signal(false);
