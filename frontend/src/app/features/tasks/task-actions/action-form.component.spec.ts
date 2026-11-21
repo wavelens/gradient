@@ -219,6 +219,50 @@ describe('ActionFormComponent', () => {
     expect(emitted.config).toEqual({ type: 'send_slack_message' });
   });
 
+  it('moving a matrix action homeserver to another host requires an access token, while changing only its path keeps the stored token optional', () => {
+    const fixture = createFixture(true);
+    fixture.componentRef.setInput('mode', 'edit');
+    fixture.componentRef.setInput('existing', {
+      ...existing,
+      action_type: 'send_matrix_message',
+      config: { type: 'send_matrix_message', homeserver: 'https://matrix.example.org', room_id: '!abc:example.org' },
+    });
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    const tokenInput = () => document.querySelector<HTMLInputElement>('#action-matrix-token')!;
+    c.homeserver.set('https://matrix.example.org/synapse');
+    fixture.detectChanges();
+    expect(c.errors().matrixToken).toBeNull();
+    expect(tokenInput().placeholder).toBe('Leave blank to keep the stored token');
+    c.homeserver.set('https://other.example.org');
+    fixture.detectChanges();
+    expect(c.errors().matrixToken).toBe('Enter the access token.');
+    expect(tokenInput().placeholder).toBe('');
+    let emitted: unknown;
+    c.saved.subscribe((r) => (emitted = r));
+    c.onSubmit();
+    expect(emitted).toBeUndefined();
+  });
+
+  it.each(['http://matrix.example.org', 'https://matrix.example.org:8448'])(
+    'changingMatrixHomeserverUrlToHttpOrAnotherPortOnSameHostRequiresAccessTokenFor%s',
+    (homeserver) => {
+      const fixture = createFixture(true);
+      fixture.componentRef.setInput('mode', 'edit');
+      fixture.componentRef.setInput('existing', {
+        ...existing,
+        action_type: 'send_matrix_message',
+        config: { type: 'send_matrix_message', homeserver: 'https://matrix.example.org', room_id: '!abc:example.org' },
+      });
+      fixture.detectChanges();
+      const c = fixture.componentInstance;
+      c.homeserver.set(homeserver);
+      fixture.detectChanges();
+      expect(c.errors().matrixToken).toBe('Enter the access token.');
+      expect(document.querySelector<HTMLInputElement>('#action-matrix-token')!.placeholder).toBe('');
+    },
+  );
+
   it('submits start_evaluation with the picked task and its events', () => {
     const fixture = createFixture(true);
     fixture.componentRef.setInput('tasks', [{ id: 't-deploy', name: 'deploy' }]);

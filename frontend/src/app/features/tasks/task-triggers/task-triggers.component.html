@@ -303,7 +303,7 @@
       />
     </gr-form-field>
 
-    <gr-form-field hint="When enabled (secure-by-default), PRs from contributors who are not repo writers on the Git host are parked until a maintainer clicks “Approve and run” on the GitHub Check or comments /gradient approve (or /gradient run) on the PR. Disable to build every PR automatically.">
+    <gr-form-field hint="The option is on by default for safety. Gradient can start evaluation for PRs from contributors who lack write permission on the Git host only after maintainer approval. Maintainers click Approve and run in GitHub checks or add a /gradient approve <full 40-character commit hash> comment to the PR. PRs build automatically with the option off. PRs from forks run without project secrets. GitLab merge requests from forks still wait for a member with write permission to comment /gradient approve or /gradient run.">
       <gr-checkbox
         inputId="trig-require-approval"
         [(ngModel)]="form.require_approval"

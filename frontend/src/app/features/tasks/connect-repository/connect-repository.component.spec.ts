@@ -230,17 +230,14 @@ describe('ConnectRepositoryComponent', () => {
     expect(createTask).toHaveBeenCalledWith('acme', expect.objectContaining({ git_host_connection: 'c1' }));
   });
 
-  it('lists a connection without host URL marked and never preselects it', () => {
-    const withoutHostUrl = { id: 'c3', name: 'forge', display_name: 'Forge', owner: { type: 'project', name: 'acme' }, git_host_type: 'forgejo',
-      base_url: null, repository_fit: { fits: false, can_be_selected: true, reason: 'No host URL' } } as GitHostConnectionSummary;
-    const fixture = render({}, {}, {}, undefined, undefined, [withoutHostUrl]);
+  it('does not offer or preselect connections on another host than the repository', () => {
+    const forgejoConnectionOnDifferentHost = { id: 'c3', name: 'forge', display_name: 'Forge', owner: { type: 'project', name: 'acme' }, git_host_type: 'forgejo',
+      base_url: 'https://other.example.com', repository_fit: { fits: false, can_be_selected: false, reason: 'Different host' } } as GitHostConnectionSummary;
+    const fixture = render({}, {}, {}, undefined, undefined, [forgejoConnectionOnDifferentHost]);
     const comp = fixture.componentInstance;
     comp.repositoryChanged('https://forgejo.example.com/acme/app');
     comp.continueFromRepository();
-    expect(comp.connectionOptions().map((option) => [option.value, option.label])).toEqual([
-      ['', 'No connection'],
-      ['c3', 'Forge · Forgejo · Project acme · No host URL'],
-    ]);
+    expect(comp.connectionOptions().map((option) => [option.value, option.label])).toEqual([['', 'No connection']]);
     expect(comp.selectedConnectionId()).toBeNull();
   });
 
@@ -368,6 +365,55 @@ describe('ConnectRepositoryComponent', () => {
         base_url: 'https://github.com', repository_fit: { fits: true, can_be_selected: true } } as GitHostConnectionSummary;
       saveProjectWizardDraftToSessionStorage({ project: 'acme', step: 'git-host', form: savedForm, selectedConnectionId: 'gone' });
       expect(render({}, {}, {}, undefined, undefined, [fits]).componentInstance.selectedConnectionId()).toBe('c1');
+    });
+
+    function saveGitHostStepInputAndRenderWizardWithOneGithubAppInstallation(
+      superuser: boolean,
+      owner: GitHostConnectionSummary['owner'] = { type: 'instance' },
+    ): HTMLElement {
+      const installation = { id: 'c1', name: 'github', display_name: 'GitHub', owner, git_host_type: 'github',
+        account_login: 'acme', repository_fit: { fits: true, can_be_selected: true } } as GitHostConnectionSummary;
+      saveProjectWizardDraftToSessionStorage({ project: 'acme', step: 'git-host', form: savedForm, selectedConnectionId: null });
+      const fixture = render({}, {}, {}, undefined, undefined, [installation], undefined, {}, superuser);
+      fixture.detectChanges();
+      return fixture.nativeElement as HTMLElement;
+    }
+
+    it('after returning from the GitHub App page with saved wizard input, shows the repository grant sentence for the preselected instance connection and the superuser link to that connection on the admin page', () => {
+      const el = saveGitHostStepInputAndRenderWizardWithOneGithubAppInstallation(true);
+      expect(el.querySelector('[data-testid="connection-requires-repository-grant-text"]')?.textContent).toContain(
+        'No task can use this connection without a repository grant for the project.',
+      );
+      expect(el.querySelector('[data-testid="manage-repository-grants-link"]')?.getAttribute('href')).toBe('/admin/git-host-connections?connection=c1');
+    });
+
+    it('non-superuser sees repository grant sentence for selected instance connection without admin page link', () => {
+      const el = saveGitHostStepInputAndRenderWizardWithOneGithubAppInstallation(false);
+      expect(el.querySelector('[data-testid="connection-requires-repository-grant-text"]')?.textContent).toContain(
+        'No task can use this connection without a repository grant for the project.',
+      );
+      expect(el.querySelector('[data-testid="manage-repository-grants-link"]')).toBeNull();
+    });
+
+    it('selectedTeamConnectionShowsRepositoryGrantSentenceAndSuperuserGrantsLinkInWizard', () => {
+      const el = saveGitHostStepInputAndRenderWizardWithOneGithubAppInstallation(true, { type: 'team', name: 'acme-team' });
+      expect(el.querySelector('[data-testid="connection-requires-repository-grant-text"]')?.textContent).toContain(
+        'No task can use this connection without a repository grant for the project.',
+      );
+      expect(el.querySelector('[data-testid="manage-repository-grants-link"]')?.getAttribute('href')).toBe('/team/acme-team/git-host-connections?connection=c1');
+    });
+
+    it('showsRepositoryGrantSentenceWithoutGrantsLinkForNonSuperuser', () => {
+      const el = saveGitHostStepInputAndRenderWizardWithOneGithubAppInstallation(false, { type: 'team', name: 'acme-team' });
+      expect(el.querySelector('[data-testid="connection-requires-repository-grant-text"]')?.textContent).toContain(
+        'No task can use this connection without a repository grant for the project.',
+      );
+      expect(el.querySelector('[data-testid="manage-repository-grants-link"]')).toBeNull();
+    });
+
+    it('projectOwnedSelectedGitHostConnectionHasNoRepositoryGrantSentence', () => {
+      const el = saveGitHostStepInputAndRenderWizardWithOneGithubAppInstallation(true, { type: 'project', name: 'acme' });
+      expect(el.querySelector('[data-testid="connection-requires-repository-grant-text"]')).toBeNull();
     });
 
     it('Clear saved input on wizard cancel', () => {

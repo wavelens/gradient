@@ -9,6 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { CachesService } from '@core/services/caches.service';
 import { TeamsService } from '@core/services/teams.service';
+import { AuthService } from '@core/services/auth.service';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { CreateCacheDialogComponent } from './create-cache-dialog.component';
@@ -28,7 +29,8 @@ async function setup(createCache: () => unknown, available = true) {
   TestBed.configureTestingModule({
     providers: [
       { provide: CachesService, useValue: { createCache, checkCacheNameAvailable: () => of(available) } },
-      { provide: TeamsService, useValue: { list: () => of([{ name: 'infra', display_name: 'Infra', role: 'member' }]) } },
+      { provide: TeamsService, useValue: { list: () => of([{ name: 'infra', display_name: 'Infra', role: 'admin' }]) } },
+      { provide: AuthService, useValue: { user: () => ({ superuser: false }) } },
     ],
   });
   const fixture = TestBed.createComponent(HostComponent);

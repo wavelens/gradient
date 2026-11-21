@@ -43,6 +43,7 @@ export const teamMemberSourceLabels: Record<TeamMemberItem['source'], string> = 
   api: 'Direct',
   state: 'Direct · server configuration',
   group: 'From a group in the identity provider',
+  sign_in_group: 'From a group sent at sign-in',
 };
 
 export function convertTeamMemberToPeopleListRow(member: TeamMemberItem): PeopleListRow {

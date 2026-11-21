@@ -74,7 +74,7 @@ export class TeamOverviewComponent implements OnInit {
   busy = signal<string | null>(null);
 
   isAdmin = computed(() => canManageTeam(this.team(), this.authService.user()));
-  canSetOwnerTeam = computed(() => this.team()?.role != null || this.authService.user()?.superuser === true);
+  canSetOwnerTeam = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);
   canCreateProject = injectCanCreateProject();
   canCreateCache = injectCanCreateCache();
   isCreateProjectDialogOpen = signal(false);

@@ -118,7 +118,7 @@
         placeholder="!abc:example.org"
       />
     </gr-form-field>
-    <gr-form-field label="Access Token" for="action-matrix-token" [required]="mode() === 'create'"
+    <gr-form-field label="Access Token" for="action-matrix-token" [required]="mode() === 'create' || accessTokenRequiredBecauseHomeserverUrlChanged()"
       [invalid]="showError('matrixToken')" [error]="errors().matrixToken ?? ''">
       <input
         grInput
@@ -129,7 +129,7 @@
         (ngModelChange)="secretValue.set($event)"
         (blur)="touch('matrixToken', secretValue())"
         (keyup.enter)="onSubmit()"
-        [placeholder]="mode() === 'edit' ? 'Leave blank to keep the stored token' : ''"
+        [placeholder]="mode() === 'edit' && !accessTokenRequiredBecauseHomeserverUrlChanged() ? 'Leave blank to keep the stored token' : ''"
       />
     </gr-form-field>
   }

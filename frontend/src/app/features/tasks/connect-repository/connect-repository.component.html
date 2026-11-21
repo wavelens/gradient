@@ -66,6 +66,15 @@
               <gr-select inputId="connect-git-host-connection" [options]="connectionOptions()" optionLabel="label" optionValue="value"
                 [ngModel]="selectedConnectionId() ?? ''" (ngModelChange)="selectedConnectionId.set($event ?? '')" />
             </gr-form-field>
+            @if (selectedConnectionRequiringRepositoryGrant(); as connection) {
+              <p class="gr-form-aside" data-testid="connection-requires-repository-grant-text">
+                <span>No task can use this connection without a repository grant for the project.</span>
+                @if (isInstanceSuperuser()) {
+                  <a grButton severity="secondary" size="small" label="Grants" icon="lock"
+                    [routerLink]="links.gitHostConnection(connection.owner, connection.id)" data-testid="manage-repository-grants-link" (click)="saveWizardInputAndStepToSessionStorage()"></a>
+                }
+              </p>
+            }
           } @else if (gitHubAccount(); as account) {
             <p class="gr-form-aside" data-testid="no-connection">
               @if (!config.githubAppEnabled) {

@@ -188,8 +188,12 @@ describe('TeamOverviewComponent', () => {
     expect(denyRequest).not.toHaveBeenCalled();
   });
 
-  it('offers team members to create a project or cache owned by the team', () => {
-    expect(actionButtonLabels(setup('member').root)).toEqual(['Create Project', 'Create Cache']);
+  it('offers team admins to create a project or cache owned by the team', () => {
+    expect(actionButtonLabels(setup('admin').root)).toEqual(['Create Project', 'Create Cache']);
+  });
+
+  it('Hide project creation and cache creation from plain team members. Only team admins can set the team as owner.', () => {
+    expect(actionButtonLabels(setup('member').root)).toEqual([]);
   });
 
   it('offers instance admins outside the team to create a project or cache owned by the team', () => {
@@ -201,7 +205,7 @@ describe('TeamOverviewComponent', () => {
   });
 
   it('opens Create Project with the team as owner team', async () => {
-    const { fixture, root } = setup('member');
+    const { fixture, root } = setup('admin');
     Array.from(root.querySelectorAll<HTMLButtonElement>('button[slot="actions"]'))[0].click();
     fixture.detectChanges();
     await fixture.whenStable();

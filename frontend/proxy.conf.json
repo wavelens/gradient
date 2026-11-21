@@ -3,6 +3,9 @@
     "target": "http://localhost:3000",
     "secure": false,
     "changeOrigin": true,
-    "ws": true
+    "ws": true,
+    "headers": {
+      "origin": "http://localhost:3000"
+    }
   }
 }

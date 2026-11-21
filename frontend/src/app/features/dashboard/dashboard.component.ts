@@ -5,13 +5,14 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, inject, signal, viewChild } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { EMPTY } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ButtonComponent, MessageBannerComponent } from '@gradient/ui/ui';
 import { PendingUserDecisionsService } from '@core/services/pending-invites.service';
 import { links } from '@shared/routing';
 import { plural } from '@shared/text';
+import { oauthErrorTextForValue } from '@shared/git-host-connections/git-host-oauth-error-messages';
 import { DashboardStatsComponent } from './stats/dashboard-stats.component';
 import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.component';
 import { DashboardActivityComponent } from './activity/dashboard-activity.component';
@@ -64,7 +65,21 @@ export class DashboardComponent {
     for (const section of this.failedDashboardSectionComponents()) section.component?.load();
   }
 
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  protected gitHostOauthConnectionErrorText = signal<string | null>(null);
+
   constructor() {
+    const oauthError = this.route.snapshot.queryParamMap.get('oauth_error');
+    if (oauthError !== null) {
+      this.gitHostOauthConnectionErrorText.set(oauthErrorTextForValue(oauthError) ?? null);
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { oauth_error: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
+    }
     for (const section of [this.stats, this.tasks, this.activity, this.rail]) {
       runReloadIntervalWhileTabVisible(() => section()?.reloadSilentlyKeepingContentOnError() ?? EMPTY);
     }

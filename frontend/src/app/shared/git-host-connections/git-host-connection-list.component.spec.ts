@@ -5,11 +5,13 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
-import type { AccessState, GitHostConnectionOwner, GitHostConnectionResponse, GitHostConnectionSummary } from '@core/models';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { Subject, of, throwError } from 'rxjs';
+import type { AccessState, CompletedGitHostOAuthConnection, GitHostConnectionOwner, GitHostConnectionResponse, GitHostConnectionSummary } from '@core/models';
+import { ApiError, ApiService } from '@core/services/api.service';
 import { GitHostConnectionsApi } from '@core/services/git-host-connections.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ConfigService } from '@core/services/config.service';
 import { GitHostConnectionListComponent } from './git-host-connection-list.component';
@@ -43,6 +45,16 @@ const inherited: GitHostConnectionSummary = {
   can_manage: false,
 };
 
+const teamGitHostConnectionOwner: GitHostConnectionOwner = { type: 'team', name: 'platform' };
+
+const teamAdminManagedGitHostConnectionSummary: GitHostConnectionSummary = {
+  ...own,
+  id: 'c3',
+  owner: teamGitHostConnectionOwner,
+  name: 'team-forgejo',
+  display_name: 'Team Forgejo',
+};
+
 const full: GitHostConnectionResponse = {
   ...own,
   managed: false,
@@ -69,6 +81,7 @@ function render(
     providers: [
       provideRouter([]),
       { provide: GitHostConnectionsApi, useValue: { list, listDeliveries: () => of([]), ...api } },
+      { provide: ProjectsService, useValue: { getProjects: () => of({ items: [], total: 0, page: 1, per_page: 100 }) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
       { provide: ConfigService, useValue: { giteaOauthAppConfig: null } },
@@ -279,5 +292,65 @@ describe('GitHostConnectionListComponent', () => {
 
   it('shows the banner for the OAuth result only on project pages', () => {
     expect(render().el.querySelector('app-git-host-oauth-return-banner')).not.toBeNull();
+  });
+
+  it('reloads the connection list once and shows the new connection after the OAuth return completes', () => {
+    const navigate = vi.spyOn(Router.prototype, 'navigate').mockResolvedValue(true);
+    TestBed.overrideProvider(ActivatedRoute, { useValue: { snapshot: { queryParamMap: convertToParamMap({ code: 'code-1', state: 'state-1' }) } } });
+    const complete = new Subject<CompletedGitHostOAuthConnection>();
+    TestBed.overrideProvider(ApiService, { useValue: { post: vi.fn(() => complete) } });
+    const codeberg = { ...own, id: 'c4', name: 'codeberg', display_name: 'Codeberg' };
+    const list = vi.fn().mockReturnValueOnce(of([own])).mockReturnValueOnce(of([own, codeberg]));
+    const { fixture, el } = render(writable, [], { list });
+    expect(list).toHaveBeenCalledTimes(1);
+    complete.next({ name: 'codeberg', webhooks_installed: 0 });
+    complete.complete();
+    fixture.detectChanges();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(el.querySelector('#connection-c4')?.textContent).toContain('Codeberg');
+    navigate.mockRestore();
+  });
+
+  it('does not reload the list and shows the server refusal text when the oauth complete request is refused', () => {
+    const navigate = vi.spyOn(Router.prototype, 'navigate').mockResolvedValue(true);
+    TestBed.overrideProvider(ActivatedRoute, { useValue: { snapshot: { queryParamMap: convertToParamMap({ code: 'code-1', state: 'state-1' }) } } });
+    const refusal = 'The connection attempt was not started in this browser session.';
+    TestBed.overrideProvider(ApiService, { useValue: { post: vi.fn(() => throwError(() => new ApiError(refusal, 400))) } });
+    const { fixture, el, list } = render(writable, [own]);
+    fixture.detectChanges();
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('[data-testid="oauth-outcome-banner"]')?.textContent).toContain(refusal);
+    navigate.mockRestore();
+  });
+
+  it('shows the repository grants of a team connection to a team Admin', () => {
+    const getGitHostConnectionRepositoryGrants = vi.fn(() => of([]));
+    const { fixture, el } = render(writable, [teamAdminManagedGitHostConnectionSummary], { getGitHostConnectionRepositoryGrants }, { gitHostConnectionOwner: teamGitHostConnectionOwner });
+    el.querySelector<HTMLButtonElement>('[data-testid="toggle-repository-grants"]')!.click();
+    fixture.detectChanges();
+    expect(getGitHostConnectionRepositoryGrants).toHaveBeenCalledWith(teamGitHostConnectionOwner, 'c3');
+    expect(el.querySelector('app-repository-grants')).not.toBeNull();
+  });
+
+  it('Keep grants panel closed for non-Admin team members and send no request on a panel toggle in code.', () => {
+    const getGitHostConnectionRepositoryGrants = vi.fn(() => of([]));
+    const teamConnectionForMemberWithoutManagePermission = { ...teamAdminManagedGitHostConnectionSummary, can_manage: false };
+    const { fixture, el, component } = render(
+      readOnly,
+      [teamConnectionForMemberWithoutManagePermission],
+      { getGitHostConnectionRepositoryGrants },
+      { gitHostConnectionOwner: teamGitHostConnectionOwner },
+    );
+    expect(rows(el, 'own-connection')).toHaveLength(1);
+    expect(el.querySelector('[data-testid="toggle-repository-grants"]')).toBeNull();
+    component.toggleRepositoryGrantsVisibility(teamConnectionForMemberWithoutManagePermission);
+    fixture.detectChanges();
+    expect(el.querySelector('app-repository-grants')).toBeNull();
+    expect(getGitHostConnectionRepositoryGrants).not.toHaveBeenCalled();
+  });
+
+  it('offers no repository grants for a project connection', () => {
+    const { el } = render();
+    expect(el.querySelector('[data-testid="toggle-repository-grants"]')).toBeNull();
   });
 });

@@ -79,23 +79,18 @@ export class CliAuthorizeComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    const query = this.route.snapshot.queryParamMap.get('code');
-    const code = query ? formatCliConfirmationCode(query) : null;
-    if (code) {
-      this.form.patchValue({ userCode: code });
+    const addressWithoutCode = this.router.parseUrl(this.router.url);
+    delete addressWithoutCode.queryParams['code'];
+    if (this.route.snapshot.queryParamMap.has('code')) {
+      void this.router.navigateByUrl(addressWithoutCode, { replaceUrl: true });
     }
 
     this.auth.initialized$.pipe(take(1)).subscribe(() => {
       if (!this.auth.isAuthenticated()) {
-        const next = this.router.url;
-        this.router.navigateByUrl(links.login(next));
+        this.router.navigateByUrl(links.login(this.router.serializeUrl(addressWithoutCode)));
         return;
       }
-      if (code) {
-        this.lookup(code);
-      } else {
-        this.loading.set(false);
-      }
+      this.loading.set(false);
     });
   }
 
@@ -122,7 +117,6 @@ export class CliAuthorizeComponent implements OnInit {
     const code = formatCliConfirmationCode(this.form.value.userCode ?? '');
     if (code) {
       this.form.patchValue({ userCode: code });
-      void this.router.navigate([], { relativeTo: this.route, queryParams: { code }, queryParamsHandling: 'merge', replaceUrl: true });
       this.lookup(code);
     }
   }
@@ -132,7 +126,6 @@ export class CliAuthorizeComponent implements OnInit {
     this.status.set('pending');
     this.errorMessage.set(null);
     this.form.reset({ userCode: '' });
-    void this.router.navigate([], { relativeTo: this.route, queryParams: { code: null }, queryParamsHandling: 'merge', replaceUrl: true });
   }
 
   authorize(): void {

@@ -4,18 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, input, output, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MessageBannerComponent } from '@gradient/ui/ui';
-
-const OAUTH_ERROR_MESSAGES: Record<string, string> = {
-  denied: 'The Git host denied access.',
-  expired: 'Approval took more than 10 minutes, or the approval happened in a different browser. Start the connection again.',
-  signed_out: 'Sign-out happened before the Git host responded. Sign in again and retry.',
-  forbidden: 'No permission to manage connections to Git hosts for this project.',
-  exists: 'There is already a connection with this name in this project. Choose another name and try again.',
-  failed: 'Failed to connect to the Git host. Try again.',
-};
+import { CompleteGitHostOAuthConnectionRequest, CompletedGitHostOAuthConnection } from '@core/models';
+import { ApiService, apiErrorMessage } from '@core/services/api.service';
+import { gitHostOauthUnknownFailureText, oauthErrorTextForValue } from './git-host-oauth-error-messages';
 
 @Component({
   selector: 'app-git-host-oauth-return-banner',
@@ -31,27 +25,44 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
 export class GitHostOAuthReturnBannerComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private api = inject(ApiService);
+
+  projectName = input.required<string>();
+  gitHostConnectionCreated = output<CompletedGitHostOAuthConnection>();
 
   outcome = signal<{ severity: 'success' | 'error'; text: string } | null>(null);
 
   ngOnInit(): void {
     const query = this.route.snapshot.queryParamMap;
-    const connected = query.get('oauth_connected');
+    const code = query.get('code');
+    const state = query.get('state');
     const error = query.get('oauth_error');
-    if (!connected && !error) return;
+    if (!error && !(code && state)) return;
     if (error) {
-      this.outcome.set({ severity: 'error', text: OAUTH_ERROR_MESSAGES[error] ?? OAUTH_ERROR_MESSAGES['failed'] });
-    } else {
-      const installed = Number(query.get('webhooks_installed') ?? 0);
-      const webhooks = installed > 0 ? `Installed webhooks in ${installed} repositories.` : '';
-      const text = [`Connected ${connected}.`, webhooks].filter(Boolean).join(' ');
-      this.outcome.set({ severity: 'success', text });
+      this.outcome.set({ severity: 'error', text: oauthErrorTextForValue(error) ?? gitHostOauthUnknownFailureText });
+    } else if (code && state) {
+      this.finishForgejoOAuthConnectionAndShowBanner({ code, state });
     }
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { oauth_connected: null, webhooks_installed: null, oauth_error: null },
+      queryParams: { code: null, state: null, oauth_error: null },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
+  }
+
+  private finishForgejoOAuthConnectionAndShowBanner(body: CompleteGitHostOAuthConnectionRequest): void {
+    this.api
+      .post<CompletedGitHostOAuthConnection>(`projects/${encodeURIComponent(this.projectName())}/git-host-connections/oauth/complete`, body)
+      .subscribe({
+        next: (connection) => {
+          const { name, webhooks_installed } = connection;
+          const webhooks = webhooks_installed > 0 ? `Installed webhooks in ${webhooks_installed} repositories.` : '';
+          const text = [`Connected ${name}.`, webhooks].filter(Boolean).join(' ');
+          this.outcome.set({ severity: 'success', text });
+          this.gitHostConnectionCreated.emit(connection);
+        },
+        error: (failure: unknown) => this.outcome.set({ severity: 'error', text: apiErrorMessage(failure, gitHostOauthUnknownFailureText) }),
+      });
   }
 }

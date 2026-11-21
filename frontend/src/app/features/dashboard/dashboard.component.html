@@ -6,8 +6,11 @@
 
 <div class="page">
   <h1 class="sr-only">Dashboard</h1>
+  @if (gitHostOauthConnectionErrorText(); as text) {
+    <gr-message-banner type="error" data-testid="oauth-error-banner">{{ text }}</gr-message-banner>
+  }
   @if (pending.count(); as count) {
-    <gr-message-banner class="pending-requests" type="info" icon="mail">
+    <gr-message-banner data-testid="pending-invitations-and-access-requests-banner" type="info" icon="mail">
       {{ plural(count, 'request') }} {{ count === 1 ? 'needs' : 'need' }} a decision
       <a [routerLink]="links.settings('invites')">View requests</a>
     </gr-message-banner>

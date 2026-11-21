@@ -38,7 +38,6 @@ const HEALTH: BoardHealth = {
     { name: 'retention', restarts: 0, pass_errors: 0, pass_timeouts: 0, last_ok_seconds_ago: null, last_error: null },
   ],
   proto_sessions: 2,
-  unconfirmed_nars: 0,
   pending_deliveries: 0,
   failed_deliveries: 0,
   hot_nar_cache: { entries: 0, bytes: 0, hits: 0, misses: 0, evictions: 0 },

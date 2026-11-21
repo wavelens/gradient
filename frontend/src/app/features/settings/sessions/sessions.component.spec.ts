@@ -17,6 +17,7 @@ import { SessionInfo } from '@core/models';
 
 const CURRENT = { id: 's1', current: true, user_agent: 'Firefox', ip: '10.0.0.1', last_used_at: '2026-10-01T10:00:00', expires_at: '2026-11-01T10:00:00' } as SessionInfo;
 const OTHER = { ...CURRENT, id: 's2', current: false };
+const cliBrowserSignInSession = { ...OTHER, id: 's3', is_cli_device_sign_in_session: true };
 
 function createOnePageSessionsResponse(items: SessionInfo[], total = items.length, page = 1) {
   return of({ items, total, page, per_page: 25 });
@@ -85,6 +86,14 @@ describe('SessionsComponent', () => {
     expect(getSessions).toHaveBeenLastCalledWith(2, 25);
     expect(revokeButtons(root)).toHaveLength(3);
     expect(root.textContent).not.toContain('Load more');
+  });
+
+  it('Label sessions from CLI sign-in, not browser sessions.', () => {
+    const { root } = setup(vi.fn().mockReturnValue(createOnePageSessionsResponse([CURRENT, OTHER, cliBrowserSignInSession])));
+    const cliSignInBadgeShownForEachSessionRow = Array.from(root.querySelectorAll('gr-row')).map((row) =>
+      Array.from(row.querySelectorAll('gr-badge')).some((badge) => badge.textContent?.includes('CLI Sign-In')),
+    );
+    expect(cliSignInBadgeShownForEachSessionRow).toEqual([false, false, true]);
   });
 
   it('offers Log out instead of Revoke for the session of this device', () => {

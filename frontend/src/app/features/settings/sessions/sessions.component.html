@@ -24,6 +24,9 @@
           @if (s.current) {
             <gr-badge severity="info">This device</gr-badge>
           }
+          @if (s.is_cli_device_sign_in_session) {
+            <gr-badge severity="info">CLI Sign-In</gr-badge>
+          }
           <span slot="meta">
             IP: {{ s.ip || 'unknown' }} ·
             Last used {{ s.last_used_at | serverDate }} ·
