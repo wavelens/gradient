@@ -28,7 +28,8 @@ pub use self::git::{
     SshGitPrivateKeyKnownHostsAndObservations, TaskUpdateCheck, check_task_updates,
     checkout_commit, checkout_commit_into, fetch_commit_into_new_bare_temporary_repository,
     fetch_ssh_host_key, get_changed_file_path_pairs_between_commits, get_commit_info, head_commit,
-    remote_branch_head, remote_tag_commit, resolve_remote_ref,
+    register_git_transports_once, remote_branch_head, remote_tag_commit, resolve_remote_ref,
+    set_default_git_http_client,
 };
 pub use self::secret::{decrypt_secret, encrypt_secret};
 pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};
@@ -115,6 +116,8 @@ pub enum SourceError {
     SshHostKeyReadFailed { reason: String },
     #[error("Project not found with ID: {id}")]
     ProjectNotFound { id: gradient_types::ids::ProjectId },
+    #[error("{reason}")]
+    GitServerAddressRefusedByAdminAllowlist { reason: String },
 }
 
 impl SourceError {
@@ -129,7 +132,8 @@ impl SourceError {
             | Self::TagNotFound { .. }
             | Self::EmptyRemote
             | Self::InvalidUrl
-            | Self::UrlParsing => self.to_string(),
+            | Self::UrlParsing
+            | Self::GitServerAddressRefusedByAdminAllowlist { .. } => self.to_string(),
             _ => "Gradient failed to check the repository. Details live in the server log."
                 .to_owned(),
         }

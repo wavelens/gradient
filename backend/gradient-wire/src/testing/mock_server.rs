@@ -183,6 +183,7 @@ impl MockServerConn {
             capabilities: negotiated,
             authorized_peers: vec![],
             failed_peers: vec![],
+            user_url_destination_allowlist: vec![],
         })
         .await?;
         Ok(id)

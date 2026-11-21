@@ -6,7 +6,8 @@
 
 mod changed_paths;
 pub(crate) mod fixtures;
-mod https_credentials_for_operation_host;
+mod git_listing_and_fetch_refuse_loopback_and_private_addresses_without_tcp_connections_tests;
+mod git_smart_http_subtransport_and_admin_allowlist_tests;
 
 use super::checkout::Origin;
 use super::checkout::{
@@ -18,25 +19,23 @@ use super::git_credentials::{
 };
 use super::git_network_limits::{
     BlockingGitFetchOperationLimits, CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS,
+    GitNetworkStreamReadDeadlineAndByteLimitChecker, RefAdvertisementEnd,
     current_thread_blocking_libgit2_fetch_time_and_byte_limits_or_ordinary_fetch_limits,
 };
-use super::pktline::{MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT, read_advertised_refs};
+use super::guarded_git_network_connections::set_guarded_git_client_to_allow_loopback_for_tests;
 use super::remote::{
-    AdvertisedRef, BranchHead, branch_head, list_remote_refs, ls_remote_head, ref_commit,
-    tag_commit,
+    AdvertisedRef, branch_head, list_remote_refs, ls_remote_head, ref_commit, tag_commit,
 };
 use super::url::parse_git_protocol_url;
 use crate::SourceError;
-use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
+use fixtures::{
+    build_git_comment_pkt_lines_with_min_byte_len,
+    build_protocol_v0_ref_advertisement_pkt_lines_over_64_mib_listing_limit_with_flush_packet,
+    build_v0_ref_advertisement_for_main_with_multi_ack,
+};
 use gradient_types::RepositoryUrl;
 use gradient_types::branch_key::NO_BRANCH;
-
-fn default_head(reader: &mut dyn std::io::Read) -> Result<BranchHead, SourceError> {
-    branch_head(
-        &read_advertised_refs(reader, MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT)?,
-        None,
-    )
-}
+use std::io::{Read, Write};
 
 fn advertised(name: &str, oid: u8, symref_target: Option<&str>) -> AdvertisedRef {
     AdvertisedRef {
@@ -162,23 +161,6 @@ fn a_flake_ref_accepts_a_full_ref_name() {
 }
 
 #[test]
-fn the_symref_capability_names_the_default_branch_of_a_git_daemon() {
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&ref_line_with_caps(
-        FAKE_SHA,
-        "HEAD",
-        "multi_ack symref=HEAD:refs/heads/develop agent=git/2",
-    ));
-    buf.extend_from_slice(&ref_line(FAKE_SHA, "refs/heads/develop"));
-    buf.extend_from_slice(&ref_line(FAKE_SHA, "refs/heads/main"));
-    buf.extend_from_slice(FLUSH);
-
-    let head = default_head(&mut buf.as_slice()).unwrap();
-    assert_eq!(head.branch, "refs/heads/develop");
-    assert_eq!(hex::encode(&head.commit), FAKE_SHA);
-}
-
-#[test]
 fn parse_git_protocol_url_default_port() {
     let url = parse_git_protocol_url("git://server.example.com/repo.git").unwrap();
     assert_eq!(
@@ -205,6 +187,121 @@ fn parse_git_protocol_url_explicit_port() {
 }
 
 #[test]
+fn an_endless_ref_advertisement_stops_at_the_byte_limit() {
+    set_guarded_git_client_to_allow_loopback_for_tests();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut connection, _) = listener.accept().unwrap();
+        let _ = connection.read(&mut [0; 512]);
+        let _ = connection.write_all(
+            &build_protocol_v0_ref_advertisement_pkt_lines_over_64_mib_listing_limit_with_flush_packet(),
+        );
+        let _ = connection.read_to_end(&mut Vec::new());
+    });
+    let url: RepositoryUrl = format!("git://127.0.0.1:{port}/repo").parse().unwrap();
+
+    let listed = list_remote_refs(&url, &GitOperationCredentials::default()).map(drop);
+
+    match listed {
+        Err(SourceError::GitCommandFailed { stderr }) => {
+            assert!(
+                stderr.contains("ref advertisement larger than 64 MiB"),
+                "{stderr}"
+            );
+        }
+        result => panic!(
+            "Expected the ref listing to stop at the byte limit of the ref advertisement, but got {result:?}."
+        ),
+    }
+}
+
+#[test]
+fn ref_advertisement_flush_packet_stops_byte_count_before_pack_data_on_one_byte_reads() {
+    let payload = format!("{} refs/heads/main\n", "1".repeat(40));
+    let mut transfer = format!("{:04x}{payload}0000", payload.len() + 4).into_bytes();
+    let advertisement_length = transfer.len();
+    transfer.extend(std::iter::repeat_n(b'P', advertisement_length * 100));
+
+    let mut stream = GitNetworkStreamReadDeadlineAndByteLimitChecker::with_byte_limit(
+        transfer.as_slice(),
+        RefAdvertisementEnd::AdvertisementEndsAtFirstFlushPacket,
+        advertisement_length,
+    );
+    let mut read = Vec::new();
+    let mut byte = [0; 1];
+    while stream.read(&mut byte).unwrap() == 1 {
+        read.push(byte[0]);
+    }
+
+    assert_eq!(read, transfer);
+}
+
+#[test]
+fn fetch_stops_at_byte_limit_when_git_server_sends_comment_packets_after_wants() {
+    set_guarded_git_client_to_allow_loopback_for_tests();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut connection, _) = listener.accept().unwrap();
+        let _ = connection.read(&mut [0; 512]);
+        let _ = connection.write_all(&build_v0_ref_advertisement_for_main_with_multi_ack(
+            &"1".repeat(40),
+        ));
+        let _ = connection.read(&mut [0; 512]);
+        let _ = connection.write_all(&build_git_comment_pkt_lines_with_min_byte_len(8 << 20));
+    });
+    let url = format!("git://127.0.0.1:{port}/repo");
+    let target = tempfile::TempDir::new().unwrap();
+    let limits = BlockingGitFetchOperationLimits {
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
+        byte_limit: 1 << 20,
+        finished_fetch_bytes: 0,
+    };
+
+    let fetched = run_blocking_libgit2_operation_with_git_credentials(
+        &GitOperationCredentials::default(),
+        limits,
+        || -> anyhow::Result<()> {
+            let target = git2::Repository::init_bare(target.path())?;
+            Origin::new(&target, &url)?.fetch("refs/heads/main", false)?;
+            Ok(())
+        },
+    );
+
+    let refusal = "The received byte count went past the fetch limit.";
+    let error = fetched.as_ref().map_err(|error| format!("{error:#}"));
+    assert!(
+        matches!(&error, Err(text) if text.contains(refusal)),
+        "Expected the fetch to stop at the limit on bytes per fetch, but got {fetched:?}."
+    );
+}
+
+#[test]
+fn test_read_with_passed_fetch_deadline_returns_existing_deadline_refusal_text() {
+    let expired = BlockingGitFetchOperationLimits {
+        deadline: std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap(),
+        byte_limit: usize::MAX,
+        finished_fetch_bytes: 0,
+    };
+    let previous = CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS.replace(Some(expired));
+    let mut stream = GitNetworkStreamReadDeadlineAndByteLimitChecker::new(
+        std::io::repeat(b'0'),
+        RefAdvertisementEnd::NoRefAdvertisementInStream,
+    );
+    CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS.set(previous);
+
+    let read = stream.read(&mut [0; 64]).map_err(|error| error.to_string());
+
+    assert!(
+        matches!(&read, Err(text) if text == "fetch deadline exceeded"),
+        "Expected the read to stop because the fetch deadline already passed, but got {read:?}."
+    );
+}
+
+#[test]
 fn parse_git_protocol_url_rejects_non_numeric_port_https_url_no_path_and_line_break() {
     for url in [
         "git://server.example.com:not-a-port/repo",
@@ -217,101 +314,6 @@ fn parse_git_protocol_url_rejects_non_numeric_port_https_url_no_path_and_line_br
             "{url:?}"
         );
     }
-}
-
-#[test]
-fn read_head_from_pktlines_basic() {
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "HEAD", "multi_ack"));
-    buf.extend_from_slice(&ref_line(FAKE_SHA, "refs/heads/main"));
-    buf.extend_from_slice(FLUSH);
-
-    let result = default_head(&mut buf.as_slice()).unwrap();
-    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
-}
-
-#[test]
-fn an_endless_ref_advertisement_stops_at_the_byte_limit() {
-    let line = ref_line(FAKE_SHA, "refs/heads/main");
-    let unterminated = line.repeat(1000);
-
-    let refs = read_advertised_refs(&mut unterminated.as_slice(), line.len() * 10);
-
-    assert!(matches!(refs, Err(SourceError::GitCommandFailed { .. })));
-}
-
-#[test]
-fn read_head_from_pktlines_head_not_first() {
-    let other_sha = "1111111111111111111111111111111111111111";
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&ref_line_with_caps(other_sha, "refs/heads/main", "caps"));
-    buf.extend_from_slice(&ref_line(FAKE_SHA, "HEAD"));
-    buf.extend_from_slice(FLUSH);
-
-    let result = default_head(&mut buf.as_slice()).unwrap();
-    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
-}
-
-#[test]
-fn read_head_from_pktlines_no_head_falls_back_to_first_ref() {
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "refs/heads/main", "caps"));
-    buf.extend_from_slice(FLUSH);
-
-    let result = default_head(&mut buf.as_slice()).unwrap();
-    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
-}
-
-#[test]
-fn read_head_from_pktlines_empty_repo_returns_error() {
-    let zero_id = "0000000000000000000000000000000000000000";
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&ref_line_with_caps(zero_id, "capabilities^{}", "multi_ack"));
-    buf.extend_from_slice(FLUSH);
-
-    let err = default_head(&mut buf.as_slice()).unwrap_err();
-    assert!(matches!(err, SourceError::EmptyRemote));
-}
-
-/// git-daemon is keeping the connection open after the ref advertisement. `read_to_end` was
-/// blocking until timeout here.
-#[test]
-fn read_head_from_pktlines_server_keeps_connection_open() {
-    use std::io::Write;
-    use std::net::TcpListener;
-
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let server = std::thread::spawn(move || {
-        let (mut conn, _) = listener.accept().unwrap();
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "HEAD", "multi_ack"));
-        payload.extend_from_slice(FLUSH);
-        conn.write_all(&payload).unwrap();
-        conn.flush().unwrap();
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        drop(conn);
-    });
-
-    let mut stream = std::net::TcpStream::connect(addr).unwrap();
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-        .unwrap();
-
-    let start = std::time::Instant::now();
-    let result = default_head(&mut stream).unwrap();
-    let elapsed = start.elapsed();
-
-    assert_eq!(hex::encode(&result.commit), FAKE_SHA);
-    assert!(
-        elapsed.as_millis() < 1000,
-        "read_advertised_refs blocked for {}ms - likely still using read_to_end",
-        elapsed.as_millis()
-    );
-
-    drop(stream);
-    server.join().unwrap();
 }
 
 fn commit_on(repo: &git2::Repository, branch: &str, message: &str) -> git2::Oid {
@@ -526,6 +528,7 @@ impl Drop for GitDaemon {
 }
 
 fn start_git_daemon(base: &std::path::Path) -> (GitDaemon, RepositoryUrl) {
+    set_guarded_git_client_to_allow_loopback_for_tests();
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -612,7 +615,9 @@ fn fetch_commit_by_hash_fails_after_operation_deadline_and_fetch_all_branches_fa
         expired,
         || {
             let target = git2::Repository::init_bare(target.path())?;
-            Origin::new(&target, url.git_connection_url())?.fetch_commit(pinned)
+            Origin::new(&target, url.git_connection_url())?
+                .fetch_commit(pinned)
+                .map_err(anyhow::Error::from)
         },
     );
 
@@ -654,7 +659,7 @@ fn test_byte_limit_counts_bytes_across_all_fetches_of_one_operation() {
                 limits.byte_limit = limits.finished_fetch_bytes + 1;
             });
             let second = commit_file(&repo, "refs/heads/main", "second");
-            origin.fetch_commit(second)
+            origin.fetch_commit(second).map_err(anyhow::Error::from)
         },
     );
 

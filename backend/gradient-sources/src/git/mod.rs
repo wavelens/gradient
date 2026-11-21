@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod allowlisted_git_smart_http_subtransport;
 mod changed_paths;
 mod checkout;
 mod commit_info;
 mod context;
 mod git_credentials;
 mod git_network_limits;
-mod https_credentials_for_operation_host;
-mod pktline;
+mod git_transport_registration;
+mod guarded_git_network_connections;
 mod remote;
 mod ssh;
 mod update_check;
@@ -37,6 +38,8 @@ pub use context::{
     save_observed_project_ssh_host_keys,
 };
 pub use git_credentials::{GitOperationCredentials, HttpsGitCredential};
+pub use git_transport_registration::register_git_transports_once;
+pub use guarded_git_network_connections::set_default_git_http_client;
 pub use remote::BranchHead;
 
 pub fn is_valid_branch_name(name: &str) -> bool {

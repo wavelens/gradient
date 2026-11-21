@@ -59,16 +59,13 @@ pub async fn load_project_git_credentials_for_repository_url(
     project: &MProject,
     url: &RepositoryUrl,
 ) -> Result<GitOperationCredentials, SourceError> {
-    Ok(GitOperationCredentials {
-        ssh_git_private_key_and_known_hosts: load_ssh_private_key_and_known_hosts(
-            ctx, project, url,
-        )
-        .await?,
-        https_git_credentials: load_decrypted_project_https_credentials_for_repository_url_host(
-            ctx, project, url,
-        )
-        .await?,
-    })
+    Ok(
+        GitOperationCredentials::from_ssh_key_known_hosts_and_https_credentials(
+            load_ssh_private_key_and_known_hosts(ctx, project, url).await?,
+            load_decrypted_project_https_credentials_for_repository_url_host(ctx, project, url)
+                .await?,
+        ),
+    )
 }
 
 async fn load_ssh_private_key_and_known_hosts(

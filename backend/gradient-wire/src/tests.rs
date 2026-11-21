@@ -256,6 +256,24 @@ fn an_exec_job_and_a_phase_round_trip() {
 }
 
 #[test]
+fn init_ack_with_allowed_private_destinations_roundtrip_at_newest_version() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{GradientCapabilities, PROTO_VERSIONS, ServerMessage};
+
+    let newest = *PROTO_VERSIONS.end();
+    let msg = ServerMessage::InitAck {
+        capabilities: GradientCapabilities::default(),
+        authorized_peers: vec!["peer-1".to_owned()],
+        failed_peers: Vec::new(),
+        user_url_destination_allowlist: vec!["10.0.0.0/8".to_owned(), "git.internal".to_owned()],
+    };
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, newest).unwrap(), newest).unwrap(),
+        msg
+    );
+}
+
+#[test]
 fn pre_warm_vms_round_trips_and_names_no_job() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::messages::{PROTO_VERSIONS, ServerMessage};

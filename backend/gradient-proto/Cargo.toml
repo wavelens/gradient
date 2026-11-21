@@ -56,7 +56,7 @@ axum = { workspace = true, features = ["ws", "http1", "tokio"] }
 gradient-wire = { workspace = true, features = ["testing"] }
 gradient-entity = { workspace = true, features = ["testing"] }
 tempfile     = { workspace = true }
-tokio        = { workspace = true, features = ["macros", "sync", "net", "rt-multi-thread"] }
+tokio        = { workspace = true, features = ["macros", "sync", "net", "rt-multi-thread", "test-util"] }
 zstd         = { workspace = true }
 gradient-fixtures = { workspace = true }
 gradient-graph = { workspace = true, features = ["testing"] }

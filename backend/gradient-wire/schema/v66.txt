@@ -41,7 +41,7 @@ client
 39:WorkerLocalStoreBloomFilterChunk{bit_count:u64,probe_count:u8,offset:u64,bits:bytes,is_final:bool}
 server
 0:AuthChallenge{peers:seq<str>}
-1:InitAck{capabilities:{core:bool,federate:bool,eval:bool,build:bool,cache:bool,network:bool,secrets:bool,exec:bool},authorized_peers:seq<str>,failed_peers:seq<{peer_id:str,reason:str}>}
+1:InitAck{capabilities:{core:bool,federate:bool,eval:bool,build:bool,cache:bool,network:bool,secrets:bool,exec:bool},authorized_peers:seq<str>,failed_peers:seq<{peer_id:str,reason:str}>,user_url_destination_allowlist:seq<str>}
 2:AuthUpdate{authorized_peers:seq<str>,failed_peers:seq<{peer_id:str,reason:str}>}
 3:Reject{code:u16,reason:str}
 4:Error{code:u16,message:str}

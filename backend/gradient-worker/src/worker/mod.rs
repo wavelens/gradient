@@ -25,6 +25,8 @@ use crate::exec::host::ExecHost;
 use crate::exec::reattach::ResumedJob;
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
+use crate::proto::credentials::parse_allowlist_entries_and_build_http_client;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use gradient_worker_client::connection::ProtoConnection;
 use gradient_worker_client::connection::handshake::{perform_dialed_handshake, perform_handshake};
 use gradient_worker_client::reconnect::RunOutcome;
@@ -57,7 +59,7 @@ impl Worker<Connected> {
         executor: JobExecutor,
     ) -> Result<Self> {
         let mut conn = ProtoConnection::from_accepted(ws);
-        perform_setup(
+        let http_client_for_git_urls_limited_to_allowed_destinations = perform_setup(
             &mut conn,
             &config,
             Side::Inbound,
@@ -70,7 +72,10 @@ impl Worker<Connected> {
             jobs: Arc::new(WorkerJobs::new(&config)),
             config,
             executor,
-            conn_state: Connected { conn },
+            conn_state: Connected {
+                conn,
+                http_client_for_git_urls_limited_to_allowed_destinations,
+            },
             _marker: PhantomData,
         })
     }
@@ -91,9 +96,9 @@ impl Worker<Disconnected> {
         }
     }
 
-    pub async fn connect(&self, server_url: &str) -> Result<ProtoConnection> {
+    pub async fn connect(&self, server_url: &str) -> Result<Connected> {
         let mut conn = ProtoConnection::open(server_url).await?;
-        perform_setup(
+        let http_client_for_git_urls_limited_to_allowed_destinations = perform_setup(
             &mut conn,
             &self.config,
             Side::Outbound,
@@ -102,10 +107,13 @@ impl Worker<Disconnected> {
             &*self.executor.store,
         )
         .await?;
-        Ok(conn)
+        Ok(Connected {
+            conn,
+            http_client_for_git_urls_limited_to_allowed_destinations,
+        })
     }
 
-    pub fn into_connected(self, conn: ProtoConnection) -> Worker<Connected> {
+    pub fn into_connected(self, connected: Connected) -> Worker<Connected> {
         let Worker {
             config,
             executor,
@@ -117,7 +125,7 @@ impl Worker<Disconnected> {
             config,
             executor,
             jobs,
-            conn_state: Connected { conn },
+            conn_state: connected,
             _marker: PhantomData,
         }
     }
@@ -129,7 +137,11 @@ impl Worker<Connected> {
             config,
             executor,
             jobs,
-            conn_state: Connected { conn },
+            conn_state:
+                Connected {
+                    conn,
+                    http_client_for_git_urls_limited_to_allowed_destinations,
+                },
             ..
         } = self;
 
@@ -141,8 +153,13 @@ impl Worker<Connected> {
                 warn!(error = %e, "the new session closed before the queued job reports went out");
                 NO_JOB_SESSION
             });
-        let state =
-            message_loop::MessageLoopState::new(writer, &jobs, config.clone(), executor.clone());
+        let state = message_loop::MessageLoopState::new(
+            writer,
+            &jobs,
+            config.clone(),
+            executor.clone(),
+            http_client_for_git_urls_limited_to_allowed_destinations,
+        );
         let outcome =
             message_loop::run_message_loop(state, reader, job_session, stop.clone()).await;
         jobs.end_session();
@@ -239,7 +256,7 @@ async fn perform_setup(
     running: Vec<RunningAssignment>,
     exec: Option<&ExecHost>,
     store: &(impl WorkerStore + ?Sized),
-) -> Result<()> {
+) -> Result<HttpClientForUserSuppliedUrls> {
     let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
         .context("load or generate persistent worker ID")?;
     let handshake = match side {
@@ -262,6 +279,8 @@ async fn perform_setup(
         version = handshake.version,
         "capabilities negotiated"
     );
+    let http_client_for_git_urls_limited_to_allowed_destinations =
+        parse_allowlist_entries_and_build_http_client(&handshake.user_url_destination_allowlist)?;
     if let Some(exec) = exec {
         exec.start_session();
     }
@@ -327,7 +346,7 @@ async fn perform_setup(
         })
         .await?;
     }
-    Ok(())
+    Ok(http_client_for_git_urls_limited_to_allowed_destinations)
 }
 
 #[cfg(test)]

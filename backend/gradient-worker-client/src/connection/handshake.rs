@@ -205,6 +205,7 @@ mod tests {
             capabilities: all_caps(),
             authorized_peers: vec!["peer-1".to_owned()],
             failed_peers: vec![],
+            user_url_destination_allowlist: vec![],
         };
 
         let server_task = tokio::spawn(async move {
@@ -368,6 +369,7 @@ mod tests {
                 capabilities: no_caps(),
                 authorized_peers: vec![],
                 failed_peers: vec![],
+                user_url_destination_allowlist: vec![],
             })
             .await
             .unwrap();

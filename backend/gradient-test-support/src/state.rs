@@ -143,11 +143,8 @@ impl TestState {
         });
 
         let user_supplied_url_http_client =
-            gradient_util::http::HttpClientForUserSuppliedUrls::new(
-                gradient_core::build_user_url_destination_allowlist_from_config(&config)
-                    .expect("valid test allowlist"),
-            )
-            .expect("build test HTTP client for user-supplied URLs");
+            gradient_core::build_http_client_for_user_supplied_urls_from_runtime_config_and_set_as_process_git_client(&config)
+                .expect("build test HTTP client for user-supplied URLs");
         Arc::new(ServerState {
             web_db: WebDb::new(self.web_db),
             cache_db: CacheDb::new(self.cache_db),

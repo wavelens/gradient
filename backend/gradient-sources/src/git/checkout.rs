@@ -12,7 +12,6 @@ use super::git_network_limits::{
     blocking_git_fetch_limit_exceeded_reason_before_connect,
     build_fetch_options_with_time_and_size_limits_and_optional_shallow,
 };
-use super::https_credentials_for_operation_host::remote_callbacks_for_url_with_thread_https_credentials;
 use anyhow::{Context, Result};
 use git2::{Commit, Direction, Oid, Remote, Repository, Tree};
 use gradient_types::RepositoryUrl;
@@ -170,10 +169,7 @@ impl<'a> Origin<'a> {
 
     fn ref_pointing_at(&mut self, oid: Oid) -> Result<Option<String>, git2::Error> {
         return_error_if_git_operation_limits_exceeded()?;
-        let callbacks = remote_callbacks_for_url_with_thread_https_credentials(self.url);
-        let connection = self
-            .remote
-            .connect_auth(Direction::Fetch, Some(callbacks), None)?;
+        let connection = self.remote.connect_auth(Direction::Fetch, None, None)?;
         Ok(connection
             .list()?
             .iter()

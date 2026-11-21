@@ -48,6 +48,7 @@ use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilterChu
 
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
 const AUTHORIZATION_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
+const WORKER_SESSION_UPLOAD_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 const FAILED_AUTHORIZATION_RECHECKS_BEFORE_CLOSE: u32 = 3;
 
 pub enum SessionMsg {
@@ -99,6 +100,7 @@ pub struct SessionState {
     logs: LogLane,
     reader: JoinHandle<()>,
     authorization_recheck_task: JoinHandle<()>,
+    upload_sweep_loop_task: JoinHandle<()>,
 }
 
 pub struct SessionActor;
@@ -152,6 +154,8 @@ impl Actor for SessionActor {
         };
         let authorization_recheck_task =
             spawn_authorization_rechecks(&handles.db.shutdown, &myself);
+        let upload_sweep_loop_task =
+            spawn_idle_upload_grant_expiry_loop(&handles.db.shutdown, &myself);
 
         let nar_cfg = &handles.db.config.nar;
         let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get());
@@ -213,6 +217,7 @@ impl Actor for SessionActor {
             job_events,
             reader,
             authorization_recheck_task,
+            upload_sweep_loop_task,
         })
     }
 
@@ -522,6 +527,7 @@ impl Actor for SessionActor {
     ) -> Result<(), ActorProcessingErr> {
         st.reader.abort();
         st.authorization_recheck_task.abort();
+        st.upload_sweep_loop_task.abort();
         for granted in st.uploads.table.drain_granted() {
             let nar_storage = st.handles.db.storage.nar_storage.clone();
             st.handles
@@ -636,36 +642,58 @@ fn open_uploads(
             }
         }
     });
-    let sweep = myself.clone();
-    shutdown.spawn(async move {
-        let mut tick = tokio::time::interval(Duration::from_secs(30));
-        loop {
-            tick.tick().await;
-            if sweep.send_message(SessionMsg::SweepUploads).is_err() {
-                break;
-            }
-        }
-    });
     Ok(uploads)
+}
+
+fn spawn_idle_upload_grant_expiry_loop(
+    shutdown: &Shutdown,
+    myself: &ActorRef<SessionMsg>,
+) -> JoinHandle<()> {
+    spawn_tracked_worker_session_interval_loop(
+        shutdown,
+        myself,
+        WORKER_SESSION_UPLOAD_SWEEP_INTERVAL,
+        |session| async move { session.send_message(SessionMsg::SweepUploads).is_ok() },
+    )
 }
 
 fn spawn_authorization_rechecks(
     shutdown: &Shutdown,
     myself: &ActorRef<SessionMsg>,
 ) -> JoinHandle<()> {
+    spawn_tracked_worker_session_interval_loop(
+        shutdown,
+        myself,
+        AUTHORIZATION_RECHECK_INTERVAL,
+        |session| async move {
+            let recheck = session.call(SessionMsg::RecheckAuthorization, None).await;
+            matches!(recheck, Ok(ractor::rpc::CallResult::Success(true)))
+        },
+    )
+}
+
+fn spawn_tracked_worker_session_interval_loop<Step, StepFuture>(
+    shutdown: &Shutdown,
+    myself: &ActorRef<SessionMsg>,
+    interval: Duration,
+    step: Step,
+) -> JoinHandle<()>
+where
+    Step: Fn(ActorRef<SessionMsg>) -> StepFuture + Send + 'static,
+    StepFuture: Future<Output = bool> + Send,
+{
     let session = myself.clone();
     let server_shutdown_cancel_token = shutdown.token();
     shutdown.spawn(async move {
-        let start = tokio::time::Instant::now() + AUTHORIZATION_RECHECK_INTERVAL;
-        let mut tick = tokio::time::interval_at(start, AUTHORIZATION_RECHECK_INTERVAL);
+        let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
+                biased;
                 () = server_shutdown_cancel_token.cancelled() => break,
                 _ = tick.tick() => {}
             }
-            let recheck = session.call(SessionMsg::RecheckAuthorization, None).await;
-            if !matches!(recheck, Ok(ractor::rpc::CallResult::Success(true))) {
+            if !step(session.clone()).await {
                 break;
             }
         }
@@ -966,6 +994,105 @@ pub(in crate::handler) mod tests {
         }
     }
 
+    struct SweepUploadsCountingSession;
+
+    impl Actor for SweepUploadsCountingSession {
+        type Msg = SessionMsg;
+        type State = Arc<std::sync::atomic::AtomicUsize>;
+        type Arguments = (SessionHandles, Arc<std::sync::atomic::AtomicUsize>);
+
+        async fn pre_start(
+            &self,
+            myself: ActorRef<Self::Msg>,
+            (handles, received_sweep_uploads_message_count): Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            spawn_idle_upload_grant_expiry_loop(&handles.db.shutdown, &myself);
+            Ok(received_sweep_uploads_message_count)
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            msg: Self::Msg,
+            received_sweep_uploads_message_count: &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            if matches!(msg, SessionMsg::SweepUploads) {
+                received_sweep_uploads_message_count.fetch_add(1, Ordering::Relaxed);
+            }
+
+            Ok(())
+        }
+    }
+
+    async fn spawn_sweep_uploads_counting_session_test_actor(
+        state: &Arc<gradient_core::ServerState>,
+    ) -> (
+        ActorRef<SessionMsg>,
+        ractor::concurrency::JoinHandle<()>,
+        Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        let received_sweep_uploads_message_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (session, join) = Actor::spawn(
+            None,
+            SweepUploadsCountingSession,
+            (
+                SessionHandles::from_state(state),
+                Arc::clone(&received_sweep_uploads_message_count),
+            ),
+        )
+        .await
+        .unwrap();
+        (session, join, received_sweep_uploads_message_count)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn upload_sweep_loop_started_during_pre_start_sends_sweep_uploads_at_least_twice_after_two_sweep_intervals()
+     {
+        let state = test_state(empty_db());
+        let (session, join, received_sweep_uploads_message_count) =
+            spawn_sweep_uploads_counting_session_test_actor(&state).await;
+
+        tokio::time::sleep(WORKER_SESSION_UPLOAD_SWEEP_INTERVAL * 2 + Duration::from_secs(1)).await;
+        let upload_sweep_count_after_clock_advance =
+            received_sweep_uploads_message_count.load(Ordering::Relaxed);
+
+        session.stop(None);
+        join.await.unwrap();
+        assert!(
+            upload_sweep_count_after_clock_advance >= 2,
+            "The upload sweep ran fewer than 2 times after 2 sweep intervals. ran {upload_sweep_count_after_clock_advance} times"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancel_and_drain_with_a_short_budget_returns_true_while_session_upload_sweep_loop_is_open_and_no_upload_sweep_runs_after_server_shutdown_token_cancellation()
+     {
+        let state = test_state(empty_db());
+        let (session, join, received_sweep_uploads_message_count) =
+            spawn_sweep_uploads_counting_session_test_actor(&state).await;
+
+        let drained_all_tasks_in_time = state
+            .shutdown
+            .cancel_and_drain(Duration::from_millis(200))
+            .await;
+        let upload_sweeps_after_shutdown =
+            received_sweep_uploads_message_count.load(Ordering::Relaxed);
+        tokio::time::sleep(WORKER_SESSION_UPLOAD_SWEEP_INTERVAL * 3).await;
+        let upload_sweeps_three_intervals_after_shutdown_cancelled =
+            received_sweep_uploads_message_count.load(Ordering::Relaxed);
+
+        session.stop(None);
+        join.await.unwrap();
+        assert!(
+            drained_all_tasks_in_time,
+            "The loop that ran upload sweeps blocked tracked tasks from draining after cancellation of the shutdown token."
+        );
+        assert_eq!(
+            upload_sweeps_three_intervals_after_shutdown_cancelled, upload_sweeps_after_shutdown,
+            "upload sweep ran after cancellation of the shutdown token"
+        );
+    }
+
     pub(in crate::handler) async fn connected_pair()
     -> (ProtoSocket, WebSocketStream<MaybeTlsStream<TcpStream>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1149,6 +1276,44 @@ pub(in crate::handler) mod tests {
         session.stop(None);
         join.await.unwrap();
         assert!(drained_all_tasks_in_time);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_shutdown_token_when_interval_tick_is_due_never_runs_the_tracked_worker_session_step_repeated_two_hundred_times()
+     {
+        let (session, join) = Actor::spawn(None, DecliningSession, ()).await.unwrap();
+        let interval_loop_step_run_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        for _ in 0..200 {
+            let shutdown = Shutdown::new();
+            let server_shutdown_cancel_token = shutdown.token();
+            let interval_loop_step_run_count = Arc::clone(&interval_loop_step_run_count);
+            spawn_tracked_worker_session_interval_loop(
+                &shutdown,
+                &session,
+                AUTHORIZATION_RECHECK_INTERVAL,
+                move |_| {
+                    let server_shutdown_cancel_token = server_shutdown_cancel_token.clone();
+                    let interval_loop_step_run_count = Arc::clone(&interval_loop_step_run_count);
+                    async move {
+                        interval_loop_step_run_count.fetch_add(1, Ordering::Relaxed);
+                        tokio::time::sleep(AUTHORIZATION_RECHECK_INTERVAL).await;
+                        server_shutdown_cancel_token.cancel();
+                        true
+                    }
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        session.stop(None);
+        join.await.unwrap();
+        let interval_loop_step_run_count = interval_loop_step_run_count.load(Ordering::Relaxed);
+        assert_eq!(
+            interval_loop_step_run_count, 200,
+            "A step of the interval loop ran even though cancellation of the shutdown token came at the same time as the tick. Run count: {interval_loop_step_run_count}"
+        );
     }
 
     #[tokio::test]

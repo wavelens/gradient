@@ -14,6 +14,7 @@ use crate::git::changed_paths::{
     project_git_credentials_for_pull_request_head_on_same_host_and_port,
 };
 use crate::git::git_credentials::{GitOperationCredentials, HttpsGitCredential};
+use crate::git::guarded_git_network_connections::set_guarded_git_client_to_allow_loopback_for_tests;
 use crate::git::ssh::SshGitPrivateKeyKnownHostsAndObservations;
 use crate::git::ssh::tests::{
     decode, ed25519_pem, generate_random_ssh_host_private_key, serve_git_over_ssh,
@@ -511,17 +512,17 @@ fn pull_request_head_fetch_from_fork_url_gets_no_ssh_key_or_https_login_on_other
     let fork_on_same_server: RepositoryUrl = "git://127.0.0.1:9418/external/repo".parse().unwrap();
     let fork_on_other_port: RepositoryUrl = "git://127.0.0.1:9419/external/repo".parse().unwrap();
     let fork_on_other_host: RepositoryUrl = "git://127.0.0.2:9418/external/repo".parse().unwrap();
-    let credentials = GitOperationCredentials {
-        ssh_git_private_key_and_known_hosts: Some(SshGitPrivateKeyKnownHostsAndObservations::new(
+    let credentials = GitOperationCredentials::from_ssh_key_known_hosts_and_https_credentials(
+        Some(SshGitPrivateKeyKnownHostsAndObservations::new(
             ed25519_pem().into(),
             Vec::new(),
         )),
-        https_git_credentials: vec![HttpsGitCredential {
+        vec![HttpsGitCredential {
             host: "127.0.0.1".to_owned(),
             username: "ci".to_owned(),
             password: "token".into(),
         }],
-    };
+    );
 
     let same_server = project_git_credentials_for_pull_request_head_on_same_host_and_port(
         &project_repository,
@@ -717,6 +718,7 @@ async fn listing_changed_paths_between_ssh_project_repository_and_fork_pull_requ
 
 fn spawn_tcp_listener_that_accepts_and_holds_connection_open()
 -> (u16, mpsc::Receiver<()>, mpsc::Sender<()>) {
+    set_guarded_git_client_to_allow_loopback_for_tests();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (fetch_connection_accepted_sender, fetch_connection_accepted_receiver) = mpsc::channel();

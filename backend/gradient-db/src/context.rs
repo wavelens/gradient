@@ -183,6 +183,7 @@ pub struct Wakeups {
     pub eval_assign: Arc<Notify>,
     pub run_cache_maintenance_now: Arc<Notify>,
     pub run_signature_sweep_now: Arc<Notify>,
+    pub run_signature_backfill_now: Arc<Notify>,
 }
 
 #[derive(Clone, Debug, Default)]

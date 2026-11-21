@@ -314,6 +314,9 @@ pub async fn post_approve_subscription_request(
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::CacheSubscription))?;
     tx.commit().await?;
+    if mode.writes_build_outputs_to_cache() {
+        state.wake.run_signature_backfill_now.notify_one();
+    }
 
     reauth_project_workers(&state.web_db, &scheduler, project.id).await;
 

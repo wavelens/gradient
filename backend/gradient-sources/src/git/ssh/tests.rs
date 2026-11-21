@@ -7,9 +7,18 @@
 #![allow(clippy::disallowed_methods, reason = "test SSH server")]
 
 use super::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
+use crate::SourceError;
 use crate::git::commit_info::{fetch_commit, head_refspec};
 use crate::git::git_credentials::GitOperationCredentials;
+use crate::git::guarded_git_network_connections::{
+    clone_git_http_client_or_public_client, set_guarded_git_client_to_allow_loopback_for_tests,
+};
 use crate::git::remote::ls_remote_head;
+use crate::git::tests::fixtures::spawn_loopback_tcp_listener_counting_accepted_connections;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
+use gradient_util::http_validation::{
+    UserUrlDestinationAllowlist, parse_and_check_allowed_outbound_url,
+};
 use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
 use russh::keys::{Algorithm, EcdsaCurve, PrivateKey, PublicKey};
 use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session};
@@ -17,8 +26,10 @@ use russh::{Channel, ChannelId, MethodKind, MethodSet};
 use ssh_key::LineEnding;
 use ssh_key::private::Ed25519Keypair;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
@@ -104,6 +115,7 @@ async fn run_in_shell(channel: Channel<Msg>, handle: Handle, command: String) {
 }
 
 pub(crate) async fn serve_git_over_ssh(client_key: PublicKey, host_keys: Vec<PrivateKey>) -> u16 {
+    set_guarded_git_client_to_allow_loopback_for_tests();
     let config = Arc::new(russh::server::Config {
         methods: MethodSet::from(&[MethodKind::PublicKey][..]),
         keys: host_keys,
@@ -277,23 +289,18 @@ async fn a_saved_host_key_is_accepted_silently() {
         ..make_saved_git_server_ssh_host_key_for_local_test_server(port, &host_key)
     };
     let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(client_pem.into(), vec![saved]);
+    let credentials = GitOperationCredentials::from(Some(ssh.clone())).with_guarded_http_client(
+        HttpClientForUserSuppliedUrls::new(
+            UserUrlDestinationAllowlist::parse(&["localhost".to_owned()]).unwrap(),
+        )
+        .unwrap(),
+    );
 
-    let (head, fetched) = tokio::task::spawn_blocking({
-        let ssh = ssh.clone();
-        move || {
-            (
-                ls_remote_head(
-                    &ssh_url,
-                    &GitOperationCredentials::from(Some(ssh.clone())),
-                    None,
-                ),
-                fetch_commit(
-                    &ssh_url,
-                    &GitOperationCredentials::from(Some(ssh.clone())),
-                    &head_refspec(None),
-                ),
-            )
-        }
+    let (head, fetched) = tokio::task::spawn_blocking(move || {
+        (
+            ls_remote_head(&ssh_url, &credentials, None),
+            fetch_commit(&ssh_url, &credentials, &head_refspec(None)),
+        )
     })
     .await
     .unwrap();
@@ -397,7 +404,78 @@ async fn the_presented_host_key_can_be_fetched_without_a_saved_one() {
     )
     .await;
 
-    let presented = fetch_ssh_host_key("127.0.0.1", port).await.unwrap();
+    let presented =
+        fetch_ssh_host_key("127.0.0.1", port, &clone_git_http_client_or_public_client())
+            .await
+            .unwrap();
 
     assert_eq!(presented, host_key.public_key().to_openssh().unwrap());
+}
+
+#[test]
+fn test_ssh_repository_listing_at_loopback_with_public_only_admin_allowlist_fails_with_git_server_address_refused_by_admin_allowlist_and_accepts_no_tcp_connection()
+ {
+    let (port, accepted) = spawn_loopback_tcp_listener_counting_accepted_connections();
+    let url: gradient_types::RepositoryUrl =
+        format!("ssh://git@127.0.0.1:{port}/repo").parse().unwrap();
+    let allowlist = UserUrlDestinationAllowlist::default();
+    let http_reason =
+        parse_and_check_allowed_outbound_url(&format!("http://127.0.0.1:{port}/repo"), &allowlist)
+            .unwrap_err()
+            .to_string();
+    let credentials = GitOperationCredentials::from(Some(
+        SshGitPrivateKeyKnownHostsAndObservations::new(ed25519_pem().into(), Vec::new()),
+    ))
+    .with_guarded_http_client(HttpClientForUserSuppliedUrls::new(allowlist).unwrap());
+
+    let listed = ls_remote_head(&url, &credentials, None);
+
+    match listed {
+        Err(SourceError::GitServerAddressRefusedByAdminAllowlist { reason }) => {
+            assert_eq!(reason, http_reason);
+        }
+        result => panic!("Expected rejection from the admin allowlist, but got {result:?}."),
+    }
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        0,
+        "The listener accepted the connection, but this address is not on the admin allowlist."
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn public_only_allowlist_refuses_ssh_host_key_scan_of_loopback_and_faked_internal_host_with_same_refusal_text_as_http_client_and_listener_accepts_no_connection()
+ {
+    let (port, accepted) = spawn_loopback_tcp_listener_counting_accepted_connections();
+    let allowlist = UserUrlDestinationAllowlist::default().with_dns_lookup_function(|_, port| {
+        Box::pin(async move { Ok(vec![SocketAddr::from(([127, 0, 0, 1], port))]) })
+    });
+    let http_reason =
+        parse_and_check_allowed_outbound_url(&format!("http://127.0.0.1:{port}/"), &allowlist)
+            .unwrap_err()
+            .to_string();
+    let client = HttpClientForUserSuppliedUrls::new(allowlist).unwrap();
+
+    let mut reasons = Vec::new();
+    for host in ["127.0.0.1", "internal.example"] {
+        match fetch_ssh_host_key(host, port, &client).await {
+            Err(SourceError::GitServerAddressRefusedByAdminAllowlist { reason }) => {
+                reasons.push(reason);
+            }
+            result => panic!("Expected rejection from the admin allowlist, but got {result:?}."),
+        }
+    }
+
+    assert_eq!(reasons[0], http_reason);
+    assert!(reasons[1].contains("internal.example"), "{}", reasons[1]);
+    assert!(
+        !reasons[1].contains("127.0.0.1"),
+        "Don't specify the address that the hostname resolved to in a rejection for a hostname: {}",
+        reasons[1]
+    );
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        0,
+        "The listener accepted the connection, but this address is not on the admin allowlist."
+    );
 }

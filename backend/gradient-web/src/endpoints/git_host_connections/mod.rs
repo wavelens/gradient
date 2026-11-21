@@ -313,6 +313,14 @@ async fn link_fitting_tasks_without_connection(
         }
         _ => Vec::new(),
     };
+    link_fitting_tasks_with_repository_grant(db, connection, candidates).await
+}
+
+async fn link_fitting_tasks_with_repository_grant(
+    db: &impl sea_orm::ConnectionTrait,
+    connection: &MGitHostConnection,
+    candidates: Vec<MTask>,
+) -> Result<Vec<MTask>, sea_orm::DbErr> {
     let fitting: Vec<MTask> = candidates
         .into_iter()
         .filter(|task| {
@@ -344,9 +352,13 @@ async fn link_fitting_tasks_without_connection(
         );
     }
     let ids: Vec<TaskId> = linked.iter().map(|task| task.id).collect();
-    connections::link_tasks_to_connection(db, &ids, connection.id, connection.reports_status)
-        .await?;
-    Ok(linked)
+    let updated =
+        connections::link_tasks_to_connection(db, &ids, connection.id, connection.reports_status)
+            .await?;
+    Ok(linked
+        .into_iter()
+        .filter(|task| updated.contains(&task.id))
+        .collect())
 }
 
 pub(crate) async fn load_of_owner(

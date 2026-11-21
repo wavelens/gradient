@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{GitHostConnectionRefusal, audit_log_owner_of_git_host_connection, load_of_owner};
+use super::{
+    GitHostConnectionRefusal, audit_log_owner_of_git_host_connection,
+    link_fitting_tasks_with_repository_grant, load_of_owner,
+};
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
@@ -15,6 +18,7 @@ use gradient_db::git_host_connection_repository_grants::{
 use gradient_db::git_host_connections::GitHostConnectionOwnerByDatabaseId;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
+use sea_orm::{TransactionSession, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -110,6 +114,7 @@ async fn write_audit(
     connection: &MGitHostConnection,
     grant: &MGitHostConnectionRepositoryGrant,
     taken_over_from_source: Option<RepositoryGrantSource>,
+    git_host_connection_linked_task_ids: Option<&[TaskId]>,
 ) {
     let mut details = serde_json::json!({
         "git_host_connection_id": connection.id.to_string(),
@@ -121,6 +126,10 @@ async fn write_audit(
     });
     if let Some(former) = taken_over_from_source {
         details["taken_over_from_source"] = serde_json::json!(former);
+    }
+    if let Some(linked) = git_host_connection_linked_task_ids {
+        details["git_host_connection_linked_task_ids"] =
+            serde_json::json!(linked.iter().map(ToString::to_string).collect::<Vec<_>>());
     }
     audit
         .write(
@@ -159,7 +168,7 @@ pub(crate) async fn list(
 }
 
 pub(crate) async fn create(
-    db: &impl sea_orm::ConnectionTrait,
+    db: &(impl sea_orm::ConnectionTrait + TransactionTrait),
     owner: GitHostConnectionOwnerByDatabaseId,
     connection: GitHostConnectionId,
     created_by: UserId,
@@ -182,15 +191,16 @@ pub(crate) async fn create(
             )?,
         _ => project.or_not_found(Resource::Project)?,
     };
+    let txn = db.begin().await?;
     let existing = grants::of_connection_project_and_repository(
-        db,
+        &txn,
         connection.id,
         project.id,
         &body.repository_owner,
         body.repository_name.as_deref(),
     )
     .await?;
-    let (grant, taken_over_from_source) = match existing {
+    let (grant, taken_over_from_source, linked) = match existing {
         Some(existing) if existing.source == RepositoryGrantSource::Admin => {
             return Err(WebError::already_exists(
                 Resource::GitHostConnectionRepositoryGrant,
@@ -198,12 +208,12 @@ pub(crate) async fn create(
         }
         Some(existing) => {
             let former_source = existing.source;
-            let grant = grants::take_over_as_admin_grant(db, existing, created_by).await?;
-            (grant, Some(former_source))
+            let grant = grants::take_over_as_admin_grant(&txn, existing, created_by).await?;
+            (grant, Some(former_source), Vec::new())
         }
         None => {
             let grant = grants::insert(
-                db,
+                &txn,
                 NewGitHostConnectionRepositoryGrant {
                     connection: connection.id,
                     project: project.id,
@@ -217,15 +227,21 @@ pub(crate) async fn create(
             .map_err(|err| {
                 WebError::from_db_err(err, Resource::GitHostConnectionRepositoryGrant)
             })?;
-            (grant, None)
+            let candidates = gradient_db::tasks::of_project(project.id).all(&txn).await?;
+            let linked =
+                link_fitting_tasks_with_repository_grant(&txn, &connection, candidates).await?;
+            (grant, None, linked)
         }
     };
+    txn.commit().await?;
+    let linked_ids: Vec<TaskId> = linked.iter().map(|task| task.id).collect();
     write_audit(
         audit,
         Action::GitHostConnectionRepositoryGrantCreate,
         &connection,
         &grant,
         taken_over_from_source,
+        Some(&linked_ids),
     )
     .await;
     Ok(RepositoryGrantResponse::new(grant, Some(project.name)))
@@ -248,6 +264,7 @@ pub(crate) async fn delete(
         Action::GitHostConnectionRepositoryGrantDelete,
         &connection,
         &grant,
+        None,
         None,
     )
     .await;

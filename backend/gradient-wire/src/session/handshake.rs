@@ -86,6 +86,7 @@ pub struct HandshakeResult {
     pub negotiated: GradientCapabilities,
     pub authorized_peers: Vec<String>,
     pub failed_peers: Vec<FailedPeer>,
+    pub user_url_destination_allowlist: Vec<String>,
     pub version: u16,
 }
 
@@ -131,6 +132,7 @@ where
         capabilities: negotiated,
         authorized_peers,
         failed_peers,
+        user_url_destination_allowlist,
     } = ack
     else {
         if let ServerMessage::Reject { code, reason } = ack {
@@ -145,6 +147,7 @@ where
         negotiated,
         authorized_peers,
         failed_peers,
+        user_url_destination_allowlist,
         version: agreed_version(socket),
     })
 }
@@ -251,20 +254,27 @@ where
     };
     let tokens = tokens.clone();
     let advertised = greeted.client_capabilities.clone();
-    let (authorized_peers, failed_peers, negotiated) = match authority
-        .authorize(&greeted.peer_id, challenge, &tokens, advertised.clone())
-        .await
-        .context("authorize")?
-    {
-        AuthOutcome::Accept {
-            authorized_peers,
-            failed_peers,
-            granted_capabilities,
-        } => (authorized_peers, failed_peers, granted_capabilities),
-        AuthOutcome::Reject(rejection) => {
-            return Err(reject_peer(socket, rejection, Some(greeted.peer_id.clone())).await);
-        }
-    };
+    let (authorized_peers, failed_peers, negotiated, user_url_destination_allowlist) =
+        match authority
+            .authorize(&greeted.peer_id, challenge, &tokens, advertised.clone())
+            .await
+            .context("authorize")?
+        {
+            AuthOutcome::Accept {
+                authorized_peers,
+                failed_peers,
+                granted_capabilities,
+                user_url_destination_allowlist,
+            } => (
+                authorized_peers,
+                failed_peers,
+                granted_capabilities,
+                user_url_destination_allowlist,
+            ),
+            AuthOutcome::Reject(rejection) => {
+                return Err(reject_peer(socket, rejection, Some(greeted.peer_id.clone())).await);
+            }
+        };
 
     let claimed = Some(greeted.peer_id.clone());
     let authenticated = match on_auth_response(greeted, auth_response, negotiated.clone()) {
@@ -280,6 +290,7 @@ where
             capabilities: negotiated.clone(),
             authorized_peers: authorized_peers.clone(),
             failed_peers: failed_peers.clone(),
+            user_url_destination_allowlist: user_url_destination_allowlist.clone(),
         })
         .await
         .map_err(|_| HandshakeError::InitAckNotSent)?;
@@ -291,6 +302,7 @@ where
         negotiated: registered.negotiated,
         authorized_peers,
         failed_peers,
+        user_url_destination_allowlist,
         version: agreed_version(socket),
     })
 }
@@ -316,26 +328,34 @@ where
 
     let greeted = greet_dialed_worker(socket, &credentials.worker_id).await?;
     let advertised = greeted.client_capabilities;
-    let (authorized_peers, failed_peers, negotiated) = match authority
-        .admit(&credentials.worker_id, advertised.clone())
-        .await
-        .context("admit")?
-    {
-        AuthOutcome::Accept {
-            authorized_peers,
-            failed_peers,
-            granted_capabilities,
-        } => (authorized_peers, failed_peers, granted_capabilities),
-        AuthOutcome::Reject(rejection) => {
-            return Err(reject_peer(socket, rejection, None).await);
-        }
-    };
+    let (authorized_peers, failed_peers, negotiated, user_url_destination_allowlist) =
+        match authority
+            .admit(&credentials.worker_id, advertised.clone())
+            .await
+            .context("admit")?
+        {
+            AuthOutcome::Accept {
+                authorized_peers,
+                failed_peers,
+                granted_capabilities,
+                user_url_destination_allowlist,
+            } => (
+                authorized_peers,
+                failed_peers,
+                granted_capabilities,
+                user_url_destination_allowlist,
+            ),
+            AuthOutcome::Reject(rejection) => {
+                return Err(reject_peer(socket, rejection, None).await);
+            }
+        };
 
     socket
         .send_msg(&ServerMessage::InitAck {
             capabilities: negotiated.clone(),
             authorized_peers: authorized_peers.clone(),
             failed_peers: failed_peers.clone(),
+            user_url_destination_allowlist: user_url_destination_allowlist.clone(),
         })
         .await
         .map_err(|_| HandshakeError::InitAckNotSent)?;
@@ -346,6 +366,7 @@ where
         negotiated,
         authorized_peers,
         failed_peers,
+        user_url_destination_allowlist,
         version: agreed_version(socket),
     })
 }
@@ -441,12 +462,14 @@ where
             capabilities: negotiated,
             authorized_peers,
             failed_peers,
+            user_url_destination_allowlist,
         } => Ok(HandshakeResult {
             peer_id: identity.peer_id(),
             advertised,
             negotiated,
             authorized_peers,
             failed_peers,
+            user_url_destination_allowlist,
             version: agreed_version(socket),
         }),
         ServerMessage::Reject { code, reason } => Err(Rejected {
@@ -542,6 +565,7 @@ mod tests {
                 authorized_peers: self.0.clone(),
                 failed_peers: vec![],
                 granted_capabilities: advertised,
+                user_url_destination_allowlist: vec![],
             })
         }
     }

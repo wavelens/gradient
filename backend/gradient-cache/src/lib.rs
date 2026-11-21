@@ -19,6 +19,8 @@ mod evaluations;
 #[cfg(feature = "server")]
 mod schedule;
 #[cfg(feature = "server")]
+mod signature_backfill_pass;
+#[cfg(feature = "server")]
 mod signatures;
 #[cfg(feature = "server")]
 mod storage_migrations;

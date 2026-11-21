@@ -5,6 +5,7 @@
  */
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
@@ -29,6 +30,7 @@ use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::*;
 use sea_orm::{ActiveModelBehavior, ActiveModelTrait, EntityTrait, IntoActiveModel};
 use serde_json::{Value, json};
+use tokio::sync::Notify;
 
 struct Instance {
     db: TestDatabase,
@@ -485,4 +487,261 @@ async fn deleting_project_leaves_input_producer_without_worker_and_waiting_build
         "The producer row for the output of F is present after the project delete. That row is a dispatched build job with no worker reference."
     );
     instance.db.finish().await;
+}
+
+const TRUSTED_EARLIER_PROJECT_BUILD_OUTPUT_STORE_PATH_HASH: &str =
+    "t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0";
+
+struct TestCacheSubscriptionSetup {
+    db: TestDatabase,
+    server: TestServer,
+    auth: String,
+    project_id: ProjectId,
+    project_name: String,
+    cache_id: CacheId,
+    cache_name: String,
+    run_signature_backfill_now: Arc<Notify>,
+}
+
+async fn setup_signed_in_admin_project_with_stored_build_and_unsubscribed_signing_cache_and_start_test_server()
+-> TestCacheSubscriptionSetup {
+    let evaluation_id = EvaluationId::now_v7();
+    let cache_id = CacheId::now_v7();
+    let db = shape()
+        .evaluation(evaluation_id)
+        .derivation(&format!("/nix/store/{}-output.drv", "r".repeat(32)))
+        .output(TRUSTED_EARLIER_PROJECT_BUILD_OUTPUT_STORE_PATH_HASH)
+        .job()
+        .cached_path(
+            TRUSTED_EARLIER_PROJECT_BUILD_OUTPUT_STORE_PATH_HASH,
+            "output",
+        )
+        .into_cache(cache_id)
+        .keyed("signing-key")
+        .into_database()
+        .await;
+    db.execute("DELETE FROM project_cache").await;
+    let project_id = db.project_of(evaluation_id).await;
+    let [project_name] = db
+        .texts(&format!(
+            "SELECT name FROM project WHERE id = '{project_id}'"
+        ))
+        .await
+        .try_into()
+        .expect("one project");
+    insert(&db, rows::admin_role()).await;
+    insert(
+        &db,
+        project_user::Model {
+            project: project_id,
+            ..rows::project_member(BASE_ROLE_ADMIN_ID)
+        },
+    )
+    .await;
+    insert(
+        &db,
+        rows::cache_member_in(cache_id, BASE_CACHE_ROLE_ADMIN_ID),
+    )
+    .await;
+    let session_id = SessionId::now_v7();
+    insert(&db, rows::live_session(session_id)).await;
+    let state = TestState::new().web_db(db.connection()).build();
+    let run_signature_backfill_now = Arc::clone(&state.wake.run_signature_backfill_now);
+    let server = TestServer::new(gradient_web::create_router(state).expect("the router builds"));
+    TestCacheSubscriptionSetup {
+        db,
+        server,
+        auth: bearer(session_id),
+        project_id,
+        project_name,
+        cache_id,
+        cache_name: format!("cache-{}", cache_id.into_inner().simple()),
+        run_signature_backfill_now,
+    }
+}
+
+async fn read_unsigned_signature_backfill_requested_at_as_text_for_all_subscriptions(
+    db: &TestDatabase,
+) -> Vec<String> {
+    db.texts(
+        "SELECT coalesce(unsigned_signature_backfill_requested_at::text, 'NULL') FROM project_cache ORDER BY id",
+    )
+    .await
+}
+
+async fn count_cached_path_signature_rows_for_cache(db: &TestDatabase, cache: CacheId) -> usize {
+    db.texts(&format!(
+        "SELECT id::text FROM cached_path_signature WHERE cache = '{cache}'"
+    ))
+    .await
+    .len()
+}
+
+async fn wait_for_notify_with_one_second_timeout(notify: &Notify) -> bool {
+    tokio::time::timeout(Duration::from_secs(1), notify.notified())
+        .await
+        .is_ok()
+}
+
+async fn insert_read_write_subscription_with_sign_outputs(
+    setup: &TestCacheSubscriptionSetup,
+    sign_outputs: bool,
+) {
+    insert(
+        &setup.db,
+        project_cache::Model {
+            id: ProjectCacheId::now_v7(),
+            project: setup.project_id,
+            cache: setup.cache_id,
+            mode: CacheSubscriptionMode::ReadWrite,
+            sign_outputs,
+            ..Default::default()
+        },
+    )
+    .await;
+}
+
+async fn assert_no_cached_path_signatures_and_signature_backfill_requested_and_wake_notified_within_one_second(
+    setup: &TestCacheSubscriptionSetup,
+) {
+    assert_eq!(
+        count_cached_path_signature_rows_for_cache(&setup.db, setup.cache_id).await,
+        0,
+        "The request doesn't write signature rows. Signature rows come from the signature backfill pass later in the background."
+    );
+    let requested =
+        read_unsigned_signature_backfill_requested_at_as_text_for_all_subscriptions(&setup.db)
+            .await;
+    assert!(
+        matches!(requested.as_slice(), [time] if time != "NULL"),
+        "Subscription rows record the timestamp of the signature backfill request. {requested:?}"
+    );
+    assert!(
+        wait_for_notify_with_one_second_timeout(&setup.run_signature_backfill_now).await,
+        "Requests start the signature backfill pass within one second."
+    );
+}
+
+#[tokio::test]
+async fn post_cache_subscription_returns_200_writes_no_signature_rows_sets_backfill_requested_at_and_notifies_signature_backfill_wake()
+ {
+    let setup =
+        setup_signed_in_admin_project_with_stored_build_and_unsubscribed_signing_cache_and_start_test_server()
+            .await;
+
+    let response: Value = setup
+        .server
+        .post(&format!(
+            "/api/v1/projects/{}/subscribe/{}",
+            setup.project_name, setup.cache_name
+        ))
+        .add_header("authorization", setup.auth.clone())
+        .json(&json!({ "mode": "ReadWrite" }))
+        .await
+        .json();
+
+    assert_eq!(response["message"], "Cache subscribed");
+    assert_no_cached_path_signatures_and_signature_backfill_requested_and_wake_notified_within_one_second(&setup).await;
+    setup.db.finish().await;
+}
+
+#[tokio::test]
+async fn patch_subscription_sign_outputs_false_to_true_returns_200_sets_unsigned_signature_backfill_requested_at_and_wakes_signature_backfill_within_one_second_without_writing_cached_path_signature_rows()
+ {
+    let setup =
+        setup_signed_in_admin_project_with_stored_build_and_unsubscribed_signing_cache_and_start_test_server()
+            .await;
+    insert_read_write_subscription_with_sign_outputs(&setup, false).await;
+
+    setup
+        .server
+        .patch(&format!(
+            "/api/v1/projects/{}/subscribe/{}",
+            setup.project_name, setup.cache_name
+        ))
+        .add_header("authorization", setup.auth.clone())
+        .json(&json!({ "sign_outputs": true }))
+        .await
+        .assert_status_ok();
+
+    assert_no_cached_path_signatures_and_signature_backfill_requested_and_wake_notified_within_one_second(&setup).await;
+    setup.db.finish().await;
+}
+
+#[tokio::test]
+async fn test_approve_subscription_request_sets_unsigned_signature_backfill_requested_at_and_notifies_signature_backfill_wake()
+ {
+    let setup =
+        setup_signed_in_admin_project_with_stored_build_and_unsubscribed_signing_cache_and_start_test_server()
+            .await;
+    insert(
+        &setup.db,
+        cache_subscription_request::Model {
+            id: CacheSubscriptionRequestId::now_v7(),
+            project: setup.project_id,
+            cache: setup.cache_id,
+            mode: CacheSubscriptionMode::ReadWrite,
+            requested_by: rows::user().id,
+            created_at: gradient_types::now(),
+        },
+    )
+    .await;
+
+    setup
+        .server
+        .post(&format!(
+            "/api/v1/caches/{}/subscription-requests/{}",
+            setup.cache_name, setup.project_name
+        ))
+        .add_header("authorization", setup.auth.clone())
+        .await
+        .assert_status_ok();
+
+    let requested =
+        read_unsigned_signature_backfill_requested_at_as_text_for_all_subscriptions(&setup.db)
+            .await;
+    assert!(
+        matches!(requested.as_slice(), [time] if time != "NULL"),
+        "Subscription rows record the timestamp of the signature backfill request. {requested:?}"
+    );
+    assert!(
+        wait_for_notify_with_one_second_timeout(&setup.run_signature_backfill_now).await,
+        "Requests start the signature backfill pass within one second."
+    );
+    setup.db.finish().await;
+}
+
+#[tokio::test]
+async fn patch_subscription_sign_outputs_to_false_clears_unsigned_signature_backfill_requested_at_while_backfill_requested()
+ {
+    let setup =
+        setup_signed_in_admin_project_with_stored_build_and_unsubscribed_signing_cache_and_start_test_server()
+            .await;
+    insert_read_write_subscription_with_sign_outputs(&setup, true).await;
+    let requested =
+        read_unsigned_signature_backfill_requested_at_as_text_for_all_subscriptions(&setup.db)
+            .await;
+    assert!(
+        matches!(requested.as_slice(), [time] if time != "NULL"),
+        "Subscription rows record the timestamp of the signature backfill request. {requested:?}"
+    );
+
+    setup
+        .server
+        .patch(&format!(
+            "/api/v1/projects/{}/subscribe/{}",
+            setup.project_name, setup.cache_name
+        ))
+        .add_header("authorization", setup.auth.clone())
+        .json(&json!({ "sign_outputs": false }))
+        .await
+        .assert_status_ok();
+
+    assert_eq!(
+        read_unsigned_signature_backfill_requested_at_as_text_for_all_subscriptions(&setup.db)
+            .await,
+        vec!["NULL".to_string()],
+        "Subscriptions don't keep the requested backfill time once signatures are off."
+    );
+    setup.db.finish().await;
 }

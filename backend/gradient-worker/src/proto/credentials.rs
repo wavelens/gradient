@@ -10,19 +10,41 @@
 //! from a previous job. A `SecretBytes` buffer can lock its memory pages with mlock(2) and zero
 //! them on drop.
 
+use anyhow::Context as _;
 use gradient_sources::{
     GitOperationCredentials, HttpsGitCredential, SshGitPrivateKeyKnownHostsAndObservations,
 };
 use gradient_types::{SecretBytes, SecretString};
+use gradient_util::http::HttpClientForUserSuppliedUrls;
+use gradient_util::http_validation::UserUrlDestinationAllowlist;
 use gradient_wire::messages::{CredentialKind, GitServerSshHostKey};
 use std::collections::BTreeMap;
+
+pub fn parse_allowlist_entries_and_build_http_client(
+    entries: &[String],
+) -> anyhow::Result<HttpClientForUserSuppliedUrls> {
+    UserUrlDestinationAllowlist::parse(entries)
+        .map_err(anyhow::Error::from)
+        .and_then(|allowlist| Ok(HttpClientForUserSuppliedUrls::new(allowlist)?))
+        .context(
+            "Build the HTTP client for Git connections from the allowlist that the server sent.",
+        )
+}
 
 #[derive(Default)]
 pub struct CredentialStore {
     job_secrets: BTreeMap<(String, String), SecretBytes>,
+    http_client_for_git_urls_limited_to_allowed_destinations: Option<HttpClientForUserSuppliedUrls>,
 }
 
 impl CredentialStore {
+    pub fn new_with_git_connection_http_client(client: HttpClientForUserSuppliedUrls) -> Self {
+        Self {
+            job_secrets: BTreeMap::new(),
+            http_client_for_git_urls_limited_to_allowed_destinations: Some(client),
+        }
+    }
+
     pub fn store(&mut self, kind: CredentialKind, data: SecretBytes) {
         let CredentialKind::JobSecret { job_id, name } = kind;
         self.job_secrets.insert((job_id, name), data);
@@ -43,6 +65,9 @@ impl CredentialStore {
             ssh_key,
             ssh_host_keys,
             https_git_credentials,
+            http_client_for_git_urls_limited_to_allowed_destinations: self
+                .http_client_for_git_urls_limited_to_allowed_destinations
+                .clone(),
             secrets: own
                 .into_iter()
                 .map(|((_, name), value)| (name, value))
@@ -56,15 +81,19 @@ pub struct JobCredentials {
     ssh_key: Option<SecretString>,
     ssh_host_keys: Vec<GitServerSshHostKey>,
     https_git_credentials: Vec<HttpsGitCredential>,
+    http_client_for_git_urls_limited_to_allowed_destinations: Option<HttpClientForUserSuppliedUrls>,
     secrets: BTreeMap<String, SecretBytes>,
 }
 
 impl JobCredentials {
     pub fn git_credentials_for_clone_and_fetch(&self) -> GitOperationCredentials {
-        GitOperationCredentials {
-            ssh_git_private_key_and_known_hosts: self
-                .ssh_git_private_key_known_hosts_and_observations(),
-            https_git_credentials: self.https_git_credentials.clone(),
+        let credentials = GitOperationCredentials::from_ssh_key_known_hosts_and_https_credentials(
+            self.ssh_git_private_key_known_hosts_and_observations(),
+            self.https_git_credentials.clone(),
+        );
+        match &self.http_client_for_git_urls_limited_to_allowed_destinations {
+            Some(client) => credentials.with_guarded_http_client(client.clone()),
+            None => credentials,
         }
     }
 
@@ -90,6 +119,10 @@ impl JobCredentials {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_sources::SourceError;
+    use gradient_types::RepositoryUrl;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn job_secret(job_id: &str, name: &str) -> CredentialKind {
         CredentialKind::JobSecret {
@@ -212,6 +245,80 @@ mod tests {
             ("github.com", "x-access-token", "ghp-secret")
         );
         assert!(second.https_git_credentials.is_empty());
+    }
+
+    fn bind_loopback_tcp_listener_and_count_accepted_connections() -> (u16, Arc<AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&accepted);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                drop(stream);
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        (port, accepted)
+    }
+
+    fn checkout_git_repo_with_job_context_from_credential_store_allowlist_and_return_error(
+        port: u16,
+        allowlist_entries: &[String],
+    ) -> anyhow::Error {
+        let client = parse_allowlist_entries_and_build_http_client(allowlist_entries).unwrap();
+        let mut store = CredentialStore::new_with_git_connection_http_client(client);
+        let context = take_credentials_for_job_without_ssh_key_or_host_keys(&mut store, "exec:1")
+            .git_credentials_for_clone_and_fetch();
+        let url: RepositoryUrl = format!("git://127.0.0.1:{port}/repo").parse().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        gradient_sources::checkout_commit_into(work.path(), &url, &"a".repeat(40), &context)
+            .unwrap_err()
+    }
+
+    fn wait_until_connection_count_reaches_expected(
+        accepted: &AtomicUsize,
+        expected: usize,
+    ) -> usize {
+        for _ in 0..50 {
+            if accepted.load(Ordering::SeqCst) >= expected {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        accepted.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn credential_store_git_context_allows_loopback_when_allowlisted_and_refuses_without_tcp_when_empty()
+     {
+        let (allowed_port, allowed_accepted) =
+            bind_loopback_tcp_listener_and_count_accepted_connections();
+        checkout_git_repo_with_job_context_from_credential_store_allowlist_and_return_error(
+            allowed_port,
+            &["127.0.0.0/8".to_owned()],
+        );
+        assert_eq!(
+            wait_until_connection_count_reaches_expected(&allowed_accepted, 1),
+            1,
+            "127.0.0.0/8 is in the session allowlist. The Git connection can reach the local listener."
+        );
+
+        let (refused_port, refused_accepted) =
+            bind_loopback_tcp_listener_and_count_accepted_connections();
+        let refused =
+            checkout_git_repo_with_job_context_from_credential_store_allowlist_and_return_error(
+                refused_port,
+                &[],
+            );
+        match refused.downcast_ref::<SourceError>() {
+            Some(SourceError::GitServerAddressRefusedByAdminAllowlist { .. }) => {}
+            other => panic!("Expected a rejection from the admin allowlist, but got {other:?}"),
+        }
+        assert_eq!(
+            wait_until_connection_count_reaches_expected(&refused_accepted, 1),
+            0,
+            "The session allowlist is empty, so no Git connection can reach the local listener."
+        );
     }
 
     #[test]

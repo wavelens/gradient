@@ -186,9 +186,10 @@ pub async fn connect_to_saved_host_and_get_current_key_with_fingerprint(
     let saved = load_project_git_ssh_host_key(&db.web_db, project.id, &params).await?;
     let port = u16::try_from(saved.port).unwrap_or_default();
     let read_failed = |reason: String| ProjectRefusal::GitServerSshHostKeyReadFailed { reason };
-    let public_key = gradient_sources::fetch_ssh_host_key(&saved.host, port)
-        .await
-        .map_err(|e| read_failed(e.to_string()))?;
+    let public_key =
+        gradient_sources::fetch_ssh_host_key(&saved.host, port, &db.user_supplied_url_http_client)
+            .await
+            .map_err(|e| read_failed(e.to_string()))?;
     let fingerprint = PublicKey::from_openssh(&public_key)
         .map_err(|e| read_failed(e.to_string()))?
         .fingerprint(HashAlg::Sha256)

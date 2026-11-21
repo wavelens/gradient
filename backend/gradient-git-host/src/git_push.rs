@@ -9,7 +9,7 @@
 
 use crate::BranchCommit;
 use anyhow::{Context, Result};
-use git2::{FetchOptions, Oid, PushOptions, RemoteCallbacks, Repository, Signature, Tree};
+use git2::{FetchOptions, Oid, PushOptions, Repository, Signature, Tree};
 
 pub async fn force_push_lock_commit(
     git_url: String,
@@ -36,12 +36,13 @@ fn force_push_blocking(
 ) -> Result<String> {
     let dir = tempfile::tempdir().context("git push tempdir")?;
     let repo = Repository::init_bare(dir.path()).context("init bare repo")?;
-    let mut remote = repo.remote_anonymous(git_url).context("anonymous remote")?;
+    let git_url = git_host_url_with_user_and_password(git_url, cred_user, cred_pass)?;
+    let mut remote = repo
+        .remote_anonymous(&git_url)
+        .context("anonymous remote")?;
 
     let mut fetch = FetchOptions::new();
-    fetch
-        .depth(1)
-        .remote_callbacks(credentials_cb(cred_user, cred_pass));
+    fetch.depth(1);
     remote
         .fetch(&[&format!("refs/heads/{base}")], Some(&mut fetch), None)
         .with_context(|| format!("fetch base branch {base}"))?;
@@ -74,23 +75,26 @@ fn force_push_blocking(
     )
     .context("local head ref")?;
 
-    let mut push = PushOptions::new();
-    push.remote_callbacks(credentials_cb(cred_user, cred_pass));
     remote
         .push(
             &[&format!("+refs/heads/{head}:refs/heads/{head}")],
-            Some(&mut push),
+            Some(&mut PushOptions::new()),
         )
         .with_context(|| format!("force-push {head}"))?;
 
     Ok(new_commit.to_string())
 }
 
-fn credentials_cb<'a>(user: &'a str, pass: &'a str) -> RemoteCallbacks<'a> {
-    let mut cb = RemoteCallbacks::new();
-    cb.credentials(move |_url, _username, _allowed| git2::Cred::userpass_plaintext(user, pass));
-
-    cb
+fn git_host_url_with_user_and_password(
+    git_url: &str,
+    user: &str,
+    password: &str,
+) -> Result<String> {
+    let mut url = url::Url::parse(git_url).context("Add user and password to Git host URL")?;
+    url.set_username(user)
+        .and_then(|()| url.set_password(Some(password)))
+        .map_err(|()| anyhow::anyhow!("Add user and password to Git host URL"))?;
+    Ok(url.into())
 }
 
 fn upsert_path(repo: &Repository, base: Option<&Tree>, path: &str, blob: Oid) -> Result<Oid> {
