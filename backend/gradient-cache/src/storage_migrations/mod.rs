@@ -7,6 +7,7 @@
 //! Storage migrations are to the NAR, log and blob layout what database migrations are to the
 //! schema. Apply them in order and before any deep GC unit.
 
+mod delete_eval_cache_segment_objects_before_project_column_migration;
 mod eval_cache_per_cache;
 mod eval_cache_segments;
 
@@ -31,6 +32,9 @@ fn migrations() -> Vec<Box<dyn StorageMigration>> {
     vec![
         Box::new(eval_cache_per_cache::EvalCachePerCache),
         Box::new(eval_cache_segments::EvalCacheSegments),
+        Box::new(
+            delete_eval_cache_segment_objects_before_project_column_migration::DeleteEvaluationCacheSegmentObjectsBeforeProjectColumnMigration,
+        ),
     ]
 }
 

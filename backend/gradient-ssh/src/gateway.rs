@@ -29,7 +29,8 @@ const VM_STARTUP_TIMED_OUT: &str = "the vm did not start within 30 minutes";
 const NO_EXIT_CODE: u32 = 255;
 const MAX_KEYBOARD_INPUT_BYTES_WHILE_WAITING_FOR_EXEC_GUEST_START: usize = 64 * 1024;
 const OPEN_FAILED: &str = "the terminal could not be opened";
-const NOT_ALLOWED: &str = "this login needs the TriggerEvaluation permission on the project";
+const NOT_ALLOWED: &str =
+    "the OpenJobTerminal permission on the project is necessary for this login";
 
 pub type TerminalSize = watch::Receiver<(u16, u16)>;
 
@@ -45,7 +46,7 @@ pub async fn resolve_target(
     session: &Session,
     target: &GatewayTarget,
 ) -> Result<(ExecJobId, u32), String> {
-    if !session.may(Permission::TriggerEvaluation) {
+    if !session.may(Permission::OpenJobTerminal) {
         return Err(NOT_ALLOWED.into());
     }
     let resolved = match target {
@@ -322,6 +323,7 @@ mod tests {
             project(),
             mask_from(&permissions),
             vec![],
+            true,
         )
         .await
         .expect("session")
@@ -355,14 +357,14 @@ mod tests {
             .append_query_results([vec![evaluation]])
             .append_query_results([vec![other_task]]);
         let elsewhere = resolve_target(
-            &session(db, vec![Permission::TriggerEvaluation]).await,
+            &session(db, vec![Permission::OpenJobTerminal]).await,
             &job_target(),
         )
         .await;
 
         let unknown = mock_db().append_query_results([Vec::<MExecJob>::new()]);
         let missing = resolve_target(
-            &session(unknown, vec![Permission::TriggerEvaluation]).await,
+            &session(unknown, vec![Permission::OpenJobTerminal]).await,
             &job_target(),
         )
         .await;
@@ -406,8 +408,9 @@ mod tests {
             SshHandles::for_tests(&state),
             user(),
             project(),
-            mask_from(&[Permission::TriggerEvaluation]),
+            mask_from(&[Permission::OpenJobTerminal]),
             vec![],
+            true,
         )
         .await
         .expect("session");
@@ -435,6 +438,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ssh_login_to_exec_job_with_view_project_and_trigger_evaluation_without_open_job_terminal_is_refused()
+     {
+        let refused = resolve_target(
+            &session(
+                mock_db(),
+                vec![Permission::ViewProject, Permission::TriggerEvaluation],
+            )
+            .await,
+            &job_target(),
+        )
+        .await;
+        assert_eq!(refused, Err(NOT_ALLOWED.into()));
+    }
+
+    #[tokio::test]
+    async fn ssh_login_with_view_project_and_open_job_terminal_without_trigger_evaluation_resolves_exec_job()
+     {
+        let task = MTask {
+            project: project().id,
+            ..Default::default()
+        };
+        let evaluation = MEvaluation {
+            task: Some(task.id),
+            ..Default::default()
+        };
+        let job = MExecJob {
+            id: job_id(),
+            evaluation: evaluation.id,
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![job]])
+            .append_query_results([vec![evaluation]])
+            .append_query_results([vec![task]]);
+        let resolved = resolve_target(
+            &session(
+                db,
+                vec![Permission::ViewProject, Permission::OpenJobTerminal],
+            )
+            .await,
+            &job_target(),
+        )
+        .await;
+        assert_eq!(resolved, Ok((job_id(), 0)));
+    }
+
+    #[tokio::test]
     async fn a_task_without_a_running_job_is_named() {
         let task = MTask {
             name: "nightly".into(),
@@ -445,7 +495,7 @@ mod tests {
             .append_query_results([vec![task]])
             .append_query_results([Vec::<MExecJob>::new()]);
         let refused = resolve_target(
-            &session(db, vec![Permission::TriggerEvaluation]).await,
+            &session(db, vec![Permission::OpenJobTerminal]).await,
             &GatewayTarget::Task("nightly".into()),
         )
         .await;

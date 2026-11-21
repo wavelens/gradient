@@ -8,7 +8,7 @@ use gradient_db::WorkerDb;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-/// A derivation is prunable once `walked` and `unwalked_inputs = 0` both hold.
+/// A derivation is prunable if both `walked` and `unwalked_inputs = 0` are true and a verified hash modulo is present in the row. The closure check for dependent derivations can't get input from that row if that value is absent. Evaluation workers report the derivation again.
 /// The second flag is keeping pruning safe against a walk abandoned between batches.
 /// Build and cache state are not telling whether the graph is recorded.
 /// Keying on them re-walked complete records until their shared build succeeded.
@@ -22,6 +22,7 @@ pub(crate) async fn prunable(
         .filter(CDerivation::Hash.is_in(drv_hashes))
         .filter(CDerivation::Walked.eq(true))
         .filter(CDerivation::UnwalkedInputs.eq(0))
+        .filter(CDerivation::SerializedDerivationHashForDependentOutputPaths.is_not_null())
         .all(db)
         .await?
         .into_iter()

@@ -100,11 +100,13 @@ mod tests {
             .insert(&connection)
             .await
             .unwrap();
+        let transaction = sea_orm::TransactionTrait::begin(&connection).await.unwrap();
         let app = StateApplicator {
-            db: &connection,
+            db: &transaction,
             crypt_secret_file: "",
             credentials_dir: Path::new(""),
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
 
         app.apply_roles(&HashMap::from([(
@@ -117,6 +119,7 @@ mod tests {
         )]))
         .await
         .unwrap();
+        transaction.commit().await.unwrap();
 
         let role = db
             .rows::<role::Entity>()

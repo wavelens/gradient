@@ -477,6 +477,7 @@ impl EvalWorker {
         &mut self,
         request: String,
         git_subprocess_environment: Vec<(String, String)>,
+        allowed_fetch_uri_prefixes: Vec<String>,
         sink: Arc<dyn DownloadSink>,
     ) -> Result<String> {
         *lock(&self.downloads) = Some(sink);
@@ -485,6 +486,7 @@ impl EvalWorker {
                 EvalRequest::FetchInput {
                     request,
                     git_subprocess_environment,
+                    allowed_fetch_uri_prefixes,
                 },
                 "FetchInput",
                 &RefuseDependencies("an input fetch"),

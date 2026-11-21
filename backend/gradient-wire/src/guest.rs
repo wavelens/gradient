@@ -5,6 +5,7 @@
  */
 
 use std::collections::BTreeMap;
+use std::net::Ipv4Addr;
 use std::ops::RangeInclusive;
 
 use anyhow::{Context, Result, anyhow};
@@ -19,7 +20,7 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=9;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=11;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const GUEST_UPLOADS_SINCE: u16 = 3;
@@ -27,6 +28,8 @@ pub const GUEST_WORK_DISK_SINCE: u16 = 5;
 pub const GUEST_SHUTDOWN_SINCE: u16 = 6;
 pub const GUEST_CONSOLE_RESIZE_SINCE: u16 = 8;
 pub const GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE: u16 = 9;
+pub const GUEST_PREPARE_TAP_LEASED_IPV4_ADDRESS_SINCE: u16 = 10;
+pub const GUEST_IPV6_NETWORK_CONFIGURATION_SINCE: u16 = 11;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const GUEST_STORE_VSOCK_PORT: u32 = 7001;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
@@ -130,6 +133,15 @@ pub struct GuestNetwork {
     pub nameservers: Vec<String>,
     #[proto(4, default)]
     pub mac: String,
+    #[proto(11, default)]
+    pub ipv6_configuration: Option<GuestNetworkIpv6>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+pub struct GuestNetworkIpv6 {
+    pub address: String,
+    pub prefix: u8,
+    pub gateway: String,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -207,12 +219,13 @@ pub enum AgentToWorker {
 pub enum SupervisorRequest {
     PrepareMount {
         tag: String,
-        dir: String,
         read_only: bool,
     },
     PrepareTap {
         name: String,
         bridge: String,
+        #[proto(10, default)]
+        guest_ipv4_address: Option<Ipv4Addr>,
     },
     BindUsb {
         vendor_product: String,
@@ -235,6 +248,7 @@ pub enum SupervisorReply {
     MountSocket { path: String },
     UsbBound { bus_id: String },
     Failed { message: String },
+    RejectedByConfiguration { message: String },
 }
 
 pub struct GuestConnection<S> {
@@ -358,6 +372,7 @@ mod tests {
                 gateway: "10.233.0.1".into(),
                 nameservers: vec!["10.233.0.1".into()],
                 mac: "02:47:52:00:00:03".into(),
+                ipv6_configuration: None,
             }),
             relays: vec![GuestRelay {
                 name: "tty0".into(),
@@ -521,9 +536,11 @@ mod tests {
     async fn a_frame_of_a_disjoint_version_range_is_refused() {
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
         let mut peer = Framed::new(theirs, LengthDelimitedCodec::new());
-        peer.send(version_frame(&(10..=11)))
-            .await
-            .expect("peer frame");
+        peer.send(version_frame(
+            &(GUEST_PROTO_VERSIONS.end() + 1..=GUEST_PROTO_VERSIONS.end() + 2),
+        ))
+        .await
+        .expect("peer frame");
 
         assert!(GuestConnection::agree(ours).await.is_err());
     }

@@ -5,6 +5,12 @@
  */
 
 use super::*;
+use crate::commands::mcp_command_run_decisions::{
+    COMMAND_NOT_OFFERED_TO_MODEL, McpToolCommandPermission,
+    McpToolCommandPermission::{CommandNotAllowed, McpToolMayRunCommand},
+    NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES,
+    UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES,
+};
 use crate::config::*;
 use crate::error::CliError;
 use crate::input::*;
@@ -43,22 +49,27 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum MainCommands {
     /// Manage saved accounts. Each account is a server. The server has its own login, selected project and selected task.
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Account {
         #[command(subcommand)]
         cmd: saved_account_commands::Commands,
     },
     /// Generate shell completions
     #[command(hide = true)]
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Completion {
         /// The shell to generate completions for
         #[arg(value_enum)]
         shell: Shell,
     },
     /// Get or set a config value. The environment variables `GRADIENT_SERVER` and `GRADIENT_TOKEN` override the stored server and token for a single command.
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Config { key: String, value: Option<String> },
     /// Check server connection status
+    #[command(add = McpToolMayRunCommand)]
     Status,
     /// Register a new user account
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Register {
         #[arg(short, long)]
         username: Option<String>,
@@ -70,6 +81,7 @@ enum MainCommands {
         password: Option<String>,
     },
     /// Log in to the server. Scripts can skip login. Set the server URL in `GRADIENT_SERVER` and the API key in `GRADIENT_TOKEN`.
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Login {
         /// Server URL to log in to. It is stored as the configured server, replacing a separate
         /// `gradient config server`.
@@ -84,10 +96,13 @@ enum MainCommands {
         no_browser: bool,
     },
     /// Logout: revoke the login token on the server, then remove it from this machine
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Logout,
     /// Display current user information
+    #[command(add = McpToolMayRunCommand)]
     Info,
     /// Manage SSH keys, API keys, sessions, invitations, linked logins and settings for the logged-in account.
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     LoggedInUser {
         #[command(subcommand)]
         cmd: logged_in_user_account_group_commands::Commands,
@@ -103,6 +118,7 @@ enum MainCommands {
         cmd: task::Commands,
     },
     /// Open pull requests from the working tree
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Pr {
         #[command(subcommand)]
         cmd: pr::Commands,
@@ -123,11 +139,13 @@ enum MainCommands {
         cmd: team::Commands,
     },
     /// Show users and their access rights.
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     User {
         #[command(subcommand)]
         cmd: user_access::UserAccessCommands,
     },
     /// Submit a build request from the current git repository
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Build {
         /// Eval target attribute path (default: task's wildcard)
         target: Option<String>,
@@ -148,6 +166,7 @@ enum MainCommands {
         override_input: Vec<String>,
     },
     /// Run the flake program on an exec worker and stream the program output to this terminal
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Run(run::RunArgs),
     /// Inspect exec jobs and control them. An exec job is a program that `gradient run` can launch on an exec worker.
     ExecJob {
@@ -155,16 +174,19 @@ enum MainCommands {
         cmd: exec_job_commands::Commands,
     },
     /// Manage the whole instance. Only a superuser account can run these commands.
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Administration {
         #[command(subcommand)]
         cmd: admin::Commands,
     },
     /// Monitor live build logs and status of running evaluations. Print one line per status change and exit like `gradient evaluation wait` without a terminal or with `--json`.
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Watch {
         /// An evaluation UUID, `project/task` (the latest evaluation of the task), `project/task@<commit>`, or a link copied from the Web UI.
         evaluation: TaskOrEvaluationReference,
     },
     /// Print the full logs of every build in an evaluation
+    #[command(add = McpToolMayRunCommand)]
     Logs {
         /// An evaluation UUID, `project/task` (the latest evaluation of the task), `project/task@<commit>`, or a link copied from the Web UI.
         evaluation: TaskOrEvaluationReference,
@@ -173,6 +195,7 @@ enum MainCommands {
         exit_code: bool,
     },
     /// Download evaluation artefacts
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Download {
         /// Flake-output attribute spec, e.g. '#packages.x86_64-linux.my-app'. Comma-separated for multiple.
         flake_ref: Option<String>,
@@ -184,9 +207,13 @@ enum MainCommands {
         products: Option<String>,
         /// Write to this directory (default: current directory)
         #[arg(long)]
-        out: Option<String>,
+        out: Option<std::path::PathBuf>,
+        /// Replace files that already exist in the target directory
+        #[arg(long)]
+        replace_existing: bool,
     },
     /// Search projects, tasks, cache, commit entries and store paths. List starred items when the query is empty.
+    #[command(add = McpToolMayRunCommand)]
     Search {
         /// Text, a prefix of a commit hash, or a store path
         query: Option<String>,
@@ -205,14 +232,17 @@ enum MainCommands {
         cmd: evaluation::Commands,
     },
     /// Generate configuration files
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Generate {
         #[command(subcommand)]
         cmd: generate::Commands,
     },
     /// Evaluate a flake's outputs to derivations, like nix-eval-jobs
     #[cfg(feature = "eval")]
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Eval(eval::EvalArgs),
     /// Serve this Gradient instance to MCP clients over stdio
+    #[command(add = COMMAND_NOT_OFFERED_TO_MODEL)]
     Mcp {
         /// Also expose tools that start, abort and watch evaluations
         #[arg(long)]
@@ -220,6 +250,7 @@ enum MainCommands {
     },
     /// Hash a password as an argon2id PHC string for use in
     /// `services.gradient.state.users.<name>.password_file`.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Hash,
 }
 
@@ -241,17 +272,111 @@ fn store_invocation_overrides_from_cli_and_env(
     });
 }
 
-pub fn parse_subcommand_name_chain_from_cli_args(args: &[String]) -> Option<Vec<String>> {
-    let matches = Cli::command()
-        .try_get_matches_from(std::iter::once("gradient").chain(args.iter().map(String::as_str)))
-        .ok()?;
-    let mut chain = Vec::new();
-    let mut current = &matches;
-    while let Some((name, sub)) = current.subcommand() {
-        chain.push(name.to_owned());
-        current = sub;
+pub enum CommandRunCheckResult {
+    CommandMayRun,
+    McpPermissionDeniedCommandMustNotRun {
+        command: String,
+        reason: &'static str,
+    },
+    CommandArgumentsParseFailure(String),
+}
+
+const MISSING_MCP_DECISION_REASON: &str = "No decision yet for the MCP tool.";
+
+fn check_mcp_tool_command_chain_permission(chain: &[&clap::Command]) -> Result<(), &'static str> {
+    let permissions = chain
+        .iter()
+        .filter_map(|command| command.get::<McpToolCommandPermission>());
+    if let Some(reason) = permissions.clone().find_map(|permission| match permission {
+        CommandNotAllowed(reason) => Some(*reason),
+        McpToolMayRunCommand => None,
+    }) {
+        return Err(reason);
     }
-    Some(chain)
+    match chain.last() {
+        Some(leaf)
+            if !leaf.has_subcommands()
+                && leaf.get::<McpToolCommandPermission>() == Some(&McpToolMayRunCommand) =>
+        {
+            Ok(())
+        }
+        _ => Err(MISSING_MCP_DECISION_REASON),
+    }
+}
+
+pub fn parse_cli_arguments_and_decide_run_permission(args: &[String]) -> CommandRunCheckResult {
+    let mut root = Cli::command();
+    let matches = match root.try_get_matches_from_mut(
+        std::iter::once("gradient").chain(args.iter().map(String::as_str)),
+    ) {
+        Ok(matches) => matches,
+        Err(error) => {
+            return match error.kind() {
+                clap::error::ErrorKind::DisplayHelp
+                | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                | clap::error::ErrorKind::DisplayVersion => CommandRunCheckResult::CommandMayRun,
+                _ => CommandRunCheckResult::CommandArgumentsParseFailure(
+                    error.to_string().trim().to_owned(),
+                ),
+            };
+        }
+    };
+
+    let mut chain = vec![&root];
+    let mut names = Vec::new();
+    let mut current = &matches;
+    while let Some((name, sub_matches)) = current.subcommand() {
+        let Some(command) = chain.last().and_then(|parent| parent.find_subcommand(name)) else {
+            break;
+        };
+        chain.push(command);
+        names.push(name);
+        current = sub_matches;
+    }
+    match check_mcp_tool_command_chain_permission(&chain[1..]) {
+        Ok(()) => CommandRunCheckResult::CommandMayRun,
+        Err(reason) => CommandRunCheckResult::McpPermissionDeniedCommandMustNotRun {
+            command: names.join(" "),
+            reason,
+        },
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct LeafSubcommandTestFixture {
+    pub names: Vec<String>,
+    pub command: clap::Command,
+    pub permission: Result<(), &'static str>,
+}
+
+#[cfg(test)]
+pub(crate) fn collect_leaf_subcommands_with_name_chain_and_refusal()
+-> Vec<LeafSubcommandTestFixture> {
+    fn walk(chain: &mut Vec<&clap::Command>, leaves: &mut Vec<LeafSubcommandTestFixture>) {
+        let last = *chain.last().expect("the chain starts with a command");
+        if !last.has_subcommands() {
+            leaves.push(LeafSubcommandTestFixture {
+                names: chain
+                    .iter()
+                    .map(|command| command.get_name().to_owned())
+                    .collect(),
+                command: last.clone(),
+                permission: check_mcp_tool_command_chain_permission(chain),
+            });
+            return;
+        }
+        for child in last.get_subcommands() {
+            chain.push(child);
+            walk(chain, leaves);
+            chain.pop();
+        }
+    }
+    let root = Cli::command();
+    let mut leaves = Vec::new();
+    for group in root.get_subcommands() {
+        walk(&mut vec![group], &mut leaves);
+    }
+    leaves
 }
 
 pub fn complete_env() {
@@ -281,7 +406,7 @@ pub fn run() -> std::io::Result<()> {
 
     #[cfg(feature = "eval")]
     if let Some(metrics) = eval::subprocess_flags(&std::env::args().collect::<Vec<_>>()) {
-        return gradient_eval::eval_worker::run_eval_worker(metrics);
+        return gradient_eval::eval_worker::run_eval_worker(metrics, None);
     }
 
     let cli = Cli::parse();
@@ -323,6 +448,10 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                         format!("failed to generate completions: {e}"),
                     )
                 });
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "print the completion script that this binary generated"
+            )]
             let mut stdout = io::stdout();
             stdout.write_all(&output.stdout).ok();
             // clap's dynamic zsh script is registering the completer only when sourced. An fpath
@@ -524,7 +653,18 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             evaluation,
             products,
             out: out_dir,
-        } => download::handle_download(flake_ref, evaluation, products, out_dir, out).await,
+            replace_existing,
+        } => {
+            download::handle_download(
+                flake_ref,
+                evaluation,
+                products,
+                out_dir,
+                replace_existing,
+                out,
+            )
+            .await
+        }
         MainCommands::Project { cmd } => project::handle(cmd, out).await,
         MainCommands::Task { cmd } => task::handle(cmd, out).await,
         MainCommands::Pr { cmd } => pr::handle(cmd, out).await,
@@ -545,6 +685,10 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 out.err(ExitKind::Api, format!("mcp server failed: {e}"));
             }
         }
+        #[expect(
+            clippy::disallowed_macros,
+            reason = "output the hash of the password entered on this machine"
+        )]
         MainCommands::Hash => {
             let password = ask_for_password(out);
             let confirm = ask_for_password(out);
@@ -662,4 +806,117 @@ fn open_url(url: &str) -> std::io::Result<()> {
 #[cfg(all(unix, not(target_os = "macos")))]
 fn open_url(url: &str) -> std::io::Result<()> {
     Command::new("xdg-open").arg(url).status().map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decide(args: &[&str]) -> CommandRunCheckResult {
+        parse_cli_arguments_and_decide_run_permission(
+            &args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn test_every_cli_leaf_command_has_mcp_decision_or_ancestor_refusal() {
+        let undecided: Vec<String> = collect_leaf_subcommands_with_name_chain_and_refusal()
+            .into_iter()
+            .filter(|leaf| leaf.permission == Err(MISSING_MCP_DECISION_REASON))
+            .map(|leaf| leaf.names.join(" "))
+            .collect();
+        assert!(undecided.is_empty(), "{undecided:#?}");
+    }
+
+    #[test]
+    fn test_fails_when_mcp_runnable_leaf_command_has_pathbuf_argument() {
+        let with_path: Vec<String> = collect_leaf_subcommands_with_name_chain_and_refusal()
+            .into_iter()
+            .filter(|leaf| leaf.permission.is_ok())
+            .filter(|leaf| {
+                leaf.command.get_arguments().any(|argument| {
+                    argument.get_value_parser().type_id()
+                        == std::any::TypeId::of::<std::path::PathBuf>()
+                })
+            })
+            .map(|leaf| leaf.names.join(" "))
+            .collect();
+        assert!(with_path.is_empty(), "{with_path:#?}");
+    }
+
+    #[test]
+    fn denied_commands_and_artifact_download_are_refused() {
+        let leaves = collect_leaf_subcommands_with_name_chain_and_refusal();
+        for chain in [
+            "project secret set",
+            "project secret delete",
+            "task action create",
+            "task trigger create",
+            "task trigger edit",
+            "task trigger rotate-trigger-secret",
+            "project webhook create",
+            "project webhook rotate-secret",
+            "team webhook create",
+            "team webhook rotate-secret",
+            "cache webhook create",
+            "cache webhook rotate-secret",
+            "cache install-netrc",
+            "cache upload",
+            "worker register",
+            "team worker register",
+            "evaluation report",
+            "builds sbom",
+            "exec-job artifact download",
+            "exec-job console",
+            "download",
+            "project select",
+            "task select",
+        ] {
+            let leaf = leaves
+                .iter()
+                .find(|leaf| leaf.names.join(" ") == chain)
+                .unwrap_or_else(|| panic!("`{chain}` is not a leaf command"));
+            assert!(leaf.permission.is_err(), "`{chain}` may run");
+        }
+
+        assert!(matches!(
+            decide(&["exec-job", "artifact", "download", "job1", "x/.envrc", "--output-file-path", "pwned"]),
+            CommandRunCheckResult::McpPermissionDeniedCommandMustNotRun { command, .. }
+                if command == "exec-job artifact download"
+        ));
+        assert!(matches!(
+            decide(&["project", "select", "other"]),
+            CommandRunCheckResult::McpPermissionDeniedCommandMustNotRun { command, .. }
+                if command == "project select"
+        ));
+    }
+
+    #[test]
+    fn project_secret_list_runs_under_mcp_tool() {
+        assert!(matches!(
+            decide(&["project", "secret", "list"]),
+            CommandRunCheckResult::CommandMayRun
+        ));
+        assert!(matches!(
+            decide(&["--project", "proj", "project", "secret", "list"]),
+            CommandRunCheckResult::CommandMayRun
+        ));
+    }
+
+    #[test]
+    fn argument_parse_error_is_returned_and_help_request_may_run() {
+        assert!(matches!(
+            decide(&["exec-job", "artifact", "download", "--no-such-flag"]),
+            CommandRunCheckResult::CommandArgumentsParseFailure(message)
+                if message.contains("--no-such-flag")
+        ));
+        assert!(matches!(
+            decide(&["exec-job", "artifact", "download", "--help"]),
+            CommandRunCheckResult::CommandMayRun
+        ));
+        assert!(matches!(
+            decide(&["exec-job"]),
+            CommandRunCheckResult::CommandMayRun
+        ));
+    }
 }

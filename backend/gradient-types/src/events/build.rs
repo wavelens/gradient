@@ -57,6 +57,8 @@ pub struct Reported {
     pub project: Option<ProjectId>,
     pub derivation_path: Option<String>,
     pub evaluation_kind: Option<String>,
+    #[serde(default)]
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 impl Reported {

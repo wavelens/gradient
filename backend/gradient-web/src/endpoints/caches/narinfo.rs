@@ -15,7 +15,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream::UpstreamProbe;
-use gradient_core::upstream_source::substitutes_from;
+use gradient_core::upstream_source::{credential_of_upstream_row, substitutes_from};
 use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_sources::{CacheSigner, get_hash_from_url};
@@ -203,6 +203,7 @@ pub async fn path(
     .await?;
 
     let mapper = state.cache_mapper(ctx.cache.id);
+    let stored_hash = mapper.inbound_hash(store_hash.clone()).to_string();
     if let Ok(path_info) = get_nar_by_hash(
         &state.web_db,
         &state.config,
@@ -217,209 +218,110 @@ pub async fn path(
             hash: path_hash.clone(),
             hit: true,
         });
-        let response = if flag.is_set() {
-            axum::Json(path_info).into_response()
-        } else {
-            text_response("text/x-nix-narinfo", path_info.to_nix_string())?.into_response()
-        };
+        let response =
+            build_narinfo_http_response(path_info, flag.is_set(), &stored_hash, ctx.cache.id)?;
         return Ok(with_narinfo_headers(response, "HIT"));
     }
 
-    let rewritten = fetch_from_upstream(&state.web_db, &state.config, &ctx.cache, &path_hash).await;
-    if let Some(body) = rewritten {
+    let proxied = fetch_from_upstream(
+        &state.web_db,
+        &state.user_supplied_url_http_client,
+        &state.config,
+        &ctx.cache,
+        &path_hash,
+    )
+    .await;
+    if let Some(path_info) = proxied {
         state.events.publish(NarinfoServed {
             cache: ctx.cache.id,
             hash: path_hash.clone(),
             hit: false,
         });
-        let response = if flag.is_set() {
-            match gradient_types::parse_narinfo_body(&body) {
-                Ok(parsed) => axum::Json(parsed).into_response(),
-                Err(_) => return Err(anyhow::anyhow!("Upstream narinfo malformed").into()),
-            }
-        } else {
-            text_response("text/x-nix-narinfo", body)?.into_response()
-        };
+        let response =
+            build_narinfo_http_response(path_info, flag.is_set(), &path_hash, ctx.cache.id)?;
         return Ok(with_narinfo_headers(response, "MISS"));
     }
 
     Err(WebError::not_found(Resource::Path))
 }
 
-fn narinfo_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
-    body.lines().find_map(|line| {
-        line.strip_prefix(key)
-            .and_then(|rest| rest.strip_prefix(':'))
-            .map(str::trim)
+fn build_narinfo_http_response(
+    path_info: NixPathInfo,
+    json: bool,
+    stored_hash: &str,
+    cache_id: CacheId,
+) -> WebResult<Response> {
+    Ok(if json {
+        axum::Json(path_info).into_response()
+    } else {
+        text_response(
+            "text/x-nix-narinfo",
+            path_info.to_nix_string().with_context(|| {
+                format!(
+                    "render narinfo for the store path with hash {stored_hash} in cache {cache_id}"
+                )
+            })?,
+        )?
+        .into_response()
     })
-}
-
-/// Only a body whose upstream signature already verified may be re-signed. Signing an unverified
-/// narinfo would launder an upstream's claim under our own name.
-fn resign_narinfo(
-    body: &str,
-    sign: impl FnOnce(&str, &str, u64, &[String]) -> String,
-) -> Option<String> {
-    let store_path = narinfo_field(body, "StorePath")?;
-    let nar_hash = narinfo_field(body, "NarHash")?;
-    let nar_size: u64 = narinfo_field(body, "NarSize")?.parse().ok()?;
-    let references: Vec<String> = narinfo_field(body, "References")
-        .unwrap_or("")
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect();
-
-    let token = sign(store_path, nar_hash, nar_size, &references);
-
-    let mut out = String::with_capacity(body.len() + token.len() + 8);
-    for line in body.lines() {
-        out.push_str(line);
-        out.push('\n');
-    }
-    out.push_str("Sig: ");
-    out.push_str(&token);
-    out.push('\n');
-    Some(out)
-}
-
-fn rewrite_nar_url(body: &str, upstream: CacheUpstreamId) -> String {
-    body.lines()
-        .map(|line| {
-            if let Some(nar_path) = line.strip_prefix("URL: ") {
-                format!("URL: nar/upstream/{}/{}", upstream, nar_path.trim())
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n"
 }
 
 async fn fetch_from_upstream(
     db: &WebDb,
+    http: &gradient_util::http::HttpClientForUserSuppliedUrls,
     config: &RuntimeConfig,
     cache: &MCache,
     path_hash: &str,
-) -> Option<String> {
-    let upstream_caches: Vec<UpstreamProbe> = pull_through_upstream_caches(db, cache)
+) -> Option<NixPathInfo> {
+    let mut upstream_caches: Vec<UpstreamProbe> = Vec::new();
+    for upstream in pull_through_upstream_caches(db, cache)
         .await
         .unwrap_or_default()
         .into_iter()
         .filter(substitutes_from)
-        .filter_map(|upstream| {
-            let url = upstream.url?;
-            let Some(public_key) = upstream.public_key else {
-                warn!(upstream = %upstream.id, "upstream missing public_key; skipping");
-                return None;
-            };
-            Some(UpstreamProbe {
-                id: upstream.id,
-                url,
-                public_key,
-                http1_only: upstream.http1_only,
-            })
-        })
-        .collect();
+    {
+        let Some(url) = upstream.url.as_deref().and_then(|stored| {
+            gradient_db::caches::upstream::parse_stored_upstream_cache_url(upstream.id, stored)
+        }) else {
+            continue;
+        };
+        let Ok(credential) =
+            credential_of_upstream_row(&config.secrets.crypt_file, &upstream).await
+        else {
+            warn!(upstream = %upstream.id, "can't decrypt credentials for the upstream cache. skipping this upstream.");
+            continue;
+        };
+        let Some(public_key) = upstream.public_key else {
+            warn!(upstream = %upstream.id, "upstream missing public_key; skipping");
+            continue;
+        };
+        upstream_caches.push(UpstreamProbe {
+            id: upstream.id,
+            url,
+            public_key,
+            http1_only: upstream.http1_only,
+            credential,
+        });
+    }
 
-    let found = gradient_core::upstream::fetch_narinfo_body(&upstream_caches, path_hash).await?;
+    let found = gradient_core::upstream::find_first_signed_upstream_narinfo(
+        http,
+        &upstream_caches,
+        path_hash,
+    )
+    .await?;
 
-    let body = rewrite_nar_url(&found.body, found.upstream);
+    let mut path_info = found.path_info;
+    path_info.url = format!("nar/upstream/{}/{}", found.upstream, path_info.url);
 
-    let signer = match CacheSigner::from_cache(
-        &config.secrets.crypt_file,
-        cache,
-        &config.server.serve_url,
-    ) {
-        Ok(signer) => signer,
+    match CacheSigner::from_cache(&config.secrets.crypt_file, cache, &config.server.serve_url) {
+        Ok(signer) => {
+            let signature = signer.sign_parsed_narinfo(&path_info);
+            path_info.signature_lines.push(signature);
+        }
         Err(e) => {
             warn!(cache = %cache.name, error = %e, "cannot re-sign a proxied narinfo; serving it with the upstream's signature only");
-            return Some(body);
         }
-    };
-
-    let signed = resign_narinfo(&body, |store_path, nar_hash, nar_size, references| {
-        signer.sign_narinfo(store_path, nar_hash, nar_size, references)
-    });
-    Some(signed.unwrap_or(body))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{narinfo_field, resign_narinfo, rewrite_nar_url};
-    use gradient_types::ids::CacheUpstreamId;
-
-    const UPSTREAM: &str = "StorePath: /nix/store/k3l5ywcvzijjjx44b9xrjbhr116sal9i-plotly-6.8.0\n\
-URL: nar/0z7np.nar.zst\n\
-Compression: zstd\n\
-NarHash: sha256:1lld5kb21xphcav6fd553as8fr4yqiz6mdfhac5mjcqpqzdrx8z8\n\
-NarSize: 85514096\n\
-References: sdd13vm3yf8fwhhasc5r0fm2pkzq9cmx-narwhals-2.23.0 9ipfvwnqp1q8ijnmi5sxvlx9r8w34lw3-bash-5.3p15\n\
-Sig: cache.nixos.org-1:AAAA\n";
-
-    #[test]
-    fn a_proxied_narinfo_gains_our_own_signature() {
-        let out = resign_narinfo(UPSTREAM, |_, _, _, _| "gradient.test-main:OURS".into())
-            .expect("re-signed");
-
-        assert!(out.contains("Sig: gradient.test-main:OURS"), "{out}");
-        assert!(
-            out.contains("Sig: cache.nixos.org-1:AAAA"),
-            "the upstream's own signature stays, so anyone trusting it can still verify: {out}"
-        );
-        assert!(out.ends_with('\n'));
     }
-
-    #[test]
-    fn the_signature_covers_the_paths_own_fingerprint_fields() {
-        let seen = std::cell::RefCell::new(None);
-        resign_narinfo(UPSTREAM, |sp, nh, ns, refs| {
-            *seen.borrow_mut() = Some((sp.to_owned(), nh.to_owned(), ns, refs.to_vec()));
-            "k:v".into()
-        })
-        .expect("re-signed");
-
-        let (store_path, nar_hash, nar_size, refs) = seen.into_inner().expect("signer was called");
-        assert_eq!(
-            store_path,
-            "/nix/store/k3l5ywcvzijjjx44b9xrjbhr116sal9i-plotly-6.8.0"
-        );
-        assert_eq!(
-            nar_hash,
-            "sha256:1lld5kb21xphcav6fd553as8fr4yqiz6mdfhac5mjcqpqzdrx8z8"
-        );
-        assert_eq!(nar_size, 85514096);
-        assert_eq!(refs.len(), 2, "{refs:?}");
-        assert!(
-            refs.iter().all(|r| !r.starts_with("/nix/store/")),
-            "references stay bare; the fingerprint adds the prefix and sorts: {refs:?}"
-        );
-    }
-
-    #[test]
-    fn an_unparseable_narinfo_is_not_signed() {
-        assert!(resign_narinfo("Compression: zstd\n", |_, _, _, _| "k:v".into()).is_none());
-    }
-
-    #[test]
-    fn a_field_lookup_does_not_match_a_longer_key() {
-        assert_eq!(narinfo_field(UPSTREAM, "NarSize"), Some("85514096"));
-        assert_eq!(narinfo_field("StorePathX: y\n", "StorePath"), None);
-        assert_eq!(narinfo_field(UPSTREAM, "CA"), None);
-    }
-
-    #[test]
-    fn the_nar_url_is_rewritten_through_our_proxy() {
-        let id = CacheUpstreamId::new(uuid::Uuid::from_u128(7));
-        let body = "StorePath: /nix/store/aaa-foo\nURL: nar/1abc.nar.xz\nNarSize: 12\n";
-
-        let out = rewrite_nar_url(body, id);
-
-        assert!(
-            out.contains(&format!("URL: nar/upstream/{id}/nar/1abc.nar.xz")),
-            "{out}"
-        );
-        assert!(out.contains("StorePath: /nix/store/aaa-foo"));
-        assert!(out.ends_with('\n'));
-    }
+    Some(path_info)
 }

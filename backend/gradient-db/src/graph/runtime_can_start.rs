@@ -13,14 +13,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use gradient_entity::build::BuildStatus;
-use gradient_types::DerivationId;
+use gradient_types::{CachedPathId, DerivationId, EvaluationId};
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 
 use crate::graph::can_start::{ids, lock_shared_builds};
 use crate::graph::predicates::{
-    present_predicate, present_shared_build_derivation_ids_select, shared_build_complete_predicate,
+    content_variant_trusted_by_all_projects_with_live_job_on_shared_build, present_predicate,
+    present_shared_build_derivation_ids_select, shared_build_complete_predicate,
 };
 use crate::sql::StatusWrite;
+use crate::store_path_content_variant_trust::project_trusts_content_variant_exists_sql;
 
 fn seed_sql() -> String {
     format!(
@@ -117,23 +119,33 @@ crate::sql_fn! {
 
 fn complete_output_hashes_sql() -> String {
     format!(
-        "SELECT cp.hash FROM cached_path cp \
-         WHERE cp.hash = ANY($1) AND cp.file_hash IS NOT NULL \
+        "SELECT DISTINCT cp.hash FROM cached_path cp \
+         WHERE cp.hash = ANY($1) \
+           AND {recording_project_trusts} \
            AND NOT EXISTS (SELECT 1 FROM derivation_output o \
                            JOIN derivation_build db ON db.derivation = o.derivation \
-                           WHERE o.hash = cp.hash AND NOT {complete})",
+                           WHERE o.hash = cp.hash AND NOT ({complete} AND {live_projects_trust}))",
+        recording_project_trusts = project_trusts_content_variant_exists_sql(
+            "cp.id",
+            "(SELECT recording_task.project FROM evaluation recording_evaluation \
+              JOIN task recording_task ON recording_task.id = recording_evaluation.task \
+              WHERE recording_evaluation.id = $2)",
+        ),
         complete = shared_build_complete_predicate("db"),
+        live_projects_trust =
+            content_variant_trusted_by_all_projects_with_live_job_on_shared_build("cp.id", "db"),
     )
 }
 
 crate::sql_fn! {
     COMPLETE_OUTPUT_HASHES = complete_output_hashes_sql,
-        params = [CachedPathHashes(64)],
+        params = [CachedPathHashes(64), EvaluationId],
         tier = Bulk;
 }
 
 pub async fn complete_output_hashes<C: ConnectionTrait>(
     db: &C,
+    evaluation: EvaluationId,
     hashes: &[String],
 ) -> Result<Vec<String>, DbErr> {
     if hashes.is_empty() {
@@ -141,7 +153,10 @@ pub async fn complete_output_hashes<C: ConnectionTrait>(
     }
 
     Ok(db
-        .query_all_raw(COMPLETE_OUTPUT_HASHES.bind([hashes.to_vec().into()]))
+        .query_all_raw(COMPLETE_OUTPUT_HASHES.bind([
+            hashes.to_vec().into(),
+            sea_orm::Value::Uuid(Some(evaluation.into_inner())),
+        ]))
         .await?
         .iter()
         .filter_map(|r| r.try_get::<String>("", "hash").ok())
@@ -181,8 +196,24 @@ crate::sql_fn! {
 }
 
 crate::sql! {
-    DELETE_CACHED_PATHS = "DELETE FROM cached_path cp WHERE cp.hash = ANY($1) RETURNING cp.hash",
-        params = [CachedPathHashes(64)];
+    DELETE_CACHED_PATHS_BY_ID_RETURNING_UNREFERENCED_OBJECT_KEYS = "WITH deleted AS ( \
+             DELETE FROM cached_path cp WHERE cp.id = ANY($1::uuid[]) \
+             RETURNING cp.nar_object_storage_key) \
+         SELECT DISTINCT d.nar_object_storage_key FROM deleted d \
+         WHERE NOT EXISTS (SELECT 1 FROM cached_path kept \
+                           WHERE kept.nar_object_storage_key = d.nar_object_storage_key \
+                             AND kept.id <> ALL($1::uuid[]))",
+        params = [CachedPathIds(64)];
+
+    SQL_SELECT_STORE_HASHES_WITH_NO_CACHED_PATH_OUTSIDE_ROW_IDS = "SELECT h.hash \
+         FROM unnest($1::text[]) AS h(hash) \
+         WHERE NOT EXISTS (SELECT 1 FROM cached_path cp \
+                           WHERE cp.hash = h.hash AND cp.id <> ALL($2::uuid[]))",
+        params = [CachedPathHashes(64), CachedPathIds(64)];
+
+    SELECT_DISTINCT_STORE_HASHES_OF_CACHED_PATH_ROW_IDS_SQL = "SELECT DISTINCT cp.hash \
+         FROM cached_path cp WHERE cp.id = ANY($1::uuid[]) ORDER BY cp.hash",
+        params = [CachedPathIds(64)];
 
     RIPPLE_MISSING_RUNTIME_DEPS = "SELECT derivation FROM ripple_missing_runtime_deps($1::uuid[], $2::bool) AS r(derivation)",
         params = [DerivationIds(64), Bool(true)],
@@ -309,43 +340,135 @@ pub async fn complete_among(
 
 #[derive(Debug, Default)]
 pub struct Retired {
-    pub deleted: Vec<String>,
+    pub unreferenced_cached_path_object_storage_keys: Vec<String>,
     pub incomplete: Vec<DerivationId>,
     pub transitions: Vec<crate::status::TransitionChange>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StoreContentToRetire {
+    StoreHashesWithGraphOutput(Vec<String>),
+    OnlyTheseCachedPathIds(Vec<CachedPathId>),
+}
+
+fn cached_path_ids_value(ids: &[CachedPathId]) -> sea_orm::Value {
+    ids.iter()
+        .map(|id| id.into_inner())
+        .collect::<Vec<uuid::Uuid>>()
+        .into()
+}
+
+fn hashes_of(rows: &[QueryResult]) -> Vec<String> {
+    rows.iter()
+        .filter_map(|r| r.try_get::<String>("", "hash").ok())
+        .collect()
+}
+
+impl StoreContentToRetire {
+    pub async fn store_hashes_of_touched_cached_paths<C: ConnectionTrait>(
+        &self,
+        db: &C,
+    ) -> Result<Vec<String>, DbErr> {
+        match self {
+            Self::StoreHashesWithGraphOutput(hashes) => Ok(hashes.clone()),
+            Self::OnlyTheseCachedPathIds(ids) if ids.is_empty() => Ok(Vec::new()),
+            Self::OnlyTheseCachedPathIds(ids) => Ok(hashes_of(
+                &db.query_all_raw(
+                    SELECT_DISTINCT_STORE_HASHES_OF_CACHED_PATH_ROW_IDS_SQL
+                        .bind([cached_path_ids_value(ids)]),
+                )
+                .await?,
+            )),
+        }
+    }
+
+    pub async fn store_hashes_without_cached_path_after_retire<C: ConnectionTrait>(
+        &self,
+        db: &C,
+    ) -> Result<Vec<String>, DbErr> {
+        let Self::OnlyTheseCachedPathIds(ids) = self else {
+            return self.store_hashes_of_touched_cached_paths(db).await;
+        };
+        let touched = self.store_hashes_of_touched_cached_paths(db).await?;
+        if touched.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        Ok(hashes_of(
+            &db.query_all_raw(
+                SQL_SELECT_STORE_HASHES_WITH_NO_CACHED_PATH_OUTSIDE_ROW_IDS
+                    .bind([touched.into(), cached_path_ids_value(ids)]),
+            )
+            .await?,
+        ))
+    }
+
+    async fn cached_path_ids<C: ConnectionTrait>(
+        &self,
+        db: &C,
+    ) -> Result<Vec<CachedPathId>, DbErr> {
+        use gradient_entity::cached_path::{Column, Entity};
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+
+        match self {
+            Self::OnlyTheseCachedPathIds(ids) => Ok(ids.clone()),
+            Self::StoreHashesWithGraphOutput(hashes) => {
+                Entity::find()
+                    .select_only()
+                    .column(Column::Id)
+                    .filter(Column::Hash.is_in(hashes.iter().cloned()))
+                    .into_tuple()
+                    .all(db)
+                    .await
+            }
+        }
+    }
+}
+
 pub async fn retire_outputs(
     txn: &DatabaseTransaction,
-    hashes: &[String],
+    content: &StoreContentToRetire,
 ) -> Result<Retired, DbErr> {
+    let hashes = content.store_hashes_of_touched_cached_paths(txn).await?;
     if hashes.is_empty() {
         return Ok(Retired::default());
     }
 
-    txn.execute_raw(LOCK_CACHED_PATHS.bind([hashes.to_vec().into()]))
+    txn.execute_raw(LOCK_CACHED_PATHS.bind([hashes.clone().into()]))
+        .await?;
+    let ids = content.cached_path_ids(txn).await?;
+    let graph_hashes = &content
+        .store_hashes_without_cached_path_after_retire(txn)
         .await?;
     let owners =
         crate::graph::walk_completeness::mark_derivations_not_walked_for_store_path_hashes(
-            txn, hashes,
+            txn,
+            graph_hashes,
         )
         .await?;
 
-    let gone = crate::graph::reachability::producers_of_hashes(txn, hashes).await?;
+    let gone = crate::graph::reachability::producers_of_hashes(txn, graph_hashes).await?;
     let was_complete: BTreeSet<DerivationId> =
         complete_among(txn, &gone).await?.into_iter().collect();
 
-    let deleted: Vec<String> = txn
-        .query_all_raw(DELETE_CACHED_PATHS.bind([hashes.to_vec().into()]))
+    let unreferenced_cached_path_object_storage_keys: Vec<String> = if ids.is_empty() {
+        Vec::new()
+    } else {
+        txn.query_all_raw(
+            DELETE_CACHED_PATHS_BY_ID_RETURNING_UNREFERENCED_OBJECT_KEYS
+                .bind([cached_path_ids_value(&ids)]),
+        )
         .await?
         .iter()
-        .filter_map(|r| r.try_get::<String>("", "hash").ok())
-        .collect();
+        .filter_map(|r| r.try_get::<String>("", "nar_object_storage_key").ok())
+        .collect()
+    };
 
     let incomplete = lost_completeness(txn, &gone, &was_complete).await?;
     let transitions = retire_shared_builds(txn, &gone, &incomplete, &owners).await?;
 
     Ok(Retired {
-        deleted,
+        unreferenced_cached_path_object_storage_keys,
         incomplete,
         transitions,
     })

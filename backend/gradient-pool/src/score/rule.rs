@@ -33,6 +33,7 @@ pub struct JobContext<'a> {
     pub build_request: bool,
     pub ifd: bool,
     pub rescore_count: u32,
+    pub largest_usable_worker_ram_mb: Option<u64>,
     pub now: chrono::NaiveDateTime,
 }
 
@@ -53,6 +54,7 @@ impl Default for JobContext<'_> {
             build_request: false,
             ifd: false,
             rescore_count: 0,
+            largest_usable_worker_ram_mb: None,
             now,
         }
     }
@@ -69,13 +71,17 @@ impl<'a> JobContext<'a> {
 
     pub fn core_choice(&self, worker: &WorkerMetricsView, unmeasured_mb: u64) -> CoreChoice {
         let Some(build) = self.job.build() else {
-            return choose_cores(worker, None, unmeasured_mb, |_| RamNeed::Negligible);
+            return choose_cores(worker, None, unmeasured_mb, None, |_| RamNeed::Negligible);
         };
         let estimate = self.build_estimate();
         let substitution = self.outputs_present || self.substitute_outputs.is_some();
-        choose_cores(worker, estimate.max_cores, unmeasured_mb, |cores| {
-            RamNeed::of_build(estimate.ram_mb(cores), substitution, build.is_fetch())
-        })
+        choose_cores(
+            worker,
+            estimate.max_cores,
+            unmeasured_mb,
+            self.largest_usable_worker_ram_mb,
+            |cores| RamNeed::of_build(estimate.ram_mb(cores), substitution, build.is_fetch()),
+        )
     }
 }
 

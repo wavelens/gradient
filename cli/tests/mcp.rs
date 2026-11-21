@@ -710,10 +710,7 @@ fn run_gradient_command_refuses_administration_group() {
     let result = &response(&responses, 2)["result"];
 
     assert_eq!(result["isError"], json!(true), "{result:#}");
-    assert!(
-        result.to_string().contains("not available here"),
-        "{result:#}"
-    );
+    assert!(result.to_string().contains("can't run here"), "{result:#}");
 }
 
 #[test]

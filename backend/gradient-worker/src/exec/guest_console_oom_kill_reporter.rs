@@ -27,8 +27,8 @@ pub struct GuestKernelOutOfMemoryKillLogScanner {
 }
 
 impl GuestKernelOutOfMemoryKillLogScanner {
-    pub fn new(guest_dir: &Path, memory_mb: u64) -> Self {
-        let console = guest_dir.join(CONSOLE_LOG);
+    pub fn new(guest_supervisor_directory_path: &Path, memory_mb: u64) -> Self {
+        let console = guest_supervisor_directory_path.join(CONSOLE_LOG);
         let scanned_to = std::fs::metadata(&console).map_or(0, |console| console.len());
         Self {
             console,

@@ -74,6 +74,9 @@ async fn enrich_build<C: ConnectionTrait>(
     b.task = Some(scope.task);
     b.project = Some(scope.project);
     b.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
+    b.allows_project_credentials_and_privileged_actions = scope
+        .evaluation
+        .allows_project_credentials_and_privileged_actions;
     if let Some(mapper) = project_mapper(mapping, scope.project).await {
         b.derivation_path = EDerivation::find_by_id(b.derivation)
             .one(db)
@@ -93,6 +96,9 @@ async fn enrich_exec_job<C: ConnectionTrait>(
     };
     r.task = Some(scope.task);
     r.project = Some(scope.project);
+    r.allows_project_credentials_and_privileged_actions = scope
+        .evaluation
+        .allows_project_credentials_and_privileged_actions;
     r.entry_point_name = EEntryPoint::find_by_id(r.entry_point)
         .one(db)
         .await
@@ -115,6 +121,9 @@ async fn enrich_evaluation<C: ConnectionTrait>(
         .await
         .map(|mapper| mapper.outbound_if_store_path(&scope.evaluation.repository));
     e.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
+    e.allows_project_credentials_and_privileged_actions = scope
+        .evaluation
+        .allows_project_credentials_and_privileged_actions;
     Ok(Some(e))
 }
 

@@ -22,33 +22,24 @@ pub async fn dial(url: &str) -> Result<ProtoSocket> {
     connect(request, url).await
 }
 
-/// The server is accepting API keys only through the `Bearer` scheme. The `GRAD` token must be
-/// wrapped in it.
-pub async fn dial_with_auth(url: &str, api_key: Option<&str>) -> Result<ProtoSocket> {
-    let Some(key) = api_key else {
-        return dial(url).await;
-    };
-
-    let mut request = url
-        .into_client_request()
-        .with_context(|| format!("build WebSocket request {url}"))?;
-    request.headers_mut().insert(
-        http::header::AUTHORIZATION,
-        format!("Bearer GRAD{key}")
-            .parse()
-            .context("encode Authorization header")?,
-    );
-
-    connect(request, url).await
-}
-
 pub async fn dial_with_prechecked_socket_addrs(
     url: &str,
     addrs: &[SocketAddr],
+    api_key: Option<&str>,
 ) -> Result<ProtoSocket> {
-    let request = url
+    let mut request = url
         .into_client_request()
         .with_context(|| format!("build WebSocket request {url}"))?;
+    // The server is accepting API keys only through the `Bearer` scheme. The `GRAD` token must be
+    // wrapped in it.
+    if let Some(key) = api_key {
+        request.headers_mut().insert(
+            http::header::AUTHORIZATION,
+            format!("Bearer GRAD{key}")
+                .parse()
+                .context("encode Authorization header")?,
+        );
+    }
     let tcp = TcpStream::connect(addrs)
         .await
         .with_context(|| format!("connect to {url}"))?;

@@ -5,9 +5,11 @@
  */
 
 use super::git_credentials::{CURRENT_THREAD_GIT_CREDENTIALS, HttpsGitCredential};
+use super::git_network_limits::CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS;
 use git2::cert::Cert;
 use git2::{CertificateCheckStatus, Cred, CredentialType, RemoteCallbacks};
 use gradient_types::https_git_url_host::https_host_from_repository_url;
+use std::time::Instant;
 
 pub(super) fn remote_callbacks_for_url_with_thread_https_credentials(
     url: &str,
@@ -16,12 +18,14 @@ pub(super) fn remote_callbacks_for_url_with_thread_https_credentials(
     let credential = CURRENT_THREAD_GIT_CREDENTIALS.with_borrow(|credentials| {
         find_https_credential_matching_url_host(&credentials.https_git_credentials, url).cloned()
     });
+    let deadline = CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS
+        .with_borrow(|limits| limits.as_ref().map(|limits| limits.deadline));
     if let Some(credential) = credential {
         let credential_host = credential.host.clone();
         callbacks
             .credentials(
                 make_username_password_callback_for_single_login_attempt_on_matching_host(
-                    credential,
+                    credential, deadline,
                 ),
             )
             .certificate_check(certificate_check_callback_rejecting_other_hosts(
@@ -43,10 +47,16 @@ pub(super) fn find_https_credential_matching_url_host<'a>(
 
 pub(super) fn make_username_password_callback_for_single_login_attempt_on_matching_host(
     credential: HttpsGitCredential,
+    deadline: Option<Instant>,
 ) -> impl FnMut(&str, Option<&str>, CredentialType) -> Result<Cred, git2::Error> {
     let mut asked = false;
     move |url, _username_from_url, allowed| {
         let host = &credential.host;
+        if deadline.is_some_and(|deadline| Instant::now() > deadline) {
+            return Err(git2::Error::from_str(&format!(
+                "Authentication denied: the git fetch deadline for {host} has passed"
+            )));
+        }
         if std::mem::replace(&mut asked, true) {
             return Err(git2::Error::from_str(&format!(
                 "authentication failed: the server for {host} rejected the HTTPS credentials"

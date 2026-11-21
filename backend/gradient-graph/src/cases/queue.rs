@@ -13,7 +13,7 @@ use super::{
     A, A_OUT, B, B_OUT, Case, X, X_OUT, Y, Y_OUT, assert_only_unstored_outputs, chain, chain_done,
     drv, drv_nar, nar, narinfo, pass, with_attr, with_output, with_references,
 };
-use crate::messages::{Demotion, Transition};
+use crate::messages::Transition;
 
 #[tokio::test]
 async fn q01_a_build_queues_only_after_the_walk_and_the_probe_answer() {
@@ -310,7 +310,7 @@ async fn q06_a_regressing_condition_unqueues_a_build_only_without_an_open_assign
         })
         .await;
 
-        case.demote(Demotion::MissingNar { hash: B_OUT.into() })
+        case.report_missing_nar_of_every_content_variant(B_OUT)
             .await;
 
         let (variant, status_of_a, queued) = if assigned {
@@ -455,10 +455,8 @@ async fn q10_an_assignment_is_refused_on_a_build_that_left_the_queue() {
     let case = Case::start(chain(e1)).await;
     let (drv_of_b, _) = B.split_once('-').expect("B is a drv path");
 
-    case.demote(Demotion::MissingNar {
-        hash: drv_of_b.into(),
-    })
-    .await;
+    case.report_missing_nar_of_every_content_variant(drv_of_b)
+        .await;
 
     let b = case.sb(B).await;
     assert_eq!(

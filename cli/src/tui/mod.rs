@@ -46,6 +46,10 @@ fn run_loop<V: View>(
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Terminal Setup and Teardown for Full-Screen Interfaces"
+)]
 fn setup() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -60,6 +64,10 @@ fn restore(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> 
     terminal.show_cursor()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Terminal Setup and Teardown for Full-Screen Interfaces"
+)]
 fn install_panic_hook() {
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

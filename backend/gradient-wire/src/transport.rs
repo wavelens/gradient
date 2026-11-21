@@ -22,13 +22,8 @@ pub fn external_arity_ok(external: bool, paths: usize) -> bool {
     !external || paths == 1
 }
 
-pub fn pull_transport(
-    confirmed: bool,
-    file_size: u64,
-    small_nar_bytes: u64,
-    presigner: bool,
-) -> Transport {
-    if presigner && confirmed && file_size > small_nar_bytes {
+pub fn pull_transport(file_size: u64, small_nar_bytes: u64, presigner: bool) -> Transport {
+    if presigner && file_size > small_nar_bytes {
         Transport::Presigned
     } else {
         Transport::Passthrough
@@ -40,22 +35,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pull_transport_passes_through_unconfirmed_small_and_presignerless_paths() {
+    fn pull_transport_returns_presigned_only_for_large_compressed_nar_when_url_signer_available_else_passthrough()
+     {
         let threshold = 1024 * 1024;
         assert_eq!(
-            pull_transport(true, threshold + 1, threshold, true),
+            pull_transport(threshold + 1, threshold, true),
             Transport::Presigned
         );
         assert_eq!(
-            pull_transport(false, threshold + 1, threshold, true),
+            pull_transport(threshold, threshold, true),
             Transport::Passthrough
         );
         assert_eq!(
-            pull_transport(true, threshold, threshold, true),
-            Transport::Passthrough
-        );
-        assert_eq!(
-            pull_transport(true, threshold + 1, threshold, false),
+            pull_transport(threshold + 1, threshold, false),
             Transport::Passthrough
         );
     }

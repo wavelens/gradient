@@ -85,6 +85,8 @@ pub(super) struct CommentBody {
     pub(super) body: Option<String>,
     #[serde(default)]
     pub(super) id: Option<i64>,
+    #[serde(default)]
+    pub(super) created_at: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -118,6 +120,12 @@ pub(super) struct GitlabNoteAttrs {
     pub(super) note: Option<String>,
     #[serde(default)]
     pub(super) noteable_type: Option<String>,
+    #[serde(default)]
+    pub(super) created_at: Option<String>,
+    #[serde(default)]
+    pub(super) updated_at: Option<String>,
+    #[serde(default)]
+    pub(super) action: Option<String>,
 }
 
 #[derive(Deserialize, Default)]

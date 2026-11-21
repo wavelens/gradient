@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use gradient_vm::{
-    DeviceInventory, GuestAddresses, GuestBudget, GuestPool, GuestUnits, SysfsProbe, plan_reattach,
-    read_states,
+    DeviceInventory, GuestAddresses, GuestBudget, GuestPool, GuestUnits, SysfsProbe,
+    parse_guest_subnet, plan_reattach, read_states,
 };
 use gradient_wire::types::ExecInventory;
 use tokio_util::sync::CancellationToken;
@@ -60,9 +60,13 @@ impl ExecHost {
         if config.exec.image.is_none() {
             bail!("capabilities.exec needs exec.image, the guest image exec jobs boot");
         }
-        let Some(subnet) = &config.exec.subnet else {
-            bail!("`capabilities.exec` needs `exec.subnet`, the IPv4 subnet of the guest bridge");
+        let Some(subnet) = &config.exec.subnet_v4 else {
+            bail!(
+                "`capabilities.exec` can start only with `exec.subnet.v4`, the IPv4 subnet of the guest bridge."
+            );
         };
+        let guest_bridge_ipv4_subnet = parse_guest_subnet(subnet).context("exec.subnet.v4")?;
+        let guest_bridge_ipv6_subnet = config.exec.parse_exec_subnet_v6()?;
         let secrets = WorkerSecrets::open(
             &config.exec.sops_files,
             config.exec.sops_key_file.as_deref(),
@@ -70,8 +74,11 @@ impl ExecHost {
         let vm = config.exec.vm_config(config.guests_dir());
         let units = GuestUnits::connect().await?;
         let devices = DeviceInventory::from_config(&vm.devices, &SysfsProbe);
-        let addresses =
-            GuestAddresses::new(subnet, &config.exec.nameservers).context("exec.subnet")?;
+        let addresses = GuestAddresses::new(
+            guest_bridge_ipv4_subnet,
+            guest_bridge_ipv6_subnet,
+            &config.exec.nameservers,
+        );
         let total = config
             .exec
             .guest_budget(&host_resources(&config.guests_dir())?);
@@ -108,7 +115,7 @@ impl ExecHost {
             &self.config,
             &self.worker_id,
             self.pool.warm_guests(),
-            self.secrets.names(),
+            self.secrets.project_access_by_secret_name(),
             self.pool.capacity(),
         )
     }

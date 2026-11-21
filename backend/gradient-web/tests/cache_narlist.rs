@@ -50,7 +50,7 @@ async fn ls_returns_v1_tree_with_null_offsets() {
 
 #[tokio::test]
 async fn ls_unknown_hash_returns_404() {
-    let state = public_cache_with_nar().await;
+    let state = public_cache_with_foreign_nar().await;
     let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
     let unknown = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";

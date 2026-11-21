@@ -25,6 +25,7 @@ http-body-util = { workspace = true }
 hyper          = { workspace = true }
 hyper-util     = { workspace = true }
 ipnet          = { workspace = true }
+rustix         = { workspace = true, features = ["fs", "process"] }
 serde          = { workspace = true }
 serde_json     = { workspace = true }
 tokio          = { workspace = true, features = ["rt", "macros", "sync", "net", "fs", "io-util", "process", "time", "signal"] }

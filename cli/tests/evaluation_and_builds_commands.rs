@@ -16,11 +16,10 @@ use tempfile::TempDir;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn run_gradient_json_with_temp_home_for_wiremock_in_dir(
+fn build_gradient_command_with_mock_server_config_and_working_directory(
     server: &MockServer,
     dir: &Path,
-    args: &[&str],
-) -> assert_cmd::assert::Assert {
+) -> Command {
     let home = dir.join("home");
     fs::create_dir_all(home.join("gradient")).unwrap();
     fs::write(
@@ -28,11 +27,20 @@ fn run_gradient_json_with_temp_home_for_wiremock_in_dir(
         format!("Server = '{}'\nAuthToken = 'test-token'\n", server.uri()),
     )
     .unwrap();
-    Command::cargo_bin("gradient")
-        .unwrap()
+    let mut command = Command::cargo_bin("gradient").unwrap();
+    command
         .current_dir(dir)
         .env("HOME", &home)
-        .env("XDG_CONFIG_HOME", &home)
+        .env("XDG_CONFIG_HOME", &home);
+    command
+}
+
+fn run_gradient_json_with_temp_home_for_wiremock_in_dir(
+    server: &MockServer,
+    dir: &Path,
+    args: &[&str],
+) -> assert_cmd::assert::Assert {
+    build_gradient_command_with_mock_server_config_and_working_directory(server, dir)
         .arg("--json")
         .args(args)
         .assert()
@@ -131,7 +139,7 @@ async fn gradient_builds_sbom_saves_suggested_file_name_and_prints_path_and_size
             ResponseTemplate::new(200)
                 .insert_header(
                     "Content-Disposition",
-                    "attachment; filename=\"../hello.cdx.json\"",
+                    "attachment; filename=\"hello.cdx.json\"",
                 )
                 .set_body_bytes(br#"{"bomFormat":"CycloneDX"}"#.to_vec()),
         )
@@ -153,6 +161,39 @@ async fn gradient_builds_sbom_saves_suggested_file_name_and_prints_path_and_size
         parse_gradient_json_stdout_as_json_value(&assert)["message"],
         serde_json::json!({"path": "hello.cdx.json", "bytes": 25})
     );
+}
+
+#[tokio::test]
+async fn builds_sbom_ignores_server_suggested_file_name_with_directory_part() {
+    let build_id = "4c1f7a2e-8d3b-4e5a-b6c7-1f2e3d4c5b6a";
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/builds/{build_id}/sbom")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header(
+                    "Content-Disposition",
+                    "attachment; filename=\"../../.bashrc\"",
+                )
+                .set_body_bytes(br#"{"bomFormat":"CycloneDX"}"#.to_vec()),
+        )
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+
+    run_gradient_json_with_temp_home_for_wiremock_in_dir(
+        &server,
+        dir.path(),
+        &["builds", "sbom", build_id],
+    )
+    .success();
+    let mut written: Vec<String> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name != "home")
+        .collect();
+    written.sort();
+    assert_eq!(written, [format!("{build_id}.cdx.json")]);
 }
 
 #[tokio::test]
@@ -369,6 +410,58 @@ async fn builds_log_with_attempt_prints_the_log_of_that_attempt() {
         parse_gradient_json_stdout_as_json_value(&assert)["message"],
         "first try\n"
     );
+}
+
+#[tokio::test]
+async fn builds_log_attempt_prints_no_escape_bytes_or_clipboard_payload() {
+    let build = "0b6f6d0e-6b1a-4c55-9a8e-2f1d3c4b5a61";
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/builds/{build}/log")))
+        .and(query_param("attempt", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "error": false,
+            "message": "before\x1b]52;c;ZXZpbA==\x07\x1b[2Kafter\n",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+
+    let assert =
+        build_gradient_command_with_mock_server_config_and_working_directory(&server, dir.path())
+            .args(["builds", "log", build, "--attempt", "1"])
+            .assert()
+            .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.contains("beforeafter"), "{stdout:?}");
+    assert!(!stdout.contains('\x1b'), "{stdout:?}");
+    assert!(!stdout.contains("52;c"), "{stdout:?}");
+}
+
+#[tokio::test]
+async fn gradient_logs_with_literal_escape_sequence_in_log_stream_prints_no_escape_byte() {
+    let evaluation = "5c2e9a7b-1d34-4f80-b6a2-7e9c0d1f2a83";
+    let literal_escape_line = "\\u001b]52;c;eA==\\u0007 compiled\n";
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/evals/{evaluation}/builds")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!("{}\n", serde_json::to_string(literal_escape_line).unwrap()),
+            "application/x-ndjson",
+        ))
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+
+    let assert =
+        build_gradient_command_with_mock_server_config_and_working_directory(&server, dir.path())
+            .args(["logs", evaluation])
+            .assert()
+            .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.contains(literal_escape_line), "{stdout:?}");
+    assert!(!stdout.contains('\x1b'), "{stdout:?}");
 }
 
 #[tokio::test]

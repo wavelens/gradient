@@ -272,7 +272,7 @@
     "env": "GRADIENT_REGISTRATION_ENABLE",
     "type": "bool",
     "description": "Whether to enable self-service user registration.",
-    "default": "true",
+    "default": "false",
     "values": [
       "true",
       "false"
@@ -360,7 +360,7 @@
     "flag": "database-max-connections",
     "env": "GRADIENT_DATABASE_MAX_CONNECTIONS",
     "type": "NonZeroU32",
-    "description": "Maximum connections of the scheduler and worker pool. Server processes each open up to\nthe sum of {option}`services.gradient.database.maxConnections`,\n{option}`services.gradient.database.cache.maxConnections` and\n{option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`\nmust accommodate that sum.",
+    "description": "Maximum connections of the scheduler and worker pool. Server processes each open up to\nthe sum of {option}`services.gradient.database.maxConnections`,\n{option}`services.gradient.database.cache.maxConnections` and\n{option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`\nmust accommodate that sum. The scheduler opens 2 more connections in a separate pool\nfor refreshing waiting evaluations. `max_connections` must also accommodate them.",
     "default": "16",
     "values": []
   },
@@ -475,6 +475,16 @@
     "values": []
   },
   {
+    "group": "http",
+    "field": "anonymous_websocket_max_connections_per_ip",
+    "flag": "http-anonymous-websocket-max-connections-per-ip",
+    "env": "GRADIENT_HTTP_ANONYMOUS_WEBSOCKET_MAX_CONNECTIONS_PER_IP",
+    "type": "NonZeroUsize",
+    "description": "Maximum number of WebSocket connections that a visitor without an account or API key can\nkeep open at the same time from one client IP. IPv6 limits use a /64 network. Connection\nlimits impose an upper bound on the number of database access checks that one address can\ntrigger. These WebSocket connections repeat one access check every minute. Browser tabs open\nat most two WebSocket connections. Additional connections receive a 429 response until open\nconnections from that address drop below the limit. Reverse proxy setups need an entry for\nthe proxy in {option}`services.gradient.http.trustedProxies`. Without that entry, all\nvisitors share the proxy address.",
+    "default": "256",
+    "values": []
+  },
+  {
     "group": "proto",
     "field": "discoverable",
     "flag": "proto-discoverable",
@@ -577,6 +587,16 @@
     "values": []
   },
   {
+    "group": "outbound",
+    "field": "allowed_non_public_network_targets",
+    "flag": "outbound-allowed-non-public-network-targets",
+    "env": "GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS",
+    "type": "Vec<String>",
+    "description": "The server can reach private network targets through URLs that project members enter. These targets include upstream caches, APIs of git hosts, actions and outbound webhooks. Each entry can be a CIDR range (`10.0.0.0/8`), an IP address, or an exact-match hostname (`git.internal.example`). Default settings allow the server to connect only to public addresses. Addresses of the server's own network interfaces don't count as public. They need entries too. The server doesn't detect addresses that network configuration can forward to the host without assigning them to an interface. Examples include kube-proxy service addresses and AnyIP routes. List self-hosted git hosts and internal caches here. Project members who can set such URLs can reach all listed targets. Servers trust the listed hostnames for every address that those hostnames resolve to. Loopback addresses and addresses for cloud metadata such as 169.254.169.254 also receive that trust. List only hostnames within managed DNS zones. The server can always connect to hosts in {option}`services.gradient.giteaApp.instanceBaseUrl`.",
+    "default": null,
+    "values": []
+  },
+  {
     "group": "upload",
     "field": "concurrency",
     "flag": "upload-concurrency",
@@ -645,19 +665,6 @@
     "description": "Capacity in bytes of the in-memory NAR cache. Set it to `0` to disable the cache.",
     "default": "536870912",
     "values": []
-  },
-  {
-    "group": "nar",
-    "field": "verify_digest",
-    "flag": "nar-verify-digest",
-    "env": "GRADIENT_NAR_VERIFY_DIGEST",
-    "type": "bool",
-    "description": "Whether to download NARs committed through presigned S3 uploads and verify their hash,\ncatching same-length corruption at the cost of a full object read. Size checks run\neither way. Passthrough and REST uploads always go through verification.",
-    "default": "false",
-    "values": [
-      "true",
-      "false"
-    ]
   },
   {
     "group": "nar",
@@ -745,7 +752,7 @@
     "flag": "cache-sign-sweep-interval-secs",
     "env": "GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS",
     "type": "NonZeroU64",
-    "description": "Seconds between NAR signature backfill passes. Uploads receive their signature\nimmediately. Only subscription placeholders and unsigned leftovers need the pass.",
+    "description": "Seconds between passes that sign unsigned cache entries. Uploads receive a signature at\nonce. Only three kinds of rows need this pass. They are subscription placeholders, unsigned\nleftovers and published dependency outputs. The cache publishes dependency outputs every\n300 seconds and on every wake.",
     "default": "3600",
     "values": []
   },
@@ -865,7 +872,7 @@
     "flag": "eval-allowed-uri-prefixes",
     "env": "GRADIENT_EVAL_ALLOWED_URI_PREFIXES",
     "type": "Vec<String>",
-    "description": "Allowed URL prefixes that each project evaluation can fetch from in addition to the inputs locked in `flake.lock`. Evaluations in Nix under `restrict-eval` make `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` can allow the whole scheme. Projects can add prefixes of their own or disable the restriction.",
+    "description": "Allowed URL prefixes that each project evaluation can fetch, in addition to the inputs pinned by `flake.lock`. Under Nix setting `restrict-eval`, `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` allows the whole scheme. Projects can add their own prefixes, but they can't disable the restriction.",
     "default": null,
     "values": []
   },
@@ -970,6 +977,16 @@
     "type": "NonZeroU64",
     "description": "Number of seconds to keep a reservation for a cluster job before release. Cluster jobs wait\none cluster-reserve-after period before they can reserve workers again.",
     "default": "1800",
+    "values": []
+  },
+  {
+    "group": "scheduler",
+    "field": "input_fetch_timeout_secs",
+    "flag": "scheduler-input-fetch-timeout-secs",
+    "env": "GRADIENT_SCHEDULER_INPUT_FETCH_TIMEOUT_SECS",
+    "type": "NonZeroU64",
+    "description": "Seconds for a worker to respond to an input fetch. A different worker takes over a fetch\nwith no response in time if that worker can fetch it. Waiting evaluations end in failure if\nno connected workers remain.",
+    "default": "3600",
     "values": []
   },
   {

@@ -7,8 +7,7 @@
 mod core;
 mod shell;
 
-pub use self::core::{AdmissionCore, Decision, Limits, ObjectKey, Outcome, Request, SessionId};
+pub use self::core::{AdmissionCore, Limits, ObjectKey, Request, SessionId};
 pub use self::shell::{
-    Admission, AdmissionSession, AdmissionStats, Admitted, HeldPermit, UploadAdmission,
-    UploadPermit,
+    AdmissionSession, AdmissionStats, Admitted, HeldPermit, UploadAdmission, UploadPermit,
 };

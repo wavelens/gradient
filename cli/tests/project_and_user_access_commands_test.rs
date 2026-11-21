@@ -49,8 +49,43 @@ fn ok(message: Value) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(json!({"error": false, "message": message}))
 }
 
-fn team(name: &str) -> Value {
-    json!({"name": name, "display_name": name, "role": "member"})
+fn team_list_item_json_with_name_and_role(name: &str, role: &str) -> Value {
+    json!({"name": name, "display_name": name, "role": role})
+}
+
+async fn mount_signed_in_user_response_with_superuser_flag(server: &MockServer, superuser: bool) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(ok(json!({
+            "id": "user-id",
+            "username": "alice",
+            "name": "Alice",
+            "email": "alice@example.com",
+            "superuser": superuser,
+            "last_seen_version": null,
+            "can_create_cache": true,
+        })))
+        .mount(server)
+        .await;
+}
+
+fn run_json_project_create_command_with_extra_arguments(
+    home: &TempDir,
+    extra_arguments: &[&str],
+) -> assert_cmd::assert::Assert {
+    let mut args = vec![
+        "--json",
+        "project",
+        "create",
+        "--name",
+        "p",
+        "--display-name",
+        "P",
+        "--description",
+        "d",
+    ];
+    args.extend_from_slice(extra_arguments);
+    run_gradient(home, &args)
 }
 
 async fn mount_teams_and_expect_project_create(server: &MockServer, teams: Value, body: Value) {
@@ -75,7 +110,7 @@ async fn project_create_without_team_sends_users_only_team_as_owner_team() {
     let server = MockServer::start().await;
     mount_teams_and_expect_project_create(
         &server,
-        json!([team("ops")]),
+        json!([team_list_item_json_with_name_and_role("ops", "admin")]),
         json!({"name": "p", "display_name": "P", "description": "d", "owner_team": "ops"}),
     )
     .await;
@@ -100,11 +135,78 @@ async fn project_create_without_team_sends_users_only_team_as_owner_team() {
 }
 
 #[tokio::test]
+async fn project_create_without_team_sends_no_owner_team_for_plain_member_of_only_team() {
+    let server = MockServer::start().await;
+    mount_teams_and_expect_project_create(
+        &server,
+        json!([team_list_item_json_with_name_and_role("ops", "member")]),
+        json!({"name": "p", "display_name": "P", "description": "d"}),
+    )
+    .await;
+    mount_signed_in_user_response_with_superuser_flag(&server, false).await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+
+    run_json_project_create_command_with_extra_arguments(&home, &[]).success();
+}
+
+#[tokio::test]
+async fn project_create_without_team_uses_admin_team_as_owner_when_user_is_plain_member_of_another_team_and_not_superuser()
+ {
+    let server = MockServer::start().await;
+    mount_teams_and_expect_project_create(
+        &server,
+        json!([
+            team_list_item_json_with_name_and_role("ops", "member"),
+            team_list_item_json_with_name_and_role("dev", "admin"),
+        ]),
+        json!({"name": "p", "display_name": "P", "description": "d", "owner_team": "dev"}),
+    )
+    .await;
+    mount_signed_in_user_response_with_superuser_flag(&server, false).await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+
+    run_json_project_create_command_with_extra_arguments(&home, &[]).success();
+}
+
+#[tokio::test]
+async fn project_create_without_team_sets_only_team_as_owner_team_when_superuser_is_plain_member() {
+    let server = MockServer::start().await;
+    mount_teams_and_expect_project_create(
+        &server,
+        json!([team_list_item_json_with_name_and_role("ops", "member")]),
+        json!({"name": "p", "display_name": "P", "description": "d", "owner_team": "ops"}),
+    )
+    .await;
+    mount_signed_in_user_response_with_superuser_flag(&server, true).await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+
+    run_json_project_create_command_with_extra_arguments(&home, &[]).success();
+}
+
+#[tokio::test]
+async fn project_create_with_team_flag_sends_owner_team_without_checking_roles() {
+    let server = MockServer::start().await;
+    mount_teams_and_expect_project_create(
+        &server,
+        json!([team_list_item_json_with_name_and_role("ops", "member")]),
+        json!({"name": "p", "display_name": "P", "description": "d", "owner_team": "other"}),
+    )
+    .await;
+    mount_signed_in_user_response_with_superuser_flag(&server, false).await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+
+    run_json_project_create_command_with_extra_arguments(&home, &["--team", "other"]).success();
+}
+
+#[tokio::test]
 async fn project_create_sends_no_owner_team_when_user_is_member_of_two_teams() {
     let server = MockServer::start().await;
     mount_teams_and_expect_project_create(
         &server,
-        json!([team("ops"), team("dev")]),
+        json!([
+            team_list_item_json_with_name_and_role("ops", "admin"),
+            team_list_item_json_with_name_and_role("dev", "admin"),
+        ]),
         json!({"name": "p", "display_name": "P", "description": "d"}),
     )
     .await;

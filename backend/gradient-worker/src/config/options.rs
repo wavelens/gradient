@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 use clap::{Args, Parser};
 use gradient_derive::config_group;
-use gradient_vm::{DeviceConfig, MountConfig, check_device};
+use gradient_vm::{DeviceConfig, MountConfig, SopsSecretFileEntry, check_device, check_mount_list};
 use gradient_wire::types::PortRanges;
 use serde::de::DeserializeOwned;
 
@@ -116,6 +116,10 @@ pub struct WorkerConfig {
     #[arg(hide = true)]
     pub guest_supervisor: Option<PathBuf>,
 
+    /// Release the tap for the guest with this id after exit of the root supervisor and after a force-kill (internal - do not set manually).
+    #[arg(hide = true)]
+    pub release_guest_taps: Option<String>,
+
     #[command(flatten)]
     pub capabilities: CapabilitiesArgs,
     #[command(flatten)]
@@ -155,6 +159,7 @@ impl Default for WorkerConfig {
             eval_subprocess: false,
             eval_driver: None,
             guest_supervisor: None,
+            release_guest_taps: None,
             capabilities: CapabilitiesArgs::default(),
             system: SystemArgs::default(),
             nix_daemon: NixDaemonArgs::default(),
@@ -393,25 +398,23 @@ pub struct ExecArgs {
     #[arg(value_delimiter = ',')]
     pub labels: Vec<String>,
 
-    /// Host devices exec jobs can request, a JSON list in the environment variable. Each
-    /// entry has a `name` and exactly one source: `vfio` lists PCI addresses bound to
-    /// `vfio-pci`, one device each; `dev` names a device node; `usb` holds a `vendor:product`
-    /// ID.
+    /// Host devices that exec jobs can request sit in a JSON list in an environment variable. Store `name`, `projects` (string `"all"`, or a list of project UUIDs that can request it) and exactly one source in each entry. PCI addresses that belong to `vfio-pci` go in `vfio`, one device each. Device nodes go in `dev`. Put the `vendor:product` ID in `usb`.
     #[arg(value_parser = json_devices, default_value = "[]")]
     pub devices: std::vec::Vec<DeviceConfig>,
 
-    /// Host directories exec jobs can mount at {file}`/mnt/<name>`, a JSON list in the
-    /// environment variable. Each entry has a `name`, a `path`, `readOnly` and `perJob`; a
-    /// `perJob` mount gives every job a fresh directory below `path`.
-    #[arg(value_parser = json_list::<MountConfig>, default_value = "[]")]
+    /// Host directories that exec jobs can mount at {file}`/mnt/<name>`. A JSON list in the environment variable. An entry can contain `name`, `path`, `projects` (the string `"all"` or a list of project UUIDs that can mount the entry), `readOnly` and `perJob`. A `perJob` mount provides a new directory under `path` for each job.
+    #[arg(value_parser = parse_mounts_json_and_validate_mount_names, default_value = "[]")]
     pub mounts: std::vec::Vec<MountConfig>,
 
     /// Network bridge the guest tap devices join.
     #[arg(default_value = "gradient-guests")]
     pub bridge: String,
 
-    /// The IPv4 subnet for {option}`services.gradient.worker.exec.bridge`. Set this option when {option}`services.gradient.worker.capabilities.exec` is on. Pick a subnet free of other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span several nodes need a separate subnet on each Exec worker in the zone.
-    pub subnet: Option<String>,
+    /// IPv4 subnet for {option}`services.gradient.worker.exec.bridge`. Set this option when {option}`services.gradient.worker.capabilities.exec` is on. Choose a subnet without overlap with other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span multiple nodes need a separate subnet on each Exec worker in the zone.
+    pub subnet_v4: Option<String>,
+
+    /// The IPv6 subnet for {option}`services.gradient.worker.exec.bridge`. Guests get no IPv6 address from `null`. Guests with network access get an address in this subnet with the same host offset as their IPv4 address in {option}`services.gradient.worker.exec.subnet.v4`. They can reach the internet through IPv6 masquerade. The bridge address is the first host address. The prefix length must fall between 64 and the {option}`services.gradient.worker.exec.subnet.v4` prefix length plus 96. Host bits must be zero. A random unique local `/64` (`fd00::/8`) can fit.
+    pub subnet_v6: Option<String>,
 
     /// IPv4 addresses of the nameservers for guests with network access. An empty list uses the
     /// address of {option}`services.gradient.worker.exec.bridge`, where the NixOS module runs
@@ -423,8 +426,10 @@ pub struct ExecArgs {
     #[arg(default_value = "virtiofsd")]
     pub virtiofsd_bin: String,
 
-    /// Whether exec jobs may reach the network through
-    /// {option}`services.gradient.worker.exec.bridge`.
+    /// Whether exec jobs reach the network through
+    /// {option}`services.gradient.worker.exec.bridge`. The worker module adds steps to
+    /// `nftables.service` when `networking.nftables.enable` is on. Those steps restore the guest
+    /// filter after stop/start.
     #[arg(default_value = "false")]
     pub allow_network: bool,
 
@@ -480,11 +485,9 @@ pub struct ExecArgs {
     /// out. `null` sets no limit.
     pub defaults_max_silent: Option<u64>,
 
-    /// Sops files decrypted on the worker with
-    /// {option}`services.gradient.worker.exec.sops.keyFile`. Exec jobs get their top-level
-    /// values by name. The server never sees them.
-    #[arg(value_delimiter = ',')]
-    pub sops_files: Vec<PathBuf>,
+    /// List of sops files that the worker can decrypt with {option}`services.gradient.worker.exec.sops.keyFile`. Pass the list as JSON in the environment variable. Entries have `path` and `projects`. `"all"` is a string, or a list of project UUIDs that receive the values of that file. Exec jobs fetch top-level values by name. These values never reach the server.
+    #[arg(value_parser = parse_worker_sops_secret_files_json_and_validate_entries, default_value = "[]")]
+    pub sops_files: std::vec::Vec<SopsSecretFileEntry>,
 
     /// SSH private key decrypting {option}`services.gradient.worker.exec.sops.files`, an
     /// Ed25519 or RSA key. The age recipient derives from it. `null` decrypts no file.
@@ -493,6 +496,29 @@ pub struct ExecArgs {
 
 fn json_list<T: DeserializeOwned>(s: &str) -> Result<Vec<T>, String> {
     serde_json::from_str(s).map_err(|e| e.to_string())
+}
+
+fn parse_mounts_json_and_validate_mount_names(s: &str) -> Result<Vec<MountConfig>, String> {
+    let mounts: Vec<MountConfig> = json_list(s)?;
+    check_mount_list(&mounts)?;
+    Ok(mounts)
+}
+
+fn parse_worker_sops_secret_files_json_and_validate_entries(
+    s: &str,
+) -> Result<Vec<SopsSecretFileEntry>, String> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(s).map_err(|error| {
+        format!("The list of sops files is not a JSON list of entries with `path` and `projects` ({error}). The code stopped reading the old comma-separated path list.")
+    })?;
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(sops_file_entry_index, raw_sops_file_entry_json_value_for_error)| {
+            serde_json::from_value(raw_sops_file_entry_json_value_for_error.clone()).map_err(|error| {
+                format!("Sops file entry {sops_file_entry_index} {raw_sops_file_entry_json_value_for_error} is invalid: {error}. Each entry needs a path and projects, the string \"all\" or a list of project UUIDs.")
+            })
+        })
+        .collect()
 }
 
 fn json_devices(s: &str) -> Result<Vec<DeviceConfig>, String> {

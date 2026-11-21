@@ -12,15 +12,14 @@
 use gradient_entity::{api, cache, ids::*};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::{all_statements, mock_db};
-use gradient_fixtures::rows::{
-    cache_member_in, cache_view_role, project_cache_link, project_member, user,
-};
+use gradient_fixtures::rows::{cache_member_in, cache_view_role, project_member, user};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::make_test_server;
 use gradient_types::consts::{BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_VIEW_ID};
 use gradient_types::permissions::{CachePermission, cache_admin_mask, cache_mask_from};
 use sea_orm::{MockDatabase, MockExecResult, Value as SqlValue};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 fn hash_api_key(raw: &str) -> String {
     let mut h = Sha256::new();
@@ -219,12 +218,10 @@ async fn subscribed_project_member_cannot_create_a_key_pinned_to_the_cache() {
         .append_query_results([Vec::<api::Model>::new()])
         .append_query_results([vec![private_cache_row()]])
         .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
-        .append_query_results([vec![project_cache_link(
-            ProjectCacheId::now_v7(),
-            project_id(),
-            cache_id(),
-            gradient_entity::project_cache::CacheSubscriptionMode::ReadOnly,
-        )]])
+        .append_query_results([vec![BTreeMap::from([(
+            "project",
+            SqlValue::from(project_id().into_inner()),
+        )])]])
         .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
         .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()]);
 

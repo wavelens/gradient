@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::super::ApplyInput;
+use super::super::{ApplyInput, EvaluationCodeTrust};
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_fixtures::rows::worker_registration;
 use gradient_types::ids::{CacheId, ProjectCacheId, UserId};
@@ -72,6 +72,7 @@ pub fn input(trig: TaskTriggerId, ttype: TriggerType, hash: Vec<u8>, manual: boo
         author_name: None,
         manual,
         honors_skip_marker: false,
+        code_trust: EvaluationCodeTrust::CodeWithProjectCredentials,
         repository_override: None,
         wildcard_override: None,
         source_comment: None,
@@ -106,6 +107,10 @@ pub fn with_writable_cache(db: MockDatabase) -> MockDatabase {
     let cache = cache_row(true);
     db.append_query_results([vec![project_cache_row(cache.id)]])
         .append_query_results([vec![cache]])
+}
+
+pub fn mock_database_returning_task_row_for_lock(task: &MTask) -> MockDatabase {
+    gradient_fixtures::mock::mock_db().append_query_results([vec![task.clone()]])
 }
 
 pub fn with_eval_worker(db: MockDatabase) -> MockDatabase {

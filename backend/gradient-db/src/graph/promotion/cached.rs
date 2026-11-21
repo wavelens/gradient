@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::graph::predicates::content_variant_trusted_by_all_projects_with_live_job_on_shared_build;
 use crate::graph::walks::eval_closure_cte;
 use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
+use crate::store_path_content_variant_trust::project_trusts_content_variant_exists_sql;
 
 use super::transitions::returned_transitions;
 use gradient_entity::build::BuildStatus;
@@ -80,10 +82,21 @@ fn repair_cached_shared_builds_for_eval_sql() -> String {
       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
       AND NOT EXISTS (
         SELECT 1 FROM derivation_output o
-        LEFT JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
-        WHERE o.derivation = db.derivation AND cp.hash IS NULL)
+        WHERE o.derivation = db.derivation
+          AND NOT EXISTS (
+            SELECT 1 FROM cached_path cp
+            WHERE cp.hash = o.hash
+              AND {evaluation_project_trusts} AND {live_projects_trust}))
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#,
+        evaluation_project_trusts = project_trusts_content_variant_exists_sql(
+            "cp.id",
+            "(SELECT repair_task.project FROM evaluation repair_evaluation \
+              JOIN task repair_task ON repair_task.id = repair_evaluation.task \
+              WHERE repair_evaluation.id = $1)",
+        ),
+        live_projects_trust =
+            content_variant_trusted_by_all_projects_with_live_job_on_shared_build("cp.id", "db"),
         terminal_success = crate::sql::status::build_in(&BuildStatus::TERMINAL_SUCCESS),
         completed = crate::sql::status::to(BuildStatus::COMPLETE_CACHED),
     )

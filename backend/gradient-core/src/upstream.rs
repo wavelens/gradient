@@ -14,8 +14,23 @@ use tokio::sync::Semaphore;
 use gradient_db::caches::upstream::{UpstreamAccum, UpstreamEndpoint};
 use gradient_entity::StorePathError;
 use gradient_types::ids::CacheUpstreamId;
-use gradient_types::{StorePath, StorePathMapper};
+use gradient_types::{NixPathInfo, StorePath, StorePathMapper, parse_narinfo_body};
+use gradient_util::http::{
+    HttpClientForUserSuppliedUrls, HttpProtocolSelection, HttpUpstreamCredential,
+    read_response_body_with_limit,
+};
+use gradient_util::http_base_url::ValidatedHttpBaseUrl;
+use gradient_util::http_validation::{DestinationUrlRejectedError, HostHasNoAllowedAddressError};
 use gradient_wire::types::CachedPath;
+
+const MAX_UPSTREAM_NARINFO_RESPONSE_BYTES: usize = 1024 * 1024;
+
+async fn read_upstream_narinfo_body(response: reqwest::Response) -> Option<String> {
+    let body = read_response_body_with_limit(response, MAX_UPSTREAM_NARINFO_RESPONSE_BYTES)
+        .await
+        .ok()?;
+    String::from_utf8(body).ok()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SampleKind {
@@ -35,10 +50,11 @@ const TRIP_AFTER: u32 = 3;
 
 const BREAKER_COOLDOWN: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 struct Breaker {
     consecutive_errors: u32,
     open_until: Option<Instant>,
+    last_warned_outbound_address_refusal: Option<String>,
 }
 
 /// Only transport failures are counting toward a trip. A 404 is a healthy answer for a missing path
@@ -84,6 +100,7 @@ impl UpstreamBreakers {
             SampleKind::Hit | SampleKind::Miss => {
                 b.consecutive_errors = 0;
                 b.open_until = None;
+                b.last_warned_outbound_address_refusal = None;
             }
             SampleKind::Error => {
                 b.consecutive_errors = b.consecutive_errors.saturating_add(1);
@@ -92,6 +109,82 @@ impl UpstreamBreakers {
                 }
             }
         }
+    }
+
+    pub fn record_refusal_reason_and_return_whether_it_is_new(
+        &self,
+        id: CacheUpstreamId,
+        reason: &str,
+    ) -> bool {
+        let mut guard = self.inner.lock();
+        let b = guard.entry(id).or_default();
+        if b.last_warned_outbound_address_refusal.as_deref() == Some(reason) {
+            return false;
+        }
+        b.last_warned_outbound_address_refusal = Some(reason.to_owned());
+        true
+    }
+}
+
+enum UpstreamCacheFetchRefusalWarningKind {
+    HostHasNoAllowedAddress,
+    UrlOrRedirectToForbiddenAddressOrUnfollowedRedirect,
+}
+
+fn outbound_address_refusal_kind_and_text_from_request_error(
+    error: &(dyn std::error::Error + 'static),
+) -> Option<(UpstreamCacheFetchRefusalWarningKind, String)> {
+    let mut source = Some(error);
+    while let Some(current) = source {
+        if let Some(refusal) = current.downcast_ref::<HostHasNoAllowedAddressError>() {
+            return Some((
+                UpstreamCacheFetchRefusalWarningKind::HostHasNoAllowedAddress,
+                refusal.to_string(),
+            ));
+        }
+        if let Some(refusal) = current.downcast_ref::<DestinationUrlRejectedError>() {
+            let kind = match refusal {
+                DestinationUrlRejectedError::HostHasNoAllowedAddress(_) => {
+                    UpstreamCacheFetchRefusalWarningKind::HostHasNoAllowedAddress
+                }
+                _ => UpstreamCacheFetchRefusalWarningKind::UrlOrRedirectToForbiddenAddressOrUnfollowedRedirect,
+            };
+            return Some((kind, refusal.to_string()));
+        }
+        source = current.source();
+    }
+    None
+}
+
+fn warn_once_per_upstream_until_refusal_reason_changes_that_outbound_address_rule_refused_fetch(
+    upstream: CacheUpstreamId,
+    url: &ValidatedHttpBaseUrl,
+    error: &(dyn std::error::Error + 'static),
+) {
+    let Some((kind, reason)) = outbound_address_refusal_kind_and_text_from_request_error(error)
+    else {
+        return;
+    };
+    if !breakers().record_refusal_reason_and_return_whether_it_is_new(upstream, &reason) {
+        return;
+    }
+    let host = reqwest::Url::parse(url.as_str())
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        .unwrap_or_default();
+    match kind {
+        UpstreamCacheFetchRefusalWarningKind::HostHasNoAllowedAddress => tracing::warn!(
+            %upstream,
+            %host,
+            %reason,
+            "The server refused to fetch from this upstream cache. The host name does not resolve, or every address it resolves to is a private address or an address of the server itself. An admin can add a trusted internal host to setting `outbound.allowed_non_public_network_targets` (NixOS module option `outbound.allowedNonPublicNetworkTargets`); a name that does not resolve needs a DNS fix. The server logs this warning again only when the reason changes."
+        ),
+        UpstreamCacheFetchRefusalWarningKind::UrlOrRedirectToForbiddenAddressOrUnfollowedRedirect => tracing::warn!(
+            %upstream,
+            %host,
+            %reason,
+            "The server refused to fetch from this upstream cache. The URL or a redirect names a private address, an address of the server itself or `localhost`, or a redirect that the server does not follow; the field `reason` names which. An admin can add a trusted internal host to setting `outbound.allowed_non_public_network_targets` (NixOS module option `outbound.allowedNonPublicNetworkTargets`). The server logs this warning again only when the reason changes."
+        ),
     }
 }
 
@@ -182,6 +275,7 @@ impl ProbeResult {
 }
 
 async fn probe_one(
+    http: &HttpClientForUserSuppliedUrls,
     pool: &Arc<Semaphore>,
     ep: &UpstreamEndpoint,
     mapper: &StorePathMapper,
@@ -199,30 +293,43 @@ async fn probe_one(
             );
         }
     };
-    let narinfo_url = format!("{}/{}.narinfo", ep.url.trim_end_matches('/'), hash);
+    let narinfo_url = ep
+        .url
+        .append_api_path_to_base_url(&format!("{hash}.narinfo"));
     let started = Instant::now();
-    let resp = gradient_util::http::upstream_download_client(ep.http1_only)
-        .get(&narinfo_url)
-        .timeout(PROBE_TIMEOUT)
-        .send()
-        .await;
+    let resp = match http.download_get_request_builder(
+        &narinfo_url,
+        HttpProtocolSelection::select_http_protocol_from_cache_row(ep.http1_only),
+        None,
+    ) {
+        Ok(request) => match request.timeout(PROBE_TIMEOUT).send().await {
+            Ok(response) => Some(response),
+            Err(error) => {
+                warn_once_per_upstream_until_refusal_reason_changes_that_outbound_address_rule_refused_fetch(ep.id, &ep.url, &error);
+                None
+            }
+        },
+        Err(error) => {
+            warn_once_per_upstream_until_refusal_reason_changes_that_outbound_address_rule_refused_fetch(ep.id, &ep.url, &error);
+            None
+        }
+    };
     let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     let out = match resp {
-        Ok(r) if r.status().is_success() => match r.text().await {
-            Ok(body) => match verified_narinfo(ep, hash, store_path, &body)
+        Some(r) if r.status().is_success() => match read_upstream_narinfo_body(r).await {
+            Some(body) => match verified_narinfo(ep, hash, store_path, &body)
                 .and_then(|cp| inbound_cached_path(mapper, cp).ok())
             {
                 Some(cp) => (latency_ms, SampleKind::Hit, Some(cp)),
                 None => (latency_ms, SampleKind::Miss, None),
             },
-            Err(_) => (latency_ms, SampleKind::Error, None),
+            None => (latency_ms, SampleKind::Error, None),
         },
-        Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
+        Some(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
             (latency_ms, SampleKind::Miss, None)
         }
-        Ok(_) => (latency_ms, SampleKind::Error, None),
-        Err(_) => (latency_ms, SampleKind::Error, None),
+        Some(_) | None => (latency_ms, SampleKind::Error, None),
     };
     breakers().record(ep.id, out.1);
     out
@@ -231,18 +338,20 @@ async fn probe_one(
 #[derive(Debug, Clone)]
 pub struct UpstreamProbe {
     pub id: CacheUpstreamId,
-    pub url: String,
+    pub url: ValidatedHttpBaseUrl,
     pub public_key: String,
     pub http1_only: bool,
+    pub credential: Option<std::sync::Arc<HttpUpstreamCredential>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UpstreamNarinfo {
     pub upstream: CacheUpstreamId,
-    pub body: String,
+    pub path_info: NixPathInfo,
 }
 
-pub async fn fetch_narinfo_body(
+pub async fn find_first_signed_upstream_narinfo(
+    http: &HttpClientForUserSuppliedUrls,
     upstream_caches: &[UpstreamProbe],
     path_hash: &str,
 ) -> Option<UpstreamNarinfo> {
@@ -252,33 +361,46 @@ pub async fn fetch_narinfo_body(
         .iter()
         .filter(|u| breakers().allows(u.id))
         .map(|u| async move {
-            let url = format!("{}/{}.narinfo", u.url.trim_end_matches('/'), path_hash);
-            let resp = gradient_util::http::upstream_download_client(u.http1_only)
-                .get(&url)
-                .timeout(PROBE_TIMEOUT)
-                .send()
-                .await;
+            let url = u
+                .url
+                .append_api_path_to_base_url(&format!("{path_hash}.narinfo"));
+            let resp = match http.download_get_request_builder(
+                &url,
+                HttpProtocolSelection::select_http_protocol_from_cache_row(u.http1_only),
+                u.credential.as_deref(),
+            ) {
+                Ok(request) => match request.timeout(PROBE_TIMEOUT).send().await {
+                    Ok(response) => Some(response),
+                    Err(error) => {
+                        warn_once_per_upstream_until_refusal_reason_changes_that_outbound_address_rule_refused_fetch(u.id, &u.url, &error);
+                        None
+                    }
+                },
+                Err(error) => {
+                    warn_once_per_upstream_until_refusal_reason_changes_that_outbound_address_rule_refused_fetch(u.id, &u.url, &error);
+                    None
+                }
+            };
             let kind = match &resp {
-                Ok(r) if r.status().is_success() => SampleKind::Hit,
-                Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => SampleKind::Miss,
-                Ok(_) | Err(_) => SampleKind::Error,
+                Some(r) if r.status().is_success() => SampleKind::Hit,
+                Some(r) if r.status() == reqwest::StatusCode::NOT_FOUND => SampleKind::Miss,
+                Some(_) | None => SampleKind::Error,
             };
             breakers().record(u.id, kind);
             if kind != SampleKind::Hit {
                 return None;
             }
-            let body = resp.ok()?.text().await.ok()?;
-            if !is_trusted_narinfo(&u.public_key, path_hash, &body) {
-                tracing::warn!(
-                    upstream = %u.id,
-                    path_hash,
-                    "upstream narinfo is not signed by its configured public_key for this path; dropping"
-                );
-                return None;
-            }
+            let body = read_upstream_narinfo_body(resp?).await?;
+            let path_info = parse_upstream_narinfo_for_requested_path_with_valid_signature(
+                u.id,
+                &u.public_key,
+                path_hash,
+                None,
+                &body,
+            )?;
             Some(UpstreamNarinfo {
                 upstream: u.id,
-                body,
+                path_info,
             })
         })
         .collect();
@@ -296,17 +418,25 @@ pub fn inbound_cached_path(
     cp: CachedPath,
 ) -> Result<CachedPath, StorePathError> {
     Ok(CachedPath {
-        path: mapper.inbound_text(&cp.path)?,
+        path: mapper.inbound_text_if_exact_store_path(&cp.path)?,
         references: cp
             .references
-            .map(|refs| refs.iter().map(|r| mapper.inbound_text(r)).collect())
+            .map(|refs| {
+                refs.iter()
+                    .map(|r| mapper.inbound_text_if_exact_store_path(r))
+                    .collect()
+            })
             .transpose()?,
-        deriver: cp.deriver.map(|d| mapper.inbound_text(&d)).transpose()?,
+        deriver: cp
+            .deriver
+            .map(|d| mapper.inbound_text_if_exact_store_path(&d))
+            .transpose()?,
         ..cp
     })
 }
 
 pub async fn lookup_upstream_narinfo(
+    http: &HttpClientForUserSuppliedUrls,
     endpoints: Arc<Vec<UpstreamEndpoint>>,
     pool: Arc<Semaphore>,
     mapper: StorePathMapper,
@@ -344,7 +474,7 @@ pub async fn lookup_upstream_narinfo(
                 let pool = Arc::clone(&pool);
                 let (mapper, hash, path) = (&mapper, &hash, &store_path);
                 async move {
-                    let (latency, kind, cp) = probe_one(&pool, ep, mapper, hash, path).await;
+                    let (latency, kind, cp) = probe_one(http, &pool, ep, mapper, hash, path).await;
                     (ep.id, latency, kind, cp)
                 }
             })
@@ -364,7 +494,7 @@ pub async fn lookup_upstream_narinfo(
     }
 
     for ep in endpoints.iter() {
-        let (latency, kind, cp) = probe_one(&pool, ep, &mapper, &hash, &store_path).await;
+        let (latency, kind, cp) = probe_one(http, &pool, ep, &mapper, &hash, &store_path).await;
         let is_hit = matches!(kind, SampleKind::Hit);
         samples.push(ProbeSample {
             upstream: ep.id,
@@ -393,6 +523,7 @@ pub struct BatchProbe {
 }
 
 pub async fn probe_batch(
+    http: &HttpClientForUserSuppliedUrls,
     mut endpoints: Vec<UpstreamEndpoint>,
     pool: Arc<Semaphore>,
     mapper: StorePathMapper,
@@ -416,7 +547,7 @@ pub async fn probe_batch(
         let mapper = mapper.clone();
         futs.push(async move {
             let hash = target.hash().to_owned();
-            let res = lookup_upstream_narinfo(eps, pool, mapper, target).await;
+            let res = lookup_upstream_narinfo(http, eps, pool, mapper, target).await;
             (hash, res)
         });
     };
@@ -454,98 +585,118 @@ pub fn verified_narinfo(
         tracing::warn!(upstream = %ep.id, "upstream has no public_key; ignoring its narinfo");
         return None;
     };
-    if !is_trusted_narinfo(public_key, path_hash, body) {
+    let path_info = parse_upstream_narinfo_for_requested_path_with_valid_signature(
+        ep.id,
+        public_key,
+        path_hash,
+        Some(store_path),
+        body,
+    )?;
+    Some(cached_path_from_upstream_narinfo(
+        ep.url.as_str(),
+        store_path,
+        path_info,
+    ))
+}
+
+fn parse_upstream_narinfo_for_requested_path_with_valid_signature(
+    upstream: CacheUpstreamId,
+    public_key: &str,
+    path_hash: &str,
+    requested_store_path: Option<&str>,
+    body: &str,
+) -> Option<NixPathInfo> {
+    let path_info = match parse_narinfo_body(body) {
+        Ok(path_info) => path_info,
+        Err(error) => {
+            tracing::warn!(
+                upstream = %upstream,
+                path_hash,
+                %error,
+                "discard invalid upstream narinfo"
+            );
+            return None;
+        }
+    };
+    if !names_path_hash(&path_info, path_hash)
+        || requested_store_path
+            .is_some_and(|requested| !narinfo_matches_full_store_path(&path_info, requested))
+        || !gradient_sources::verify_narinfo_signature(public_key, &path_info)
+    {
         tracing::warn!(
-            upstream = %ep.id,
+            upstream = %upstream,
             path_hash,
             "upstream narinfo is not signed by its configured public_key for this path; dropping"
         );
         return None;
     }
-    parse_upstream_narinfo(&ep.url, store_path, body)
+    Some(path_info)
 }
 
-fn is_trusted_narinfo(public_key: &str, path_hash: &str, body: &str) -> bool {
-    names_path_hash(body, path_hash) && gradient_sources::verify_narinfo_signature(public_key, body)
+fn names_path_hash(path_info: &NixPathInfo, path_hash: &str) -> bool {
+    StorePath::parse_stored(&path_info.store_path).is_ok_and(|p| p.hash() == path_hash)
 }
 
-fn names_path_hash(body: &str, path_hash: &str) -> bool {
-    body.lines()
-        .filter_map(|l| l.strip_prefix("StorePath: "))
-        .next_back()
-        .and_then(|p| StorePath::parse_stored(p.trim()).ok())
-        .is_some_and(|p| p.hash() == path_hash)
-}
-
-pub fn parse_upstream_narinfo(base_url: &str, store_path: &str, body: &str) -> Option<CachedPath> {
-    let mut nar_path: Option<&str> = None;
-    let mut nar_hash: Option<String> = None;
-    let mut file_hash: Option<String> = None;
-    let mut nar_size: Option<u64> = None;
-    let mut file_size: Option<u64> = None;
-    let mut references: Option<Vec<String>> = None;
-    let mut deriver: Option<String> = None;
-    let mut ca: Option<String> = None;
-    let mut sigs: Vec<String> = Vec::new();
-
-    for line in body.lines() {
-        if let Some(v) = line.strip_prefix("URL: ") {
-            nar_path = Some(v.trim());
-        } else if let Some(v) = line.strip_prefix("NarHash: ") {
-            nar_hash = Some(v.trim().to_owned());
-        } else if let Some(v) = line.strip_prefix("FileHash: ") {
-            file_hash = Some(v.trim().to_owned());
-        } else if let Some(v) = line.strip_prefix("NarSize: ") {
-            nar_size = v.trim().parse().ok();
-        } else if let Some(v) = line.strip_prefix("FileSize: ") {
-            file_size = v.trim().parse().ok();
-        } else if let Some(v) = line.strip_prefix("References: ") {
-            references = Some(
-                v.split_whitespace()
-                    .map(|r| {
-                        if r.starts_with("/nix/store/") {
-                            r.to_owned()
-                        } else {
-                            format!("/nix/store/{}", r)
-                        }
-                    })
-                    .collect(),
-            );
-        } else if let Some(v) = line.strip_prefix("Deriver: ") {
-            let d = v.trim();
-            if !d.is_empty() {
-                deriver = Some(if d.starts_with("/nix/store/") {
-                    d.to_owned()
-                } else {
-                    format!("/nix/store/{}", d)
-                });
-            }
-        } else if let Some(v) = line.strip_prefix("CA: ") {
-            let c = v.trim();
-            if !c.is_empty() {
-                ca = Some(c.to_owned());
-            }
-        } else if let Some(v) = line.strip_prefix("Sig: ") {
-            sigs.push(v.trim().to_owned());
-        }
+fn narinfo_matches_full_store_path(path_info: &NixPathInfo, requested_store_path: &str) -> bool {
+    match (
+        StorePath::parse_stored(&path_info.store_path),
+        StorePath::parse_stored(requested_store_path),
+    ) {
+        (Ok(named), Ok(requested)) => named == requested,
+        _ => false,
     }
+}
 
-    let nar_path = nar_path?;
-    let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
+fn store_path_with_nix_store_prefix(name_or_path: &str) -> String {
+    if name_or_path.starts_with("/nix/store/") {
+        name_or_path.to_owned()
+    } else {
+        format!("/nix/store/{name_or_path}")
+    }
+}
 
-    Some(CachedPath {
+pub fn cached_path_from_upstream_narinfo(
+    base_url: &str,
+    store_path: &str,
+    path_info: NixPathInfo,
+) -> CachedPath {
+    CachedPath {
         path: store_path.to_string(),
         cached: true,
-        file_size,
-        nar_size,
-        url: Some(url),
-        nar_hash,
-        file_hash,
-        references,
-        signatures: if sigs.is_empty() { None } else { Some(sigs) },
-        deriver,
-        ca,
-    })
+        file_size: path_info.file_size,
+        nar_size: Some(path_info.nar_size),
+        url: Some(format!(
+            "{}/{}",
+            base_url.trim_end_matches('/'),
+            path_info.url
+        )),
+        nar_hash: Some(path_info.nar_hash),
+        file_hash: path_info.file_hash,
+        references: Some(
+            path_info
+                .references
+                .iter()
+                .map(|r| store_path_with_nix_store_prefix(r))
+                .collect(),
+        ),
+        signatures: Some(path_info.signature_lines),
+        deriver: path_info
+            .deriver
+            .filter(|d| !d.is_empty())
+            .map(|d| store_path_with_nix_store_prefix(&d)),
+        ca: path_info.ca.filter(|c| !c.is_empty()),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn http_client_for_user_supplied_urls_allowing_loopback() -> HttpClientForUserSuppliedUrls
+{
+    let allowlist = gradient_util::http_validation::UserUrlDestinationAllowlist::parse(&[
+        "127.0.0.0/8".to_owned(),
+        "::1/128".to_owned(),
+    ])
+    .unwrap();
+    HttpClientForUserSuppliedUrls::new(allowlist).unwrap()
 }
 
 #[cfg(test)]
@@ -636,12 +787,12 @@ mod tests {
         );
     }
 
-    async fn black_hole() -> (String, tokio::net::TcpListener) {
+    async fn black_hole() -> (super::ValidatedHttpBaseUrl, tokio::net::TcpListener) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
         let addr = listener.local_addr().expect("addr");
-        (format!("http://{addr}"), listener)
+        (format!("http://{addr}").parse().unwrap(), listener)
     }
 
     #[tokio::test]
@@ -651,11 +802,17 @@ mod tests {
             id: upstream(10),
             url,
             public_key: "test:0000000000000000000000000000000000000000000=".into(),
+            credential: None,
             http1_only: false,
         }];
 
         let started = Instant::now();
-        let got = super::fetch_narinfo_body(&probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
+        let got = super::find_first_signed_upstream_narinfo(
+            &crate::upstream::http_client_for_user_supplied_urls_allowing_loopback(),
+            &probes,
+            "brj5bb4pny8pnngq3qdymkllwql6z29j",
+        )
+        .await;
         let elapsed = started.elapsed();
 
         assert!(got.is_none());
@@ -676,11 +833,17 @@ mod tests {
             id,
             url,
             public_key: "test:0000000000000000000000000000000000000000000=".into(),
+            credential: None,
             http1_only: false,
         }];
 
         let started = Instant::now();
-        let got = super::fetch_narinfo_body(&probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
+        let got = super::find_first_signed_upstream_narinfo(
+            &crate::upstream::http_client_for_user_supplied_urls_allowing_loopback(),
+            &probes,
+            "brj5bb4pny8pnngq3qdymkllwql6z29j",
+        )
+        .await;
         let elapsed = started.elapsed();
 
         assert!(got.is_none());
@@ -699,7 +862,7 @@ mod tests {
             .mount(&server)
             .await;
         let endpoint = UpstreamEndpoint {
-            url: server.uri(),
+            url: server.uri().parse().unwrap(),
             ..ep(None, None)
         };
         (server, endpoint)
@@ -707,6 +870,7 @@ mod tests {
 
     async fn lookup(endpoints: Vec<UpstreamEndpoint>) -> ProbeResult {
         lookup_upstream_narinfo(
+            &crate::upstream::http_client_for_user_supplied_urls_allowing_loopback(),
             Arc::new(endpoints),
             Arc::new(Semaphore::new(4)),
             gradient_types::StorePathMapper::for_cache(
@@ -759,8 +923,107 @@ mod tests {
         assert_eq!(result.unanswered, vec![tripped_id]);
     }
 
+    #[derive(Clone, Default)]
+    struct CapturedLogs(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CapturedLogs {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    impl CapturedLogs {
+        fn warning_lines(&self) -> Vec<String> {
+            String::from_utf8(self.0.lock().unwrap().clone())
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains(" WARN "))
+                .map(str::to_owned)
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn two_refused_upstream_cache_lookups_log_one_warning_until_refusal_reason_changes() {
+        let logs = CapturedLogs::default();
+        let _guard = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(logs.clone())
+                .with_ansi(false)
+                .finish(),
+        );
+        let refused = UpstreamEndpoint {
+            url: "http://10.0.0.1/private-path/".parse().unwrap(),
+            ..ep(None, None)
+        };
+
+        lookup(vec![refused.clone()]).await;
+        lookup(vec![refused.clone()]).await;
+
+        let warnings = logs.warning_lines();
+        assert_eq!(warnings.len(), 1, "{warnings:#?}");
+        assert!(
+            warnings[0].contains("host=10.0.0.1")
+                && warnings[0].contains("The URL or a redirect")
+                && warnings[0].contains("outbound.allowed_non_public_network_targets")
+                && warnings[0].contains("outbound.allowedNonPublicNetworkTargets")
+                && !warnings[0].contains("private-path"),
+            "{}",
+            warnings[0]
+        );
+
+        lookup(vec![UpstreamEndpoint {
+            url: "http://10.0.0.2/".parse().unwrap(),
+            ..refused
+        }])
+        .await;
+
+        assert_eq!(logs.warning_lines().len(), 2, "{:#?}", logs.warning_lines());
+    }
+
+    #[tokio::test]
+    async fn upstream_cache_with_unresolvable_host_name_logs_one_warning_that_host_name_does_not_resolve()
+     {
+        let logs = CapturedLogs::default();
+        let _guard = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(logs.clone())
+                .with_ansi(false)
+                .finish(),
+        );
+
+        lookup(vec![UpstreamEndpoint {
+            url: "http://upstream-name-that-does-not-resolve.invalid/"
+                .parse()
+                .unwrap(),
+            ..ep(None, None)
+        }])
+        .await;
+
+        let warnings = logs.warning_lines();
+        assert_eq!(warnings.len(), 1, "{warnings:#?}");
+        assert!(
+            warnings[0].contains("The host name does not resolve"),
+            "{}",
+            warnings[0]
+        );
+    }
+
     #[test]
-    fn parse_upstream_narinfo_full_fields() {
+    fn upstream_narinfo_with_all_fields_converts_to_cached_path_keeping_every_field() {
         let body = "StorePath: /nix/store/6ak2iyrql4xlj0mpxcibqnzdlwl0vlwj-bzip2-0.6.1\n\
                     URL: nar/abc.nar.xz\n\
                     Compression: xz\n\
@@ -768,15 +1031,18 @@ mod tests {
                     FileSize: 35372\n\
                     NarHash: sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf\n\
                     NarSize: 102760\n\
-                    References: aaaa-dep1 /nix/store/bbbb-dep2\n\
+                    References: REFERENCES\n\
                     Deriver: vmc3d9j1qnwhqyxqkwzsnf3pv98shq18-bzip2-0.6.1.drv\n\
-                    Sig: cache.nixos.org-1:a84Gyv6ieXj7HclpmXu/i+so=\n";
-        let cp = parse_upstream_narinfo(
+                    Sig: cache.nixos.org-1:a84Gyv6ieXj7HclpmXu/i+so=\n"
+            .replace(
+                "REFERENCES",
+                &format!("{SIGNED_HASH}-dep1 /nix/store/{DIFFERENT_STORE_PATH_HASH}-dep2"),
+            );
+        let cp = cached_path_from_upstream_narinfo(
             "https://upstream.example/",
             "/nix/store/6ak2iyrql4xlj0mpxcibqnzdlwl0vlwj-bzip2-0.6.1",
-            body,
-        )
-        .unwrap();
+            parse_narinfo_body(&body).expect("a valid narinfo"),
+        );
         assert!(cp.cached);
         assert_eq!(
             cp.url.as_deref(),
@@ -794,8 +1060,8 @@ mod tests {
         );
         let refs = cp.references.unwrap();
         assert_eq!(refs.len(), 2);
-        assert!(refs.contains(&"/nix/store/aaaa-dep1".to_string()));
-        assert!(refs.contains(&"/nix/store/bbbb-dep2".to_string()));
+        assert!(refs.contains(&format!("/nix/store/{SIGNED_HASH}-dep1")));
+        assert!(refs.contains(&format!("/nix/store/{DIFFERENT_STORE_PATH_HASH}-dep2")));
         assert_eq!(
             cp.deriver.as_deref(),
             Some("/nix/store/vmc3d9j1qnwhqyxqkwzsnf3pv98shq18-bzip2-0.6.1.drv")
@@ -803,45 +1069,54 @@ mod tests {
         assert_eq!(cp.signatures.as_ref().unwrap().len(), 1);
     }
 
+    fn narinfo_with_required_fields_and_one_signature() -> NixPathInfo {
+        parse_narinfo_body(
+            "StorePath: /nix/store/aa-x\nURL: nar/x.nar.xz\nCompression: xz\n\
+             FileHash: sha256:deadbeef\nFileSize: 1\nNarHash: sha256:deadbeef\nNarSize: 1\n\
+             Sig: up-1:AAAA\n",
+        )
+        .expect("a valid narinfo")
+    }
+
     #[test]
-    fn parse_upstream_narinfo_ca_field() {
-        let body = "URL: nar/x.nar.xz\n\
-                    NarHash: sha256:deadbeef\n\
-                    NarSize: 1\n\
-                    CA: fixed:sha256:0abc\n";
-        let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+    fn upstream_narinfo_to_cached_path_keeps_content_address() {
+        let path_info = NixPathInfo {
+            ca: Some("fixed:sha256:0abc".to_owned()),
+            ..narinfo_with_required_fields_and_one_signature()
+        };
+        let cp = cached_path_from_upstream_narinfo("https://up/", "/nix/store/aa-x", path_info);
         assert_eq!(cp.ca.as_deref(), Some("fixed:sha256:0abc"));
     }
 
     #[test]
-    fn parse_upstream_narinfo_empty_references_is_some_empty() {
-        let body = "URL: nar/x.nar.xz\n\
-                    NarHash: sha256:deadbeef\n\
-                    NarSize: 1\n\
-                    References: \n";
-        let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+    fn test_upstream_narinfo_without_references_converts_to_cached_path_with_empty_references() {
+        let cp = cached_path_from_upstream_narinfo(
+            "https://up/",
+            "/nix/store/aa-x",
+            narinfo_with_required_fields_and_one_signature(),
+        );
         assert_eq!(cp.references.as_deref(), Some(&[][..]));
     }
 
     #[test]
-    fn parse_upstream_narinfo_requires_url() {
-        let body = "NarHash: sha256:abc\nNarSize: 1\n";
-        assert!(parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).is_none());
+    fn upstream_narinfo_with_empty_deriver_converts_to_cached_path_without_deriver() {
+        let path_info = NixPathInfo {
+            deriver: Some(String::new()),
+            ..narinfo_with_required_fields_and_one_signature()
+        };
+        let cp = cached_path_from_upstream_narinfo("https://up/", "/nix/store/aa-x", path_info);
+        assert!(cp.deriver.is_none());
     }
 
     #[test]
-    fn parse_upstream_narinfo_trims_base_url_trailing_slash() {
-        let body = "URL: nar/x.nar\n";
-        let cp = parse_upstream_narinfo("https://up.example/", "/nix/store/aa-x", body).unwrap();
-        assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar"));
-    }
-
-    #[test]
-    fn parse_upstream_narinfo_ignores_unparseable_sizes() {
-        let body = "URL: nar/x.nar\nNarSize: not-a-number\nFileSize: also-bad\n";
-        let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
-        assert!(cp.nar_size.is_none());
-        assert!(cp.file_size.is_none());
+    fn upstream_narinfo_to_cached_path_removes_trailing_slash_from_base_url_before_joining_nar_url()
+    {
+        let cp = cached_path_from_upstream_narinfo(
+            "https://up.example/",
+            "/nix/store/aa-x",
+            narinfo_with_required_fields_and_one_signature(),
+        );
+        assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar.xz"));
     }
 
     const SIGNED_HASH: &str = "brj5bb4pny8pnngq3qdymkllwql6z29j";
@@ -859,8 +1134,9 @@ mod tests {
         let fingerprint = format!("1;{store_path};{nar_hash};120;{full_reference}");
         let sig = STANDARD.encode(*keypair.sk.sign(fingerprint, None));
         let body = format!(
-            "StorePath: {store_path}\nURL: nar/x.nar.xz\nNarHash: {nar_hash}\nNarSize: 120\n\
-             References: {}\nSig: upstream-1:{sig}\n",
+            "StorePath: {store_path}\nURL: nar/x.nar.xz\nCompression: xz\nFileHash: {nar_hash}\n\
+             FileSize: 100\nNarHash: {nar_hash}\nNarSize: 120\nReferences: {}\n\
+             Sig: upstream-1:{sig}\n",
             reference.unwrap_or_default()
         );
         (body, format!("upstream-1:{}", STANDARD.encode(*keypair.pk)))
@@ -881,7 +1157,7 @@ mod tests {
             .mount(&server)
             .await;
         let endpoint = UpstreamEndpoint {
-            url: server.uri(),
+            url: server.uri().parse().unwrap(),
             public_key: Some(key),
             ..ep(None, None)
         };
@@ -891,10 +1167,11 @@ mod tests {
         );
 
         let batch = probe_batch(
+            &crate::upstream::http_client_for_user_supplied_urls_allowing_loopback(),
             vec![endpoint],
             Arc::new(Semaphore::new(4)),
             mapper,
-            vec![gradient_types::StorePath::from_stored(stored, "hello")],
+            vec![gradient_types::StorePath::from_hash_and_name_without_validation(stored, "hello")],
         )
         .await;
 
@@ -904,6 +1181,25 @@ mod tests {
             found.references,
             Some(vec![format!("/nix/store/{stored}-dep")])
         );
+    }
+
+    #[test]
+    fn inbound_cached_path_rejects_store_path_with_subpath_or_parent_traversal() {
+        let original = gradient_entity::EXAMPLE_ORIGINAL_HASH;
+        let mapper = gradient_types::StorePathMapper::for_cache(
+            Arc::new(gradient_entity::RotatedHashMapping),
+            gradient_types::ids::CacheId::nil(),
+        );
+        for path in [
+            format!("/nix/store/{original}-hello/sub"),
+            format!("/nix/store/{original}-hello/../x"),
+        ] {
+            let cached = CachedPath {
+                path: path.clone(),
+                ..Default::default()
+            };
+            assert!(inbound_cached_path(&mapper, cached).is_err(), "{path}");
+        }
     }
 
     fn ep_with_key(public_key: Option<String>) -> UpstreamEndpoint {
@@ -960,15 +1256,131 @@ mod tests {
     }
 
     #[test]
+    fn rejects_narinfo_signed_for_same_hash_but_different_store_name() {
+        let (body, key) = signed_narinfo(&format!("/nix/store/{SIGNED_HASH}-other"));
+        let requested = format!("/nix/store/{SIGNED_HASH}-name");
+        assert!(
+            verified_narinfo(&ep_with_key(Some(key)), SIGNED_HASH, &requested, &body).is_none()
+        );
+    }
+
+    #[test]
     fn an_upstream_without_a_key_serves_nothing() {
         let (body, _) = signed_narinfo(SIGNED_PATH);
         assert!(verified_narinfo(&ep_with_key(None), SIGNED_HASH, SIGNED_PATH, &body).is_none());
     }
 
+    const DIFFERENT_STORE_PATH_HASH: &str = "0c8xfp8wr4dhz8gm2qv5nk5r6dl7hzsk";
+
+    fn unsigned_evil_store_path() -> String {
+        format!("/nix/store/{DIFFERENT_STORE_PATH_HASH}-evil-1.0")
+    }
+
+    fn narinfo_texts_with_two_store_paths_and_upstream_public_key() -> (Vec<String>, String) {
+        let (body, key) = signed_narinfo(SIGNED_PATH);
+        let signed_line = format!("StorePath: {SIGNED_PATH}\n");
+        let other_line = format!("StorePath: {}\n", unsigned_evil_store_path());
+        let other_first = format!("{other_line}{body}");
+        let other_second = body.replacen(&signed_line, &format!("{signed_line}{other_line}"), 1);
+        let other_without_space = format!("StorePath:{}\n{body}", unsigned_evil_store_path());
+        (vec![other_first, other_second, other_without_space], key)
+    }
+
+    #[test]
+    fn rejects_signed_upstream_narinfo_with_two_store_path_lines_for_both_paths() {
+        let (bodies, key) = narinfo_texts_with_two_store_paths_and_upstream_public_key();
+        let endpoint = ep_with_key(Some(key));
+        let mut accepted = Vec::new();
+        for (body_index, body) in bodies.iter().enumerate() {
+            for (hash, path) in [
+                (SIGNED_HASH, SIGNED_PATH.to_owned()),
+                (DIFFERENT_STORE_PATH_HASH, unsigned_evil_store_path()),
+            ] {
+                if verified_narinfo(&endpoint, hash, &path, body).is_some() {
+                    accepted.push((body_index, path));
+                }
+            }
+        }
+        assert_eq!(accepted, Vec::new());
+    }
+
+    #[tokio::test]
+    async fn upstream_narinfo_fetch_with_two_store_path_lines_returns_none_for_each_path_hash() {
+        let (bodies, key) = narinfo_texts_with_two_store_paths_and_upstream_public_key();
+        for body in bodies {
+            let server = wiremock::MockServer::start().await;
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(body.clone()))
+                .mount(&server)
+                .await;
+            let probes = vec![UpstreamProbe {
+                id: CacheUpstreamId::now_v7(),
+                url: server.uri().parse().unwrap(),
+                public_key: key.clone(),
+                credential: None,
+                http1_only: false,
+            }];
+            for hash in [SIGNED_HASH, DIFFERENT_STORE_PATH_HASH] {
+                let found = find_first_signed_upstream_narinfo(
+                    &crate::upstream::http_client_for_user_supplied_urls_allowing_loopback(),
+                    &probes,
+                    hash,
+                )
+                .await;
+                assert!(found.is_none(), "served for {hash}:\n{body}");
+            }
+        }
+    }
+
+    async fn start_mock_upstream_serving_signed_narinfo_and_fetch_narinfo(
+        path_hash: &str,
+    ) -> (CacheUpstreamId, Option<UpstreamNarinfo>) {
+        let (body, key) = signed_narinfo(SIGNED_PATH);
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        let id = CacheUpstreamId::now_v7();
+        let probes = vec![UpstreamProbe {
+            id,
+            url: server.uri().parse().unwrap(),
+            public_key: key,
+            credential: None,
+            http1_only: false,
+        }];
+        let found = find_first_signed_upstream_narinfo(
+            &crate::upstream::http_client_for_user_supplied_urls_allowing_loopback(),
+            &probes,
+            path_hash,
+        )
+        .await;
+        (id, found)
+    }
+
+    #[tokio::test]
+    async fn fetch_returns_none_when_upstream_narinfo_is_signed_for_another_store_path() {
+        let (_, found) =
+            start_mock_upstream_serving_signed_narinfo_and_fetch_narinfo(DIFFERENT_STORE_PATH_HASH)
+                .await;
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_returns_verified_narinfo_with_upstream_id_when_upstream_cache_serves_correctly_signed_narinfo_for_requested_hash()
+     {
+        let (id, found) =
+            start_mock_upstream_serving_signed_narinfo_and_fetch_narinfo(SIGNED_HASH).await;
+        let found = found.expect("verified");
+        assert_eq!(found.upstream, id);
+        assert_eq!(found.path_info.store_path, SIGNED_PATH);
+        assert_eq!(found.path_info.nar_size, 120);
+    }
+
     fn ep(latency: Option<f64>, hit: Option<f64>) -> UpstreamEndpoint {
         UpstreamEndpoint {
             id: CacheUpstreamId::now_v7(),
-            url: "https://up.example/".into(),
+            url: "https://up.example/".parse().unwrap(),
             public_key: None,
             http1_only: false,
             avg_latency_ms: latency,

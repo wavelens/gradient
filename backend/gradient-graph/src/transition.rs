@@ -7,9 +7,9 @@
 use anyhow::{Context, Result};
 use gradient_db::{
     DbContext,
-    graph::{can_start::unpromote_ungated, promotion::cascade_dependency_failed},
+    graph::can_start::unpromote_ungated,
     scheduling::build_attempt::{
-        abort_running_attempts, finish_latest_attempt, open_failed_attempt, worker_loss_streaks,
+        abort_running_attempts, finish_latest_attempt, worker_loss_streaks,
     },
     status::{
         EvaluationFailure, EvaluationWarning, emit_transition_effects,
@@ -20,6 +20,7 @@ use gradient_db::{
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_storage::eval_cache_segment::CheckedEvalCacheFingerprint;
 use gradient_types::*;
 use gradient_wire::BuildOutputMetadata;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct};
@@ -30,7 +31,9 @@ use sea_orm::{
 };
 use tracing::{error, info, warn};
 
-use crate::messages::{OrphanCause, RamShortage, SubstituteLog, Transition, TransitionReport};
+use crate::messages::{
+    FailedBuildDispatchReport, OrphanCause, SubstituteLog, Transition, TransitionReport,
+};
 use crate::policy::{self, FailureOutcome, OrphanedBuild};
 use crate::{continuation, exec};
 
@@ -64,11 +67,26 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
         }
         Transition::BuildOutput {
             shared_build,
+            dispatched_job,
             outputs,
             metrics,
             substituted,
         } => {
-            build_output(ctx, shared_build, outputs, metrics, substituted).await?;
+            if !dispatched_job_row_is_still_open_for_build_job(ctx, shared_build, dispatched_job)
+                .await?
+            {
+                warn!(%shared_build, %dispatched_job, "Build output of a dispatch that is no longer open for this build - ignore");
+                return Ok(TransitionReport::default());
+            }
+            build_output(
+                ctx,
+                shared_build,
+                dispatched_job,
+                outputs,
+                metrics,
+                substituted,
+            )
+            .await?;
             Ok(TransitionReport::default())
         }
         Transition::BuildCompleted { shared_build } => Ok(TransitionReport {
@@ -81,7 +99,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             log_banner,
             kind,
             missing_paths,
-            metrics,
+            dispatch_that_reported_failure,
         } => {
             build_failed(
                 ctx,
@@ -90,7 +108,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 &log_banner,
                 kind,
                 &missing_paths,
-                metrics,
+                dispatch_that_reported_failure,
             )
             .await?;
             Ok(TransitionReport::default())
@@ -127,6 +145,24 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             ),
             ..Default::default()
         }),
+        Transition::DemoteCompletedBuildsMissingNeededStoredOutputCopies => {
+            gradient_db::caches::demotion::demote_completed_builds_missing_needed_stored_output_copies(
+                ctx,
+                gradient_db::caches::demotion::MAX_OUTPUT_STORE_PATH_HASHES_DEMOTED_PER_CONSISTENCY_PASS,
+            )
+            .await?;
+            Ok(TransitionReport::default())
+        }
+        Transition::SignStoredInputsIntoReadWriteBinaryCache {
+            signed_dependency_output_rows_to_insert,
+        } => {
+            crate::claims::insert_signed_dependency_output_rows_in_graph_writer_transaction_after_allowed_recheck(
+                ctx,
+                signed_dependency_output_rows_to_insert,
+            )
+            .await?;
+            Ok(TransitionReport::default())
+        }
         Transition::AbortEvaluationSharedBuilds { evaluation, hard } => {
             let Some(eval) = EEvaluation::find_by_id(evaluation)
                 .one(&ctx.worker_db)
@@ -222,10 +258,6 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                     Err(refusal) => TransitionReport::from(refusal),
                 },
             )
-        }
-        Transition::NotEnoughResources { shortages } => {
-            not_enough_resources(ctx, &shortages).await?;
-            Ok(TransitionReport::default())
         }
         Transition::SettleExecJobs => {
             exec::settle(ctx).await?;
@@ -429,7 +461,11 @@ async fn heal_corrupt_eval_cache(
     evaluation_id: EvaluationId,
     fingerprint: &str,
 ) -> Result<bool> {
+    let Some(project) = get_project_of_evaluation(ctx, evaluation_id).await? else {
+        return Ok(false);
+    };
     let rows = EEvalCacheStore::find()
+        .filter(CEvalCacheStore::Project.eq(project))
         .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
         .all(&ctx.worker_db)
         .await?;
@@ -442,15 +478,18 @@ async fn heal_corrupt_eval_cache(
     EEvalCacheStore::update_many()
         .col_expr(CEvalCacheStore::PurgedAt, Expr::value(now))
         .col_expr(CEvalCacheStore::SizeBytes, Expr::value(0i64))
+        .filter(CEvalCacheStore::Project.eq(project))
         .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
         .exec(&ctx.worker_db)
         .await?;
+    let parsed = CheckedEvalCacheFingerprint::parse(fingerprint).ok();
     for row in rows {
-        if let Err(e) = ctx
-            .storage
-            .nar_storage
-            .delete_eval_cache_segments(row.cache, &row.fingerprint)
-            .await
+        if let Some(fingerprint) = &parsed
+            && let Err(e) = ctx
+                .storage
+                .nar_storage
+                .delete_eval_cache_segments(row.cache, row.project, fingerprint)
+                .await
         {
             warn!(key = %row.storage_path, error = %e, "failed to delete corrupt eval-cache segments");
         }
@@ -459,6 +498,23 @@ async fn heal_corrupt_eval_cache(
     requeue_evaluation(ctx, evaluation_id).await?;
     info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache segments; re-queued eval for fresh evaluation");
     Ok(true)
+}
+
+async fn get_project_of_evaluation(
+    ctx: &DbContext,
+    evaluation_id: EvaluationId,
+) -> Result<Option<ProjectId>> {
+    let Some(task) = EEvaluation::find_by_id(evaluation_id)
+        .one(&ctx.worker_db)
+        .await?
+        .and_then(|evaluation| evaluation.task)
+    else {
+        return Ok(None);
+    };
+    Ok(ETask::find_by_id(task)
+        .one(&ctx.worker_db)
+        .await?
+        .map(|task| task.project))
 }
 
 fn purged_recently(rows: &[MEvalCacheStore], now: chrono::NaiveDateTime) -> bool {
@@ -482,6 +538,7 @@ async fn requeue_evaluation(ctx: &DbContext, evaluation_id: EvaluationId) -> Res
 async fn build_output(
     ctx: &DbContext,
     derivation_build: DerivationBuildId,
+    dispatched_job: DispatchedJobId,
     outputs: Vec<BuildOutput>,
     metrics: Option<BuildMetrics>,
     substituted: bool,
@@ -500,7 +557,21 @@ async fn build_output(
         policy::BuildEnd::Built
     };
     if let Some(metrics) = policy::history_sample(metrics, end) {
-        record_metrics(ctx, &shared_build, derivation_id, &metrics).await;
+        let build_report_sender_worker =
+            find_worker_project_and_credentials_for_dispatched_job(ctx, Some(dispatched_job))
+                .await
+                .unwrap_or_else(|e| {
+                    warn!(%derivation_build, %dispatched_job, error = %e, "Failed to read the worker and project for the dispatched job. The row for the build metric persisted without a worker, credentials, or project.");
+                    None
+                });
+        write_derivation_metric_history_row_for_build_attempt(
+            ctx,
+            &shared_build,
+            derivation_id,
+            &metrics,
+            build_report_sender_worker,
+        )
+        .await;
     }
 
     let mut missing: Vec<&BuildProduct> = Vec::new();
@@ -583,6 +654,23 @@ async fn build_output(
     Ok(())
 }
 
+async fn dispatched_job_row_is_still_open_for_build_job(
+    ctx: &DbContext,
+    shared_build: DerivationBuildId,
+    dispatched_job: DispatchedJobId,
+) -> Result<bool> {
+    use gradient_db::scheduling::assignment_record::shared_build_of_key;
+    use gradient_entity::dispatched_job::{Column, Entity};
+
+    let open_job_key = Entity::find_by_id(dispatched_job)
+        .filter(Column::FinishedAt.is_null())
+        .one(&ctx.worker_db)
+        .await
+        .context("fetch dispatched_job")?
+        .and_then(|row| row.job_id);
+    Ok(open_job_key.as_deref().and_then(shared_build_of_key) == Some(shared_build))
+}
+
 fn record_realised_path(active: &mut ADerivationOutput, output: &BuildOutput) {
     match StorePath::parse_stored(&output.store_path) {
         Ok(path) => {
@@ -641,6 +729,30 @@ async fn build_completed(
         warn!(%derivation_build, "shared build not found on job_completed");
         return Ok(None);
     };
+
+    let missing_from_store =
+        gradient_db::caches::demotion::find_needed_output_paths_missing_from_store(
+            &ctx.worker_db,
+            derivation_build,
+        )
+        .await?;
+    if !missing_from_store.is_empty() {
+        let paths = missing_from_store.join(", ");
+        let error = policy::truncate_failure_message(&format!(
+            "The build reported completion. These required outputs have no stored copy: {paths}"
+        ));
+        build_failed(
+            ctx,
+            derivation_build,
+            &error,
+            &error,
+            BuildFailureKind::Transient,
+            &[],
+            None,
+        )
+        .await?;
+        return Ok(None);
+    }
 
     let derivation_id = shared_build.derivation;
     let was_external_cached = shared_build.cache_available;
@@ -726,8 +838,22 @@ async fn build_failed(
     log_banner: &str,
     kind: BuildFailureKind,
     missing_paths: &[String],
-    metrics: Option<BuildMetrics>,
+    dispatch_that_reported_failure: Option<FailedBuildDispatchReport>,
 ) -> Result<()> {
+    let (failed_dispatch_build_start, metrics) = dispatch_that_reported_failure
+        .map(|report| {
+            let failed_dispatch_build_start = BuildStart {
+                dispatched_job: report.dispatched_job,
+                substitute: report.substitute,
+                build_context: report.build_context,
+            };
+            (failed_dispatch_build_start, report.metrics)
+        })
+        .unzip();
+    let dispatched_job = failed_dispatch_build_start
+        .as_ref()
+        .map(|failed_dispatch_build_start| failed_dispatch_build_start.dispatched_job);
+    let metrics = metrics.flatten();
     let Some(shared_build) = EDerivationBuild::find_by_id(derivation_build)
         .one(&ctx.worker_db)
         .await?
@@ -738,21 +864,50 @@ async fn build_failed(
 
     let out_of_memory = policy::out_of_memory(kind, metrics.as_ref());
     let oom_cores = metrics.as_ref().and_then(|m| m.build_cores);
-    let fewest_before = if out_of_memory {
-        gradient_db::derivation_dependencies::fewest_out_of_memory_cores(
-            &ctx.worker_db,
-            shared_build.derivation,
-        )
-        .await?
-    } else {
-        None
+    let build_report_sender_worker =
+        find_worker_project_and_credentials_for_dispatched_job(ctx, dispatched_job).await?;
+    let fewest_before = match (out_of_memory, &build_report_sender_worker) {
+        (true, Some(sender)) => {
+            gradient_db::derivation_dependencies::fewest_out_of_memory_cores(
+                &ctx.worker_db,
+                shared_build.derivation,
+                sender.project,
+            )
+            .await?
+        }
+        // Kills with no known project for the attempt don't get a free retry. They spend one build attempt.
+        (true, None) => oom_cores,
+        (false, _) => None,
     };
     let kind = policy::retried_as(kind, out_of_memory);
     if let Some(metrics) = policy::history_sample(metrics, policy::BuildEnd::Failed) {
-        record_metrics(ctx, &shared_build, shared_build.derivation, &metrics).await;
+        write_derivation_metric_history_row_for_build_attempt(
+            ctx,
+            &shared_build,
+            shared_build.derivation,
+            &metrics,
+            build_report_sender_worker,
+        )
+        .await;
     }
 
-    let running_attempt = running_attempt_id(ctx, derivation_build).await;
+    let mut running_attempt = running_attempt_id(ctx, derivation_build).await;
+    if running_attempt.is_none()
+        && policy::attempt_outcome(kind) == AttemptOutcome::Failed
+        && let Some(failed_dispatch_build_start) = failed_dispatch_build_start
+        && newest_attempt_dispatched_job_id(ctx, derivation_build).await
+            != Some(failed_dispatch_build_start.dispatched_job)
+    {
+        open_started_attempt(ctx, &shared_build, failed_dispatch_build_start).await;
+        running_attempt = running_attempt_id(ctx, derivation_build).await;
+    }
+    let failure_report_is_for_closed_attempt = running_attempt.is_none()
+        && dispatched_job.is_some()
+        && newest_attempt_dispatched_job_id(ctx, derivation_build).await == dispatched_job;
+    if failure_report_is_for_closed_attempt {
+        info!(%derivation_build, "failure report for a dispatch with an already closed attempt. build status: no change");
+        return Ok(());
+    }
     if let Some(attempt_id) = running_attempt
         && let Err(e) = ctx
             .storage
@@ -834,7 +989,7 @@ async fn build_failed(
         FailureOutcome::RetryWithFewerCores => {
             update_derivation_build_status(ctx, shared_build, BuildStatus::FailedTransient).await?;
             info!(%derivation_build, cores = ?oom_cores, "out of memory; retried with fewer cores");
-            return Ok(());
+            return check_referencing_evals_done(ctx, derivation_id).await;
         }
         FailureOutcome::Retry => {
             let mut active: ADerivationBuild = shared_build.clone().into_active_model();
@@ -849,23 +1004,27 @@ async fn build_failed(
                 .unwrap_or(shared_build);
             update_derivation_build_status(ctx, reloaded, BuildStatus::FailedTransient).await?;
             info!(%derivation_build, attempt = attempt + 1, "transient build failure; scheduled for retry");
-            return Ok(());
+            return check_referencing_evals_done(ctx, derivation_id).await;
         }
         FailureOutcome::Requeue | FailureOutcome::Canceled => {
             // `repair_missing_inputs` above is purging stale cached inputs in this same call.
             // A purged input is raising this shared build's `blocking_deps`.
             // The settle is what makes the `Queued` write legal.
             update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await?;
-            let settled = unpromote_ungated(&ctx.worker_db, &[derivation_id]).await?;
+            let mut settled = unpromote_ungated(&ctx.worker_db, &[derivation_id]).await?;
+            settled.extend(
+                gradient_db::graph::can_start::settle_created(&ctx.worker_db, &[derivation_id])
+                    .await?,
+            );
             emit_transition_effects(ctx, &settled).await?;
             info!(%derivation_build, ?outcome, "re-queued for re-dispatch");
-            return Ok(());
+            return check_referencing_evals_done(ctx, derivation_id).await;
         }
         FailureOutcome::Exhausted => {
             let misses = substitution.misses + 1;
             exhaust_substitution(ctx, &shared_build, misses).await?;
             info!(%derivation_build, misses, "substitute misses exhausted; the shared build will be built");
-            return Ok(());
+            return check_referencing_evals_done(ctx, derivation_id).await;
         }
         FailureOutcome::Aborted => {
             update_derivation_build_status(ctx, shared_build, BuildStatus::Aborted).await?;
@@ -880,7 +1039,6 @@ async fn build_failed(
         }
     }
 
-    cascade_dependency_failed(&ctx.worker_db, derivation_id).await?;
     check_referencing_evals_done(ctx, derivation_id).await
 }
 
@@ -922,7 +1080,14 @@ async fn orphaned_builds(
                         peak_ram_mb: Some(*peak),
                         ..Default::default()
                     };
-                    record_metrics(ctx, row, row.derivation, &observed).await;
+                    write_derivation_metric_history_row_for_build_attempt(
+                        ctx,
+                        row,
+                        row.derivation,
+                        &observed,
+                        None,
+                    )
+                    .await;
                 }
             }
             worker_loss_streaks(&ctx.worker_db, &ids).await?
@@ -950,8 +1115,12 @@ async fn orphaned_builds(
         }
     }
 
-    let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
+    let mut settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
+    settled.extend(gradient_db::graph::can_start::settle_created(&ctx.worker_db, &requeued).await?);
     emit_transition_effects(ctx, &settled).await?;
+    for derivation in requeued {
+        check_referencing_evals_done(ctx, derivation).await?;
+    }
     Ok(())
 }
 
@@ -995,105 +1164,7 @@ async fn fail_build_lost_with_every_worker(
     }
 
     update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await?;
-    cascade_dependency_failed(&ctx.worker_db, derivation).await?;
     check_referencing_evals_done(ctx, derivation).await
-}
-
-async fn not_enough_resources(ctx: &DbContext, shortages: &[RamShortage]) -> Result<()> {
-    for shortage in shortages {
-        if let Some(shared_build) = queued_without_worker(ctx, shortage.shared_build).await? {
-            fail_build_no_worker_fits(ctx, shared_build, shortage).await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn queued_without_worker(
-    ctx: &DbContext,
-    derivation_build: DerivationBuildId,
-) -> Result<Option<MDerivationBuild>> {
-    let Some(shared_build) = EDerivationBuild::find_by_id(derivation_build)
-        .one(&ctx.worker_db)
-        .await?
-    else {
-        return Ok(None);
-    };
-    if shared_build.status != BuildStatus::Queued {
-        return Ok(None);
-    }
-
-    let dispatched = gradient_db::scheduling::assignment_record::build_has_open_assignment(
-        &ctx.worker_db,
-        derivation_build,
-    )
-    .await?;
-
-    Ok((!dispatched).then_some(shared_build))
-}
-
-async fn fail_build_no_worker_fits(
-    ctx: &DbContext,
-    shared_build: MDerivationBuild,
-    shortage: &RamShortage,
-) -> Result<()> {
-    let derivation_build = shared_build.id;
-    let derivation = shared_build.derivation;
-    let error =
-        policy::not_enough_resources_message(shortage.needed_mb, shortage.largest_available_mb);
-    warn!(
-        %derivation_build,
-        needed_mb = shortage.needed_mb,
-        largest_available_mb = shortage.largest_available_mb,
-        "build fits on no connected worker; failing instead of leaving it queued"
-    );
-
-    open_shortage_attempt(ctx, &shared_build, shortage, &error).await;
-    update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await?;
-    cascade_dependency_failed(&ctx.worker_db, derivation).await?;
-    check_referencing_evals_done(ctx, derivation).await
-}
-
-async fn open_shortage_attempt(
-    ctx: &DbContext,
-    shared_build: &MDerivationBuild,
-    shortage: &RamShortage,
-    error: &str,
-) {
-    let derivation_build = shared_build.id;
-    let Some(build_job) = find_or_create_build_job(ctx, shortage.evaluation, shared_build).await
-    else {
-        return;
-    };
-
-    let superseded =
-        gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, derivation_build)
-            .await;
-    let attempt = match open_failed_attempt(
-        &ctx.worker_db,
-        build_job,
-        derivation_build,
-        AttemptFailureReason::NotEnoughResources,
-        error.to_owned(),
-    )
-    .await
-    {
-        Ok(attempt) => attempt,
-        Err(e) => {
-            warn!(%derivation_build, error = %e, "failed to open the attempt of a build no worker fits");
-            return;
-        }
-    };
-
-    finalize_superseded_log(ctx, superseded).await;
-    if let Err(e) = ctx
-        .storage
-        .log_storage
-        .append(attempt.id, &policy::failure_log_entry(error))
-        .await
-    {
-        warn!(%derivation_build, error = %e, "failed to append the memory shortage to the build log");
-    }
 }
 
 async fn substitute_misses(
@@ -1215,11 +1286,49 @@ async fn check_referencing_evals_done(ctx: &DbContext, derivation: DerivationId)
     Ok(())
 }
 
-async fn record_metrics(
+pub(crate) struct BuildReportSenderWorker {
+    pub(crate) worker_id: String,
+    pub(crate) project: ProjectId,
+    pub(crate) proven_worker_credential_ids:
+        gradient_db::store_path_content_variant_trust::ProvenWorkerCredentialIds,
+}
+
+pub(crate) async fn find_worker_project_and_credentials_for_dispatched_job(
+    ctx: &DbContext,
+    dispatched_job: Option<DispatchedJobId>,
+) -> Result<Option<BuildReportSenderWorker>> {
+    let Some(dispatched_job) = dispatched_job else {
+        return Ok(None);
+    };
+    let Some((worker_id, project)) =
+        gradient_db::scheduling::assignment_record::find_worker_id_and_project_by_dispatched_job_id(
+            &ctx.worker_db,
+            dispatched_job,
+        )
+        .await?
+    else {
+        return Ok(None);
+    };
+    let proven_worker_credential_ids =
+        gradient_db::store_path_content_variant_trust::find_worker_credentials_for_project_job(
+            &ctx.worker_db,
+            &worker_id,
+            project,
+        )
+        .await?;
+    Ok(Some(BuildReportSenderWorker {
+        worker_id,
+        project,
+        proven_worker_credential_ids,
+    }))
+}
+
+async fn write_derivation_metric_history_row_for_build_attempt(
     ctx: &DbContext,
     shared_build: &MDerivationBuild,
     derivation_id: DerivationId,
     metrics: &BuildMetrics,
+    build_report_sender_worker: Option<BuildReportSenderWorker>,
 ) {
     let derivation = match EDerivation::find_by_id(derivation_id)
         .one(&ctx.worker_db)
@@ -1257,14 +1366,23 @@ async fn record_metrics(
                 .await
                 .unwrap_or_default(),
         ),
-        worker_id: gradient_db::scheduling::build_attempt::latest_attempt_worker(
-            &ctx.worker_db,
-            shared_build.id,
-        )
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default(),
+        worker_id: build_report_sender_worker
+            .as_ref()
+            .map(|sender| sender.worker_id.clone())
+            .unwrap_or_default(),
+        worker_registration: build_report_sender_worker.as_ref().and_then(|sender| {
+            sender
+                .proven_worker_credential_ids
+                .worker_registrations
+                .first()
+                .copied()
+        }),
+        team_worker: build_report_sender_worker
+            .as_ref()
+            .and_then(|sender| sender.proven_worker_credential_ids.team_worker),
+        project: build_report_sender_worker
+            .as_ref()
+            .map(|sender| sender.project),
         created_at: now(),
     };
 
@@ -1371,6 +1489,17 @@ async fn running_attempt_id(
         .await
         .ok()
         .flatten()
+}
+
+async fn newest_attempt_dispatched_job_id(
+    ctx: &DbContext,
+    derivation_build: DerivationBuildId,
+) -> Option<DispatchedJobId> {
+    gradient_db::scheduling::build_attempt::latest_attempt(&ctx.worker_db, derivation_build)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|attempt| attempt.dispatched_job)
 }
 
 async fn stamp_dispatched_at(ctx: &DbContext, derivation_build: DerivationBuildId) {
@@ -1488,6 +1617,83 @@ async fn ready(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::testing::{ctx_with_crypt_file, secret_file};
+    use gradient_fixtures::shape::shape;
+    use gradient_storage::eval_cache_segment::eval_cache_segment_key;
+
+    const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[tokio::test]
+    async fn healing_a_corrupt_segment_leaves_the_row_and_segment_of_another_project_with_the_same_fingerprint()
+     {
+        let (cache, healed, other) = (
+            CacheId::now_v7(),
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+        );
+        let db = shape()
+            .evaluation(healed)
+            .into_cache(cache)
+            .eval_cache(FINGERPRINT)
+            .evaluation(other)
+            .into_cache(cache)
+            .eval_cache(FINGERPRINT)
+            .into_database()
+            .await;
+        let (_secret, crypt_file) = secret_file();
+        let ctx = ctx_with_crypt_file(db.connection(), &crypt_file).await;
+        let healed_project = get_project_of_evaluation(&ctx, healed)
+            .await
+            .unwrap()
+            .unwrap();
+        let other_project = get_project_of_evaluation(&ctx, other)
+            .await
+            .unwrap()
+            .unwrap();
+        let fingerprint = CheckedEvalCacheFingerprint::parse(FINGERPRINT).unwrap();
+        let nar_storage = &ctx.storage.nar_storage;
+        let mut segments = Vec::new();
+        for project in [healed_project, other_project] {
+            let key = eval_cache_segment_key(cache, project, &fingerprint, uuid::Uuid::now_v7());
+            nar_storage.put_eval_cache(&key, vec![0; 4]).await.unwrap();
+            segments.push(key);
+        }
+
+        assert!(
+            heal_corrupt_eval_cache(&ctx, healed, FINGERPRINT)
+                .await
+                .unwrap()
+        );
+
+        let row_of = |project: ProjectId| {
+            let db = db.connection();
+            async move {
+                EEvalCacheStore::find()
+                    .filter(CEvalCacheStore::Project.eq(project))
+                    .one(&db)
+                    .await
+                    .unwrap()
+                    .expect("the row stays")
+            }
+        };
+        assert!(row_of(healed_project).await.purged_at.is_some());
+        assert_eq!(
+            nar_storage.get_eval_cache(&segments[0]).await.unwrap(),
+            None
+        );
+        let untouched = row_of(other_project).await;
+        assert_eq!((untouched.purged_at, untouched.size_bytes), (None, 1));
+        assert!(
+            nar_storage
+                .get_eval_cache(&segments[1])
+                .await
+                .unwrap()
+                .is_some()
+        );
+        db.finish().await;
+    }
+
     #[test]
     fn every_status_write_declares_its_transition() {
         let violations = gradient_db::sql::status_write::violations();

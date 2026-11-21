@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use gradient_pool::estimate::Sample;
 use gradient_pool::score::contention_factor;
 use gradient_pool::score::weights::REFERENCE_CORE_SCORE;
-use gradient_types::ids::DerivationId;
+use gradient_types::ids::{DerivationId, ProjectId, TeamWorkerId, WorkerRegistrationId};
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 
 use super::store::LoadedSample;
@@ -20,6 +20,7 @@ gradient_db::sql! {
 SELECT m.id, m.created_at, m.derivation, m.architecture, coalesce(m.pname, '') AS pname,
        coalesce(m.input_pnames, '{}') AS input_pnames, m.build_cores, m.peak_ram_mb,
        m.build_time_ms, m.concurrent_builds, m.cpu_core_score, m.oom_killed,
+       m.worker_registration, m.team_worker, m.project,
        (SELECT sum(o.nar_size) FROM derivation_output o WHERE o.derivation = m.derivation)::bigint
            AS output_nar_bytes
 FROM derivation_metric m
@@ -43,6 +44,9 @@ struct SampleRow {
     concurrent_builds: Option<i32>,
     cpu_core_score: Option<i32>,
     oom_killed: bool,
+    worker_registration: Option<WorkerRegistrationId>,
+    team_worker: Option<TeamWorkerId>,
+    project: Option<ProjectId>,
     output_nar_bytes: Option<i64>,
 }
 
@@ -59,7 +63,7 @@ pub(crate) async fn load_since(
     Ok(rows.into_iter().map(SampleRow::into_loaded).collect())
 }
 
-fn read_since(
+pub(super) fn read_since(
     newest: Option<NaiveDateTime>,
     oldest_retained_sample_creation_time: Option<NaiveDateTime>,
 ) -> NaiveDateTime {
@@ -76,6 +80,9 @@ impl SampleRow {
             id: self.id,
             created_at: self.created_at,
             oom_killed: self.oom_killed,
+            worker_registration_id: self.worker_registration,
+            reporting_team_worker_id: self.team_worker,
+            project: self.project,
             sample: Sample {
                 derivation: DerivationId::new(self.derivation),
                 architecture: self.architecture,

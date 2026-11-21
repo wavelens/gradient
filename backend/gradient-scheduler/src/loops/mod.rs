@@ -24,7 +24,7 @@ mod exec;
 
 use background::{
     AbandonedDispatchSweep, BuildHistoryRefit, EvalCompletionWatchdog, GraphConsistency,
-    GraphStuckReheal, InstanceMetrics, NeededOutputRequeue, RamShortageSweep, StrandedBuildSweep,
+    GraphStuckReheal, InstanceMetrics, NeededOutputRequeue, StrandedBuildSweep,
     TransientRetryRequeue, UnreclaimedJobSweep, WorkerLiveness, WorkerSample,
 };
 use eval::EvalDispatch;
@@ -51,6 +51,7 @@ pub(crate) const ASSIGN_TICK_SECS: u64 = 5;
 pub(super) const ASSIGN_TICK: Duration = Duration::from_secs(ASSIGN_TICK_SECS);
 pub(super) const STARTABLE_RESYNC: Duration = Duration::from_secs(60);
 pub(super) const ASSIGN_BUDGET: Duration = Duration::from_secs(120);
+pub(crate) const WAITING_REFRESH_TIME_BUDGET: Duration = Duration::from_secs(30);
 const METRICS_BUDGET: Duration = Duration::from_secs(60);
 const CONSISTENCY_BUDGET: Duration = Duration::from_secs(600);
 const BUILD_HISTORY_REFIT_PERIOD: Duration = Duration::from_secs(300);
@@ -124,9 +125,6 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         ChildSpec::pass(StrandedBuildSweep {
             scheduler: Arc::clone(scheduler),
         }),
-        ChildSpec::pass(RamShortageSweep {
-            scheduler: Arc::clone(scheduler),
-        }),
         ChildSpec::pass(AbandonedDispatchSweep {
             scheduler: Arc::clone(scheduler),
         }),
@@ -160,4 +158,19 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
     }
 
     children
+}
+
+#[cfg(test)]
+mod tests {
+    use gradient_util::supervision::Pass;
+
+    #[test]
+    fn graph_consistency_pass_does_not_run_at_scheduler_start() {
+        const {
+            assert!(
+                !<super::GraphConsistency as Pass>::RUN_AT_START,
+                "The periodic consistency pass doesn't run until after one interval. The scheduler doesn't run recalculation at startup. Events that change the blocking dependency count update that count in their own transaction."
+            )
+        };
+    }
 }

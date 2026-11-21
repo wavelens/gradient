@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult};
@@ -13,6 +14,7 @@ use crate::store_paths::original_text;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::store_path_content_variant_reader_choice::StorePathContentVariantReader;
 use gradient_types::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -47,7 +49,7 @@ impl From<&MCachedPath> for ClosureNode {
             id: path.hash.clone(),
             name: path.package.clone(),
             path: path.as_store_path().base(),
-            nar_size: path.nar_size,
+            nar_size: Some(path.nar_size),
         }
     }
 }
@@ -113,14 +115,19 @@ where
 
 pub async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
     db: &C,
+    reader: StorePathContentVariantReader,
     drv_ids: Vec<DerivationId>,
 ) -> WebResult<Option<i64>> {
-    let by_drv = gradient_db::graph::closure::output_sizes_by_drv(db, &drv_ids).await?;
+    let by_drv = gradient_db::graph::closure::output_sizes_by_drv(db, reader, &drv_ids).await?;
     let total: i64 = by_drv.values().sum();
     Ok(if total > 0 { Some(total) } else { None })
 }
 
-pub async fn build_closure_graph<C>(db: &C, roots: Vec<DerivationId>) -> WebResult<ClosureGraph>
+pub async fn build_closure_graph<C>(
+    db: &C,
+    reader: StorePathContentVariantReader,
+    roots: Vec<DerivationId>,
+) -> WebResult<ClosureGraph>
 where
     C: sea_orm::ConnectionTrait
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
@@ -128,7 +135,8 @@ where
     let closure = derivation_closure_reachable(db, roots.clone()).await?;
     let all_ids: Vec<DerivationId> = closure.iter().cloned().collect();
 
-    let size_by_drv = gradient_db::graph::closure::output_sizes_by_drv(db, &all_ids).await?;
+    let size_by_drv =
+        gradient_db::graph::closure::output_sizes_by_drv(db, reader, &all_ids).await?;
     let total: i64 = size_by_drv.values().sum();
     let total_size_bytes = if total > 0 { Some(total) } else { None };
 
@@ -275,10 +283,21 @@ pub async fn get_build_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let mapper = state.project_mapper(ctx.project.id).await?;
-    let graph = build_closure_graph(&state.web_db, vec![ctx.build_job.derivation]).await?;
+    let graph = build_closure_graph(
+        &state.web_db,
+        StorePathContentVariantReader::Project(ctx.project.id),
+        vec![ctx.build_job.derivation],
+    )
+    .await?;
     Ok(ok_json(graph.with_original_paths(&mapper)))
 }
 
@@ -298,8 +317,14 @@ pub async fn get_eval_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
 
     let roots: Vec<DerivationId> =
         gradient_db::entry_points::of_evaluation(&state.web_db, evaluation_id)
@@ -309,12 +334,18 @@ pub async fn get_eval_closure(
             .collect();
 
     let mapper = state.project_mapper(ctx.project_id).await?;
-    let graph = build_closure_graph(&state.web_db, roots).await?;
+    let graph = build_closure_graph(
+        &state.web_db,
+        StorePathContentVariantReader::Project(ctx.project_id),
+        roots,
+    )
+    .await?;
     Ok(ok_json(graph.with_original_paths(&mapper)))
 }
 
 pub async fn build_runtime_closure_graph<C>(
     db: &C,
+    reader: StorePathContentVariantReader,
     seed_hashes: Vec<String>,
 ) -> WebResult<ClosureGraph>
 where
@@ -322,9 +353,10 @@ where
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
 {
     let reached =
-        gradient_db::graph::runtime_closure::runtime_closure_reachable(db, &seed_hashes).await?;
+        gradient_db::graph::runtime_closure::runtime_closure_reachable(db, reader, &seed_hashes)
+            .await?;
 
-    let total: i64 = reached.values().filter_map(|r| r.nar_size).sum();
+    let total: i64 = reached.values().map(|r| r.nar_size).sum();
     let total_size_bytes = (total > 0).then_some(total);
 
     let nodes: Vec<ClosureNode> = reached.values().map(ClosureNode::from).collect();
@@ -369,8 +401,14 @@ pub async fn get_build_runtime_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let seeds = gradient_db::graph::runtime_closure::output_hashes_for_drvs(
         &state.web_db,
         &[ctx.build_job.derivation],
@@ -378,7 +416,12 @@ pub async fn get_build_runtime_closure(
     .await?;
 
     let mapper = state.project_mapper(ctx.project.id).await?;
-    let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
+    let graph = build_runtime_closure_graph(
+        &state.web_db,
+        StorePathContentVariantReader::Project(ctx.project.id),
+        seeds,
+    )
+    .await?;
     Ok(ok_json(graph.with_original_hashes(&mapper)))
 }
 
@@ -398,8 +441,14 @@ pub async fn get_eval_runtime_closure(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
 
     let roots: Vec<DerivationId> =
         gradient_db::entry_points::of_evaluation(&state.web_db, evaluation_id)
@@ -411,7 +460,12 @@ pub async fn get_eval_runtime_closure(
     let seeds =
         gradient_db::graph::runtime_closure::output_hashes_for_drvs(&state.web_db, &roots).await?;
     let mapper = state.project_mapper(ctx.project_id).await?;
-    let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
+    let graph = build_runtime_closure_graph(
+        &state.web_db,
+        StorePathContentVariantReader::Project(ctx.project_id),
+        seeds,
+    )
+    .await?;
     Ok(ok_json(graph.with_original_hashes(&mapper)))
 }
 
@@ -445,7 +499,13 @@ mod tests {
             .append_query_results([vec![derivation_dependency(root, child)]])
             .into_connection();
 
-        let g = build_closure_graph(&db, vec![root]).await.unwrap();
+        let g = build_closure_graph(
+            &db,
+            StorePathContentVariantReader::Project(ProjectId::now_v7()),
+            vec![root],
+        )
+        .await
+        .unwrap();
         assert_eq!(g.total_size_bytes, Some(140));
         assert_eq!(g.node_count, 2);
         assert_eq!(g.edge_count, 1);

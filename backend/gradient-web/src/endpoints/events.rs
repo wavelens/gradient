@@ -5,14 +5,14 @@
  */
 
 use super::live::live_stream;
-use crate::authorization::LiveStreamAuthToken;
+use crate::authorization::WebSocketUpgradeCredentialRecheckRequestExtractor;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::extractors::Query;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::State;
-use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
-use axum::response::{IntoResponse, Response};
+use axum::http::Method;
+use axum::response::Response;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_types::events::{CatalogEntry, Envelope, Event, EventFilter};
@@ -41,26 +41,27 @@ pub async fn firehose_ws(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Query(query): Query<FirehoseQuery>,
-    credentials: LiveStreamAuthToken,
-    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
     require_superuser(&user, Permission::ReadSuperuser)?;
-    let ws = match ws {
-        Ok(ws) => ws,
-        Err(rejection) => return Ok(rejection.into_response()),
-    };
+    let guard = credentials.watch_caller_access_with_recheck(Method::GET, |user, _| async move {
+        require_superuser(
+            &user.ok_or_else(WebError::invalid_credentials)?,
+            Permission::ReadSuperuser,
+        )
+    });
     let rx = state.events.subscribe_firehose();
     let select = select_frames(EventFilter::parse(query.events.as_deref()));
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
-    Ok(ws.on_upgrade(move |socket| async move {
+    Ok(guard.on_upgrade(move |socket, guard| async move {
         let _ = shutdown
             .spawn(live_stream(
                 socket,
                 rx,
                 select,
                 lag_frame,
-                credentials,
+                guard.wait_until_access_lost(),
                 cancel,
             ))
             .await;

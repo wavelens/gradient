@@ -26,7 +26,10 @@ use sea_orm::ConnectionTrait;
 use tracing::instrument;
 
 pub use changed_paths::ComparisonBaseCommit;
-pub use checkout::{checkout_commit, checkout_commit_into};
+pub use checkout::{
+    FetchedCommitInTemporaryBareRepository, checkout_commit, checkout_commit_into,
+    fetch_commit_into_new_bare_temporary_repository,
+};
 pub use commit_info::HeadCommit;
 pub use context::{
     load_decrypted_project_git_https_credential, load_project_git_credentials_for_repository_url,
@@ -35,10 +38,14 @@ pub use context::{
 };
 pub use git_credentials::{GitOperationCredentials, HttpsGitCredential};
 pub use remote::BranchHead;
+
+pub fn is_valid_branch_name(name: &str) -> bool {
+    git2::Reference::is_valid_name(&format!("refs/heads/{name}"))
+}
 pub use ssh::{SshGitPrivateKeyKnownHostsAndObservations, fetch_ssh_host_key};
 pub use update_check::{BranchCheckOutcome, TaskUpdateCheck};
 
-#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
+#[instrument(skip_all, fields(task_id = %task.id, task_name = %task.name))]
 pub async fn check_task_updates(
     ctx: &DbContext,
     task: &MTask,
@@ -50,7 +57,7 @@ pub async fn check_task_updates(
         .await
 }
 
-#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
+#[instrument(skip_all, fields(task_id = %task.id, task_name = %task.name))]
 pub async fn remote_branch_head(
     ctx: &DbContext,
     task: &MTask,
@@ -62,7 +69,7 @@ pub async fn remote_branch_head(
         .await
 }
 
-#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
+#[instrument(skip_all, fields(task_id = %task.id, task_name = %task.name))]
 pub async fn remote_tag_commit(
     ctx: &DbContext,
     task: &MTask,
@@ -74,7 +81,7 @@ pub async fn remote_tag_commit(
         .await
 }
 
-#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name, commit_hash = %vec_to_hex(commit_hash)))]
+#[instrument(skip_all, fields(task_id = %task.id, task_name = %task.name, commit_hash = %vec_to_hex(commit_hash)))]
 pub async fn get_commit_info(
     ctx: &DbContext,
     task: &MTask,
@@ -86,7 +93,7 @@ pub async fn get_commit_info(
         .await
 }
 
-#[instrument(skip(ctx, base, head), fields(task_id = %task.id, task_name = %task.name, head = %vec_to_hex(head)))]
+#[instrument(skip_all, fields(task_id = %task.id, task_name = %task.name, head = %vec_to_hex(head)))]
 pub async fn get_changed_file_path_pairs_between_commits(
     ctx: &DbContext,
     task: &MTask,
@@ -94,16 +101,17 @@ pub async fn get_changed_file_path_pairs_between_commits(
     head: &[u8],
     head_repository: Option<&str>,
 ) -> Result<Vec<String>, SourceError> {
-    let urls: Vec<&str> = std::iter::once(task.repository.as_str())
-        .chain(head_repository)
-        .collect();
-    TaskGitContext::new_with_credentials_for_repository_urls(ctx, task, &urls)
+    let head_repository_url = head_repository
+        .map(str::parse::<RepositoryUrl>)
+        .transpose()
+        .map_err(|_| SourceError::InvalidUrl)?;
+    TaskGitContext::new(ctx, task)
         .await?
-        .changed_paths(base, head.to_vec(), head_repository)
+        .changed_paths(base, head.to_vec(), head_repository_url.as_ref())
         .await
 }
 
-#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
+#[instrument(skip_all, fields(task_id = %task.id, task_name = %task.name))]
 pub async fn head_commit(
     ctx: &DbContext,
     task: &MTask,
@@ -115,11 +123,11 @@ pub async fn head_commit(
         .await
 }
 
-#[instrument(skip(ctx, project), fields(project_id = %project.id, repository = %url))]
+#[instrument(skip_all, fields(project_id = %project.id))]
 pub async fn resolve_remote_ref(
     ctx: &DbContext,
     project: &MProject,
-    url: &str,
+    url: &RepositoryUrl,
     branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
     let credentials = load_project_git_credentials_for_repository_url(ctx, project, url).await?;
@@ -136,15 +144,12 @@ pub async fn resolve_remote_ref(
 async fn list_remote_refs_find_branch_head_and_save_host_keys<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
-    url: &str,
+    url: &RepositoryUrl,
     credentials: GitOperationCredentials,
     branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
-    let (url, branch, blocking_credentials) = (
-        url.to_owned(),
-        branch.map(str::to_owned),
-        credentials.clone(),
-    );
+    let (url, branch, blocking_credentials) =
+        (url.clone(), branch.map(str::to_owned), credentials.clone());
     let head = tokio::task::spawn_blocking(move || {
         remote::ls_remote_head(&url, &blocking_credentials, branch.as_deref())
     })
@@ -162,7 +167,7 @@ async fn list_remote_refs_find_branch_head_and_save_host_keys<C: ConnectionTrait
 }
 
 pub(crate) fn remote_ref_commit(
-    url: &str,
+    url: &RepositoryUrl,
     ref_: Option<&str>,
     credentials: &GitOperationCredentials,
 ) -> Result<String, SourceError> {

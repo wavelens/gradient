@@ -92,10 +92,8 @@ crate::sql_fn! {
 }
 
 crate::sql! {
-    CACHE_SIZE = "SELECT coalesce(sum(u.bytes), 0)::bigint AS bytes FROM cache_usage u \
-        JOIN cache c ON c.id = u.cache \
-        WHERE $2 OR c.created_by = $1 OR EXISTS (SELECT 1 FROM project_cache pc \
-        JOIN project_access pu ON pu.project = pc.project WHERE pc.cache = c.id AND pu.\"user\" = $1)",
+    CACHE_SIZE = concat!("SELECT coalesce(sum(u.bytes), 0)::bigint AS bytes FROM cache_usage u \
+        JOIN cache c ON c.id = u.cache WHERE $2 OR ", user_can_see_cache_sql!()),
         params = [UserId, Bool(false)];
 }
 

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::ProjectItemLocation;
 use crate::permissions::{
     Permission, PermissionMask, mask_grants, superuser_permission_for_http_method,
 };
@@ -21,6 +22,25 @@ pub struct ApiKeyContext {
     pub project: Option<ProjectId>,
     pub cache_pin: Option<CacheId>,
     pub allowed_ips: Vec<String>,
+    pub job_binding: Option<JobTokenTaskAndExecJobIds>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobTokenTaskAndExecJobIds {
+    pub task: TaskId,
+    pub exec_job: ExecJobId,
+}
+
+impl JobTokenTaskAndExecJobIds {
+    pub fn allows_resource(&self, resource: ProjectItemLocation) -> bool {
+        match resource {
+            ProjectItemLocation::ProjectAsWhole => true,
+            ProjectItemLocation::ItemInTask {
+                task,
+                parent_exec_job,
+            } => task == self.task || parent_exec_job == Some(self.exec_job),
+        }
+    }
 }
 
 impl ApiKeyContext {
@@ -194,6 +214,7 @@ mod tests {
             project: None,
             cache_pin: None,
             allowed_ips: Vec::new(),
+            job_binding: None,
         }
     }
 
@@ -210,6 +231,7 @@ mod tests {
                 project_name: "infra".into(),
                 task_name: "master".into(),
                 acting_user: UserId::now_v7(),
+                allows_project_credentials_and_privileged_actions: true,
             },
         };
 

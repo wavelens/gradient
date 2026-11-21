@@ -62,6 +62,19 @@ mod tests {
         staging
     }
 
+    #[test]
+    fn unsized_job_gets_default_guest_disk_size_and_sized_job_keeps_its_size() {
+        use gradient_wire::types::GuestSize;
+        assert_eq!(
+            GuestSize::work_disk_size_mb_for_requested_disk_size_mb(0),
+            GuestSize::default_request().disk_mb
+        );
+        assert_eq!(
+            GuestSize::work_disk_size_mb_for_requested_disk_size_mb(10_240),
+            10_240
+        );
+    }
+
     #[tokio::test]
     async fn a_checkout_larger_than_the_disk_fails() {
         let dir = tempfile::tempdir().unwrap();

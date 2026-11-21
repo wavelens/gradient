@@ -41,14 +41,13 @@ pub fn aggregate<'a>(workers: impl IntoIterator<Item = &'a WorkerShared>) -> Agg
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::Arc;
 
     use gradient_wire::types::GradientCapabilities;
     use tokio::sync::mpsc;
 
-    use crate::WorkerPool;
     use crate::session_port::SessionPort;
+    use crate::{ProjectAccess, WorkerPool};
 
     fn port() -> Arc<dyn SessionPort> {
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -63,7 +62,7 @@ mod tests {
         features: &[&str],
         slots: u32,
     ) {
-        pool.register(id.into(), caps, HashSet::new(), port());
+        pool.register(id.into(), caps, ProjectAccess::AllProjects, port());
         pool.update_capabilities(
             id,
             crate::WorkerProfile {

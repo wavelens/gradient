@@ -82,6 +82,10 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         wake: Default::default(),
         memory: Default::default(),
         store_path_mapping: Arc::new(gradient_entity::IdentityMapping),
+        user_supplied_url_http_client: gradient_util::http::HttpClientForUserSuppliedUrls::new(
+            Default::default(),
+        )
+        .expect("build test HTTP client for user-supplied URLs"),
     };
 
     (ctx, worker_db)

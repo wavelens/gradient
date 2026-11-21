@@ -93,6 +93,8 @@ pub struct Reported {
     pub evaluation_kind: Option<String>,
     pub description: Option<String>,
     pub created: bool,
+    #[serde(default)]
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 impl EventKind for Reported {

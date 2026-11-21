@@ -184,6 +184,13 @@ async fn update_evaluation_status_only_if_changed(
         return Ok(None);
     }
 
+    if matches!(
+        status,
+        EvaluationStatus::Completed | EvaluationStatus::Failed
+    ) {
+        ctx.request_signature_sweep_wake();
+    }
+
     let updated_eval = EEvaluation::find_by_id(evaluation.id)
         .one(&ctx.worker_db)
         .await?

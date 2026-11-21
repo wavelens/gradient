@@ -14,7 +14,6 @@ use gradient_notify::EmailSender;
 #[derive(Clone, Debug)]
 pub struct CiContext {
     pub db: DbContext,
-    pub http: reqwest::Client,
     pub git_host: GitHostRegistry,
     pub email: Arc<dyn EmailSender>,
 }

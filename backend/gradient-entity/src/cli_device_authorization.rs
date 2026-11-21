@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CliDeviceAuthorizationId, UserId};
+use crate::ids::{CliDeviceAuthorizationId, SessionId, UserId};
 
 #[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cli_device_authorization")]
@@ -18,7 +18,7 @@ pub struct Model {
     pub device_code_hash: String,
     pub user_code: String,
     pub user_id: Option<UserId>,
-    pub token: Option<String>,
+    pub approving_session_id: Option<SessionId>,
     pub denied_at: Option<NaiveDateTime>,
     pub authorized_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
@@ -44,7 +44,7 @@ impl std::fmt::Debug for Model {
             .field("device_code_hash", &"[redacted]")
             .field("user_code", &self.user_code)
             .field("user_id", &self.user_id)
-            .field("token", &self.token.as_ref().map(|_| "[redacted]"))
+            .field("approving_session_id", &self.approving_session_id)
             .field("denied_at", &self.denied_at)
             .field("authorized_at", &self.authorized_at)
             .field("created_at", &self.created_at)

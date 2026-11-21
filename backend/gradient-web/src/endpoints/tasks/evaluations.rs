@@ -10,7 +10,10 @@ use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
     FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
 };
-use crate::access::{Caller, caller_project_mask, can_view_project};
+use crate::access::{
+    Caller, ProjectItemAccessRequirement, ProjectItemLocation, caller_project_mask,
+    can_access_project_resource,
+};
 use crate::api_spec::{Binary, TaskPath};
 use crate::audit::Audit;
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -362,6 +365,7 @@ async fn evaluate_commit(
         None,
         Some(started_by),
         walk_mode,
+        &gradient_ci::EvaluationCodeTrust::CodeWithProjectCredentials,
     )
     .await
     .map_err(|e| match e {
@@ -371,8 +375,6 @@ async fn evaluate_commit(
         gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
-    let eval = gradient_ci::park_if_no_cache(&db.web_db, eval, task.project).await?;
-    let eval = gradient_ci::park_if_no_workers(&db.web_db, eval, task.project).await?;
     db.record_evaluation_created(&eval).await;
 
     Ok(eval.id)
@@ -850,12 +852,12 @@ impl EntryPointRelatedData {
 pub struct EntryPointDownloadQuery {
     pub eval: String,
     pub filename: String,
-    pub token: Option<String>,
 }
 
 async fn serve_hydra_artifact(
     web_db: &WebDb,
     nar_storage: &NarStore,
+    project: ProjectId,
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
 ) -> WebResult<Option<Response>> {
@@ -871,6 +873,17 @@ async fn serve_hydra_artifact(
             return Ok(None);
         }
     };
+    let output_hashes: Vec<String> = build_outputs
+        .iter()
+        .filter_map(|o| o.hash.clone())
+        .collect();
+    let highest_ranked_trusted_content_variant_by_store_path_hash =
+        gradient_db::store_path_content_variant_reader_choice::highest_ranked_trusted_content_variant_by_store_path_hash_for_project(
+            web_db,
+            project,
+            &output_hashes,
+        )
+        .await?;
 
     for product in rows {
         let product_name = &product.name;
@@ -889,8 +902,12 @@ async fn serve_hydra_artifact(
             tracing::warn!(%filename, "build_product references an unknown or unrealised output");
             continue;
         };
+        let Some(variant) =
+            highest_ranked_trusted_content_variant_by_store_path_hash.get(output_path.hash())
+        else {
+            continue;
+        };
         let output_root = output_path.full();
-        let hash = output_path.hash();
 
         let prefix = format!("{}/", output_root);
         let rel = product
@@ -899,7 +916,10 @@ async fn serve_hydra_artifact(
             .map(str::to_owned)
             .unwrap_or_else(|| product.path.trim_start_matches('/').to_owned());
 
-        let (_size, stream) = match nar_storage.get_stream(hash).await {
+        let (_size, stream) = match nar_storage
+            .get_stream(&variant.nar_object_storage_key)
+            .await
+        {
             Ok(Some(s)) => s,
             Ok(None) => continue,
             Err(e) => {
@@ -950,39 +970,31 @@ pub async fn get_entry_point_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Extension(crate::client_ip::ClientIp(client_ip)): Extension<crate::client_ip::ClientIp>,
     Path((project, task)): Path<(String, String)>,
     Query(params): Query<EntryPointDownloadQuery>,
 ) -> Result<Response, WebError> {
-    let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
-        let (user, decoded) =
-            crate::authorization::verify_credential_and_return_user_and_decoded_credential(
-                &state.web_db,
-                &state.jwt_secret,
-                &state.memory.last_used_stamps,
-                token_str,
-                &axum::http::Method::GET,
-                client_ip,
-            )
-            .await?;
-        (Some(user), decoded.api_key_context().cloned())
-    } else {
-        (maybe_user, api_key.as_ref().cloned())
+    let found = get_any_task_by_name(&state.db(), project, task)
+        .await?
+        .filter(|(project, _)| project.public || maybe_user.is_some());
+    let Some((project, task)) = found else {
+        return Err(match maybe_user {
+            None => SharedRefusal::AuthorizationRequired.into(),
+            Some(_) => WebError::not_found(Resource::Task),
+        });
     };
-
-    let found = get_any_task_by_name(&state.db(), project, task).await?;
-    let visible = match (&found, &resolved_user) {
-        (Some((project, _)), _) if project.public => true,
-        (Some((project, _)), Some(user)) => {
-            can_view_project(&state.web_db, user.id, project.id, resolved_key.as_ref()).await?
-        }
-        _ => false,
-    };
-    let task = match found {
-        Some((_, task)) if visible => task,
-        _ if resolved_user.is_none() => return Err(SharedRefusal::AuthorizationRequired.into()),
-        _ => return Err(WebError::not_found(Resource::Task)),
-    };
+    can_access_project_resource(
+        &state.web_db,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        &project,
+        ProjectItemLocation::ItemInTask {
+            task: task.id,
+            parent_exec_job: None,
+        },
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+        Resource::Task,
+    )
+    .await?;
 
     let evaluation_id = task.last_evaluation.or_not_found(Resource::Evaluation)?;
     let evaluation = require::<EEvaluation>(&state.web_db, evaluation_id).await?;
@@ -1007,6 +1019,7 @@ pub async fn get_entry_point_download(
     match serve_hydra_artifact(
         &state.web_db,
         &state.nar_storage,
+        project.id,
         build_outputs,
         &params.filename,
     )
@@ -1055,6 +1068,82 @@ mod tests {
                 .count(),
             100
         );
+    }
+}
+
+#[cfg(test)]
+mod entry_point_build_product_nar_file_download_tests {
+    use super::*;
+    use gradient_fixtures::store_path_content_variants::{
+        BUILD_A, FIRST_KEY, SECOND_KEY, SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+    };
+    use gradient_test_support::cache_fixture::create_temp_directory_with_one_file_and_get_zstd_compressed_nar;
+
+    #[tokio::test]
+    async fn download_returns_bytes_of_content_variant_trusted_by_each_project() {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        let derivation = readers.db.shared_build(BUILD_A).await.derivation;
+        readers
+            .db
+            .execute(&format!(
+                "INSERT INTO derivation_output (id, derivation, name, hash, package, path_known_after_build, created_at) \
+                 VALUES (uuidv7(), '{derivation}', 'out', '{SHARED}', 'shared', false, now()); \
+                 INSERT INTO build_product (id, derivation_output, file_type, subtype, name, path, created_at) \
+                 SELECT uuidv7(), id, 'file', 'report', 'report.txt', '/nix/store/{SHARED}-shared/report.txt', now() \
+                 FROM derivation_output WHERE hash = '{SHARED}' AND name = 'out'"
+            ))
+            .await;
+        let nar_storage_temp_dir = tempfile::TempDir::new().expect("temporary directory");
+        let nar_storage = NarStore::local(nar_storage_temp_dir.path()).expect("Local NAR storage");
+        for (key, contents) in [(FIRST_KEY, b"first"), (SECOND_KEY, b"other")] {
+            nar_storage
+                .put(
+                    key,
+                    create_temp_directory_with_one_file_and_get_zstd_compressed_nar(
+                        "report.txt",
+                        contents,
+                    )
+                    .await,
+                )
+                .await
+                .expect("Save the variant");
+        }
+        let web_db = WebDb::new(readers.db.connection());
+        let shared_hash_derivation_outputs: Vec<MDerivationOutput> = readers
+            .db
+            .rows::<EDerivationOutput>()
+            .await
+            .into_iter()
+            .filter(|derivation_output_row| derivation_output_row.hash.as_deref() == Some(SHARED))
+            .collect();
+
+        let mut downloaded_report_texts = Vec::new();
+        for project in [readers.project_a, readers.project_b] {
+            let response = serve_hydra_artifact(
+                &web_db,
+                &nar_storage,
+                project,
+                shared_hash_derivation_outputs.clone(),
+                "report.txt",
+            )
+            .await
+            .expect("Download ran")
+            .expect("Projects trust an output variant.");
+            let build_product_download_response_body_bytes =
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("Body content");
+            downloaded_report_texts.push(
+                String::from_utf8_lossy(&build_product_download_response_body_bytes).into_owned(),
+            );
+        }
+
+        assert_eq!(
+            downloaded_report_texts,
+            ["first", "other"],
+            "Each project downloads build products from the variant that it trusts. No project downloads build products from a variant that only the other project trusts."
+        );
+        readers.db.finish().await;
     }
 }
 

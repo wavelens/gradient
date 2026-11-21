@@ -30,12 +30,18 @@ pub struct Model {
     pub unwalked_inputs: i32,
     pub closure_size: Option<i64>,
     pub ifd: bool,
+    pub timeout_secs: Option<i64>,
+    pub max_silent_secs: Option<i64>,
+    pub serialized_derivation_hash_for_dependent_output_paths: Option<String>,
     pub created_at: NaiveDateTime,
 }
 
 impl Model {
     pub fn as_store_path(&self) -> crate::StorePath {
-        crate::StorePath::from_stored(self.hash.clone(), format!("{}.drv", self.name))
+        crate::StorePath::from_hash_and_name_without_validation(
+            self.hash.clone(),
+            format!("{}.drv", self.name),
+        )
     }
 
     pub fn drv_path(&self) -> String {

@@ -27,6 +27,7 @@ pub enum Permission {
     TriggerEvaluation,
     ManageTriggers,
     ManageWebhooks,
+    OpenJobTerminal,
 
     CreateProject,
     ReadSuperuser,
@@ -52,6 +53,7 @@ impl Permission {
         Permission::TriggerEvaluation,
         Permission::ManageTriggers,
         Permission::ManageWebhooks,
+        Permission::OpenJobTerminal,
         Permission::CreateProject,
         Permission::ReadSuperuser,
         Permission::WriteSuperuser,
@@ -79,6 +81,7 @@ impl Permission {
             Permission::CreateProject => 15,
             Permission::WriteSuperuser => 16,
             Permission::ReadSuperuser => 17,
+            Permission::OpenJobTerminal => 18,
         };
         1_i64 << pos
     }
@@ -100,6 +103,7 @@ impl Permission {
             Permission::TriggerEvaluation => "triggerEvaluation",
             Permission::ManageTriggers => "manageTriggers",
             Permission::ManageWebhooks => "manageWebhooks",
+            Permission::OpenJobTerminal => "openJobTerminal",
             Permission::CreateProject => "createProject",
             Permission::ReadSuperuser => "readSuperuser",
             Permission::WriteSuperuser => "writeSuperuser",
@@ -134,6 +138,9 @@ impl Permission {
             Permission::TriggerEvaluation => "Start an evaluation manually.",
             Permission::ManageTriggers => "Pick when tasks run (e.g., on push, on schedule)",
             Permission::ManageWebhooks => "Send event notifications to an external URL.",
+            Permission::OpenJobTerminal => {
+                "Open a shell, console, or port forward in a running job."
+            }
             Permission::CreateProject => "Create a new project on the server.",
             Permission::ReadSuperuser => "Use owner's superuser rights on GET, HEAD, OPTIONS",
             Permission::WriteSuperuser => {
@@ -159,6 +166,7 @@ impl Permission {
             Permission::TriggerEvaluation => "trigger evaluation",
             Permission::ManageTriggers => "triggers",
             Permission::ManageWebhooks => "webhooks",
+            Permission::OpenJobTerminal => "open job terminal",
             Permission::CreateProject => "create project",
             Permission::ReadSuperuser => "superuser read",
             Permission::WriteSuperuser => "superuser write",
@@ -223,6 +231,7 @@ pub fn write_mask() -> PermissionMask {
         TriggerEvaluation,
         ManageTriggers,
         ManageWebhooks,
+        OpenJobTerminal,
     ])
 }
 
@@ -448,12 +457,18 @@ mod tests {
         assert!(!mask_grants(write, Permission::ManageProjectSettings));
         assert!(mask_grants(write, Permission::EditTask));
         assert!(mask_grants(write, Permission::ManageActions));
+        assert!(mask_grants(write, Permission::OpenJobTerminal));
+        assert!(!mask_grants(
+            mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]),
+            Permission::OpenJobTerminal
+        ));
 
         let view = view_mask();
         assert!(!mask_grants(view, Permission::EditTask));
         assert!(!mask_grants(view, Permission::ManageActions));
         assert!(!mask_grants(view, Permission::ManageMembers));
         assert!(!mask_grants(view, Permission::ManageRoles));
+        assert!(!mask_grants(view, Permission::OpenJobTerminal));
         assert!(mask_grants(view, Permission::ViewProject));
 
         for p in CachePermission::ALL.iter().copied() {

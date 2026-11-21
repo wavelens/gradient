@@ -17,21 +17,9 @@ use super::{
 };
 use crate::messages::{Demotion, NarCommit};
 
-fn missing_nar(hash: &str) -> Demotion {
-    Demotion::MissingNar {
-        hash: hash.to_owned(),
-    }
-}
-
-fn path_demotion(hash: &str) -> Demotion {
-    Demotion::Path {
-        hash: hash.to_owned(),
-    }
-}
-
-fn drv_file(drv: &str) -> Demotion {
+fn drv_file_hash(drv: &str) -> &str {
     let (hash, _) = drv.split_once('-').expect("a drv path");
-    path_demotion(hash)
+    hash
 }
 
 async fn rebuild(case: &Case, path: &str, commit: NarCommit) {
@@ -70,58 +58,55 @@ async fn state_of_the_chain(case: &Case, evaluation: EvaluationId) -> Vec<String
 
 #[tokio::test]
 async fn r01_retiring_an_output_resets_the_producer_and_the_recommit_restores_every_counter() {
-    for (variant, demotion) in [
-        ("MissingNar", missing_nar(B_OUT)),
-        ("Path", path_demotion(B_OUT)),
-    ] {
-        let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
-        let case = Case::start(chain_done(e1).into_cache(c1).keyed(Case::key())).await;
-        case.seed_signature(B_OUT, c1, Some(vec![7; 64])).await;
-        let start = state_of_the_chain(&case, e1).await;
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = Case::start(chain_done(e1).into_cache(c1).keyed(Case::key())).await;
+    case.seed_signature(B_OUT, c1, Some(vec![7; 64])).await;
+    let start = state_of_the_chain(&case, e1).await;
 
-        let report = case.demote(demotion).await;
+    let report = case
+        .report_missing_nar_of_every_content_variant(B_OUT)
+        .await;
 
-        let stored = case.find_cached_path(B_OUT).await;
-        assert_eq!(stored, None, "{variant} after 1: cached_path(B_OUT)");
-        let signatures = case.db.rows::<cached_path_signature::Entity>().await;
-        let none = signatures.is_empty();
-        assert!(none, "{variant} after 1: {signatures:?}");
-        let b = case.sb(B).await;
-        let queue = (b.status, b.wanted, b.cache_available);
-        assert_eq!(queue, (Queued, true, false), "{variant} after 1: sb(B)");
-        let closure = (b.fetchable, b.missing_runtime_deps);
-        assert_eq!(closure, (false, 0), "{variant} after 1: sb(B)");
-        let a = case.queue_state(A).await;
-        assert_eq!(a, (Created, 1), "{variant} after 1: sb(A)");
-        let producers = as_set(&report.producers);
-        let only_b = case.ids(&[B]).await;
-        assert_eq!(producers, only_b, "{variant} after 1: report.producers");
-        let counters = case.counters(e1).await;
-        assert_eq!(counters, [2, 2, 0, 1, 0], "{variant} after 1: counters");
-        case.zero_drift("step 1").await;
+    let stored = case.find_cached_path(B_OUT).await;
+    assert_eq!(stored, None, "after 1: cached_path(B_OUT)");
+    let signatures = case.db.rows::<cached_path_signature::Entity>().await;
+    let none = signatures.is_empty();
+    assert!(none, "after 1: {signatures:?}");
+    let b = case.sb(B).await;
+    let queue = (b.status, b.wanted, b.cache_available);
+    assert_eq!(queue, (Queued, true, false), "after 1: sb(B)");
+    let closure = (b.fetchable, b.missing_runtime_deps);
+    assert_eq!(closure, (false, 0), "after 1: sb(B)");
+    let a = case.queue_state(A).await;
+    assert_eq!(a, (Created, 1), "after 1: sb(A)");
+    let producers = as_set(&report.producers);
+    let only_b = case.ids(&[B]).await;
+    assert_eq!(producers, only_b, "after 1: report.producers");
+    let counters = case.counters(e1).await;
+    assert_eq!(counters, [2, 2, 0, 1, 0], "after 1: counters");
+    case.zero_drift("step 1").await;
 
-        let commit = NarCommit {
-            targets: case.project_caches(e1).await,
-            ..commit_of(B_OUT, "b", &[(B_OUT, "b")])
-        };
+    let commit = NarCommit {
+        producer: case.make_worker_producer_for_evaluation_project(e1).await,
+        ..commit_of(B_OUT, "b", &[(B_OUT, "b")])
+    };
 
-        rebuild(&case, B, commit).await;
+    rebuild(&case, B, commit).await;
 
-        let b = case.sb(B).await;
-        let b = (b.status, b.fetchable);
-        assert_eq!(b, (Completed, true), "{variant} after 2: sb(B)");
-        let a = case.queue_state(A).await;
-        assert_eq!(a, (Queued, 0), "{variant} after 2: sb(A)");
-        let signature = case.signature(B_OUT, c1).await;
-        let signed = signature.is_some_and(|row| row.signature.is_some());
-        assert!(signed, "{variant} after 2: signature(B_OUT, C1)");
-        let counters = case.counters(e1).await;
-        assert_eq!(counters, [2, 1, 0, 1, 0], "{variant} after 2: counters");
-        let end = state_of_the_chain(&case, e1).await;
-        assert_eq!(end, start, "{variant} after 2: the CHAIN_DONE start");
-        case.zero_drift("step 2").await;
-        case.finish().await;
-    }
+    let b = case.sb(B).await;
+    let b = (b.status, b.fetchable);
+    assert_eq!(b, (Completed, true), "after 2: sb(B)");
+    let a = case.queue_state(A).await;
+    assert_eq!(a, (Queued, 0), "after 2: sb(A)");
+    let signature = case.signature(B_OUT, c1).await;
+    let signed = signature.is_some_and(|row| row.signature.is_some());
+    assert!(signed, "after 2: signature(B_OUT, C1)");
+    let counters = case.counters(e1).await;
+    assert_eq!(counters, [2, 1, 0, 1, 0], "after 2: counters");
+    let end = state_of_the_chain(&case, e1).await;
+    assert_eq!(end, start, "after 2: the CHAIN_DONE start");
+    case.zero_drift("step 2").await;
+    case.finish().await;
 }
 
 #[tokio::test]
@@ -160,7 +145,8 @@ async fn r02_a_build_that_only_referenced_the_path_stays_terminal_and_loses_its_
     )
     .await;
 
-    case.demote(missing_nar(D_OUT)).await;
+    case.report_missing_nar_of_every_content_variant(D_OUT)
+        .await;
 
     let d = case.sb(D).await;
     let d = (d.status, d.fetchable);
@@ -203,8 +189,10 @@ async fn r03_removing_cached_drv_file_marks_derivation_not_walked_moves_queued_b
     )
     .await;
 
-    case.demote(drv_file(B)).await;
-    case.demote(drv_file(C)).await;
+    case.report_missing_nar_of_every_content_variant(drv_file_hash(B))
+        .await;
+    case.report_missing_nar_of_every_content_variant(drv_file_hash(C))
+        .await;
 
     let b = case.sb(B).await;
     let b = (b.status, b.wanted);
@@ -247,7 +235,8 @@ async fn r04_retiring_the_output_of_a_substituted_passthrough_makes_it_a_builder
     .await;
     let frozen = case.counters(e1).await;
 
-    case.demote(missing_nar(A_OUT)).await;
+    case.report_missing_nar_of_every_content_variant(A_OUT)
+        .await;
 
     let a = case.queue_state(A).await;
     assert_eq!(a, (Created, 1), "after 1: sb(A) status, blocking_deps");
@@ -345,7 +334,9 @@ async fn r06_retiring_a_path_with_two_producers_resets_both() {
     )
     .await;
 
-    let report = case.demote(missing_nar(F_OUT)).await;
+    let report = case
+        .report_missing_nar_of_every_content_variant(F_OUT)
+        .await;
 
     let f1 = case.sb(F1).await;
     let f1 = (f1.status, f1.fetchable);
@@ -391,7 +382,8 @@ async fn r07_a_building_parent_outlasts_the_retire_of_its_input_and_ends_incompl
     )
     .await;
 
-    case.demote(missing_nar(B_OUT)).await;
+    case.report_missing_nar_of_every_content_variant(B_OUT)
+        .await;
 
     let a = case.sb(A).await;
     let a = (a.status, a.blocking_deps, a.missing_runtime_deps);
@@ -461,7 +453,11 @@ async fn r08_a_three_level_runtime_chain_reverses_exactly() {
     )
     .await;
 
-    case.demote(missing_nar(B_OUT)).await;
+    let variants = case.content_variant_ids(B_OUT).await;
+    let report = case.report_missing_nar_of_content_variants(&variants).await;
+    let producers = as_set(&report.producers);
+    let only_b = case.ids(&[B]).await;
+    assert_eq!(producers, only_b, "after 1: producers");
 
     for (path, missing) in [(X, 1), (A, 1), (B, 0)] {
         let closure = case.closure_state(path).await;
@@ -475,13 +471,11 @@ async fn r08_a_three_level_runtime_chain_reverses_exactly() {
     case.zero_drift("step 1").await;
     let after_first = case.rows().await;
 
-    let report = case.demote(missing_nar(B_OUT)).await;
+    let repeated = case.report_missing_nar_of_content_variants(&variants).await;
+    assert!(repeated.producers.is_empty(), "after 2: producers");
 
     let rows = case.rows().await;
     assert_eq!(rows, after_first, "after 2: identical to after 1");
-    let producers = as_set(&report.producers);
-    let only_b = case.ids(&[B]).await;
-    assert_eq!(producers, only_b, "after 2: producers, weak spot 6");
     case.zero_drift("step 2").await;
 
     rebuild(&case, B, commit_of(B_OUT, "b", &[(B_OUT, "b")])).await;
@@ -511,7 +505,8 @@ async fn r09_a_retire_while_the_producer_is_building_leaves_its_attempt_alone() 
     )
     .await;
 
-    case.demote(missing_nar(B_OUT)).await;
+    case.report_missing_nar_of_every_content_variant(B_OUT)
+        .await;
 
     let b = case.sb(B).await.status;
     assert_eq!(b, Building, "after 1: sb(B).status");
@@ -558,7 +553,8 @@ async fn r10_demoting_a_stored_unneeded_output_of_a_complete_shared_build_counts
     let d = case.closure_state(D).await;
     assert_eq!(d, (true, 0), "after the seed: sb(D) fetchable, missing");
 
-    case.demote(path_demotion(B_OUT2)).await;
+    case.report_missing_nar_of_every_content_variant(B_OUT2)
+        .await;
 
     let b = case.sb(B).await;
     assert_eq!(
@@ -569,5 +565,77 @@ async fn r10_demoting_a_stored_unneeded_output_of_a_complete_shared_build_counts
     let d = case.closure_state(D).await;
     assert_eq!(d, (false, 1), "after 1: sb(D) fetchable, missing");
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn r10_a_cache_claim_demotes_only_the_content_signed_in_that_cache() {
+    use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let (e1, c1, c2) = (EvaluationId::now_v7(), CacheId::now_v7(), CacheId::now_v7());
+    let case = Case::start(
+        chain_done(e1)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .into_cache(c2)
+            .keyed(Case::key()),
+    )
+    .await;
+    let other_key = format!("{B_OUT}-0therc0ntentfi1ehash");
+    case.seed_signature(B_OUT, c1, Some(vec![7; 64])).await;
+    case.sql(&format!(
+        "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, file_size, \
+             nar_size, nar_hash, debug_info_indexed, server_computed_hashes_and_sizes, \
+             created_at) \
+         SELECT uuidv7(), hash, '{other_key}', package, 'sha256:other', file_size, nar_size, \
+             'sha256:othernar', false, true, created_at \
+         FROM cached_path WHERE hash = '{B_OUT}'; \
+         INSERT INTO cached_path_signature (id, cached_path, cache, signature, fetch_count, created_at) \
+         SELECT uuidv7(), id, '{c2}', decode(repeat('08', 64), 'hex'), 0, now() \
+         FROM cached_path WHERE nar_object_storage_key = '{other_key}';"
+    ))
+    .await;
+    case.store_object(B_OUT).await;
+    case.store_object(&other_key).await;
+
+    case.demote(Demotion::CacheClaim {
+        cache: c1,
+        hash: B_OUT.to_owned(),
+    })
+    .await;
+
+    let claims = cached_path_signature::Entity::find()
+        .filter(cached_path_signature::Column::Cache.eq(c1))
+        .all(&case.db.connection())
+        .await
+        .expect("the claims are read");
+    assert!(claims.is_empty(), "The claims of cache C1 are missing.");
+    let kept: Vec<String> = ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(B_OUT))
+        .all(&case.db.connection())
+        .await
+        .expect("the stored contents are read")
+        .into_iter()
+        .map(|row| row.nar_object_storage_key)
+        .collect();
+    assert_eq!(
+        kept,
+        vec![other_key.clone()],
+        "Contents of other projects remain stored with their C2 claims."
+    );
+    assert!(
+        case.signature(B_OUT, c2).await.is_some(),
+        "Contents of other projects remain stored with their C2 claims."
+    );
+    let object_kept = case.ctx.storage.nar_storage.exists(&other_key).await;
+    assert!(
+        object_kept.expect("the storage is probed"),
+        "The NAR object for the other content is still in storage."
+    );
+    assert!(
+        case.sb(B).await.fetchable,
+        "The producer can remain fetchable while other contents of its output stay in storage."
+    );
     case.finish().await;
 }

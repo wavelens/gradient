@@ -8,8 +8,6 @@ use gradient_db::WorkerDb;
 use gradient_scheduler::connection_failures::{ConnectionDirection, ConnectionFailures};
 use gradient_wire::session::handshake::Rejected;
 
-use super::auth::has_any_registrations;
-
 fn rejection_reason(code: u16, reason: &str) -> String {
     format!("{code} {reason}")
 }
@@ -44,7 +42,9 @@ pub(super) fn record_dialed(failures: &ConnectionFailures, worker_id: &str, erro
 }
 
 async fn is_registered(db: &WorkerDb, worker_id: &str) -> bool {
-    has_any_registrations(db, worker_id).await
+    gradient_db::worker_registrations::by_worker_id(db, worker_id)
+        .await
+        .is_ok_and(|registration| registration.is_some())
         || gradient_db::teams::workers::is_team_worker(db, worker_id)
             .await
             .unwrap_or(false)

@@ -23,8 +23,9 @@ use gradient_db::DbContext;
 use gradient_db::caches::capacity::project_caches_all_full;
 use gradient_db::lookup::by_id;
 use gradient_entity::evaluation::RunOptions;
+use gradient_entity::store_path_content_producer::CacheUploadChannel;
 use gradient_graph::Graph;
-use gradient_proto::import::{NarCommit, SignTargets};
+use gradient_proto::import::{NarCommit, NarCommitContent, StoredContentProducer};
 use gradient_storage::NarStore;
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::RuntimeConfig;
@@ -33,8 +34,9 @@ use gradient_types::ids::{
 };
 use gradient_types::input::{check_flake_input_override, check_manifest_path, decode_blake3_hex};
 use gradient_types::{
-    BaseResponse, ECache, EUploadSession, MCommit, MEvaluation, MEvaluationFlakeInputOverride,
-    MUploadSession, MUser, OriginalStorePath, StorePath, StorePathMapper, now,
+    BaseResponse, ECache, EEvaluation, EExecJob, EUploadSession, MCommit, MEvaluation,
+    MEvaluationFlakeInputOverride, MUploadSession, MUser, OriginalStorePath, StorePath,
+    StorePathMapper, now,
 };
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
@@ -190,22 +192,41 @@ pub(super) async fn finalize_build_request(
 
     let mapper = db.project_mapper(project).await?;
     let stored = stored_source_path(&mapper, &nar.store_path)?;
+    let verified = gradient_storage::verify_zstd_nar_stream_sha256_and_sizes_against_claims(
+        nar.compressed_bytes.as_slice(),
+        &gradient_storage::ClientClaimedNarUploadHashesAndSizes {
+            file_hash: &nar.file_hash_sri,
+            file_size: nar.file_size,
+            nar_hash: &nar.nar_hash_sri,
+            nar_size: nar.nar_size,
+            claimed_store_path_references: &[],
+            uploaded_nar_with_stated_content_address_to_check: None,
+        },
+    )
+    .await
+    .context("verify source NAR")?;
     db.storage
         .nar_storage
-        .put(stored.hash(), nar.compressed_bytes.clone())
+        .put(
+            &verified
+                .object_storage_key_for_store_path_hash_and_compressed_file_sha256(stored.hash()),
+            nar.compressed_bytes.clone(),
+        )
         .await
         .context("store source NAR")?;
 
     graph
         .commit_nar(NarCommit {
             store_path: stored.base(),
-            file_hash: nar.file_hash_sri.clone(),
-            file_size: nar.file_size as i64,
-            nar_size: nar.nar_size as i64,
-            nar_hash: nar.nar_hash_sri.clone(),
-            targets: SignTargets::ProjectCaches(project),
-            confirmed: true,
-            ..Default::default()
+            content: NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(verified),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            producer: StoredContentProducer::ProjectUserContentUpload {
+                project,
+                user: user.id,
+                channel: CacheUploadChannel::RestHttpApiUpload,
+            },
         })
         .await
         .context("record source NAR")?;
@@ -267,6 +288,18 @@ pub(super) struct BuildRequestSource {
     pub parent_exec_job: Option<gradient_types::ExecJobId>,
 }
 
+async fn parent_exec_job_evaluation_allows_project_credentials<C: ConnectionTrait>(
+    db: &C,
+    job: gradient_types::ExecJobId,
+) -> Result<bool, sea_orm::DbErr> {
+    let Some(job) = by_id::<EExecJob, _>(db, job).await? else {
+        return Ok(false);
+    };
+    Ok(by_id::<EEvaluation, _>(db, job.evaluation)
+        .await?
+        .is_some_and(|evaluation| evaluation.allows_project_credentials_and_privileged_actions))
+}
+
 pub(super) async fn queue_build_request<C: ConnectionTrait>(
     tx: &C,
     config: &RuntimeConfig,
@@ -301,6 +334,10 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
     )
     .await?;
 
+    let allows_project_credentials_and_privileged_actions = match source.parent_exec_job {
+        Some(job) => parent_exec_job_evaluation_allows_project_credentials(tx, job).await?,
+        None => true,
+    };
     let now_ts = now();
     let evaluation = gradient_db::evaluations::insert(
         tx,
@@ -315,6 +352,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
             branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
             parent_exec_job: source.parent_exec_job,
             run_options: source.run_options,
+            allows_project_credentials_and_privileged_actions,
             created_at: now_ts,
             updated_at: now_ts,
             ..Default::default()

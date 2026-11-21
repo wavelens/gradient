@@ -6,7 +6,7 @@
 
 use super::super::{generate_signing_key, sign_narinfo_fingerprint};
 use chrono::NaiveDateTime;
-use gradient_types::MCache;
+use gradient_types::{MCache, NixPathInfo, parse_narinfo_body};
 use std::io::Write;
 
 pub fn temp_secret_file() -> (tempfile::NamedTempFile, String) {
@@ -38,14 +38,17 @@ pub fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
     }
 }
 
-pub fn signed_narinfo_fixture() -> (String, String) {
+pub fn signed_narinfo_fixture() -> (NixPathInfo, String) {
     let (_f, path) = temp_secret_file();
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
     let cache = make_cache("upstream", &pub_b64, &encrypted_priv);
     let store_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo";
     let nar_hash = "sha256:0000000000000000000000000000000000000000000000000000";
     let nar_size: u64 = 1234;
-    let refs = vec!["bbbb-b".to_string(), "cccc-c".to_string()];
+    let refs = vec![
+        "0123456789abcdfghijklmnpqrsvwxyz-b".to_string(),
+        "zyxwvsrqpnmlkjihgfdcba9876543210-c".to_string(),
+    ];
     let sig = sign_narinfo_fingerprint(
         &path,
         cache,
@@ -69,5 +72,6 @@ pub fn signed_narinfo_fixture() -> (String, String) {
          Sig: {sig}\n",
         refs.join(" "),
     );
-    (body, format!("{sig_key_name}:{pub_b64}"))
+    let path_info = parse_narinfo_body(&body).expect("the fixture is a valid narinfo");
+    (path_info, format!("{sig_key_name}:{pub_b64}"))
 }

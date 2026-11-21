@@ -5,12 +5,13 @@
  */
 
 use anyhow::{Context, Result, bail};
-use gradient_types::ids::CacheId;
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_wire::constants::NAR_ZSTD_LEVEL;
 use rkyv::rancor::Error as RkyvError;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashSet};
+use std::fmt;
 use std::io::Read as _;
 use tracing::warn;
 use uuid::Uuid;
@@ -40,15 +41,67 @@ pub enum Merge {
     Take,
 }
 
-pub fn eval_cache_segment_key(cache: CacheId, fingerprint: &str, segment: Uuid) -> String {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CheckedEvalCacheFingerprint(String);
+
+impl CheckedEvalCacheFingerprint {
+    pub fn parse(text: &str) -> Result<Self> {
+        let lower_case_hex = |byte: u8| matches!(byte, b'0'..=b'9' | b'a'..=b'f');
+        if text.len() != 64 || !text.bytes().all(lower_case_hex) {
+            bail!("expect 64 characters from lowercase hex in the fingerprint for an eval cache");
+        }
+        Ok(Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CheckedEvalCacheFingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+pub fn eval_cache_segment_key(
+    cache: CacheId,
+    project: ProjectId,
+    fingerprint: &CheckedEvalCacheFingerprint,
+    segment: Uuid,
+) -> String {
     format!(
         "{}/{segment}",
-        eval_cache_segment_prefix(cache, fingerprint)
+        eval_cache_segment_prefix(cache, project, fingerprint)
     )
 }
 
-pub fn eval_cache_segment_prefix(cache: CacheId, fingerprint: &str) -> String {
-    format!("eval-cache-segments/{cache}/{fingerprint}")
+pub fn eval_cache_segment_prefix(
+    cache: CacheId,
+    project: ProjectId,
+    fingerprint: &CheckedEvalCacheFingerprint,
+) -> String {
+    format!("eval-cache-segments/{cache}/{project}/{fingerprint}")
+}
+
+pub fn parse_new_layout_cache_segment_key(
+    key: &str,
+) -> Option<(CacheId, ProjectId, CheckedEvalCacheFingerprint)> {
+    fn canonical<T: std::str::FromStr + fmt::Display>(part: &str) -> Option<T> {
+        part.parse()
+            .ok()
+            .filter(|parsed: &T| parsed.to_string() == part)
+    }
+
+    let mut parts = key.strip_prefix("eval-cache-segments/")?.split('/');
+    let cache = canonical(parts.next()?)?;
+    let project = canonical(parts.next()?)?;
+    let fingerprint = CheckedEvalCacheFingerprint::parse(parts.next()?).ok()?;
+    canonical::<Uuid>(parts.next()?)?;
+    parts
+        .next()
+        .is_none()
+        .then_some((cache, project, fingerprint))
 }
 
 fn rank(kind: u8) -> u8 {
@@ -236,6 +289,43 @@ fn merge_into(existing: &mut EvalCacheRow, incoming: EvalCacheRow) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn segment_key_with_non_lowercase_hyphenated_uuid_part_does_not_parse() {
+        let (cache, project, segment) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        let fingerprint = "a".repeat(64);
+        let key = |cache: String, project: String, segment: String| {
+            format!("eval-cache-segments/{cache}/{project}/{fingerprint}/{segment}")
+        };
+        let variants = |id: Uuid| {
+            [
+                id.to_string().to_uppercase(),
+                id.simple().to_string(),
+                id.braced().to_string(),
+            ]
+        };
+
+        assert!(
+            parse_new_layout_cache_segment_key(&key(
+                cache.to_string(),
+                project.to_string(),
+                segment.to_string()
+            ))
+            .is_some()
+        );
+        for variant in variants(cache) {
+            let key = key(variant, project.to_string(), segment.to_string());
+            assert_eq!(parse_new_layout_cache_segment_key(&key), None, "{key}");
+        }
+        for variant in variants(project) {
+            let key = key(cache.to_string(), variant, segment.to_string());
+            assert_eq!(parse_new_layout_cache_segment_key(&key), None, "{key}");
+        }
+        for variant in variants(segment) {
+            let key = key(cache.to_string(), project.to_string(), variant);
+            assert_eq!(parse_new_layout_cache_segment_key(&key), None, "{key}");
+        }
+    }
+
     fn row(path: &[&str], kind: u8, value: &str) -> EvalCacheRow {
         EvalCacheRow {
             path: path.iter().map(|part| (*part).to_owned()).collect(),
@@ -243,6 +333,49 @@ mod tests {
             value: Some(value.to_owned()),
             context: None,
         }
+    }
+
+    const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn a_fingerprint_is_64_lower_case_hex_characters() {
+        assert_eq!(
+            CheckedEvalCacheFingerprint::parse(FINGERPRINT)
+                .unwrap()
+                .as_str(),
+            FINGERPRINT
+        );
+        for refused in [
+            String::new(),
+            "a/b".to_owned(),
+            FINGERPRINT[..63].to_owned(),
+            FINGERPRINT.to_uppercase(),
+            format!("{}/", &FINGERPRINT[..63]),
+        ] {
+            assert!(
+                CheckedEvalCacheFingerprint::parse(&refused).is_err(),
+                "{refused:?} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn segment_keys_of_two_projects_never_share_a_prefix() {
+        let cache = CacheId::now_v7();
+        let fingerprint = CheckedEvalCacheFingerprint::parse(FINGERPRINT).unwrap();
+        let (first, second) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let first_prefix = format!("{}/", eval_cache_segment_prefix(cache, first, &fingerprint));
+        let second_prefix = format!(
+            "{}/",
+            eval_cache_segment_prefix(cache, second, &fingerprint)
+        );
+        let key = eval_cache_segment_key(cache, first, &fingerprint, Uuid::now_v7());
+
+        assert_ne!(first_prefix, second_prefix);
+        assert!(!first_prefix.starts_with(&second_prefix));
+        assert!(!second_prefix.starts_with(&first_prefix));
+        assert!(key.starts_with(&first_prefix));
+        assert!(!key.starts_with(&second_prefix));
     }
 
     #[test]

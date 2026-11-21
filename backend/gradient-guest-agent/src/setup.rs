@@ -173,12 +173,97 @@ async fn mount_work_disk(disk: &Path) -> Result<()> {
     run_command("chown", &["-R", &owner, WORK_DIR]).await
 }
 
+#[derive(Debug, PartialEq)]
+enum GuestNetworkSetupStep {
+    WriteProcSysKernelSetting {
+        ipv6_interface_proc_setting_file_path: PathBuf,
+        kernel_setting_value: &'static str,
+    },
+    RunIpCommandWithArguments(Vec<String>),
+}
+
+fn build_guest_network_setup_steps_from_network_message(
+    guest_network_interface_name: &str,
+    network: &GuestNetwork,
+) -> Vec<GuestNetworkSetupStep> {
+    let make_ip_command_step = |arguments: &[&str]| {
+        GuestNetworkSetupStep::RunIpCommandWithArguments(
+            arguments
+                .iter()
+                .map(|&argument| argument.to_owned())
+                .collect(),
+        )
+    };
+    let mut network_setup_steps = Vec::new();
+    if network.ipv6_configuration.is_some() {
+        // Write these settings before link up. The kernel can create a link-local address, start duplicate address detection and accept router advertisements right after link up. The kernel does not create a link-local address with `addr_gen_mode` 1.
+        for (ipv6_interface_setting_file_name, kernel_setting_value) in [
+            ("accept_ra", "0"),
+            ("accept_dad", "0"),
+            ("addr_gen_mode", "1"),
+        ] {
+            network_setup_steps.push(GuestNetworkSetupStep::WriteProcSysKernelSetting {
+                ipv6_interface_proc_setting_file_path: Path::new("/proc/sys/net/ipv6/conf")
+                    .join(guest_network_interface_name)
+                    .join(ipv6_interface_setting_file_name),
+                kernel_setting_value,
+            });
+        }
+    }
+    let address = format!("{}/{}", network.address, network.prefix);
+    network_setup_steps.extend([
+        make_ip_command_step(&["link", "set", "dev", guest_network_interface_name, "up"]),
+        make_ip_command_step(&["addr", "add", &address, "dev", guest_network_interface_name]),
+        make_ip_command_step(&["route", "add", "default", "via", &network.gateway]),
+    ]);
+    if let Some(ipv6_configuration) = &network.ipv6_configuration {
+        let address = format!(
+            "{}/{}",
+            ipv6_configuration.address, ipv6_configuration.prefix
+        );
+        network_setup_steps.extend([
+            make_ip_command_step(&[
+                "-6",
+                "addr",
+                "add",
+                &address,
+                "dev",
+                guest_network_interface_name,
+                "nodad",
+            ]),
+            make_ip_command_step(&[
+                "-6",
+                "route",
+                "add",
+                "default",
+                "via",
+                &ipv6_configuration.gateway,
+            ]),
+        ]);
+    }
+    network_setup_steps
+}
+
 async fn configure_network(network: &GuestNetwork) -> Result<()> {
     let interface = interface_with_mac(Path::new(NET_CLASS_DIR), &network.mac).await?;
-    let address = format!("{}/{}", network.address, network.prefix);
-    run_command("ip", &["link", "set", "dev", &interface, "up"]).await?;
-    run_command("ip", &["addr", "add", &address, "dev", &interface]).await?;
-    run_command("ip", &["route", "add", "default", "via", &network.gateway]).await?;
+    for network_setup_step in
+        build_guest_network_setup_steps_from_network_message(&interface, network)
+    {
+        match network_setup_step {
+            GuestNetworkSetupStep::WriteProcSysKernelSetting {
+                ipv6_interface_proc_setting_file_path,
+                kernel_setting_value,
+            } => tokio::fs::write(&ipv6_interface_proc_setting_file_path, kernel_setting_value)
+                .await
+                .with_context(|| {
+                    format!("write {}", ipv6_interface_proc_setting_file_path.display())
+                })?,
+            GuestNetworkSetupStep::RunIpCommandWithArguments(arguments) => {
+                let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+                run_command("ip", &arguments).await?;
+            }
+        }
+    }
     write_resolv_conf(Path::new(RESOLV_CONF), &network.nameservers).await
 }
 
@@ -331,7 +416,113 @@ async fn run_command(program: &str, args: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{interface_with_mac, write_resolv_conf};
+    use std::path::PathBuf;
+
+    use gradient_wire::guest::{GuestNetwork, GuestNetworkIpv6};
+
+    use super::{
+        GuestNetworkSetupStep, build_guest_network_setup_steps_from_network_message,
+        interface_with_mac, write_resolv_conf,
+    };
+
+    fn build_example_guest_network_message_with_ipv4_and_optional_ipv6(
+        ipv6_configuration: Option<GuestNetworkIpv6>,
+    ) -> GuestNetwork {
+        GuestNetwork {
+            address: "10.233.0.2".to_owned(),
+            prefix: 16,
+            gateway: "10.233.0.1".to_owned(),
+            nameservers: vec!["10.233.0.1".to_owned()],
+            mac: "02:47:52:00:00:02".to_owned(),
+            ipv6_configuration,
+        }
+    }
+
+    fn expected_step_running_ip_with_arguments(arguments: &[&str]) -> GuestNetworkSetupStep {
+        GuestNetworkSetupStep::RunIpCommandWithArguments(
+            arguments
+                .iter()
+                .map(|&argument| argument.to_owned())
+                .collect(),
+        )
+    }
+
+    fn expected_ipv4_steps_for_enp0s5_and_10_233_0_2_16() -> Vec<GuestNetworkSetupStep> {
+        vec![
+            expected_step_running_ip_with_arguments(&["link", "set", "dev", "enp0s5", "up"]),
+            expected_step_running_ip_with_arguments(&[
+                "addr",
+                "add",
+                "10.233.0.2/16",
+                "dev",
+                "enp0s5",
+            ]),
+            expected_step_running_ip_with_arguments(&[
+                "route",
+                "add",
+                "default",
+                "via",
+                "10.233.0.1",
+            ]),
+        ]
+    }
+
+    #[test]
+    fn test_ipv6_configuration_disables_router_advertisements_duplicate_address_detection_and_link_local_addresses_before_bringing_link_up_and_sets_static_address_and_default_route()
+     {
+        let network = build_example_guest_network_message_with_ipv4_and_optional_ipv6(Some(
+            GuestNetworkIpv6 {
+                address: "fd00:ec2:6::2".to_owned(),
+                prefix: 64,
+                gateway: "fd00:ec2:6::1".to_owned(),
+            },
+        ));
+        let expected_ipv6_kernel_setting_write_step_for_enp0s5 =
+            |name: &str, kernel_setting_value| GuestNetworkSetupStep::WriteProcSysKernelSetting {
+                ipv6_interface_proc_setting_file_path: PathBuf::from(format!(
+                    "/proc/sys/net/ipv6/conf/enp0s5/{name}"
+                )),
+                kernel_setting_value,
+            };
+        let mut expected_network_setup_steps = vec![
+            expected_ipv6_kernel_setting_write_step_for_enp0s5("accept_ra", "0"),
+            expected_ipv6_kernel_setting_write_step_for_enp0s5("accept_dad", "0"),
+            expected_ipv6_kernel_setting_write_step_for_enp0s5("addr_gen_mode", "1"),
+        ];
+        expected_network_setup_steps.extend(expected_ipv4_steps_for_enp0s5_and_10_233_0_2_16());
+        expected_network_setup_steps.push(expected_step_running_ip_with_arguments(&[
+            "-6",
+            "addr",
+            "add",
+            "fd00:ec2:6::2/64",
+            "dev",
+            "enp0s5",
+            "nodad",
+        ]));
+        expected_network_setup_steps.push(expected_step_running_ip_with_arguments(&[
+            "-6",
+            "route",
+            "add",
+            "default",
+            "via",
+            "fd00:ec2:6::1",
+        ]));
+
+        assert_eq!(
+            build_guest_network_setup_steps_from_network_message("enp0s5", &network),
+            expected_network_setup_steps
+        );
+    }
+
+    #[test]
+    fn test_no_ipv6_config_only_sets_ipv4_link_address_and_route() {
+        let network = build_example_guest_network_message_with_ipv4_and_optional_ipv6(None);
+
+        assert_eq!(
+            build_guest_network_setup_steps_from_network_message("enp0s5", &network),
+            expected_ipv4_steps_for_enp0s5_and_10_233_0_2_16()
+        );
+    }
 
     #[tokio::test]
     async fn the_interface_is_found_by_its_mac() {

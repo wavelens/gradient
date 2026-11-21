@@ -134,6 +134,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_parse_without_registration_flag_leaves_registration_disabled() {
+        let matches = Cli::command()
+            .mut_args(|arg| arg.env(None))
+            .get_matches_from([
+                "gradient-server",
+                "--database-url",
+                "postgres://gradient@db/gradient",
+            ]);
+        let parsed_server_command_line_with_only_required_database_flag =
+            <Cli as clap::FromArgMatches>::from_arg_matches(&matches).expect("command line parses");
+
+        assert!(
+            !parsed_server_command_line_with_only_required_database_flag
+                .registration
+                .enable,
+            "Keep registration for self-service off unless admins enable it."
+        );
+    }
+
     fn option<'a>(options: &'a [EffectiveConfigOption], flag: &str) -> &'a EffectiveConfigOption {
         options
             .iter()

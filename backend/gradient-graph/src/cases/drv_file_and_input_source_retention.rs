@@ -16,7 +16,7 @@ use gradient_fixtures::shape::{Shape, shape};
 use gradient_wire::types::BuildFailureKind;
 
 use super::{A, B, Case, chain_done, store_path, t0};
-use crate::messages::{Demotion, GcRequest};
+use crate::messages::GcRequest;
 
 const B_INPUT_SOURCE_PATCH_STORE_PATH_NAME: &str = "b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5-sunrpc.patch";
 
@@ -28,7 +28,10 @@ fn entry_derivation_depends_on_derivation_with_cached_input_source(
     evaluation: EvaluationId,
 ) -> Shape {
     chain_done(evaluation)
+        .derivation(A)
+        .with_verified_serialized_derivation_hash_for_dependent_output_paths()
         .derivation(B)
+        .with_verified_serialized_derivation_hash_for_dependent_output_paths()
         .add_input_source_and_cache_path(B_INPUT_SOURCE_PATCH_STORE_PATH_NAME)
 }
 
@@ -126,10 +129,8 @@ async fn removing_cached_input_source_marks_derivation_not_walked_and_its_depend
     assert_server_reports_derivations_a_and_b_as_known(&case).await;
     let source = store_path_name_hash_part(B_INPUT_SOURCE_PATCH_STORE_PATH_NAME);
 
-    case.demote(Demotion::MissingNar {
-        hash: source.to_owned(),
-    })
-    .await;
+    case.report_missing_nar_of_every_content_variant(source)
+        .await;
 
     let path = case.find_cached_path(source).await;
     assert!(
@@ -150,10 +151,8 @@ async fn removing_dependent_derivation_drv_from_cache_marks_it_unwalked_and_depe
     assert_server_reports_derivations_a_and_b_as_known(&case).await;
     let drv_file = store_path_name_hash_part(B);
 
-    case.demote(Demotion::MissingNar {
-        hash: drv_file.to_owned(),
-    })
-    .await;
+    case.report_missing_nar_of_every_content_variant(drv_file)
+        .await;
 
     let path = case.find_cached_path(drv_file).await;
     assert!(
@@ -184,10 +183,9 @@ async fn expiry_gc_paths_keeps_live_input_source_and_removes_missing_nar_file_ma
     );
     assert_server_reports_derivations_a_and_b_as_known(&case).await;
 
-    case.gc(GcRequest::MissingNarFileCachedPathHashes {
-        hashes: vec![source.to_owned()],
-    })
-    .await;
+    let id = case.cached_path(source).await.id;
+    case.gc(GcRequest::RetireCachedPathsWithMissingNarFiles { ids: vec![id] })
+        .await;
 
     let path = case.find_cached_path(source).await;
     assert!(
@@ -207,8 +205,10 @@ async fn failed_build_with_missing_input_source_and_missing_storage_object_marks
         chain_done(e1)
             .evaluation_status(EvaluationStatus::Building)
             .derivation(B)
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .input_source(B_INPUT_SOURCE_PATCH_STORE_PATH_NAME)
             .derivation(A)
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .build_status(BuildStatus::Building)
             .attempt(AttemptOutcome::Running, None)
             .open_assignment(),

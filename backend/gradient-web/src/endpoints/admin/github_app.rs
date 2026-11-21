@@ -139,9 +139,13 @@ pub async fn callback(
         return Err(AdminRefusal::InvalidManifestState.into());
     };
 
-    let creds = gradient_ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
-        .await
-        .context("run github exchange")?;
+    let creds = gradient_ci::github_app_manifest::exchange_code(
+        &state.admin_configured_endpoint_http_client,
+        &host,
+        &q.code,
+    )
+    .await
+    .context("run github exchange")?;
 
     state
         .memory

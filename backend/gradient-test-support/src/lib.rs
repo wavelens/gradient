@@ -11,7 +11,10 @@
 
 pub mod cache_fixture;
 pub mod cli;
+pub mod content_address_and_store_path;
+pub mod derivation_file_from_reported_facts;
 pub mod fakes;
+pub mod git_daemon_and_fork_repository_fixtures;
 pub mod log_storage;
 pub mod state;
 pub mod web;

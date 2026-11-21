@@ -9,7 +9,8 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use axum_test::TestServer;
+use axum::extract::connect_info::MockConnectInfo;
+use axum_test::{TestResponse, TestServer};
 use chrono::{Duration, Utc};
 use gradient_entity::{api, session};
 use gradient_fixtures::ids::user_id;
@@ -18,10 +19,11 @@ use gradient_fixtures::rows::{live_session, user};
 use gradient_test_support::state::{TEST_JWT_SECRET, TestState};
 use gradient_types::{ApiId, ConcurrencyPolicy, SessionId, UserId};
 use jsonwebtoken::{EncodingKey, Header, encode};
-use sea_orm::{MockDatabase, MockExecResult};
+use sea_orm::{IdenStatic, Iterable, MockDatabase, MockExecResult, ModelTrait};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -484,4 +486,346 @@ async fn project_pinned_view_key_cannot_reach_account_routes() {
             "{method} {path}"
         );
     }
+}
+
+const FIXTURE_USER_PASSWORD: &str = "TestPass123!";
+
+fn build_test_server_with_trusted_proxy_peer(db: MockDatabase) -> TestServer {
+    let router = gradient_web::create_router(TestState::new().web_db(db.into_connection()).build())
+        .expect("router")
+        .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+    TestServer::new(router)
+}
+
+async fn send_password_sign_in_request_from_client_ip(
+    server: &TestServer,
+    client_ip: &str,
+    loginname: &str,
+    password: &str,
+) -> TestResponse {
+    server
+        .post("/api/v1/auth/basic/login")
+        .add_header("x-forwarded-for", client_ip)
+        .json(&serde_json::json!({ "loginname": loginname, "password": password }))
+        .await
+}
+
+fn queue_successful_password_sign_in_query_results(
+    db: MockDatabase,
+    account: &gradient_entity::user::Model,
+) -> MockDatabase {
+    add_audit_log_insert_result_to_mock_database(
+        db.append_query_results([vec![account.clone()]])
+            .append_query_results([vec![live_session(SessionId::now_v7())]])
+            .append_query_results([vec![account.clone()]]),
+    )
+}
+
+fn add_audit_log_insert_result_to_mock_database(db: MockDatabase) -> MockDatabase {
+    db.append_query_results([Vec::<gradient_entity::audit_log::Model>::new()])
+}
+
+fn add_rejected_password_sign_in_query_results_to_mock_database(
+    mut db: MockDatabase,
+    account_rows: &[gradient_entity::user::Model],
+    attempts: usize,
+) -> MockDatabase {
+    for _ in 0..attempts {
+        db = add_audit_log_insert_result_to_mock_database(
+            db.append_query_results([account_rows.to_vec()]),
+        );
+    }
+    db
+}
+
+fn assert_sign_in_response_is_rate_limited_wait(response: &TestResponse) {
+    response.assert_status(axum::http::StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.header("retry-after"), "1");
+    assert_eq!(response.json::<Value>()["code"], "rate_limit_exceeded");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wrong_passwords_from_many_networks_delay_the_account_without_running_password_check() {
+    let account = user();
+    let account_rows = [account.clone()];
+    let mut db =
+        add_rejected_password_sign_in_query_results_to_mock_database(mock_db(), &account_rows, 5);
+    for _ in 0..2 {
+        db = db
+            .append_query_results([account_rows.to_vec()])
+            .append_query_results([Vec::<session::Model>::new()]);
+    }
+    db = db.append_query_results([account_rows.to_vec()]);
+    db = queue_successful_password_sign_in_query_results(db, &account);
+    db = add_rejected_password_sign_in_query_results_to_mock_database(db, &account_rows, 2);
+    let server = build_test_server_with_trusted_proxy_peer(db);
+
+    for i in 1..=5 {
+        send_password_sign_in_request_from_client_ip(
+            &server,
+            &format!("198.51.100.{i}"),
+            &account.username,
+            "wrong",
+        )
+        .await
+        .assert_status_unauthorized();
+    }
+    assert_sign_in_response_is_rate_limited_wait(
+        &send_password_sign_in_request_from_client_ip(
+            &server,
+            "198.51.100.6",
+            &account.username,
+            "wrong",
+        )
+        .await,
+    );
+    assert_sign_in_response_is_rate_limited_wait(
+        &send_password_sign_in_request_from_client_ip(
+            &server,
+            "198.51.100.7",
+            &account.username,
+            FIXTURE_USER_PASSWORD,
+        )
+        .await,
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    send_password_sign_in_request_from_client_ip(
+        &server,
+        "198.51.100.8",
+        &account.username,
+        FIXTURE_USER_PASSWORD,
+    )
+    .await
+    .assert_status_ok();
+
+    for i in 9..=10 {
+        send_password_sign_in_request_from_client_ip(
+            &server,
+            &format!("198.51.100.{i}"),
+            &account.username,
+            "wrong",
+        )
+        .await
+        .assert_status_unauthorized();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_wrong_password_sign_in_from_twelve_client_ips_allows_at_most_five_401_responses_and_429_for_the_rest()
+ {
+    let account = user();
+    let mock_row_with_user_and_session_columns_and_no_ip =
+        build_mock_row_with_user_and_session_columns_and_no_ip(&account);
+    let server = build_test_server_with_trusted_proxy_peer(mock_db().append_query_results(
+        (0..36).map(|_| vec![mock_row_with_user_and_session_columns_and_no_ip.clone()]),
+    ));
+
+    let twelve_parallel_wrong_password_sign_in_responses =
+        futures::future::join_all((1..=12).map(|i| {
+            let server = &server;
+            let username = &account.username;
+            async move {
+                send_password_sign_in_request_from_client_ip(
+                    server,
+                    &format!("198.51.100.{i}"),
+                    username,
+                    "wrong",
+                )
+                .await
+            }
+        }))
+        .await;
+
+    let invalid_credentials_response_count = twelve_parallel_wrong_password_sign_in_responses
+        .iter()
+        .filter(|response| response.status_code() == axum::http::StatusCode::UNAUTHORIZED)
+        .count();
+    let too_many_requests_response_count = twelve_parallel_wrong_password_sign_in_responses
+        .iter()
+        .filter(|response| response.status_code() == axum::http::StatusCode::TOO_MANY_REQUESTS)
+        .count();
+    assert_eq!(
+        invalid_credentials_response_count, 5,
+        "{invalid_credentials_response_count} returned HTTP 401"
+    );
+    assert_eq!(too_many_requests_response_count, 7);
+}
+
+fn build_mock_row_with_user_and_session_columns_and_no_ip(
+    account: &gradient_entity::user::Model,
+) -> std::collections::BTreeMap<String, sea_orm::Value> {
+    let live_signed_in_session_row_without_ip_address = live_session(SessionId::now_v7());
+    session::Column::iter()
+        .map(|column| {
+            (
+                column.as_str().to_owned(),
+                live_signed_in_session_row_without_ip_address.get(column),
+            )
+        })
+        .chain(
+            gradient_entity::user::Column::iter()
+                .map(|column| (column.as_str().to_owned(), account.get(column))),
+        )
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn correct_password_from_network_with_live_session_is_not_delayed() {
+    let account = user();
+    let session_of_signed_in_owner = session::Model {
+        ip: Some("2001:db8:7:7::1".to_owned()),
+        ..live_session(SessionId::now_v7())
+    };
+    let db = add_rejected_password_sign_in_query_results_to_mock_database(
+        mock_db(),
+        std::slice::from_ref(&account),
+        5,
+    );
+    let db = db
+        .append_query_results([vec![account.clone()]])
+        .append_query_results([vec![session_of_signed_in_owner]]);
+    let db = queue_successful_password_sign_in_query_results(db, &account);
+    let server = build_test_server_with_trusted_proxy_peer(db);
+
+    for i in 1..=5 {
+        send_password_sign_in_request_from_client_ip(
+            &server,
+            &format!("198.51.100.{i}"),
+            &account.username,
+            "wrong",
+        )
+        .await
+        .assert_status_unauthorized();
+    }
+    send_password_sign_in_request_from_client_ip(
+        &server,
+        "2001:db8:7:7::2",
+        &account.username,
+        FIXTURE_USER_PASSWORD,
+    )
+    .await
+    .assert_status_ok();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn correct_password_from_network_with_live_cli_device_sign_in_session_is_still_delayed() {
+    let account = user();
+    let owner_cli_sign_in_device_flow_session_row = session::Model {
+        ip: Some("2001:db8:7:7::1".to_owned()),
+        is_cli_device_sign_in_session: true,
+        ..live_session(SessionId::now_v7())
+    };
+    let db = add_rejected_password_sign_in_query_results_to_mock_database(
+        mock_db(),
+        std::slice::from_ref(&account),
+        5,
+    );
+    let db = db
+        .append_query_results([vec![account.clone()]])
+        .append_query_results([vec![owner_cli_sign_in_device_flow_session_row]]);
+    let db = queue_successful_password_sign_in_query_results(db, &account);
+    let server = build_test_server_with_trusted_proxy_peer(db);
+
+    for i in 1..=5 {
+        send_password_sign_in_request_from_client_ip(
+            &server,
+            &format!("198.51.100.{i}"),
+            &account.username,
+            "wrong",
+        )
+        .await
+        .assert_status_unauthorized();
+    }
+    send_password_sign_in_request_from_client_ip(
+        &server,
+        "2001:db8:7:7::2",
+        &account.username,
+        FIXTURE_USER_PASSWORD,
+    )
+    .await
+    .assert_status(axum::http::StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repeated_wrong_sign_in_attempts_for_email_without_account_return_invalid_credentials_not_too_many_requests()
+ {
+    let server = build_test_server_with_trusted_proxy_peer(
+        add_rejected_password_sign_in_query_results_to_mock_database(mock_db(), &[], 8),
+    );
+
+    for i in 1..=8 {
+        let response = send_password_sign_in_request_from_client_ip(
+            &server,
+            &format!("198.51.100.{i}"),
+            "nobody@example.com",
+            "wrong",
+        )
+        .await;
+        response.assert_status_unauthorized();
+        assert_eq!(response.json::<Value>()["code"], "invalid_credentials");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repeated_wrong_sign_in_attempts_for_account_that_signs_in_only_through_external_identity_provider_return_invalid_credentials_not_too_many_requests()
+ {
+    let account_without_password = gradient_entity::user::Model {
+        password: None,
+        ..user()
+    };
+    let server = build_test_server_with_trusted_proxy_peer(
+        add_rejected_password_sign_in_query_results_to_mock_database(
+            mock_db(),
+            std::slice::from_ref(&account_without_password),
+            8,
+        ),
+    );
+
+    for i in 1..=8 {
+        let response = send_password_sign_in_request_from_client_ip(
+            &server,
+            &format!("198.51.100.{i}"),
+            &account_without_password.username,
+            "wrong",
+        )
+        .await;
+        response.assert_status_unauthorized();
+        assert_eq!(response.json::<Value>()["code"], "invalid_credentials");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn five_wrong_password_account_deletion_confirmations_delay_next_password_sign_in_from_network_without_live_session_with_429_and_retry_after()
+ {
+    let session = live_session(SessionId::now_v7());
+    let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
+    let mut db = auth_queue(mock_db(), session.clone());
+    for _ in 1..5 {
+        db = db
+            .append_query_results([vec![session.clone()]])
+            .append_query_results([vec![user()]]);
+    }
+    db = db
+        .append_query_results([vec![user()]])
+        .append_query_results([Vec::<session::Model>::new()]);
+    let server = build_test_server_with_trusted_proxy_peer(db);
+
+    for _ in 0..5 {
+        server
+            .delete("/api/v1/user")
+            .add_header("authorization", format!("Bearer {token}"))
+            .json(&serde_json::json!({ "password": "WrongPassword!" }))
+            .await
+            .assert_status_forbidden();
+    }
+    assert_sign_in_response_is_rate_limited_wait(
+        &send_password_sign_in_request_from_client_ip(
+            &server,
+            "198.51.100.20",
+            &user().username,
+            FIXTURE_USER_PASSWORD,
+        )
+        .await,
+    );
 }

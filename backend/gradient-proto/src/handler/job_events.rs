@@ -351,13 +351,13 @@ impl SchedulerJobEvents {
                     .await;
             }
             JobUpdateKind::BuildOutput {
-                build_id,
+                build_id: _,
                 outputs,
                 metrics,
                 substituted,
             } => {
                 if let Err(e) = scheduler
-                    .handle_build_output(&job_id, &build_id, outputs, metrics, substituted)
+                    .handle_build_output(peer_id, &job_id, outputs, metrics, substituted)
                     .await
                 {
                     error!(%peer_id, %job_id, error = %e, "handle_build_output failed");

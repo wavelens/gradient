@@ -5,13 +5,13 @@
  */
 
 use crate::pr::{BranchCommit, CommitIdent, PrRef};
-use crate::registry::GitHostRegistry;
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_types::{GitHostType, RepositoryLocation};
-use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
+pub use gradient_types::parse_owner_repo;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
+use gradient_util::http_base_url::ValidatedHttpBaseUrl;
+use gradient_util::http_validation::parse_and_check_allowed_outbound_url;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tracing::warn;
 
 mod gitea;
@@ -38,8 +38,13 @@ fn comment_exists(edited: Result<(), crate::client::HostError>) -> Result<bool> 
     }
 }
 
-fn validate_safe_outbound_url(url: &str) -> Result<(), WebhookUrlError> {
-    validate_webhook_url(url).map(|_| ())
+fn parse_user_git_host_base_url_and_check_allowlist(
+    http: &HttpClientForUserSuppliedUrls,
+    raw: &str,
+) -> Result<ValidatedHttpBaseUrl> {
+    let base_url: ValidatedHttpBaseUrl = raw.parse()?;
+    parse_and_check_allowed_outbound_url(base_url.as_str(), http.allowlist())?;
+    Ok(base_url)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +106,7 @@ pub struct ReactionTarget {
 pub struct PullRequestSnapshot {
     pub head_sha: String,
     pub head_branch: String,
-    pub head_clone_url: Option<String>,
+    pub head_clone_url: Option<gradient_types::RepositoryUrl>,
     pub is_fork: Option<bool>,
     pub title: Option<String>,
 }
@@ -156,6 +161,21 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         _repo: &str,
         _pr_number: u64,
     ) -> Result<Option<PullRequestSnapshot>> {
+        Ok(None)
+    }
+
+    /// Return the commit of the newest deciding review (APPROVED or REQUEST_CHANGES) for this
+    /// user. If none, nothing is approved. Match reviews by stable user ID. The review must still
+    /// carry the login of the webhook sender. No approval for a login that a renamed reviewer gave
+    /// up and another user took.
+    async fn get_newest_undismissed_approval_review_commit_id_for_user(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _pr_number: u64,
+        _user_id: i64,
+        _webhook_sender_login: &str,
+    ) -> Result<Option<Vec<u8>>> {
         Ok(None)
     }
 
@@ -220,74 +240,9 @@ struct ContentReactionPayload<'a> {
     content: &'a str,
 }
 
-pub fn reporter_for_task(
-    http: reqwest::Client,
-    ci_type: Option<&str>,
-    ci_url: Option<&str>,
-    ci_token: Option<&str>,
-) -> Arc<dyn CiReporter> {
-    let Some(token) = ci_token else {
-        return Arc::new(NoopCiReporter);
-    };
-
-    let git_host = match ci_type.and_then(GitHostType::from_path_segment) {
-        Some(git_host) => git_host,
-        None => {
-            if let Some(unknown) = ci_type {
-                warn!(ci_type = %unknown, "Unknown CI reporter type, using noop");
-            }
-            return Arc::new(NoopCiReporter);
-        }
-    };
-
-    let registry = GitHostRegistry::with_builtin();
-    let Some(provider) = registry.get(git_host) else {
-        return Arc::new(NoopCiReporter);
-    };
-
-    match provider.build_reporter(http, ci_url, Some(token)) {
-        Ok(reporter) => reporter,
-        Err(e) => {
-            warn!(error = %e, git_host = ?git_host, "Failed to build reporter, falling back to noop");
-            Arc::new(NoopCiReporter)
-        }
-    }
-}
-
-pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
-    let clone_url = RepositoryLocation::of(repository_url).clone_url;
-    let url = clone_url.strip_prefix("git+").unwrap_or(clone_url);
-
-    let path = if let Some(rest) = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .or_else(|| url.strip_prefix("git://"))
-        .or_else(|| url.strip_prefix("ssh://"))
-    {
-        rest.split_once('/')?.1
-    } else {
-        let colon_pos = url.find(':')?;
-        &url[colon_pos + 1..]
-    };
-
-    let path = path.trim_end_matches('/').trim_end_matches(".git");
-    if !path.split('/').all(is_valid_repository_path_component) {
-        return None;
-    }
-    let (owner, repo) = path.split_once('/')?;
-    Some((owner.to_string(), repo.to_string()))
-}
-
-fn is_valid_repository_path_component(segment: &str) -> bool {
-    !matches!(segment, "" | "." | "..")
-        && segment
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-}
-
 #[cfg(test)]
-fn test_client() -> reqwest::Client {
-    gradient_util::http::build_client().expect("build test http client")
+fn test_client() -> HttpClientForUserSuppliedUrls {
+    HttpClientForUserSuppliedUrls::new(Default::default()).expect("build test http client")
 }
 
 #[cfg(test)]
@@ -303,116 +258,6 @@ mod tests {
             ),
             CommitIdent::gradient_bot("https://codeberg.org")
         );
-    }
-
-    fn is_noop(r: &Arc<dyn CiReporter>) -> bool {
-        format!("{:?}", r).contains("NoopCiReporter")
-    }
-
-    #[test]
-    fn reporter_for_task_picks_by_type_and_falls_back_to_noop() {
-        assert!(is_noop(&reporter_for_task(
-            test_client(),
-            Some("gitea"),
-            Some("http://169.254.169.254/"),
-            Some("tok")
-        )));
-        assert!(is_noop(&reporter_for_task(
-            test_client(),
-            Some("github"),
-            Some("https://x"),
-            None
-        )));
-        assert!(is_noop(&reporter_for_task(
-            test_client(),
-            None,
-            None,
-            Some("tok")
-        )));
-        assert!(is_noop(&reporter_for_task(
-            test_client(),
-            Some("bitbucket"),
-            None,
-            Some("tok")
-        )));
-
-        let cases = [
-            ("gitea", Some("https://gitea.example.com"), "GiteaReporter"),
-            (
-                "gitlab",
-                Some("https://gitlab.example.com"),
-                "GitlabReporter",
-            ),
-            ("github", None, "GithubReporter"),
-        ];
-        for (kind, url, marker) in cases {
-            let r = reporter_for_task(test_client(), Some(kind), url, Some("tok"));
-            assert!(format!("{:?}", r).contains(marker), "{kind}");
-        }
-    }
-
-    #[test]
-    fn parse_owner_repo_reads_the_owner_and_repo_from_each_transport() {
-        for url in [
-            "https://github.com/acme/widgets.git",
-            "https://github.com/acme/widgets",
-            "http://github.com/acme/widgets.git",
-            "git://github.com/acme/widgets.git",
-            "git@github.com:acme/widgets.git",
-            "git+https://github.com/acme/widgets.git",
-            "git+ssh://git@github.com/acme/widgets.git",
-        ] {
-            assert_eq!(
-                parse_owner_repo(url),
-                Some(("acme".into(), "widgets".into())),
-                "{url}"
-            );
-        }
-        assert_eq!(
-            parse_owner_repo("ssh://forgejo@gitea.home.lan:2222/internal/infra-home"),
-            Some(("internal".into(), "infra-home".into()))
-        );
-        assert_eq!(
-            parse_owner_repo("git@gitea.example.com:group/sub/repo.git"),
-            Some(("group".into(), "sub/repo".into()))
-        );
-    }
-
-    #[test]
-    fn a_flake_directory_does_not_change_the_repository_identity() {
-        for url in [
-            "https://github.com/acme/infra?dir=nix",
-            "git@github.com:acme/infra.git?dir=nix",
-        ] {
-            assert_eq!(
-                parse_owner_repo(url),
-                Some(("acme".into(), "infra".into())),
-                "{url}"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_owner_repo_rejects_urls_without_a_repo_path() {
-        for url in [
-            "https://github.com",
-            "https://github.com/acme",
-            "ftp-no-colon-owner-repo",
-        ] {
-            assert_eq!(parse_owner_repo(url), None, "{url}");
-        }
-    }
-
-    #[test]
-    fn parse_owner_repo_rejects_dot_segments_and_odd_characters() {
-        for url in [
-            "https://github.com/a/b/../../../orgs/x/y",
-            "https://github.com/a/./b",
-            "https://github.com/a//b",
-            "https://github.com/a/b%2F..",
-        ] {
-            assert_eq!(parse_owner_repo(url), None, "{url}");
-        }
     }
 
     #[derive(Debug, Default)]

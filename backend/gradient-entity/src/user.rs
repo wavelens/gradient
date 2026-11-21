@@ -10,6 +10,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::UserId;
 
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, EnumIter, DeriveActiveEnum, Deserialize, Serialize,
+)]
+#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
+#[serde(rename_all = "snake_case")]
+pub enum AccountOrigin {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    PublicRegistration,
+    #[sea_orm(num_value = 1)]
+    DeclaredInStateFile,
+    #[sea_orm(num_value = 2)]
+    ScimProvisionedByIdentityProvider,
+    #[sea_orm(num_value = 3)]
+    CreatedOnFirstSignInWithExternalLoginProvider,
+}
+
 #[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "user")]
 pub struct Model {
@@ -32,6 +49,7 @@ pub struct Model {
     pub scim_external_id: Option<String>,
     pub last_seen_version: Option<String>,
     pub last_opened_yearly_recap_year: Option<i32>,
+    pub account_origin: AccountOrigin,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -46,6 +64,7 @@ impl std::fmt::Debug for Model {
             .field("email", &self.email)
             .field("password", &"[redacted]")
             .field("created_at", &self.created_at)
+            .field("account_origin", &self.account_origin)
             .finish()
     }
 }

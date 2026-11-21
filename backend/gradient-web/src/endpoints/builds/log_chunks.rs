@@ -5,6 +5,7 @@
  */
 
 use super::refusal::BuildReadRefusal;
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
@@ -63,8 +64,14 @@ pub async fn get_build_log_chunks(
     Path(build_id): Path<BuildJobId>,
     Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> WebResult<Json<BaseResponse<LogChunkIndex>>> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let rows = match super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await? {
         Some(log_key) => gradient_db::build_log_chunks::of_attempt(&state.web_db, log_key).await?,
         None => vec![],
@@ -116,8 +123,14 @@ pub async fn get_build_log_chunk(
     Path((build_id, index)): Path<(BuildJobId, u32)>,
     Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> Result<Response, WebError> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let log_key = super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::LogChunk))?;
@@ -185,8 +198,14 @@ pub async fn get_build_log_lines(
     Query(q): Query<LineRangeQuery>,
     Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> Result<Response, WebError> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let Some(log_key) = super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await?
     else {
         return Ok((
@@ -272,8 +291,14 @@ pub async fn get_build_log_search(
     Query(query): Query<LogSearchQuery>,
     Query(attempt): Query<super::BuildLogAttemptQuery>,
 ) -> Result<Response, WebError> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let (log_key, rows) =
         match super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await? {
             Some(key) => (

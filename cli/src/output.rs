@@ -5,6 +5,10 @@
  */
 
 use crate::error::CliError;
+use crate::logfmt::{
+    StreamingTerminalEscapeSequenceFilter, TerminalColorOrPlainText,
+    filter_complete_text_for_terminal_output, stdout_filter_mode,
+};
 use connector::api::EvaluationStatus;
 use serde::Serialize;
 use std::io::{self, IsTerminal, Write};
@@ -67,12 +71,25 @@ impl Color {
     }
 }
 
+fn filter_mode_for_terminal_output(terminal: bool) -> TerminalColorOrPlainText {
+    if terminal {
+        TerminalColorOrPlainText::KeepSgrColorSequences
+    } else {
+        TerminalColorOrPlainText::StripEscapeSequences
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Output {
     json: bool,
     terminal: bool,
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "The output sink is the only place for writes to stdout and stderr."
+)]
 impl Output {
     pub fn new(json: bool) -> Self {
         Self {
@@ -105,13 +122,62 @@ impl Output {
 
     pub fn human(&self, msg: impl std::fmt::Display) {
         if !self.json {
-            println!("{}", msg);
+            println!(
+                "{}",
+                filter_complete_text_for_terminal_output(
+                    &msg.to_string(),
+                    filter_mode_for_terminal_output(self.terminal)
+                )
+            );
         }
     }
 
     pub fn progress(&self, msg: impl std::fmt::Display) {
         if !self.json {
-            eprintln!("{}", msg);
+            eprintln!(
+                "{}",
+                filter_complete_text_for_terminal_output(
+                    &msg.to_string(),
+                    filter_mode_for_terminal_output(io::stderr().is_terminal())
+                )
+            );
+        }
+    }
+
+    pub fn write_filtered_log_chunk_to_stdout_without_newline_and_flush(
+        &self,
+        filter: &mut StreamingTerminalEscapeSequenceFilter,
+        chunk: &str,
+    ) {
+        let mut stdout = io::stdout();
+        let _ = stdout.write_all(
+            filter
+                .filter_text_chunk_holding_incomplete_escape(chunk)
+                .as_bytes(),
+        );
+        let _ = stdout.flush();
+    }
+
+    pub fn write_unfinished_last_line_and_flush(
+        &self,
+        filter: &mut StreamingTerminalEscapeSequenceFilter,
+    ) {
+        let mut stdout = io::stdout();
+        let _ = stdout.write_all(filter.take_unfinished_line().as_bytes());
+        let _ = stdout.flush();
+    }
+
+    pub fn write_filtered_log_text_to_stdout_and_flush(&self, log: &str) {
+        let mut filter = StreamingTerminalEscapeSequenceFilter::new(stdout_filter_mode());
+        self.write_filtered_log_chunk_to_stdout_without_newline_and_flush(&mut filter, log);
+        self.write_unfinished_last_line_and_flush(&mut filter);
+    }
+
+    pub fn print_serializable_value_as_json_line<T: Serialize>(&self, value: &T) {
+        let stdout = io::stdout();
+        let mut lock = stdout.lock();
+        if serde_json::to_writer(&mut lock, value).is_ok() {
+            let _ = writeln!(lock);
         }
     }
 
@@ -121,6 +187,10 @@ impl Output {
         }
         let mut err = io::stderr();
         if err.is_terminal() {
+            let msg = filter_complete_text_for_terminal_output(
+                &msg.to_string(),
+                TerminalColorOrPlainText::KeepSgrColorSequences,
+            );
             let _ = write!(err, "\r\x1b[K{msg}");
             let _ = err.flush();
         }
@@ -131,6 +201,10 @@ impl Output {
             return;
         }
         let mut err = io::stderr();
+        let msg = filter_complete_text_for_terminal_output(
+            &msg.to_string(),
+            filter_mode_for_terminal_output(err.is_terminal()),
+        );
         if err.is_terminal() {
             let _ = write!(err, "\r\x1b[K{msg}\n");
         } else {
@@ -146,7 +220,13 @@ impl Output {
             let _ = serde_json::to_writer(io::stdout(), &env);
             println!();
         } else {
-            eprintln!("{}", text);
+            eprintln!(
+                "{}",
+                filter_complete_text_for_terminal_output(
+                    &text,
+                    filter_mode_for_terminal_output(io::stderr().is_terminal())
+                )
+            );
         }
         exit(kind.code());
     }

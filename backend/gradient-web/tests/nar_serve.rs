@@ -55,8 +55,16 @@ fn cache_row() -> gradient_entity::cache::Model {
     }
 }
 
-fn served() -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
-    std::collections::BTreeMap::from([("served", sea_orm::Value::Int(Some(1)))])
+fn served(hash: &str) -> gradient_entity::cached_path::Model {
+    gradient_entity::cached_path::Model {
+        id: CachedPathId::now_v7(),
+        hash: hash.into(),
+        nar_object_storage_key: hash.into(),
+        package: "hello".into(),
+        file_hash: format!("sha256:{FILE_HASH_NIX32}"),
+        created_at: test_date(),
+        ..Default::default()
+    }
 }
 
 /// The blob must span several storage stream chunks to exercise reassembly.
@@ -72,7 +80,7 @@ async fn nar_serve_streams_stored_blob_byte_for_byte() {
 
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![served()]])
+        .append_query_results([vec![served(STORE_HASH)]])
         .into_connection();
 
     let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
@@ -116,9 +124,9 @@ async fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
     let cli = test_cli();
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![served()]])
+        .append_query_results([vec![served(STORE_HASH)]])
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![served()]])
+        .append_query_results([vec![served(STORE_HASH)]])
         .into_connection();
 
     let nar_storage = NarStore::local(&cli.server.base_dir)
@@ -167,7 +175,7 @@ async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
     let cli = test_cli();
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
+        .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
     let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     nar_storage
@@ -215,7 +223,7 @@ async fn a_nar_url_store_hash_is_mapped_inbound() {
     let cli = test_cli();
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![served()]])
+        .append_query_results([vec![served(EXAMPLE_STORED_HASH)]])
         .into_connection();
     let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     nar_storage
@@ -263,15 +271,25 @@ async fn insert_signed_path(
     hash: &str,
     file_hash: &str,
 ) {
+    insert_signed_path_with_object_storage_key(db, cache, hash, hash, file_hash).await;
+}
+
+async fn insert_signed_path_with_object_storage_key(
+    db: &sea_orm::DatabaseConnection,
+    cache: CacheId,
+    hash: &str,
+    object_key: &str,
+    file_hash: &str,
+) {
     let path = gradient_entity::cached_path::Model {
         id: CachedPathId::now_v7(),
         hash: hash.into(),
+        nar_object_storage_key: object_key.into(),
         package: "system-shutdown".into(),
-        file_hash: Some(file_hash.into()),
+        file_hash: file_hash.into(),
         file_size: Some(79),
-        nar_size: Some(96),
-        nar_hash: Some(file_hash.into()),
-        confirmed: true,
+        nar_size: 96,
+        nar_hash: file_hash.into(),
         created_at: test_date(),
         ..Default::default()
     }
@@ -284,6 +302,18 @@ async fn insert_signed_path(
         cached_path: path.id,
         cache,
         signature: Some(vec![0; 64]),
+        created_at: test_date(),
+        ..Default::default()
+    }
+    .into_active_model()
+    .insert(db)
+    .await
+    .unwrap();
+    gradient_entity::store_path_content_producer::Model {
+        id: StorePathContentProducerId::now_v7(),
+        cached_path: path.id,
+        kind: gradient_entity::store_path_content_producer::StoredContentVariantProducerKind::UploadedByUserOrApiKey,
+        cache: Some(cache),
         created_at: test_date(),
         ..Default::default()
     }
@@ -353,4 +383,237 @@ async fn paths_sharing_identical_bytes_are_served_by_their_own_store_hash() {
         .await
         .assert_status_not_found();
     db.finish().await;
+}
+
+#[tokio::test]
+async fn two_content_variants_are_served_from_their_own_cache_objects() {
+    let cli = test_cli();
+    let db = TestDatabase::create().await;
+    let connection = db.connection();
+    let owner = gradient_fixtures::rows::user();
+    owner
+        .clone()
+        .into_active_model()
+        .insert(&connection)
+        .await
+        .unwrap();
+    let (first, second) = (CacheId::now_v7(), CacheId::now_v7());
+    for (id, name) in [(first, "first-cache"), (second, "second-cache")] {
+        gradient_entity::cache::Model {
+            public: true,
+            ..gradient_fixtures::rows::cache_with_id(id, name, owner.id)
+        }
+        .into_active_model()
+        .insert(&connection)
+        .await
+        .unwrap();
+    }
+    let second_key = format!("{STORE_HASH}-{FILE_HASH_NIX32}");
+    insert_signed_path(&connection, first, STORE_HASH, "sha256:first").await;
+    insert_signed_path_with_object_storage_key(
+        &connection,
+        second,
+        STORE_HASH,
+        &second_key,
+        &format!("sha256:{FILE_HASH_NIX32}"),
+    )
+    .await;
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
+    nar_storage.put(STORE_HASH, blob()).await.unwrap();
+    nar_storage
+        .put(&second_key, empty_directory_nar())
+        .await
+        .unwrap();
+    let state = TestState::new()
+        .web_db(connection)
+        .nar_storage(nar_storage)
+        .build();
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(
+            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        ));
+
+    let server = TestServer::new(router);
+    for (cache, expected) in [
+        ("first-cache", blob()),
+        ("second-cache", empty_directory_nar()),
+    ] {
+        let resp = server
+            .get(&format!("/cache/{cache}/nar/{STORE_HASH}.nar.zst"))
+            .await;
+        resp.assert_status_ok();
+        assert_eq!(resp.as_bytes().as_ref(), expected.as_slice(), "{cache}");
+    }
+    db.finish().await;
+}
+
+#[tokio::test]
+async fn public_cache_serves_signed_content_variant_on_narinfo_nar_single_file_and_directory_listing_when_no_subscribed_project_trusts_producer()
+ {
+    use gradient_fixtures::store_path_content_variants::{
+        UNTRUSTED, two_variants_of_one_hash_and_one_untrusted_hash,
+    };
+
+    let cli = test_cli();
+    let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+    readers
+        .db
+        .execute("UPDATE cache SET public = true, active = true")
+        .await;
+    let untrusted_hash_nar_object_storage_keys = readers
+        .db
+        .texts(&format!(
+            "SELECT nar_object_storage_key FROM cached_path WHERE hash = '{UNTRUSTED}'"
+        ))
+        .await;
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
+    nar_storage
+        .put(
+            &untrusted_hash_nar_object_storage_keys[0],
+            gradient_test_support::cache_fixture::create_temp_directory_with_one_file_and_get_zstd_compressed_nar(
+                "hello", b"hi",
+            )
+            .await,
+        )
+        .await
+        .unwrap();
+    let state = TestState::new()
+        .web_db(readers.db.connection())
+        .worker_db(readers.db.connection())
+        .cache_db(readers.db.connection())
+        .nar_storage(nar_storage)
+        .build();
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(
+            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        ));
+    let server = TestServer::new(router);
+    let cache = format!("cache-{}", readers.cache_one.into_inner().simple());
+
+    let mut route_url_and_http_status_pairs = Vec::new();
+    for route in [
+        format!("/cache/{cache}/{UNTRUSTED}.narinfo"),
+        format!("/cache/{cache}/nar/{UNTRUSTED}.nar.zst"),
+        format!("/cache/{cache}/serve/{UNTRUSTED}/hello"),
+        format!("/cache/{cache}/ls/{UNTRUSTED}"),
+    ] {
+        let status = server.get(&route).await.status_code();
+        route_url_and_http_status_pairs.push((route, status));
+    }
+
+    assert!(
+        route_url_and_http_status_pairs
+            .iter()
+            .all(|(_, status)| *status == axum::http::StatusCode::OK),
+        "Cache C1 signed the only variant of this hash. Every route served it. Answers: {answers:?}.",
+        answers = route_url_and_http_status_pairs
+    );
+    drop(server);
+    readers.db.finish().await;
+}
+
+#[tokio::test]
+async fn build_trace_realisation_route_returns_output_path_for_each_output_with_cache_signature_in_two_caches_including_write_only_subscription_and_untrusted_producer()
+ {
+    use gradient_fixtures::store_path_content_variants::{
+        BUILD_A, SHARED, UNTRUSTED, two_variants_of_one_hash_and_one_untrusted_hash,
+    };
+
+    let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+    let temporary_secrets_dir = tempfile::TempDir::new().expect("Secrets directory");
+    let cache_signing_key_encryption_key_file_path = temporary_secrets_dir.path().join("crypt");
+    std::fs::write(
+        &cache_signing_key_encryption_key_file_path,
+        "this-is-a-32-byte-crypt-key!!!!",
+    )
+    .expect("the secret is written");
+    let cache_signing_key_encryption_key_file_path = cache_signing_key_encryption_key_file_path
+        .to_string_lossy()
+        .into_owned();
+    let (private_key, public_key) =
+        gradient_sources::generate_signing_key(&cache_signing_key_encryption_key_file_path)
+            .expect("Key pair");
+    let derivation = readers.db.shared_build(BUILD_A).await.derivation;
+    readers
+        .db
+        .execute(&format!(
+            "UPDATE cache SET private_key = '{private_key}', public_key = '{public_key}', public = true, active = true; \
+             UPDATE project_cache SET mode = {write_only} WHERE cache = '{cache_two}'; \
+             INSERT INTO cached_path_signature (id, cached_path, cache, signature, fetch_count, created_at) \
+             SELECT uuidv7(), id, '{cache_two}', convert_to('signature', 'UTF8'), 0, now() \
+             FROM cached_path WHERE hash = '{UNTRUSTED}'; \
+             INSERT INTO derivation_output (id, derivation, name, hash, package, path_known_after_build, created_at) \
+             VALUES (uuidv7(), '{derivation}', 'out', '{SHARED}', 'shared', true, now()), \
+                    (uuidv7(), '{derivation}', 'bad', '{UNTRUSTED}', 'untrusted', true, now())",
+            write_only = sea_orm::ActiveEnum::to_value(
+                &gradient_entity::project_cache::CacheSubscriptionMode::WriteOnly
+            ),
+            cache_two = readers.cache_two,
+        ))
+        .await;
+    let derivation_file_name = readers
+        .db
+        .texts(&format!(
+            "SELECT hash || '-' || name || '.drv' FROM derivation WHERE id = '{derivation}'"
+        ))
+        .await
+        .remove(0);
+    let state = TestState::new()
+        .web_db(readers.db.connection())
+        .worker_db(readers.db.connection())
+        .cache_db(readers.db.connection())
+        .cli(|cli| cli.secrets.crypt_file = cache_signing_key_encryption_key_file_path.clone())
+        .build();
+    let server = TestServer::new(gradient_web::create_router(state).expect("Router"));
+
+    let mut expected_status_and_out_path_for_each_realisation_request = Vec::new();
+    for (cache, output) in [
+        (readers.cache_one, "out"),
+        (readers.cache_two, "out"),
+        (readers.cache_two, "bad"),
+        (readers.cache_one, "bad"),
+    ] {
+        let cache = format!("cache-{}", cache.into_inner().simple());
+        let resp = server
+            .get(&format!(
+                "/cache/{cache}/build-trace-v2/{derivation_file_name}/{output}.doi"
+            ))
+            .await;
+        let output_store_path = (resp.status_code() == axum::http::StatusCode::OK)
+            .then(|| {
+                resp.json::<serde_json::Value>()["outPath"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .flatten();
+        expected_status_and_out_path_for_each_realisation_request
+            .push((resp.status_code(), output_store_path));
+    }
+
+    let c1_untrusted_output_build_trace_status_and_output_path =
+        expected_status_and_out_path_for_each_realisation_request.pop();
+    assert_eq!(
+        c1_untrusted_output_build_trace_status_and_output_path,
+        Some((
+            axum::http::StatusCode::OK,
+            Some(format!("{UNTRUSTED}-untrusted"))
+        )),
+        "Cache C1 can sign untrusted outputs and serve their realisation."
+    );
+    assert_eq!(
+        expected_status_and_out_path_for_each_realisation_request,
+        [
+            (axum::http::StatusCode::OK, Some(format!("{SHARED}-shared"))),
+            (axum::http::StatusCode::OK, Some(format!("{SHARED}-shared"))),
+            (
+                axum::http::StatusCode::OK,
+                Some(format!("{UNTRUSTED}-untrusted"))
+            ),
+        ],
+        "Each cache serves the realisation of every output that it holds a signature for. Cache C2 serves the untrusted output from its own stored signature, although its only subscription is WriteOnly and cannot sign."
+    );
+    drop(server);
+    readers.db.finish().await;
 }

@@ -12,9 +12,7 @@ use gradient_types::TaskActionId;
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn http() -> reqwest::Client {
-    gradient_util::http::build_client().expect("http client")
-}
+use super::fixtures::http_client_allow_loopback as http;
 
 fn summary() -> EventSummary {
     EventSummary {
@@ -28,7 +26,7 @@ fn summary() -> EventSummary {
 
 #[tokio::test]
 async fn slack_transport_error_hides_the_webhook_url() {
-    let webhook = "http://127.0.0.1:1/services/T0/B0/SECRET".parse().unwrap();
+    let webhook = "http://127.0.0.1:1/services/T0/B0/SECRET";
     let Err(err) = post_slack_message(&http(), webhook, &summary()).await else {
         panic!("nothing listens on port 1");
     };
@@ -101,15 +99,15 @@ async fn slack_rate_limit_is_retried_and_forbidden_is_recorded() {
         .await;
 
     let http = http();
-    let limited = format!("{}/limited", server.uri()).parse().unwrap();
+    let limited = format!("{}/limited", server.uri());
     assert!(
-        post_slack_message(&http, limited, &summary())
+        post_slack_message(&http, &limited, &summary())
             .await
             .is_err()
     );
 
-    let revoked = format!("{}/revoked", server.uri()).parse().unwrap();
-    let ok = post_slack_message(&http, revoked, &summary())
+    let revoked = format!("{}/revoked", server.uri());
+    let ok = post_slack_message(&http, &revoked, &summary())
         .await
         .unwrap();
     assert_eq!(ok.status_code, Some(403));
@@ -132,7 +130,8 @@ async fn endless_response_body_is_read_only_up_to_the_cap() {
         let chunk = [b'x'; 8192];
         while stream.write_all(&chunk).is_ok() {}
     });
-    let resp = http()
+    let resp = gradient_util::http::build_client()
+        .expect("http client")
         .get(format!("http://{addr}/"))
         .send()
         .await

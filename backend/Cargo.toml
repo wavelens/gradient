@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wildcard", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wildcard", "gradient-wire", "gradient-worker", "gradient-worker-client"]
 resolver     = "2"
 
 [workspace.package]
@@ -57,6 +57,7 @@ gradient-types        = { path = "gradient-types" }
 gradient-util         = { path = "gradient-util" }
 gradient-vm           = { path = "gradient-vm" }
 gradient-web          = { path = "gradient-web" }
+gradient-wildcard     = { path = "gradient-wildcard" }
 gradient-wire         = { path = "gradient-wire" }
 gradient-derive       = { path = "gradient-derive" }
 gradient-worker       = { path = "gradient-worker" }
@@ -155,6 +156,7 @@ badgelib             = { version = "0.5.0", default-features = false }
 email_address        = { version = "0.2", default-features = false }
 governor             = { version = "0.10", default-features = false, features = ["std"] }
 http                 = { version = "1.4", default-features = false }
+http-body            = { version = "1.0", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
 hyper                = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util           = { version = "0.1", default-features = false, features = ["tokio"] }
@@ -289,7 +291,7 @@ required-features = ["api-spec"]
 
 [features]
 api-spec = []
-sql-gate = ["dep:anyhow", "dep:gradient-db", "dep:gradient-ci", "dep:gradient-graph", "dep:gradient-proto", "dep:gradient-report", "dep:sea-orm", "dep:serde_json", "dep:uuid"]
+sql-gate = ["dep:anyhow", "dep:gradient-db", "dep:gradient-ci", "dep:gradient-graph", "dep:gradient-report", "dep:sea-orm", "dep:serde_json", "dep:uuid"]
 
 [dependencies]
 gradient-cache     = { workspace = true }
@@ -299,7 +301,6 @@ anyhow             = { workspace = true, optional = true }
 gradient-db        = { workspace = true, optional = true }
 gradient-ci        = { workspace = true, optional = true }
 gradient-graph     = { workspace = true, optional = true }
-gradient-proto     = { workspace = true, optional = true }
 gradient-report    = { workspace = true, optional = true }
 gradient-scheduler = { workspace = true }
 sea-orm            = { workspace = true, optional = true }

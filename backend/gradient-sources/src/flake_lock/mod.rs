@@ -12,6 +12,7 @@ pub mod resolver;
 
 pub use generator::{
     BumpedInput, FileEdit, FlakeLockGenerator, InputName, Patch, PatchGenerator, ResolveProgress,
+    check_each_tracked_input_is_a_remote_direct_input,
 };
 pub use lock::{FlakeLock, InputRef, LockedRef, Node};
 pub use resolver::{HttpRevisionResolver, ResolvedRev, RevisionResolver};

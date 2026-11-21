@@ -10,7 +10,7 @@ use gradient_db::git_host_connections::{self, GitHostConnectionOwnerByDatabaseId
 use gradient_db::lookup::by_id;
 use gradient_entity::*;
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 
 pub(crate) fn lookup_id<T: Copy>(
@@ -57,10 +57,72 @@ pub(crate) fn keep_closest_owner_git_host_connection_for_each_name(
     closest
 }
 
+pub(crate) struct StateFileManagedUserIdsByUsername(HashMap<String, UserId>);
+
+impl StateFileManagedUserIdsByUsername {
+    pub(crate) fn resolve_username_to_user_id(
+        &self,
+        username: &str,
+        grant: &str,
+    ) -> Option<UserId> {
+        let user_id = self.0.get(&username.to_lowercase()).copied();
+        if user_id.is_none() {
+            tracing::error!(
+                username,
+                grant,
+                "Skip grant to state user: records in the state file declare this user, but none of the accounts in the state file have that username. An account from another origin already took that username. See the earlier conflict error."
+            );
+        }
+        user_id
+    }
+
+    pub(crate) fn resolve_creator_username_to_state_account_id(
+        &self,
+        username: &str,
+        owner: &str,
+        existing_entity_created_by_user_id: Option<UserId>,
+    ) -> Result<UserId, DynError> {
+        if let Some(user_id) = self.0.get(&username.to_lowercase()).copied() {
+            return Ok(user_id);
+        }
+        if username.is_empty() {
+            return existing_entity_created_by_user_id.ok_or_else(|| {
+                format!("No creator for {owner} (created_by is empty). {owner} doesn't exist yet. Set created_by to the user named in the state file.").into()
+            });
+        }
+        match existing_entity_created_by_user_id {
+            Some(existing_entity_created_by_user_id) => {
+                tracing::warn!(
+                    username,
+                    owner,
+                    %existing_entity_created_by_user_id,
+                    "Keep the creator stored on the existing entity. An account from another origin can have the same username as the declared creator. The state file can't use that account. See the earlier conflict error."
+                );
+                Ok(existing_entity_created_by_user_id)
+            }
+            None => Err(format!(
+                "User '{username}' is the creator of {owner}, but {owner} does not exist yet. There is an account on another origin with this username. The state file cannot use this username. Rename or delete that account. Or set existing_account_id on the declared user to link it to that account. Such links remove the password, sessions, API keys and external ID links of that account."
+            )
+            .into()),
+        }
+    }
+}
+
 impl<'a> StateApplicator<'a> {
-    pub(crate) async fn user_lookup(&self) -> Result<HashMap<String, UserId>, DynError> {
-        let users = user::Entity::find().all(self.db).await?;
-        Ok(users.into_iter().map(|u| (u.username, u.id)).collect())
+    pub(crate) async fn load_managed_accounts_by_lowercase_user_name(
+        &self,
+    ) -> Result<StateFileManagedUserIdsByUsername, DynError> {
+        let users = user::Entity::find()
+            .filter(user::Column::AccountOrigin.eq(AccountOrigin::DeclaredInStateFile))
+            .filter(user::Column::Managed.eq(true))
+            .all(self.db)
+            .await?;
+        Ok(StateFileManagedUserIdsByUsername(
+            users
+                .into_iter()
+                .map(|u| (u.username.to_lowercase(), u.id))
+                .collect(),
+        ))
     }
 
     pub(crate) async fn project_lookup(&self) -> Result<HashMap<String, ProjectId>, DynError> {

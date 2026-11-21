@@ -332,6 +332,7 @@ mod tests {
             gradient_fixtures::rows::project(),
             0,
             vec![],
+            true,
         )
         .await
         .unwrap();

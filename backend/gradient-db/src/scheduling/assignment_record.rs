@@ -423,17 +423,17 @@ pub async fn assignment_rows<C: ConnectionTrait>(
     .await
 }
 
-pub async fn build_has_open_assignment<C: ConnectionTrait>(
+pub async fn find_worker_id_and_project_by_dispatched_job_id<C: ConnectionTrait>(
     db: &C,
-    shared_build: DerivationBuildId,
-) -> Result<bool, DbErr> {
-    let open = EDispatchedJob::find()
-        .filter(CDispatchedJob::JobId.eq(format!("{BUILD_KEY_PREFIX}{shared_build}")))
-        .filter(CDispatchedJob::FinishedAt.is_null())
+    dispatched_job: DispatchedJobId,
+) -> Result<Option<(String, ProjectId)>, DbErr> {
+    EDispatchedJob::find_by_id(dispatched_job)
+        .select_only()
+        .column(CDispatchedJob::WorkerId)
+        .column(CDispatchedJob::Project)
+        .into_tuple::<(String, ProjectId)>()
         .one(db)
-        .await?;
-
-    Ok(open.is_some())
+        .await
 }
 
 pub(crate) async fn abandon_open<C: ConnectionTrait>(

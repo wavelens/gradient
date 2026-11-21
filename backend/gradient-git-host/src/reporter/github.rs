@@ -6,12 +6,14 @@
 
 use super::{
     CiReport, CiReporter, CiStatus, ContentReactionPayload, CreatedComment, GitHostCommentPayload,
-    PullRequestSnapshot, ReactionKind, ReactionTarget, comment_exists, validate_safe_outbound_url,
+    PullRequestSnapshot, ReactionKind, ReactionTarget, comment_exists,
+    parse_user_git_host_base_url_and_check_allowlist,
 };
-use crate::client::{GITHUB_API_URL, HostClient};
+use crate::client::{HostClient, validated_public_github_api_base_url};
 use crate::pr::{BranchCommit, PrRef};
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -20,20 +22,17 @@ pub struct GithubReporter {
 }
 
 impl GithubReporter {
-    const DEFAULT_API_URL: &'static str = GITHUB_API_URL;
-
     pub fn new(
-        client: reqwest::Client,
+        client: HttpClientForUserSuppliedUrls,
         base_url: impl Into<String>,
         token: impl Into<String>,
     ) -> Result<Self> {
         let raw = base_url.into();
         let base_url = if raw.is_empty() {
-            Self::DEFAULT_API_URL.to_string()
+            validated_public_github_api_base_url()
         } else {
-            validate_safe_outbound_url(&raw)
-                .map_err(|e| anyhow::anyhow!("Rejected GitHub base_url: {}", e))?;
-            raw.trim_end_matches('/').to_string()
+            parse_user_git_host_base_url_and_check_allowlist(&client, &raw)
+                .map_err(|e| anyhow::anyhow!("Rejected GitHub base_url: {}", e))?
         };
 
         Ok(Self {
@@ -113,10 +112,18 @@ impl From<GithubPrResponse> for PullRequestSnapshot {
             .as_ref()
             .and_then(|b| b.repo.as_ref())
             .and_then(|r| r.full_name.clone());
-        let is_fork =
-            matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
-        let head_clone_url = if is_fork {
-            pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
+        let is_fork = match (head_full.as_deref(), base_full.as_deref()) {
+            (Some(h), Some(b)) => Some(h != b),
+            _ => None,
+        };
+        let head_clone_url = if is_fork == Some(true) {
+            pr.head
+                .repo
+                .as_ref()
+                .and_then(|r| r.clone_url.as_deref())
+                .and_then(|url| {
+                    crate::webhook::parse_allowed_fork_repository_clone_url(url, "github")
+                })
         } else {
             None
         };
@@ -124,7 +131,7 @@ impl From<GithubPrResponse> for PullRequestSnapshot {
             head_sha: pr.head.sha,
             head_branch: pr.head.ref_,
             head_clone_url,
-            is_fork: Some(is_fork),
+            is_fork,
             title: pr.title,
         }
     }
@@ -315,7 +322,7 @@ mod tests {
     #[test]
     fn github_reporter_empty_url_uses_default() {
         let r = GithubReporter::new(test_client(), "", "tok").unwrap();
-        assert_eq!(r.client.base_url(), GithubReporter::DEFAULT_API_URL);
+        assert_eq!(r.client.base_url(), crate::client::GITHUB_API_URL);
     }
 
     #[test]
@@ -340,5 +347,53 @@ mod tests {
         let r = GithubReporter::new(test_client(), "https://github.example.com/api/v3/", "tok")
             .unwrap();
         assert_eq!(r.client.base_url(), "https://github.example.com/api/v3");
+    }
+
+    fn parse_github_pull_request_json_to_pull_request_snapshot(
+        value: serde_json::Value,
+    ) -> PullRequestSnapshot {
+        PullRequestSnapshot::from(serde_json::from_value::<GithubPrResponse>(value).unwrap())
+    }
+
+    #[test]
+    fn github_pull_request_with_deleted_head_repository_has_unknown_is_fork() {
+        let base = serde_json::json!({
+            "sha": "b",
+            "ref": "main",
+            "repo": { "full_name": "org/repo" },
+        });
+        let deleted_fork =
+            parse_github_pull_request_json_to_pull_request_snapshot(serde_json::json!({
+                "head": { "sha": "a", "ref": "patch-1", "repo": null },
+                "base": base,
+            }));
+        assert_eq!(deleted_fork.is_fork, None);
+        assert_eq!(deleted_fork.head_clone_url, None);
+
+        let without_base =
+            parse_github_pull_request_json_to_pull_request_snapshot(serde_json::json!({
+                "head": { "sha": "a", "ref": "patch-1", "repo": { "full_name": "org/repo" } },
+            }));
+        assert_eq!(without_base.is_fork, None);
+
+        let same_repository =
+            parse_github_pull_request_json_to_pull_request_snapshot(serde_json::json!({
+                "head": { "sha": "a", "ref": "patch-1", "repo": { "full_name": "org/repo" } },
+                "base": base,
+            }));
+        assert_eq!(same_repository.is_fork, Some(false));
+
+        let fork = parse_github_pull_request_json_to_pull_request_snapshot(serde_json::json!({
+            "head": {
+                "sha": "a",
+                "ref": "patch-1",
+                "repo": {
+                    "full_name": "external/repo",
+                    "clone_url": "https://github.com/external/repo.git",
+                },
+            },
+            "base": base,
+        }));
+        assert_eq!(fork.is_fork, Some(true));
     }
 }

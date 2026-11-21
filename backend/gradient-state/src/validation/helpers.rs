@@ -6,6 +6,7 @@
 
 use super::ValidationError;
 use crate::config::StateConfiguration;
+use gradient_types::input::InputError;
 
 pub(super) struct ErrorCollector {
     errors: Vec<ValidationError>,
@@ -21,6 +22,16 @@ impl ErrorCollector {
             field: field.into(),
             message: message.into(),
         });
+    }
+
+    pub(super) fn record_input_error_at_field(
+        &mut self,
+        field: impl Into<String>,
+        result: Result<(), InputError>,
+    ) {
+        if let Err(e) = result {
+            self.push(field, e.to_string());
+        }
     }
 
     pub(super) fn into_errors(self) -> Vec<ValidationError> {
@@ -39,6 +50,11 @@ impl<'a> EntityLookup<'a> {
 
     pub(super) fn user_exists(&self, name: &str) -> bool {
         self.config.users.contains_key(name)
+    }
+
+    /// Blank creator names leave the creator saved on the existing entity. Exports leave the creator blank when the creator is not an account in the state file.
+    pub(super) fn creator_is_blank_or_user_exists(&self, name: &str) -> bool {
+        name.is_empty() || self.user_exists(name)
     }
 
     pub(super) fn user_is_superuser(&self, name: &str) -> bool {

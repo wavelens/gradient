@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
 use gradient_types::{
-    BuildProgress, BuildProgressPhase, EvaluationProgress, SecretString, StorePath, StorePathMapper,
+    BuildProgress, BuildProgressPhase, EvaluationProgress, StorePath, StorePathMapper,
 };
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
@@ -20,7 +21,6 @@ use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
 use gradient_scheduler::eval_split::reply::ShardRequest;
 use gradient_scheduler::jobs::{Assignment, PendingJob, Reattached};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
-use gradient_wire::Rejection;
 use gradient_wire::messages::{
     BuildFailureKind, CACHE_QUERY_BUDGET, ClientMessage, ClusterMembership, JobKind, JobUpdateKind,
     RunningAssignment, ServerMessage,
@@ -34,25 +34,30 @@ use gradient_wire::worker_store_path_bloom_filter::{
 };
 
 use super::SessionHandles;
-use super::auth::{challenge_for, resolve_authorized};
-use super::cache::handle_cache_query;
-use super::dialed::{DialedSession, refresh_dialed_peers};
+use super::cache::{CacheQueryJob, handle_cache_query};
+use super::dialed::DialedSession;
 use super::eval_cache::handle_eval_cache_pull;
 use super::eval_split::{handle_eval_shards_planned, handle_eval_source_ready, send_reply};
 use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::{LogLane, LogTarget};
-use super::nar_serve::{ServeSlot, serve_nar_request};
+use super::nar_serve::{NarStreamResume, ServeSlot, serve_nar_request};
 use super::refusal::refuse;
-use super::socket::{ProtoWriter, send_credentials_for_job, send_error, send_server_msg};
+use super::socket::{ProtoWriter, send_error, send_job_with_credentials, send_server_msg};
 use super::store_paths::{inbound_or_refuse, outbound_message, project_mapper, unmapped_project};
-use super::upload::UploadSession;
+use super::upload::{UploadSession, UploadedStorePathDeriverChoice};
 use gradient_db::cache_paths::project_read_caches;
+use gradient_db::eval_cache::is_pre_upgrade_eval_cache_segment_cleanup_applied;
+use gradient_db::maintenance::storage_migrations::DELETE_EVALUATION_CACHE_SEGMENTS_WRITTEN_BEFORE_UPGRADE_MIGRATION_NAME;
+use gradient_db::store_path_content_variant_reader_choice::{
+    StorePathContentVariantReader, StorePathInputClosureHashes,
+};
 
 #[derive(Clone)]
 pub(crate) struct ActiveJob {
     pub assignment_id: DispatchedJobId,
     pub pending: PendingJob,
     pub cluster: Option<gradient_types::ids::ClusterAttemptId>,
+    pub input_closure_set: StorePathInputClosureHashes,
 }
 
 #[derive(Clone, Default)]
@@ -96,6 +101,65 @@ impl ActiveJobs {
 
     pub(crate) fn session_project(&self, job_id: &str) -> Option<ProjectId> {
         self.project(job_id).or_else(|| self.fetch_project(job_id))
+    }
+
+    pub(in crate::handler) fn deriver_decision_for_job_upload(
+        &self,
+        job_id: &str,
+        store_path: &str,
+    ) -> Result<UploadedStorePathDeriverChoice, String> {
+        let dispatched = self
+            .0
+            .lock()
+            .get(job_id)
+            .map(|active| match &active.pending {
+                PendingJob::Build(build) => {
+                    let outputs = &build.job.build.outputs;
+                    if outputs.iter().any(|output| output.path == store_path) {
+                        UploadedStorePathDeriverChoice::DispatchedBuildJobOutputDerivation {
+                            dispatched_deriver_path: build.job.build.drv_path.clone(),
+                        }
+                    } else {
+                        UploadedStorePathDeriverChoice::NoRecordedDeriver
+                    }
+                }
+                PendingJob::Eval(_) | PendingJob::Exec(_) => {
+                    UploadedStorePathDeriverChoice::UseWorkerStatedDeriver
+                }
+            });
+        match dispatched {
+            Some(decision) => Ok(decision),
+            None if self.fetch_project(job_id).is_some() => {
+                Ok(UploadedStorePathDeriverChoice::UseWorkerStatedDeriver)
+            }
+            None => Err(format!("This session does not run job {job_id}.")),
+        }
+    }
+
+    pub(crate) fn store_path_content_variant_reader_for_job(
+        &self,
+        job_id: &str,
+    ) -> Option<StorePathContentVariantReader> {
+        let pending = self
+            .0
+            .lock()
+            .get(job_id)
+            .map(|active| match &active.pending {
+                PendingJob::Build(build) => StorePathContentVariantReader::SharedBuild(
+                    build.derivation_build,
+                    active.input_closure_set.clone(),
+                ),
+                PendingJob::Exec(exec) => StorePathContentVariantReader::ExecJob(
+                    exec.project_id,
+                    exec.spec.program.clone(),
+                    active.input_closure_set.clone(),
+                ),
+                other => StorePathContentVariantReader::Project(other.project_id()),
+            });
+        pending.or_else(|| {
+            self.fetch_project(job_id)
+                .map(StorePathContentVariantReader::Project)
+        })
     }
 
     pub(crate) fn build(&self, job_id: &str) -> Option<DerivationBuildId> {
@@ -151,6 +215,7 @@ impl ActiveJobs {
                     assignment_id: job.assignment_id,
                     pending: job.job.clone(),
                     cluster: job.cluster,
+                    input_closure_set: Default::default(),
                 },
             );
         }
@@ -213,16 +278,21 @@ impl<'a> InboundContext<'a> {
             return true;
         };
         match msg {
-            ClientMessage::InitConnection { .. } => {
-                send_error(self.writer, 400, "unexpected InitConnection".into()).await;
+            unexpected @ (ClientMessage::InitConnection { .. }
+            | ClientMessage::ReauthRequest
+            | ClientMessage::AuthResponse { .. }) => {
+                send_error(
+                    self.writer,
+                    400,
+                    format!("unexpected {}", unexpected.variant_name()),
+                )
+                .await;
                 false
             }
             ClientMessage::Reject { code, reason } => {
                 info!(peer_id = %self.peer_id, code, %reason, "peer rejected connection");
                 false
             }
-            ClientMessage::ReauthRequest => self.on_reauth_request().await,
-            ClientMessage::AuthResponse { tokens } => self.on_auth_response(tokens).await,
             ClientMessage::WorkerCapabilities {
                 architectures,
                 system_features,
@@ -273,7 +343,7 @@ impl<'a> InboundContext<'a> {
                 });
                 true
             }
-            ClientMessage::RequestJob { kind } => self.on_request_job(kind).await,
+            ClientMessage::RequestJob { kind } => self.on_request_job(kind, uploads).await,
             ClientMessage::ClusterSignal {
                 attempt,
                 to,
@@ -290,7 +360,7 @@ impl<'a> InboundContext<'a> {
                 reason,
                 endpoint,
             } => {
-                self.on_assign_job_response(job_id, accepted, reason, endpoint)
+                self.on_assign_job_response(job_id, accepted, reason, endpoint, uploads)
                     .await;
                 true
             }
@@ -849,7 +919,31 @@ impl<'a> InboundContext<'a> {
         applied: Vec<String>,
     ) {
         let db = &self.handles.db.worker_db;
-        let readable = match self.active.session_project(&job_id) {
+        let evaluation_project = self
+            .active
+            .eval(&job_id)
+            .and_then(|_| self.active.project(&job_id));
+        let evaluation_project = match evaluation_project {
+            Some(project) => is_pre_upgrade_eval_cache_segment_cleanup_applied(db)
+                .await
+                .unwrap_or_else(|e| {
+                    warn!(peer_id = %self.peer_id, %job_id, error = %e, "Failed to read the cleanup reference for the evaluation cache");
+                    false
+                })
+                .then_some(project)
+                .or_else(|| {
+                    static EVALUATION_CACHE_MISS_WARNING_LOGGED: AtomicBool = AtomicBool::new(false);
+                    if !EVALUATION_CACHE_MISS_WARNING_LOGGED.swap(true, Ordering::Relaxed) {
+                        warn!(
+                            storage_migration = DELETE_EVALUATION_CACHE_SEGMENTS_WRITTEN_BEFORE_UPGRADE_MIGRATION_NAME,
+                            "All evaluation cache pulls get a miss until the storage migration has run."
+                        );
+                    }
+                    None
+                }),
+            None => None,
+        };
+        let readable = match evaluation_project {
             Some(project) => project_read_caches(db, project).await.unwrap_or_else(|e| {
                 warn!(peer_id = %self.peer_id, %job_id, error = %e, "readable caches lookup failed");
                 Vec::new()
@@ -860,6 +954,7 @@ impl<'a> InboundContext<'a> {
             &self.handles.db.storage.nar_storage,
             self.writer,
             &readable,
+            evaluation_project,
             job_id,
             fingerprint,
             applied,
@@ -888,70 +983,6 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    async fn on_reauth_request(&mut self) -> bool {
-        debug!(peer_id = %self.peer_id, "ReauthRequest");
-        if let Some(dialed) = self.dialed {
-            return refresh_dialed_peers(
-                self.writer,
-                &self.handles.db.worker_db,
-                self.scheduler,
-                self.peer_id,
-                dialed,
-            )
-            .await;
-        }
-
-        let (_, registered_peers) = challenge_for(&self.handles.db.worker_db, self.peer_id).await;
-        send_server_msg(
-            self.writer,
-            &ServerMessage::AuthChallenge {
-                peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
-            },
-        )
-        .await
-        .is_ok()
-    }
-
-    async fn on_auth_response(&mut self, tokens: Vec<(String, SecretString)>) -> bool {
-        let db = &self.handles.db.worker_db;
-        let (team, registered_peers) = challenge_for(db, self.peer_id).await;
-        let resolved = match resolve_authorized(db, &team, &registered_peers, &tokens).await {
-            Ok(resolved) => resolved,
-            Err(e) => {
-                warn!(peer_id = %self.peer_id, error = %e, "Failed to look up data for re-authentication. Closing connection.");
-                return false;
-            }
-        };
-
-        if resolved.authorized.is_empty() {
-            info!(peer_id = %self.peer_id, "no project authorizes this worker any more - disconnecting");
-            let _ = send_server_msg(
-                self.writer,
-                &ServerMessage::from(Rejection::NoProjectAuthorization),
-            )
-            .await;
-            return false;
-        }
-
-        let updated: HashSet<ProjectId> = resolved
-            .authorized
-            .iter()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        self.scheduler
-            .update_authorized_peers(self.peer_id, updated)
-            .await;
-        send_server_msg(
-            self.writer,
-            &ServerMessage::AuthUpdate {
-                authorized_peers: resolved.authorized,
-                failed_peers: resolved.failed,
-            },
-        )
-        .await
-        .is_ok()
-    }
-
     async fn on_worker_capabilities(&mut self, caps: WorkerCapabilities) {
         debug!(peer_id = %self.peer_id, ?caps, "WorkerCapabilities");
         self.scheduler
@@ -960,10 +991,10 @@ impl<'a> InboundContext<'a> {
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
-    async fn on_request_job(&mut self, kind: JobKind) -> bool {
+    async fn on_request_job(&mut self, kind: JobKind, uploads: &mut UploadSession) -> bool {
         trace!(peer_id = %self.peer_id, ?kind, "RequestJob");
         match self.scheduler.request_job(self.peer_id, kind).await {
-            Some(assignment) => self.hand_out(assignment, None).await,
+            Some(assignment) => self.hand_out(assignment, None, uploads).await,
             None => true,
         }
     }
@@ -972,13 +1003,14 @@ impl<'a> InboundContext<'a> {
     pub(super) async fn send_assign_job_for_available_requested_job_kind(
         &mut self,
         kind: JobKind,
+        uploads: &mut UploadSession,
     ) -> bool {
         match self
             .scheduler
             .fulfill_job_request_for_live_idle_slot(self.peer_id, kind)
             .await
         {
-            Some(assignment) => self.hand_out(assignment, None).await,
+            Some(assignment) => self.hand_out(assignment, None, uploads).await,
             None => true,
         }
     }
@@ -987,6 +1019,7 @@ impl<'a> InboundContext<'a> {
         &mut self,
         assignment: Assignment,
         cluster: Option<ClusterMembership>,
+        uploads: &mut UploadSession,
     ) -> bool {
         tracing::Span::current().record("job_id", assignment.job_id());
         let Some(mapper) = project_mapper(&self.handles.db, assignment.project_id).await else {
@@ -998,38 +1031,44 @@ impl<'a> InboundContext<'a> {
                 assignment_id: assignment.assignment_id(),
                 pending: assignment.pending.clone(),
                 cluster: cluster.as_ref().and_then(|m| m.attempt.parse().ok()),
+                input_closure_set: Default::default(),
             },
         );
-        let credentials = send_credentials_for_job(
+        let job_id = assignment.job_id().to_owned();
+        let assignment_id = assignment.assignment_id().to_string();
+        let sent = send_job_with_credentials(
             self.writer,
             &self.handles.db,
             self.scheduler,
             self.peer_id,
-            &assignment,
+            assignment,
+            |job, ssh_key, ssh_host_keys, https_git_credentials| {
+                let assign = ServerMessage::AssignJob {
+                    job_id: job_id.clone(),
+                    assignment_id,
+                    job,
+                    cluster: cluster.map(Box::new),
+                    ssh_key,
+                    ssh_host_keys,
+                    https_git_credentials,
+                };
+                outbound_message(assign, &mapper)
+            },
         )
-        .instrument(debug_span!("send_credentials"))
+        .instrument(debug_span!("assign_job", %job_id))
         .await;
-        if let Err(message) = credentials {
-            self.fail_dispatch(assignment.job_id(), message).await;
-            return true;
+        match sent {
+            Ok(sent) => sent,
+            Err(message) => {
+                self.fail_dispatch(&job_id, message, uploads).await;
+                true
+            }
         }
-        let job_id = assignment.job_id().to_owned();
-        let assigned = debug_span!("assign_job", %job_id);
-        let assign = ServerMessage::AssignJob {
-            job_id,
-            assignment_id: assignment.assignment_id().to_string(),
-            job: assignment.job,
-            cluster: cluster.map(Box::new),
-        };
-        send_server_msg(self.writer, &outbound_message(assign, &mapper))
-            .instrument(assigned)
-            .await
-            .is_ok()
     }
 
-    async fn fail_dispatch(&mut self, job_id: &str, message: String) {
+    async fn fail_dispatch(&mut self, job_id: &str, message: String, uploads: &mut UploadSession) {
         warn!(peer_id = %self.peer_id, %job_id, %message, "exec job fails at hand-out");
-        self.withdraw_assignment(job_id).await;
+        self.withdraw_assignment(job_id, uploads).await;
         if let Err(e) = self
             .scheduler
             .fail_exec_dispatch(self.peer_id, job_id, message)
@@ -1063,6 +1102,7 @@ impl<'a> InboundContext<'a> {
         accepted: bool,
         reason: Option<String>,
         endpoint: Option<String>,
+        uploads: &mut UploadSession,
     ) {
         if !self.active.contains(&job_id) {
             warn!(peer_id = %self.peer_id, %job_id, "Assignment Response for a Job Not Given to This Session");
@@ -1075,7 +1115,7 @@ impl<'a> InboundContext<'a> {
                 .await;
         } else {
             info!(peer_id = %self.peer_id, %job_id, ?reason, "job rejected by worker");
-            self.withdraw_assignment(&job_id).await;
+            self.withdraw_assignment(&job_id, uploads).await;
             if !self.scheduler.cluster_member_rejected(&job_id).await {
                 self.scheduler.job_rejected(self.peer_id, &job_id).await;
             }
@@ -1114,10 +1154,11 @@ impl<'a> InboundContext<'a> {
         true
     }
 
-    async fn withdraw_assignment(&mut self, job_id: &str) {
+    async fn withdraw_assignment(&mut self, job_id: &str, uploads: &mut UploadSession) {
         let Some(active) = self.active.remove(job_id) else {
             return;
         };
+        self.forget_uploads(job_id, uploads).await;
 
         if let Err(e) = gradient_db::scheduling::assignment_record::abandon_open_assignment(
             &self.handles.db.worker_db,
@@ -1199,6 +1240,12 @@ impl<'a> InboundContext<'a> {
         mapper: StorePathMapper,
     ) {
         trace!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
+        let Some(reader) = self
+            .active
+            .store_path_content_variant_reader_for_job(&job_id)
+        else {
+            return;
+        };
         let shutdown = self.handles.db.shutdown.clone();
         for store_path in paths {
             let handles = self.handles.clone();
@@ -1207,15 +1254,23 @@ impl<'a> InboundContext<'a> {
             let peer_id = self.peer_id.to_owned();
             let job_id = job_id.clone();
             let mapper = mapper.clone();
+            let reader = reader.clone();
             shutdown.spawn(async move {
                 let server = Arc::clone(&handles.nar_downloads);
                 let Some(_slot) = ServeSlot::acquire(permit, server).await else {
                     return;
                 };
 
-                if let Err(e) =
-                    serve_nar_request(&handles, &writer, &mapper, &job_id, &store_path, 0, None)
-                        .await
+                if let Err(e) = serve_nar_request(
+                    &handles,
+                    &writer,
+                    &mapper,
+                    reader,
+                    &job_id,
+                    &store_path,
+                    None,
+                )
+                .await
                 {
                     warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
                 }
@@ -1232,6 +1287,12 @@ impl<'a> InboundContext<'a> {
         mapper: StorePathMapper,
     ) {
         trace!(peer_id = %self.peer_id, %job_id, %store_path, received_bytes, "NarRequestResume");
+        let Some(reader) = self
+            .active
+            .store_path_content_variant_reader_for_job(&job_id)
+        else {
+            return;
+        };
         let handles = self.handles.clone();
         let writer = self.writer.clone();
         let permit = Arc::clone(self.nar_serve_semaphore);
@@ -1247,10 +1308,13 @@ impl<'a> InboundContext<'a> {
                 &handles,
                 &writer,
                 &mapper,
+                reader,
                 &job_id,
                 &store_path,
-                received_bytes,
-                Some(&stream_token),
+                Some(NarStreamResume {
+                    received_bytes,
+                    stream_token: &stream_token,
+                }),
             )
             .await
             {
@@ -1302,10 +1366,12 @@ impl RpcContext {
     }
 
     async fn answer(&self, msg: ClientMessage) {
-        let Some(project_id) = self
-            .active
-            .session_project(msg.job_id().unwrap_or_default())
-        else {
+        let job_id = msg.job_id().unwrap_or_default();
+        let (Some(project_id), Some(content_variant_reader)) = (
+            self.active.session_project(job_id),
+            self.active
+                .store_path_content_variant_reader_for_job(job_id),
+        ) else {
             refuse(&self.writer, &msg, "the job does not resolve to a project").await;
             return;
         };
@@ -1315,6 +1381,10 @@ impl RpcContext {
                 refuse(&self.writer, &msg, &unmapped_project(&e)).await;
                 return;
             }
+        };
+        let derivation_store_paths_from_worker_before_mapping = match &msg {
+            ClientMessage::QueryKnownDerivations { drv_paths, .. } => drv_paths.clone(),
+            _ => Vec::new(),
         };
         let Some(msg) = inbound_or_refuse(&self.writer, &mapper, msg).await else {
             return;
@@ -1328,8 +1398,18 @@ impl RpcContext {
                 mode,
                 external,
             } => {
+                let querying_job = CacheQueryJob {
+                    project: project_id,
+                    content_variant_reader,
+                };
                 self.on_cache_query(
-                    project_id, job_id, query_id, paths, nar_sizes, mode, external,
+                    querying_job,
+                    job_id,
+                    query_id,
+                    paths,
+                    nar_sizes,
+                    mode,
+                    external,
                 )
                 .await
             }
@@ -1338,6 +1418,10 @@ impl RpcContext {
                 query_id,
                 drv_paths,
             } => {
+                let drv_paths = filter_stored_paths_equal_to_client_paths(
+                    &derivation_store_paths_from_worker_before_mapping,
+                    drv_paths,
+                );
                 self.on_query_known_derivations(job_id, query_id, drv_paths)
                     .await
             }
@@ -1358,7 +1442,7 @@ impl RpcContext {
     )]
     async fn on_cache_query(
         &self,
-        project_id: ProjectId,
+        querying_job: CacheQueryJob,
         job_id: String,
         query_id: String,
         paths: Vec<String>,
@@ -1370,7 +1454,7 @@ impl RpcContext {
         let answer = handle_cache_query(
             &self.handles,
             &self.peer_id,
-            project_id,
+            querying_job,
             &paths,
             &nar_sizes,
             mode,
@@ -1444,6 +1528,22 @@ impl RpcContext {
     }
 }
 
+/// Only paths that equal the mapped store path of the project count as known. Only rows where the
+/// client path and stored path match get a verified hash modulo from the graph writer. Rows that
+/// another project recorded under a different client path can make a worker skip a derivation
+/// still in the closure check of this project.
+fn filter_stored_paths_equal_to_client_paths(
+    client_paths: &[String],
+    stored_paths: Vec<String>,
+) -> Vec<String> {
+    stored_paths
+        .into_iter()
+        .zip(client_paths)
+        .filter(|(stored, client)| stored == *client)
+        .map(|(stored, _)| stored)
+        .collect()
+}
+
 fn build_progress_phase(phase: WireBuildProgressPhase) -> BuildProgressPhase {
     match phase {
         WireBuildProgressPhase::Download => BuildProgressPhase::Download,
@@ -1499,6 +1599,7 @@ pub(in crate::handler) mod fixture {
             assignment_id: DispatchedJobId::now_v7(),
             pending: pending_eval(),
             cluster,
+            input_closure_set: Default::default(),
         };
         let active = ActiveJobs::from(HashMap::from([
             ("member".to_owned(), job(Some(attempt))),
@@ -1518,6 +1619,7 @@ pub(in crate::handler) mod fixture {
             assignment_id: DispatchedJobId::now_v7(),
             pending,
             cluster: None,
+            input_closure_set: Default::default(),
         };
         let active = ActiveJobs::from(HashMap::from([
             ("build".to_owned(), job(pending_build(shared_build))),
@@ -1527,6 +1629,55 @@ pub(in crate::handler) mod fixture {
         assert_eq!(active.build("build"), Some(shared_build));
         assert_eq!(active.build("eval"), None);
         assert_eq!(active.build("gone"), None);
+    }
+
+    #[test]
+    fn active_jobs_input_closure_set_is_not_reused_after_job_or_attempt_removal_or_in_new_session()
+    {
+        let shared_build = DerivationBuildId::now_v7();
+        let attempt = gradient_types::ids::ClusterAttemptId::now_v7();
+        let job = |cluster| ActiveJob {
+            assignment_id: DispatchedJobId::now_v7(),
+            pending: pending_build(shared_build),
+            cluster,
+            input_closure_set: Default::default(),
+        };
+        let input_closure_set_for_job_id = |active: &ActiveJobs, job_id: &str| match active
+            .store_path_content_variant_reader_for_job(job_id)
+        {
+            Some(StorePathContentVariantReader::SharedBuild(_, set)) => Some(set),
+            _ => None,
+        };
+        let active = ActiveJobs::default();
+
+        active.insert(JOB.to_owned(), job(None));
+        let first_input_closure_set =
+            input_closure_set_for_job_id(&active, JOB).unwrap_or_default();
+        let second_lookup_input_closure_set =
+            input_closure_set_for_job_id(&active, JOB).unwrap_or_default();
+        assert!(first_input_closure_set.shares_underlying_set(&second_lookup_input_closure_set));
+
+        active.remove(JOB);
+        assert!(input_closure_set_for_job_id(&active, JOB).is_none());
+
+        active.insert(JOB.to_owned(), job(Some(attempt)));
+        let reinserted_job_input_closure_set =
+            input_closure_set_for_job_id(&active, JOB).unwrap_or_default();
+        assert!(!reinserted_job_input_closure_set.shares_underlying_set(&first_input_closure_set));
+
+        active.remove_attempt(attempt);
+        assert!(input_closure_set_for_job_id(&active, JOB).is_none());
+
+        active.insert(JOB.to_owned(), job(None));
+        let reattached_active_jobs = ActiveJobs::default();
+        reattached_active_jobs.reattach(&active.pending());
+        let old_session_third_job_input_set =
+            input_closure_set_for_job_id(&active, JOB).unwrap_or_default();
+        assert!(
+            input_closure_set_for_job_id(&reattached_active_jobs, JOB)
+                .is_some_and(|set| !set.shares_underlying_set(&old_session_third_job_input_set)),
+            "Three job types get a new input-closure set. They are jobs dispatched again after removal, jobs that belong to a removed attempt and jobs in a new session. These jobs never get the old set."
+        );
     }
 
     pub(in crate::handler) fn pending_build(derivation_build: DerivationBuildId) -> PendingJob {
@@ -1557,6 +1708,92 @@ pub(in crate::handler) mod fixture {
             substitute: false,
             verifying_keys: Vec::new(),
         })
+    }
+
+    pub(in crate::handler) fn pending_build_job_for_project_with_output_store_paths(
+        project: ProjectId,
+        output_store_paths: &[&str],
+    ) -> PendingJob {
+        let PendingJob::Build(mut build) = pending_build(DerivationBuildId::now_v7()) else {
+            unreachable!()
+        };
+        build.project_id = project;
+        build.job.build.drv_path = format!("/nix/store/{}-build.drv", "c".repeat(32));
+        build.job.build.outputs = output_store_paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| gradient_wire::types::DerivationOutput {
+                name: format!("out{index}"),
+                path: (*path).to_owned(),
+            })
+            .collect();
+        PendingJob::Build(build)
+    }
+
+    #[test]
+    fn active_jobs_job_derivation_for_each_job_kind() {
+        let output = format!("/nix/store/{}-out", "a".repeat(32));
+        let other = format!("/nix/store/{}-other", "b".repeat(32));
+        let job = |pending| ActiveJob {
+            assignment_id: DispatchedJobId::now_v7(),
+            pending,
+            cluster: None,
+            input_closure_set: Default::default(),
+        };
+        let project = ProjectId::now_v7();
+        let active = ActiveJobs::from(HashMap::from([
+            (
+                "build".to_owned(),
+                job(pending_build_job_for_project_with_output_store_paths(
+                    project,
+                    &[&output],
+                )),
+            ),
+            ("eval".to_owned(), job(pending_eval())),
+            (
+                "exec".to_owned(),
+                job(pending_exec(gradient_types::ids::ExecJobAttemptId::now_v7())),
+            ),
+        ]));
+        active.insert_fetch("fetch".to_owned(), project);
+
+        let dispatched_deriver_path = match &active.0.lock()["build"].pending {
+            PendingJob::Build(build) => build.job.build.drv_path.clone(),
+            _ => unreachable!(),
+        };
+        let expected_deriver_decision_for_build_job_output_own_derivation_path = Ok(
+            UploadedStorePathDeriverChoice::DispatchedBuildJobOutputDerivation {
+                dispatched_deriver_path,
+            },
+        );
+        let expected_no_recorded_deriver_choice_for_unlisted_output_upload =
+            Ok(UploadedStorePathDeriverChoice::NoRecordedDeriver);
+        let expected_uploaded_store_path_deriver_choice_use_worker_stated_deriver =
+            Ok(UploadedStorePathDeriverChoice::UseWorkerStatedDeriver);
+        assert_eq!(
+            active.deriver_decision_for_job_upload("build", &output),
+            expected_deriver_decision_for_build_job_output_own_derivation_path
+        );
+        assert_eq!(
+            active.deriver_decision_for_job_upload("build", &other),
+            expected_no_recorded_deriver_choice_for_unlisted_output_upload
+        );
+        assert_eq!(
+            active.deriver_decision_for_job_upload("eval", &other),
+            expected_uploaded_store_path_deriver_choice_use_worker_stated_deriver
+        );
+        assert_eq!(
+            active.deriver_decision_for_job_upload("fetch", &other),
+            expected_uploaded_store_path_deriver_choice_use_worker_stated_deriver
+        );
+        assert_eq!(
+            active.deriver_decision_for_job_upload("exec", &other),
+            expected_uploaded_store_path_deriver_choice_use_worker_stated_deriver
+        );
+        assert_eq!(
+            active.deriver_decision_for_job_upload("gone", &other),
+            Err("This session does not run job gone.".to_owned())
+        );
     }
 
     pub(in crate::handler) fn pending_eval() -> PendingJob {
@@ -1591,6 +1828,8 @@ pub(in crate::handler) mod fixture {
             build_request: false,
             continuation: None,
             flake_fetch_needs_secrets: false,
+            derivation_batch_save_failure_message: None,
+            allows_project_credentials_and_privileged_actions: true,
         })
     }
 
@@ -1632,6 +1871,7 @@ pub(in crate::handler) mod fixture {
                 master_port: None,
             }),
             secrets: Default::default(),
+            allows_project_credentials_and_privileged_actions: true,
         }))
     }
 
@@ -1646,6 +1886,21 @@ pub(in crate::handler) mod fixture {
         pub uploads: UploadSession,
         pub worker_store_path_bloom_filter_chunk_collector:
             WorkerStorePathBloomFilterChunkCollector,
+    }
+
+    pub(in crate::handler) fn make_empty_upload_session_for_test(
+        state: &Arc<ServerState>,
+    ) -> (UploadSession, mpsc::UnboundedReceiver<Admitted>) {
+        let (admission, admitted) = state.memory.upload_admission.open_session("test");
+        let uploads = UploadSession {
+            admission,
+            table: UploadTable::default(),
+            partials: gradient_storage::PartialStore::new(tempfile::TempDir::new().unwrap().keep())
+                .unwrap(),
+            retain_up_to: 0,
+            idle_lease: Duration::from_secs(300),
+        };
+        (uploads, admitted)
     }
 
     impl TestSession {
@@ -1674,19 +1929,10 @@ pub(in crate::handler) mod fixture {
                     assignment_id: DispatchedJobId::now_v7(),
                     pending: pending_eval(),
                     cluster: None,
+                    input_closure_set: Default::default(),
                 },
             )]));
-            let (admission, admitted) = state.memory.upload_admission.open_session("test");
-            let uploads = UploadSession {
-                admission,
-                table: UploadTable::default(),
-                partials: gradient_storage::PartialStore::new(
-                    tempfile::TempDir::new().unwrap().keep(),
-                )
-                .unwrap(),
-                retain_up_to: 0,
-                idle_lease: Duration::from_secs(300),
-            };
+            let (uploads, admitted) = make_empty_upload_session_for_test(state);
             let session = Self {
                 writer,
                 handles: SessionHandles::from_state(state),
@@ -1732,7 +1978,7 @@ pub(in crate::handler) mod fixture {
 
 #[cfg(test)]
 mod assignment_response_tests {
-    use super::fixture::pending_eval;
+    use super::fixture::{make_empty_upload_session_for_test, pending_eval};
     use super::*;
     use crate::handler::job_events::SchedulerJobEvents;
     use gradient_fixtures::mock::{empty_db, mock_db};
@@ -1775,6 +2021,7 @@ mod assignment_response_tests {
                 assignment_id,
                 pending: pending_eval(),
                 cluster: None,
+                input_closure_set: Default::default(),
             },
         )]));
 
@@ -1790,8 +2037,15 @@ mod assignment_response_tests {
             dialed: None,
             worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
-        ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()), None)
-            .await;
+        let (mut uploads, _admitted) = make_empty_upload_session_for_test(&state);
+        ctx.on_assign_job_response(
+            "j1".into(),
+            false,
+            Some("at capacity".into()),
+            None,
+            &mut uploads,
+        )
+        .await;
 
         assert!(active.pending().is_empty());
         let log = log_db.into_transaction_log();
@@ -1836,6 +2090,7 @@ mod assignment_response_tests {
                 assignment_id: DispatchedJobId::now_v7(),
                 pending: pending_eval(),
                 cluster: None,
+                input_closure_set: Default::default(),
             },
         )]));
 
@@ -1851,7 +2106,8 @@ mod assignment_response_tests {
             dialed: None,
             worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
-        ctx.on_assign_job_response("j1".into(), true, None, None)
+        let (mut uploads, _admitted) = make_empty_upload_session_for_test(&state);
+        ctx.on_assign_job_response("j1".into(), true, None, None, &mut uploads)
             .await;
 
         assert!(active.contains("j1"));
@@ -1890,13 +2146,15 @@ mod assignment_response_tests {
             dialed: None,
             worker_store_path_bloom_filter_chunk_collector: &mut Default::default(),
         };
-        ctx.on_assign_job_response("build:foreign".into(), false, None, None)
+        let (mut uploads, _admitted) = make_empty_upload_session_for_test(&state);
+        ctx.on_assign_job_response("build:foreign".into(), false, None, None, &mut uploads)
             .await;
         ctx.on_assign_job_response(
             "build:foreign".into(),
             true,
             None,
             Some("10.0.0.5:22".into()),
+            &mut uploads,
         )
         .await;
         ctx.on_eval_message(
@@ -1934,6 +2192,7 @@ mod assignment_response_tests {
                 assignment_id: DispatchedJobId::now_v7(),
                 pending: super::fixture::pending_build(shared_build),
                 cluster: None,
+                input_closure_set: Default::default(),
             },
         )]));
         let mut events = state.events.subscribe();
@@ -2007,6 +2266,7 @@ mod assignment_response_tests {
                 assignment_id: DispatchedJobId::now_v7(),
                 pending,
                 cluster: None,
+                input_closure_set: Default::default(),
             },
         )]));
         let mut events = state.events.subscribe();
@@ -2071,6 +2331,7 @@ mod assignment_response_tests {
             assignment_id: DispatchedJobId::now_v7(),
             pending,
             cluster: attempt,
+            input_closure_set: Default::default(),
         };
         let active = ActiveJobs::from(HashMap::from([
             ("member-a".to_owned(), member(pending.clone())),
@@ -2133,6 +2394,7 @@ mod assignment_response_tests {
                 assignment_id: DispatchedJobId::now_v7(),
                 pending: pending_eval(),
                 cluster: None,
+                input_closure_set: Default::default(),
             },
         )]));
 
@@ -2308,8 +2570,8 @@ mod assignment_response_tests {
 
         let stored = gradient_entity::cached_path::Model {
             hash: EXAMPLE_STORED_HASH.into(),
-            file_hash: Some("sha256:f".into()),
-            confirmed: true,
+            nar_object_storage_key: EXAMPLE_STORED_HASH.into(),
+            file_hash: "sha256:f".into(),
             ..Default::default()
         };
         let cache_db = gradient_fixtures::mock::mock_db()
@@ -2348,8 +2610,8 @@ mod assignment_response_tests {
 
         let stored = gradient_entity::cached_path::Model {
             hash: EXAMPLE_STORED_HASH.into(),
-            file_hash: Some("sha256:f".into()),
-            confirmed: true,
+            nar_object_storage_key: EXAMPLE_STORED_HASH.into(),
+            file_hash: "sha256:f".into(),
             ..Default::default()
         };
         let cache_db = gradient_fixtures::mock::mock_db()
@@ -2381,6 +2643,29 @@ mod assignment_response_tests {
         let cached: Vec<String> = cached.into_iter().map(|hit| hit.path).collect();
         assert_eq!(cached, vec![asked]);
     }
+
+    #[test]
+    fn rotated_hash_mapping_path_is_not_asked_as_known_but_identity_mapping_path_is() {
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH, RotatedHashMapping};
+        use gradient_types::ids::CacheId;
+
+        let asked = vec![format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello.drv")];
+        let map_derivation_paths_to_stored_paths =
+            |mapping: Arc<dyn gradient_types::StorePathMapping>| {
+                let mapper = StorePathMapper::for_cache(mapping, CacheId::nil());
+                let stored = asked
+                    .iter()
+                    .map(|path| mapper.inbound_text_if_exact_store_path(path).unwrap())
+                    .collect();
+                filter_stored_paths_equal_to_client_paths(&asked, stored)
+            };
+
+        assert!(map_derivation_paths_to_stored_paths(Arc::new(RotatedHashMapping)).is_empty());
+        assert_eq!(
+            map_derivation_paths_to_stored_paths(Arc::new(gradient_types::IdentityMapping)),
+            asked
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2389,7 +2674,9 @@ mod running_jobs_tests {
     use super::*;
     use gradient_entity::dispatched_job::Model as MDispatchedJob;
     use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_pool::ProjectAccess;
     use gradient_test_support::prelude::*;
+    use std::collections::HashSet;
     use std::time::Duration;
 
     fn running(assignment_id: String) -> ClientMessage {
@@ -2408,24 +2695,32 @@ mod running_jobs_tests {
         let shared_build = DerivationBuildId::now_v7();
         let key = format!("build:{shared_build}");
         let a1 = DispatchedJobId::now_v7();
+        let job = pending_build(shared_build);
+        let job_project = ProjectAccess::OnlyListedProjects(HashSet::from([job.project_id()]));
         let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
+        let builds = gradient_wire::types::GradientCapabilities {
+            build: true,
+            ..Default::default()
+        };
+        let port: Arc<dyn gradient_pool::session_port::SessionPort> = Arc::new(port);
         session
             .scheduler
             .reattach_worker(
                 "w1",
-                Default::default(),
-                HashSet::new(),
-                Arc::new(port),
-                vec![Reattached::single(
-                    key.clone(),
-                    a1,
-                    pending_build(shared_build),
-                )],
+                builds.clone(),
+                job_project.clone(),
+                Arc::clone(&port),
+                vec![Reattached::single(key.clone(), a1, job)],
                 true,
             )
             .await
             .expect("the worker registers");
         session.scheduler.unregister_worker("w1").await;
+        session
+            .scheduler
+            .reattach_worker("w1", builds, job_project, port, vec![], true)
+            .await
+            .expect("the reconnecting worker registers");
         let written = Arc::new(gradient_util::sync::Mutex::new(Vec::new()));
         session.logs = LogLane::spawn(&state.shutdown, {
             let written = Arc::clone(&written);
@@ -2499,9 +2794,11 @@ mod exec_report_tests {
     use super::*;
     use crate::handler::job_events::{ApplyJobEvent, JobEvent};
     use gradient_fixtures::mock::empty_db;
+    use gradient_pool::ProjectAccess;
     use gradient_test_support::prelude::*;
     use gradient_types::ids::ExecJobAttemptId;
     use gradient_wire::types::MAX_PHASE_PAYLOAD;
+    use std::collections::HashSet;
 
     type Recorded = Arc<gradient_util::sync::Mutex<Vec<(String, usize)>>>;
 
@@ -2535,8 +2832,11 @@ mod exec_report_tests {
             .scheduler
             .reattach_worker(
                 "w1",
-                Default::default(),
-                HashSet::new(),
+                gradient_wire::types::GradientCapabilities {
+                    exec: true,
+                    ..Default::default()
+                },
+                ProjectAccess::OnlyListedProjects(HashSet::from([pending.project_id()])),
                 Arc::new(port),
                 vec![Reattached::single(key.clone(), a1, pending.clone())],
                 true,
@@ -2549,6 +2849,7 @@ mod exec_report_tests {
                 assignment_id: a1,
                 pending,
                 cluster: None,
+                input_closure_set: Default::default(),
             },
         );
         let recorded = Recorded::default();
@@ -2564,5 +2865,185 @@ mod exec_report_tests {
         session.job_events.finish().await;
 
         assert_eq!(*recorded.lock(), vec![("epoch-3".to_owned(), 2)]);
+    }
+}
+
+#[cfg(test)]
+mod eval_cache_pull_tests {
+    use super::fixture::{JOB, TestSession, decode, pending_build, pending_exec};
+    use super::*;
+    use bytes::Bytes;
+    use gradient_fixtures::mock::mock_db;
+    use gradient_storage::eval_cache_segment::{
+        CheckedEvalCacheFingerprint, eval_cache_segment_key,
+    };
+    use gradient_test_support::state::test_state;
+    use gradient_types::ids::CacheId;
+    use gradient_wire::types::EvalCachePullOutcome;
+    use sea_orm::Value;
+    use std::collections::BTreeMap;
+
+    const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn mock_database_rows_for_applied_evaluation_cache_segment_cleanup()
+    -> Vec<BTreeMap<&'static str, Value>> {
+        vec![BTreeMap::from([("applied", Value::Int(Some(1)))])]
+    }
+
+    fn mock_rows_for_one_project_readable_cache(
+        cache: CacheId,
+    ) -> Vec<BTreeMap<&'static str, Value>> {
+        vec![BTreeMap::from([(
+            "cache",
+            Value::Uuid(Some(cache.into_inner())),
+        )])]
+    }
+
+    fn readable_cache(cache: CacheId) -> sea_orm::DatabaseConnection {
+        mock_db()
+            .append_query_results([
+                mock_database_rows_for_applied_evaluation_cache_segment_cleanup(),
+                mock_rows_for_one_project_readable_cache(cache),
+            ])
+            .into_connection()
+    }
+
+    async fn put_segment(session: &TestSession, cache: CacheId, project: ProjectId) -> String {
+        let fingerprint = CheckedEvalCacheFingerprint::parse(FINGERPRINT).unwrap();
+        let key = eval_cache_segment_key(cache, project, &fingerprint, uuid::Uuid::now_v7());
+        session
+            .handles
+            .db
+            .storage
+            .nar_storage
+            .put_eval_cache(&key, b"rows".to_vec())
+            .await
+            .unwrap();
+        key
+    }
+
+    fn pull_outcome(bytes: Bytes) -> EvalCachePullOutcome {
+        match decode(bytes) {
+            ServerMessage::EvalCachePullResult { outcome, .. } => outcome,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pull_returns_only_segments_of_the_project_of_the_evaluation() {
+        let cache = CacheId::now_v7();
+        let state = test_state(readable_cache(cache));
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let project = session
+            .active
+            .project(JOB)
+            .expect("the session runs an evaluation");
+        let mine = put_segment(&session, cache, project).await;
+        put_segment(&session, cache, ProjectId::now_v7()).await;
+        let (mut ctx, _uploads) = session.split();
+
+        ctx.on_eval_cache_pull(JOB.into(), FINGERPRINT.into(), Vec::new())
+            .await;
+
+        let EvalCachePullOutcome::Segments { keys, .. } = pull_outcome(sent.try_recv().unwrap())
+        else {
+            panic!("the evaluation gets the segment of its project")
+        };
+        assert_eq!(keys, vec![mine]);
+    }
+
+    #[tokio::test]
+    async fn pull_returns_miss_until_cleanup_of_evaluation_cache_segments_written_before_upgrade_is_applied()
+     {
+        let cache = CacheId::now_v7();
+        let applied_and_readable = mock_rows_for_one_project_readable_cache(cache);
+        let state = test_state(
+            mock_db()
+                .append_query_results([
+                    Vec::new(),
+                    applied_and_readable.clone(),
+                    applied_and_readable.clone(),
+                    applied_and_readable,
+                ])
+                .into_connection(),
+        );
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let project = session
+            .active
+            .project(JOB)
+            .expect("the session runs an evaluation");
+        let segment = put_segment(&session, cache, project).await;
+        let (mut ctx, _uploads) = session.split();
+
+        ctx.on_eval_cache_pull(JOB.into(), FINGERPRINT.into(), Vec::new())
+            .await;
+        assert!(matches!(
+            pull_outcome(sent.try_recv().unwrap()),
+            EvalCachePullOutcome::Miss
+        ));
+
+        ctx.on_eval_cache_pull(JOB.into(), FINGERPRINT.into(), Vec::new())
+            .await;
+        let EvalCachePullOutcome::Segments { keys, .. } = pull_outcome(sent.try_recv().unwrap())
+        else {
+            panic!("The evaluation can fetch its segment once cleanup is complete.")
+        };
+        assert_eq!(keys, vec![segment]);
+    }
+
+    #[tokio::test]
+    async fn a_pull_from_a_build_job_is_refused() {
+        let cache = CacheId::now_v7();
+        let state = test_state(readable_cache(cache));
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let pending = pending_build(DerivationBuildId::now_v7());
+        let key = pending.job_key();
+        put_segment(&session, cache, pending.project_id()).await;
+        session.active.insert(
+            key.clone(),
+            ActiveJob {
+                assignment_id: DispatchedJobId::now_v7(),
+                pending,
+                cluster: None,
+                input_closure_set: Default::default(),
+            },
+        );
+        let (mut ctx, _uploads) = session.split();
+
+        ctx.on_eval_cache_pull(key, FINGERPRINT.into(), Vec::new())
+            .await;
+
+        assert!(matches!(
+            pull_outcome(sent.try_recv().unwrap()),
+            EvalCachePullOutcome::Miss
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_pull_from_an_exec_job_misses_even_when_project_segment_exists() {
+        let cache = CacheId::now_v7();
+        let state = test_state(readable_cache(cache));
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let pending = pending_exec(gradient_types::ids::ExecJobAttemptId::now_v7());
+        let key = pending.job_key();
+        put_segment(&session, cache, pending.project_id()).await;
+        session.active.insert(
+            key.clone(),
+            ActiveJob {
+                assignment_id: DispatchedJobId::now_v7(),
+                pending,
+                cluster: None,
+                input_closure_set: Default::default(),
+            },
+        );
+        let (mut ctx, _uploads) = session.split();
+
+        ctx.on_eval_cache_pull(key, FINGERPRINT.into(), Vec::new())
+            .await;
+
+        assert!(matches!(
+            pull_outcome(sent.try_recv().unwrap()),
+            EvalCachePullOutcome::Miss
+        ));
     }
 }

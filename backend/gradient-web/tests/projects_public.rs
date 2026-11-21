@@ -30,3 +30,17 @@ async fn the_public_listing_leaves_out_the_private_key() {
     assert_eq!(item["name"], public_project().name);
     assert!(item.get("private_key").is_none(), "{item}");
 }
+
+#[tokio::test]
+async fn anonymous_caller_cannot_list_access_for_public_project() {
+    let db = mock_db().append_query_results([vec![public_project()]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!(
+            "/api/v1/projects/{}/access",
+            public_project().name
+        ))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}

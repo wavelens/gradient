@@ -89,6 +89,8 @@ async fn create_role_persists_permission_bitmask() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results::<role::Model, _, _>([Vec::<role::Model>::new()])
         .append_query_results([vec![inserted.clone()]])
         .append_exec_results([MockExecResult {
@@ -172,6 +174,8 @@ async fn create_role_rejects_duplicate_name() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![existing]]);
 
     let server = make_test_server(db.into_connection());
@@ -226,6 +230,8 @@ async fn patch_custom_role_updates_mask() {
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![updated]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -290,6 +296,8 @@ async fn delete_role_in_use_is_rejected() {
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![in_use_membership]]);
 
     let server = make_test_server(db.into_connection());
@@ -315,6 +323,8 @@ async fn delete_role_granted_to_a_team_is_rejected() {
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
         .append_query_results([vec![gradient_entity::team_project::Model {
             id: TeamProjectId::now_v7(),
@@ -350,6 +360,8 @@ async fn delete_unused_custom_role_succeeds() {
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_project_request::Model>::new()])

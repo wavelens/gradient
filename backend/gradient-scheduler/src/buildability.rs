@@ -241,7 +241,7 @@ pub(crate) fn exec_waiting_reason(
 
     let fits = |worker: &WorkerCaps, devices: DeviceCount| {
         job.requirement_for(worker)
-            .is_some_and(|requirement| worker.fits_exec(&requirement, devices))
+            .is_some_and(|requirement| worker.fits_exec(&requirement, devices, job.project_id))
     };
     let nodes = job.spec.nodes.max(1);
     let one_zone_fits =
@@ -254,7 +254,7 @@ pub(crate) fn exec_waiting_reason(
         .iter()
         .filter_map(|worker| Some((worker, job.requirement_for(worker)?)))
         .collect();
-    let mut unmet = exec_unmet(&job.architecture, &candidates);
+    let mut unmet = exec_unmet(&job.architecture, &candidates, job.project_id);
     if nodes > 1 && !one_zone_fits(DeviceCount::Total) {
         unmet.nodes = nodes;
     }

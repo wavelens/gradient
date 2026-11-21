@@ -278,7 +278,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            authorized: None,
+            authorized: gradient_pool::ProjectAccess::AllProjects,
         }
     }
 

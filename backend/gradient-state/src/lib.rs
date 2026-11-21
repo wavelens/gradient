@@ -11,10 +11,6 @@ mod validation;
 
 pub use config::*;
 pub use export::export_state;
-pub use provisioning::{
-    PendingProjectMembership, PendingProjectMemberships, StateApplyResult,
-    apply_pending_project_memberships,
-};
 pub use validation::{ValidationError, ValidationResult};
 
 use sea_orm::DatabaseConnection;
@@ -37,12 +33,11 @@ pub async fn load_and_apply_state(
     credentials_dir: &Path,
     delete_state: bool,
     email_enabled: bool,
-) -> Result<StateApplyResult, Box<dyn std::error::Error>> {
+    user_url_destination_allowlist: &gradient_util::http_validation::UserUrlDestinationAllowlist,
+) -> Result<(), Box<dyn std::error::Error>> {
     let Some(path) = state_file_path else {
         tracing::info!("No state file configured, skipping state management");
-        return Ok(StateApplyResult {
-            pending: PendingProjectMemberships::default(),
-        });
+        return Ok(());
     };
 
     tracing::info!(path, "Loading state configuration");
@@ -66,17 +61,16 @@ pub async fn load_and_apply_state(
 
     tracing::info!("State configuration validated successfully");
 
-    let result = provisioning::apply_state_to_database(
+    provisioning::apply_state_to_database(
         db,
         &config,
         crypt_secret_file,
         credentials_dir,
         delete_state,
         email_enabled,
+        user_url_destination_allowlist,
     )
-    .await?;
-
-    Ok(result)
+    .await
 }
 
 #[cfg(test)]

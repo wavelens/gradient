@@ -329,7 +329,16 @@ fn parse_env(s: &str) -> Result<(HashMap<String, String>, &str)> {
         let r = expect(r, ')', "')' to close env entry")?;
         Ok(((key, value), r))
     })?;
-    Ok((entries.into_iter().collect(), r))
+    let mut environment = HashMap::with_capacity(entries.len());
+    for (key, value) in entries {
+        if environment.contains_key(&key) {
+            anyhow::bail!(
+                "Duplicate assignments of environment variable {key} in the derivation file."
+            );
+        }
+        environment.insert(key, value);
+    }
+    Ok((environment, r))
 }
 
 fn strip_header(content: &str) -> Result<&str> {
@@ -355,6 +364,10 @@ pub fn parse_drv(content: &[u8]) -> Result<Derivation> {
     let mut s = strip_header(content)?;
 
     let (outputs, r) = parse_outputs(s)?;
+    let mut names = std::collections::HashSet::with_capacity(outputs.len());
+    if let Some(name) = outputs.iter().map(|o| &o.name).find(|n| !names.insert(*n)) {
+        anyhow::bail!("There are multiple entries for output {name} in the derivation file.");
+    }
     s = comma(r)?;
     let (input_derivations, r) = parse_input_drvs(s)?;
     s = comma(r)?;
@@ -366,7 +379,13 @@ pub fn parse_drv(content: &[u8]) -> Result<Derivation> {
     s = comma(r)?;
     let (args, r) = parse_string_list(s)?;
     s = comma(r)?;
-    let (environment, _) = parse_env(s)?;
+    let (environment, r) = parse_env(s)?;
+    anyhow::ensure!(
+        expect(r, ')', "')' to close the derivation")?
+            .trim_start()
+            .is_empty(),
+        "Found data after the closing bracket of the derivation file."
+    );
 
     Ok(Derivation {
         outputs,
@@ -523,6 +542,26 @@ mod tests {
             parse_drv(br#"DrvWithVersion("xp-future",[],[],[],"x86_64-linux","/bin/sh",[],[])"#)
                 .unwrap_err();
         assert!(format!("{err:#}").contains("xp-future"), "{err:#}");
+    }
+
+    #[test]
+    fn rejects_derivation_with_trailing_bytes() {
+        let mut drv = EXAMPLE.to_vec();
+        drv.extend_from_slice(br#",("extra","x")"#);
+        assert!(parse_drv(&drv).is_err());
+        assert!(parse_drv(&[EXAMPLE, b")"].concat()).is_err());
+    }
+
+    #[test]
+    fn rejects_derivation_with_duplicate_output_name() {
+        let drv = br#"Derive([("out","/nix/store/abc-hello","",""),("out","/nix/store/def-hello","","")],[],[],"x86_64-linux","/bin/sh",[],[])"#;
+        assert!(parse_drv(drv).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_environment_variable_key() {
+        let drv = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/bin/sh",[],[("name","hello"),("name","other")])"#;
+        assert!(parse_drv(drv).is_err());
     }
 
     #[test]

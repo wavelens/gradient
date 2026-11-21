@@ -11,9 +11,9 @@ use tokio::io::{AsyncBufRead, BufReader};
 
 pub async fn open_raw(
     nar_storage: &NarStore,
-    hash: &str,
+    nar_object_storage_key: &str,
 ) -> anyhow::Result<Option<impl AsyncBufRead + Send + Unpin + use<>>> {
-    let Some(source) = nar_storage.open(hash, 0).await? else {
+    let Some(source) = nar_storage.open(nar_object_storage_key, 0).await? else {
         return Ok(None);
     };
 

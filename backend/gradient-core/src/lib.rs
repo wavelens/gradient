@@ -11,6 +11,7 @@ pub mod login_provider;
 pub mod state_root;
 pub mod upstream;
 pub mod upstream_source;
+pub mod upstream_url_credentials;
 
 pub use cache_creation_limit::{CacheCreationLimit, NoCacheCreationLimit};
 pub use extensions::ServerExtensions;
@@ -18,7 +19,6 @@ pub use gradient_graph::Graph;
 pub use gradient_pool::{WorkerJob, WorkerJobPolicy};
 pub use login_provider::{
     AuthorizeRequest, CodeExchange, ExternalIdentity, LoginMethods, LoginProvider, LoginRefusal,
-    MatchRule,
 };
 pub use state_root::{
     AppState, BUILD_PROGRESS_TTL, EVAL_PROGRESS_TTL, EvalMemberThunks, InstanceMemory,
@@ -35,6 +35,10 @@ use gradient_state::load_and_apply_state;
 use gradient_storage::{FileLogStorage, S3LogStorage};
 use gradient_storage::{HotNarCache, NarStore};
 use gradient_types::*;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
+use gradient_util::http_validation::{
+    InvalidAdminAllowListEntryError, UserUrlDestinationAllowlist,
+};
 use gradient_util::shutdown::Shutdown;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -50,6 +54,10 @@ pub enum InitError {
     Database(#[source] anyhow::Error),
     #[error("web database pool failed: {0}")]
     WebDatabase(#[source] anyhow::Error),
+    #[error(
+        "failed to migrate the username and password from the upstream cache URL to encrypted credentials: {0}"
+    )]
+    UpstreamCacheUrlCredentialMoveFailed(#[source] anyhow::Error),
     #[error("cache database pool failed: {0}")]
     CacheDatabase(#[source] anyhow::Error),
     #[error("failed to load state configuration: {0}")]
@@ -58,6 +66,8 @@ pub enum InitError {
     LogStorage(#[source] anyhow::Error),
     #[error("http client build failed: {0}")]
     HttpClient(#[source] anyhow::Error),
+    #[error("GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS: {0}")]
+    InvalidAdminNetworkAllowlistEntry(#[source] InvalidAdminAllowListEntryError),
     #[error("failed to load encryption key file: {0}")]
     EncryptionKeyFile(#[source] anyhow::Error),
     #[error("failed to load JWT secret: {0}")]
@@ -73,11 +83,30 @@ pub enum InitError {
 }
 
 struct ValidatedStartupSettings {
-    http: reqwest::Client,
+    admin_configured_endpoint_http_client: reqwest::Client,
     jwt_secret: SecretString,
     email: Arc<dyn gradient_notify::EmailSender>,
     nar_storage: NarStore,
     log_storage: Arc<dyn gradient_storage::LogStorage>,
+}
+
+pub fn build_user_url_destination_allowlist_from_config(
+    config: &RuntimeConfig,
+) -> Result<UserUrlDestinationAllowlist, InitError> {
+    let allowlist =
+        UserUrlDestinationAllowlist::parse(&config.outbound.allowed_non_public_network_targets)
+            .map_err(InitError::InvalidAdminNetworkAllowlistEntry)?;
+    let gitea_app_host = config.gitea_app.as_ref().and_then(|app| {
+        url::Url::parse(&app.instance_base_url)
+            .ok()?
+            .host_str()
+            .map(str::to_owned)
+    });
+
+    Ok(match gitea_app_host {
+        Some(host) => allowlist.with_added_allowed_host_or_ip(&host),
+        None => allowlist,
+    })
 }
 
 async fn load_and_check_secret_files_and_external_endpoints_before_database(
@@ -92,7 +121,8 @@ async fn load_and_check_secret_files_and_external_endpoints_before_database(
         .await
         .map_err(InitError::LogStorage)?;
 
-    let http = gradient_util::http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
+    let admin_configured_endpoint_http_client =
+        gradient_util::http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
 
     let email_service = EmailService::new(cli.email_config())
         .await
@@ -164,7 +194,7 @@ async fn load_and_check_secret_files_and_external_endpoints_before_database(
     };
 
     Ok(ValidatedStartupSettings {
-        http,
+        admin_configured_endpoint_http_client,
         jwt_secret,
         email: Arc::new(email_service),
         nar_storage,
@@ -192,8 +222,12 @@ pub async fn init_state(
         effective_options,
         ..RuntimeConfig::from_cli(&cli).map_err(|e| InitError::NetworkConfig(e.to_string()))?
     });
+    let user_supplied_url_http_client = HttpClientForUserSuppliedUrls::new(
+        build_user_url_destination_allowlist_from_config(&config)?,
+    )
+    .map_err(|e| InitError::HttpClient(e.into()))?;
     let ValidatedStartupSettings {
-        http,
+        admin_configured_endpoint_http_client,
         jwt_secret,
         email,
         nar_storage,
@@ -201,22 +235,28 @@ pub async fn init_state(
     } = load_and_check_secret_files_and_external_endpoints_before_database(&cli).await?;
 
     let db = connect_db(&cli).await.map_err(InitError::Database)?;
+    upstream_url_credentials::move_userinfo_of_stored_upstream_urls_into_encrypted_credentials(
+        &db,
+        &cli.secrets.crypt_file,
+    )
+    .await
+    .map_err(InitError::UpstreamCacheUrlCredentialMoveFailed)?;
     let web_db = connect_web_db(&cli).await.map_err(InitError::WebDatabase)?;
     let cache_db = connect_cache_db(&cli)
         .await
         .map_err(InitError::CacheDatabase)?;
 
-    let state_result = load_and_apply_state(
+    load_and_apply_state(
         &db,
         cli.state.file.as_deref(),
         &cli.secrets.crypt_file,
         &cli.server.credentials_dir,
         cli.state.delete,
         cli.email.enable,
+        user_supplied_url_http_client.allowlist(),
     )
     .await
     .map_err(|e| InitError::StateLoad(e.to_string()))?;
-    let pending_project_memberships = state_result.pending;
 
     if let Some(max) = cli.eval.keep_evaluations_max() {
         let capped = ETask::update_many()
@@ -246,7 +286,8 @@ pub async fn init_state(
         log_storage,
         email,
         nar_storage,
-        http,
+        admin_configured_endpoint_http_client,
+        user_supplied_url_http_client,
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         shutdown: Shutdown::new(),
         jwt_secret,
@@ -266,7 +307,6 @@ pub async fn init_state(
             github_app_page_url: Default::default(),
             manifest_state: Default::default(),
             pending_credentials: Default::default(),
-            pending_project_memberships,
             upstream_query: Arc::new(tokio::sync::Semaphore::new(upstream_query_concurrency)),
             nar_downloads: Arc::new(tokio::sync::Semaphore::new(nar_downloads)),
             upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),

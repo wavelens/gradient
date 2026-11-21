@@ -24,7 +24,16 @@ mod timed;
 
 pub use self::context::StorageCtx;
 pub use self::debug_info::{BuildIdEntry, scan_build_ids};
-pub use self::digest::{VerifyError, file_hash_matches, file_hash_sri, verify_nar_reader};
+pub use self::digest::{
+    ClientClaimedNarUploadHashesAndSizes, ServerComputedNarAndCompressedFileHashesAndSizes,
+    UploadedStorePathAndContentAddress, VerifyError, file_hash_sri,
+    verify_zstd_nar_stream_sha256_and_sizes_against_claims,
+};
+#[cfg(feature = "testing")]
+pub use self::digest::{
+    compress_nar_bytes_and_verify_stream,
+    compress_nar_bytes_as_two_zstd_frames_and_verify_hashes_and_sizes,
+};
 pub use self::hot::{HotNarCache, HotNarStats};
 pub use self::log::*;
 pub use self::nar::*;

@@ -11,6 +11,10 @@ pub mod members;
 pub mod project;
 pub mod roles;
 
+use crate::access::{
+    Caller, ensure_cache_permissions_are_subset_of_caller_permissions,
+    load_caller_project_permissions_and_require_can_grant,
+};
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::lookup::HasResource;
@@ -150,6 +154,7 @@ pub trait OwnerScope:
 
 pub trait ActingScope: OwnerScope {
     fn user(&self) -> &MUser;
+    async fn ensure_user_holds_all_permissions(&self, granted: PermissionMask) -> WebResult<()>;
 }
 
 impl<R: ProjectRule> OwnerScope for ProjectScope<R> {
@@ -183,6 +188,17 @@ impl<R: ProjectRule> OwnerScope for ProjectScope<R> {
 impl<R: ProjectRule<User = MUser>> ActingScope for ProjectScope<R> {
     fn user(&self) -> &MUser {
         &self.user
+    }
+
+    async fn ensure_user_holds_all_permissions(&self, granted: PermissionMask) -> WebResult<()> {
+        load_caller_project_permissions_and_require_can_grant(
+            &self.db.web_db,
+            Caller::User(&self.user),
+            self.project.id,
+            self.api_key.as_ref(),
+            granted,
+        )
+        .await
     }
 }
 
@@ -218,6 +234,17 @@ impl<R: CacheRule<User = MUser>> ActingScope for CacheScope<R> {
     fn user(&self) -> &MUser {
         &self.user
     }
+
+    async fn ensure_user_holds_all_permissions(&self, granted: PermissionMask) -> WebResult<()> {
+        ensure_cache_permissions_are_subset_of_caller_permissions(
+            &self.db.web_db,
+            Caller::User(&self.user),
+            self.cache.id,
+            self.api_key.as_ref(),
+            granted,
+        )
+        .await
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -241,7 +268,7 @@ pub trait Owner: Send + Sync + 'static {
     type ManageMembersScope: ActingScope<Id = Self::Id>;
     type ListInvitationsScope: OwnerScope<Id = Self::Id>;
     type ReadRolesScope: OwnerScope<Id = Self::Id>;
-    type ManageRolesScope: OwnerScope<Id = Self::Id>;
+    type ManageRolesScope: ActingScope<Id = Self::Id>;
     type Members: MemberTable<Id = Self::Id>;
     type Invitations: InvitationTable<Id = Self::Id>;
     type Roles: RoleTable<Id = Self::Id>;
@@ -321,6 +348,16 @@ pub async fn update_unique_row<T: Table>(
 pub async fn delete_row<T: Table>(db: &impl ConnectionTrait, row: T::Row) -> WebResult<()> {
     gradient_db::rows::delete::<T, _>(db, row).await?;
     Ok(())
+}
+
+pub async fn load_permission_mask_by_role_id<T: RoleTable>(
+    db: &impl ConnectionTrait,
+    role: RoleId,
+) -> WebResult<PermissionMask> {
+    let row = gradient_db::lookup::by_id::<T, _>(db, role)
+        .await?
+        .or_not_found(Resource::Role)?;
+    Ok(T::fields(&row).permission)
 }
 
 pub async fn role_names<T: RoleTable>(

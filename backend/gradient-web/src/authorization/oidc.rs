@@ -9,8 +9,9 @@ use super::jwt::{sign_claims, verify_claims};
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
+use gradient_core::ExternalIdentity;
 use gradient_core::ServerState;
-use gradient_core::{ExternalIdentity, MatchRule};
+use gradient_db::users::VerifiedFactForSessionOrCredentialCreation;
 use gradient_types::input::load_secret;
 use gradient_types::*;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
@@ -182,7 +183,7 @@ pub async fn oidc_login_verify(
     authorization_code: String,
     state_query: String,
     csrf_cookie: String,
-) -> Result<MUser> {
+) -> Result<(MUser, VerifiedFactForSessionOrCredentialCreation)> {
     let oidc = state
         .config
         .oidc
@@ -205,7 +206,11 @@ pub async fn oidc_login_verify(
     let expected_nonce = csrf.nonce;
     let pkce_verifier = csrf.pkce_verifier;
 
-    let metadata = get_oidc_metadata(&state.http, &oidc.discovery_url).await?;
+    let metadata = get_oidc_metadata(
+        &state.admin_configured_endpoint_http_client,
+        &oidc.discovery_url,
+    )
+    .await?;
 
     let issuer = metadata["issuer"]
         .as_str()
@@ -218,7 +223,7 @@ pub async fn oidc_login_verify(
         .as_str()
         .context("no jwks_uri in OIDC metadata")?;
 
-    let http_client = &state.http;
+    let http_client = &state.admin_configured_endpoint_http_client;
 
     let redirect_uri = format!(
         "{}/api/v1/auth/oidc/callback",
@@ -258,7 +263,7 @@ pub async fn oidc_login_verify(
 
     let algorithms = allowed_id_token_signing_algorithms_from_discovery(&metadata);
     let claims = verify_id_token(
-        &state.http,
+        &state.admin_configured_endpoint_http_client,
         id_token,
         jwks_uri,
         &algorithms,
@@ -272,13 +277,18 @@ pub async fn oidc_login_verify(
         _ => bail!("OIDC nonce mismatch"),
     }
 
-    sign_in_external(
+    let identity = external_identity(claims);
+    let identity_link = VerifiedFactForSessionOrCredentialCreation::ExternalLoginLink {
+        issuer: identity.issuer.clone(),
+        subject: identity.subject.clone(),
+    };
+    let user = sign_in_external(
         &state.web_db,
-        &state.memory.pending_project_memberships,
-        external_identity(claims),
+        identity,
         PasswordLogin::of(&state.login_methods()),
     )
-    .await
+    .await?;
+    Ok((user, identity_link))
 }
 
 async fn verify_id_token(
@@ -324,7 +334,6 @@ fn external_identity(claims: IdTokenClaims) -> ExternalIdentity {
         email,
         name: claims.name,
         groups: Some(claims.groups),
-        match_rule: MatchRule::UsernameOrEmail,
         refresh_profile: true,
     }
 }

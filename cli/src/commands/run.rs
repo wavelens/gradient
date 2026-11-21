@@ -111,6 +111,10 @@ pub async fn handle_run(args: RunArgs, out: Output) {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "check only whether stdout is a terminal"
+)]
 fn has_terminal() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }

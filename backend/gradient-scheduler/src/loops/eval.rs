@@ -14,6 +14,9 @@ use gradient_entity::dispatched_job::{
     Column as CDispatchedJob, DispatchedJobKind, Entity as EDispatchedJob,
 };
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_types::fetch_source_allowlist_and_request_validation::{
+    ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES, check_allowed_uri_prefix_has_remote_nix_scheme,
+};
 use gradient_types::https_git_url_host::https_host_from_repository_url;
 use gradient_types::input::{check_repository_url_is_ssh, vec_to_hex};
 use gradient_types::wildcard::Wildcard;
@@ -352,6 +355,9 @@ fn assemble_eval_job(
         eval_index: 0,
         continuation: None,
         flake_fetch_needs_secrets,
+        derivation_batch_save_failure_message: None,
+        allows_project_credentials_and_privileged_actions: eval
+            .allows_project_credentials_and_privileged_actions,
     })
 }
 
@@ -530,14 +536,25 @@ fn build_nix_evaluation_fetch_url_access(
     if !task.restrict_evaluation_fetches
         || gradient_db::build_request_task::is_build_request_task(task)
     {
-        return NixEvaluationFetchUrlAccess::UnrestrictedEvaluation;
+        return NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+            extra_allowed_uri_prefixes: ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES
+                .iter()
+                .map(|scheme| (*scheme).to_owned())
+                .collect(),
+        };
     }
 
     NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
         extra_allowed_uri_prefixes: allowed_uri_prefixes
             .iter()
             .chain(&task.extra_allowed_uri_prefixes)
-            .cloned()
+            .filter_map(|prefix| {
+                check_allowed_uri_prefix_has_remote_nix_scheme(prefix)
+                    .inspect_err(|error| {
+                        warn!(task_id = %task.id, %prefix, %error, "The scheduler dropped the extra allowed URL prefix for the task. The prefix did not start with an allowed remote source scheme.");
+                    })
+                    .ok()
+            })
             .collect(),
     }
 }
@@ -630,11 +647,11 @@ pub(crate) async fn project_id_for_eval(db: &WorkerDb, eval: &MEvaluation) -> Op
 #[cfg(test)]
 mod eval_source_tests {
     use super::{build_nix_evaluation_fetch_url_access, flake_job_for_eval_source, member_job};
+    use gradient_types::fetch_source_allowlist_and_request_validation::ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES;
     use gradient_wire::types::{FlakeSource, FlakeStep, NixEvaluationFetchUrlAccess};
 
     #[test]
-    fn task_with_restrict_evaluation_fetches_false_gets_unrestricted_evaluation_fetch_access_even_with_extra_allowed_url_prefixes()
-     {
+    fn task_with_unrestricted_fetches_gets_all_allowed_remote_source_uri_schemes() {
         let task = gradient_entity::task::Model {
             restrict_evaluation_fetches: false,
             extra_allowed_uri_prefixes: vec!["https://task.example".into()],
@@ -643,12 +660,17 @@ mod eval_source_tests {
 
         assert_eq!(
             build_nix_evaluation_fetch_url_access(&task, &["github:".into()]),
-            NixEvaluationFetchUrlAccess::UnrestrictedEvaluation
+            NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes: ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES
+                    .iter()
+                    .map(|scheme| (*scheme).to_owned())
+                    .collect(),
+            }
         );
     }
 
     #[test]
-    fn task_build_request_gets_unrestricted_evaluation_fetch_access_even_when_evaluation_fetches_are_restricted()
+    fn managed_build_request_task_gets_locked_inputs_plus_extra_url_prefixes_with_allowed_remote_source_uri_schemes_when_evaluation_fetches_are_restricted()
      {
         let task = gradient_entity::task::Model {
             name: gradient_db::build_request_task::BUILD_REQUEST_TASK_NAME.into(),
@@ -659,7 +681,12 @@ mod eval_source_tests {
 
         assert_eq!(
             build_nix_evaluation_fetch_url_access(&task, &["github:".into()]),
-            NixEvaluationFetchUrlAccess::UnrestrictedEvaluation
+            NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes: ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES
+                    .iter()
+                    .map(|scheme| (*scheme).to_owned())
+                    .collect(),
+            }
         );
     }
 
@@ -669,6 +696,28 @@ mod eval_source_tests {
         let task = gradient_entity::task::Model {
             restrict_evaluation_fetches: true,
             extra_allowed_uri_prefixes: vec!["https://task.example".into()],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_nix_evaluation_fetch_url_access(&task, &["github:".into()]),
+            NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes: vec!["github:".into(), "https://task.example".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn task_with_local_extra_allowed_url_prefixes_gets_only_remote_prefixes_in_evaluation_fetch_url_access()
+     {
+        let task = gradient_entity::task::Model {
+            restrict_evaluation_fetches: true,
+            extra_allowed_uri_prefixes: vec![
+                "path:/".into(),
+                "file:///etc".into(),
+                "git+file:///srv".into(),
+                "https://task.example".into(),
+            ],
             ..Default::default()
         };
 

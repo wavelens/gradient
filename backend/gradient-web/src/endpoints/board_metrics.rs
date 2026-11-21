@@ -397,7 +397,6 @@ pub struct BoardHealth {
     pub draining: bool,
     pub supervised: Vec<SupervisedLoop>,
     pub proto_sessions: usize,
-    pub unconfirmed_nars: u64,
     /// A rising `failed_deliveries` points at a Git host or mail host that is down, not at a
     /// backlog. Those rows stay dead letters until an operator acts.
     pub pending_deliveries: i64,
@@ -471,10 +470,6 @@ pub async fn get_board_health(
         draining: scheduler.draining.is_draining().await,
         supervised: loops_view(scheduler.loop_health(), std::time::Instant::now()),
         proto_sessions: limiter.in_use(),
-        unconfirmed_nars: gradient_db::caches::capacity::unconfirmed_cached_path_count(
-            &state.web_db,
-        )
-        .await?,
         pending_deliveries,
         failed_deliveries,
         hot_nar_cache: state.nar_storage.hot().stats().into(),

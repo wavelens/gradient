@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod eviction;
 #[cfg(feature = "server")]
 pub(crate) mod expiry;
 #[cfg(feature = "server")]

@@ -141,6 +141,7 @@ pub enum AuthOutcome {
     Accept {
         authorized_peers: Vec<String>,
         failed_peers: Vec<FailedPeer>,
+        granted_capabilities: GradientCapabilities,
     },
     Reject(Rejection),
 }
@@ -156,24 +157,14 @@ pub trait PeerAuthority: Send + Sync {
         claimed: &str,
         challenge: Self::Challenge,
         tokens: &[(String, SecretString)],
+        advertised: GradientCapabilities,
     ) -> Result<AuthOutcome>;
-
-    async fn negotiate(
-        &self,
-        claimed: &str,
-        client: GradientCapabilities,
-    ) -> Result<GradientCapabilities>;
 }
 
 #[async_trait]
 pub trait DialerAuthority: Send + Sync {
-    async fn admit(&self, worker_id: &str) -> Result<AuthOutcome>;
-
-    async fn negotiate(
-        &self,
-        worker_id: &str,
-        client: GradientCapabilities,
-    ) -> Result<GradientCapabilities>;
+    async fn admit(&self, worker_id: &str, advertised: GradientCapabilities)
+    -> Result<AuthOutcome>;
 }
 
 #[async_trait]

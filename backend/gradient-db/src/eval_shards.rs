@@ -156,7 +156,9 @@ pub async fn shard_drv_paths<C: ConnectionTrait>(
 
     Ok(rows
         .into_iter()
-        .map(|(hash, name)| StorePath::from_stored(hash, format!("{name}.drv")).full())
+        .map(|(hash, name)| {
+            StorePath::from_hash_and_name_without_validation(hash, format!("{name}.drv")).full()
+        })
         .collect())
 }
 

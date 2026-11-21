@@ -12,11 +12,12 @@ use nix_bindings::flake::{
     FetchersSettings, FlakeReference, FlakeReferenceParseFlags, FlakeSettings, LockFlags,
     LockedFlake,
 };
-use nix_bindings::{Context, EvalState, Store};
+use nix_bindings::{Context, EvalState};
 
 use crate::exec_app::{self, AppKind};
 use crate::ipc::{AttrError, DiscoveryShard, ExecApp, License};
 use crate::license::licenses_of;
+use crate::nix_eval::FlakeLockCheckFn;
 use crate::run_app::{RunProgram, read_plain_app, read_run_app};
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
@@ -28,12 +29,13 @@ pub struct Resolved {
     pub exec: Option<ExecApp>,
 }
 
-// These lines reflect the fetch of each lock node in call-flake.nix. All URLs then match the URL that Nix can check against allowed-uris. Inputs with relative paths stay out. Git inputs get the shallow attribute from fetchTree.
-const LOCKED_INPUT_FETCH_URLS_NIX_EXPRESSION: &str = r#"exported:
+// Mirror the fetch of each lock node in `call-flake.nix` as a URL in the form of the Nix
+// `allowed-uris` check. Path inputs don't apply (relative paths belong to the flake source,
+// absolute paths don't pass). Git inputs take `shallow` from `fetchTree`.
+pub(crate) const LOCKED_INPUT_FETCH_URLS_NIX_EXPRESSION: &str = r#"exported:
   let
     nodes = builtins.attrValues (builtins.fromJSON exported).lockFile.nodes;
-    isFetched = node: node ? locked
-      && !(node.locked.type == "path" && builtins.substring 0 1 node.locked.path != "/");
+    isFetched = node: node ? locked && node.locked.type != "path";
     fetchAttrs = node:
       let attrs = node.info or { } // removeAttrs node.locked [ "dir" ];
       in if attrs.type == "git" then { shallow = true; } // attrs else attrs;
@@ -49,15 +51,7 @@ pub struct FlakeWalker<'a> {
 
 impl<'a> FlakeWalker<'a> {
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn open(
-        ctx: &Arc<Context>,
-        fetch: &FetchersSettings,
-        flake: &Arc<FlakeSettings>,
-        state: &'a EvalState,
-        flake_ref: &str,
-        overrides: &[(String, String)],
-    ) -> Result<Self> {
-        let locked = lock_flake(ctx, fetch, flake, state, flake_ref, overrides)?;
+    pub fn open(ctx: &Arc<Context>, state: &'a EvalState, locked: LockedFlake) -> Result<Self> {
         let cache = EvalCache::open(ctx, state, &locked)?;
 
         Ok(FlakeWalker {
@@ -186,7 +180,7 @@ impl<'a> FlakeWalker<'a> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn lock_flake(
+pub(crate) fn lock_flake(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,
     flake: &Arc<FlakeSettings>,
@@ -211,18 +205,19 @@ fn lock_flake(
         .with_context(|| format!("lock flake '{flake_ref}'"))
 }
 
-pub fn fingerprint(
-    ctx: &Arc<Context>,
-    fetch: &FetchersSettings,
-    flake: &Arc<FlakeSettings>,
-    state: &EvalState,
-    store: &Store,
+pub(crate) fn reject_flake_lock_with_disallowed_input(
+    locked: &LockedFlake,
     flake_ref: &str,
     overrides: &[(String, String)],
-) -> Result<Option<String>> {
-    let locked = lock_flake(ctx, fetch, flake, state, flake_ref, overrides)?;
-
-    Ok(locked.fingerprint(store, fetch)?)
+    check: FlakeLockCheckFn,
+) -> Result<()> {
+    let exported: serde_json::Value = serde_json::from_str(&locked.export_json()?)
+        .with_context(|| format!("parse the exported lock of flake '{flake_ref}'"))?;
+    let flake_dir = exported["root"]["original"]["dir"].as_str();
+    let override_references: Vec<&str> = overrides.iter().map(|(_, r)| r.as_str()).collect();
+    check(&exported["lockFile"], flake_dir, &override_references).map_err(|reason| {
+        anyhow!("Nix locked flake '{flake_ref}' with a disallowed input: {reason}")
+    })
 }
 
 struct CursorNode<'a> {

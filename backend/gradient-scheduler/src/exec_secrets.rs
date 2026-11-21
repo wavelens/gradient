@@ -69,6 +69,14 @@ pub enum SecretResolutionError {
     Unreadable { name: String, reason: String },
     #[error("reading project secrets failed: {0}")]
     Database(#[from] sea_orm::DbErr),
+    #[error(
+        "This job does execute code from a fork pull request that no maintainer approved. This job can't use project secrets or SSH keys of the project. Comment `/gradient run <full 40-character commit hash>` on the pull request to use them."
+    )]
+    ProjectSecretsNotAllowedForUnapprovedForkPullRequest,
+    #[error(
+        "This job runs code from a fork pull request that a maintainer has not approved. The server did not provide project Git credentials (the project SSH key and stored credentials for HTTPS Git), so fetches that need them fail. To run the commit with those credentials, comment `/gradient run <full 40-character commit hash>` on the pull request."
+    )]
+    ProjectGitCredentialsWithheldForUnapprovedForkPullRequest,
 }
 
 pub fn resolve_sources(
@@ -111,9 +119,13 @@ pub async fn resolve_secret_names(
     config: &RuntimeConfig,
     project: ProjectId,
     spec: &ExecSpec,
+    allows_project_credentials_and_privileged_actions: bool,
 ) -> Result<ResolvedSecretNames, SecretResolutionError> {
     if spec.secrets.is_empty() {
         return Ok(ResolvedSecretNames::default());
+    }
+    if !allows_project_credentials_and_privileged_actions {
+        return Err(SecretResolutionError::ProjectSecretsNotAllowedForUnapprovedForkPullRequest);
     }
 
     let stored = gradient_db::project_secrets::names(db, project).await?;
@@ -201,6 +213,7 @@ pub fn secret_refusal(
     req: &ExecRequirement,
     names: &ResolvedSecretNames,
     workers: &[WorkerInfo],
+    project_id: ProjectId,
 ) -> Option<SecretResolutionError> {
     let without_secrets = ExecRequirement {
         secrets: Vec::new(),
@@ -209,9 +222,12 @@ pub fn secret_refusal(
     };
     let fitting: Vec<(&str, Vec<String>)> = workers
         .iter()
-        .filter(|w| caps_of(w).fits_exec(&without_secrets, DeviceCount::Total))
+        .filter(|w| caps_of(w).fits_exec(&without_secrets, DeviceCount::Total, project_id))
         .map(|w| {
-            let advertised = w.exec.as_ref().map(|e| e.secrets.clone());
+            let advertised = w
+                .exec
+                .as_ref()
+                .map(|e| e.worker_sops_secret_names_released_to_project(&project_id.into_inner()));
             (w.id.as_str(), advertised.unwrap_or_default())
         })
         .collect();
@@ -245,7 +261,10 @@ pub fn secret_refusal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_jobs::{allow_all, exec_caps, worker_info};
+    use crate::test_jobs::{
+        allow_all, exec_caps,
+        exec_worker_caps_allowing_all_commands_with_sops_secret_for_one_project, worker_info,
+    };
     use gradient_types::exec::ExecDefaults;
 
     fn set(names: &[&str]) -> BTreeSet<String> {
@@ -323,7 +342,7 @@ mod tests {
             exec_caps(allow_all(), ExecDefaults::default()),
         )];
         assert_eq!(
-            secret_refusal(&x86(|_| {}), &names, &workers)
+            secret_refusal(&x86(|_| {}), &names, &workers, ProjectId::nil())
                 .unwrap()
                 .to_string(),
             r#"secret "lab-key" not found in project secrets, repository sops files or worker sops files"#
@@ -341,7 +360,7 @@ mod tests {
             exec_caps(allow_all(), ExecDefaults::default()),
         )];
         let req = x86(|r| r.labels = listed(&["3d-printer"]));
-        assert!(secret_refusal(&req, &names, &workers).is_none());
+        assert!(secret_refusal(&req, &names, &workers, ProjectId::nil()).is_none());
     }
 
     #[test]
@@ -356,10 +375,66 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            secret_refusal(&x86(|_| {}), &names, &[worker_info("w1", caps)])
-                .unwrap()
-                .to_string(),
+            secret_refusal(
+                &x86(|_| {}),
+                &names,
+                &[worker_info("w1", caps)],
+                ProjectId::nil()
+            )
+            .unwrap()
+            .to_string(),
             r#"secret "wandb-token" found in two sources: project secrets, worker sops of w1"#
         );
+    }
+
+    #[test]
+    fn secret_refusal_for_project_secret_with_same_name_as_worker_secret_released_only_to_other_project_does_not_return_two_sources()
+     {
+        let project_id = ProjectId::now_v7();
+        let project_p2_id = ProjectId::now_v7();
+        let workers = [worker_info(
+            "w1",
+            exec_worker_caps_allowing_all_commands_with_sops_secret_for_one_project(
+                "wandb-token",
+                project_id,
+            ),
+        )];
+        let names = ResolvedSecretNames {
+            server: vec![ServerSecret {
+                name: "wandb-token".into(),
+                source: ServerSecretSource::Project,
+            }],
+            ..Default::default()
+        };
+        let refusal = secret_refusal(&x86(|_| {}), &names, &workers, project_p2_id);
+        assert!(refusal.is_none(), "{refusal:?}");
+        assert!(matches!(
+            secret_refusal(&x86(|_| {}), &names, &workers, project_id),
+            Some(SecretResolutionError::TwoSources { .. })
+        ));
+    }
+
+    #[test]
+    fn job_in_other_project_gets_not_found_for_secret_released_only_to_another_project_like_missing_secret()
+     {
+        let project_id = ProjectId::now_v7();
+        let project_p2_id = ProjectId::now_v7();
+        let workers = [worker_info(
+            "w1",
+            exec_worker_caps_allowing_all_commands_with_sops_secret_for_one_project(
+                "lab-key", project_id,
+            ),
+        )];
+        let names = ResolvedSecretNames {
+            worker: listed(&["lab-key"]),
+            ..Default::default()
+        };
+        assert_eq!(
+            secret_refusal(&x86(|_| {}), &names, &workers, project_p2_id)
+                .unwrap()
+                .to_string(),
+            r#"secret "lab-key" not found in project secrets, repository sops files or worker sops files"#
+        );
+        assert!(secret_refusal(&x86(|_| {}), &names, &workers, project_id).is_none());
     }
 }

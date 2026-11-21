@@ -186,6 +186,16 @@
     "values": []
   },
   {
+    "group": "",
+    "field": "release_guest_taps",
+    "flag": "release-guest-taps",
+    "env": "GRADIENT_WORKER_RELEASE_GUEST_TAPS",
+    "type": "Option<String>",
+    "description": "Release the tap for the guest with this id after exit of the root supervisor and after a force-kill (internal - do not set manually).",
+    "default": null,
+    "values": []
+  },
+  {
     "group": "capabilities",
     "field": "federate",
     "flag": "capabilities-federate",
@@ -644,7 +654,7 @@
     "flag": "exec-devices",
     "env": "GRADIENT_WORKER_EXEC_DEVICES",
     "type": "std::vec::Vec<DeviceConfig>",
-    "description": "Host devices exec jobs can request, a JSON list in the environment variable. Each\nentry has a `name` and exactly one source: `vfio` lists PCI addresses bound to\n`vfio-pci`, one device each; `dev` names a device node; `usb` holds a `vendor:product`\nID.",
+    "description": "Host devices that exec jobs can request sit in a JSON list in an environment variable. Store `name`, `projects` (string `\"all\"`, or a list of project UUIDs that can request it) and exactly one source in each entry. PCI addresses that belong to `vfio-pci` go in `vfio`, one device each. Device nodes go in `dev`. Put the `vendor:product` ID in `usb`.",
     "default": "[]",
     "values": []
   },
@@ -654,7 +664,7 @@
     "flag": "exec-mounts",
     "env": "GRADIENT_WORKER_EXEC_MOUNTS",
     "type": "std::vec::Vec<MountConfig>",
-    "description": "Host directories exec jobs can mount at {file}`/mnt/<name>`, a JSON list in the\nenvironment variable. Each entry has a `name`, a `path`, `readOnly` and `perJob`; a\n`perJob` mount gives every job a fresh directory below `path`.",
+    "description": "Host directories that exec jobs can mount at {file}`/mnt/<name>`. A JSON list in the environment variable. An entry can contain `name`, `path`, `projects` (the string `\"all\"` or a list of project UUIDs that can mount the entry), `readOnly` and `perJob`. A `perJob` mount provides a new directory under `path` for each job.",
     "default": "[]",
     "values": []
   },
@@ -670,11 +680,21 @@
   },
   {
     "group": "exec",
-    "field": "subnet",
-    "flag": "exec-subnet",
-    "env": "GRADIENT_WORKER_EXEC_SUBNET",
+    "field": "subnet_v4",
+    "flag": "exec-subnet-v4",
+    "env": "GRADIENT_WORKER_EXEC_SUBNET_V4",
     "type": "Option<String>",
-    "description": "The IPv4 subnet for {option}`services.gradient.worker.exec.bridge`. Set this option when {option}`services.gradient.worker.capabilities.exec` is on. Pick a subnet free of other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span several nodes need a separate subnet on each Exec worker in the zone.",
+    "description": "IPv4 subnet for {option}`services.gradient.worker.exec.bridge`. Set this option when {option}`services.gradient.worker.capabilities.exec` is on. Choose a subnet without overlap with other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span multiple nodes need a separate subnet on each Exec worker in the zone.",
+    "default": null,
+    "values": []
+  },
+  {
+    "group": "exec",
+    "field": "subnet_v6",
+    "flag": "exec-subnet-v6",
+    "env": "GRADIENT_WORKER_EXEC_SUBNET_V6",
+    "type": "Option<String>",
+    "description": "The IPv6 subnet for {option}`services.gradient.worker.exec.bridge`. Guests get no IPv6 address from `null`. Guests with network access get an address in this subnet with the same host offset as their IPv4 address in {option}`services.gradient.worker.exec.subnet.v4`. They can reach the internet through IPv6 masquerade. The bridge address is the first host address. The prefix length must fall between 64 and the {option}`services.gradient.worker.exec.subnet.v4` prefix length plus 96. Host bits must be zero. A random unique local `/64` (`fd00::/8`) can fit.",
     "default": null,
     "values": []
   },
@@ -704,7 +724,7 @@
     "flag": "exec-allow-network",
     "env": "GRADIENT_WORKER_EXEC_ALLOW_NETWORK",
     "type": "bool",
-    "description": "Whether exec jobs may reach the network through\n{option}`services.gradient.worker.exec.bridge`.",
+    "description": "Whether exec jobs reach the network through\n{option}`services.gradient.worker.exec.bridge`. The worker module adds steps to\n`nftables.service` when `networking.nftables.enable` is on. Those steps restore the guest\nfilter after stop/start.",
     "default": "false",
     "values": [
       "true",
@@ -845,9 +865,9 @@
     "field": "sops_files",
     "flag": "exec-sops-files",
     "env": "GRADIENT_WORKER_EXEC_SOPS_FILES",
-    "type": "Vec<PathBuf>",
-    "description": "Sops files decrypted on the worker with\n{option}`services.gradient.worker.exec.sops.keyFile`. Exec jobs get their top-level\nvalues by name. The server never sees them.",
-    "default": null,
+    "type": "std::vec::Vec<SopsSecretFileEntry>",
+    "description": "List of sops files that the worker can decrypt with {option}`services.gradient.worker.exec.sops.keyFile`. Pass the list as JSON in the environment variable. Entries have `path` and `projects`. `\"all\"` is a string, or a list of project UUIDs that receive the values of that file. Exec jobs fetch top-level values by name. These values never reach the server.",
+    "default": "[]",
     "values": []
   },
   {

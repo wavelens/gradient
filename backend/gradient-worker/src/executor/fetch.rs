@@ -10,6 +10,11 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use gradient_sources::{GitOperationCredentials, SshGitPrivateKeyKnownHostsAndObservations};
+use gradient_types::RepositoryUrl;
+use gradient_types::fetch_source_allowlist_and_request_validation::{
+    AllowedFetchRequest, ValidatedFlakeLock,
+    check_flake_input_override_reference_is_remote_flake_or_single_store_path,
+};
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{FlakeJob, FlakeSource};
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter, WorkerStore};
@@ -17,6 +22,9 @@ use gradient_wire::types::{EvalProgress, InputFetch, InputFetchState};
 use tracing::{debug, info, warn};
 
 use super::AbortSignal;
+use super::capped_regular_file_below_trusted_root_reader::{
+    SizeCappedNoFollowReadError, open_regular_file_below_root_and_read_at_most_max_bytes,
+};
 use super::dependencies::InputSource;
 use super::progress_report::ChangeReporter;
 use crate::error::WorkerError;
@@ -35,6 +43,26 @@ struct FetchedInputs {
     progress: Option<EvalProgress>,
 }
 
+#[derive(Debug)]
+enum ValidatedFlakeSource<'a> {
+    Repository { url: RepositoryUrl, commit: &'a str },
+    Cached { store_path: &'a str },
+}
+
+impl<'a> ValidatedFlakeSource<'a> {
+    fn of(source: &'a FlakeSource) -> Result<Self> {
+        Ok(match source {
+            FlakeSource::Repository { url, commit } => Self::Repository {
+                url: url
+                    .parse()
+                    .with_context(|| format!("job repository `{url}`"))?,
+                commit,
+            },
+            FlakeSource::Cached { store_path, .. } => Self::Cached { store_path },
+        })
+    }
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn fetch_repository(
     job: &FlakeJob,
@@ -43,9 +71,23 @@ pub async fn fetch_repository(
     store: &dyn WorkerStore,
     abort: AbortSignal,
 ) -> Result<FetchOutcome> {
+    let source = ValidatedFlakeSource::of(&job.source)?;
+    fetch_flake_inputs_from_validated_job_source(job, source, updater, credentials, store, abort)
+        .await
+}
+
+async fn fetch_flake_inputs_from_validated_job_source(
+    job: &FlakeJob,
+    source: ValidatedFlakeSource<'_>,
+    updater: &mut dyn JobReporter,
+    credentials: &JobCredentials,
+    store: &dyn WorkerStore,
+    abort: AbortSignal,
+) -> Result<FetchOutcome> {
     let git_credentials = credentials.git_credentials_for_clone_and_fetch();
     let fetched = clone_job_repository_and_update_inputs_with_git_credentials(
         job,
+        source,
         updater,
         &git_credentials,
         store,
@@ -72,6 +114,7 @@ pub(crate) async fn send_ssh_host_key_observations_or_log_warning(
 
 async fn clone_job_repository_and_update_inputs_with_git_credentials(
     job: &FlakeJob,
+    source: ValidatedFlakeSource<'_>,
     updater: &mut dyn JobReporter,
     git_credentials: &GitOperationCredentials,
     store: &dyn WorkerStore,
@@ -83,27 +126,27 @@ async fn clone_job_repository_and_update_inputs_with_git_credentials(
 
     updater.report_fetching().await?;
 
-    let (source_path, flake_root, _checkout) = match &job.source {
-        FlakeSource::Repository { url, commit } => {
-            let (url, commit) = (url.clone(), commit.clone());
+    let (source_path, flake_root, lock, _checkout) = match source {
+        ValidatedFlakeSource::Repository { url, commit } => {
             debug!(
-                %url,
+                url = url.git_connection_url_for_log_without_username_password_and_query(),
                 %commit,
                 has_ssh_key = git_credentials.ssh_git_private_key_and_known_hosts.is_some(),
                 "fetching repository"
             );
+            let commit = commit.to_owned();
 
             let git_credentials_for_clone = git_credentials.clone();
             let commit_for_clone = commit.clone();
             let clone_task = tokio::task::spawn_blocking(move || {
-                gradient_sources::checkout_commit(
+                gradient_sources::fetch_commit_into_new_bare_temporary_repository(
                     &url,
                     &commit_for_clone,
                     &git_credentials_for_clone,
                 )
             });
 
-            let checkout = tokio::select! {
+            let fetched = tokio::select! {
                 biased;
                 () = abort.aborted() => {
                     anyhow::bail!("job aborted during git clone");
@@ -112,30 +155,53 @@ async fn clone_job_repository_and_update_inputs_with_git_credentials(
                     result.context("fetch task panicked")??
                 }
             };
-            let checkout_path = checkout.path().to_string_lossy().into_owned();
-            let flake_root = flake_root(checkout.path(), job.flake_dir.as_deref())?;
+            let repository_path = fetched.repository().path().to_string_lossy().into_owned();
+            let flake_root = flake_root(Path::new(&commit), job.flake_dir.as_deref())?;
+            let (lock_commit, flake_dir) = (commit.clone(), job.flake_dir.clone());
+            let (fetched, lock_bytes) = tokio::task::spawn_blocking(move || {
+                let lock_bytes = super::source::read_regular_flake_lock_blob_from_commit_tree(
+                    &fetched,
+                    &lock_commit,
+                    flake_dir.as_deref(),
+                    MAX_FLAKE_LOCK_FILE_SIZE_BYTES,
+                );
+                (fetched, lock_bytes)
+            })
+            .await
+            .context("`flake.lock` read task panicked")?;
+            let lock_bytes = lock_bytes?;
+            let mut lock = parse_and_validate_optional_flake_lock(lock_bytes, job)?;
 
-            if let Some(spec) = &job.input_update {
-                run_input_update(spec, &flake_root, git_credentials, updater, &mut abort).await?;
+            if let Some(spec) = &job.input_update
+                && let Some(updated) =
+                    run_input_update(spec, lock.as_ref(), git_credentials, updater, &mut abort)
+                        .await?
+            {
+                lock = parse_and_validate_optional_flake_lock(Some(updated), job)?;
             }
 
-            let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;
-            (source_path, flake_root, Some(checkout))
+            let source_path = super::source::add_git_tree(store, &repository_path, &commit).await?;
+            (source_path, flake_root, lock, Some(fetched))
         }
-        FlakeSource::Cached { store_path, .. } => {
+        ValidatedFlakeSource::Cached { store_path } => {
             debug!(%store_path, "using the cached build source");
             let flake_root = flake_root(Path::new(store_path), job.flake_dir.as_deref())?;
-            (store_path.clone(), flake_root, None)
+            let lock_bytes = read_optional_flake_lock_file_from_local_store_path(
+                store_path,
+                job.flake_dir.as_deref(),
+            )
+            .await?;
+            let lock = parse_and_validate_optional_flake_lock(lock_bytes, job)?;
+            (store_path.to_owned(), flake_root, lock, None)
         }
     };
 
-    let lock = read_lock(&flake_root).await?;
     let overrides_in: Vec<OverrideInput> = job.input_overrides.iter().map(Into::into).collect();
     let (applied_overrides, warnings) = match (&lock, overrides_in.is_empty()) {
         (_, true) => (Vec::new(), Vec::new()),
         (Some(lock), false) => {
-            let declared = declared_inputs_from_lock(lock)?;
-            resolve_overrides(&overrides_in, &declared, lock)?
+            let declared = declared_inputs_from_lock(lock.parsed_json_value())?;
+            resolve_overrides(&overrides_in, &declared, lock.parsed_json_value())?
         }
         (None, false) => anyhow::bail!(
             "input overrides need a flake.lock in {}",
@@ -164,10 +230,10 @@ async fn clone_job_repository_and_update_inputs_with_git_credentials(
         .iter()
         .map(|(name, _)| name.clone())
         .collect();
-    let inputs = lock
-        .as_ref()
-        .map(|lock| locked_inputs(lock, &overridden))
-        .unwrap_or_default();
+    let inputs = match &lock {
+        Some(lock) => locked_inputs(lock, &overridden)?,
+        None => Vec::new(),
+    };
     let sink = updater.eval_progress_sink();
     let fetched = {
         let source = InputSource::new(&*updater);
@@ -208,18 +274,40 @@ pub(super) fn flake_root(base: &Path, flake_dir: Option<&str>) -> Result<PathBuf
     Ok(base.join(dir))
 }
 
-async fn read_lock(flake_root: &Path) -> Result<Option<serde_json::Value>> {
-    let path = flake_root.join("flake.lock");
-    match tokio::fs::read(&path).await {
-        Ok(bytes) => Ok(Some(
-            serde_json::from_slice(&bytes).context("parse flake.lock")?,
-        )),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
+fn parse_and_validate_optional_flake_lock(
+    bytes: Option<Vec<u8>>,
+    job: &FlakeJob,
+) -> Result<Option<ValidatedFlakeLock>> {
+    Ok(bytes
+        .map(|bytes| ValidatedFlakeLock::parse(bytes, job.flake_dir.as_deref()))
+        .transpose()?)
+}
+
+const MAX_FLAKE_LOCK_FILE_SIZE_BYTES: u64 = 16 * 1024 * 1024;
+
+pub(super) async fn read_optional_flake_lock_file_from_local_store_path(
+    store_path: &str,
+    flake_dir: Option<&str>,
+) -> Result<Option<Vec<u8>>> {
+    let relative = Path::new(flake_dir.unwrap_or("")).join("flake.lock");
+    match open_regular_file_below_root_and_read_at_most_max_bytes(
+        Path::new(store_path),
+        &relative,
+        MAX_FLAKE_LOCK_FILE_SIZE_BYTES,
+    )
+    .await
+    {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(SizeCappedNoFollowReadError::FileOrAncestorDirectoryNotFound { .. }) => Ok(None),
+        Err(error) => Err(error.into()),
     }
 }
 
-fn locked_inputs(lock: &serde_json::Value, overridden: &HashSet<String>) -> Vec<LockedInput> {
+fn locked_inputs(
+    validated: &ValidatedFlakeLock,
+    overridden: &HashSet<String>,
+) -> Result<Vec<LockedInput>> {
+    let lock = validated.parsed_json_value();
     let root = lock["root"].as_str().unwrap_or("root");
     let nodes = &lock["nodes"];
     let root_names: HashMap<&str, &str> = nodes[root]["inputs"]
@@ -248,31 +336,28 @@ fn locked_inputs(lock: &serde_json::Value, overridden: &HashSet<String>) -> Vec<
                 .flatten()
                 .filter_map(|(_, k)| k.as_str()),
         );
-        let locked = &node["locked"];
-        let Some(store_path) = locked["narHash"].as_str().and_then(source_store_path) else {
+        let Some(attributes) = validated.validated_fetch_tree_input_by_node_key(key) else {
             continue;
         };
+        let Some(store_path) = node["locked"]["narHash"]
+            .as_str()
+            .and_then(source_store_path)
+        else {
+            continue;
+        };
+        let request =
+            AllowedFetchRequest::build_accepted_fetch_tree_request_from_validated_attributes_and_expected_store_path(
+                attributes.clone(),
+                Some(store_path.clone()),
+            )?;
         inputs.push(LockedInput {
             name: root_names.get(key).copied().unwrap_or(key).to_owned(),
-            request: serde_json::json!({
-                "builtin": "fetchTree",
-                "args": fetcher_attrs(locked),
-                "storePath": store_path,
-            })
-            .to_string(),
+            request: request.get_canonical_fetch_request_json(),
             store_path,
         });
     }
     inputs.sort_by(|a, b| a.name.cmp(&b.name));
-    inputs
-}
-
-fn fetcher_attrs(locked: &serde_json::Value) -> serde_json::Value {
-    let mut attrs = locked.clone();
-    if let Some(attrs) = attrs.as_object_mut() {
-        attrs.remove("dir");
-    }
-    attrs
+    Ok(inputs)
 }
 
 fn source_store_path(nar_hash: &str) -> Option<String> {
@@ -475,18 +560,17 @@ async fn fetch_inputs(
 #[tracing::instrument(level = "debug", skip_all)]
 async fn run_input_update(
     spec: &gradient_wire::messages::InputUpdateSpec,
-    flake_root: &Path,
+    lock: Option<&ValidatedFlakeLock>,
     git_credentials: &GitOperationCredentials,
     updater: &mut dyn JobReporter,
     abort: &mut AbortSignal,
-) -> Result<()> {
+) -> Result<Option<Vec<u8>>> {
+    let Some(lock) = lock else {
+        anyhow::bail!("input update: flake.lock missing from commit");
+    };
+    let lock_bytes = lock.raw_lock_file_bytes();
     if spec.discover_only {
-        let lock_path = flake_root.join("flake.lock");
-        let bytes = tokio::fs::read(&lock_path)
-            .await
-            .with_context(|| format!("read {}", lock_path.display()))?;
-        let lock: serde_json::Value = serde_json::from_slice(&bytes).context("parse flake.lock")?;
-        let declared = declared_inputs_from_lock(&lock)?;
+        let declared = declared_inputs_from_lock(lock.parsed_json_value())?;
         let mut matched: Vec<String> = spec
             .inputs
             .iter()
@@ -494,35 +578,36 @@ async fn run_input_update(
             .flat_map(|p| {
                 declared
                     .iter()
-                    .filter(move |d| gradient_util::glob::glob_match(p, d))
+                    .filter(move |d| gradient_wildcard::candidate_matches_wildcard_pattern(p, d))
                     .cloned()
             })
             .collect();
         matched.sort();
         matched.dedup();
-        return updater.report_input_expansion(matched).await;
+        return updater.report_input_expansion(matched).await.map(|()| None);
     }
 
-    report_input_sources(&spec.inputs, flake_root, updater).await;
+    let tracked: Vec<gradient_sources::flake_lock::InputName> =
+        spec.inputs.iter().cloned().map(Into::into).collect();
+    gradient_sources::flake_lock::check_each_tracked_input_is_a_remote_direct_input(
+        lock_bytes, &tracked,
+    )?;
+    report_input_sources(&spec.inputs, lock_bytes, updater).await;
     let sink = updater.eval_progress_sink();
     let Some(patch) =
-        resolve_newest_revisions(spec, flake_root, git_credentials, &*sink, abort).await?
+        resolve_newest_revisions(spec, lock_bytes, git_credentials, &*sink, abort).await?
     else {
-        return Ok(());
+        return Ok(None);
     };
 
-    for edit in &patch.edits {
-        let dest = flake_root.join(&edit.path);
-        tokio::fs::write(&dest, &edit.contents)
-            .await
-            .with_context(|| format!("write {}", dest.display()))?;
-    }
-
-    let candidate = patch
+    let updated_lock = patch
         .edits
-        .iter()
-        .find(|e| e.path.to_string_lossy().as_ref() == "flake.lock")
-        .map(|e| String::from_utf8_lossy(&e.contents).into_owned())
+        .into_iter()
+        .find(|e| e.path.as_os_str() == "flake.lock")
+        .map(|e| e.contents);
+    let candidate = updated_lock
+        .as_deref()
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
         .unwrap_or_default();
 
     let bumped = patch
@@ -535,15 +620,12 @@ async fn run_input_update(
         })
         .collect();
 
-    updater.report_input_update(candidate, bumped).await
+    updater.report_input_update(candidate, bumped).await?;
+    Ok(updated_lock)
 }
 
-async fn report_input_sources(
-    tracked: &[String],
-    flake_root: &Path,
-    updater: &mut dyn JobReporter,
-) {
-    let sent = match read_input_sources(tracked, flake_root).await {
+async fn report_input_sources(tracked: &[String], lock: &[u8], updater: &mut dyn JobReporter) {
+    let sent = match read_input_sources(tracked, lock) {
         Ok(sources) => updater.report_input_sources(sources).await,
         Err(e) => Err(e),
     };
@@ -552,17 +634,13 @@ async fn report_input_sources(
     }
 }
 
-async fn read_input_sources(
+fn read_input_sources(
     tracked: &[String],
-    flake_root: &Path,
+    lock: &[u8],
 ) -> Result<Vec<gradient_wire::messages::FlakeInputSourceWire>> {
     use gradient_sources::flake_lock::{FlakeLock, input_source::tracked_input_sources};
 
-    let lock_path = flake_root.join("flake.lock");
-    let bytes = tokio::fs::read(&lock_path)
-        .await
-        .with_context(|| format!("read {}", lock_path.display()))?;
-    let lock = FlakeLock::parse(&bytes)?;
+    let lock = FlakeLock::parse(lock)?;
     Ok(tracked_input_sources(&lock, tracked)
         .into_iter()
         .map(|s| gradient_wire::messages::FlakeInputSourceWire {
@@ -575,7 +653,7 @@ async fn read_input_sources(
 
 async fn resolve_newest_revisions(
     spec: &gradient_wire::messages::InputUpdateSpec,
-    flake_root: &Path,
+    lock: &[u8],
     git_credentials: &GitOperationCredentials,
     sink: &dyn EvalProgressSink,
     abort: &mut AbortSignal,
@@ -596,7 +674,7 @@ async fn resolve_newest_revisions(
     let patch = tokio::select! {
         biased;
         () = abort.aborted() => anyhow::bail!(WorkerError::FlakeInputFetchAborted),
-        patch = generator.produce(flake_root, &tracked, &board) => patch,
+        patch = generator.produce(lock, &tracked, &board) => patch,
         never = reporter.run(sink, snapshot) => match never {},
     };
     reporter.flush(sink, &snapshot).await;
@@ -696,6 +774,10 @@ fn resolve_overrides(
             Some(u) => u,
             None => reconstruct_original_ref(lock, &input_name)?,
         };
+        check_flake_input_override_reference_is_remote_flake_or_single_store_path(
+            &input_name,
+            &ref_str,
+        )?;
         applied.push((input_name, ref_str));
     }
     Ok((applied, warnings))
@@ -865,10 +947,67 @@ mod tests {
         }
     }
 
+    async fn fetch_job_from_local_test_repository(
+        job: &FlakeJob,
+        reporter: &mut RecordingJobReporter,
+        credentials: &JobCredentials,
+        store: &FakeWorkerStore,
+    ) -> Result<FetchOutcome> {
+        let source = match &job.source {
+            FlakeSource::Repository { url, commit } if url.starts_with("file://") => {
+                ValidatedFlakeSource::Repository {
+                    url: RepositoryUrl::local_test_repository(Path::new(&url["file://".len()..])),
+                    commit,
+                }
+            }
+            other => ValidatedFlakeSource::of(other)?,
+        };
+        fetch_flake_inputs_from_validated_job_source(
+            job,
+            source,
+            reporter,
+            credentials,
+            store,
+            no_abort(),
+        )
+        .await
+    }
+
     async fn fetch(job: &FlakeJob, store: &FakeWorkerStore) -> Result<FetchOutcome> {
-        let credentials = crate::proto::credentials::JobCredentials::default();
+        let credentials = JobCredentials::default();
         let mut reporter = RecordingJobReporter::new();
-        fetch_repository(job, &mut reporter, &credentials, store, no_abort()).await
+        fetch_job_from_local_test_repository(job, &mut reporter, &credentials, store).await
+    }
+
+    #[tokio::test]
+    async fn fetch_fails_for_local_repository_url_before_git_clone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("repo");
+        let sha = committed_repo(&repo_dir, &[("flake.nix", "{}")]);
+        for url in [
+            format!("file://{}", repo_dir.display()),
+            repo_dir.display().to_string(),
+        ] {
+            let job = FlakeJob {
+                source: FlakeSource::Repository {
+                    url: url.clone(),
+                    commit: sha.clone(),
+                },
+                ..make_flake_job()
+            };
+            let mut reporter = RecordingJobReporter::new();
+            let store = FakeWorkerStore::new();
+            let result = fetch_repository(
+                &job,
+                &mut reporter,
+                &JobCredentials::default(),
+                &store,
+                no_abort(),
+            )
+            .await;
+            assert!(result.is_err(), "{url}");
+            assert_eq!(reporter.len(), 0, "{url}");
+        }
     }
 
     #[tokio::test]
@@ -883,9 +1022,10 @@ mod tests {
         let mut reporter = RecordingJobReporter::new();
         let store = FakeWorkerStore::new();
 
-        let outcome = fetch_repository(&job, &mut reporter, &credentials, &store, no_abort())
-            .await
-            .unwrap();
+        let outcome =
+            fetch_job_from_local_test_repository(&job, &mut reporter, &credentials, &store)
+                .await
+                .unwrap();
 
         assert!(outcome.source_path.starts_with("/nix/store/"));
         assert!(outcome.source_path.ends_with("-source"));
@@ -949,6 +1089,274 @@ mod tests {
         assert_eq!(
             err.to_string(),
             gradient_types::InputError::InvalidFlakeDir("../x".into()).to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_fails_quickly_when_flake_lock_is_symlink_to_dev_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", repo_dir.join("flake.lock")).unwrap();
+        let sha = committed_repo(&repo_dir, &[("flake.nix", "{}")]);
+        let job = repository_job(&repo_dir, sha);
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            fetch(&job, &FakeWorkerStore::new()),
+        )
+        .await
+        .expect("the fetch must not read from /dev/zero");
+
+        let Err(err) = outcome else {
+            panic!("a symlinked flake.lock is refused")
+        };
+        assert!(err.to_string().contains("is not a regular file"), "{err:#}");
+    }
+
+    fn cached_job(store_path: &Path) -> FlakeJob {
+        FlakeJob {
+            source: FlakeSource::Cached {
+                store_path: store_path.display().to_string(),
+                commit: None,
+            },
+            ..make_flake_job()
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_fails_quickly_when_cached_build_source_store_path_flake_lock_is_symlink_to_dev_zero()
+     {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("flake.nix"), "{}").unwrap();
+        std::os::unix::fs::symlink("/dev/zero", source.path().join("flake.lock")).unwrap();
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            fetch(&cached_job(source.path()), &FakeWorkerStore::new()),
+        )
+        .await
+        .expect("the fetch must not read from /dev/zero");
+
+        let Err(err) = outcome else {
+            panic!("a symlinked flake.lock is refused")
+        };
+        assert!(
+            matches!(
+                err.downcast_ref::<SizeCappedNoFollowReadError>(),
+                Some(SizeCappedNoFollowReadError::PathComponentIsSymlinkOrIntermediateComponentIsNotDirectory { .. })
+            ),
+            "{err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_build_source_store_path_with_flake_lock_over_byte_cap_fails_fetch() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("flake.nix"), "{}").unwrap();
+        let oversized = vec![b' '; usize::try_from(MAX_FLAKE_LOCK_FILE_SIZE_BYTES).unwrap() + 1];
+        std::fs::write(source.path().join("flake.lock"), oversized).unwrap();
+
+        let Err(err) = fetch(&cached_job(source.path()), &FakeWorkerStore::new()).await else {
+            panic!("an oversized flake.lock is refused")
+        };
+        assert!(
+            matches!(
+                err.downcast_ref::<SizeCappedNoFollowReadError>(),
+                Some(SizeCappedNoFollowReadError::FileIsLargerThanByteCap { .. })
+            ),
+            "{err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn committed_flake_lock_over_byte_cap_fails_fetch() {
+        let oversized = " ".repeat(usize::try_from(MAX_FLAKE_LOCK_FILE_SIZE_BYTES).unwrap() + 1);
+
+        let (outcome, reporter) = commit_flake_lock_and_fetch_repository(&oversized).await;
+
+        let Err(err) = outcome else {
+            panic!("an oversized flake.lock is refused")
+        };
+        assert!(err.to_string().contains("is larger than"), "{err:#}");
+        assert!(reporter.input_requests().is_empty(), "no InputRequest");
+    }
+
+    #[tokio::test]
+    async fn fetch_fails_for_committed_flake_lock_with_local_git_repository_or_file_tarball_inputs_and_sends_no_input_requests()
+     {
+        for (locked, original) in [
+            (
+                serde_json::json!({
+                    "type": "git", "url": "file:///srv/repo",
+                    "rev": "1111111111111111111111111111111111111111", "narHash": nar_hash('A'),
+                }),
+                serde_json::json!({ "type": "git", "url": "file:///srv/repo" }),
+            ),
+            (
+                serde_json::json!({ "type": "tarball", "url": "file:///etc/passwd", "narHash": nar_hash('A') }),
+                serde_json::json!({ "type": "tarball", "url": "file:///etc/passwd" }),
+            ),
+        ] {
+            let lock = serde_json::json!({
+                "nodes": {
+                    "root": { "inputs": { "dep": "dep" } },
+                    "dep": { "locked": locked, "original": original },
+                },
+                "root": "root",
+                "version": 7,
+            });
+
+            let (outcome, reporter) =
+                commit_flake_lock_and_fetch_repository(&lock.to_string()).await;
+
+            let Err(err) = outcome else {
+                panic!("a local input is refused: {locked}")
+            };
+            assert!(
+                err.downcast_ref::<gradient_types::InputError>().is_some(),
+                "{err:#}"
+            );
+            assert!(reporter.input_requests().is_empty(), "no InputRequest");
+        }
+    }
+
+    async fn commit_flake_lock_and_fetch_repository(
+        lock: &str,
+    ) -> (Result<FetchOutcome>, RecordingJobReporter) {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("repo");
+        let sha = committed_repo(
+            &repo_dir,
+            &[
+                ("flake.nix", "{}"),
+                ("sub/flake.nix", "{}"),
+                ("flake.lock", lock),
+            ],
+        );
+        let credentials = crate::proto::credentials::JobCredentials::default();
+        let mut reporter = RecordingJobReporter::new();
+        let outcome = fetch_job_from_local_test_repository(
+            &repository_job(&repo_dir, sha),
+            &mut reporter,
+            &credentials,
+            &FakeWorkerStore::new(),
+        )
+        .await;
+        (outcome, reporter)
+    }
+
+    #[tokio::test]
+    async fn fetch_fails_for_flake_lock_path_node_with_absolute_host_path_and_sends_no_input_requests()
+     {
+        let lock = serde_json::json!({
+            "nodes": {
+                "root": { "inputs": { "secret": "secret" } },
+                "secret": {
+                    "locked": { "type": "path", "path": "/run/credentials/x", "narHash": nar_hash('A') },
+                    "original": { "type": "path", "path": "/run/credentials/x" },
+                },
+            },
+            "root": "root",
+            "version": 7,
+        });
+
+        let (outcome, reporter) = commit_flake_lock_and_fetch_repository(&lock.to_string()).await;
+
+        let Err(err) = outcome else {
+            panic!("an absolute path node is refused")
+        };
+        assert!(
+            err.downcast_ref::<gradient_types::InputError>().is_some(),
+            "{err:#}"
+        );
+        assert!(reporter.input_requests().is_empty(), "no InputRequest");
+    }
+
+    #[tokio::test]
+    async fn committed_flake_lock_relative_path_node_succeeds_without_input_request() {
+        let lock = serde_json::json!({
+            "nodes": {
+                "root": { "inputs": { "sub": "sub" } },
+                "sub": {
+                    "locked": { "type": "path", "path": "./sub" },
+                    "original": { "type": "path", "path": "./sub" },
+                    "parent": [],
+                },
+            },
+            "root": "root",
+            "version": 7,
+        });
+
+        let (outcome, reporter) = commit_flake_lock_and_fetch_repository(&lock.to_string()).await;
+
+        outcome.unwrap();
+        assert!(reporter.input_requests().is_empty(), "no InputRequest");
+    }
+
+    #[tokio::test]
+    async fn file_url_tracked_input_update_fails_before_clone_and_reports_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let host_repo = tmp.path().join("host");
+        committed_repo(&host_repo, &[("secret", "host content")]);
+        let lock = serde_json::json!({
+            "nodes": {
+                "root": { "inputs": { "dep": "dep" } },
+                "dep": {
+                    "locked": {
+                        "type": "github", "owner": "o", "repo": "r",
+                        "rev": "1111111111111111111111111111111111111111",
+                        "narHash": nar_hash('A'),
+                    },
+                    "original": { "type": "git", "url": format!("file://{}", host_repo.display()) },
+                },
+            },
+            "root": "root",
+            "version": 7,
+        });
+        let repo_dir = tmp.path().join("repo");
+        let sha = committed_repo(
+            &repo_dir,
+            &[("flake.nix", "{}"), ("flake.lock", &lock.to_string())],
+        );
+        let job = FlakeJob {
+            input_update: Some(gradient_wire::messages::InputUpdateSpec {
+                generator: "flake-lock".into(),
+                inputs: vec!["dep".into()],
+                discover_only: false,
+            }),
+            ..repository_job(&repo_dir, sha)
+        };
+        let credentials = crate::proto::credentials::JobCredentials::default();
+        let mut reporter = RecordingJobReporter::new();
+
+        let outcome = fetch_job_from_local_test_repository(
+            &job,
+            &mut reporter,
+            &credentials,
+            &FakeWorkerStore::new(),
+        )
+        .await;
+
+        let Err(err) = outcome else {
+            panic!("a local repository in `original` is refused")
+        };
+        assert!(
+            format!("{err:#}").contains("doesn't point to a remote source"),
+            "{err:#}"
+        );
+        let events = reporter.events();
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                ReportedEvent::InputUpdateReported { .. }
+                    | ReportedEvent::InputSourcesReported { .. }
+            )),
+            "{events:?}"
+        );
+        assert!(
+            !format!("{events:?}").contains(&*host_repo.to_string_lossy()),
+            "{events:?}"
         );
     }
 
@@ -1079,6 +1487,31 @@ mod tests {
     }
 
     #[test]
+    fn rejects_job_input_override_that_uses_original_lock_reference_to_local_path() {
+        let declared: std::collections::HashSet<String> = ["secret".to_owned()].into();
+        let lock = serde_json::json!({
+            "nodes": {
+                "root": {"inputs": {"secret": "secret"}},
+                "secret": {"original": {"type":"path","path":"/run/credentials/x"}},
+            },
+            "root": "root",
+        });
+        let overrides = [super::OverrideInput {
+            input_name: "secret".into(),
+            url: None,
+        }];
+
+        let Err(err) = super::resolve_overrides(&overrides, &declared, &lock) else {
+            panic!("a local path override is refused")
+        };
+
+        assert!(
+            err.downcast_ref::<gradient_types::InputError>().is_some(),
+            "{err:#}"
+        );
+    }
+
+    #[test]
     fn resolve_overrides_expands_glob() {
         let declared: std::collections::HashSet<String> = ["nixpkgs", "nixpkgs-lib", "flake-utils"]
             .into_iter()
@@ -1122,8 +1555,13 @@ mod tests {
 
     use gradient_wire::types::InputOutcome;
 
-    fn lock_with(nodes: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({ "root": "root", "version": 7, "nodes": nodes })
+    fn lock_with(nodes: serde_json::Value) -> ValidatedFlakeLock {
+        let lock = serde_json::json!({ "root": "root", "version": 7, "nodes": nodes });
+        ValidatedFlakeLock::parse(serde_json::to_vec(&lock).unwrap(), None).unwrap()
+    }
+
+    fn valid_nix_store_path_for_repository_name(repo: &str) -> String {
+        format!("/nix/store/{}-{repo}-source", "0".repeat(32))
     }
 
     fn nar_hash(fill: char) -> String {
@@ -1148,7 +1586,7 @@ mod tests {
             "stale": github("stale", &nar_hash('F')),
         }));
         let overridden = ["home".to_owned()].into_iter().collect();
-        let inputs = locked_inputs(&lock, &overridden);
+        let inputs = locked_inputs(&lock, &overridden).unwrap();
         let names: Vec<_> = inputs.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, vec!["nixpkgs", "systems", "utils"]);
         assert!(
@@ -1166,7 +1604,7 @@ mod tests {
             "nixpkgs-lib": { "locked": { "type": "github", "owner": "NixOS", "repo": "nixpkgs",
                 "rev": "r", "dir": "lib", "narHash": nar_hash('A') } },
         }));
-        let inputs = locked_inputs(&lock, &HashSet::new());
+        let inputs = locked_inputs(&lock, &HashSet::new()).unwrap();
         let request: serde_json::Value = serde_json::from_str(&inputs[0].request).unwrap();
         assert_eq!(
             request,
@@ -1177,7 +1615,7 @@ mod tests {
     }
 
     fn input(name: &str, repo: &str) -> LockedInput {
-        let store_path = format!("/nix/store/{repo}-source");
+        let store_path = valid_nix_store_path_for_repository_name(repo);
         LockedInput {
             name: name.into(),
             request: serde_json::json!({ "builtin": "fetchTree",
@@ -1189,7 +1627,9 @@ mod tests {
 
     fn fetched(repo: &str) -> InputOutcome {
         InputOutcome::Fetched {
-            response: format!(r#"{{"storePath":"/nix/store/{repo}-source"}}"#),
+            response:
+                serde_json::json!({ "storePath": valid_nix_store_path_for_repository_name(repo) })
+                    .to_string(),
         }
     }
 
@@ -1223,9 +1663,9 @@ mod tests {
     #[tokio::test]
     async fn locked_inputs_are_requested_up_front_and_failures_become_warnings() {
         let reporter = RecordingJobReporter::new()
-            .with_input_outcome("/nix/store/a-source", fetched("a"))
+            .with_input_outcome(&valid_nix_store_path_for_repository_name("a"), fetched("a"))
             .with_input_outcome(
-                "/nix/store/bad-source",
+                &valid_nix_store_path_for_repository_name("bad"),
                 InputOutcome::Failed {
                     message: "404 ".into(),
                 },
@@ -1239,7 +1679,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(fetched.paths, vec!["/nix/store/a-source".to_owned()]);
+        assert_eq!(
+            fetched.paths,
+            vec![valid_nix_store_path_for_repository_name("a")]
+        );
         assert_eq!(
             fetched.warnings,
             vec!["skipping flake input 'b': 404".to_owned()]
@@ -1285,21 +1728,26 @@ mod tests {
     #[tokio::test]
     async fn an_input_in_the_store_is_answered_without_the_server() {
         let reporter = RecordingJobReporter::new();
-        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
+        let store =
+            FakeWorkerStore::new().with_present_path(valid_nix_store_path_for_repository_name("a"));
         let fetched = fetch_with(&reporter, &store, vec![input("a", "a")], &mut no_abort())
             .await
             .unwrap();
 
-        assert_eq!(fetched.paths, vec!["/nix/store/a-source".to_owned()]);
+        assert_eq!(
+            fetched.paths,
+            vec![valid_nix_store_path_for_repository_name("a")]
+        );
         assert!(reporter.events().is_empty(), "{:?}", reporter.events());
     }
 
     #[tokio::test]
     async fn server_progress_moves_the_input_board() {
         let reporter = RecordingJobReporter::new()
-            .with_input_outcome("/nix/store/b-source", fetched("b"))
+            .with_input_outcome(&valid_nix_store_path_for_repository_name("b"), fetched("b"))
             .with_input_progress(40, Some(90));
-        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
+        let store =
+            FakeWorkerStore::new().with_present_path(valid_nix_store_path_for_repository_name("a"));
         let fetched = fetch_with(
             &reporter,
             &store,
@@ -1324,8 +1772,10 @@ mod tests {
 
     #[tokio::test]
     async fn inputs_sharing_a_source_are_requested_once() {
-        let reporter = RecordingJobReporter::new()
-            .with_input_outcome("/nix/store/systems-source", fetched("systems"));
+        let reporter = RecordingJobReporter::new().with_input_outcome(
+            &valid_nix_store_path_for_repository_name("systems"),
+            fetched("systems"),
+        );
         let fetched = fetch_with(
             &reporter,
             &FakeWorkerStore::default(),
@@ -1335,7 +1785,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(fetched.paths, vec!["/nix/store/systems-source".to_owned()]);
+        assert_eq!(
+            fetched.paths,
+            vec![valid_nix_store_path_for_repository_name("systems")]
+        );
         assert_eq!(reporter.input_requests().len(), 1);
     }
 

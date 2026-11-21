@@ -41,7 +41,17 @@ impl CacheSigner {
         references: &[String],
     ) -> String {
         let raw = self.sign_fingerprint(store_path, nar_hash, nar_size, references);
-        let sig_b64 = general_purpose::STANDARD.encode(raw);
+        self.format_signature_for_narinfo(&raw)
+    }
+
+    pub fn sign_parsed_narinfo(&self, path_info: &NixPathInfo) -> String {
+        let fingerprint = narinfo::narinfo_signing_fingerprint(path_info);
+        let sig = self.secret_key.sign(fingerprint.as_bytes(), None);
+        self.format_signature_for_narinfo(sig.as_ref())
+    }
+
+    fn format_signature_for_narinfo(&self, raw_signature: &[u8]) -> String {
+        let sig_b64 = general_purpose::STANDARD.encode(raw_signature);
         format!("{}-{}:{}", self.base_url, self.cache_name, sig_b64)
     }
 

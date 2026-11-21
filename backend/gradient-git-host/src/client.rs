@@ -4,12 +4,33 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_util::http::{
+    HttpClientForUserSuppliedUrls, ResponseBodyReadWithLimitError, read_response_body_with_limit,
+};
+use gradient_util::http_base_url::ValidatedHttpBaseUrl;
+use gradient_util::http_validation::DestinationUrlRejectedError;
 use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
 use reqwest::{Method, Response, StatusCode};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt;
 
 pub(crate) const GITHUB_API_URL: &str = "https://api.github.com";
+
+pub(crate) fn validated_public_github_api_base_url() -> ValidatedHttpBaseUrl {
+    GITHUB_API_URL
+        .parse()
+        .expect("The GitHub API URL constant is a valid base URL.")
+}
+
+#[cfg(test)]
+pub(crate) fn http_client_allow_loopback() -> HttpClientForUserSuppliedUrls {
+    let allowlist = gradient_util::http_validation::UserUrlDestinationAllowlist::parse(&[
+        "127.0.0.0/8".to_owned(),
+        "::1/128".to_owned(),
+    ])
+    .expect("loopback allow-list");
+    HttpClientForUserSuppliedUrls::new(allowlist).expect("build test http client")
+}
 
 const GITHUB_HEADERS: &[(&str, &str)] = &[
     ("Accept", "application/vnd.github+json"),
@@ -39,8 +60,8 @@ impl TokenHeader {
 
 #[derive(Clone)]
 pub(crate) struct HostClient {
-    http: reqwest::Client,
-    base_url: String,
+    http: HttpClientForUserSuppliedUrls,
+    base_url: ValidatedHttpBaseUrl,
     api_prefix: &'static str,
     token: String,
     token_header: TokenHeader,
@@ -59,8 +80,8 @@ impl fmt::Debug for HostClient {
 
 impl HostClient {
     fn new(
-        http: reqwest::Client,
-        base_url: impl Into<String>,
+        http: HttpClientForUserSuppliedUrls,
+        base_url: ValidatedHttpBaseUrl,
         api_prefix: &'static str,
         token: impl Into<String>,
         token_header: TokenHeader,
@@ -68,7 +89,7 @@ impl HostClient {
     ) -> Self {
         Self {
             http,
-            base_url: base_url.into(),
+            base_url,
             api_prefix,
             token: token.into(),
             token_header,
@@ -78,8 +99,8 @@ impl HostClient {
     }
 
     pub(crate) fn gitea(
-        http: reqwest::Client,
-        base_url: impl Into<String>,
+        http: HttpClientForUserSuppliedUrls,
+        base_url: ValidatedHttpBaseUrl,
         token: impl Into<String>,
     ) -> Self {
         Self::new(
@@ -93,8 +114,8 @@ impl HostClient {
     }
 
     pub(crate) fn gitea_or_forgejo_oauth2(
-        http: reqwest::Client,
-        base_url: impl Into<String>,
+        http: HttpClientForUserSuppliedUrls,
+        base_url: ValidatedHttpBaseUrl,
     ) -> Self {
         Self::new(
             http,
@@ -107,8 +128,8 @@ impl HostClient {
     }
 
     pub(crate) fn gitlab(
-        http: reqwest::Client,
-        base_url: impl Into<String>,
+        http: HttpClientForUserSuppliedUrls,
+        base_url: ValidatedHttpBaseUrl,
         token: impl Into<String>,
     ) -> Self {
         Self::new(
@@ -122,8 +143,8 @@ impl HostClient {
     }
 
     pub(crate) fn github(
-        http: reqwest::Client,
-        base_url: impl Into<String>,
+        http: HttpClientForUserSuppliedUrls,
+        base_url: ValidatedHttpBaseUrl,
         token: impl Into<String>,
     ) -> Self {
         Self::new(
@@ -144,7 +165,7 @@ impl HostClient {
     }
 
     pub(crate) fn base_url(&self) -> &str {
-        &self.base_url
+        self.base_url.as_str()
     }
 
     pub(crate) fn token(&self) -> &str {
@@ -226,7 +247,7 @@ impl HostClient {
         form: &F,
     ) -> Result<T, HostError> {
         let url = self.url(path);
-        let request = self.request(Method::POST, &url).form(form);
+        let request = self.request(Method::POST, &url)?.form(form);
         Self::send(Method::POST, url, request)
             .await?
             .into_success()
@@ -251,7 +272,7 @@ impl HostClient {
         body: Option<&B>,
     ) -> Result<Reply, HostError> {
         let url = self.url(path);
-        let mut request = self.request(method.clone(), &url);
+        let mut request = self.request(method.clone(), &url)?;
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -259,7 +280,8 @@ impl HostClient {
     }
 
     fn url(&self, path: &str) -> String {
-        format!("{}{}{}", self.base_url, self.api_prefix, path)
+        self.base_url
+            .append_api_path_to_base_url(&format!("{}{path}", self.api_prefix))
     }
 
     async fn send(
@@ -281,8 +303,15 @@ impl HostClient {
         }
     }
 
-    fn request(&self, method: Method, url: &str) -> reqwest::RequestBuilder {
-        let mut request = self.http.request(method, url);
+    fn request(&self, method: Method, url: &str) -> Result<reqwest::RequestBuilder, HostError> {
+        let mut request = self
+            .http
+            .request_builder_for_checked_url(method.clone(), url)
+            .map_err(|source| HostError {
+                method,
+                url: url.to_owned(),
+                failure: Failure::Refused(source),
+            })?;
         if let Some((name, value)) = self.token_header.pair(&self.token) {
             request = request.header(name, value);
         }
@@ -290,10 +319,10 @@ impl HostClient {
             request = request.header(*name, *value);
         }
 
-        match self.user_agent {
+        Ok(match self.user_agent {
             Some(user_agent) => request.header("User-Agent", user_agent),
             None => request,
-        }
+        })
     }
 }
 
@@ -314,36 +343,64 @@ impl Reply {
             return Ok(self);
         }
 
-        let headers = self.response.headers().clone();
-        let body = self.response.text().await.unwrap_or_default();
+        let rejection =
+            OutboundHttpNonSuccessStatusError::create_error_from_response_status_and_headers(
+                status,
+                self.response.headers(),
+                status.to_string(),
+            );
+        if let Ok(body) = read_response_body_with_limit(
+            self.response,
+            MAX_LOGGED_GIT_HOST_ERROR_RESPONSE_BODY_BYTES,
+        )
+        .await
+        {
+            tracing::debug!(
+                method = %self.method,
+                url = %self.url,
+                %status,
+                body = %String::from_utf8_lossy(&body),
+                "Git host responded with a non-success status"
+            );
+        }
         Err(HostError {
             method: self.method,
             url: self.url,
-            failure: Failure::Status(
-                OutboundHttpNonSuccessStatusError::create_error_from_response_status_and_headers(
-                    status, &headers, body,
-                ),
-            ),
+            failure: Failure::Status(rejection),
         })
     }
 
     async fn json<T: DeserializeOwned>(self) -> Result<T, HostError> {
-        match self.response.json().await {
-            Ok(value) => Ok(value),
-            Err(source) => Err(HostError {
-                method: self.method,
-                url: self.url,
-                failure: Failure::Decode(source),
-            }),
-        }
+        let failure = match read_response_body_with_limit(
+            self.response,
+            MAX_GIT_HOST_API_JSON_RESPONSE_BODY_BYTES,
+        )
+        .await
+        {
+            Ok(body) => match serde_json::from_slice(&body) {
+                Ok(value) => return Ok(value),
+                Err(source) => Failure::Decode(source),
+            },
+            Err(source) => Failure::Body(source),
+        };
+        Err(HostError {
+            method: self.method,
+            url: self.url,
+            failure,
+        })
     }
 }
 
+const MAX_LOGGED_GIT_HOST_ERROR_RESPONSE_BODY_BYTES: usize = 4 * 1024;
+const MAX_GIT_HOST_API_JSON_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Debug)]
 enum Failure {
+    Refused(DestinationUrlRejectedError),
     Transport(reqwest::Error),
     Status(OutboundHttpNonSuccessStatusError),
-    Decode(reqwest::Error),
+    Body(ResponseBodyReadWithLimitError),
+    Decode(serde_json::Error),
 }
 
 #[derive(Debug)]
@@ -357,7 +414,7 @@ impl HostError {
     pub(crate) fn status(&self) -> Option<StatusCode> {
         match self.failure {
             Failure::Status(ref rejection) => Some(rejection.status),
-            Failure::Transport(_) | Failure::Decode(_) => None,
+            _ => None,
         }
     }
 }
@@ -370,10 +427,10 @@ impl fmt::Display for HostError {
             failure,
         } = self;
         match failure {
+            Failure::Refused(source) => write!(f, "{method} {url}: {source}"),
             Failure::Transport(source) => write!(f, "{method} {url}: {source}"),
-            Failure::Status(rejection) => {
-                write!(f, "{method} {url} returned {}", rejection.status)
-            }
+            Failure::Status(_) => write!(f, "{method} {url}"),
+            Failure::Body(source) => write!(f, "{method} {url}: Reading the Response: {source}"),
             Failure::Decode(source) => write!(f, "{method} {url}: decoding response: {source}"),
         }
     }
@@ -383,7 +440,7 @@ impl std::error::Error for HostError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.failure {
             Failure::Status(rejection) => Some(rejection),
-            Failure::Transport(_) | Failure::Decode(_) => None,
+            _ => None,
         }
     }
 }
@@ -409,12 +466,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failing_status_reports_method_url_status_and_body() {
+    async fn failing_status_reports_method_url_and_status_without_body() {
         let addr = serve_once(
-            "HTTP/1.1 403 Forbidden\r\ncontent-length: 9\r\nconnection: close\r\n\r\nno access",
+            "HTTP/1.1 403 Forbidden\r\ncontent-length: 11\r\nconnection: close\r\n\r\nSECRET-BODY",
         );
-        let http = gradient_util::http::build_client().expect("build test http client");
-        let client = HostClient::gitea(http, format!("http://{addr}"), "tok");
+        let client = HostClient::gitea(
+            http_client_allow_loopback(),
+            format!("http://{addr}").parse().expect("base url"),
+            "tok",
+        );
 
         let err = client
             .post(
@@ -427,9 +487,28 @@ mod tests {
         assert_eq!(err.status(), Some(StatusCode::FORBIDDEN));
         assert_eq!(
             format!("{:#}", anyhow::Error::new(err)),
-            format!(
-                "POST http://{addr}/api/v1/repos/acme/widgets/statuses/abc returned 403 Forbidden: no access"
-            )
+            format!("POST http://{addr}/api/v1/repos/acme/widgets/statuses/abc: 403 Forbidden")
         );
+    }
+
+    #[tokio::test]
+    async fn loopback_base_url_is_refused_without_admin_allow_list() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().expect("listener address");
+        let http = HttpClientForUserSuppliedUrls::new(Default::default()).expect("http client");
+        let client = HostClient::gitea(
+            http,
+            format!("http://{addr}").parse().expect("base url"),
+            "tok",
+        );
+
+        let err = client
+            .get_json::<serde_json::Value>("/user")
+            .await
+            .expect_err("loopback target");
+
+        assert!(matches!(err.failure, Failure::Refused(_)), "{err}");
+        listener.set_nonblocking(true).expect("nonblocking");
+        assert!(listener.accept().is_err(), "no connection was made");
     }
 }

@@ -13,6 +13,19 @@ pub enum Outcome {
     Unmeasured(String),
 }
 
+impl Outcome {
+    pub fn fail_statement_timeout() -> Self {
+        Self::Fail(vec![Violation {
+            rule: "statement_timeout",
+            detail: format!(
+                "statement timeout of {} seconds cancelled this statement",
+                crate::STATEMENT_TIMEOUT_DURATION.as_secs()
+            ),
+            fatal: true,
+        }])
+    }
+}
+
 pub fn render(rows: &[(&'static Query, Outcome)]) -> String {
     let measured = rows
         .iter()
@@ -112,6 +125,7 @@ mod tests {
         tier: Tier::Hot,
         budget: Budget::HOT,
         flags: &[],
+        status_write: None,
     };
 
     #[test]
@@ -144,6 +158,23 @@ mod tests {
     fn growing_the_unmeasured_count_fails() {
         let rows = vec![(&Q, Outcome::Unmeasured("empty".into()))];
         assert_eq!(exit_code(&rows, 0), 1);
+    }
+
+    #[test]
+    fn timed_out_statement_renders_fail_and_counts_over_budget() {
+        let rows = vec![(&Q, Outcome::fail_statement_timeout())];
+
+        let text = render(&rows);
+        assert!(text.contains("FAIL can_start.rs:348"), "{text}");
+        assert!(text.contains("SAMPLE"), "{text}");
+        assert!(text.contains("30 seconds"), "{text}");
+        assert!(text.contains("0 unmeasured | 1 over budget"), "{text}");
+    }
+
+    #[test]
+    fn timeout_statement_exit_code_is_one_even_with_high_unmeasured_limit() {
+        let rows = vec![(&Q, Outcome::fail_statement_timeout())];
+        assert_eq!(exit_code(&rows, 100), 1);
     }
 
     #[test]

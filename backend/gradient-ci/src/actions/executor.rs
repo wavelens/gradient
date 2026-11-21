@@ -13,8 +13,8 @@ use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
 use gradient_types::{
-    ActionConfig, MTaskAction, MTaskActionDelivery, PatchGeneratorKind, TaskActionDeliveryId,
-    TaskActionId,
+    ActionConfig, MTask, MTaskAction, MTaskActionDelivery, PatchGeneratorKind,
+    TaskActionDeliveryId, TaskActionId,
 };
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 use serde_json::Value as JsonValue;
@@ -175,10 +175,10 @@ const CONNECTIVITY_TEST_EVENT: &str = "test.connectivity";
 pub async fn test_git_host_action(
     ctx: &CiContext,
     action: &MTaskAction,
-    repository: &str,
+    task: &MTask,
 ) -> Result<()> {
     let started = Instant::now();
-    let result = verify_git_host_action(ctx, action, repository).await;
+    let result = verify_git_host_action(ctx, action, task).await;
     record_delivery(
         ctx,
         Attempt {

@@ -38,12 +38,14 @@ use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{
-    CacheId, CachedPathSignatureId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
+    CacheId, CachedPathId, CachedPathSignatureId, DerivationBuildId, DerivationId, DispatchedJobId,
+    EvaluationId, ProjectId, StorePathContentProducerId,
 };
+use gradient_entity::store_path_content_producer::StoredContentVariantProducerKind;
 use gradient_entity::{
     build_attempt, build_job, cache, cached_path, cached_path_signature, derivation,
     derivation_build, derivation_dependency, derivation_output, dispatched_job, entry_point,
-    evaluation,
+    evaluation, store_path_content_producer,
 };
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::shape::{Shape, build_assignment, build_job_key};
@@ -56,8 +58,9 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::messages::{
-    DemoteReport, Demotion, GcReport, GcRequest, NarCommit, NarCommitted, OrphanCause, RamShortage,
-    RequeueScope, SignTargets, Transition, TransitionReport, UpstreamHit,
+    DemoteReport, Demotion, EvaluationBatchDerivation, GcReport, GcRequest, NarCommit,
+    NarCommitContent, NarCommitted, OrphanCause, RequeueScope, StoredContentProducer, Transition,
+    TransitionReport, UpstreamHit,
 };
 use crate::test_ctx::{
     Batch, BatchReport, apply_in, claim_build, ctx_with_crypt_file, secret_file, send, signing_key,
@@ -186,11 +189,115 @@ impl Case {
     }
 
     pub async fn commit_nar_result(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
+        let commit = self
+            .replace_nar_commit_placeholder_producer_with_first_project_worker_producer(commit)
+            .await;
+        testing::write_commit_compressed_object_to_object_storage(&self.ctx, &commit).await;
         self.graph.commit_nar(commit).await
     }
 
-    pub async fn project_caches(&self, evaluation: EvaluationId) -> SignTargets {
-        SignTargets::ProjectCaches(self.db.project_of(evaluation).await)
+    async fn replace_nar_commit_placeholder_producer_with_first_project_worker_producer(
+        &self,
+        mut commit: NarCommit,
+    ) -> NarCommit {
+        if commit.producer != shared::test_stand_in_nar_upload_commit_producer() {
+            return commit;
+        }
+        let first_project = self
+            .db
+            .rows::<gradient_entity::project::Entity>()
+            .await
+            .into_iter()
+            .map(|project| project.id)
+            .min();
+        if let Some(project) = first_project {
+            commit.producer = self
+                .build_worker_stored_content_producer_for_project_or_insert_inactive_registration(
+                    project,
+                )
+                .await;
+        }
+        commit
+    }
+
+    pub async fn make_worker_producer_for_evaluation_project(
+        &self,
+        evaluation: EvaluationId,
+    ) -> StoredContentProducer {
+        self.build_worker_stored_content_producer_for_project_or_insert_inactive_registration(
+            self.db.project_of(evaluation).await,
+        )
+        .await
+    }
+
+    pub async fn make_worker_producer_for_evaluation_projects(
+        &self,
+        evaluations: &[EvaluationId],
+    ) -> StoredContentProducer {
+        let mut projects = Vec::new();
+        let mut worker_registrations = Vec::new();
+        for evaluation in evaluations {
+            let project = self.db.project_of(*evaluation).await;
+            projects.push(project);
+            worker_registrations.extend(
+                self.db
+                    .worker_registration_ids_for_project_or_insert_inactive(project)
+                    .await,
+            );
+        }
+        StoredContentProducer::Worker {
+            project: *projects.first().expect("at least one evaluation"),
+            credentials: gradient_db::store_path_content_variant_trust::ProvenWorkerCredentialIds {
+                worker_registrations,
+                team_worker: None,
+            },
+            dispatched_job: None,
+        }
+    }
+
+    pub async fn add_worker_registration_producer_for_evaluation_project_to_stored_path(
+        &self,
+        hash: &str,
+        evaluation: EvaluationId,
+    ) {
+        let cached_path = self.cached_path(hash).await.id;
+        let project = self.db.project_of(evaluation).await;
+        for worker_registration in self
+            .db
+            .worker_registration_ids_for_project_or_insert_inactive(project)
+            .await
+        {
+            store_path_content_producer::Model {
+                id: StorePathContentProducerId::now_v7(),
+                cached_path,
+                kind: StoredContentVariantProducerKind::BuiltInDispatchedBuildJob,
+                worker_registration: Some(worker_registration),
+                created_at: test_date(),
+                ..Default::default()
+            }
+            .into_active_model()
+            .insert(&self.db.connection())
+            .await
+            .expect("write the producer row");
+        }
+    }
+
+    async fn build_worker_stored_content_producer_for_project_or_insert_inactive_registration(
+        &self,
+        project: ProjectId,
+    ) -> StoredContentProducer {
+        let worker_registrations = self
+            .db
+            .worker_registration_ids_for_project_or_insert_inactive(project)
+            .await;
+        StoredContentProducer::Worker {
+            project,
+            credentials: gradient_db::store_path_content_variant_trust::ProvenWorkerCredentialIds {
+                worker_registrations,
+                team_worker: None,
+            },
+            dispatched_job: None,
+        }
     }
 
     pub async fn seed_signature(&self, hash: &str, cache: CacheId, signature: Option<Vec<u8>>) {
@@ -297,6 +404,11 @@ impl Case {
         let Some(bytes) = &signature.signature else {
             return false;
         };
+        let NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(facts) =
+            &content.content
+        else {
+            return false;
+        };
 
         let cache = cache::Entity::find_by_id(signature.cache)
             .one(&self.db.connection())
@@ -319,15 +431,21 @@ impl Case {
         )
         .expect("the public key of the cache");
 
-        let narinfo = format!(
-            "StorePath: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {token}\n",
-            content.store_path,
-            content.nar_hash,
-            content.nar_size,
-            content.references.join(" "),
-        );
+        let path_info = gradient_types::NixPathInfo {
+            store_path: content.store_path.clone(),
+            url: String::new(),
+            compression: String::new(),
+            file_hash: None,
+            file_size: None,
+            nar_hash: facts.nar_hash().to_owned(),
+            nar_size: facts.nar_size(),
+            references: content.references.clone(),
+            signature_lines: vec![token],
+            deriver: None,
+            ca: None,
+        };
 
-        gradient_sources::verify_narinfo_signature(&key, &narinfo)
+        gradient_sources::verify_narinfo_signature(&key, &path_info)
     }
 
     pub async fn drift(&self) -> ConsistencyReport {
@@ -369,7 +487,10 @@ impl Case {
         derivations: Vec<DiscoveredDerivation>,
     ) -> Batch {
         Batch {
-            derivations,
+            derivations: derivations
+                .into_iter()
+                .map(EvaluationBatchDerivation::test_batch_entry_from_discovered_derivation)
+                .collect(),
             task: Some(self.db.task_of(evaluation).await),
             ..batch(evaluation)
         }
@@ -392,7 +513,12 @@ impl Case {
     }
 
     pub async fn commit_nar_outside_tx(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
-        crate::nar::commit(&self.ctx, &commit).await
+        let existing_object_keys = crate::nar::find_object_keys_in_storage_at_batch_start(
+            &self.ctx,
+            std::slice::from_ref(&commit),
+        )
+        .await;
+        crate::nar::commit(&self.ctx, &commit, &existing_object_keys).await
     }
 
     pub async fn store_object(&self, hash: &str) {
@@ -565,8 +691,67 @@ impl Case {
         outputs: Vec<gradient_wire::types::BuildOutput>,
         substituted: bool,
     ) -> TransitionReport {
+        if let Some(assignment) = self.open_assignment(path).await {
+            return self
+                .send_build_output_for_build_path_naming_dispatched_job_id(
+                    path,
+                    assignment.id,
+                    outputs,
+                    substituted,
+                )
+                .await;
+        }
+        let dispatched_job = self
+            .insert_open_dispatched_job_for_shared_build_without_claim_gate(path)
+            .await;
+        let report = self
+            .send_build_output_for_build_path_naming_dispatched_job_id(
+                path,
+                dispatched_job,
+                outputs,
+                substituted,
+            )
+            .await;
+        self.close_assignment(path).await;
+        report
+    }
+
+    pub async fn insert_open_dispatched_job_for_shared_build_without_claim_gate(
+        &self,
+        path: &str,
+    ) -> DispatchedJobId {
+        let evaluation = self
+            .db
+            .rows::<evaluation::Entity>()
+            .await
+            .first()
+            .expect("the case has an evaluation")
+            .id;
+        let assignment = build_assignment(
+            evaluation,
+            self.db.project_of(evaluation).await,
+            self.db.task_of(evaluation).await,
+            self.sb(path).await.id,
+            gradient_types::now(),
+        );
+        assignment
+            .into_active_model()
+            .insert(&self.db.connection())
+            .await
+            .expect("the dispatch row is written")
+            .id
+    }
+
+    pub async fn send_build_output_for_build_path_naming_dispatched_job_id(
+        &self,
+        path: &str,
+        dispatched_job: DispatchedJobId,
+        outputs: Vec<gradient_wire::types::BuildOutput>,
+        substituted: bool,
+    ) -> TransitionReport {
         self.transition(Transition::BuildOutput {
             shared_build: self.sb(path).await.id,
+            dispatched_job,
             outputs,
             metrics: None,
             substituted,
@@ -592,7 +777,7 @@ impl Case {
             log_banner: String::new(),
             kind,
             missing_paths: missing_paths.to_vec(),
-            metrics: None,
+            dispatch_that_reported_failure: None,
         })
         .await
     }
@@ -627,23 +812,6 @@ impl Case {
         let shared_build = self.sb(path).await.id;
         self.transition(Transition::PrioritizeBuild { shared_build })
             .await
-    }
-
-    pub async fn not_enough_resources(
-        &self,
-        evaluation: EvaluationId,
-        path: &str,
-        needed_mb: u64,
-    ) -> TransitionReport {
-        self.transition(Transition::NotEnoughResources {
-            shortages: vec![RamShortage {
-                shared_build: self.sb(path).await.id,
-                evaluation,
-                needed_mb,
-                largest_available_mb: needed_mb / 2,
-            }],
-        })
-        .await
     }
 
     pub async fn requeue_imports(
@@ -684,6 +852,37 @@ impl Case {
             .demote(demotion)
             .await
             .expect("the demotion runs")
+    }
+
+    pub async fn content_variant_ids(&self, hash: &str) -> Vec<CachedPathId> {
+        gradient_db::store_path_content_variant_reader_choice::list_all_content_variant_rows_for_store_path_hashes(
+            &self.ctx.worker_db,
+            &[hash.to_owned()],
+        )
+        .await
+        .expect("the content variants are listed")
+        .into_iter()
+        .map(|variant| variant.id)
+        .collect()
+    }
+
+    pub async fn report_missing_nar_of_every_content_variant(&self, hash: &str) -> DemoteReport {
+        let variants = self.content_variant_ids(hash).await;
+        self.report_missing_nar_of_content_variants(&variants).await
+    }
+
+    pub async fn report_missing_nar_of_content_variants(
+        &self,
+        variants: &[CachedPathId],
+    ) -> DemoteReport {
+        let mut merged = DemoteReport::default();
+        for &content_variant in variants {
+            let report = self
+                .demote(Demotion::MissingNarOfContentVariant { content_variant })
+                .await;
+            merged.producers.extend(report.producers);
+        }
+        merged
     }
 
     pub async fn gc(&self, request: GcRequest) -> GcReport {
@@ -931,7 +1130,7 @@ mod shared {
     use gradient_fixtures::test_date;
     use gradient_wire::types::{DerivationOutput, DiscoveredDerivation};
 
-    use crate::messages::{NarCommit, UpstreamHit};
+    use crate::messages::{NarCommit, NarCommitContent, UpstreamHit};
     use crate::test_ctx::Batch;
 
     pub(crate) const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
@@ -1183,13 +1382,32 @@ mod shared {
     pub(crate) fn nar(hash: &str, package: &str) -> NarCommit {
         NarCommit {
             store_path: store_path(hash, package),
-            file_hash: "sha256:abc".into(),
-            file_size: 5,
-            nar_size: 5,
-            nar_hash: "sha256:def".into(),
-            confirmed: true,
-            ..Default::default()
+            content: NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(
+                gradient_storage::compress_nar_bytes_and_verify_stream(b"nar"),
+            ),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            producer: test_stand_in_nar_upload_commit_producer(),
         }
+    }
+
+    pub(crate) fn test_stand_in_nar_upload_commit_producer() -> crate::StoredContentProducer {
+        crate::StoredContentProducer::Worker {
+            project: gradient_entity::ids::ProjectId::nil(),
+            credentials: Default::default(),
+            dispatched_job: None,
+        }
+    }
+
+    pub(crate) fn with_verified_content_from_nar_bytes(
+        mut commit: NarCommit,
+        nar_bytes: &[u8],
+    ) -> NarCommit {
+        commit.content = NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(
+            gradient_storage::compress_nar_bytes_and_verify_stream(nar_bytes),
+        );
+        commit
     }
 
     pub(crate) fn drv_nar(path: &str) -> NarCommit {

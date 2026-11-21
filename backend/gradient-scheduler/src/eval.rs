@@ -35,6 +35,7 @@ impl ProbeAnswer {
 /// reason, never on a graph path.
 pub async fn probe_outputs(
     db: &WorkerDb,
+    http: &gradient_util::http::HttpClientForUserSuppliedUrls,
     mapping: &Arc<dyn StorePathMapping>,
     upstream_query: &Arc<Semaphore>,
     evaluation: &MEvaluation,
@@ -71,8 +72,12 @@ pub async fn probe_outputs(
             return ProbeAnswer::unanswered_for(&to_probe);
         }
     };
-    let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
+    let id_to_url: HashMap<_, String> = endpoints
+        .iter()
+        .map(|e| (e.id, e.url.to_string()))
+        .collect();
     let batch = gradient_core::upstream::probe_batch(
+        http,
         endpoints,
         Arc::clone(upstream_query),
         mapper,

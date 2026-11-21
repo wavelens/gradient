@@ -22,6 +22,7 @@ mod nar_serve;
 mod refusal;
 mod session;
 mod session_actor;
+mod session_authorization;
 mod sessions;
 mod socket;
 mod store_paths;
@@ -33,7 +34,6 @@ mod vm_state;
 
 use std::sync::Arc;
 
-use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Extension, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -68,8 +68,12 @@ pub fn proto_router() -> OpenApiRouter<Arc<ServerState>> {
         (status = SERVICE_UNAVAILABLE, description = "Connection limit (`GRADIENT_PROTO_MAX_CONNECTIONS`) reached; retry after `Retry-After`")
     )
 )]
+#[expect(
+    clippy::disallowed_types,
+    reason = "Workers sign in inside the protocol, not through a session cookie."
+)]
 async fn ws_upgrade(
-    ws: WebSocketUpgrade,
+    ws: axum::extract::ws::WebSocketUpgrade,
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Extension(limiter): Extension<Arc<ProtoLimiter>>,

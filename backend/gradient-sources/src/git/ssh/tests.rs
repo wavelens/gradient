@@ -177,7 +177,10 @@ async fn a_repository_is_listed_and_fetched_over_ssh_with_the_project_key() {
         vec![host_key.clone()],
     )
     .await;
-    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let ssh_url: gradient_types::RepositoryUrl =
+        format!("ssh://git@127.0.0.1:{port}{}", dir.path().display())
+            .parse()
+            .unwrap();
     let saved = vec![make_saved_git_server_ssh_host_key_for_local_test_server(
         port, &host_key,
     )];
@@ -227,7 +230,10 @@ async fn an_unknown_host_is_accepted_and_reported_as_learned() {
         vec![host_key.clone()],
     )
     .await;
-    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let ssh_url: gradient_types::RepositoryUrl =
+        format!("ssh://git@127.0.0.1:{port}{}", dir.path().display())
+            .parse()
+            .unwrap();
     let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(client_pem.into(), Vec::new());
 
     let head = tokio::task::spawn_blocking({
@@ -262,7 +268,10 @@ async fn a_saved_host_key_is_accepted_silently() {
         vec![host_key.clone()],
     )
     .await;
-    let ssh_url = format!("ssh://git@LocalHost:{port}{}", dir.path().display());
+    let ssh_url: gradient_types::RepositoryUrl =
+        format!("ssh://git@LocalHost:{port}{}", dir.path().display())
+            .parse()
+            .unwrap();
     let saved = GitServerSshHostKey {
         host: "localhost".into(),
         ..make_saved_git_server_ssh_host_key_for_local_test_server(port, &host_key)
@@ -300,7 +309,10 @@ async fn a_different_host_key_is_refused_and_reported_as_changed() {
     let client_pem = ed25519_pem();
     let host_key = generate_random_ssh_host_private_key(Algorithm::Ed25519);
     let port = serve_git_over_ssh(decode(&client_pem).public_key().clone(), vec![host_key]).await;
-    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let ssh_url: gradient_types::RepositoryUrl =
+        format!("ssh://git@127.0.0.1:{port}{}", dir.path().display())
+            .parse()
+            .unwrap();
     let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(
         client_pem.into(),
         vec![make_saved_git_server_ssh_host_key_for_local_test_server(
@@ -348,7 +360,10 @@ async fn a_saved_ecdsa_key_still_matches_when_the_host_also_offers_ed25519() {
         ],
     )
     .await;
-    let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let ssh_url: gradient_types::RepositoryUrl =
+        format!("ssh://git@127.0.0.1:{port}{}", dir.path().display())
+            .parse()
+            .unwrap();
     let ssh = SshGitPrivateKeyKnownHostsAndObservations::new(
         client_pem.into(),
         vec![make_saved_git_server_ssh_host_key_for_local_test_server(

@@ -18,10 +18,10 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use gradient_db::sql::{Flag, Query, check, measure, registry};
-use sea_orm::sqlx::{AssertSqlSafe, Row, raw_sql};
+use sea_orm::sqlx::{self, AssertSqlSafe, Row, raw_sql};
 use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseConnection, DatabaseTransaction, Statement,
-    TransactionTrait, Value,
+    ConnectionTrait, DatabaseBackend, DatabaseConnection, DatabaseTransaction, DbErr, RuntimeErr,
+    Statement, TransactionTrait, Value,
 };
 
 use crate::report::Outcome;
@@ -55,7 +55,7 @@ async fn run_one(
 
     let generic = match plan(db, format!("EXPLAIN (GENERIC_PLAN, FORMAT JSON) {sql}")).await {
         Ok(plan) => plan,
-        Err(err) => return Ok(Outcome::Unmeasured(format!("generic plan failed: {err}"))),
+        Err(err) => return Ok(plan_gate_step_error_to_outcome("generic plan", &err)),
     };
 
     for relation in relations(&generic) {
@@ -70,9 +70,10 @@ async fn run_one(
             Ok(Some(value)) => values.push(value),
             Ok(None) => return Ok(Outcome::Unmeasured(format!("no {param:?} to draw"))),
             Err(err) => {
-                return Ok(Outcome::Unmeasured(format!(
-                    "drawing {param:?} failed: {err}"
-                )));
+                return Ok(plan_gate_step_error_to_outcome(
+                    &format!("drawing {param:?}"),
+                    &err,
+                ));
             }
         }
     }
@@ -85,7 +86,7 @@ async fn run_one(
 
     let mut measured = match measured {
         Ok(plan) => measure(&plan).map_err(|err| anyhow::anyhow!("{err}"))?,
-        Err(err) => return Ok(Outcome::Unmeasured(format!("explain failed: {err}"))),
+        Err(err) => return Ok(plan_gate_step_error_to_outcome("explain", &err)),
     };
 
     measured.inputs = inputs as u64;
@@ -96,6 +97,33 @@ async fn run_one(
     } else {
         Outcome::Fail(violations)
     })
+}
+
+fn plan_gate_step_error_to_outcome(step: &str, err: &anyhow::Error) -> Outcome {
+    if is_query_canceled_sqlstate(postgres_sqlstate_code(err).as_deref()) {
+        Outcome::fail_statement_timeout()
+    } else {
+        Outcome::Unmeasured(format!("{step} failed: {err}"))
+    }
+}
+
+fn postgres_sqlstate_code(err: &anyhow::Error) -> Option<String> {
+    let driver = err.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<sqlx::Error>()
+            .or_else(|| match cause.downcast_ref::<DbErr>()? {
+                DbErr::Query(RuntimeErr::SqlxError(driver))
+                | DbErr::Exec(RuntimeErr::SqlxError(driver))
+                | DbErr::Conn(RuntimeErr::SqlxError(driver)) => Some(&**driver),
+                _ => None,
+            })
+    })?;
+
+    Some(driver.as_database_error()?.code()?.into_owned())
+}
+
+fn is_query_canceled_sqlstate(code: Option<&str>) -> bool {
+    code == Some("57014")
 }
 
 async fn measure_in(
@@ -198,4 +226,18 @@ async fn relation_rows(db: &DatabaseConnection) -> Result<HashMap<String, u64>> 
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_query_canceled_sqlstate;
+
+    #[test]
+    fn statement_timeout_sqlstate_57014_is_recognized_but_lock_timeout_syntax_error_and_missing_code_are_not()
+     {
+        assert!(is_query_canceled_sqlstate(Some("57014")));
+        assert!(!is_query_canceled_sqlstate(Some("55P03")));
+        assert!(!is_query_canceled_sqlstate(Some("42601")));
+        assert!(!is_query_canceled_sqlstate(None));
+    }
 }

@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::graph::predicates::{builds_once_wanted_predicate, open_predicate};
+use crate::graph::predicates::{
+    aborted_dependency_without_failure_spread_predicate, builds_once_wanted_predicate,
+    open_predicate,
+};
 use crate::graph::promotion::{returned_derivations, returned_transitions};
 use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
@@ -125,11 +128,11 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
                WHERE ({open} OR s.fetchable)) x \
          WHERE db.derivation = x.derivation AND db.wanted <> x.wanted \
          RETURNING db.derivation, db.wanted",
-        cte = crate::graph::walks::need_closure_cte_body_until(
+        cte = crate::graph::walks::need_walk_dependency_recursive_cte_body_until_after_index_lookup(
             "wanted",
             &open_entry_points(),
             None,
-            ""
+            &|step| aborted_dependency_without_failure_spread_predicate(step, step, None),
         ),
         open = open_predicate("s"),
     )
@@ -189,6 +192,15 @@ static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| need_sql(""));
 
 static GAIN_NEED_SQL: LazyLock<String> = LazyLock::new(|| need_sql("dep.wanted"));
 
+fn walk_may_enter_dependency_sql() -> String {
+    format!(
+        "NOT EXISTS (SELECT 1 FROM derivation_build db \
+                     WHERE db.derivation = k.dependency AND {aborted_without_spread})",
+        aborted_without_spread =
+            aborted_dependency_without_failure_spread_predicate("k", "db", Some("pb")),
+    )
+}
+
 fn need_sql(stop_region_at: &str) -> String {
     let region = crate::graph::walks::need_closure_cte_body_until(
         "region",
@@ -211,11 +223,13 @@ fn need_sql(stop_region_at: &str) -> String {
                              JOIN derivation pw ON pw.id = pb.derivation \
                              WHERE (k.derivation, k.dependency) \
                                    = (open_wanted_edges.parent, open_wanted_edges.dependency) \
-                               AND (({builder}) OR k.kind IN (1, 2)) OFFSET 0) wanting \
+                               AND (({builder}) OR k.kind IN (1, 2)) \
+                               AND {walk_may_enter_dependency_sql} OFFSET 0) wanting \
          WHERE NOT EXISTS (SELECT 1 FROM region x \
                            WHERE x.derivation = open_wanted_edges.parent))",
         open = open_predicate("p"),
         builder = builds_once_wanted_predicate("pb", "pw"),
+        walk_may_enter_dependency_sql = walk_may_enter_dependency_sql(),
     );
     let seeds = format!(
         "seeds(derivation) AS MATERIALIZED (SELECT r.derivation \
@@ -233,7 +247,12 @@ fn need_sql(stop_region_at: &str) -> String {
         open = open_predicate("rb"),
     );
     let wanted =
-        crate::graph::walks::need_closure_cte_body_until("wanted", &seed, Some("region"), "");
+        crate::graph::walks::need_walk_dependency_recursive_cte_body_until_after_index_lookup(
+            "wanted",
+            &seed,
+            Some("region"),
+            &|step| aborted_dependency_without_failure_spread_predicate(step, step, None),
+        );
 
     format!(
         "WITH RECURSIVE {region}, {entered}, {seeds}, {wanted} \
@@ -612,6 +631,18 @@ mod tests {
             sql.contains("RETURNING db.derivation, db.wanted"),
             "the caller settles the queue from the new value: {sql}"
         );
+        for sql in [
+            RECOUNT_WANTED_SQL.as_str(),
+            UPDATE_NEED_SQL.as_str(),
+            GAIN_NEED_SQL.as_str(),
+        ] {
+            let sql = norm(sql);
+            assert!(
+                sql.contains("OFFSET 0) s WHERE NOT ((s.status = 5")
+                    && !sql.contains("dep.status = 5"),
+                "The need walk abort rule can filter step rows fetched after OFFSET 0 fence. The planner can use hash join over all of derivation_build there. {sql}"
+            );
+        }
     }
 
     #[test]
@@ -863,9 +894,14 @@ mod tests {
         );
         assert!(
             walk.contains(
-                "OFFSET 0) s OFFSET 0) t WHERE EXISTS (SELECT 1 FROM region x WHERE x.derivation = t.next))"
+                "OFFSET 0) t WHERE EXISTS (SELECT 1 FROM region x WHERE x.derivation = t.next))"
             ),
             "the wanted step semi-joins the region once per level: {walk}"
+        );
+        assert!(
+            walk.contains("OFFSET 0) s WHERE NOT ((s.status = 5")
+                && !walk.contains("dep.status = 5"),
+            "Bounded need updates apply the abort rule to step rows fetched after the OFFSET 0 fence, not to rows inside the fence. {walk}"
         );
         assert!(
             !walk.contains("IN (SELECT derivation FROM region)")
@@ -877,7 +913,7 @@ mod tests {
             "the parent is looked up by its key, not joined: {walk}"
         );
         assert!(
-            walk.contains(
+            walk.contains(&format!(
                 "entered(derivation) AS (SELECT open_wanted_edges.dependency FROM \
                  (SELECT oe.parent, oe.dependency FROM \
                  (SELECT e.derivation AS parent, e.dependency \
@@ -894,10 +930,13 @@ mod tests {
                  WHERE (k.derivation, k.dependency) \
                  = (open_wanted_edges.parent, open_wanted_edges.dependency) \
                  AND ((pw.walked AND pb.probed AND NOT pb.cache_available \
-                 AND pb.status IN (0, 1, 2, 5, 8, 10)) OR k.kind IN (1, 2)) OFFSET 0) wanting \
+                 AND pb.status IN (0, 1, 2, 5, 8, 10)) OR k.kind IN (1, 2)) \
+                 AND {walk_may_enter_dependency_sql} OFFSET 0) wanting \
                  WHERE NOT EXISTS (SELECT 1 FROM region x \
-                 WHERE x.derivation = open_wanted_edges.parent))"
-            ),
+                 WHERE x.derivation = open_wanted_edges.parent))",
+                walk_may_enter_dependency_sql =
+                    norm(&walk_may_enter_dependency_sql()).replace('"', "\\\""),
+            )),
             "the parent probe is a lateral lookup by key, never a semi join the planner can \
              turn into a materialised filter: {walk}"
         );

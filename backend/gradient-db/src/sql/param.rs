@@ -14,6 +14,7 @@ pub enum Param {
     DerivationHash,
     DerivationHashes(usize),
     CachedPathId,
+    CachedPathIds(usize),
     CachedPathHash,
     CachedPathHashes(usize),
     SharedBuildId,

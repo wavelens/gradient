@@ -5,14 +5,13 @@
  */
 
 use super::refusal::EvaluationRefusal;
-use crate::access::require_project_permission;
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::extractors::{JsonBody, Path};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::permissions::Permission;
-use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::State;
 use axum::{Extension, Json};
@@ -24,39 +23,6 @@ use std::sync::Arc;
 
 use super::EvalAccessContext;
 use super::types::{EvaluationAction, MakeEvaluationRequest};
-
-async fn load_abortable_evaluation(
-    db: &gradient_db::WebDb,
-    user: &MUser,
-    api_key: &MaybeApiKey,
-    evaluation_id: EvaluationId,
-) -> WebResult<EvalAccessContext> {
-    if user.superuser {
-        return EvalAccessContext::load_unguarded(db, evaluation_id).await;
-    }
-
-    load_triggerable_evaluation(db, user, api_key, evaluation_id).await
-}
-
-async fn load_triggerable_evaluation(
-    db: &gradient_db::WebDb,
-    user: &MUser,
-    api_key: &MaybeApiKey,
-    evaluation_id: EvaluationId,
-) -> WebResult<EvalAccessContext> {
-    let api_key_ref = api_key.as_ref();
-    let ctx = EvalAccessContext::load(db, evaluation_id, &Some(user.clone()), api_key_ref).await?;
-    require_project_permission(
-        db,
-        user.id,
-        ctx.project_id,
-        Permission::TriggerEvaluation,
-        Resource::Evaluation,
-        api_key_ref,
-    )
-    .await?;
-    Ok(ctx)
-}
 
 #[utoipa::path(
     post,
@@ -77,7 +43,14 @@ pub async fn post_evaluation(
     Path(evaluation_id): Path<EvaluationId>,
     JsonBody(body): JsonBody<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_abortable_evaluation(&state.web_db, &user, &api_key, evaluation_id).await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::CanAbortRunningWork,
+    )
+    .await?;
 
     match body.method {
         EvaluationAction::Abort => {
@@ -106,7 +79,14 @@ pub async fn post_evaluation_retry(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_triggerable_evaluation(&state.web_db, &user, &api_key, evaluation_id).await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::IncludesPermission(Permission::TriggerEvaluation),
+    )
+    .await?;
 
     if !EvaluationStatus::TERMINAL.contains(&ctx.evaluation.status) {
         return Err(EvaluationRefusal::StillRunning.into());

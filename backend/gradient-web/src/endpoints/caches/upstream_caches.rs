@@ -20,15 +20,26 @@ use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
 use gradient_core::ServerState;
-use gradient_core::upstream_source::{ProtocolProbe, probe_protocol};
+use gradient_core::upstream_source::{ProtocolProbe, credential_of_upstream_row, probe_protocol};
 use gradient_db::WebDb;
-use gradient_entity::cache_upstream::{CacheUpstreamKind, CacheUpstreamSource};
+use gradient_entity::cache_upstream::{
+    CacheUpstreamKind, CacheUpstreamSource, UpstreamCredentialScheme,
+};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::*;
-use gradient_util::http::HttpVersion;
-use gradient_util::http_validation::validate_webhook_url;
+use gradient_util::http::HttpProtocolSelection;
+use gradient_util::http_base_url::{
+    InvalidHttpBaseUrlError, UpstreamCacheUrlForDisplay, ValidatedHttpBaseUrl,
+    upstream_cache_url_for_display_without_username_password_query_and_fragment,
+    urls_differ_in_scheme_host_or_port,
+};
+use gradient_util::http_validation::UserUrlDestinationAllowlist;
+use gradient_util::upstream_cache_credential::{
+    upstream_cache_credential_plaintext_from_bearer_token,
+    validate_basic_auth_and_make_upstream_cache_credential,
+};
 use sea_orm::ActiveValue::Set;
-use sea_orm::IntoActiveModel;
+use sea_orm::{IntoActiveModel, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -46,6 +57,7 @@ pub enum AddUpstreamRequest {
         public_key: String,
         #[serde(default)]
         http1_only: bool,
+        credential: Option<HttpUpstreamCredentialRequest>,
     },
     GradientProto {
         url: String,
@@ -54,6 +66,76 @@ pub enum AddUpstreamRequest {
         mode: Option<CacheSubscriptionMode>,
         api_key: Option<String>,
     },
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(tag = "scheme", rename_all = "snake_case")]
+pub enum HttpUpstreamCredentialRequest {
+    Basic { user: String, password: String },
+    Bearer { token: String },
+}
+
+impl HttpUpstreamCredentialRequest {
+    fn validate_and_return_credential_scheme_and_plain_text_for_encryption(
+        &self,
+    ) -> Result<(UpstreamCredentialScheme, String), CacheRefusal> {
+        Ok(match self {
+            Self::Basic { user, password } => (
+                UpstreamCredentialScheme::Basic,
+                validate_basic_auth_and_make_upstream_cache_credential(user, password)?,
+            ),
+            Self::Bearer { token } => (
+                UpstreamCredentialScheme::Bearer,
+                upstream_cache_credential_plaintext_from_bearer_token(token)?,
+            ),
+        })
+    }
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(tag = "scheme", rename_all = "snake_case")]
+pub enum PatchHttpUpstreamCredentialRequest {
+    Basic { user: String, password: String },
+    Bearer { token: String },
+    None,
+}
+
+impl PatchHttpUpstreamCredentialRequest {
+    fn into_credential_request_to_store(self) -> Option<HttpUpstreamCredentialRequest> {
+        match self {
+            Self::Basic { user, password } => {
+                Some(HttpUpstreamCredentialRequest::Basic { user, password })
+            }
+            Self::Bearer { token } => Some(HttpUpstreamCredentialRequest::Bearer { token }),
+            Self::None => None,
+        }
+    }
+}
+
+impl std::fmt::Debug for PatchHttpUpstreamCredentialRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Basic { .. } => "Basic",
+            Self::Bearer { .. } => "Bearer",
+            Self::None => "None",
+        })
+    }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialSchemeItem {
+    Basic,
+    Bearer,
+}
+
+impl From<UpstreamCredentialScheme> for CredentialSchemeItem {
+    fn from(scheme: UpstreamCredentialScheme) -> Self {
+        match scheme {
+            UpstreamCredentialScheme::Basic => Self::Basic,
+            UpstreamCredentialScheme::Bearer => Self::Bearer,
+        }
+    }
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -70,22 +152,33 @@ pub struct UpstreamCacheItem {
     pub remote_cache: Option<String>,
     pub http1_only: bool,
     pub active: bool,
+    /// True when the stored URL holds a user, password or query, which `url` leaves out. Such an upstream cache can't be set active until its URL is fixed: with PATCH for an HTTP upstream cache, by creating it again for a Gradient Proto one.
+    pub stored_url_has_user_password_or_query: bool,
+    pub credential_scheme: Option<CredentialSchemeItem>,
 }
 
 impl UpstreamCacheItem {
     fn new(upstream: MCacheUpstream, upstream_cache_name: Option<String>) -> Self {
+        let shown_url = upstream
+            .url
+            .as_deref()
+            .and_then(upstream_cache_url_for_display_without_username_password_query_and_fragment);
         Self {
+            stored_url_has_user_password_or_query: shown_url
+                .as_ref()
+                .is_some_and(|shown| shown.had_removed_url_parts),
+            url: shown_url.map(|UpstreamCacheUrlForDisplay { url, .. }| url),
             id: upstream.id,
             display_name: upstream.display_name,
             mode: upstream.mode,
             upstream_cache_id: upstream.upstream_cache,
             upstream_cache_name,
-            url: upstream.url,
             public_key: upstream.public_key,
             kind: format!("{:?}", upstream.kind).to_lowercase(),
             remote_cache: upstream.remote_cache_name,
             http1_only: upstream.http1_only,
             active: upstream.active,
+            credential_scheme: upstream.credential_scheme.map(Into::into),
         }
     }
 }
@@ -98,6 +191,7 @@ pub struct PatchUpstreamRequest {
     pub public_key: Option<String>,
     pub http1_only: Option<bool>,
     pub active: Option<bool>,
+    pub credential: Option<PatchHttpUpstreamCredentialRequest>,
 }
 
 /// State is re-applying a managed cache's upstream caches on startup. Toggling `active` is the only
@@ -108,32 +202,78 @@ fn patch_edits_managed_fields(body: &PatchUpstreamRequest) -> bool {
         || body.url.is_some()
         || body.public_key.is_some()
         || body.http1_only.is_some()
+        || body.credential.is_some()
 }
 
-fn validate_upstream_cache_url(url: &str) -> Result<(), WebError> {
+fn validate_upstream_cache_url(url: &str) -> Result<ValidatedHttpBaseUrl, WebError> {
     let url = url.trim();
     if url.is_empty() {
         return Err(CacheRefusal::UpstreamUrlRequired.into());
     }
-    validate_webhook_url(url).map_err(|e| CacheRefusal::UpstreamCacheUrlInvalid(e.to_string()))?;
-    Ok(())
+    url.parse()
+        .map_err(|e: InvalidHttpBaseUrlError| match e {
+            InvalidHttpBaseUrlError::Userinfo => CacheRefusal::UpstreamCacheUrlContainsCredentials,
+            InvalidHttpBaseUrlError::Query => CacheRefusal::CacheUrlContainsQueryString,
+            other => CacheRefusal::UpstreamCacheUrlInvalid(other.to_string()),
+        })
+        .map_err(Into::into)
 }
 
-fn validate_http(url: &str, public_key: &str) -> Result<(), WebError> {
-    validate_upstream_cache_url(url)?;
+async fn check_upstream_cache_destination_allowed_and_host_has_usable_address(
+    url: &ValidatedHttpBaseUrl,
+    allowlist: &UserUrlDestinationAllowlist,
+) -> Result<(), WebError> {
+    allowlist
+        .allowed_socket_addresses_for_url(url)
+        .await
+        .map(drop)
+        .map_err(|e| CacheRefusal::UpstreamCacheUrlInvalid(e.to_string()).into())
+}
+
+fn validate_http(
+    url: &str,
+    public_key: &str,
+    credential: Option<&HttpUpstreamCredentialRequest>,
+) -> Result<
+    (
+        ValidatedHttpBaseUrl,
+        Option<(UpstreamCredentialScheme, String)>,
+    ),
+    WebError,
+> {
+    let url = validate_upstream_cache_url(url)?;
     if public_key.trim().is_empty() {
         return Err(CacheRefusal::HttpPublicKeyRequired.into());
     }
-    Ok(())
+    let payload = credential
+        .map(HttpUpstreamCredentialRequest::validate_and_return_credential_scheme_and_plain_text_for_encryption)
+        .transpose()?;
+    if payload.is_some() && !url.as_str().starts_with("https://") {
+        return Err(CacheRefusal::UpstreamCacheCredentialSentOverPlainHttp.into());
+    }
+    Ok((url, payload))
+}
+
+fn validate_https_and_encrypt_upstream_cache_credential(
+    crypt_file: &str,
+    payload: Option<(UpstreamCredentialScheme, String)>,
+) -> WebResult<(Option<String>, Option<UpstreamCredentialScheme>)> {
+    let Some((scheme, payload)) = payload else {
+        return Ok((None, None));
+    };
+    let encrypted = gradient_sources::encrypt_secret(crypt_file, &payload)
+        .context("encrypt HTTP upstream credential")?;
+    Ok((Some(encrypted), Some(scheme)))
 }
 
 fn validate_gradient_proto(
     url: &str,
     remote_cache: &str,
     api_key: Option<&str>,
-) -> Result<(), WebError> {
-    validate_upstream_cache_url(url)?;
-    if api_key.is_some_and(|k| !k.trim().is_empty()) && !url.trim().starts_with("https://") {
+) -> Result<ValidatedHttpBaseUrl, WebError> {
+    let validated = validate_upstream_cache_url(url)?;
+    if api_key.is_some_and(|k| !k.trim().is_empty()) && !validated.as_str().starts_with("https://")
+    {
         return Err(CacheRefusal::ApiKeyOverCleartext.into());
     }
     let name = remote_cache.trim();
@@ -149,7 +289,7 @@ fn validate_gradient_proto(
     {
         return Err(CacheRefusal::RemoteCacheNameBadCharacters.into());
     }
-    Ok(())
+    Ok(validated)
 }
 
 async fn load_upstream(
@@ -250,7 +390,7 @@ pub async fn get_upstream_caches(
     operation_id = "addUpstreamCache",
     tag = "caches",
     summary = "Add upstream cache",
-    description = "Adds an upstream cache. Three types are supported, selected by the `type` discriminator:\n\n- **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.\n- **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.\n- **http** - an arbitrary Nix binary cache URL. Always ReadOnly.\n\nCallers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.",
+    description = "Adds an upstream cache. Three types are supported, selected by the `type` discriminator:\n\n- **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.\n- **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.\n- **http** - an arbitrary Nix binary cache URL. Always ReadOnly. Supports an optional `credential` (`basic` with `user` and `password`, or `bearer` with `token`) over https:// only. The credential is stored encrypted at rest and is write-only: the API returns only `credential_scheme`. The URL can't contain a username, password or query. Workers never fetch from an upstream cache with a credential. Such an upstream cache serves only this cache's pull-through, build logs and the Test route.\n\nCallers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.",
     params(CachePath),
     request_body = AddUpstreamRequest,
     responses((status = OK, description = "Upstream added - returns the new upstream UUID", body = CacheUpstreamId), WebError)
@@ -308,17 +448,30 @@ pub async fn put_cache_upstream(
             url,
             public_key,
             http1_only,
+            credential,
         } => {
-            validate_http(&url, &public_key)?;
+            let (url, payload) = validate_http(&url, &public_key, credential.as_ref())?;
+            check_upstream_cache_destination_allowed_and_host_has_usable_address(
+                &url,
+                db.user_supplied_url_http_client.allowlist(),
+            )
+            .await?;
+            let (encrypted_credential, credential_scheme) =
+                validate_https_and_encrypt_upstream_cache_credential(
+                    &state.config.secrets.crypt_file,
+                    payload,
+                )?;
             MCacheUpstream {
                 id: CacheUpstreamId::now_v7(),
                 cache: cache.id,
                 display_name,
                 mode: CacheSubscriptionMode::ReadOnly,
                 kind: CacheUpstreamKind::Http,
-                url: Some(url.trim().to_string()),
+                url: Some(url.to_string()),
                 public_key: Some(public_key),
                 http1_only,
+                encrypted_credential,
+                credential_scheme,
                 ..Default::default()
             }
         }
@@ -329,8 +482,13 @@ pub async fn put_cache_upstream(
             mode,
             api_key: key,
         } => {
-            validate_gradient_proto(&url, &remote_cache, key.as_deref())?;
-            let api_key_enc = match key {
+            let url = validate_gradient_proto(&url, &remote_cache, key.as_deref())?;
+            check_upstream_cache_destination_allowed_and_host_has_usable_address(
+                &url,
+                db.user_supplied_url_http_client.allowlist(),
+            )
+            .await?;
+            let encrypted_credential = match key {
                 Some(k) if !k.trim().is_empty() => Some(
                     gradient_sources::encrypt_secret(&state.config.secrets.crypt_file, k.trim())
                         .context("encrypt upstream API key")?,
@@ -343,15 +501,24 @@ pub async fn put_cache_upstream(
                 display_name,
                 mode: mode.unwrap_or(CacheSubscriptionMode::ReadOnly),
                 kind: CacheUpstreamKind::GradientProto,
-                url: Some(url.trim().to_string()),
+                url: Some(url.to_string()),
                 remote_cache_name: Some(remote_cache.trim().to_string()),
-                api_key: api_key_enc,
+                credential_scheme: encrypted_credential
+                    .as_ref()
+                    .map(|_| UpstreamCredentialScheme::Bearer),
+                encrypted_credential,
                 ..Default::default()
             }
         }
     };
 
-    let inserted = gradient_db::rows::insert::<ECacheUpstream, _>(&state.web_db, record).await?;
+    let inserted =
+        gradient_db::caches::upstream::insert_upstream_cache_if_below_max_upstream_count(
+            &state.web_db,
+            record,
+        )
+        .await?
+        .ok_or(CacheRefusal::MaximumUpstreamCacheCountReached)?;
     Ok(ok_json(inserted.id))
 }
 
@@ -361,7 +528,7 @@ pub async fn put_cache_upstream(
     operation_id = "patchUpstreamCache",
     tag = "caches",
     summary = "Update upstream cache",
-    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nCallers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.",
+    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url`, `public_key`, `http1_only` and `credential` may be updated. `credential` takes `basic` (`user`, `password`) or `bearer` (`token`) to set or replace the stored credential, or `none` to remove it. A credential needs an https:// URL. Moving the URL to another scheme, host or port while a credential is stored needs the credential again in the same request, or its removal. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried. Setting `active` to true checks the stored URL again and refuses a URL with a username, password or query.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nCallers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.",
     params(CachePath, ("id" = CacheUpstreamId, Path)),
     request_body = PatchUpstreamRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
@@ -375,6 +542,7 @@ pub async fn patch_cache_upstream(
         params,
         ..
     }: CacheScope<Requires<can::ManageUpstreamCaches>>,
+    state: State<Arc<ServerState>>,
     JsonBody(body): JsonBody<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let upstream_id: CacheUpstreamId = params.param("id")?;
@@ -383,6 +551,15 @@ pub async fn patch_cache_upstream(
         reject_managed_cache(&cache)?;
     }
     let record = load_upstream(&db.web_db, cache.id, upstream_id).await?;
+    let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
+    let request_replaces_external_http_cache_url = is_external && body.url.is_some();
+
+    if body.active == Some(true)
+        && !request_replaces_external_http_cache_url
+        && let Some(stored_url) = record.url.as_deref()
+    {
+        validate_upstream_cache_url(stored_url)?;
+    }
 
     if let (Some(upstream_cache), Some(mode)) = (record.upstream_cache, &body.mode) {
         let upstream = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, upstream_cache)
@@ -398,8 +575,10 @@ pub async fn patch_cache_upstream(
         .await?;
     }
 
-    let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
+    let stored_url = record.url.clone().unwrap_or_default();
+    let has_stored_credential = record.encrypted_credential.is_some();
     let mut row = record.into_active_model();
+    let mut should_clear_stored_nar_download_urls = false;
 
     if let Some(name) = body.display_name {
         row.display_name = Set(name);
@@ -409,9 +588,51 @@ pub async fn patch_cache_upstream(
     }
     if is_external {
         row.mode = Set(CacheSubscriptionMode::ReadOnly);
-        if let Some(url) = body.url {
-            validate_upstream_cache_url(&url)?;
-            row.url = Set(Some(url.trim().to_string()));
+        let new_url = body
+            .url
+            .as_deref()
+            .map(validate_upstream_cache_url)
+            .transpose()?;
+        let credential_change = body
+            .credential
+            .map(PatchHttpUpstreamCredentialRequest::into_credential_request_to_store);
+        let payload = credential_change
+            .as_ref()
+            .and_then(Option::as_ref)
+            .map(HttpUpstreamCredentialRequest::validate_and_return_credential_scheme_and_plain_text_for_encryption)
+            .transpose()?;
+        let keeps_stored_credential = has_stored_credential && credential_change.is_none();
+        let target_url = new_url
+            .as_ref()
+            .map_or(stored_url.as_str(), ValidatedHttpBaseUrl::as_str);
+        let sends_credential_to_target =
+            payload.is_some() || (keeps_stored_credential && new_url.is_some());
+        if sends_credential_to_target && !target_url.starts_with("https://") {
+            return Err(CacheRefusal::UpstreamCacheCredentialSentOverPlainHttp.into());
+        }
+        if keeps_stored_credential
+            && new_url.is_some()
+            && urls_differ_in_scheme_host_or_port(&stored_url, target_url)
+        {
+            return Err(CacheRefusal::StoredCredentialWouldBeSentToNewUpstreamCacheHost.into());
+        }
+        should_clear_stored_nar_download_urls = new_url.is_some() || credential_change.is_some();
+        if let Some(url) = new_url {
+            check_upstream_cache_destination_allowed_and_host_has_usable_address(
+                &url,
+                db.user_supplied_url_http_client.allowlist(),
+            )
+            .await?;
+            row.url = Set(Some(url.to_string()));
+        }
+        if credential_change.is_some() {
+            let (encrypted_credential, credential_scheme) =
+                validate_https_and_encrypt_upstream_cache_credential(
+                    &state.config.secrets.crypt_file,
+                    payload,
+                )?;
+            row.encrypted_credential = Set(encrypted_credential);
+            row.credential_scheme = Set(credential_scheme);
         }
         if let Some(key) = body.public_key {
             if key.trim().is_empty() {
@@ -426,7 +647,13 @@ pub async fn patch_cache_upstream(
         row.mode = Set(mode);
     }
 
-    gradient_db::rows::update::<ECacheUpstream, _>(&db.web_db, row).await?;
+    let tx = db.web_db.inner().begin().await?;
+    gradient_db::rows::update::<ECacheUpstream, _>(&tx, row).await?;
+    if should_clear_stored_nar_download_urls {
+        gradient_db::caches::upstream::clear_nar_url_and_upstream_reference_for_build_outputs_verified_by_upstream(&tx, upstream_id)
+            .await?;
+    }
+    tx.commit().await?;
 
     Ok(ok_json("Upstream updated".to_string()))
 }
@@ -478,9 +705,28 @@ pub async fn post_cache_upstream_test(
         return Err(CacheRefusal::UpstreamNotHttp.into());
     };
 
+    let url: ValidatedHttpBaseUrl =
+        url.parse()
+            .map_err(|e: gradient_util::http_base_url::InvalidHttpBaseUrlError| {
+                CacheRefusal::UpstreamCacheUrlInvalid(e.to_string())
+            })?;
+    let credential = credential_of_upstream_row(&db.config.secrets.crypt_file, &record)
+        .await
+        .context("decrypt upstream cache credential")?;
+    let http = &db.user_supplied_url_http_client;
     let (http1, http2) = tokio::join!(
-        probe_protocol(url, HttpVersion::Http1),
-        probe_protocol(url, HttpVersion::Http2),
+        probe_protocol(
+            http,
+            &url,
+            HttpProtocolSelection::Http1Only,
+            credential.as_deref()
+        ),
+        probe_protocol(
+            http,
+            &url,
+            HttpProtocolSelection::Http2PriorKnowledge,
+            credential.as_deref()
+        ),
     );
 
     Ok(ok_json(UpstreamTestResponse::new(http1, http2)))
@@ -525,21 +771,44 @@ mod tests {
             serde_json::json!({ "url": "https://x" }),
             serde_json::json!({ "public_key": "k:1" }),
             serde_json::json!({ "http1_only": true }),
+            serde_json::json!({ "credential": { "scheme": "none" } }),
         ] {
             assert!(patch_edits_managed_fields(&patch(edit)));
         }
     }
 
     #[test]
-    fn validate_http_requires_url_and_key() {
-        assert!(validate_http("", "k").is_err());
-        assert!(validate_http("https://x", "").is_err());
-        assert!(validate_http("not a url", "k").is_err());
-        assert!(validate_http("https://cache.nixos.org", "cache.nixos.org-1:abc").is_ok());
+    fn patch_upstream_request_debug_omits_credential_secret() {
+        for credential in [
+            serde_json::json!({ "scheme": "basic", "user": "alice", "password": "pw-hidden" }),
+            serde_json::json!({ "scheme": "bearer", "token": "pw-hidden" }),
+        ] {
+            let patch = serde_json::from_value::<PatchUpstreamRequest>(
+                serde_json::json!({ "credential": credential }),
+            )
+            .unwrap();
+            let debug = format!("{patch:?}");
+            assert!(!debug.contains("pw-hidden"), "{debug}");
+            assert!(!debug.contains("alice"), "{debug}");
+        }
+    }
+
+    fn user_url_destination_allowlist_with_dns_lookup_function(
+        lookup: gradient_util::http_validation::HostNameAndPortToSocketAddressesLookupFunction,
+    ) -> UserUrlDestinationAllowlist {
+        UserUrlDestinationAllowlist::default().with_dns_lookup_function(lookup)
     }
 
     #[test]
-    fn upstream_cache_url_rejects_internal_addresses() {
+    fn validate_http_requires_url_and_key() {
+        assert!(validate_http("", "k", None).is_err());
+        assert!(validate_http("https://x", "", None).is_err());
+        assert!(validate_http("not a url", "k", None).is_err());
+        assert!(validate_http("https://cache.nixos.org", "cache.nixos.org-1:abc", None).is_ok());
+    }
+
+    #[tokio::test]
+    async fn upstream_cache_url_rejects_internal_addresses() {
         for url in [
             "http://169.254.169.254",
             "http://localhost:8080",
@@ -547,10 +816,54 @@ mod tests {
             "http://10.0.0.5",
             "http://[::1]:5000",
         ] {
-            assert!(validate_upstream_cache_url(url).is_err(), "{url}");
-            assert!(validate_gradient_proto(url, "prod", None).is_err(), "{url}");
+            let parsed = validate_upstream_cache_url(url).unwrap();
+            assert!(
+                check_upstream_cache_destination_allowed_and_host_has_usable_address(
+                    &parsed,
+                    &Default::default()
+                )
+                .await
+                .is_err(),
+                "{url}"
+            );
         }
-        assert!(validate_upstream_cache_url(" https://cache.nixos.org ").is_ok());
+        let public = user_url_destination_allowlist_with_dns_lookup_function(|_, port| {
+            Box::pin(async move {
+                Ok(vec![std::net::SocketAddr::new(
+                    [203, 0, 113, 8].into(),
+                    port,
+                )])
+            })
+        });
+        let parsed = validate_upstream_cache_url(" https://cache.nixos.org ").unwrap();
+        assert!(
+            check_upstream_cache_destination_allowed_and_host_has_usable_address(&parsed, &public)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn creating_upstream_cache_of_any_kind_is_refused_when_dns_answer_has_zero_addresses() {
+        let empty = user_url_destination_allowlist_with_dns_lookup_function(|_, _| {
+            Box::pin(async { Ok(Vec::new()) })
+        });
+        for url in [
+            validate_http("https://empty.example/", "cache-1:abc", None)
+                .unwrap()
+                .0,
+            validate_gradient_proto("https://empty.example/", "prod", None).unwrap(),
+        ] {
+            let refusal =
+                check_upstream_cache_destination_allowed_and_host_has_usable_address(&url, &empty)
+                    .await
+                    .expect_err("a host without addresses is refused");
+            let text = format!("{refusal} {refusal:?}");
+            assert!(
+                text.contains("The server cannot connect to empty.example"),
+                "{text}"
+            );
+        }
     }
 
     #[test]

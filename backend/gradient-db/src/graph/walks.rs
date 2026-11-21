@@ -211,6 +211,7 @@ pub fn open_closure_cte_body_until(
         within,
         stop_at,
         &builder_predicate("dep", "w"),
+        None,
     )
 }
 
@@ -226,6 +227,23 @@ pub fn need_closure_cte_body_until(
         within,
         stop_at,
         &crate::graph::predicates::builds_once_wanted_predicate("dep", "w"),
+        None,
+    )
+}
+
+pub fn need_walk_dependency_recursive_cte_body_until_after_index_lookup(
+    name: &str,
+    seed_select: &str,
+    within: Option<&str>,
+    render_stop_condition: &dyn Fn(&str) -> String,
+) -> String {
+    closure_cte_body(
+        name,
+        seed_select,
+        within,
+        "",
+        &crate::graph::predicates::builds_once_wanted_predicate("dep", "w"),
+        Some(render_stop_condition),
     )
 }
 
@@ -235,17 +253,25 @@ fn closure_cte_body(
     within: Option<&str>,
     stop_at: &str,
     builder: &str,
+    render_stop_condition: Option<&dyn Fn(&str) -> String>,
 ) -> String {
     let stop = if stop_at.is_empty() {
         String::new()
     } else {
         format!(" AND NOT ({stop_at})")
     };
+    let (step_columns, step_stop) = match render_stop_condition {
+        None => (String::new(), String::new()),
+        Some(render) => (
+            ", e.derivation, e.dependency, e.kind, dep.status, dep.fetchable".to_owned(),
+            format!(" WHERE NOT ({})", render("s")),
+        ),
+    };
     let step = lateral_step(
         name,
         "c.evaluation, s.next, s.builder",
         &format!(
-            "SELECT e.dependency AS next, ({builder}) AS builder \
+            "SELECT e.dependency AS next, ({builder}) AS builder{step_columns} \
              FROM derivation_dependency e \
              JOIN derivation_build dep ON dep.derivation = e.dependency \
              JOIN derivation w ON w.id = dep.derivation \
@@ -253,7 +279,7 @@ fn closure_cte_body(
                AND {open}{stop}",
             open = open_predicate("dep"),
         ),
-    );
+    ) + &step_stop;
     let step = within_step(step, "t.evaluation, t.next, t.builder", within);
     format!("{name}(evaluation, derivation, builder) AS ({seed_select} UNION {step})")
 }
@@ -556,6 +582,36 @@ mod tests {
             open_closure_cte_body_until("x", "SELECT 1", None, ""),
             open_closure_cte_body("x", "SELECT 1", None),
             "an empty stop is the unrestricted walk"
+        );
+    }
+
+    #[test]
+    fn need_walk_stop_condition_applies_to_fetched_step_row_after_subquery_fence_and_dependency_lookup_stays_in_lateral_subquery()
+     {
+        let cte = norm(
+            &need_walk_dependency_recursive_cte_body_until_after_index_lookup(
+                "x",
+                "SELECT 1",
+                None,
+                &|row| format!("{row}.status = 5"),
+            ),
+        );
+        assert!(
+            cte.ends_with(&format!(
+                "AND {} OFFSET 0) s WHERE NOT (s.status = 5))",
+                norm(&open_predicate("dep"))
+            )),
+            "Checks for the stop condition run on dependency rows fetched after the subquery fence. Dependency lookups keep the index join of the walk without a stop. {cte}"
+        );
+        assert_eq!(
+            cte.replacen(
+                ", e.derivation, e.dependency, e.kind, dep.status, dep.fetchable",
+                "",
+                1
+            )
+            .replacen(" WHERE NOT (s.status = 5)", "", 1),
+            norm(&need_closure_cte_body_until("x", "SELECT 1", None, "")),
+            "Lookups inside a fence match a walk with no stops."
         );
     }
 }

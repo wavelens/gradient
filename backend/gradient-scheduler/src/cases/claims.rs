@@ -22,9 +22,9 @@ use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_t
 
 use super::{
     A, A_DEV, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase,
-    SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv, drv_nar, drv_path, eval_key, failure,
+    SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv, drv_path, eval_key, failure,
     from_now, is_recent, jobs_available_signal_for_one_kind, narinfo, output_nar, span, store_path,
-    w_all, w_network_build, with_attr, with_output,
+    test_derivation_store_file_name, w_all, w_network_build, with_attr, with_output,
 };
 use crate::jobs::Assignment;
 use crate::pending_job_input_store_paths::PendingJobInputStorePath;
@@ -38,7 +38,7 @@ const W2: &str = "w2";
 async fn c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_start() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -186,7 +186,7 @@ async fn c01_a_won_claim_opens_the_row_and_leaves_the_build_queued_until_the_sta
 #[tokio::test]
 async fn c02_a_second_request_on_a_free_slot_gets_nothing_and_leaves_an_idle_slot() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -221,8 +221,8 @@ async fn c02_a_second_request_on_a_free_slot_gets_nothing_and_leaves_an_idle_slo
 #[tokio::test]
 async fn c03_two_workers_ask_for_the_only_candidate_and_the_loser_idles() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -266,8 +266,8 @@ async fn c03_two_workers_ask_for_the_only_candidate_and_the_loser_idles() {
 async fn c04_a_row_of_a_second_instance_makes_the_local_claim_lose() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_all(), &[]).await;
-    second.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    second.connect(W2, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -327,8 +327,8 @@ async fn c05_a_lost_claim_moves_on_to_the_next_candidate() {
         .add_missing_cached_build_input(B, D, D_OUT);
     let case = SchedulerCase::start(seed).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_all(), &[]).await;
-    second.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    second.connect(W2, w_all()).await;
     let (x, y) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -382,8 +382,8 @@ async fn c06_three_lost_claims_end_the_request_and_the_next_request_gets_the_fou
     )
     .await;
     let second = case.second_instance().await;
-    case.connect(W1, w_all(), &[]).await;
-    second.connect(W2, w_all().slots(3), &[]).await;
+    case.connect(W1, w_all()).await;
+    second.connect(W2, w_all().slots(3)).await;
     let lost_keys = vec![case.key(A).await, case.key(B).await, case.key(C).await];
     let remaining = case.key(D).await;
     let all_keys = [lost_keys.clone(), vec![remaining.clone()]].concat();
@@ -462,7 +462,7 @@ async fn c06_three_lost_claims_end_the_request_and_the_next_request_gets_the_fou
 async fn c07_a_build_that_left_queued_before_the_claim_hands_out_nothing() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -507,7 +507,7 @@ async fn c07_a_build_that_left_queued_before_the_claim_hands_out_nothing() {
 #[tokio::test]
 async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a_substitute() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -593,7 +593,7 @@ async fn c08_an_upstream_hit_before_the_claim_fails_the_build_claim_and_offers_a
 async fn c09_a_build_aborted_in_the_graph_before_the_claim_is_not_handed_out() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -650,7 +650,7 @@ async fn c10_an_eval_claim_after_an_abort_on_the_second_instance_writes_no_row()
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().evalq(e1)).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let key = eval_key(e1);
 
     case.assign_queued_evals().await;
@@ -695,7 +695,7 @@ async fn c11_a_won_eval_claim_writes_the_row_and_leaves_the_evaluation_queued() 
     let e1 = EvaluationId::now_v7();
     let case =
         SchedulerCase::start(shape().evalq(e1).commit_hash(&[0xc1; 20]).wildcard("pkg.*")).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let key = eval_key(e1);
 
     case.assign_queued_evals().await;
@@ -794,8 +794,8 @@ async fn c11_a_won_eval_claim_writes_the_row_and_leaves_the_evaluation_queued() 
 async fn c12_a_reject_closes_the_row_and_returns_the_job_to_every_worker() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -882,7 +882,7 @@ async fn c12_a_reject_closes_the_row_and_returns_the_job_to_every_worker() {
 #[tokio::test]
 async fn c13_a_claim_whose_assigned_transition_fails_closes_its_row_and_keeps_the_job_pending() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -954,17 +954,22 @@ async fn c13_a_claim_whose_assigned_transition_fails_closes_its_row_and_keeps_th
 #[tokio::test]
 async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
     let e1 = EvaluationId::now_v7();
+    let b_derivation_base_store_path =
+        test_derivation_store_file_name(&with_attr(with_output(drv(B, &[]), B_OUT), &attr_of(B)));
     let case = SchedulerCase::start(
         shape()
             .evaluation(e1)
             .evaluation_status(EvaluationStatus::EvaluatingDerivation)
             .startable(A, A_OUT)
-            .startable(B, B_OUT),
+            .startable(&b_derivation_base_store_path, B_OUT),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     case.idle(W1, JobKind::Build).await;
-    let (a, b) = (case.key(A).await, case.key(B).await);
+    let (a, b) = (
+        case.key(A).await,
+        case.key(&b_derivation_base_store_path).await,
+    );
 
     case.admit_startable_moves().await;
     assert!(case.pending(&a).await, "after 1: pending(build:A)");
@@ -979,17 +984,24 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
     );
     case.check("step 1").await;
 
-    case.demote_path(B).await;
+    case.demote_path(&b_derivation_base_store_path).await;
     assert_eq!(
-        case.sb(B).await.status,
+        case.sb(&b_derivation_base_store_path).await.status,
         BuildStatus::Created,
         "after 2: sb(B).status"
     );
     case.check("step 2").await;
 
-    case.commit_nar(drv_nar(B)).await;
+    case.upload_reported_derivation_as_evaluation_project_worker(
+        case.db.project_of(e1).await,
+        &with_attr(
+            with_output(drv(&b_derivation_base_store_path, &[]), B_OUT),
+            &attr_of(B),
+        ),
+    )
+    .await;
     assert_eq!(
-        case.sb(B).await.status,
+        case.sb(&b_derivation_base_store_path).await.status,
         BuildStatus::Created,
         "after 3: sb(B).status"
     );
@@ -997,11 +1009,14 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
 
     case.walk_evaluation_derivations_and_wait(
         e1,
-        vec![with_attr(with_output(drv(B, &[]), B_OUT), &attr_of(B))],
+        vec![with_attr(
+            with_output(drv(&b_derivation_base_store_path, &[]), B_OUT),
+            &attr_of(B),
+        )],
     )
     .await;
     assert_eq!(
-        case.sb(B).await.status,
+        case.sb(&b_derivation_base_store_path).await.status,
         BuildStatus::Queued,
         "after 4: sb(B).status"
     );
@@ -1023,15 +1038,20 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
 #[tokio::test]
 async fn c15_a_resync_drops_unstartable_builds_and_enqueues_startable_ones_again() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let derivation_a_drv_base_store_path =
+        test_derivation_store_file_name(&with_attr(with_output(drv(A, &[]), A_OUT), &attr_of(A)));
     let case = SchedulerCase::start(
         shape()
             .evaluation(e1)
             .evaluation_status(EvaluationStatus::EvaluatingDerivation)
-            .startable(A, A_OUT)
+            .startable(&derivation_a_drv_base_store_path, A_OUT)
             .evalq(e2),
     )
     .await;
-    let (a, eval) = (case.key(A).await, eval_key(e2));
+    let (a, eval) = (
+        case.key(&derivation_a_drv_base_store_path).await,
+        eval_key(e2),
+    );
 
     case.assign_queued_evals().await;
     case.admit_startable_moves().await;
@@ -1039,9 +1059,9 @@ async fn c15_a_resync_drops_unstartable_builds_and_enqueues_startable_ones_again
     assert!(case.pending(&a).await, "after 1: pending(build:A)");
     case.check("step 1").await;
 
-    case.demote_path(A).await;
+    case.demote_path(&derivation_a_drv_base_store_path).await;
     assert_eq!(
-        case.sb(A).await.status,
+        case.sb(&derivation_a_drv_base_store_path).await.status,
         BuildStatus::Created,
         "after 2: sb(A).status"
     );
@@ -1053,9 +1073,16 @@ async fn c15_a_resync_drops_unstartable_builds_and_enqueues_startable_ones_again
     assert_eq!(case.totals().await.pending, 1, "after 3: pending jobs");
     case.check("step 3").await;
 
-    case.commit_nar(drv_nar(A)).await;
+    case.upload_reported_derivation_as_evaluation_project_worker(
+        case.db.project_of(e1).await,
+        &with_attr(
+            with_output(drv(&derivation_a_drv_base_store_path, &[]), A_OUT),
+            &attr_of(A),
+        ),
+    )
+    .await;
     assert_eq!(
-        case.sb(A).await.status,
+        case.sb(&derivation_a_drv_base_store_path).await.status,
         BuildStatus::Created,
         "after 4: sb(A).status"
     );
@@ -1063,11 +1090,14 @@ async fn c15_a_resync_drops_unstartable_builds_and_enqueues_startable_ones_again
 
     case.walk_evaluation_derivations_and_wait(
         e1,
-        vec![with_attr(with_output(drv(A, &[]), A_OUT), &attr_of(A))],
+        vec![with_attr(
+            with_output(drv(&derivation_a_drv_base_store_path, &[]), A_OUT),
+            &attr_of(A),
+        )],
     )
     .await;
     assert_eq!(
-        case.sb(A).await.status,
+        case.sb(&derivation_a_drv_base_store_path).await.status,
         BuildStatus::Queued,
         "after 5: sb(A).status"
     );
@@ -1089,7 +1119,7 @@ async fn c16_a_resync_skips_a_build_with_an_open_row_until_the_sweep_frees_it() 
             .open_assignment(),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
     let attempts_before = case.attempts(A).await;
 
@@ -1141,7 +1171,7 @@ async fn c16_a_resync_skips_a_build_with_an_open_row_until_the_sweep_frees_it() 
 #[tokio::test]
 async fn c17_a_server_drain_buffers_startable_moves_until_it_ends() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.drain_server(true).await;
@@ -1179,8 +1209,8 @@ async fn c17_a_server_drain_buffers_startable_moves_until_it_ends() {
 #[tokio::test]
 async fn c18_a_draining_worker_gets_no_offers_no_job_and_no_idle_slot() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let a = case.key(A).await;
 
     case.draining(W1).await;
@@ -1219,7 +1249,7 @@ async fn c19_a_worker_with_full_build_slots_is_refused_until_the_completion() {
             .add_missing_cached_build_input(B, D, D_OUT),
     )
     .await;
-    case.connect(W1, w_all().slots(1), &[]).await;
+    case.connect(W1, w_all().slots(1)).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -1278,7 +1308,7 @@ async fn c20_an_abort_pending_job_keeps_its_slot_until_the_worker_confirms() {
     let e1 = EvaluationId::now_v7();
     let case =
         SchedulerCase::start(shape().two(e1).add_missing_cached_build_input(B, D, D_OUT)).await;
-    case.connect(W1, w_all().slots(1), &[]).await;
+    case.connect(W1, w_all().slots(1)).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -1364,7 +1394,7 @@ async fn c21_a_project_restricted_worker_gets_only_its_project_until_the_set_wid
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT).one(e2, B, B_OUT)).await;
     let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
-    case.connect(W1, w_all().slots(2), &[p1]).await;
+    case.connect_for_projects(W1, w_all().slots(2), &[p1]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -1379,7 +1409,7 @@ async fn c21_a_project_restricted_worker_gets_only_its_project_until_the_set_wid
     assert!(case.pending(&b).await, "after 4: pending(build:B)");
     case.check("step 4").await;
 
-    case.authorize(W1, &[]).await;
+    case.authorize(W1, &[p1, p2]).await;
     case.check("step 5").await;
 
     let widened = case.request_job(W1, JobKind::Build).await;
@@ -1408,7 +1438,7 @@ async fn c22_a_build_needing_a_feature_or_system_waits_for_matching_capabilities
             .system(ARM),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -1451,7 +1481,7 @@ async fn c22_a_build_needing_a_feature_or_system_waits_for_matching_capabilities
 async fn c23_idle_worker_receives_one_jobs_available_for_requested_kinds_signal_per_queued_build() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().chain(e1)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     case.idle(W1, JobKind::Build).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
@@ -1509,7 +1539,7 @@ async fn c23_idle_worker_receives_one_jobs_available_for_requested_kinds_signal_
 #[tokio::test]
 async fn c24_a_capability_update_keeps_running_jobs_and_offers_new_jobs_as_a_delta() {
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7()).system(ARM)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -1576,7 +1606,7 @@ async fn c24_a_capability_update_keeps_running_jobs_and_offers_new_jobs_as_a_del
 async fn c25_a_passthrough_is_a_substitute_job_and_finishes_substituted_without_a_metric() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().passthrough(e1)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1639,7 +1669,7 @@ async fn c25_a_passthrough_is_a_substitute_job_and_finishes_substituted_without_
     case.check("step 3").await;
 
     case.commit_nar(NarCommit {
-        targets: case.project_caches(e1).await,
+        producer: case.make_worker_producer_for_evaluation_project(e1).await,
         ..output_nar(A, A_OUT)
     })
     .await;
@@ -1706,7 +1736,7 @@ async fn c26_a_builtin_fixed_output_derivation_is_a_download_job_for_any_archite
             .fixed_output(),
     )
     .await;
-    case.connect(W1, w_all().arch(&[ARM]), &[]).await;
+    case.connect(W1, w_all().arch(&[ARM])).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1751,10 +1781,10 @@ async fn c27_connecting_closes_only_rows_dispatched_before_the_scheduler_started
             .dispatched_at(from_now(60)),
     )
     .await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W2, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let rows_a = case.assignments(&a).await;
     let [row_a] = rows_a.as_slice() else {
         panic!("after 1: dj(build:A) has a single row, got {rows_a:?}");
@@ -1803,7 +1833,7 @@ async fn c27_connecting_closes_only_rows_dispatched_before_the_scheduler_started
 async fn c28_a_registration_on_a_second_instance_leaves_rows_of_the_first_claim_open() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1816,7 +1846,7 @@ async fn c28_a_registration_on_a_second_instance_leaves_rows_of_the_first_claim_
     second.check("step 1").await;
 
     let open_before = case.open_assignment(&a).await;
-    second.connect(W1, w_all(), &[]).await;
+    second.connect(W1, w_all()).await;
     assert_eq!(
         case.open_assignment(&a).await,
         open_before,
@@ -1883,7 +1913,7 @@ async fn c29_a_passthrough_fetches_only_the_outputs_it_did_not_leave_out() {
             .build_status(BuildStatus::Queued),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
 
     case.admit_startable_moves().await;
     let substitute = case
@@ -1921,7 +1951,7 @@ async fn c30_a_build_requires_only_the_outputs_its_derivation_names_of_an_input(
             .cached_path(A_DEV, "a-dev"),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
 
     case.admit_startable_moves().await;
     let build = case
@@ -2016,8 +2046,7 @@ async fn c31_a_restricted_worker_takes_only_substitutions_its_job_policy_allows(
     )
     .await;
     let (a, b) = (case.key(A).await, case.key(B).await);
-    case.connect(RESTRICTED_WORKER, w_network_build(), &[])
-        .await;
+    case.connect(RESTRICTED_WORKER, w_network_build()).await;
 
     case.admit_startable_moves().await;
     let taken = case.request_job(RESTRICTED_WORKER, JobKind::Build).await;
@@ -2032,7 +2061,7 @@ async fn c31_a_restricted_worker_takes_only_substitutions_its_job_policy_allows(
     assert!(case.pending(&a).await, "after 2: pending(build:A)");
     case.check("step 2").await;
 
-    case.connect(W2, w_network_build(), &[]).await;
+    case.connect(W2, w_network_build()).await;
     let taken = case.request_job(W2, JobKind::Build).await;
     assert_eq!(
         taken.map(|j| j.job_id().to_owned()),
@@ -2048,8 +2077,8 @@ async fn c32_a_reject_or_release_from_a_worker_that_does_not_run_the_job_keeps_t
  {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let a = case.key(A).await;
     case.admit_startable_moves().await;
     case.request_job(W1, JobKind::Build)

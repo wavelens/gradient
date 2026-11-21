@@ -23,6 +23,8 @@ pub struct Reported {
     pub task: Option<TaskId>,
     pub project: Option<ProjectId>,
     pub entry_point_name: Option<String>,
+    #[serde(default)]
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 impl Reported {

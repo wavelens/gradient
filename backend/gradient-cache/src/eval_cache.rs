@@ -7,10 +7,17 @@
 use chrono::{Duration, NaiveDateTime};
 use gradient_db::WorkerDb;
 use gradient_storage::NarStore;
+use gradient_storage::eval_cache_segment::{
+    CheckedEvalCacheFingerprint, parse_new_layout_cache_segment_key,
+};
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use std::collections::HashSet;
 use std::sync::Arc;
+
+use crate::nar::shard_repair::orphan_delete_cutoff_timestamp;
 use tracing::{error, info, warn};
 
 fn select_evictions(
@@ -65,7 +72,10 @@ impl Pass for EvalCacheSweep {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        self.evict().await.map_err(Into::into)
+        self.evict().await?;
+        self.delete_unreferenced_eval_cache_segments_older_than_minimum_age()
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -109,10 +119,11 @@ impl EvalCacheSweep {
         let mut freed: u64 = 0;
         let mut evicted = 0usize;
         for row in models {
-            if let Err(e) = self
-                .nar_storage
-                .delete_eval_cache_segments(row.cache, &row.fingerprint)
-                .await
+            if let Ok(fingerprint) = CheckedEvalCacheFingerprint::parse(&row.fingerprint)
+                && let Err(e) = self
+                    .nar_storage
+                    .delete_eval_cache_segments(row.cache, row.project, &fingerprint)
+                    .await
             {
                 warn!(key = %row.storage_path, error = ?e, "eval-cache sweep: segment delete failed");
             }
@@ -137,6 +148,204 @@ impl EvalCacheSweep {
         }
 
         Ok(())
+    }
+
+    /// Uploads write the segment before they record the row. Segments newer than the upload grace remain.
+    async fn delete_unreferenced_eval_cache_segments_older_than_minimum_age(
+        &self,
+    ) -> anyhow::Result<()> {
+        let cutoff = orphan_delete_cutoff_timestamp(&self.config);
+        let stored = self
+            .nar_storage
+            .list_eval_cache_segment_keys_with_last_modified_unix_seconds()
+            .await?;
+        let old_enough: Vec<(String, (CacheId, ProjectId, CheckedEvalCacheFingerprint))> = stored
+            .into_iter()
+            .filter(|(_, modified)| *modified < cutoff)
+            .filter_map(|(key, _)| {
+                parse_new_layout_cache_segment_key(&key).map(|store| (key, store))
+            })
+            .collect();
+        if old_enough.is_empty() {
+            return Ok(());
+        }
+
+        let rows: HashSet<(CacheId, ProjectId, String)> = EEvalCacheStore::find()
+            .select_only()
+            .column(CEvalCacheStore::Cache)
+            .column(CEvalCacheStore::Project)
+            .column(CEvalCacheStore::Fingerprint)
+            .into_tuple()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
+        let mut deleted = 0usize;
+        for (key, (cache, project, fingerprint)) in old_enough {
+            if rows.contains(&(cache, project, fingerprint.as_str().to_owned())) {
+                continue;
+            }
+            match self.nar_storage.delete_eval_cache(&key).await {
+                Ok(()) => deleted += 1,
+                Err(e) => warn!(%key, error = ?e, "eval-cache sweep: segment delete failed"),
+            }
+        }
+
+        if deleted > 0 {
+            info!(deleted, "eval-cache sweep: deleted segments without rows");
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod eval_cache_sweep_tests {
+    use super::*;
+    use crate::test_support::test_server_state;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::shape::shape;
+    use gradient_storage::eval_cache_segment::eval_cache_segment_key;
+
+    const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn fingerprint(text: &str) -> CheckedEvalCacheFingerprint {
+        CheckedEvalCacheFingerprint::parse(text).unwrap()
+    }
+
+    async fn create_test_database_with_cache_and_two_projects_sharing_fingerprint()
+    -> (TestDatabase, CacheId, ProjectId, ProjectId) {
+        let cache = CacheId::now_v7();
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .into_cache(cache)
+            .eval_cache(FINGERPRINT)
+            .evaluation(EvaluationId::now_v7())
+            .into_cache(cache)
+            .eval_cache(FINGERPRINT)
+            .into_database()
+            .await;
+        let rows = EEvalCacheStore::find().all(&db.connection()).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        (db, cache, rows[0].project, rows[1].project)
+    }
+
+    async fn put_segment(
+        nar_storage: &NarStore,
+        cache: CacheId,
+        project: ProjectId,
+        fingerprint: &CheckedEvalCacheFingerprint,
+    ) -> String {
+        let key = eval_cache_segment_key(cache, project, fingerprint, uuid::Uuid::now_v7());
+        nar_storage.put_eval_cache(&key, vec![0; 4]).await.unwrap();
+        key
+    }
+
+    fn sweep(db: &TestDatabase, nar_storage: NarStore, upload_grace_hours: u32) -> EvalCacheSweep {
+        let state = test_server_state(nar_storage, db.connection(), move |config| {
+            config.gc.nar_upload_grace_hours = upload_grace_hours;
+        });
+        EvalCacheSweep {
+            db: state.worker_db.clone(),
+            config: Arc::clone(&state.config),
+            nar_storage: state.nar_storage.clone(),
+            period: std::time::Duration::from_secs(60),
+        }
+    }
+
+    async fn rows_of(db: &TestDatabase, project: ProjectId) -> usize {
+        EEvalCacheStore::find()
+            .filter(CEvalCacheStore::Project.eq(project))
+            .all(&db.connection())
+            .await
+            .unwrap()
+            .len()
+    }
+
+    #[tokio::test]
+    async fn evicting_an_expired_row_leaves_the_row_and_segments_of_another_project_with_the_same_fingerprint()
+     {
+        let (db, cache, expired, fresh) =
+            create_test_database_with_cache_and_two_projects_sharing_fingerprint().await;
+        db.execute(&format!(
+            "UPDATE eval_cache_store SET updated_at = now() WHERE project = '{fresh}'"
+        ))
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let nar_storage = NarStore::local(tmp.path()).unwrap();
+        let fp = fingerprint(FINGERPRINT);
+        let evicted = put_segment(&nar_storage, cache, expired, &fp).await;
+        let kept = put_segment(&nar_storage, cache, fresh, &fp).await;
+
+        sweep(&db, nar_storage.clone(), 1).evict().await.unwrap();
+
+        assert_eq!(rows_of(&db, expired).await, 0);
+        assert_eq!(nar_storage.get_eval_cache(&evicted).await.unwrap(), None);
+        assert_eq!(rows_of(&db, fresh).await, 1);
+        assert!(nar_storage.get_eval_cache(&kept).await.unwrap().is_some());
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn segments_without_a_row_are_deleted_and_segments_with_a_row_stay() {
+        let (db, cache, mine, other) =
+            create_test_database_with_cache_and_two_projects_sharing_fingerprint().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let nar_storage = NarStore::local(tmp.path()).unwrap();
+        let (fp, fp_without_row) = (fingerprint(FINGERPRINT), fingerprint(&"f".repeat(64)));
+        let kept = [
+            put_segment(&nar_storage, cache, mine, &fp).await,
+            put_segment(&nar_storage, cache, other, &fp).await,
+        ];
+        let deleted = [
+            put_segment(&nar_storage, cache, mine, &fp_without_row).await,
+            put_segment(&nar_storage, CacheId::now_v7(), mine, &fp).await,
+            put_segment(&nar_storage, cache, ProjectId::now_v7(), &fp).await,
+        ];
+
+        sweep(&db, nar_storage.clone(), 0)
+            .delete_unreferenced_eval_cache_segments_older_than_minimum_age()
+            .await
+            .unwrap();
+
+        for key in &kept {
+            assert!(
+                nar_storage.get_eval_cache(key).await.unwrap().is_some(),
+                "{key}"
+            );
+        }
+        for key in &deleted {
+            assert_eq!(
+                nar_storage.get_eval_cache(key).await.unwrap(),
+                None,
+                "{key}"
+            );
+        }
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_segment_without_a_row_stays_within_the_upload_grace() {
+        let (db, cache, mine, _) =
+            create_test_database_with_cache_and_two_projects_sharing_fingerprint().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let nar_storage = NarStore::local(tmp.path()).unwrap();
+        let uploading = put_segment(&nar_storage, cache, mine, &fingerprint(&"f".repeat(64))).await;
+
+        sweep(&db, nar_storage.clone(), 1)
+            .delete_unreferenced_eval_cache_segments_older_than_minimum_age()
+            .await
+            .unwrap();
+
+        assert!(
+            nar_storage
+                .get_eval_cache(&uploading)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        db.finish().await;
     }
 }
 

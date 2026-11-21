@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
@@ -66,7 +67,14 @@ pub async fn get_exec_job_log(
     Path(job): Path<ExecJobId>,
     Query(query): Query<ExecJobLogQuery>,
 ) -> WebResult<Json<BaseResponse<ExecJobLog>>> {
-    let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let attempts = &ctx.node(query.node)?.attempts;
     let attempt = match query.attempt {
         Some(number) => Some(

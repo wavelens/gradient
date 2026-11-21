@@ -5,6 +5,7 @@
  */
 
 use crate::commands::completion;
+use crate::commands::mcp_command_run_decisions::McpToolCommandPermission::McpToolMayRunCommand;
 use crate::error::CliError;
 use crate::input::{client_from_config, confirm_delete};
 use crate::output::Output;
@@ -15,6 +16,7 @@ use connector::caches::NarListQuery;
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// List NARs in a cache
+    #[command(add = McpToolMayRunCommand)]
     List {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
@@ -37,12 +39,14 @@ pub enum Commands {
         interactive: bool,
     },
     /// Show a NAR's full metadata
+    #[command(add = McpToolMayRunCommand)]
     Show {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
         hash: String,
     },
     /// Delete a NAR from a cache
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
@@ -52,6 +56,7 @@ pub enum Commands {
         yes: bool,
     },
     /// Pin a NAR to the cache so garbage collection can retain it
+    #[command(add = McpToolMayRunCommand)]
     Pin {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
@@ -61,6 +66,7 @@ pub enum Commands {
         include_referenced_paths: bool,
     },
     /// Unpin a NAR from the cache
+    #[command(add = McpToolMayRunCommand)]
     Unpin {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
@@ -70,6 +76,7 @@ pub enum Commands {
         include_referenced_paths: bool,
     },
     /// Aggregate stats for a cache's NARs
+    #[command(add = McpToolMayRunCommand)]
     Stats {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,

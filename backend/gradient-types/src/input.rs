@@ -9,6 +9,10 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use thiserror::Error;
 
 use crate::consts::*;
+pub use crate::fetch_source_allowlist_and_request_validation::{
+    check_allowed_uri_prefix_has_remote_nix_scheme,
+    check_flake_input_override_reference_is_remote_flake_or_single_store_path,
+};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum InputError {
@@ -82,12 +86,45 @@ pub enum InputError {
     #[error("input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$")]
     FlakeInputNameInvalid,
     #[error(
-        "override-input '{input_name}': '{flake_ref}' is not a remote flake ref; use github:/gitlab:/git+ssh://flake:/path:/nix/store/... ."
+        "override-input '{input_name}': '{flake_ref}' is not a remote flake reference. Use one of these schemes: github, gitlab, sourcehut, git+https, git+http, git+ssh, git, hg+https, hg+ssh, https, http, flake:<id>, or path: followed by exactly one store path with no query."
     )]
     FlakeRefNotRemote {
         input_name: String,
         flake_ref: String,
     },
+    #[error("Invalid fetch request: {0}")]
+    InvalidFetchRequest(String),
+    #[error(
+        "The type `{0}` isn't valid for a fetch input. Use github, gitlab, sourcehut, git, hg, tarball or file."
+    )]
+    InputTypeNotAllowed(String),
+    #[error(
+        "Fetch URL `{0}` is not allowed. Use a remote http, https, ssh, or git URL with a host."
+    )]
+    NotAllowedUrl(String),
+    #[error(
+        "A fetch input can't have the `path` attribute, because it can only take a local file."
+    )]
+    InputPathNamesLocalFile,
+    #[error("Set the `{0}` attribute of the fetch input to a string, integer, or boolean value.")]
+    AttributeValueIsNotStringIntegerOrBoolean(String),
+    #[error("Host `{0}` in the fetch input isn't a hostname")]
+    InvalidHost(String),
+    #[error("`{0}` is not exactly one path in the Nix store")]
+    NotExactlyOneStorePath(String),
+    #[error("Rejected flake.lock input `{input}`: {reason}")]
+    FlakeLockNodeValidationFailed {
+        input: String,
+        reason: Box<InputError>,
+    },
+    #[error("Relative path input `{0}` points outside its source tree")]
+    RelativePathLeavesSourceTree(String),
+    #[error("Invalid flake.lock: {0}")]
+    FlakeLockNotValidJsonOrMissingNodes(String),
+    #[error(
+        "Start the allowed URL prefix `{0}` with a remote Nix scheme such as github:, git+https: or https:."
+    )]
+    AllowedUriPrefixNotRemoteNixScheme(String),
     #[error("Username cannot be empty")]
     UsernameEmpty,
     #[error("Username must be at least 3 characters long")]
@@ -102,6 +139,8 @@ pub enum InputError {
     UsernameConsecutiveSpecialChars,
     #[error("This username is reserved and cannot be used")]
     UsernameReserved,
+    #[error("Email address is invalid")]
+    EmailAddressNotValid,
     #[error("Display name cannot be empty")]
     DisplayNameEmpty,
     #[error("Display name cannot exceed 100 characters")]
@@ -175,25 +214,6 @@ pub fn vec_to_hex(v: &[u8]) -> String {
     v.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, InputError> {
-    if commit_hash.len() != 40 {
-        return Err(InputError::InvalidCommitHashLength);
-    }
-
-    if url.contains("file://") || url.starts_with("file") {
-        return Err(InputError::LocalFileUrlNotAllowed);
-    }
-
-    let url =
-        if url.starts_with("ssh://") || url.starts_with("http://") || url.starts_with("https://") {
-            format!("git+{}", url)
-        } else {
-            url.to_string()
-        };
-
-    Ok(format!("{}?rev={}", url, commit_hash))
-}
-
 pub fn check_repository_url_is_ssh(url: &str) -> bool {
     if url.starts_with("git+ssh://") || url.starts_with("ssh://") {
         return true;
@@ -236,15 +256,6 @@ pub fn check_index_name(s: &str) -> Result<(), InputError> {
 }
 
 pub const RESERVED_TASK_NAMES: &[&str] = &["build-request"];
-
-pub fn check_nix_restricted_evaluation_url_prefix(prefix: &str) -> Result<String, InputError> {
-    if prefix.is_empty() || prefix.contains(char::is_whitespace) {
-        return Err(InputError::ExtraAllowedUrlPrefixEmptyOrWhitespace(
-            prefix.to_owned(),
-        ));
-    }
-    Ok(prefix.to_owned())
-}
 
 pub fn check_task_name(s: &str) -> Result<(), InputError> {
     check_index_name(s)?;
@@ -301,6 +312,11 @@ pub fn load_secret_bytes(f: &str) -> anyhow::Result<super::secret::SecretBytes> 
 }
 
 pub fn validate_username(username: &str) -> Result<(), InputError> {
+    validate_username_syntax(username)?;
+    reject_reserved_username(username)
+}
+
+pub fn validate_username_syntax(username: &str) -> Result<(), InputError> {
     if username.is_empty() {
         return Err(InputError::UsernameEmpty);
     }
@@ -336,6 +352,10 @@ pub fn validate_username(username: &str) -> Result<(), InputError> {
         return Err(InputError::UsernameConsecutiveSpecialChars);
     }
 
+    Ok(())
+}
+
+pub fn reject_reserved_username(username: &str) -> Result<(), InputError> {
     let reserved = [
         "admin",
         "root",
@@ -358,6 +378,24 @@ pub fn validate_username(username: &str) -> Result<(), InputError> {
     }
 
     Ok(())
+}
+
+pub fn validate_email(email: &str) -> Result<(), InputError> {
+    if email_address::EmailAddress::is_valid(email) {
+        Ok(())
+    } else {
+        Err(InputError::EmailAddressNotValid)
+    }
+}
+
+pub fn choose_account_display_name_from_identity_provider(
+    provided: Option<&str>,
+    username: &str,
+) -> String {
+    provided
+        .filter(|name| validate_display_name(name).is_ok())
+        .unwrap_or(username)
+        .to_owned()
 }
 
 pub fn validate_display_name(display_name: &str) -> Result<(), InputError> {
@@ -441,20 +479,6 @@ pub fn validate_password(password: &str) -> Result<(), InputError> {
     Ok(())
 }
 
-const REMOTE_FLAKE_REF_PREFIXES: &[&str] = &[
-    "github:",
-    "gitlab:",
-    "sourcehut:",
-    "git+ssh://",
-    "git+https://",
-    "git+http://",
-    "git://",
-    "https://",
-    "http://",
-    "flake:",
-    "path:/nix/store/",
-];
-
 pub fn check_flake_input_override(input_name: &str, flake_ref: &str) -> Result<(), InputError> {
     let mut chars = input_name.chars();
     let name_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
@@ -464,25 +488,7 @@ pub fn check_flake_input_override(input_name: &str, flake_ref: &str) -> Result<(
         return Err(InputError::FlakeInputNameInvalid);
     }
 
-    validate_flake_input_override_flake_ref(input_name, flake_ref)
-}
-
-pub fn validate_flake_input_override_flake_ref(
-    input_name: &str,
-    flake_ref: &str,
-) -> Result<(), InputError> {
-    let is_remote = REMOTE_FLAKE_REF_PREFIXES
-        .iter()
-        .any(|prefix| flake_ref.starts_with(prefix));
-
-    if !is_remote || flake_ref.contains(char::is_whitespace) {
-        return Err(InputError::FlakeRefNotRemote {
-            input_name: input_name.to_string(),
-            flake_ref: flake_ref.to_string(),
-        });
-    }
-
-    Ok(())
+    check_flake_input_override_reference_is_remote_flake_or_single_store_path(input_name, flake_ref)
 }
 
 pub fn check_manifest_path(path: &str) -> Result<(), InputError> {
@@ -527,19 +533,12 @@ mod tests {
 
     #[test]
     fn an_allowed_url_prefix_must_be_one_non_empty_word() {
-        for prefix in [
-            "github:",
-            "https://example.com/archive",
-            "git+ssh://git@h/x.git",
-        ] {
-            assert!(
-                check_nix_restricted_evaluation_url_prefix(prefix).is_ok(),
-                "{prefix}"
-            );
-        }
         for prefix in ["", "https://a https://b", " https://a", "https://a\n"] {
-            assert!(
-                check_nix_restricted_evaluation_url_prefix(prefix).is_err(),
+            assert_eq!(
+                check_allowed_uri_prefix_has_remote_nix_scheme(prefix),
+                Err(InputError::ExtraAllowedUrlPrefixEmptyOrWhitespace(
+                    prefix.to_owned()
+                )),
                 "{prefix:?}"
             );
         }
@@ -572,6 +571,7 @@ mod tests {
             "~/x",
             "name",
             "path:/home/u/x",
+            "path:/nix/store/../../run/x",
             "not a flake url !!",
             "github:a/b c",
         ] {

@@ -6,7 +6,8 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_test_support::cache_fixture::{
-    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_with_nar, public_cache_with_foreign_nar,
+    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_with_nar,
+    public_cache_serving_store_path_without_nar_file, public_cache_with_foreign_nar,
     public_cache_with_nar,
 };
 use gradient_web::create_router;
@@ -73,13 +74,26 @@ async fn serve_symlink_returns_404() {
 
 #[tokio::test]
 async fn serve_unknown_hash_returns_404() {
-    let state = public_cache_with_nar().await;
+    let state = public_cache_with_foreign_nar().await;
     let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
     let unknown = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let resp = server
         .get(&format!(
             "/cache/{FIXTURE_CACHE_NAME}/serve/{unknown}/bin/hello"
+        ))
+        .await;
+    resp.assert_status(StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn served_store_path_with_missing_nar_file_returns_404() {
+    let state = public_cache_serving_store_path_without_nar_file().await;
+    let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+
+    let resp = server
+        .get(&format!(
+            "/cache/{FIXTURE_CACHE_NAME}/serve/{FIXTURE_PATH_HASH}/bin/hello"
         ))
         .await;
     resp.assert_status(StatusCode::NOT_FOUND);

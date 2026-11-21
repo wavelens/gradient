@@ -33,6 +33,15 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
+pub fn http_client_allow_loopback() -> gradient_util::http::HttpClientForUserSuppliedUrls {
+    let loopback = ["127.0.0.0/8".to_owned(), "::1/128".to_owned()];
+    gradient_util::http::HttpClientForUserSuppliedUrls::new(
+        gradient_util::http_validation::UserUrlDestinationAllowlist::parse(&loopback)
+            .expect("loopback allowlist"),
+    )
+    .expect("http client")
+}
+
 pub fn make_ctx() -> crate::CiContext {
     make_ctx_with(mock_db())
 }
@@ -42,6 +51,13 @@ pub fn make_ctx_with(worker: sea_orm::MockDatabase) -> crate::CiContext {
 }
 
 pub fn make_ctx_with_database_connection(worker: sea_orm::DatabaseConnection) -> crate::CiContext {
+    make_ci_context_from_worker_and_web_databases(worker, empty_db())
+}
+
+pub fn make_ci_context_from_worker_and_web_databases(
+    worker: sea_orm::DatabaseConnection,
+    web: sea_orm::DatabaseConnection,
+) -> crate::CiContext {
     use crate::CiContext;
     use futures::future::BoxFuture;
     use gradient_db::{DbContext, WebDb, WorkerDb};
@@ -168,7 +184,7 @@ pub fn make_ctx_with_database_connection(worker: sea_orm::DatabaseConnection) ->
     let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
     let db = DbContext {
         worker_db: WorkerDb::new(worker),
-        web_db: WebDb::new(empty_db()),
+        web_db: WebDb::new(web),
         config,
         storage: StorageCtx {
             nar_storage,
@@ -179,10 +195,10 @@ pub fn make_ctx_with_database_connection(worker: sea_orm::DatabaseConnection) ->
         wake: Default::default(),
         memory: Default::default(),
         store_path_mapping: std::sync::Arc::new(gradient_entity::IdentityMapping),
+        user_supplied_url_http_client: http_client_allow_loopback(),
     };
     CiContext {
         db,
-        http: gradient_util::http::build_client().expect("http client"),
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
     }

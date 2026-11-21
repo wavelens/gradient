@@ -6,6 +6,7 @@
 
 use super::DeletedResponse;
 use super::refusal::TaskRefusal;
+use super::repository::check_git_host_connection_fits_task;
 use crate::api_spec::TaskPath;
 use crate::audit::Audit;
 use crate::endpoints::git_host_connections::GitHostConnectionRefusal;
@@ -23,13 +24,15 @@ use chrono::Utc;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
-use gradient_db::git_host_connections::list_git_host_connections_available_to_project;
 use gradient_types::actions::{ActionConfig, ActionType, is_matrix_room_id};
 use gradient_types::events::audit::Action;
 use gradient_types::events::{EventOwner, names};
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
-use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
+use gradient_util::http_base_url::urls_differ_in_scheme_host_or_port;
+use gradient_util::http_validation::{
+    DestinationUrlRejectedError, parse_and_check_allowed_outbound_url,
+};
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -156,7 +159,7 @@ async fn validate_start_target(
 
 async fn validate_open_pr_git_host_connection(
     db: &WebDb,
-    project: &MProject,
+    task: &MTask,
     cfg: &ActionConfig,
 ) -> WebResult<()> {
     let ActionConfig::OpenPr {
@@ -166,16 +169,11 @@ async fn validate_open_pr_git_host_connection(
     else {
         return Ok(());
     };
-    let connection = list_git_host_connections_available_to_project(db, project)
-        .await?
-        .into_iter()
-        .find(|c| c.id == *git_host_connection_id)
-        .ok_or(GitHostConnectionRefusal::NotAvailableToProject {
-            id: *git_host_connection_id,
-        })?;
+    let allowed = check_git_host_connection_fits_task(db, task, *git_host_connection_id).await?;
+    let connection = allowed.connection();
     if !connection.reports_status {
         return Err(GitHostConnectionRefusal::ConnectionCannotReportStatus {
-            name: connection.name,
+            name: connection.name.clone(),
         }
         .into());
     }
@@ -194,18 +192,21 @@ fn validate_task_action_events_for_type(
     }
 }
 
-fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
-    let url_error = |e: WebhookUrlError| TaskRefusal::InvalidWebhookUrl(e.to_string());
+fn validate_destination(
+    cfg: &ActionConfig,
+    allowlist: &gradient_util::http_validation::UserUrlDestinationAllowlist,
+) -> WebResult<()> {
+    let url_error = |e: DestinationUrlRejectedError| TaskRefusal::InvalidWebhookUrl(e.to_string());
     match cfg {
         ActionConfig::SendWebRequest { url, .. } => {
-            validate_webhook_url(url).map_err(url_error)?;
+            parse_and_check_allowed_outbound_url(url, allowlist).map_err(url_error)?;
         }
         ActionConfig::SendMatrixMessage {
             homeserver,
             room_id,
             access_token,
         } => {
-            validate_webhook_url(homeserver).map_err(url_error)?;
+            parse_and_check_allowed_outbound_url(homeserver, allowlist).map_err(url_error)?;
             if access_token.as_deref().is_some_and(|t| t.trim().is_empty()) {
                 return Err(TaskRefusal::EmptyAccessToken.into());
             }
@@ -217,7 +218,7 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
         ActionConfig::SendSlackMessage {
             webhook_url: Some(url),
         } => {
-            validate_webhook_url(url).map_err(url_error)?;
+            parse_and_check_allowed_outbound_url(url, allowlist).map_err(url_error)?;
         }
         _ => {}
     }
@@ -296,7 +297,10 @@ pub async fn create_action(
     }
 
     validate_task_action_events_for_type(body.config.action_type(), &body.events)?;
-    validate_destination(&body.config)?;
+    validate_destination(
+        &body.config,
+        state.user_supplied_url_http_client.allowlist(),
+    )?;
     validate_mail_teams(&state.web_db, project.id, &body.config).await?;
     validate_start_target(&state.web_db, project.id, &body.config).await?;
     if matches!(
@@ -320,7 +324,7 @@ pub async fn create_action(
         return Err(TaskRefusal::NoMailRecipients.into());
     }
 
-    validate_open_pr_git_host_connection(&state.web_db, &project, &body.config).await?;
+    validate_open_pr_git_host_connection(&state.web_db, &proj, &body.config).await?;
 
     let existing = gradient_db::actions::by_name(&state.web_db, proj.id, &body.name).await?;
     if existing.is_some() {
@@ -433,10 +437,10 @@ pub async fn update_action(
             return Err(TaskRefusal::ActionTypeChange.into());
         }
 
-        validate_destination(new_cfg)?;
+        validate_destination(new_cfg, state.user_supplied_url_http_client.allowlist())?;
         validate_mail_teams(&state.web_db, project.id, new_cfg).await?;
         validate_start_target(&state.web_db, project.id, new_cfg).await?;
-        validate_open_pr_git_host_connection(&state.web_db, &project, new_cfg).await?;
+        validate_open_pr_git_host_connection(&state.web_db, &proj, new_cfg).await?;
         match new_cfg {
             ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
                 return Err(TaskRefusal::NoMailRecipients.into());
@@ -461,6 +465,18 @@ pub async fn update_action(
         {
             *slot = Some(encrypt_secret(&state.config, &plain)?);
         } else {
+            if let (
+                ActionConfig::SendMatrixMessage {
+                    homeserver: stored_homeserver,
+                    access_token: Some(_),
+                    ..
+                },
+                ActionConfig::SendMatrixMessage { homeserver, .. },
+            ) = (&stored, &stored_cfg)
+                && urls_differ_in_scheme_host_or_port(stored_homeserver, homeserver)
+            {
+                return Err(TaskRefusal::StoredAccessTokenWouldBeSentToNewMatrixHomeserver.into());
+            }
             stored_cfg.keep_secret_from(stored);
         }
 
@@ -560,7 +576,7 @@ pub async fn test_action(
 
     // Git hosts reject pull requests for the placeholder owner, repository, and commit that synthetic tests use. The open_pr action can only check connectivity.
     if action_type == ActionType::OpenPr {
-        gradient_ci::actions::test_git_host_action(&ci, &action, &proj.repository)
+        gradient_ci::actions::test_git_host_action(&ci, &action, &proj)
             .await
             .map_err(test_failure)?;
 

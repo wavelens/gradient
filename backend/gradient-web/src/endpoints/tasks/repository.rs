@@ -15,8 +15,7 @@ use crate::audit::Audit;
 use crate::authorization::ApiKeyContext;
 use crate::endpoints::git_host_connections::{
     self as connections, GitHostConnectionRefusal, GitHostConnectionSummary,
-    IncomingWebhookDeliveryResponse, check_task_repository_url_can_use_git_host_connection,
-    repository_fits_connection_with_known_host,
+    IncomingWebhookDeliveryResponse, repository_fits_connection_with_known_host,
 };
 use crate::endpoints::git_host_hooks::repo_identity;
 use crate::error::{WebError, WebResult};
@@ -32,6 +31,11 @@ use gradient_ci::task_commit_status_posting::{
 };
 use gradient_core::ServerState;
 use gradient_db::DbContext;
+use gradient_db::git_host_connection_repository_grants::{
+    GitHostConnectionRepositoryAccessProof, GitHostConnectionRepositoryGrantError,
+    check_git_host_connection_task_repository_access_with_grants,
+    load_task_project_and_grants_and_check_given_git_host_connection_for_task_repository_access,
+};
 use gradient_db::git_host_connections::list_git_host_connections_available_to_project;
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
 use gradient_git_host::{GitHostRegistry, WebhookEventKind};
@@ -179,6 +183,7 @@ async fn repository_response(
             repository: Some(&task.repository),
         },
         project,
+        Some(task),
         can_manage_integrations,
     )
     .await?;
@@ -299,22 +304,20 @@ pub async fn get_task_repository(
 
 pub(crate) async fn check_git_host_connection_fits_task(
     db: &impl sea_orm::ConnectionTrait,
-    project: &MProject,
-    repository: &str,
+    task: &MTask,
     connection: GitHostConnectionId,
-) -> WebResult<MGitHostConnection> {
-    let row = list_git_host_connections_available_to_project(db, project)
-        .await?
-        .into_iter()
-        .find(|c| c.id == connection)
-        .ok_or(GitHostConnectionRefusal::NotAvailableToProject { id: connection })?;
-    check_task_repository_url_can_use_git_host_connection(repository, &row).map_err(|reason| {
-        GitHostConnectionRefusal::RepositoryDoesNotMatch {
-            name: row.name.clone(),
-            reason,
+) -> WebResult<GitHostConnectionRepositoryAccessProof> {
+    load_task_project_and_grants_and_check_given_git_host_connection_for_task_repository_access(
+        db, task, connection,
+    )
+    .await?
+    .map_err(|refusal| {
+        GitHostConnectionRefusal::GitHostConnectionCannotActOnTaskRepository {
+            id: connection,
+            refusal,
         }
-    })?;
-    Ok(row)
+        .into()
+    })
 }
 
 fn check_report_status_is_possible(
@@ -341,15 +344,45 @@ pub(crate) async fn choose_git_host_connection_for_new_task(
     report_status: Option<bool>,
 ) -> WebResult<(Option<GitHostConnectionId>, bool)> {
     let connection = match requested {
-        Some(id) => Some(check_git_host_connection_fits_task(db, project, repository, id).await?),
+        Some(id) => {
+            let refused = |refusal: GitHostConnectionRepositoryGrantError| -> WebError {
+                GitHostConnectionRefusal::GitHostConnectionCannotActOnTaskRepository { id, refusal }
+                    .into()
+            };
+            let row = gradient_db::lookup::by_id::<EGitHostConnection, _>(db, id)
+                .await?
+                .ok_or_else(|| refused(GitHostConnectionRepositoryGrantError::NoConnection))?;
+            let grants =
+                gradient_db::git_host_connection_repository_grants::of_project(db, project.id)
+                    .await?;
+            check_git_host_connection_task_repository_access_with_grants(
+                &row, project, repository, &grants,
+            )
+            .map_err(refused)?;
+            Some(row)
+        }
         None => {
             let mut fitting = list_git_host_connections_available_to_project(db, project)
                 .await?
                 .into_iter()
-                .filter(|row| repository_fits_connection_with_known_host(repository, row));
-            match (fitting.next(), fitting.next()) {
-                (Some(only), None) => Some(only),
-                _ => None,
+                .filter(|row| repository_fits_connection_with_known_host(repository, row))
+                .peekable();
+            if fitting.peek().is_none() {
+                None
+            } else {
+                let grants =
+                    gradient_db::git_host_connection_repository_grants::of_project(db, project.id)
+                        .await?;
+                let mut fitting = fitting.filter(|row| {
+                    check_git_host_connection_task_repository_access_with_grants(
+                        row, project, repository, &grants,
+                    )
+                    .is_ok()
+                });
+                match (fitting.next(), fitting.next()) {
+                    (Some(only), None) => Some(only),
+                    _ => None,
+                }
             }
         }
     };
@@ -384,16 +417,32 @@ pub async fn save_task_repository_connection_and_commit_status(
 ) -> WebResult<Json<BaseResponse<TaskRepositoryResponse>>> {
     let connection = match body.git_host_connection {
         Some(Some(id)) => Some(
-            check_git_host_connection_fits_task(&db.web_db, &project, &task.repository, id).await?,
+            check_git_host_connection_fits_task(&db.web_db, &task, id)
+                .await?
+                .connection()
+                .clone(),
         ),
         Some(None) => None,
-        None => match task.git_host_connection {
-            Some(current) => list_git_host_connections_available_to_project(&db.web_db, &project)
-                .await?
-                .into_iter()
-                .find(|row| row.id == current),
-            None => None,
-        },
+        None => {
+            let task_git_host_connection_available_to_project = match task.git_host_connection {
+                Some(current) => {
+                    list_git_host_connections_available_to_project(&db.web_db, &project)
+                        .await?
+                        .into_iter()
+                        .find(|row| row.id == current)
+                }
+                None => None,
+            };
+            match task_git_host_connection_available_to_project {
+                Some(row) if body.report_status == Some(true) => Some(
+                    check_git_host_connection_fits_task(&db.web_db, &task, row.id)
+                        .await?
+                        .connection()
+                        .clone(),
+                ),
+                row => row,
+            }
+        }
     };
     let report_status = body.report_status.unwrap_or_else(|| {
         task.report_status && connection.as_ref().is_some_and(|row| row.reports_status)

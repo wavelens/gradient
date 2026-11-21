@@ -79,7 +79,7 @@ fn refuse_duplicate_addresses(peers: &[PeerAddress]) -> Result<(), String> {
         .find(|peer| !seen.insert(peer.address.as_str()))
     {
         Some(peer) => Err(format!(
-            "two nodes have the guest address {}; give every exec worker its own exec.subnet",
+            "Two nodes have guest address {}. Assign a unique exec.subnet.v4 to each exec worker.",
             peer.address
         )),
         None => Ok(()),
@@ -300,7 +300,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            err.contains("10.233.0.2") && err.contains("exec.subnet"),
+            err.contains("10.233.0.2") && err.contains("exec.subnet.v4"),
             "{err}"
         );
     }

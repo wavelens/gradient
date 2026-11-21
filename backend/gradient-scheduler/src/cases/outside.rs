@@ -8,6 +8,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use gradient_entity::cache;
+use gradient_test_support::git_daemon_and_fork_repository_fixtures::{
+    GitDaemonProcessGuard, start_git_daemon_on_free_loopback_port_serving_base_directory,
+};
 use tempfile::{NamedTempFile, TempDir};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -20,24 +23,33 @@ const SILENT_FOR: Duration = Duration::from_secs(3);
 const NAR_HASH: &str = "sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf";
 
 pub(crate) struct GitRepo {
-    dir: TempDir,
+    _daemon: GitDaemonProcessGuard,
+    base_url: String,
     repo: git2::Repository,
     head: Mutex<Option<git2::Oid>>,
+    _dir: TempDir,
 }
 
 impl GitRepo {
     pub fn new() -> Self {
         let dir = tempfile::tempdir().expect("a temp dir for the repository");
-        let repo = git2::Repository::init(dir.path()).expect("a repository");
+        let repo = git2::Repository::init(dir.path().join("repo")).expect("a repository");
+        repo.config()
+            .and_then(|mut config| config.set_bool("uploadpack.allowReachableSHA1InWant", true))
+            .expect("the repository serves reachable commits by hash");
+        let (daemon, base_url) =
+            start_git_daemon_on_free_loopback_port_serving_base_directory(dir.path());
         Self {
-            dir,
+            _daemon: daemon,
+            base_url,
             repo,
             head: Mutex::new(None),
+            _dir: dir,
         }
     }
 
     pub fn url(&self) -> String {
-        format!("file://{}", self.dir.path().display())
+        format!("{}/repo", self.base_url)
     }
 
     pub fn commit(&self, message: &str) -> Vec<u8> {

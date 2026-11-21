@@ -26,18 +26,19 @@ use sea_orm::{
 };
 use tracing::{debug, error, warn};
 
-use crate::messages::{RecordBatch, RecordReport, UpstreamHit};
+use crate::messages::{EvaluationBatchDerivation, RecordBatch, RecordReport, UpstreamHit};
 
 const BATCH_SIZE: usize = 1000;
 
 gradient_db::sql! {
     WALKED_UPSERT = r#"
 INSERT INTO derivation
-    (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, unwalked_inputs, created_at)
+    (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, unwalked_inputs, timeout_secs, max_silent_secs, created_at)
 SELECT d.id, d.hash, d.name, d.architecture, NULLIF(d.pname, ''), d.prefer_local_build,
-       d.is_fixed_output, d.allow_substitutes, true, d.unwalked_inputs, $10
-FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bool[], $7::bool[], $8::bool[], $9::int[])
-     AS d(id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, unwalked_inputs)
+       d.is_fixed_output, d.allow_substitutes, true, d.unwalked_inputs,
+       NULLIF(d.timeout_secs, 0), NULLIF(d.max_silent_secs, 0), $10
+FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bool[], $7::bool[], $8::bool[], $9::int[], $11::bigint[], $12::bigint[])
+     AS d(id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, unwalked_inputs, timeout_secs, max_silent_secs)
 ON CONFLICT (hash, name) DO UPDATE SET
     architecture = EXCLUDED.architecture,
     pname = EXCLUDED.pname,
@@ -45,14 +46,16 @@ ON CONFLICT (hash, name) DO UPDATE SET
     is_fixed_output = EXCLUDED.is_fixed_output,
     allow_substitutes = EXCLUDED.allow_substitutes,
     walked = true,
-    unwalked_inputs = EXCLUDED.unwalked_inputs
+    unwalked_inputs = EXCLUDED.unwalked_inputs,
+    timeout_secs = EXCLUDED.timeout_secs,
+    max_silent_secs = EXCLUDED.max_silent_secs
 WHERE NOT derivation.walked
 RETURNING hash
 "#,
         params = [
             NewUuids(64), DerivationHashes(64), Texts("hello", 64), Texts("x86_64-linux", 64),
             Texts("hello-1.0", 64), Bools(false, 64), Bools(false, 64), Bools(true, 64), Ints(0, 64),
-            Now,
+            Now, Ints(3600, 64), Ints(600, 64),
         ];
 
     STUB_INSERT = r#"
@@ -93,16 +96,6 @@ ON CONFLICT (derivation, feature) DO NOTHING
 "#,
         params = [NewUuids(64), DerivationIds(64), Texts("kvm", 64)];
 
-    SHARED_BUILD_LIMITS_UPDATE = r#"
-UPDATE derivation_build AS db
-SET timeout_secs = NULLIF(l.timeout_secs, 0), max_silent_secs = NULLIF(l.max_silent_secs, 0)
-FROM unnest($1::uuid[], $2::bigint[], $3::bigint[]) AS l(derivation, timeout_secs, max_silent_secs)
-WHERE db.derivation = l.derivation
-  AND (db.timeout_secs, db.max_silent_secs)
-      IS DISTINCT FROM (NULLIF(l.timeout_secs, 0), NULLIF(l.max_silent_secs, 0))
-"#,
-        params = [DerivationIds(64), Ints(3600, 64), Ints(600, 64)];
-
     MARK_PROBED = r#"
 UPDATE derivation_build db
 SET probed = true, probed_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC')
@@ -123,6 +116,20 @@ RETURNING db.derivation
 
     MARK_IFD = "UPDATE derivation SET ifd = true WHERE hash = ANY($1::text[]) AND NOT ifd",
         params = [DerivationHashes(64)];
+
+    FILL_STORED_HASH_MODULO_AND_FIND_DIFFERING_HASHES = r#"
+WITH derivation_hash_and_serialized_hash_input_rows AS (
+    SELECT * FROM unnest($1::text[], $2::text[]) AS c(hash, value)
+), updated_derivation_rows_with_verified_hash_modulo AS (
+    UPDATE derivation d SET serialized_derivation_hash_for_dependent_output_paths = c.value
+    FROM derivation_hash_and_serialized_hash_input_rows c
+    WHERE d.hash = c.hash AND d.serialized_derivation_hash_for_dependent_output_paths IS NULL
+    RETURNING d.hash
+)
+SELECT d.hash FROM derivation d JOIN derivation_hash_and_serialized_hash_input_rows c ON c.hash = d.hash
+WHERE d.serialized_derivation_hash_for_dependent_output_paths <> c.value
+"#,
+        params = [DerivationHashes(64), Texts("drv:sha256:00", 64)];
 }
 
 gradient_db::sql_fn! {
@@ -131,6 +138,52 @@ gradient_db::sql_fn! {
 
     FORGET_EARLIER_MISSES = forget_earlier_misses_sql,
         params = [DerivationIds(64), EvaluationId];
+
+    SELECT_DERIVATION_OUTPUT_IDS_WITH_TRUSTED_CONTENT_VARIANT_FOR_ALL_LIVE_PROJECTS_ON_SHARED_BUILD =
+        select_outputs_trusted_by_projects_with_live_jobs_sql,
+        params = [DerivationIds(64)],
+        tier = Hot,
+        budget = gradient_db::sql::Budget::hot().buffers(4_000)
+            .because(gradient_db::store_path_content_variant_reader_choice::RAISED_QUERY_BUDGET_REASON_FOR_TRUSTED_OUTPUT_CHECK_AND_STORED_COPY_READER_BECAUSE_EVERY_LIVE_BUILD_JOB_TRIGGERS_TRUST_CHECK);
+}
+
+fn select_outputs_trusted_by_projects_with_live_jobs_sql() -> String {
+    format!(
+        "SELECT output.id FROM derivation_output output \
+         JOIN derivation_build reader_build ON reader_build.derivation = output.derivation \
+         WHERE output.derivation = ANY($1::uuid[]) AND output.hash IS NOT NULL \
+           AND EXISTS ({trusted})",
+        trusted = gradient_db::store_path_content_variant_reader_choice::select_best_stored_copy_for_own_build_outputs_trusted_by_all_projects_with_live_jobs_excluding_direct_use(
+            "output.hash",
+            "reader_build",
+        ),
+    )
+}
+
+async fn cached_output_ids_trusted_by_live_project_jobs<C: ConnectionTrait>(
+    db: &C,
+    outputs: &[MDerivationOutput],
+) -> Result<HashSet<DerivationOutputId>> {
+    let mut derivations: Vec<uuid::Uuid> =
+        outputs.iter().map(|o| o.derivation.into_inner()).collect();
+    derivations.sort_unstable();
+    derivations.dedup();
+    let mut trusted = HashSet::new();
+    for chunk in derivations.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let rows = db
+            .query_all_raw(
+                SELECT_DERIVATION_OUTPUT_IDS_WITH_TRUSTED_CONTENT_VARIANT_FOR_ALL_LIVE_PROJECTS_ON_SHARED_BUILD
+                    .bind([chunk.to_vec().into()]),
+            )
+            .await
+            .context("Find the outputs held by the cache in the variants that the shared build can trust.")?;
+        trusted.extend(
+            rows.iter()
+                .filter_map(|r| r.try_get::<uuid::Uuid>("", "id").ok())
+                .map(DerivationOutputId::new),
+        );
+    }
+    Ok(trusted)
 }
 
 fn forget_earlier_misses_sql() -> String {
@@ -238,6 +291,8 @@ impl BatchWriter<'_> {
         let mut fixed_output: Vec<bool> = Vec::new();
         let mut allow_substitutes: Vec<bool> = Vec::new();
         let mut input_counts: Vec<i32> = Vec::new();
+        let mut timeouts: Vec<i64> = Vec::new();
+        let mut silents: Vec<i64> = Vec::new();
         for d in derivations {
             let (hash, name) = drv_hash_name(&d.drv_path).ok_or_else(|| {
                 anyhow!(
@@ -261,6 +316,14 @@ impl BatchWriter<'_> {
                 i32::try_from(d.dependencies.iter().collect::<HashSet<_>>().len())
                     .unwrap_or(i32::MAX),
             );
+            timeouts.push(
+                d.timeout_secs
+                    .map_or(0, |v| i64::try_from(v).unwrap_or(i64::MAX)),
+            );
+            silents.push(
+                d.max_silent_secs
+                    .map_or(0, |v| i64::try_from(v).unwrap_or(i64::MAX)),
+            );
         }
 
         if hashes.is_empty() {
@@ -280,6 +343,8 @@ impl BatchWriter<'_> {
                 allow_substitutes.into(),
                 input_counts.into(),
                 Value::ChronoDateTime(Some(gradient_types::now())),
+                timeouts.into(),
+                silents.into(),
             ]))
             .await
             .context("upsert walked derivations")?;
@@ -288,6 +353,47 @@ impl BatchWriter<'_> {
             .into_iter()
             .filter_map(|r| r.try_get::<String>("", "hash").ok())
             .collect())
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    async fn store_serialized_derivation_hash_for_dependent_output_paths_rejecting_conflicts(
+        &self,
+        derivations: &[EvaluationBatchDerivation],
+    ) -> Result<()> {
+        let (hashes, values): (Vec<String>, Vec<String>) = derivations
+            .iter()
+            .filter_map(|d| {
+                let value = d.closure_checked_hash_modulo.as_ref()?;
+                let (hash, _) = drv_hash_name(
+                    d.store_path_verified_derivation_record
+                        .derivation_file_store_path(),
+                )?;
+                Some((hash, value.as_str().to_owned()))
+            })
+            .unzip();
+        if hashes.is_empty() {
+            return Ok(());
+        }
+
+        let derivation_hashes_with_mismatched_stored_hash_modulo: Vec<String> = self
+            .db()
+            .query_all_raw(
+                FILL_STORED_HASH_MODULO_AND_FIND_DIFFERING_HASHES
+                    .bind([hashes.into(), values.into()]),
+            )
+            .await
+            .context("fill the stored hash modulo of verified derivations")?
+            .into_iter()
+            .filter_map(|r| r.try_get::<String>("", "hash").ok())
+            .collect();
+        if !derivation_hashes_with_mismatched_stored_hash_modulo.is_empty() {
+            let hashes = derivation_hashes_with_mismatched_stored_hash_modulo.join(", ");
+            error!(%hashes, evaluation = %self.evaluation_id, "The hash modulo stored for {hashes} does not match the hash modulo computed from the validated derivation file.");
+            return Err(anyhow!(
+                "The hash modulo stored for {hashes} does not match the hash modulo computed from the validated derivation file."
+            ));
+        }
+        Ok(())
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -499,37 +605,6 @@ impl BatchWriter<'_> {
         Ok(())
     }
 
-    async fn set_shared_build_limits(
-        &self,
-        limits: &HashMap<DerivationId, (Option<i64>, Option<i64>)>,
-    ) -> Result<()> {
-        let mut ids: Vec<uuid::Uuid> = Vec::new();
-        let mut timeouts: Vec<i64> = Vec::new();
-        let mut silents: Vec<i64> = Vec::new();
-        for (id, (timeout_secs, max_silent_secs)) in limits {
-            if timeout_secs.is_none() && max_silent_secs.is_none() {
-                continue;
-            }
-            ids.push(id.into_inner());
-            timeouts.push(timeout_secs.unwrap_or(0));
-            silents.push(max_silent_secs.unwrap_or(0));
-        }
-        if ids.is_empty() {
-            return Ok(());
-        }
-
-        self.db()
-            .execute_raw(SHARED_BUILD_LIMITS_UPDATE.bind([
-                ids.into(),
-                timeouts.into(),
-                silents.into(),
-            ]))
-            .await
-            .context("set shared build limits")?;
-
-        Ok(())
-    }
-
     #[tracing::instrument(level = "debug", skip_all)]
     async fn stored_derivations(
         &self,
@@ -558,9 +633,13 @@ impl BatchWriter<'_> {
             .collect();
 
         let db = self.db();
+        let evaluation = self.evaluation_id;
         let complete: HashSet<String> =
             gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
-                gradient_db::graph::runtime_can_start::complete_output_hashes(db, &chunk).await
+                gradient_db::graph::runtime_can_start::complete_output_hashes(
+                    db, evaluation, &chunk,
+                )
+                .await
             })
             .await
             .context("look up the batch's complete outputs")?
@@ -578,7 +657,6 @@ impl BatchWriter<'_> {
     async fn resolve_shared_builds(
         &self,
         ids: &HashMap<String, DerivationId>,
-        derivations: &[DiscoveredDerivation],
         stored: &HashSet<DerivationId>,
     ) -> Result<()> {
         let now = gradient_types::now();
@@ -588,21 +666,6 @@ impl BatchWriter<'_> {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        let limits: HashMap<DerivationId, (Option<i64>, Option<i64>)> = derivations
-            .iter()
-            .filter_map(|d| {
-                ids.get(&d.drv_path).map(|id| {
-                    (
-                        *id,
-                        (
-                            d.timeout_secs.map(|v| v as i64),
-                            d.max_silent_secs.map(|v| v as i64),
-                        ),
-                    )
-                })
-            })
-            .collect();
-
         let shared_builds: Vec<ADerivationBuild> = all_ids
             .iter()
             .map(|&drv_id| {
@@ -611,9 +674,6 @@ impl BatchWriter<'_> {
                 } else {
                     BuildStatus::Created
                 };
-                let (timeout_secs, max_silent_secs) =
-                    limits.get(&drv_id).copied().unwrap_or((None, None));
-
                 MDerivationBuild {
                     id: DerivationBuildId::now_v7(),
                     derivation: drv_id,
@@ -622,8 +682,6 @@ impl BatchWriter<'_> {
                     probed: false,
                     substituted: status == BuildStatus::Substituted,
                     wanted: false,
-                    timeout_secs,
-                    max_silent_secs,
                     created_at: now,
                     updated_at: now,
                     ..Default::default()
@@ -647,7 +705,6 @@ impl BatchWriter<'_> {
                 return Err(anyhow::Error::new(e).context("upsert shared builds"));
             }
         }
-        self.set_shared_build_limits(&limits).await?;
 
         let db = self.db();
         let shared_build_by_drv: HashMap<DerivationId, DerivationBuildId> =
@@ -749,6 +806,7 @@ impl BatchWriter<'_> {
         gradient_db::graph::can_start::seed_blocking_deps(&lock)
             .await
             .context("seed blocking_deps")?;
+        self.ctx.request_signature_sweep_wake();
         changes.extend(
             gradient_db::graph::can_start::promote(txn, &locked)
                 .await
@@ -1243,30 +1301,32 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
         ..Default::default()
     };
     if !batch.derivations.is_empty() {
-        let newly_walked = writer.upsert_walked(&batch.derivations).await?;
-        writer.mark_imported(&batch.derivations).await?;
-        writer.insert_stubs(&batch.derivations).await?;
-        let resolved = writer.resolve_ids(&batch.derivations).await?;
+        let derivations: Vec<DiscoveredDerivation> = batch
+            .derivations
+            .iter()
+            .map(EvaluationBatchDerivation::to_discovered_derivation)
+            .collect();
+        let newly_walked = writer.upsert_walked(&derivations).await?;
+        writer
+            .store_serialized_derivation_hash_for_dependent_output_paths_rejecting_conflicts(
+                &batch.derivations,
+            )
+            .await?;
+        writer.mark_imported(&derivations).await?;
+        writer.insert_stubs(&derivations).await?;
+        let resolved = writer.resolve_ids(&derivations).await?;
         let ids = &resolved.by_path;
-        let grew = writer.insert_records(&batch.derivations, ids).await?;
+        let grew = writer.insert_records(&derivations, ids).await?;
         writer
             .record_walk_completeness(&resolved, &newly_walked, &grew)
             .await?;
-        writer
-            .persist_input_sources(&batch.derivations, ids)
-            .await?;
-        let stored = writer.stored_derivations(&batch.derivations, ids).await?;
-        writer
-            .resolve_shared_builds(ids, &batch.derivations, &stored)
-            .await?;
-        writer.add_system_features(&batch.derivations, ids).await?;
+        writer.persist_input_sources(&derivations, ids).await?;
+        let stored = writer.stored_derivations(&derivations, ids).await?;
+        writer.resolve_shared_builds(ids, &stored).await?;
+        writer.add_system_features(&derivations, ids).await?;
         let adopted = writer.adopt_references(&resolved, &newly_walked).await?;
         (report.entry_points, report.exec_entry_points) = match batch.task {
-            Some(task) => {
-                writer
-                    .process_entry_points(task, &batch.derivations, ids)
-                    .await?
-            }
+            Some(task) => writer.process_entry_points(task, &derivations, ids).await?,
             None => (Vec::new(), 0),
         };
         let forgotten = writer.forget_earlier_misses(ids).await?;
@@ -1415,16 +1475,8 @@ pub(crate) async fn apply_upstream_hits(
     }
 
     let db = &ctx.worker_db;
-    let stored =
-        gradient_db::cached_paths::stored_by_hash(db, &hits.keys().cloned().collect::<Vec<_>>())
-            .await
-            .context("find the hit paths our cache already stores")?;
-    let hashes: Vec<String> = hits
-        .keys()
-        .filter(|hash| !stored.contains_key(*hash))
-        .cloned()
-        .collect();
-    let hit_rows = gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
+    let hashes: Vec<String> = hits.keys().cloned().collect();
+    let mut hit_rows = gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Hash.is_in(chunk))
             .all(db)
@@ -1432,6 +1484,8 @@ pub(crate) async fn apply_upstream_hits(
     })
     .await
     .context("load the outputs an upstream hit names")?;
+    let stored = cached_output_ids_trusted_by_live_project_jobs(db, &hit_rows).await?;
+    hit_rows.retain(|o| !stored.contains(&o.id));
 
     let mut touched: Vec<DerivationId> = hit_rows.iter().map(|o| o.derivation).collect();
     touched.sort_unstable();
@@ -1528,12 +1582,8 @@ async fn substitute_available(
     })
     .await
     .context("load every output of the shared builds")?;
-    let hashes: Vec<String> = outputs.iter().filter_map(|o| o.hash.clone()).collect();
-    let stored = gradient_db::cached_paths::stored_by_hash(db, &hashes)
-        .await
-        .context("find the outputs our cache already holds")?;
-    let stored_here =
-        |o: &MDerivationOutput| o.hash.as_ref().is_some_and(|h| stored.contains_key(h));
+    let stored = cached_output_ids_trusted_by_live_project_jobs(db, &outputs).await?;
+    let stored_here = |o: &MDerivationOutput| stored.contains(&o.id);
     let hit = |o: &MDerivationOutput| match found {
         Found::UpstreamHits(hits) => o.hash.as_ref().is_some_and(|h| hits.contains_key(h)),
         Found::HeldBeforeTheProbe => false,
@@ -1560,6 +1610,7 @@ async fn substitute_available(
     if !seeded.complete.is_empty() {
         let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
         let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
+        ctx.request_signature_sweep_wake();
         gradient_db::status::emit_transition_effects(ctx, &changes).await?;
     }
 

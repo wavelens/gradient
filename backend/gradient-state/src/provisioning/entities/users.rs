@@ -9,9 +9,9 @@ use super::super::StateApplicator;
 use super::super::{parse_password_phc, read_credential};
 use crate::config::*;
 use anyhow::Result;
-use gradient_entity::*;
+use gradient_db::users::ValidatedNewUser;
 use gradient_types::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
@@ -35,42 +35,95 @@ impl<'a> StateApplicator<'a> {
                 None
             };
 
-            let existing_user = user::Entity::find()
-                .filter(user::Column::Username.eq(&state_user.username))
-                .one(self.db)
-                .await?;
+            let existing_account_user_id = match &state_user.existing_account_id {
+                Some(raw) => Some(raw.trim().parse::<UserId>().map_err(|e| {
+                    format!(
+                        "Invalid existing_account_id '{}' for user '{}': {}",
+                        raw, state_user.username, e
+                    )
+                })?),
+                None => None,
+            };
+            let holder_of_username =
+                gradient_db::users::by_username(self.db, &state_user.username).await?;
+            let holder_of_email = gradient_db::users::by_email(self.db, &state_user.email).await?;
+            let own_account = match existing_account_user_id {
+                Some(id) => EUser::find_by_id(id).one(self.db).await?,
+                None => holder_of_username
+                    .clone()
+                    .filter(|user| user.account_origin == AccountOrigin::DeclaredInStateFile),
+            };
+            let own_account_id = own_account.as_ref().map(|user| user.id);
+            let conflict = [holder_of_username, holder_of_email]
+                .into_iter()
+                .flatten()
+                .find(|holder| Some(holder.id) != own_account_id);
+            if let Some(conflict) = conflict {
+                tracing::error!(
+                    username = %state_user.username,
+                    conflicting_account_id = %conflict.id,
+                    conflicting_account_origin = ?conflict.account_origin,
+                    "Skip the state user. There is an account from another origin with the same username or email. Rename or delete that account. Or set existing_account_id on the declared user to link it to that account. That link deletes the password, sessions, API keys and external ID links of the account."
+                );
+                continue;
+            }
 
-            let now = now();
-
-            if let Some(existing) = existing_user {
-                let mut user: user::ActiveModel = existing.into();
-                user.name = Set(state_user.name.clone());
-                user.email = Set(state_user.email.clone());
-                user.password = Set(password_hash.clone());
-                user.email_verified = Set(state_user.email_verified);
-                user.superuser = Set(state_user.superuser);
-                user.managed = Set(true);
-                user.update(self.db).await?;
-                tracing::info!(username = %state_user.username, "Updated managed user");
-            } else {
-                let user = user::Model {
-                    id: UserId::now_v7(),
-                    username: state_user.username.clone(),
-                    name: state_user.name.clone(),
-                    email: state_user.email.clone(),
-                    password: password_hash,
-                    last_login_at: now,
-                    created_at: now,
-                    email_verified: state_user.email_verified,
-                    managed: true,
-                    superuser: state_user.superuser,
-                    active: true,
-                    ..Default::default()
+            match own_account {
+                Some(existing) => {
+                    if existing.account_origin != AccountOrigin::DeclaredInStateFile {
+                        gradient_db::users::revoke_previous_account_holder_access(
+                            self.db,
+                            existing.id,
+                        )
+                        .await?;
+                        gradient_db::users::delete_account_identity_links_and_clear_scim_external_id(
+                            self.db,
+                            existing.id,
+                        )
+                        .await?;
+                        tracing::warn!(
+                            username = %state_user.username,
+                            account_id = %existing.id,
+                            previous_origin = ?existing.account_origin,
+                            "A user on the state file took over an account from another origin. The cleanup deleted the password, sessions, API keys, external ID links and SCIM external ID of that account."
+                        );
+                    }
+                    let mut user: AUser = existing.into();
+                    user.account_origin = Set(AccountOrigin::DeclaredInStateFile);
+                    user.username = Set(state_user.username.clone());
+                    user.name = Set(state_user.name.clone());
+                    user.email = Set(state_user.email.clone());
+                    user.password = Set(password_hash);
+                    user.email_verified = Set(state_user.email_verified);
+                    user.superuser = Set(state_user.superuser);
+                    user.managed = Set(true);
+                    user.active = Set(true);
+                    user.update(self.db).await?;
+                    tracing::info!(username = %state_user.username, "Updated managed user");
                 }
-                .into_active_model();
-
-                user.insert(self.db).await?;
-                tracing::info!(username = %state_user.username, "Created managed user");
+                None => {
+                    let new_user = ValidatedNewUser::new(
+                        AccountOrigin::DeclaredInStateFile,
+                        &state_user.username,
+                        &state_user.name,
+                        Some(&state_user.email),
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "User {} declared in the declarative state is invalid: {error}",
+                            state_user.username
+                        )
+                    })?
+                    .with_password_hash(password_hash)
+                    .with_email_verified(state_user.email_verified)
+                    .with_superuser_flag(state_user.superuser);
+                    let new_user = match existing_account_user_id {
+                        Some(id) => new_user.with_database_id(id),
+                        None => new_user,
+                    };
+                    gradient_db::users::insert_user_account(self.db, new_user).await?;
+                    tracing::info!(username = %state_user.username, "Created managed user");
+                }
             }
         }
 

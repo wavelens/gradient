@@ -12,6 +12,10 @@ use super::super::{
 use crate::config::*;
 use anyhow::{Context, Result};
 use gradient_ci::actions::encrypt_secret_with_file;
+use gradient_db::git_host_connection_repository_grants::{
+    StateFileRepositoryGrant, check_git_host_connection_task_repository_access_without_grants,
+    make_state_file_repository_grants_match_state_file,
+};
 use gradient_db::lookup::by_id;
 use gradient_entity::*;
 use gradient_types::triggers::{TriggerConfig, TriggerConfigError, TriggerType};
@@ -28,15 +32,24 @@ impl<'a> StateApplicator<'a> {
         &self,
         state_tasks: &HashMap<String, StateTask>,
     ) -> Result<(), DynError> {
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
         let project_map = self.project_lookup().await?;
         let mut applied = Vec::with_capacity(state_tasks.len());
         let mut connections_by_project: HashMap<ProjectId, HashMap<String, MGitHostConnection>> =
             HashMap::new();
+        let mut projects: HashMap<ProjectId, MProject> = HashMap::new();
+        let mut implied_grants: HashSet<StateFileRepositoryGrant> = HashSet::new();
 
         for state_task in state_tasks.values() {
-            let created_by_id = lookup_id(&user_map, &state_task.created_by, "User")?;
             let project_id = lookup_id(&project_map, &state_task.project, "Project")?;
+            let project = match projects.entry(project_id) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                    by_id::<project::Entity, _>(self.db, project_id)
+                        .await?
+                        .ok_or_else(|| format!("Project '{}' not found", state_task.project))?,
+                ),
+            };
 
             let connections = match connections_by_project.entry(project_id) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -51,14 +64,20 @@ impl<'a> StateApplicator<'a> {
                 .map(|name| {
                     connections.get(name).ok_or_else(|| {
                         format!(
-                            "Git host connection '{}' isn't available to project '{}'",
-                            name, state_task.project
+                            "Task '{}': the connection '{}' to the Git host isn't available to project '{}'",
+                            state_task.name, name, state_task.project
                         )
                     })
                 })
                 .transpose()?;
             check_task_git_host_connection_capabilities(state_task, connection)
                 .map_err(|e| format!("Task '{}': {}", state_task.name, e))?;
+            implied_grants.extend(repository_grants_needed_by_state_file_task(
+                state_task,
+                project,
+                connection,
+                connections,
+            )?);
             let connection_id = connection.map(|connection| connection.id);
 
             let existing_task = task::Entity::find()
@@ -66,6 +85,11 @@ impl<'a> StateApplicator<'a> {
                 .filter(task::Column::Project.eq(project_id))
                 .one(self.db)
                 .await?;
+            let created_by_id = state_users.resolve_creator_username_to_state_account_id(
+                &state_task.created_by,
+                &format!("task '{}'", state_task.name),
+                existing_task.as_ref().map(|task| task.created_by),
+            )?;
 
             let now = now();
 
@@ -177,6 +201,7 @@ impl<'a> StateApplicator<'a> {
             })?;
         }
 
+        make_state_file_repository_grants_match_state_file(self.db, &implied_grants).await?;
         Ok(())
     }
 
@@ -221,9 +246,12 @@ impl<'a> StateApplicator<'a> {
                 },
                 connections,
                 &tasks,
-                self.email_enabled,
-                crypt_key.expose(),
-                self.credentials_dir,
+                &ActionConfigCreationSettings {
+                    email_enabled: self.email_enabled,
+                    crypt_key: crypt_key.expose(),
+                    credentials_dir: self.credentials_dir,
+                    user_url_destination_allowlist: self.user_url_destination_allowlist,
+                },
             )?;
             let cfg_json =
                 serde_json::to_value(&cfg).map_err(|e| format!("encoding action config: {e}"))?;
@@ -627,7 +655,9 @@ pub(crate) fn build_trigger_config(t: &StateTrigger) -> Result<TriggerConfig, Tr
             .entry("interval_secs")
             .or_insert(DEFAULT_POLLING_TRIGGER_INTERVAL_SECS.into());
     }
-    TriggerConfig::parse_row(t.trigger_type, &serde_json::Value::Object(config))
+    let config = TriggerConfig::parse_row(t.trigger_type, &serde_json::Value::Object(config))?;
+    config.validate_path_filter_pattern_limits()?;
+    Ok(config)
 }
 
 pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {
@@ -636,9 +666,53 @@ pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {
     format!("{}|{}", i16::from(cfg.trigger_type()), canonical)
 }
 
+pub(crate) struct ActionConfigCreationSettings<'a> {
+    pub(crate) email_enabled: bool,
+    pub(crate) crypt_key: &'a [u8],
+    pub(crate) credentials_dir: &'a Path,
+    pub(crate) user_url_destination_allowlist:
+        &'a gradient_util::http_validation::UserUrlDestinationAllowlist,
+}
+
 pub(crate) struct ProjectAndTaskNames<'a> {
     pub(crate) project: &'a str,
     pub(crate) task: &'a str,
+}
+
+fn repository_grants_needed_by_state_file_task(
+    state_task: &StateTask,
+    project: &MProject,
+    task_connection: Option<&MGitHostConnection>,
+    connections: &HashMap<String, MGitHostConnection>,
+) -> Result<Vec<StateFileRepositoryGrant>, String> {
+    let open_pr_connections = state_task
+        .actions
+        .iter()
+        .filter(|action| action.action_type == "open_pr")
+        .filter_map(|action| action.config.get("git_host_connection")?.as_str())
+        .filter_map(|name| connections.get(name));
+    let mut implied = Vec::new();
+    for connection in task_connection.into_iter().chain(open_pr_connections) {
+        let fitting = check_git_host_connection_task_repository_access_without_grants(
+            connection,
+            project,
+            &state_task.repository,
+        )
+        .map_err(|refusal| {
+            format!(
+                "Task '{}': connection '{}' for the Git host: {}",
+                state_task.name, connection.name, refusal
+            )
+        })?;
+        if fitting.needs_grant {
+            implied.push(StateFileRepositoryGrant::new(
+                connection.id,
+                project.id,
+                &fitting.repository,
+            ));
+        }
+    }
+    Ok(implied)
 }
 
 /// Action secrets come from credentials `gradient_action_${project}_${task}_${name}_${field}`, so actions with the same name in different tasks never share secrets. They go through encryption with the crypt key of the server before storage, in line with the REST `create_action` path.
@@ -647,10 +721,14 @@ pub(crate) fn build_action_config(
     owner: &ProjectAndTaskNames,
     connections: &HashMap<String, MGitHostConnection>,
     tasks: &HashMap<String, TaskId>,
-    email_enabled: bool,
-    crypt_key: &[u8],
-    credentials_dir: &Path,
+    settings: &ActionConfigCreationSettings,
 ) -> Result<ActionConfig, DynError> {
+    let ActionConfigCreationSettings {
+        email_enabled,
+        crypt_key,
+        credentials_dir,
+        user_url_destination_allowlist,
+    } = *settings;
     let want = |k: &str| -> Result<&serde_json::Value, DynError> {
         a.config
             .get(k)
@@ -693,7 +771,7 @@ pub(crate) fn build_action_config(
         }
         "send_web_request" => {
             let url = string_field(a, "url")?;
-            checked_url(&a.name, &url)?;
+            checked_url(&a.name, &url, user_url_destination_allowlist)?;
             let token = action_credential(credentials_dir, owner, a, "token")?
                 .map(|plain| encrypt(&plain))
                 .transpose()?;
@@ -701,7 +779,7 @@ pub(crate) fn build_action_config(
         }
         "send_matrix_message" => {
             let homeserver = string_field(a, "homeserver")?;
-            checked_url(&a.name, &homeserver)?;
+            checked_url(&a.name, &homeserver, user_url_destination_allowlist)?;
             let room_id = string_field(a, "room_id")?;
             if !gradient_types::actions::is_matrix_room_id(&room_id) {
                 return Err(format!(
@@ -722,7 +800,7 @@ pub(crate) fn build_action_config(
         "send_slack_message" => {
             let plain = action_credential(credentials_dir, owner, a, "webhook_url")?
                 .ok_or_else(|| format!("action '{}': webhook_url_file is required", a.name))?;
-            checked_url(&a.name, &plain)?;
+            checked_url(&a.name, &plain, user_url_destination_allowlist)?;
             Ok(ActionConfig::SendSlackMessage {
                 webhook_url: Some(encrypt(&plain)?),
             })
@@ -864,10 +942,17 @@ fn string_field(a: &StateAction, key: &str) -> Result<String, DynError> {
         .ok_or_else(|| format!("action '{}': {} must be a string", a.name, key).into())
 }
 
-fn checked_url(action: &str, url: &str) -> Result<(), DynError> {
-    gradient_util::http_validation::validate_webhook_url(url)
-        .map(drop)
-        .map_err(|e| format!("action '{action}': {e}").into())
+fn checked_url(
+    action: &str,
+    url: &str,
+    user_url_destination_allowlist: &gradient_util::http_validation::UserUrlDestinationAllowlist,
+) -> Result<(), DynError> {
+    gradient_util::http_validation::parse_and_check_allowed_outbound_url(
+        url,
+        user_url_destination_allowlist,
+    )
+    .map(drop)
+    .map_err(|e| format!("action '{action}': {e}").into())
 }
 
 fn action_credential(
@@ -900,6 +985,9 @@ where
             .map_err(|e| format!("action '{}': invalid '{}': {}", a.name, key, e).into()),
     }
 }
+
+#[cfg(test)]
+mod state_file_task_repository_grant_tests;
 
 #[cfg(test)]
 mod trigger_helper_tests {
@@ -961,6 +1049,17 @@ mod trigger_helper_tests {
         assert!(
             full.contains("interval_secs") || full.contains("validation"),
             "expected polling interval rejection, got: {full}"
+        );
+    }
+
+    #[test]
+    fn build_trigger_config_rejects_too_long_path_filter_pattern() {
+        let mut t = polling_trigger(60);
+        t.config["include_paths"] = serde_json::json!(["a".repeat(513)]);
+        let err = build_trigger_config(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("512 characters"),
+            "expected path filter pattern length rejection, got: {err}"
         );
     }
 
@@ -1122,9 +1221,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap();
         match cfg {
@@ -1156,9 +1258,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            false,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: false,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("SMTP"), "got: {err}");
@@ -1181,9 +1286,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("recipients"), "got: {err}");
@@ -1255,9 +1363,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap();
         match cfg {
@@ -1291,9 +1402,12 @@ mod action_helper_tests {
             },
             connections,
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
     }
 
@@ -1341,9 +1455,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("invalid type"), "got: {err}");
@@ -1369,9 +1486,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("access_token_file"), "got: {err}");
@@ -1398,9 +1518,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("room_id"), "got: {err}");
@@ -1423,9 +1546,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             &HashMap::new(),
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("webhook_url_file"), "got: {err}");
@@ -1433,8 +1559,14 @@ mod action_helper_tests {
 
     #[test]
     fn slack_webhook_rejects_a_loopback_url() {
-        let err = checked_url("slack", "http://127.0.0.1/hook").unwrap_err();
-        assert!(err.to_string().contains("disallowed address"), "got: {err}");
+        let err = checked_url("slack", "http://127.0.0.1/hook", &Default::default()).unwrap_err();
+        assert!(err.to_string().contains("private address"), "got: {err}");
+
+        let loopback = gradient_util::http_validation::UserUrlDestinationAllowlist::parse(&[
+            "127.0.0.0/8".into(),
+        ])
+        .unwrap();
+        checked_url("slack", "http://127.0.0.1/hook", &loopback).unwrap();
     }
 
     fn start_evaluation(task: &str) -> StateAction {
@@ -1459,9 +1591,12 @@ mod action_helper_tests {
             },
             &HashMap::new(),
             tasks,
-            true,
-            &key(),
-            Path::new("/nonexistent"),
+            &ActionConfigCreationSettings {
+                email_enabled: true,
+                crypt_key: &key(),
+                credentials_dir: Path::new("/nonexistent"),
+                user_url_destination_allowlist: &Default::default(),
+            },
         )
     }
 
@@ -1603,14 +1738,18 @@ mod declared_task_trigger_application_tests {
             task: &MTask,
             triggers: &[StateTrigger],
         ) -> Result<(), DynError> {
+            let transaction = sea_orm::TransactionTrait::begin(db).await?;
             let app = StateApplicator {
-                db,
+                db: &transaction,
                 crypt_secret_file: &self.crypt_file,
                 credentials_dir: self.dir.path(),
                 email_enabled: false,
+                user_url_destination_allowlist: &Default::default(),
             };
             app.apply_task_triggers("test-project", task, triggers)
-                .await
+                .await?;
+            transaction.commit().await?;
+            Ok(())
         }
 
         fn decrypt_stored_trigger_secret_with_test_crypt_key_file(
@@ -1880,6 +2019,7 @@ mod declared_task_git_host_connection_application_tests {
             name: name.into(),
             display_name: name.into(),
             git_host_type: GitHostType::Gitea,
+            base_url: Some("https://git.example.com".into()),
             receives_events: true,
             reports_status: true,
             created_by: rows::user().id,
@@ -1924,17 +2064,19 @@ mod declared_task_git_host_connection_application_tests {
         let dir = TempDir::new().unwrap();
         let crypt_file = dir.path().join("crypt");
         std::fs::write(&crypt_file, "this-is-a-32-byte-crypt-key!!!!").unwrap();
+        let transaction = sea_orm::TransactionTrait::begin(&connection).await.unwrap();
         let app = StateApplicator {
-            db: &connection,
+            db: &transaction,
             crypt_secret_file: crypt_file.to_str().unwrap(),
             credentials_dir: dir.path(),
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
         let state_task: StateTask = serde_json::from_value(serde_json::json!({
             "name": "test-task",
             "project": "test-project",
             "display_name": "Test Task",
-            "repository": "https://github.com/test/repo",
+            "repository": "https://git.example.com/test/repo",
             "created_by": rows::user().username,
             "git_host_connection": "declared",
             "report_status": false,
@@ -1943,6 +2085,7 @@ mod declared_task_git_host_connection_application_tests {
         app.apply_tasks(&HashMap::from([(state_task.name.clone(), state_task)]))
             .await
             .unwrap();
+        transaction.commit().await.unwrap();
 
         let task = db.rows::<ETask>().await.remove(0);
         assert_eq!(task.git_host_connection, Some(declared.id));

@@ -7,7 +7,10 @@
 use crate::evaluations::EvaluationItemFailureAndAbortFlags;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, JoinType, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait,
+};
 use std::sync::LazyLock;
 
 static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
@@ -22,10 +25,7 @@ static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
 crate::sql_lazy! {
     EVAL_BLOCKED = || EVAL_BLOCKED_SQL.as_str(),
         params = [EvaluationId],
-        tier = Bulk,
-        budget = crate::sql::Budget::bulk().buffers(500_000)
-            .because("an evaluation nothing blocks is read to its last shared build, and the \
-                      fixture's largest names ~98k");
+        tier = Bulk;
 }
 
 /// Shared builds with a user abort set the evaluation to Aborted, not Failed. Builds that depend on an aborted build get DependencyFailed status. DependencyFailed can count as a failure only when there are no aborts in that evaluation. The aborted companions of a completed cluster job count as neither.
@@ -140,7 +140,13 @@ pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
 ) -> Result<std::collections::HashMap<DerivationId, Vec<MBuildJob>>, DbErr> {
     Ok(crate::fetch_in_chunks(derivations, |chunk| async move {
         EBuildJob::find()
+            .join(
+                JoinType::InnerJoin,
+                gradient_entity::build_job::Relation::Evaluation.def(),
+            )
             .filter(CBuildJob::Derivation.is_in(chunk))
+            .order_by_asc(CEvaluation::CreatedAt)
+            .order_by_asc(CEvaluation::Id)
             .all(db)
             .await
     })
@@ -203,7 +209,7 @@ mod tests {
     use gradient_fixtures::shape::{Shape, shape};
 
     const A: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
-    const B: &str = "/nix/store/[hash4862]-b.drv";
+    const B: &str = "/nix/store/2wqmwdy80dwdmip2pfysbb0b5np0dq62-b.drv";
 
     async fn flags_of(
         evaluation: EvaluationId,
@@ -264,5 +270,39 @@ mod tests {
 
         assert_eq!((completed.failed, completed.aborted), (false, false));
         assert_eq!((running.failed, running.aborted), (false, true));
+    }
+
+    #[tokio::test]
+    async fn build_jobs_return_oldest_live_evaluation_first_for_both_insert_orders() {
+        let (older, newer) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        for inserted in [[older, newer], [newer, older]] {
+            let given = inserted.into_iter().fold(shape(), |given, evaluation| {
+                let minutes = if evaluation == older { 0 } else { 5 };
+                given
+                    .evaluation(evaluation)
+                    .evaluation_option(|e| {
+                        e.created_at =
+                            gradient_fixtures::test_date() + chrono::Duration::minutes(minutes)
+                    })
+                    .derivation(A)
+                    .job()
+            });
+            let db = given.into_database().await;
+            let derivation = EDerivation::find()
+                .one(&db.connection())
+                .await
+                .unwrap()
+                .expect("the derivation is stored")
+                .id;
+            for _ in 0..3 {
+                let jobs = build_jobs_for_derivations(&db.connection(), &[derivation])
+                    .await
+                    .unwrap();
+                let order: Vec<EvaluationId> =
+                    jobs[&derivation].iter().map(|j| j.evaluation).collect();
+                assert_eq!(order, [older, newer], "inserted as {inserted:?}");
+            }
+            db.finish().await;
+        }
     }
 }

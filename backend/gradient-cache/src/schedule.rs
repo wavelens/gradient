@@ -6,7 +6,7 @@
 
 use crate::debug_index::DebugIndex;
 use crate::eval_cache::EvalCacheSweep;
-use crate::signatures::SignSweep;
+use crate::signatures::{SignSweep, SignatureSweepPublishStartAndPendingWake};
 use crate::units::Step;
 use crate::{blobs, deep_gc, evaluations, nar, storage_migrations};
 use gradient_core::ServerState;
@@ -35,9 +35,16 @@ pub(crate) fn child_specs(state: &ServerState) -> Vec<ChildSpec> {
         }),
         ChildSpec::pass(SignSweep {
             db: state.worker_db.clone(),
+            graph: Arc::clone(&state.graph),
             config: Arc::clone(config),
             store_path_mapping: Arc::clone(&state.extensions.store_path_mapping),
             period: secs(config.cache.sign_sweep_interval_secs),
+            last_signing_pass_handled_parent_build_derivation_id: Default::default(),
+            last_signing_started_at: Default::default(),
+            last_complete_sweep_finished_at: Default::default(),
+            publish_start_and_scheduled_delayed_wake: SignatureSweepPublishStartAndPendingWake::new(
+                state.shutdown.clone(),
+            ),
             wake: Arc::clone(&state.wake.run_signature_sweep_now),
         }),
         ChildSpec::pass(DebugIndex {

@@ -11,12 +11,15 @@ use std::time::Duration;
 use gradient_db::WorkerDb;
 use gradient_db::exec_jobs::dispatch::{self, ExecDispatchRow};
 use gradient_db::exec_jobs::program_closure;
+use gradient_entity::{derivation, derivation_output};
 use gradient_graph::Transition;
 use gradient_pool::{WorkerCaps, WorkerInfo};
 use gradient_types::exec::{ExecDefaults, ExecSpec};
+use gradient_types::ids::DerivationId;
 use gradient_types::{ExecJobId, ProjectId};
 use gradient_util::supervision::{Pass, PassError};
 use gradient_wire::types::RequiredPath;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{debug, error, warn};
 
 use crate::Scheduler;
@@ -59,9 +62,16 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     let untracked: HashSet<String> = scheduler.untracked(keys).await.into_iter().collect();
     let workers = scheduler.board_workers().await?;
     let api_url = scheduler.db.config.server.serve_url.clone();
+    let program_outputs = DerivationPathAndOutputPathsByDerivationId::load(
+        &scheduler.db.worker_db,
+        rows.iter()
+            .filter(|row| untracked.contains(&exec_job_key(row.job.id))),
+    )
+    .await?;
     let new_rows: Vec<&ExecDispatchRow> = rows
         .iter()
         .filter(|row| untracked.contains(&exec_job_key(row.job.id)))
+        .filter(|row| program_outputs.refusal(row).is_none())
         .collect();
     let closures = ProgramClosures::load(&scheduler.db.worker_db, new_rows.iter().copied()).await?;
     let new_ids: Vec<ExecJobId> = new_rows.iter().map(|row| row.job.id).collect();
@@ -73,6 +83,10 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     for row in rows {
         let key = exec_job_key(row.job.id);
         let tracked = !untracked.contains(&key);
+        if !tracked && let Some(refusal) = program_outputs.refusal(&row) {
+            fail_queued_job(scheduler, &row, &key, false, refusal).await?;
+            continue;
+        }
         let Some(pending) = queued_job(scheduler, &row, &key, tracked, &api_url, &closures).await?
         else {
             continue;
@@ -85,7 +99,12 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
         let requirement = pending
             .spec
             .requirement_on(&pending.architecture, &ExecDefaults::default());
-        if let Some(refusal) = secret_refusal(&requirement, &pending.secrets, &project_workers) {
+        if let Some(refusal) = secret_refusal(
+            &requirement,
+            &pending.secrets,
+            &project_workers,
+            row.project,
+        ) {
             fail_queued_job(scheduler, &row, &key, tracked, refusal.to_string()).await?;
             continue;
         }
@@ -135,11 +154,62 @@ pub(crate) fn caps_of(worker: &WorkerInfo) -> WorkerCaps {
 }
 
 pub(crate) fn serves_project(worker: &WorkerInfo, project: ProjectId) -> bool {
-    !worker.draining
-        && worker
-            .authorized_peers
-            .as_ref()
-            .is_none_or(|peers| peers.contains(&project))
+    !worker.draining && worker.project_access.contains(&project)
+}
+
+struct DerivationPathAndOutputPathsByDerivationId(HashMap<DerivationId, (String, Vec<String>)>);
+
+impl DerivationPathAndOutputPathsByDerivationId {
+    async fn load<'a>(
+        db: &WorkerDb,
+        rows: impl Iterator<Item = &'a ExecDispatchRow>,
+    ) -> anyhow::Result<Self> {
+        let ids: Vec<DerivationId> = rows
+            .map(|row| row.job.program_derivation)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        if ids.is_empty() {
+            return Ok(Self(HashMap::new()));
+        }
+
+        let mut by_derivation: HashMap<DerivationId, (String, Vec<String>)> =
+            derivation::Entity::find()
+                .filter(derivation::Column::Id.is_in(ids.clone()))
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|d| (d.id, (d.store_path(), Vec::new())))
+                .collect();
+        let outputs = derivation_output::Entity::find()
+            .filter(derivation_output::Column::Derivation.is_in(ids))
+            .all(db)
+            .await?;
+        for output in outputs {
+            if let (Some(path), Some((_, paths))) = (
+                output.store_path(),
+                by_derivation.get_mut(&output.derivation),
+            ) {
+                paths.push(path.full());
+            }
+        }
+
+        Ok(Self(by_derivation))
+    }
+
+    fn refusal(&self, row: &ExecDispatchRow) -> Option<String> {
+        let program = serde_json::from_value::<ExecSpec>(row.job.spec.clone())
+            .ok()?
+            .program;
+        let (derivation, outputs) = self.0.get(&row.job.program_derivation)?;
+        let root = store_root(&program);
+        let bound = outputs
+            .iter()
+            .any(|output| root.as_deref() == Some(output.as_str()));
+        (!bound).then(|| {
+            format!("program {program} is not inside an output of derivation {derivation}")
+        })
+    }
 }
 
 #[derive(Default)]
@@ -198,7 +268,15 @@ async fn queued_job(
         return Ok(None);
     };
     let db = &scheduler.db;
-    match resolve_secret_names(&db.worker_db, &db.config, row.project, &pending.spec).await {
+    match resolve_secret_names(
+        &db.worker_db,
+        &db.config,
+        row.project,
+        &pending.spec,
+        pending.allows_project_credentials_and_privileged_actions,
+    )
+    .await
+    {
         Ok(names) => {
             pending.secrets = names;
             Ok(Some(pending))
@@ -305,6 +383,8 @@ pub(crate) fn pending_exec_job(
             master_port: None,
         }),
         secrets: Default::default(),
+        allows_project_credentials_and_privileged_actions: row
+            .allows_project_credentials_and_privileged_actions,
         spec,
     })
 }

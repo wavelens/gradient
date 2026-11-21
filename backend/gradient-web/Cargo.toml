@@ -81,7 +81,6 @@ zstd          = { workspace = true }
 axum                 = { workspace = true, features = ["multipart", "http1", "http2", "json", "tokio", "matched-path", "query", "form", "original-uri"] }
 axum_typed_multipart = { workspace = true }
 axum-streams         = { workspace = true }
-email_address        = { workspace = true }
 governor             = { workspace = true }
 http                 = { workspace = true }
 http-body-util       = { workspace = true }
@@ -101,9 +100,11 @@ harmonia-file-nar = { workspace = true, features = ["test"] }
 hmac              = { workspace = true }
 gradient-fixtures = { workspace = true }
 gradient-test-support = { workspace = true }
+gradient-util     = { workspace = true, features = ["test-functions"] }
 tokio-test   = { workspace = true }
 tonic        = { workspace = true, features = ["transport"] }
 tokio-tungstenite = { workspace = true }
 tower        = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
+wiremock     = { workspace = true }
 zstd         = { workspace = true }

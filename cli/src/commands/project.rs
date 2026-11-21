@@ -8,6 +8,10 @@ use crate::commands::completion;
 use crate::commands::git_host_connection::{
     GitHostConnectionSubcommands, run_git_host_connection_subcommand,
 };
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand, NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES,
+    UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES,
+};
 use crate::commands::user_access::access_reasons_to_comma_separated_text;
 use crate::commands::webhook::{
     NoWebhookOwnerArguments, WebhookSubcommands, run_webhook_subcommand,
@@ -25,6 +29,7 @@ use connector::api::{
     AddMemberRequest, CacheSubscriptionMode, GrantProjectRequest, MakeProjectRequest,
     PatchProjectGrantRequest, PatchProjectRequest, PutProjectSecretRequest, RemoveMemberRequest,
     RevokeInvitationRequest, SubscribeCacheRequest, SubscriptionStatus, TaskRepositoryFetchStatus,
+    TeamRole,
 };
 use connector::git_host_connections::GitHostConnectionSetOwner;
 use connector::webhooks::WebhookResource;
@@ -34,12 +39,14 @@ use std::io::{self, IsTerminal, Read};
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Select the project later commands act on
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Select {
         /// Project name
         #[arg(add = ArgValueCompleter::new(completion::complete_projects))]
         project: String,
     },
     /// Create a project with missing fields opened in $EDITOR, then select it unless `--json` is set
+    #[command(add = McpToolMayRunCommand)]
     Create {
         /// Name
         #[arg(short, long)]
@@ -50,17 +57,21 @@ pub enum Commands {
         /// Description
         #[arg(short = 'c', long)]
         description: Option<String>,
-        /// The team for the project (default: the only team when there is exactly one team membership)
+        /// Team for the project. Default: the only team with Admin role for the user (any team for a superuser)
         #[arg(long)]
         team: Option<String>,
     },
     /// Show the selected project
+    #[command(add = McpToolMayRunCommand)]
     Show,
     /// Display everyone with access to the selected project, along with role and source of access.
+    #[command(add = McpToolMayRunCommand)]
     Access,
     /// List the projects of the current user
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Edit the selected project
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// New name
         #[arg(short, long)]
@@ -73,6 +84,7 @@ pub enum Commands {
         description: Option<String>,
     },
     /// Delete the selected project
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Delete without a confirmation prompt
         #[arg(short = 'y', long)]
@@ -99,10 +111,13 @@ pub enum Commands {
         cmd: ProjectSecretCommands,
     },
     /// Print the SOPS recipient to encrypt the sops files in the repository
+    #[command(add = McpToolMayRunCommand)]
     ShowSopsRecipient,
     /// Allow visitors to view selected projects without login.
+    #[command(add = McpToolMayRunCommand)]
     MakePublic,
     /// Restrict the selected project to its members.
+    #[command(add = McpToolMayRunCommand)]
     MakeProjectPrivate,
     /// Manage teams that can access the selected project
     TeamGrant {
@@ -132,8 +147,10 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum UserCommands {
     /// List members
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Add a member
+    #[command(add = McpToolMayRunCommand)]
     Add {
         /// Username
         user: String,
@@ -144,6 +161,7 @@ pub enum UserCommands {
         add_as_member_immediately: bool,
     },
     /// Remove a member
+    #[command(add = McpToolMayRunCommand)]
     Remove {
         /// Username
         #[arg(add = ArgValueCompleter::new(completion::complete_project_users))]
@@ -154,16 +172,20 @@ pub enum UserCommands {
 #[derive(Subcommand, Debug)]
 pub enum SshCommands {
     /// Print the public SSH key used to fetch repositories
+    #[command(add = McpToolMayRunCommand)]
     Show,
     /// Replace the SSH key pair and print the new public key
+    #[command(add = McpToolMayRunCommand)]
     Recreate,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum CacheCommands {
     /// List subscribed caches
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Subscribe to a cache
+    #[command(add = McpToolMayRunCommand)]
     Add {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -173,6 +195,7 @@ pub enum CacheCommands {
         mode: Option<CacheSubscriptionMode>,
     },
     /// Unsubscribe from a cache
+    #[command(add = McpToolMayRunCommand)]
     Remove {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_subscribed_caches))]
@@ -183,13 +206,16 @@ pub enum CacheCommands {
 #[derive(Subcommand, Debug)]
 pub enum ProjectSecretCommands {
     /// List secret names
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Display the timestamp of the last secret update and the person who made it. Never display the value.
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Secret name
         name: String,
     },
     /// Create or replace a secret. The command can read the value from piped stdin or a hidden prompt with no `--value` argument.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Set {
         /// Secret name
         name: String,
@@ -198,6 +224,7 @@ pub enum ProjectSecretCommands {
         value: Option<String>,
     },
     /// Delete a secret
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Delete {
         /// Secret name
         name: String,
@@ -207,8 +234,10 @@ pub enum ProjectSecretCommands {
 #[derive(Subcommand, Debug)]
 pub enum ProjectTeamGrantCommands {
     /// List grants for a team (including pending requests)
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Grant team access. A non-admin user can send a request to the team admin.
+    #[command(add = McpToolMayRunCommand)]
     Add {
         /// Team name
         team: String,
@@ -223,6 +252,7 @@ pub enum ProjectTeamGrantCommands {
         workers: bool,
     },
     /// Edit the role or access of a team grant.
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Team name
         team: String,
@@ -237,6 +267,7 @@ pub enum ProjectTeamGrantCommands {
         workers: Option<bool>,
     },
     /// Delete the team grant or withdraw the pending request.
+    #[command(add = McpToolMayRunCommand)]
     Remove {
         /// Team name
         team: String,
@@ -246,8 +277,10 @@ pub enum ProjectTeamGrantCommands {
 #[derive(Subcommand, Debug)]
 pub enum ProjectPendingInvitationCommands {
     /// List pending invitations
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Cancel a user's pending invitations
+    #[command(add = McpToolMayRunCommand)]
     Revoke {
         /// Username
         user: String,
@@ -295,7 +328,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             let client = client_from_config(out);
             let owner_team = match team {
                 Some(team) => Some(team),
-                None => get_team_name_if_member_of_exactly_one_team(&client).await,
+                None => get_single_owner_team_name_for_new_project(&client).await,
             };
             match client
                 .projects()
@@ -864,10 +897,20 @@ fn read_project_secret_value_from_flag_stdin_or_hidden_prompt(
     value.to_owned()
 }
 
-async fn get_team_name_if_member_of_exactly_one_team(client: &Client) -> Option<String> {
-    let mut teams = client.teams().list().await.ok()?;
-    match teams.len() {
-        1 => teams.pop().map(|team| team.name),
+async fn get_single_owner_team_name_for_new_project(client: &Client) -> Option<String> {
+    let teams = client.teams().list().await.ok()?;
+    let signed_in_user_is_superuser = teams
+        .iter()
+        .any(|team| !matches!(team.role, TeamRole::Admin))
+        && client.user().get().await.is_ok_and(|user| user.superuser);
+    let mut teams_signed_in_user_may_use_as_new_project_owner_team = teams
+        .into_iter()
+        .filter(|team| signed_in_user_is_superuser || matches!(team.role, TeamRole::Admin));
+    match (
+        teams_signed_in_user_may_use_as_new_project_owner_team.next(),
+        teams_signed_in_user_may_use_as_new_project_owner_team.next(),
+    ) {
+        (Some(team), None) => Some(team.name),
         _ => None,
     }
 }

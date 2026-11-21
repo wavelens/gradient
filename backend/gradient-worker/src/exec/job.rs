@@ -13,18 +13,21 @@ use async_trait::async_trait;
 use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
-    AddressLease, BudgetHold, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, GuestBootError,
-    GuestStorePassthrough, MountConfig, NO_GUEST_BUDGET, PlugPlan, PluggedDevices, WORK_MOUNT_TAG,
-    WorkVolume, wait_ready,
+    AddressLease, BudgetHold, DeviceConfig, DeviceHold, GUEST_BOOT_TIMEOUT, Guest, GuestBootError,
+    GuestStorePassthrough, GuestSupervisorHostConfigurationError, MountConfig, NO_GUEST_BUDGET,
+    PlugPlan, PluggedDevices, wait_ready,
 };
 use gradient_wire::guest::{
-    AgentToWorker, GUEST_WORK_DISK_SINCE, GuestMount, GuestNetwork, GuestSecret, RunJob,
-    WorkerToAgent,
+    AgentToWorker, GUEST_IPV6_NETWORK_CONFIGURATION_SINCE, GUEST_WORK_DISK_SINCE, GuestMount,
+    GuestNetwork, GuestSecret, RunJob, WorkerToAgent,
 };
-use gradient_wire::types::{BuildFailureKind, ExecJob, MAX_PHASE_PAYLOAD, UploadObject};
+use gradient_wire::types::{
+    BuildFailureKind, DeviceRequest, ExecJob, GuestSize, MAX_PHASE_PAYLOAD, UploadObject,
+};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use super::agent_client::AgentClient;
 use super::channels::GuestChannelMux;
@@ -53,7 +56,7 @@ use crate::worker::cluster::ClusterStart;
 pub(super) const STORE_DIR: &str = "/nix/store/";
 const EXEC_KEY_PREFIX: &str = "exec:";
 const KILL_GRACE: Duration = Duration::from_secs(15);
-const NO_FREE_ADDRESS: &str = "no free guest address in exec.subnet";
+const NO_FREE_ADDRESS: &str = "No free guest addresses in `exec.subnet.v4`";
 const WORK_STAGING: &str = "work-staging";
 const WORK_DISK_IMAGE: &str = "work.img";
 const SHUTDOWN_ABORT_WAIT: Duration = Duration::from_secs(30);
@@ -205,10 +208,18 @@ pub async fn execute(
 ) -> Result<()> {
     let (cluster, held_address) = cluster_member(cluster, job.context.master_port)?;
     let token = SecretString::new(std::mem::take(&mut job.context.token));
-    let secrets = job_secrets(&job.secrets, credentials, &host.secrets, &host.worker_id)?;
+    let project = parse_project_uuid_from_job_context(&job.context.project)?;
+    let secrets = job_secrets(
+        &job.secrets,
+        &project,
+        credentials,
+        &host.secrets,
+        &host.worker_id,
+    )?;
     let mut run = ExecRun {
         host,
         job,
+        project_uuid: project,
         token,
         secrets,
         updater,
@@ -251,8 +262,51 @@ pub(crate) fn guest_source(
     }
 }
 
+pub(crate) fn parse_project_uuid_from_job_context(project: &str) -> Result<Uuid, BuildError> {
+    Uuid::parse_str(project).map_err(|error| {
+        BuildError::permanent(anyhow!(
+            "job project {project:?} is not a project UUID: {error}"
+        ))
+    })
+}
+
+fn find_mount_config_released_to_project_or_error<'a>(
+    configured: &'a [MountConfig],
+    name: &str,
+    project: &Uuid,
+) -> Result<&'a MountConfig, BuildError> {
+    configured
+        .iter()
+        .find(|mount| mount.name == name && mount.projects.contains(project))
+        .ok_or_else(|| {
+            BuildError::permanent(anyhow!("mount {name} is not configured on this worker"))
+        })
+}
+
+fn check_requested_device_classes_are_configured_and_released_to_project(
+    configured: &[DeviceConfig],
+    requests: &[DeviceRequest],
+    project: &Uuid,
+) -> Result<(), BuildError> {
+    for class in requests.iter().map(|request| &request.name) {
+        let mut entries = configured
+            .iter()
+            .filter(|device| &device.name == class)
+            .peekable();
+        let released =
+            entries.peek().is_some() && entries.all(|device| device.projects.contains(project));
+        if !released {
+            return Err(BuildError::permanent(anyhow!(
+                "this worker does not offer device {class}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn job_secrets(
     names: &[String],
+    project: &Uuid,
     credentials: &JobCredentials,
     worker: &WorkerSecrets,
     worker_id: &str,
@@ -260,7 +314,10 @@ pub(crate) fn job_secrets(
     names
         .iter()
         .map(|name| {
-            let value = match (credentials.secret_value_by_name(name), worker.value(name)) {
+            let value = match (
+                credentials.secret_value_by_name(name),
+                worker.secret_value_if_released_to_project(name, project),
+            ) {
                 (Some(value), None) | (None, Some(value)) => value,
                 (Some(_), Some(_)) => {
                     return Err(BuildError::permanent(anyhow!(
@@ -291,6 +348,16 @@ fn cluster_member(
     let context = cluster_context(&inbox.me, &inbox.roster, master_port)
         .map_err(|e| BuildError::permanent(anyhow!(e)))?;
     Ok((Some(context), Some(address)))
+}
+
+fn classify_mount_and_device_plug_error(error: anyhow::Error) -> BuildError {
+    match error
+        .chain()
+        .any(|cause| cause.is::<GuestSupervisorHostConfigurationError>())
+    {
+        true => BuildError::permanent(error),
+        false => BuildError::transient(error),
+    }
 }
 
 fn guest_boot_failure(error: GuestBootError) -> BuildError {
@@ -662,6 +729,7 @@ async fn drain_until_exit<R: ExecReport>(agent: &mut AgentClient, reporter: &mut
 struct ExecRun<'a> {
     host: &'a ExecHost,
     job: ExecJob,
+    project_uuid: Uuid,
     token: SecretString,
     secrets: Vec<GuestSecret>,
     updater: &'a mut JobUpdater,
@@ -695,6 +763,11 @@ impl ExecRun<'_> {
     }
 
     fn reserve_devices(&self) -> Result<DeviceHold> {
+        check_requested_device_classes_are_configured_and_released_to_project(
+            &self.host.config.devices,
+            &self.job.requirement.devices,
+            &self.project_uuid,
+        )?;
         let requests = device_requests(&self.job.requirement.devices);
         self.host
             .devices
@@ -771,7 +844,7 @@ impl ExecRun<'_> {
                 inbox.channels,
                 inbox.channel_read_totals_watch,
                 mux,
-                guest.dir().to_owned(),
+                gradient_vm::guest_supervisor_directory_path(guest.id()),
             ),
             uploads: GuestUploads::new(
                 guest.dir().join("outputs"),
@@ -783,7 +856,7 @@ impl ExecRun<'_> {
                 Some(marker_file(guest.dir())),
             ),
             kernel_out_of_memory_kill_log_scanner: GuestKernelOutOfMemoryKillLogScanner::new(
-                guest.dir(),
+                &gradient_vm::guest_supervisor_directory_path(guest.id()),
                 guest.state().size.memory_mb,
             ),
         };
@@ -811,22 +884,41 @@ impl ExecRun<'_> {
             agent_version = agent.agent_version(),
             "guest agent ready for the job"
         );
+        require_guest_work_disk_support(agent.version())?;
         self.substitute_program(guest).await?;
-        let disk_mb = self.job.requirement.guest.disk_mb;
-        let work = work_volume(guest.dir(), disk_mb, agent.version());
-        fill_work(&staging, &work, disk_mb).await?;
+        let work_disk_image_path = guest.dir().join(WORK_DISK_IMAGE);
+        fill_work_disk(
+            &staging,
+            &work_disk_image_path,
+            GuestSize::work_disk_size_mb_for_requested_disk_size_mb(
+                self.job.requirement.guest.disk_mb,
+            ),
+        )
+        .await?;
 
         let mounts = self.mounts(guest)?;
         let cid = guest.state().cid;
-        let network = address.map(|lease| lease.network(cid));
+        let network = address
+            .map(|lease| lease.network(cid))
+            .transpose()
+            .map_err(BuildError::transient)?;
+        note_ipv6_network_configuration_not_supported_by_guest_agent_version(
+            &mut *self.updater,
+            agent.version(),
+            network.as_ref(),
+        )
+        .await;
         let plan = PlugPlan {
             units: devices.units(),
             mounts: mounts.clone(),
-            work: work.clone(),
+            work_disk_image_path,
             network: network.clone(),
         };
-        let plugged = guest.plug(&plan).await.map_err(BuildError::transient)?;
-        let run_job = self.run_job(&plugged, &mounts, network, flake_dir, &work);
+        let plugged = guest
+            .plug(&plan)
+            .await
+            .map_err(classify_mount_and_device_plug_error)?;
+        let run_job = self.run_job(&plugged, &mounts, network, flake_dir);
         agent.attach(0).await.map_err(BuildError::transient)?;
         agent.run(run_job).await.map_err(BuildError::transient)?;
         guest
@@ -844,7 +936,7 @@ impl ExecRun<'_> {
         std::fs::create_dir_all(&staging)
             .with_context(|| format!("create {}", staging.display()))
             .map_err(BuildError::transient)?;
-        let source = WorkSource::of(&self.job.context);
+        let source = WorkSource::of(&self.job.context)?;
         checkout_work(&staging, source, &self.nix, credentials, self.updater).await?;
         Ok(staging)
     }
@@ -855,22 +947,12 @@ impl ExecRun<'_> {
             .mounts
             .iter()
             .map(|name| {
-                let mount = self
-                    .host
-                    .config
-                    .mounts
-                    .iter()
-                    .find(|mount| &mount.name == name)
-                    .ok_or_else(|| {
-                        BuildError::permanent(anyhow!(
-                            "mount {name} is not configured on this worker"
-                        ))
-                    })?;
-                let dir = match mount.per_job {
-                    true => mount.path.join(guest.id().to_string()),
-                    false => mount.path.clone(),
-                };
-                Ok((mount.clone(), dir))
+                let mount = find_mount_config_released_to_project_or_error(
+                    &self.host.config.mounts,
+                    name,
+                    &self.project_uuid,
+                )?;
+                Ok((mount.clone(), mount.host_directory_for_guest(guest.id())))
             })
             .collect()
     }
@@ -881,7 +963,6 @@ impl ExecRun<'_> {
         mounts: &[(MountConfig, PathBuf)],
         network: Option<GuestNetwork>,
         flake_dir: String,
-        work: &WorkVolume,
     ) -> RunJob {
         let names: Vec<String> = mounts.iter().map(|(mount, _)| mount.name.clone()).collect();
         let context = context_layers(
@@ -907,14 +988,14 @@ impl ExecRun<'_> {
                 .map(|phase| phase.payload.clone())
                 .unwrap_or_default(),
             secrets: self.secrets.clone(),
-            mounts: guest_mounts(work, mounts),
+            mounts: guest_mounts(mounts),
             groups: plugged.groups.clone(),
             network,
             relays: plugged.relays.clone(),
             usb_bus_ids: plugged.usb_bus_ids.clone(),
             program_pty: self.job.requirement.ssh,
             flake_dir,
-            work_disk: matches!(work, WorkVolume::Disk(_)),
+            work_disk: true,
             wait_for_terminal: self.job.wait_for_terminal,
         }
     }
@@ -935,29 +1016,41 @@ impl ExecRun<'_> {
     }
 }
 
-pub(crate) fn work_volume(guest_dir: &Path, disk_mb: u64, agent_protocol: u16) -> WorkVolume {
-    match disk_mb > 0 && agent_protocol >= GUEST_WORK_DISK_SINCE {
-        true => WorkVolume::Disk(guest_dir.join(WORK_DISK_IMAGE)),
-        false => WorkVolume::Share(guest_dir.join(WORK_MOUNT_TAG)),
+async fn note_ipv6_network_configuration_not_supported_by_guest_agent_version<R: ExecReport>(
+    reporter: &mut R,
+    agent_protocol: u16,
+    network: Option<&GuestNetwork>,
+) {
+    let has_ipv6_configuration =
+        network.is_some_and(|network| network.ipv6_configuration.is_some());
+    if !has_ipv6_configuration || agent_protocol >= GUEST_IPV6_NETWORK_CONFIGURATION_SINCE {
+        return;
+    }
+    let line = format!(
+        "The guest image is too old for IPv6. The protocol of the guest agent in this image is {agent_protocol}. The first protocol with IPv6 support is {GUEST_IPV6_NETWORK_CONFIGURATION_SINCE}. IPv4 is the only option for this job. Rebuild the guest image to provide IPv6 for the job."
+    );
+    if let Err(e) = reporter.note(&line).await {
+        warn!(error = %e, "failed to log that the guest image is too old for IPv6");
     }
 }
 
-async fn fill_work(staging: &Path, work: &WorkVolume, disk_mb: u64) -> Result<(), BuildError> {
-    match work {
-        WorkVolume::Share(dir) => tokio::fs::rename(staging, dir)
-            .await
-            .with_context(|| format!("move the checkout to {}", dir.display()))
-            .map_err(BuildError::transient),
-        WorkVolume::Disk(image) => {
-            build_work_disk(staging, image, disk_mb)
-                .await
-                .map_err(work_disk_failure)?;
-            tokio::fs::remove_dir_all(staging)
-                .await
-                .with_context(|| format!("remove {}", staging.display()))
-                .map_err(BuildError::transient)
-        }
+fn require_guest_work_disk_support(agent_protocol: u16) -> Result<(), BuildError> {
+    if agent_protocol >= GUEST_WORK_DISK_SINCE {
+        return Ok(());
     }
+    Err(BuildError::permanent(anyhow!(
+        "The protocol of the guest agent is {agent_protocol}. Exec jobs require at least protocol {GUEST_WORK_DISK_SINCE} for the work disk. Update the guest image."
+    )))
+}
+
+async fn fill_work_disk(staging: &Path, image: &Path, disk_mb: u64) -> Result<(), BuildError> {
+    build_work_disk(staging, image, disk_mb)
+        .await
+        .map_err(work_disk_failure)?;
+    tokio::fs::remove_dir_all(staging)
+        .await
+        .with_context(|| format!("remove {}", staging.display()))
+        .map_err(BuildError::transient)
 }
 
 fn work_disk_failure(error: WorkDiskError) -> BuildError {
@@ -967,18 +1060,15 @@ fn work_disk_failure(error: WorkDiskError) -> BuildError {
     }
 }
 
-fn guest_mounts(work: &WorkVolume, mounts: &[(MountConfig, PathBuf)]) -> Vec<GuestMount> {
-    let share = matches!(work, WorkVolume::Share(_)).then(|| GuestMount {
-        tag: WORK_MOUNT_TAG.to_owned(),
-        path: "/work".to_owned(),
-        read_only: false,
-    });
-    let configured = mounts.iter().map(|(mount, _)| GuestMount {
-        tag: mount.name.clone(),
-        path: format!("/mnt/{}", mount.name),
-        read_only: mount.read_only,
-    });
-    share.into_iter().chain(configured).collect()
+fn guest_mounts(mounts: &[(MountConfig, PathBuf)]) -> Vec<GuestMount> {
+    mounts
+        .iter()
+        .map(|(mount, _)| GuestMount {
+            tag: mount.name.clone(),
+            path: format!("/mnt/{}", mount.name),
+            read_only: mount.read_only,
+        })
+        .collect()
 }
 
 fn flake_dir_of(repository: &str) -> Result<String, BuildError> {
@@ -1014,8 +1104,9 @@ pub fn unix_now() -> u64 {
 mod tests {
     use gradient_vm::ReadyAgent;
     use gradient_wire::guest::{
-        AgentToWorker, GUEST_CHANNELS_AGENT_SINCE, GuestConnection, WorkerToAgent,
+        AgentToWorker, GUEST_CHANNELS_AGENT_SINCE, GuestConnection, GuestNetworkIpv6, WorkerToAgent,
     };
+    use gradient_wire::host_resource_project_access::WorkerResourceProjectAccess;
     use gradient_wire::messages::{BuildFailureKind, CredentialKind, GuestChannelKind};
     use tokio::net::UnixStream;
     use tokio::sync::{mpsc, watch};
@@ -1533,14 +1624,19 @@ mod tests {
             },
             value.into(),
         );
-        store.take_credentials_for_job("exec:1")
+        store.take_credentials_for_job("exec:1", None, Vec::new(), Vec::new())
     }
 
-    fn worker_sops() -> std::sync::Arc<WorkerSecrets> {
+    fn worker_sops(
+        released_to_project_names: WorkerResourceProjectAccess,
+    ) -> std::sync::Arc<WorkerSecrets> {
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../gradient-sops/tests/fixtures");
         WorkerSecrets::open(
-            &[fixtures.join("worker.yaml")],
+            &[gradient_vm::SopsSecretFileEntry {
+                path: fixtures.join("worker.yaml"),
+                projects: released_to_project_names,
+            }],
             Some(&fixtures.join("ed25519")),
         )
         .unwrap()
@@ -1555,8 +1651,9 @@ mod tests {
         let credentials = credential("wandb-token", b"s3cr3t-value");
         let secrets = job_secrets(
             &names(&["lab-key", "wandb-token"]),
+            &Uuid::now_v7(),
             &credentials,
-            &worker_sops(),
+            &worker_sops(WorkerResourceProjectAccess::EveryProject),
             "worker-7",
         )
         .unwrap();
@@ -1581,8 +1678,9 @@ mod tests {
         let credentials = credential("lab-key", b"other-value");
         let error = job_secrets(
             &names(&["lab-key"]),
+            &Uuid::now_v7(),
             &credentials,
-            &worker_sops(),
+            &worker_sops(WorkerResourceProjectAccess::EveryProject),
             "worker-7",
         )
         .unwrap_err();
@@ -1598,8 +1696,9 @@ mod tests {
     fn a_missing_secret_names_itself() {
         let error = job_secrets(
             &names(&["hf-token"]),
+            &Uuid::now_v7(),
             &JobCredentials::default(),
-            &worker_sops(),
+            &worker_sops(WorkerResourceProjectAccess::EveryProject),
             "worker-7",
         )
         .unwrap_err();
@@ -1608,6 +1707,172 @@ mod tests {
         assert_eq!(
             error.to_string(),
             r#"secret "hf-token" not available on this worker"#
+        );
+    }
+
+    #[test]
+    fn worker_secret_released_to_one_project_is_not_available_to_job_of_other_project() {
+        let released_to_project_uuid = Uuid::now_v7();
+        let project_uuid_without_worker_secret_access = Uuid::now_v7();
+        let worker = worker_sops(WorkerResourceProjectAccess::OnlyProjects(
+            [released_to_project_uuid].into(),
+        ));
+
+        let error = job_secrets(
+            &names(&["lab-key"]),
+            &project_uuid_without_worker_secret_access,
+            &JobCredentials::default(),
+            &worker,
+            "worker-7",
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, BuildFailureKind::Permanent);
+        assert_eq!(
+            error.to_string(),
+            r#"secret "lab-key" not available on this worker"#
+        );
+
+        let secrets = job_secrets(
+            &names(&["lab-key"]),
+            &released_to_project_uuid,
+            &JobCredentials::default(),
+            &worker,
+            "worker-7",
+        )
+        .unwrap();
+        assert_eq!(secrets[0].value, b"lab-value-123".to_vec().into());
+    }
+
+    #[test]
+    fn worker_secret_released_to_all_projects_is_given_to_job_of_any_project() {
+        let worker = worker_sops(WorkerResourceProjectAccess::EveryProject);
+        for _ in 0..3 {
+            let secrets = job_secrets(
+                &names(&["lab-key"]),
+                &Uuid::now_v7(),
+                &JobCredentials::default(),
+                &worker,
+                "worker-7",
+            )
+            .unwrap();
+            assert_eq!(secrets[0].value, b"lab-value-123".to_vec().into());
+        }
+    }
+
+    fn worker_mount_configs_with_scratch_released_to_project(project: Uuid) -> Vec<MountConfig> {
+        vec![MountConfig {
+            name: "scratch".to_owned(),
+            path: "/srv/scratch".into(),
+            projects: WorkerResourceProjectAccess::OnlyProjects([project].into()),
+            read_only: false,
+            per_job: false,
+        }]
+    }
+
+    fn worker_device_configs_with_project_released_device_class(
+        project: Uuid,
+    ) -> Vec<DeviceConfig> {
+        vec![DeviceConfig {
+            name: "gpu".to_owned(),
+            projects: WorkerResourceProjectAccess::OnlyProjects([project].into()),
+            vfio: Vec::new(),
+            dev: Some("/dev/dri/renderD128".into()),
+            usb: None,
+        }]
+    }
+
+    #[test]
+    fn mount_released_to_other_project_is_refused_like_unknown_mount_and_found_for_owner() {
+        let released_to_project_uuid = Uuid::now_v7();
+        let project_uuid_without_worker_secret_access = Uuid::now_v7();
+        let mounts =
+            worker_mount_configs_with_scratch_released_to_project(released_to_project_uuid);
+
+        let refused = find_mount_config_released_to_project_or_error(
+            &mounts,
+            "scratch",
+            &project_uuid_without_worker_secret_access,
+        )
+        .unwrap_err();
+        let unknown = find_mount_config_released_to_project_or_error(
+            &mounts,
+            "other",
+            &released_to_project_uuid,
+        )
+        .unwrap_err();
+        assert_eq!(refused.kind, BuildFailureKind::Permanent);
+        assert_eq!(
+            refused.to_string(),
+            "mount scratch is not configured on this worker"
+        );
+        assert_eq!(unknown.kind, BuildFailureKind::Permanent);
+        assert_eq!(
+            unknown.to_string(),
+            "mount other is not configured on this worker"
+        );
+
+        let found = find_mount_config_released_to_project_or_error(
+            &mounts,
+            "scratch",
+            &released_to_project_uuid,
+        )
+        .unwrap();
+        assert_eq!(found.name, "scratch");
+    }
+
+    #[test]
+    fn device_class_released_only_to_project_p1_is_refused_for_project_p2_job_and_accepted_for_project_p1_job()
+     {
+        let released_to_project_uuid = Uuid::now_v7();
+        let project_uuid_without_worker_secret_access = Uuid::now_v7();
+        let devices =
+            worker_device_configs_with_project_released_device_class(released_to_project_uuid);
+        let request = |name: &str| {
+            vec![DeviceRequest {
+                name: name.to_owned(),
+                count: 1,
+            }]
+        };
+
+        let refused = check_requested_device_classes_are_configured_and_released_to_project(
+            &devices,
+            &request("gpu"),
+            &project_uuid_without_worker_secret_access,
+        )
+        .unwrap_err();
+        let unknown = check_requested_device_classes_are_configured_and_released_to_project(
+            &devices,
+            &request("tpu"),
+            &released_to_project_uuid,
+        )
+        .unwrap_err();
+        assert_eq!(refused.kind, BuildFailureKind::Permanent);
+        assert_eq!(refused.to_string(), "this worker does not offer device gpu");
+        assert_eq!(unknown.kind, BuildFailureKind::Permanent);
+        assert_eq!(unknown.to_string(), "this worker does not offer device tpu");
+
+        check_requested_device_classes_are_configured_and_released_to_project(
+            &devices,
+            &request("gpu"),
+            &released_to_project_uuid,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_exec_job_project_that_is_not_uuid_is_permanent_build_error() {
+        let error = parse_project_uuid_from_job_context("not-a-project").unwrap_err();
+        assert_eq!(error.kind, BuildFailureKind::Permanent);
+        assert!(
+            error
+                .to_string()
+                .starts_with(r#"job project "not-a-project" is not a project UUID"#),
+            "{error}"
+        );
+        let project = Uuid::now_v7();
+        assert_eq!(
+            parse_project_uuid_from_job_context(&project.to_string()).unwrap(),
+            project
         );
     }
 
@@ -1744,24 +2009,84 @@ mod tests {
     }
 
     #[test]
-    fn an_old_agent_keeps_the_work_share() {
-        let dir = Path::new("/var/lib/gradient-worker/guests/g1");
-        let work_share = |work: &WorkVolume| {
-            guest_mounts(work, &[])
-                .iter()
-                .any(|mount| mount.tag == WORK_MOUNT_TAG && mount.path == "/work")
+    fn plug_error_with_permanent_supervisor_refusal_becomes_permanent_build_error_and_other_plug_error_becomes_transient()
+     {
+        let permanent_supervisor_configuration_refusal_build_error =
+            classify_mount_and_device_plug_error(
+                anyhow::Error::new(GuestSupervisorHostConfigurationError(String::new()))
+                    .context("plug"),
+            );
+        assert_eq!(
+            permanent_supervisor_configuration_refusal_build_error.kind,
+            BuildFailureKind::Permanent
+        );
+        assert_eq!(
+            classify_mount_and_device_plug_error(anyhow!("plug")).kind,
+            BuildFailureKind::Transient
+        );
+    }
+
+    #[test]
+    fn test_guest_agent_protocol_version_older_than_guest_work_disk_since_is_refused_with_permanent_error_and_current_version_is_accepted()
+     {
+        let refused = require_guest_work_disk_support(GUEST_WORK_DISK_SINCE - 1).unwrap_err();
+        assert_eq!(refused.kind, BuildFailureKind::Permanent);
+        assert!(refused.to_string().contains("Update the guest image."));
+        assert!(require_guest_work_disk_support(GUEST_WORK_DISK_SINCE).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_guest_protocol_version_10_with_ipv6_network_logs_guest_image_too_old_for_ipv6_once_and_version_11_network_without_ipv6_configuration_and_no_network_log_nothing()
+     {
+        let build_guest_network_message_with_optional_ipv6 = |ipv6_configuration| GuestNetwork {
+            address: "10.233.0.2".into(),
+            prefix: 16,
+            gateway: "10.233.0.1".into(),
+            nameservers: Vec::new(),
+            mac: "02:47:52:00:00:02".into(),
+            ipv6_configuration,
         };
-
-        let old = work_volume(dir, 10_240, GUEST_WORK_DISK_SINCE - 1);
-        assert_eq!(old, WorkVolume::Share(dir.join("work")));
-        assert!(work_share(&old));
-
-        let current = work_volume(dir, 10_240, GUEST_WORK_DISK_SINCE);
-        assert_eq!(current, WorkVolume::Disk(dir.join("work.img")));
-        assert!(!work_share(&current));
-
-        let unsized_job = work_volume(dir, 0, GUEST_WORK_DISK_SINCE);
-        assert_eq!(unsized_job, WorkVolume::Share(dir.join("work")));
+        let with_ipv6 = build_guest_network_message_with_optional_ipv6(Some(GuestNetworkIpv6 {
+            address: "fd00:ec2:6::2".into(),
+            prefix: 64,
+            gateway: "fd00:ec2:6::1".into(),
+        }));
+        let without_ipv6 = build_guest_network_message_with_optional_ipv6(None);
+        let cases = [
+            (
+                GUEST_IPV6_NETWORK_CONFIGURATION_SINCE - 1,
+                Some(&with_ipv6),
+                1,
+            ),
+            (GUEST_IPV6_NETWORK_CONFIGURATION_SINCE, Some(&with_ipv6), 0),
+            (
+                GUEST_IPV6_NETWORK_CONFIGURATION_SINCE - 1,
+                Some(&without_ipv6),
+                0,
+            ),
+            (GUEST_IPV6_NETWORK_CONFIGURATION_SINCE - 1, None, 0),
+        ];
+        for (agent_protocol, network, expected) in cases {
+            let mut reporter = Recorder::default();
+            note_ipv6_network_configuration_not_supported_by_guest_agent_version(
+                &mut reporter,
+                agent_protocol,
+                network,
+            )
+            .await;
+            let recorded_notes: Vec<&String> = reporter
+                .0
+                .iter()
+                .filter_map(|reported| match reported {
+                    Reported::Note(line) => Some(line),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(recorded_notes.len(), expected, "protocol {agent_protocol}");
+            assert!(recorded_notes.iter().all(|line| {
+                line.contains("too old for IPv6") && line.contains("Rebuild the guest image")
+            }));
+        }
     }
 
     #[test]

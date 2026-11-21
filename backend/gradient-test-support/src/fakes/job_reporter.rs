@@ -8,7 +8,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
-    BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
+    BuildMetrics, BuildOutput, BumpedInputWire, CachedPath, DiscoveredDerivation, EvalMessageLevel,
+    FlakeInputSourceWire, QueryMode,
 };
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{EvalProgress, ImportOutcome, InputOutcome, Realisation};
@@ -62,6 +63,13 @@ pub enum ReportedEvent {
         message: String,
     },
     EvalProgress(EvalProgress),
+    InputUpdateReported {
+        candidate_lock: String,
+        bumped: Vec<BumpedInputWire>,
+    },
+    InputSourcesReported {
+        sources: Vec<FlakeInputSourceWire>,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -359,6 +367,23 @@ impl JobReporter for RecordingJobReporter {
             metrics,
             substituted,
         });
+        Ok(())
+    }
+
+    async fn report_input_update(
+        &mut self,
+        candidate_lock: String,
+        bumped: Vec<BumpedInputWire>,
+    ) -> Result<()> {
+        self.record(ReportedEvent::InputUpdateReported {
+            candidate_lock,
+            bumped,
+        });
+        Ok(())
+    }
+
+    async fn report_input_sources(&mut self, sources: Vec<FlakeInputSourceWire>) -> Result<()> {
+        self.record(ReportedEvent::InputSourcesReported { sources });
         Ok(())
     }
 

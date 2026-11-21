@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::extractors::Path;
@@ -359,7 +360,14 @@ pub async fn get_exec_job(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<ExecJobResponse>>> {
-    let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let outputs_size = outputs::of_job(&state.web_db, ctx.detail.job.id)
         .await?
         .iter()
@@ -405,8 +413,14 @@ pub async fn list_evaluation_exec_jobs(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<ExecJobSummary>>>> {
-    let ctx =
-        EvalAccessContext::load(&state.web_db, evaluation, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let rows = reads::of_evaluation(&state.web_db, ctx.evaluation.id).await?;
     let jobs: Vec<DispatchedJobId> = rows.iter().filter_map(|r| r.last_dispatched_job).collect();
     let clusters = clusters_of_assignments(&state.web_db, &jobs).await?;

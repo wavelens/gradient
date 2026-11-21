@@ -15,7 +15,7 @@ use super::{
     A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, Case, X, X_OUT, Y, Y_OUT, drv, drv_nar, nar,
     narinfo, with_attr, with_output, with_references,
 };
-use crate::messages::{Demotion, GcRequest, NarCommit, Transition};
+use crate::messages::{GcRequest, NarCommit, Transition};
 
 async fn statuses(case: &Case, paths: &[&str]) -> Vec<BuildStatus> {
     let mut statuses = Vec::new();
@@ -46,8 +46,10 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
             .keyed(Case::key()),
     )
     .await;
-    let (caches_of_e1, caches_of_e2) =
-        (case.project_caches(e1).await, case.project_caches(e2).await);
+    let (caches_of_e1, caches_of_e2) = (
+        case.make_worker_producer_for_evaluation_project(e1).await,
+        case.make_worker_producer_for_evaluation_project(e2).await,
+    );
     let x_above_a = || with_attr(with_output(drv(X, &[A]), X_OUT), "pkg.x");
 
     let chain_below_x = vec![
@@ -86,7 +88,7 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
 
     for path in [X, A, B] {
         case.commit_nar(NarCommit {
-            targets: caches_of_e1,
+            producer: caches_of_e1.clone(),
             ..drv_nar(path)
         })
         .await;
@@ -137,7 +139,7 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
         .await;
     case.upstream_probed(&[Y]).await;
     case.commit_nar(NarCommit {
-        targets: caches_of_e2,
+        producer: caches_of_e2.clone(),
         ..drv_nar(Y)
     })
     .await;
@@ -158,8 +160,11 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     assert_eq!(counters, [4, 4, 0, 1, 1], "after 6: counters(E2)");
     case.zero_drift("step 6").await;
 
+    let producer_of_b_in_both_evaluations = case
+        .make_worker_producer_for_evaluation_projects(&[e1, e2])
+        .await;
     case.commit_nar(NarCommit {
-        targets: caches_of_e1,
+        producer: producer_of_b_in_both_evaluations,
         ..with_references(nar(B_OUT, "b"), &[(B_OUT, "b")])
     })
     .await;
@@ -229,7 +234,7 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
 
     case.build_started(A).await;
     case.commit_nar(NarCommit {
-        targets: caches_of_e2,
+        producer: caches_of_e2.clone(),
         ..with_references(nar(A_OUT, "a"), &[(A_OUT, "a"), (B_OUT, "b")])
     })
     .await;
@@ -242,14 +247,14 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
 
     case.build_started(X).await;
     case.commit_nar(NarCommit {
-        targets: caches_of_e2,
+        producer: caches_of_e2.clone(),
         ..with_references(nar(X_OUT, "x"), &[(X_OUT, "x"), (A_OUT, "a")])
     })
     .await;
     case.build_completed(X).await;
     case.build_started(Y).await;
     case.commit_nar(NarCommit {
-        targets: caches_of_e2,
+        producer: caches_of_e2.clone(),
         ..with_references(nar(Y_OUT, "y"), &[(Y_OUT, "y")])
     })
     .await;
@@ -388,7 +393,8 @@ async fn l02_passthrough_life_hit_miss_miss_real_build_verdict_retire_rebuild_as
     case.zero_drift("step 5").await;
 
     case.build_started(A).await;
-    case.commit_nar(with_references(nar(A_OUT, "a"), &[(A_OUT, "a")]))
+    let a_out_nar_commit_result = case
+        .commit_nar(with_references(nar(A_OUT, "a"), &[(A_OUT, "a")]))
         .await;
     case.build_completed(A).await;
 
@@ -407,7 +413,13 @@ async fn l02_passthrough_life_hit_miss_miss_real_build_verdict_retire_rebuild_as
     let frozen = case.counters(e1).await;
     case.zero_drift("step 6").await;
 
-    case.demote(Demotion::MissingNar { hash: A_OUT.into() })
+    case.ctx
+        .storage
+        .nar_storage
+        .delete(&a_out_nar_commit_result.nar_object_storage_key)
+        .await
+        .expect("The NAR object is gone");
+    case.report_missing_nar_of_every_content_variant(A_OUT)
         .await;
 
     let a = case.sb(A).await;

@@ -4,12 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::api_key::{ApiKeyContext, DecodedRequest};
+use super::api_key::{ApiKeyContext, DecodedRequest, JobTokenTaskAndExecJobIds};
 use super::job_scope::job_mask;
+use super::middleware::credential_insert_error_to_http_error;
+use crate::error::WebError;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use chrono::{Duration, Utc};
 use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
+use gradient_db::users::{
+    InsertWithAuthorisingSessionError, VerifiedFactForSessionOrCredentialCreation,
+    insert_credential_after_locking_user_row_and_rechecking_authorisation,
+};
 use gradient_types::exec::{JOB_TOKEN_PREFIX, hash_job_token};
 use gradient_types::*;
 use gradient_util::debounce::Debounce;
@@ -125,11 +131,12 @@ fn sign_session_jwt(jwt_secret: &SecretString, session: &MSession) -> Result<Str
     sign_claims(jwt_secret, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub async fn create_session_and_token<C: sea_orm::ConnectionTrait>(
+pub(crate) async fn create_session_and_token<C: sea_orm::ConnectionTrait>(
     db: &C,
     jwt_secret: &SecretString,
     user_id: UserId,
     remember_me: bool,
+    is_cli_device_sign_in_session: bool,
     user_agent: Option<String>,
     ip: Option<String>,
 ) -> Result<(SessionId, String), StatusCode> {
@@ -138,11 +145,15 @@ pub async fn create_session_and_token<C: sea_orm::ConnectionTrait>(
         id: SessionId::now_v7(),
         user_id,
         created_at: now,
-        expires_at: now + MSession::sign_in_session_valid_duration(remember_me),
+        expires_at: now
+            + MSession::sign_in_session_valid_duration(remember_me).min(
+                MSession::maximum_total_session_age(is_cli_device_sign_in_session),
+            ),
         last_used_at: now,
         user_agent,
         ip,
         remember_me,
+        is_cli_device_sign_in_session,
         ..Default::default()
     };
 
@@ -153,6 +164,46 @@ pub async fn create_session_and_token<C: sea_orm::ConnectionTrait>(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((session_id, token))
+}
+
+pub async fn create_session_and_token_with_locked_authorization_recheck(
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    user_id: UserId,
+    fact: VerifiedFactForSessionOrCredentialCreation,
+    remember_me: bool,
+    is_cli_device_sign_in_session: bool,
+    request: &crate::audit::RequestInfo,
+) -> Result<(SessionId, String), WebError> {
+    let jwt_secret = jwt_secret.clone();
+    let user_agent = request.user_agent.clone();
+    let ip = request.ip.clone();
+    insert_credential_after_locking_user_row_and_rechecking_authorisation(
+        db.inner(),
+        user_id,
+        fact,
+        |tx| {
+            Box::pin(async move {
+                create_session_and_token(
+                    tx,
+                    &jwt_secret,
+                    user_id,
+                    remember_me,
+                    is_cli_device_sign_in_session,
+                    user_agent,
+                    ip,
+                )
+                .await
+            })
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        InsertWithAuthorisingSessionError::AuthorisationNoLongerHoldsUnderUserRowLock => {
+            WebError::invalid_credentials()
+        }
+        e => credential_insert_error_to_http_error(e, |_| WebError::failed_to_generate_token()),
+    })
 }
 
 pub(super) async fn extend_session_and_return_set_cookie_if_due(
@@ -247,6 +298,7 @@ async fn decode_api_key(
         project: api_key.project,
         cache_pin: api_key.cache,
         allowed_ips: api_key.allowed_ips.clone().unwrap_or_default(),
+        job_binding: None,
     };
 
     let user_id = api_key.owned_by;
@@ -278,6 +330,10 @@ async fn decode_job_token(db: &WebDb, raw: &str) -> Result<DecodedRequest, Statu
         project: Some(job.project),
         cache_pin: None,
         allowed_ips: Vec::new(),
+        job_binding: Some(JobTokenTaskAndExecJobIds {
+            task: job.task,
+            exec_job: job.job,
+        }),
     };
 
     Ok(DecodedRequest::Job {

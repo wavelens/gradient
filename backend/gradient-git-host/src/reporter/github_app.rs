@@ -7,20 +7,22 @@
 use super::github;
 use super::{
     CiReport, CiReporter, CiStatus, PullRequestSnapshot, ReactionKind, ReactionTarget,
-    RequestedAction, validate_safe_outbound_url,
+    RequestedAction, parse_user_git_host_base_url_and_check_allowlist,
 };
-use crate::client::{GITHUB_API_URL, HostClient};
+use crate::client::{HostClient, validated_public_github_api_base_url};
 use crate::pr::{BranchCommit, PrRef};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
+use gradient_util::http_base_url::ValidatedHttpBaseUrl;
 use serde::{Deserialize, Serialize};
 
 pub struct GithubAppReporter {
-    api_base_url: String,
+    api_base_url: ValidatedHttpBaseUrl,
     app_id: u64,
     private_key_pem: String,
     installation_id: i64,
-    http: reqwest::Client,
+    http: HttpClientForUserSuppliedUrls,
 }
 
 impl std::fmt::Debug for GithubAppReporter {
@@ -34,10 +36,8 @@ impl std::fmt::Debug for GithubAppReporter {
 }
 
 impl GithubAppReporter {
-    const DEFAULT_API_URL: &'static str = GITHUB_API_URL;
-
     pub fn new(
-        client: reqwest::Client,
+        client: HttpClientForUserSuppliedUrls,
         api_base_url: impl Into<String>,
         app_id: u64,
         private_key_pem: impl Into<String>,
@@ -45,11 +45,10 @@ impl GithubAppReporter {
     ) -> Result<Self> {
         let raw = api_base_url.into();
         let api_base_url = if raw.is_empty() {
-            Self::DEFAULT_API_URL.to_string()
+            validated_public_github_api_base_url()
         } else {
-            validate_safe_outbound_url(&raw)
-                .map_err(|e| anyhow::anyhow!("Rejected GitHub App api_base_url: {}", e))?;
-            raw.trim_end_matches('/').to_string()
+            parse_user_git_host_base_url_and_check_allowlist(&client, &raw)
+                .map_err(|e| anyhow::anyhow!("Rejected GitHub App api_base_url: {}", e))?
         };
 
         Ok(Self {
@@ -73,7 +72,7 @@ impl GithubAppReporter {
 
         Ok(HostClient::github(
             self.http.clone(),
-            self.api_base_url.as_str(),
+            self.api_base_url.clone(),
             token,
         ))
     }
@@ -287,6 +286,6 @@ mod tests {
     #[test]
     fn github_app_reporter_empty_url_still_uses_default() {
         let r = GithubAppReporter::new(test_client(), "", 1, "pem", 1).unwrap();
-        assert_eq!(r.api_base_url, GithubAppReporter::DEFAULT_API_URL);
+        assert_eq!(r.api_base_url.as_str(), crate::client::GITHUB_API_URL);
     }
 }

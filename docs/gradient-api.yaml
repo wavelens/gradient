@@ -289,7 +289,7 @@ paths:
       tags:
       - admin
       summary: Update instance git host connection
-      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.
+      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Changes to the scheme, host, or port of `base_url` remove the stored access token, its refresh token, its expiry, and the webhook secret. Changes to `git_host_type` remove those values too. Requests store `access_token` or `secret` that they carry. Connections that receive events and have no new `secret` get a new webhook secret. Responses show that secret once in `generated_secret`. Requests for GitHub App connections and for connections that declarative state manages fail.
       operationId: patchInstanceGitHostConnection
       parameters:
       - name: id
@@ -352,6 +352,114 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/admin/git-host-connections/{id}/repository-grants:
+    get:
+      tags:
+      - admin
+      summary: List repository grants of an instance git host connection
+      description: List the repositories where each project can use this instance connection. Grants without `repository_name` apply to all repositories in `repository_owner`.
+      operationId: listInstanceGitHostConnectionRepositoryGrants
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Repository Grants
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RepositoryGrantResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - admin
+      summary: Create repository grant for an instance git host connection
+      description: Let tasks of `project` use this instance connection on repository `repository_owner/repository_name`. Omit `repository_name` to grant all repositories of the owner. Both parts stay lowercase in Gradient. Existing grants give a 409 response.
+      operationId: createInstanceGitHostConnectionRepositoryGrant
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRepositoryGrantRequest'
+        required: true
+      responses:
+        '200':
+          description: Created the repository grant.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/RepositoryGrantResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/admin/git-host-connections/{id}/repository-grants/{grant}:
+    delete:
+      tags:
+      - admin
+      summary: Delete repository grant of an instance git host connection
+      description: Remove the repository permission. Project tasks can no longer use the connection to that repository.
+      operationId: deleteInstanceGitHostConnectionRepositoryGrant
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      - name: grant
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionRepositoryGrantId'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: boolean
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -1240,10 +1348,7 @@ paths:
       tags:
       - auth
       summary: Authorize a pending CLI device session
-      description: |-
-        Marks the device authorization identified by `user_code` as approved, minting a JWT
-        session token (remember_me=true, 30-day lifetime) bound to the calling user. The
-        token is returned to the CLI on its next `/auth/cli/poll` request.
+      description: Mark `user_code` as a device authorization that the calling browser session approved. No session and no token come back from this call. CLI clients receive their session on the next `/auth/cli/poll` request if the browser session that approved the authorization is still valid at that point.
       operationId: cliDeviceAuthorize
       requestBody:
         content:
@@ -1306,7 +1411,7 @@ paths:
       tags:
       - auth
       summary: Look up a pending CLI device authorization
-      description: Returns metadata about a pending `user_code` so the browser-side UI can confirm what it authorizes.
+      description: Return details of the pending `user_code` for the browser page to show. The details also cover whether the CLI that started the code and the browser sit on the same network (same IPv4 address or same IPv6 /64 prefix).
       operationId: cliDeviceInfo
       parameters:
       - name: user_code
@@ -1338,11 +1443,7 @@ paths:
       tags:
       - auth
       summary: Poll a pending CLI device authorization
-      description: |-
-        Exchanges a `device_code` for a session token once the browser-side flow has been
-        approved. Returns `cli_auth_pending` while the user hasn't yet clicked Authorize,
-        `cli_auth_denied` if they explicitly denied, and `cli_auth_expired` once the device
-        code lifetime elapses.
+      description: Exchange `device_code` for a session token after user approval of the sign-in in the browser. Create a CLI sign-in session (max 30 days) on the first successful poll and delete the device authorization. Later polls get nothing. Return `cli_auth_pending` before the Authorize click. Return `cli_auth_denied` on denial. Return `cli_auth_expired` after expiry of the device code or invalidation of the browser session that approved the sign-in.
       operationId: cliDevicePoll
       requestBody:
         content:
@@ -1373,11 +1474,7 @@ paths:
       tags:
       - auth
       summary: Start a CLI device-authorization flow
-      description: |-
-        Mints a `device_code` (returned once, opaque to the server thereafter) and a short,
-        human-friendly `user_code` that the CLI shows in the terminal and the user confirms
-        in the browser at `verification_uri_complete`. The CLI polls `/auth/cli/poll` until
-        the browser-side flow completes.
+      description: Create a `device_code` that the server returns once and treats as opaque, plus a short `user_code` that the CLI shows in the terminal. The user can open `verification_uri` in a browser and enter `user_code` there. The CLI polls `/auth/cli/poll` until approval or denial in the browser.
       operationId: cliDeviceStart
       responses:
         '200':
@@ -1627,7 +1724,7 @@ paths:
       tags:
       - auth
       summary: Renew session
-      description: Extend the expiry of the caller session to 24 hours from now. Use 30 days for a `remember_me` session instead. Send back a new signed JWT for that session. Previous tokens keep working until their own expiry. Bearer clients such as the CLI call this endpoint to stay signed in while they work. Browser cookies refresh automatically.
+      description: Extend the expiry of the caller session to 24 hours from now. Use 30 days for a `remember_me` session instead. Send back a new signed JWT for that session. Previous tokens keep working until their own expiry. Bearer clients such as the CLI call this endpoint to stay signed in while they work. Browser cookies refresh automatically. Renewal never extends a session past its hard deadline of 30 days after browser sign-in of the CLI, or 90 days for other sessions. Sign in again after that.
       operationId: renewSession
       responses:
         '200':
@@ -3642,7 +3739,7 @@ paths:
       tags:
       - caches
       summary: Create cache
-      description: Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches. `owner_team` can place the cache in a team with the caller as a member.
+      description: Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches. `owner_team` can place a cache in a team where the caller is an Admin.
       operationId: createCache
       requestBody:
         content:
@@ -3796,7 +3893,7 @@ paths:
       tags:
       - caches
       summary: Update cache
-      description: Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API. `manageCacheMembers` and membership in the new team are also necessary for a change to `owner_team`.
+      description: Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API. Changes to `owner_team` also need `manageCacheMembers` and Admin of the new team.
       operationId: patchCache
       parameters:
       - name: cache
@@ -4143,6 +4240,8 @@ paths:
         A user doesn't become a member until acceptance. The response message is `Invitation sent`. Pending rows appear under `GET /caches/{cache}/invitations`. Invitations expire after 7 days.
 
         Use `add_as_member_immediately` to add a member directly. The response message is `User added`. Administrators of the instance can always do this. Other callers can do this for users in the owner team. These callers can also do this for users who already have cache access through team grants.
+
+        A role can include only permissions that belong to the caller.
       operationId: addCacheMember
       parameters:
       - name: cache
@@ -4182,6 +4281,7 @@ paths:
       description: |-
         Removes a user from the cache. Requires `manageCacheMembers`. The last
         Admin cannot be removed (`409`).
+        Callers need all permissions of the member role.
       operationId: removeCacheMember
       parameters:
       - name: cache
@@ -4218,7 +4318,9 @@ paths:
       tags:
       - caches
       summary: Update cache member role
-      description: Changes the role of an existing cache member. Requires `manageCacheMembers`.
+      description: |-
+        Changes the role of an existing cache member. Requires `manageCacheMembers`.
+        Role changes require the caller to have every permission of both the current role and the new role.
       operationId: patchCacheMember
       parameters:
       - name: cache
@@ -4849,6 +4951,7 @@ paths:
         Creates a new role scoped to this cache. Requires `manageCacheRoles`.
         The role's permission set is chosen from the capabilities returned by
         `GET /caches/{cache}/roles` -> `available_permissions`.
+        A role can include only permissions that belong to the caller.
       operationId: createCacheRole
       parameters:
       - name: cache
@@ -4925,6 +5028,7 @@ paths:
         Deletes a custom cache role. Built-in roles cannot be deleted (`403`).
         A role still assigned to members cannot be deleted until those members
         are reassigned (`400`). Requires `manageCacheRoles`.
+        Callers need every permission of the role.
       operationId: deleteCacheRole
       parameters:
       - name: cache
@@ -4963,6 +5067,7 @@ paths:
       description: |-
         Renames a custom role and/or replaces its permission set. Built-in roles
         (Admin/Write/View) are immutable (`403`). Requires `manageCacheRoles`.
+        Role changes require the caller to have every permission of both the current role and the new role.
       operationId: patchCacheRole
       parameters:
       - name: cache
@@ -5228,6 +5333,7 @@ paths:
         Needs `manageCacheMembers`.
         A grant is active at once when the caller is Admin in the team (or a superuser).
         Otherwise a request waits for a team Admin and the answer is `Request sent`.
+        The grant role can only inherit the caller's permissions on the cache.
       operationId: grantCacheTeam
       parameters:
       - name: cache
@@ -5268,6 +5374,7 @@ paths:
       description: |-
         Allowed for `manageCacheMembers` on the cache or Admin in the team.
         Without a grant, the pending request is withdrawn instead.
+        Callers without team Admin also need all permissions of the grant role.
       operationId: removeCacheTeam
       parameters:
       - name: cache
@@ -5303,7 +5410,9 @@ paths:
       tags:
       - teams
       summary: Change a cache team grant
-      description: Needs `manageCacheMembers`.
+      description: |-
+        Needs `manageCacheMembers`.
+        Role changes require the caller to have every permission of both the current role and the new role.
       operationId: patchCacheTeam
       parameters:
       - name: cache
@@ -5385,7 +5494,7 @@ paths:
 
         - **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.
         - **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.
-        - **http** - an arbitrary Nix binary cache URL. Always ReadOnly.
+        - **http** - an arbitrary Nix binary cache URL. Always ReadOnly. Supports an optional `credential` (`basic` with `user` and `password`, or `bearer` with `token`) over https:// only. The credential is stored encrypted at rest and is write-only: the API returns only `credential_scheme`. The URL can't contain a username, password or query. Workers never fetch from an upstream cache with a credential. Such an upstream cache serves only this cache's pull-through, build logs and the Test route.
 
         Callers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.
       operationId: addUpstreamCache
@@ -5462,8 +5571,8 @@ paths:
       summary: Update upstream cache
       description: |-
         Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;
-        `url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.
-        `active` toggles any upstream cache. An inactive upstream cache is kept but never queried.
+        `url`, `public_key`, `http1_only` and `credential` may be updated. `credential` takes `basic` (`user`, `password`) or `bearer` (`token`) to set or replace the stored credential, or `none` to remove it. A credential needs an https:// URL. Moving the URL to another scheme, host or port while a credential is stored needs the credential again in the same request, or its removal. For internal upstream caches only `mode` and `display_name` apply.
+        `active` toggles any upstream cache. An inactive upstream cache is kept but never queried. Setting `active` to true checks the stored URL again and refuses a URL with a username, password or query.
         A state-managed cache accepts only `active`, and the next server start restores the declared value.
         Callers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.
       operationId: patchUpstreamCache
@@ -6034,7 +6143,7 @@ paths:
         Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).
         `builds_completed` counts the builds that ran to completion in those projects (substituted builds excluded, a build reused by several evaluations counts once); `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.
         `cpu_time_ms` and `cpu_time_ms_7d` are null if no workers report CPU time (build metrics are off on the worker).
-        `cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); a background pass can recount each size every 15 minutes, or at the interval of the metrics rollup if that interval is longer, and a path held by two caches counts in both.
+        `cache_size_bytes` sums the stored size of each cache the viewer holds a cache role on or reaches through a project membership (all caches for a superuser); a background pass can recount each size every 15 minutes, or at the interval of the metrics rollup if that interval is longer, and a path held by two caches counts in both.
         `workers` cover connected workers in viewable projects. `used_build_slot_count` is the count of build jobs assigned to them. `total_build_slots` is the sum of their `max_concurrent_builds`.
       operationId: getDashboardStats
       responses:
@@ -6828,7 +6937,7 @@ paths:
         - Text frames ``{"type":"resize","cols":120,"rows":40}`` from the viewer in control of input resize the console. Read-only viewers can't resize the console.
         - The last server frame is the text frame `{"type":"closed","exit_code":null,"message":"..."}`, also when the channel is refused after the upgrade.
 
-        `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `TriggerEvaluation` permission on the project.
+        `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `OpenJobTerminal` permission on the project.
       operationId: execJobConsole
       parameters:
       - name: job
@@ -6862,7 +6971,7 @@ paths:
         - Binary frames carry the raw TCP bytes both ways.
         - The last server frame is the text frame `{"type":"closed","exit_code":null,"message":"..."}`, also when the channel is refused after the upgrade.
 
-        TCP connections each need their own WebSocket. Multi-node jobs use `node` to select a node by index (default node 0). Requests need `TriggerEvaluation` permission on the project.
+        TCP connections each need their own WebSocket. Multi-node jobs use `node` to select a node by index (default node 0). Requests need the `OpenJobTerminal` permission on the project.
       operationId: execJobForward
       parameters:
       - name: job
@@ -6896,7 +7005,7 @@ paths:
       tags:
       - exec-jobs
       summary: Keep the VM of an exec job running
-      description: Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.
+      description: Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. The caller needs the `TriggerEvaluation` permission on the project. Answers 409 when the job has already finished.
       operationId: keepExecJobVmRunning
       parameters:
       - name: job
@@ -6927,7 +7036,7 @@ paths:
       tags:
       - exec-jobs
       summary: Let the VM of an exec job stop
-      description: Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.
+      description: Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. The caller needs the `TriggerEvaluation` permission on the project. Answers 409 when the job has already finished.
       operationId: releaseExecJobVm
       parameters:
       - name: job
@@ -7145,7 +7254,7 @@ paths:
       tags:
       - exec-jobs
       summary: Run exec job
-      description: Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.
+      description: Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. The caller needs the `TriggerEvaluation` permission on the project. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.
       operationId: runExecJob
       parameters:
       - name: job
@@ -7185,7 +7294,7 @@ paths:
         - A text frame `{"type":"resize","cols":120,"rows":40}` from the client resizes the terminal.
         - The last server frame is the text frame `{"type":"closed","exit_code":0,"message":null}`, also when the channel is refused after the upgrade.
 
-        Closing an attached terminal leaves the program running. `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `TriggerEvaluation` permission on the project.
+        Closing an attached terminal leaves the program running. `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `OpenJobTerminal` permission on the project.
       operationId: execJobShell
       parameters:
       - name: job
@@ -7217,7 +7326,7 @@ paths:
       tags:
       - git-host-connections
       summary: Gitea or Forgejo OAuth2 Callback
-      description: Redirects from the Git host arrive here. Verify `state` against the `git_host_oauth_connect` cookie first. Exchange the code for a token. Create the connection while the session that started the flow is still valid. Then redirect to the connection page for the project's Git host with `oauth_connected` and `webhooks_installed`, or with the `oauth_error` code.
+      description: Redirects from the Git host arrive here. Verify `state` against the `git_host_oauth_connect` cookie. Then redirect to the connection page of the project with `code` and `state`, where the signed-in page calls `completeGitHostOAuthConnection`. Keep the cookie for that call. This endpoint stores nothing and sends no request to the Git host. The callback response is a redirect to the project page with `oauth_error=expired` for a missing cookie or a different `state`, when only letters, digits, `-` and `_` occur after the first dot in `state`. Otherwise the callback response is a redirect to `/?oauth_error=expired`. A denied approval redirects to the project page with `oauth_error=denied`. A redirect without `code` goes to the project page with `oauth_error=failed`. These three redirects clear the cookie.
       operationId: gitHostOAuthCallback
       parameters:
       - name: code
@@ -7731,7 +7840,7 @@ paths:
       tags:
       - projects
       summary: Create project
-      description: Create a new project for the current user. The response fields list the project UUID, the project name, and the URL of the web page for the project. A signed-in session can call this endpoint. An API key with `createProject` and no project pinning can also call this endpoint. Use the `owner_team` field to name a team with the caller as a member. Place the project in that team. Members of that team receive the default role for members of team projects.
+      description: Create a new project for the current user. The response fields list the project UUID, the project name, and the URL of the web page for the project. A signed-in session can call this endpoint. An API key with `createProject` and no project pinning can also call this endpoint. Use the `owner_team` field to name the team where the caller is Admin. Place the project in that team. Members of that team receive the default role for members of team projects.
       operationId: createProject
       requestBody:
         content:
@@ -7899,7 +8008,7 @@ paths:
       tags:
       - projects
       summary: Update project
-      description: Update one or more fields of a project. The API can't edit managed projects. API calls need an admin role for the project. Changes to `owner_team` also need the `manageMembers` permission. Callers need to be members of the new team.
+      description: Update one or more fields of a project. The API can't edit managed projects. API calls need an admin role for the project. Changes to `owner_team` also need the `manageMembers` permission. Callers need Admin permission in the new team. Callers also need all permissions of the team's default role for members on team projects.
       operationId: patchProject
       parameters:
       - name: project
@@ -7965,7 +8074,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
-      - {}
       - bearerAuth: []
   /api/v1/projects/{project}/git-host-connections:
     get:
@@ -8049,12 +8157,50 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/git-host-connections/oauth/complete:
+    post:
+      tags:
+      - git-host-connections
+      summary: Complete a Gitea or Forgejo OAuth2 connection
+      description: The project page calls this endpoint with `code` and `state` from the callback redirect. Gradient accepts the call only when the `git_host_oauth_connect` cookie matches `state`, and when the same browser session, the same user and this project started the flow. Then Gradient exchanges the code for a token and creates the project connection. Gradient links that connection to project tasks that have no connection on the same Git host and installs webhooks in their repositories. A project connection with the same name returns 409. Every response after the sign-in, permission and request body checks clears the cookie. A refused call stores nothing and sends no request to the Git host. API keys can't call this endpoint.
+      operationId: completeGitHostOAuthConnection
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteGitHostOAuthConnectionRequest'
+        required: true
+      responses:
+        '200':
+          description: Connection created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/CompletedGitHostOAuthConnection'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/git-host-connections/oauth/connect:
     get:
       tags:
       - git-host-connections
       summary: Connect Gitea or Forgejo with OAuth2
-      description: Redirect a signed-in browser to a Gitea or Forgejo instance (HTTP 302). That instance can run Gradient authorization setup. Use PKCE (S256). Set a short-lived signed `git_host_oauth_connect` cookie with state, project and connection name. The callback can create a project connection named `name` after approval. The connection can receive events and report commit status. Gradient can refresh the access token of that connection automatically. The callback can also link that connection to project tasks that have no connection on the same Git host. The callback can install webhooks in those repositories. API keys can't call this endpoint.
+      description: Redirect a signed-in browser to a Gitea or Forgejo instance (HTTP 302). That instance can run Gradient authorization setup. Use PKCE (S256). Set a short-lived signed `git_host_oauth_connect` cookie with state, session, project and connection name. With TLS the cookie name starts with `__Host-`. A project connection with the same `name` returns 409. After approval the Git host redirects to `gitHostOAuthCallback`, which only redirects to the project page. The project page then calls `completeGitHostOAuthConnection`. That call creates the project connection named `name`, links it to project tasks that have no connection on the same Git host and installs webhooks in their repositories. The connection can receive events and report commit status. Gradient can refresh the access token of that connection automatically. API keys can't call this endpoint.
       operationId: connectGitHostWithOAuth
       parameters:
       - name: project
@@ -8157,7 +8303,7 @@ paths:
       tags:
       - git-host-connections
       summary: Update project git host connection
-      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.
+      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Changes to the scheme, host, or port of `base_url` remove the stored access token, its refresh token, its expiry, and the webhook secret. Changes to `git_host_type` remove those values too. Requests store `access_token` or `secret` that they carry. Connections that receive events and have no new `secret` get a new webhook secret. Responses show that secret once in `generated_secret`. Requests for GitHub App connections and for connections that declarative state manages fail.
       operationId: patchProjectGitHostConnection
       parameters:
       - name: project
@@ -8665,6 +8811,7 @@ paths:
         `available_permissions`. Built-in role names (Admin, Write, View) and
         any name already used by another role in the same project are rejected
         with `409`.
+        A role can include only permissions that belong to the caller.
       operationId: createProjectRole
       parameters:
       - name: project
@@ -8741,6 +8888,7 @@ paths:
         Deletes a custom role. The built-in roles cannot be deleted (`403`).
         A role currently assigned to one or more members cannot be deleted
         until those members are reassigned (`400`).
+        Callers need every permission of the role.
       operationId: deleteProjectRole
       parameters:
       - name: project
@@ -8780,6 +8928,7 @@ paths:
         Renames a custom role and/or replaces its permission set. The three
         built-in roles (Admin, Write, View) are immutable; attempts to modify
         them return `403`.
+        Role changes require the caller to have every permission of both the current role and the new role.
       operationId: patchProjectRole
       parameters:
       - name: project
@@ -9436,6 +9585,7 @@ paths:
         Needs `manageMembers` when the grant includes users and `manageWorkers` when it includes workers.
         A grant is active at once when the caller is Admin in the team (or a superuser).
         Otherwise a request waits for a team Admin and the answer is `Request sent`.
+        A role in a grant can include only the caller's permissions in that project.
       operationId: grantProjectTeam
       parameters:
       - name: project
@@ -9476,6 +9626,7 @@ paths:
       description: |-
         Allowed for Admin in the team, or on the project for `manageWorkers` when the grant includes only workers and `manageMembers` otherwise. Removing workers aborts their running jobs of the project.
         Without a grant, the pending request is withdrawn instead.
+        Callers without team Admin also need all permissions of the grant role.
       operationId: removeProjectTeam
       parameters:
       - name: project
@@ -9511,7 +9662,9 @@ paths:
       tags:
       - teams
       summary: Change a project team grant
-      description: Needs the project permission of the changed part. Turning workers on also needs Admin in the team.
+      description: |-
+        Needs the project permission of the changed part. Turning workers on also needs Admin in the team.
+        Role changes require the caller to have every permission of both the current role and the new role.
       operationId: patchProjectTeam
       parameters:
       - name: project
@@ -9632,6 +9785,8 @@ paths:
         Users are not members until acceptance. The response message is `Invitation sent`. Pending rows appear under `GET /projects/{project}/invitations` until users accept, decline, or cancel the invite. Invites expire after 7 days.
 
         Use `add_as_member_immediately` to add members directly. The response message is `User added`. Instance admins, users of the owner team and users who already have project access through team grants get this result. State-managed projects reject this endpoint. Their members come from the state file.
+
+        A role can include only permissions that belong to the caller.
       operationId: addProjectUser
       parameters:
       - name: project
@@ -9671,6 +9826,7 @@ paths:
       description: |-
         Removes a user from the project. Requires the caller to hold the
         **admin** role in the project.
+        Callers need all permissions of the member role.
       operationId: removeProjectUser
       parameters:
       - name: project
@@ -9710,6 +9866,7 @@ paths:
       description: |-
         Updates the role or permissions of an existing project member.
         Requires the caller to hold the **admin** role in the project.
+        Role changes require the caller to have every permission of both the current role and the new role.
       operationId: patchProjectUser
       parameters:
       - name: project
@@ -10428,7 +10585,7 @@ paths:
       tags:
       - tasks
       summary: Create task
-      description: Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. `git_host_connection` selects the connection to the Git host. Without it, the task gets the one connection that fits the repository, if exactly one fits. `report_status` defaults to whether that connection reports commit status.
+      description: Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. `git_host_connection` selects the connection to the Git host. Without it, the task gets the one connection that fits the repository, if exactly one fits. Team or instance connections fit only projects with a repository grant for that connection and repository, for explicit selection through `git_host_connection` and for automatic selection. `report_status` defaults to whether that connection reports commit status.
       operationId: createTask
       parameters:
       - name: project
@@ -11130,11 +11287,6 @@ paths:
         required: false
         schema:
           type: string
-      - name: token
-        in: query
-        required: false
-        schema:
-          type: string
       responses:
         '200':
           description: SVG badge image.
@@ -11314,11 +11466,6 @@ paths:
       - name: filename
         in: query
         required: true
-        schema:
-          type: string
-      - name: token
-        in: query
-        required: false
         schema:
           type: string
       responses:
@@ -11902,7 +12049,7 @@ paths:
       - tasks
       summary: Open a pull request from a patch
       description: |-
-        Apply a unified diff to the start commit and create or update a pull request through the Git host connection of the task's `open_pr` action. Exec jobs use the job's evaluation commit as the start commit and can show the pull request on the job. Other callers pass `commit`. Start the specified `branch` with `gradient/`. Callers that omit `branch` get a branch name from the changed paths, so the same path can update one pull request. A patch can add and change files but cannot delete files.
+        Apply a unified diff to the start commit and create or update a pull request through the Git host connection of the task's `open_pr` action. Exec jobs use the job's evaluation commit as the start commit and can show the pull request on the job. Other callers pass `commit`. Segments in the specified `branch` use `/` as separator. All segments stay non-empty. All segments contain only letters, digits, `.`, `_` and `-`. Segments never start with `.`, never contain `..` and never end with `.lock`. Names for omitted `branch` live under `gradient/`. Git rules for branch names apply to the specified `base`. Callers that omit `branch` get a branch name from the changed paths, so the same path can update one pull request. A patch can add and change files but cannot delete files.
 
         **Access:** Members with the `triggerEvaluation` permission, or the job token of an exec job of the task.
       operationId: openTaskPullRequest
@@ -12146,7 +12293,7 @@ paths:
       tags:
       - tasks
       summary: Move task to another project
-      description: Move the task to the project in the request body. The task owner can move the task. A member with edit-task permission can also move the task, but that member must also have create-task permission in the target project. Reject tasks and target projects under state management. A task can use a connection to a Git host in repository settings or in an action to open a pull request. Reject that task if the connection is unavailable to the target project. Return `409` for a name already present in the target project.
+      description: Move the task to the project in the request body. The caller needs edit-task permission in the current project and create-task permission in the target project. Reject tasks and target projects under state management. Return `409` while the task has running evaluations or exec jobs. A task can use a connection to a Git host in repository settings or in an action to open a pull request. Reject that task if the connection is unavailable to the target project. A connection of the instance or of a team also needs a grant for the task repository in the target project. Return `409` for a name already present in the target project. Both projects receive the audit event.
       operationId: transferTask
       parameters:
       - name: project
@@ -12881,7 +13028,7 @@ paths:
       tags:
       - git-host-connections
       summary: Update team git host connection
-      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.
+      description: Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Changes to the scheme, host, or port of `base_url` remove the stored access token, its refresh token, its expiry, and the webhook secret. Changes to `git_host_type` remove those values too. Requests store `access_token` or `secret` that they carry. Connections that receive events and have no new `secret` get a new webhook secret. Responses show that secret once in `generated_secret`. Requests for GitHub App connections and for connections that declarative state manages fail.
       operationId: patchTeamGitHostConnection
       parameters:
       - name: team
@@ -12954,6 +13101,129 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/git-host-connections/{id}/repository-grants:
+    get:
+      tags:
+      - git-host-connections
+      summary: List repository grants of a team git host connection
+      description: List the repositories where each team project can use this team connection. Grants without `repository_name` apply to all repositories in `repository_owner`. Only a team Admin can see the list.
+      operationId: listTeamGitHostConnectionRepositoryGrants
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      responses:
+        '200':
+          description: Repository Grants
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RepositoryGrantResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - git-host-connections
+      summary: Create repository grant for a team git host connection
+      description: Tasks of `project` can use this team connection for repository `repository_owner/repository_name`. The `project` must belong to the team. Omit `repository_name` to grant all repositories of the owner. Both parts stay lowercase in Gradient. Existing grants get a 409 response.
+      operationId: createTeamGitHostConnectionRepositoryGrant
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRepositoryGrantRequest'
+        required: true
+      responses:
+        '200':
+          description: Created a repository grant.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/RepositoryGrantResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/teams/{team}/git-host-connections/{id}/repository-grants/{grant}:
+    delete:
+      tags:
+      - git-host-connections
+      summary: Delete repository grant of a team git host connection
+      description: Delete repository permissions. Project tasks can no longer use connections to that repository.
+      operationId: deleteTeamGitHostConnectionRepositoryGrant
+      parameters:
+      - name: team
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionId'
+      - name: grant
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/GitHostConnectionRepositoryGrantId'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: boolean
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -15370,7 +15640,7 @@ paths:
       tags:
       - nix-cache
       summary: Cache proto WebSocket
-      description: 'Read-only, cache-scoped WebSocket with the `/proto` wire format. Accepts only `CacheQuery` (Normal and Pull) and `NarRequest`. Public caches allow anonymous sessions (`GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE`), capped per IP by `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP`; private caches need `Authorization: Bearer GRAD<key>`.'
+      description: 'Read-only, cache-scoped WebSocket with the `/proto` wire format. Accepts only `CacheQuery` (Normal and Pull) and `NarRequest`. Public caches allow anonymous sessions (`GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE`), capped per IP by `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP`. Anonymous sessions also count toward the general anonymous WebSocket limit per address (``GRADIENT_HTTP_ANONYMOUS_WEBSOCKET_MAX_CONNECTIONS_PER_IP``, IPv6 grouped by /64). Private caches need `Authorization: Bearer GRAD<key>`.'
       operationId: cacheProtoWebSocket
       parameters:
       - name: cache
@@ -15519,9 +15789,7 @@ paths:
       tags:
       - scim
       summary: List SCIM groups
-      description: |-
-        Lists SCIM groups. A SCIM group is a team with `scim_group` set, and its
-        members are the team's members; groups are not created through SCIM. Supports the `displayName eq "..."` filter.
+      description: List SCIM groups. A SCIM group is a team with `scim_group` set. SCIM can't create groups. Group members are team members whose accounts SCIM provisioned. The response leaves out members from another method. The endpoint can take `displayName eq "..."` filters.
       operationId: scimListGroups
       parameters:
       - name: filter
@@ -15612,7 +15880,7 @@ paths:
       tags:
       - scim
       summary: Patch SCIM group membership
-      description: Use this endpoint to add, remove, or replace members of the team with a matching `scim_group`. Added users join as members. Use a `replace` for `members` to remove SCIM-added members that aren't in the new list. Members added manually or by the state remain. Unknown group names return 404.
+      description: Use this endpoint to add, remove, or replace members of the team named in `scim_group`. Users from the add operation join as members. Use `replace` with `members` to remove members that SCIM added and that the new list doesn't contain. Members added manually or by the state remain. Set member values in `add` and `replace` to ids of users that SCIM provisioned. Other ids return 400. Let `remove` skip ids that don't belong to such users. Rejected operations leave the whole request unapplied. Return 404 for an unknown group name.
       operationId: scimPatchGroup
       parameters:
       - name: id
@@ -15727,9 +15995,7 @@ paths:
       tags:
       - scim
       summary: List / filter SCIM users
-      description: |-
-        Lists managed (SCIM-provisioned) users. Supports the `userName eq "..."`
-        and `externalId eq "..."` filter subset plus `startIndex`/`count` pagination.
+      description: Call this endpoint to list SCIM-provisioned users. Other origins are the state file, registration, and external sign-in. Users from those origins don't appear here. This endpoint can apply a subset of filters from `userName eq "..."` and `externalId eq "..."`. This endpoint can also paginate with `startIndex`/`count`.
       operationId: scimListUsers
       parameters:
       - name: filter
@@ -15786,7 +16052,7 @@ paths:
       tags:
       - scim
       summary: Provision a SCIM user
-      description: Creates a passwordless `managed` user. Login happens later via OIDC (claimable path). `userName` conflicts return 409.
+      description: Create a passwordless user for SCIM to own. Only accept that user on the first external sign-in if the provider claims include a verified email address equal to the user's email. Invalid `userName` values or email addresses return 400. `userName` conflicts return 409.
       operationId: scimCreateUser
       requestBody:
         content:
@@ -16264,6 +16530,10 @@ components:
             type: string
           http1_only:
             type: boolean
+          credential:
+            oneOf:
+            - $ref: '#/components/schemas/HttpUpstreamCredentialRequest'
+            - type: 'null'
           type:
             type: string
             enum:
@@ -16825,7 +17095,6 @@ components:
       - draining
       - supervised
       - proto_sessions
-      - unconfirmed_nars
       - pending_deliveries
       - failed_deliveries
       - hot_nar_cache
@@ -16873,10 +17142,6 @@ components:
             $ref: '#/components/schemas/SupervisedLoop'
         proto_sessions:
           type: integer
-          minimum: 0
-        unconfirmed_nars:
-          type: integer
-          format: int64
           minimum: 0
         pending_deliveries:
           type: integer
@@ -17788,6 +18053,7 @@ components:
       required:
       - user_code
       - expires_at
+      - cli_and_browser_on_same_network
       properties:
         user_code:
           type: string
@@ -17802,6 +18068,8 @@ components:
           type:
           - string
           - 'null'
+        cli_and_browser_on_same_network:
+          type: boolean
     CliDevicePollRequest:
       type: object
       required:
@@ -17827,6 +18095,8 @@ components:
           type: string
         verification_uri_complete:
           type: string
+          description: 'Deprecated: same as `verification_uri`, with no code. The code in the link allowed an attacker to send a victim a link. One click approved the attacker''s own sign-in. Browsers now always require the terminal code.'
+          deprecated: true
         expires_in:
           type: integer
           format: int64
@@ -18066,6 +18336,31 @@ components:
           $ref: '#/components/schemas/EvaluationId'
         commit:
           type: string
+    CompleteGitHostOAuthConnectionRequest:
+      type: object
+      required:
+      - code
+      - state
+      properties:
+        code:
+          type: string
+          description: '`code` from the redirect of the Git host.'
+        state:
+          type: string
+          description: '`state` from the redirect of the Git host.'
+    CompletedGitHostOAuthConnection:
+      type: object
+      required:
+      - name
+      - webhooks_installed
+      properties:
+        name:
+          type: string
+          description: Name of the new project connection.
+        webhooks_installed:
+          type: integer
+          description: Number of project task repositories that received a Gradient webhook.
+          minimum: 0
     ConcurrencyPolicy:
       type: string
       enum:
@@ -18304,6 +18599,20 @@ components:
           type:
           - string
           - 'null'
+    CreateRepositoryGrantRequest:
+      type: object
+      required:
+      - project
+      - repository_owner
+      properties:
+        project:
+          type: string
+        repository_owner:
+          type: string
+        repository_name:
+          type:
+          - string
+          - 'null'
     CreateRoleRequest:
       type: object
       required:
@@ -18375,6 +18684,11 @@ components:
           type: string
         url:
           type: string
+    CredentialSchemeItem:
+      type: string
+      enum:
+      - basic
+      - bearer
     DashboardStats:
       type: object
       required:
@@ -20477,6 +20791,9 @@ components:
             type: string
             enum:
             - project
+    GitHostConnectionRepositoryGrantId:
+      type: string
+      format: uuid
     GitHostConnectionResponse:
       allOf:
       - $ref: '#/components/schemas/GitHostConnectionSummary'
@@ -20943,6 +21260,33 @@ components:
           type: integer
           format: int64
           minimum: 0
+    HttpUpstreamCredentialRequest:
+      oneOf:
+      - type: object
+        required:
+        - user
+        - password
+        - scheme
+        properties:
+          user:
+            type: string
+          password:
+            type: string
+          scheme:
+            type: string
+            enum:
+            - basic
+      - type: object
+        required:
+        - token
+        - scheme
+        properties:
+          token:
+            type: string
+          scheme:
+            type: string
+            enum:
+            - bearer
     IncomingWebhookDeliveryId:
       type: string
       format: uuid
@@ -22037,8 +22381,6 @@ components:
       - StorePath
       - URL
       - Compression
-      - FileHash
-      - FileSize
       - NarHash
       - NarSize
       - References
@@ -22051,9 +22393,13 @@ components:
         Compression:
           type: string
         FileHash:
-          type: string
+          type:
+          - string
+          - 'null'
         FileSize:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int64
           minimum: 0
         NarHash:
@@ -22476,6 +22822,41 @@ components:
           type:
           - boolean
           - 'null'
+    PatchHttpUpstreamCredentialRequest:
+      oneOf:
+      - type: object
+        required:
+        - user
+        - password
+        - scheme
+        properties:
+          user:
+            type: string
+          password:
+            type: string
+          scheme:
+            type: string
+            enum:
+            - basic
+      - type: object
+        required:
+        - token
+        - scheme
+        properties:
+          token:
+            type: string
+          scheme:
+            type: string
+            enum:
+            - bearer
+      - type: object
+        required:
+        - scheme
+        properties:
+          scheme:
+            type: string
+            enum:
+            - none
     PatchOperation:
       type: object
       required:
@@ -22669,6 +23050,10 @@ components:
           type:
           - boolean
           - 'null'
+        credential:
+          oneOf:
+          - $ref: '#/components/schemas/PatchHttpUpstreamCredentialRequest'
+          - type: 'null'
     PatchUserSettingsRequest:
       type: object
       properties:
@@ -22852,6 +23237,7 @@ components:
       - triggerEvaluation
       - manageTriggers
       - manageWebhooks
+      - openJobTerminal
       - createProject
       - readSuperuser
       - writeSuperuser
@@ -23564,6 +23950,38 @@ components:
           type:
           - string
           - 'null'
+    RepositoryGrantResponse:
+      type: object
+      required:
+      - id
+      - project
+      - repository_owner
+      - source
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/GitHostConnectionRepositoryGrantId'
+        project:
+          $ref: '#/components/schemas/ProjectId'
+        project_name:
+          type:
+          - string
+          - 'null'
+        repository_owner:
+          type: string
+        repository_name:
+          type:
+          - string
+          - 'null'
+        source:
+          type: string
+        created_by:
+          oneOf:
+          - $ref: '#/components/schemas/UserId'
+          - type: 'null'
+        created_at:
+          type: string
+          format: date-time
     RequestKind:
       type: string
       enum:
@@ -24038,6 +24456,7 @@ components:
       - expires_at
       - remember_me
       - current
+      - is_cli_device_sign_in_session
       properties:
         id:
           type: string
@@ -24059,6 +24478,9 @@ components:
           type: boolean
         current:
           type: boolean
+        is_cli_device_sign_in_session:
+          type: boolean
+          description: True if `gradient login` created the session through approval in the browser. Such sessions end 30 days after sign-in and can't change account credentials.
     SetDrainingRequest:
       type: object
       required:
@@ -25095,6 +25517,7 @@ components:
       - api
       - state
       - group
+      - sign_in_group
     TeamNameAndDisplayName:
       type: object
       required:
@@ -25531,11 +25954,12 @@ components:
           type: boolean
     UpdateCacheSubscriptionRequest:
       type: object
-      required:
-      - sign_outputs
       properties:
         sign_outputs:
-          type: boolean
+          type:
+          - boolean
+          - 'null'
+          description: 'Left out: on for a subscription that writes to the cache, off for a read-only one.'
     UpdateFlakeInputOverrideRequest:
       type: object
       properties:
@@ -25599,6 +26023,7 @@ components:
       - kind
       - http1_only
       - active
+      - stored_url_has_user_password_or_query
       properties:
         id:
           $ref: '#/components/schemas/CacheUpstreamId'
@@ -25633,6 +26058,13 @@ components:
           type: boolean
         active:
           type: boolean
+        stored_url_has_user_password_or_query:
+          type: boolean
+          description: 'True when the stored URL holds a user, password or query, which `url` leaves out. Such an upstream cache can''t be set active until its URL is fixed: with PATCH for an HTTP upstream cache, by creating it again for a Gradient Proto one.'
+        credential_scheme:
+          oneOf:
+          - $ref: '#/components/schemas/CredentialSchemeItem'
+          - type: 'null'
     UpstreamTestResponse:
       type: object
       required:

@@ -7,16 +7,18 @@
 use std::time::Duration;
 
 use gradient_entity::evaluation_message::{self, MessageLevel};
-use gradient_entity::ids::{DerivationId, EvaluationId, ProjectId, TaskId};
+use gradient_entity::ids::{DerivationId, EvaluationId, ProjectId, TaskId, WorkerRegistrationId};
 use gradient_entity::{
     build_attempt, build_job, cached_path, cached_path_signature, derivation, derivation_build,
-    derivation_dependency, derivation_output, dispatched_job, entry_point, evaluation, task,
+    derivation_dependency, derivation_output, dispatched_job, entry_point, evaluation, project,
+    task, worker_registration,
 };
 use gradient_migration::{Migrator, MigratorTrait};
 use sea_orm::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
-    PrimaryKeyTrait, QueryFilter, QueryOrder, SqlxPostgresConnector, Statement,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
+    EntityTrait, IntoActiveModel, PrimaryKeyTrait, QueryFilter, QueryOrder, SqlxPostgresConnector,
+    Statement,
 };
 use uuid::Uuid;
 
@@ -189,25 +191,41 @@ impl TestDatabase {
             .await
             .hash
             .expect("a realised output");
-        self.cached_path(&hash)
-            .await
-            .is_some_and(|stored| stored.file_hash.is_some())
+        self.cached_path(&hash).await.is_some()
     }
 
     pub async fn cached_path(&self, hash: &str) -> Option<cached_path::Model> {
         cached_path::Entity::find()
             .filter(cached_path::Column::Hash.eq(hash))
+            .order_by_asc(cached_path::Column::CreatedAt)
+            .order_by_asc(cached_path::Column::Id)
             .one(&self.connection)
             .await
             .expect("the cached path reads")
     }
 
+    pub async fn stored_contents_for_store_path_hash_oldest_first(
+        &self,
+        hash: &str,
+    ) -> Vec<cached_path::Model> {
+        cached_path::Entity::find()
+            .filter(cached_path::Column::Hash.eq(hash))
+            .order_by_asc(cached_path::Column::CreatedAt)
+            .order_by_asc(cached_path::Column::Id)
+            .all(&self.connection)
+            .await
+            .expect("the cached path variants read")
+    }
+
     pub async fn signatures(&self, hash: &str) -> Vec<cached_path_signature::Model> {
-        let Some(path) = self.cached_path(hash).await else {
-            return Vec::new();
-        };
+        let variants: Vec<_> = self
+            .stored_contents_for_store_path_hash_oldest_first(hash)
+            .await
+            .into_iter()
+            .map(|variant| variant.id)
+            .collect();
         cached_path_signature::Entity::find()
-            .filter(cached_path_signature::Column::CachedPath.eq(path.id))
+            .filter(cached_path_signature::Column::CachedPath.is_in(variants))
             .all(&self.connection)
             .await
             .expect("the signatures read")
@@ -300,6 +318,43 @@ impl TestDatabase {
             .project
     }
 
+    pub async fn worker_registration_ids_for_project_or_insert_inactive(
+        &self,
+        project: ProjectId,
+    ) -> Vec<WorkerRegistrationId> {
+        let worker_registrations = worker_registration::Entity::find()
+            .filter(worker_registration::Column::PeerId.eq(project))
+            .order_by_asc(worker_registration::Column::Id)
+            .all(&self.connection)
+            .await
+            .expect("the worker registrations read")
+            .into_iter()
+            .map(|registration| registration.id)
+            .collect::<Vec<_>>();
+        if !worker_registrations.is_empty() {
+            return worker_registrations;
+        }
+        let owner = project::Entity::find_by_id(project)
+            .one(&self.connection)
+            .await
+            .expect("the project reads")
+            .expect("the project of the producer")
+            .created_by;
+        let registration = worker_registration::Model {
+            peer_id: project,
+            worker_id: format!("producer-{project}"),
+            token_hash: format!("token-producer-{project}"),
+            created_by: Some(owner),
+            created_at: crate::test_date(),
+            ..crate::rows::worker_registration(false, true)
+        }
+        .into_active_model()
+        .insert(&self.connection)
+        .await
+        .expect("the worker registration row is written");
+        vec![registration.id]
+    }
+
     pub async fn finish(mut self) {
         self.finished = true;
         let _ = tokio::time::timeout(Duration::from_secs(5), self.connection.clone().close()).await;
@@ -339,7 +394,7 @@ impl Drop for TestDatabase {
 async fn connect(options: PgConnectOptions, connections: u32) -> DatabaseConnection {
     let pool = PgPoolOptions::new()
         .max_connections(connections)
-        .acquire_timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(30))
         .connect_with(options)
         .await
         .expect(NO_SERVER);

@@ -6,28 +6,31 @@
 
 use crate::build_wait::{BuildOutcome, wait};
 use crate::session::Session;
-use crate::store_paths::stored_derivation;
-use futures::StreamExt as _;
 use gradient_db::Hold;
 use gradient_db::build_request_task::ensure_build_request_task;
 use gradient_db::lookup::by_id;
-use gradient_derivation::{Derivation, discovered_derivation, parse_drv};
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
-use gradient_graph::{RecordBatch, Transition};
+use gradient_graph::derivation_closure_input_addressed_output_verification::{
+    DerivationClosureCheckReadFilesAndHashModulosForClientPathEqualToStoredPath,
+    DerivationFileInBuildRequestClosure, DrvSource,
+    load_stored_derivation_hash_modulo_text_by_store_path_for_chunk, normalize_store_paths,
+    read_transitive_input_derivations_checking_input_addressed_output_paths,
+};
+use gradient_graph::read_derivation_from_trusted_nar::{
+    StorePathVerifiedDerivationRecord, load_verified_trusted_derivation_record,
+};
+use gradient_graph::{EvaluationBatchDerivation, RecordBatch, Transition};
 use gradient_types::permissions::Permission;
 use gradient_types::*;
-use gradient_wire::types::DiscoveredDerivation;
+use gradient_wire::types::DerivationOutput;
 use harmonia_protocol::log::LogMessage;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, Select,
     TransactionTrait,
 };
-use std::collections::HashSet;
-use std::future::Future;
-use tokio::io::AsyncReadExt as _;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-const CONCURRENT_READS: usize = 32;
-const MAX_DRV_FILE_BYTES_READ_INTO_MEMORY: u64 = 64 * 1024 * 1024;
 pub const BUILD_LOG_MESSAGE_BUFFER_SIZE_PER_SSH_CLIENT: usize = 4096;
 const RECORD_BATCH_SIZE: usize = 50;
 
@@ -50,54 +53,49 @@ enum Added {
     EvaluationEnded,
 }
 
-pub trait DrvSource: Sync {
-    fn read(
-        &self,
-        drv_path: &str,
-    ) -> impl Future<Output = anyhow::Result<Option<Derivation>>> + Send;
+pub(crate) struct VerifiedProjectDrvSource<'a> {
+    pub(crate) session: &'a Session,
 }
 
-struct CacheDrvSource<'a> {
-    session: &'a Session,
-}
+impl DrvSource for VerifiedProjectDrvSource<'_> {
+    type Drv = StorePathVerifiedDerivationRecord;
 
-impl DrvSource for CacheDrvSource<'_> {
-    async fn read(&self, drv_path: &str) -> anyhow::Result<Option<Derivation>> {
-        let path = StorePath::parse_stored(drv_path)?;
-        let hash = path.hash();
-        let handles = &self.session.handles;
-        if gradient_db::cache_paths::served_path(&handles.db.web_db, &self.session.caches, hash)
-            .await?
-            .is_none()
-        {
-            return Ok(None);
-        }
-
-        let Some(reader) = crate::nar::open_raw(&handles.db.storage.nar_storage, hash).await?
-        else {
-            return Ok(None);
-        };
-
-        let mut events = std::pin::pin!(harmonia_file_nar::parse_nar(reader));
-        while let Some(event) = events.next().await {
-            if let harmonia_file_nar::NarEvent::File { reader, .. } = event? {
-                let mut contents = Vec::new();
-                reader
-                    .take(MAX_DRV_FILE_BYTES_READ_INTO_MEMORY + 1)
-                    .read_to_end(&mut contents)
-                    .await?;
-                anyhow::ensure!(
-                    contents.len() as u64 <= MAX_DRV_FILE_BYTES_READ_INTO_MEMORY,
-                    "{drv_path} is larger than {limit} bytes",
-                    limit = MAX_DRV_FILE_BYTES_READ_INTO_MEMORY
-                );
-                let drv = parse_drv(&contents)?;
-                return stored_derivation(&self.session.mapper, drv).map(Some);
-            }
-        }
-
-        anyhow::bail!("{drv_path} is not a single-file NAR")
+    async fn read(&self, drv_path: &str) -> anyhow::Result<Option<Self::Drv>> {
+        let db = &self.session.handles.db;
+        load_verified_trusted_derivation_record(
+            &db.web_db,
+            &db.storage.nar_storage,
+            Arc::clone(&db.store_path_mapping),
+            self.session.project.id,
+            drv_path,
+        )
+        .await
     }
+
+    async fn read_stored_derivation_hash_modulo_text_for_drv_paths(
+        &self,
+        drv_paths: &[String],
+    ) -> anyhow::Result<HashMap<String, String>> {
+        load_stored_derivation_hash_modulo_text_by_store_path_for_chunk(
+            &self.session.handles.db.web_db,
+            drv_paths,
+        )
+        .await
+    }
+
+    fn error_for_input_derivation_without_readable_drv_or_stored_verified_hash(
+        &self,
+        input: &str,
+        dependent: &str,
+    ) -> anyhow::Error {
+        input_drv_not_in_project_cache_error(input, dependent)
+    }
+}
+
+fn input_drv_not_in_project_cache_error(input: &str, dependent: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{input} is an input derivation of {dependent}. {input} isn't in the project cache and the database row for {input} doesn't store a verified hash modulo. Copy {input} into the project cache first."
+    )
 }
 
 pub fn drv_name(drv_path: &str) -> String {
@@ -109,39 +107,24 @@ pub fn drv_name(drv_path: &str) -> String {
     }
 }
 
-pub async fn closure(
-    source: &impl DrvSource,
+pub async fn closure<S: DrvSource>(
+    source: &S,
     roots: &[String],
-) -> anyhow::Result<Vec<(String, Derivation)>> {
-    let mut seen: HashSet<String> = roots.iter().cloned().collect();
-    let mut frontier = roots.to_vec();
-    let mut found = Vec::new();
-    while !frontier.is_empty() {
-        let read: Vec<_> = futures::stream::iter(std::mem::take(&mut frontier))
-            .map(|path| async move { (source.read(&path).await, path) })
-            .buffer_unordered(CONCURRENT_READS)
-            .collect()
-            .await;
-
-        for (drv, path) in read {
-            let drv = drv?.ok_or_else(|| {
-                anyhow::anyhow!("{path} is not in the project caches, copy it first")
-            })?;
-            anyhow::ensure!(
-                drv.outputs.iter().all(|o| !o.path.is_empty()),
-                "{path} is content-addressed, not supported over SSH"
-            );
-
-            for input in &drv.input_derivations {
-                if seen.insert(input.path.clone()) {
-                    frontier.push(input.path.clone());
-                }
-            }
-
-            found.push((path, drv));
-        }
+) -> anyhow::Result<
+    DerivationClosureCheckReadFilesAndHashModulosForClientPathEqualToStoredPath<S::Drv>,
+> {
+    let found =
+        read_transitive_input_derivations_checking_input_addressed_output_paths(source, roots)
+            .await?;
+    for (path, read) in &found.read_stored_derivation_path_and_derivation_file_record_pairs {
+        anyhow::ensure!(
+            read.stored_derivation()
+                .outputs
+                .iter()
+                .all(|o| !o.path.is_empty()),
+            "{path} is content-addressed, not supported over SSH"
+        );
     }
-
     Ok(found)
 }
 
@@ -149,7 +132,7 @@ pub async fn closure(
 pub struct Started {
     pub evaluation: EvaluationId,
     pub closure: Vec<String>,
-    pub requested: Vec<(String, Derivation)>,
+    pub requested: Vec<(String, Vec<DerivationOutput>)>,
 }
 
 pub async fn start(session: &Session, drv_paths: &[String]) -> anyhow::Result<Started> {
@@ -159,14 +142,21 @@ pub async fn start(session: &Session, drv_paths: &[String]) -> anyhow::Result<St
         session.project.name
     );
 
-    let closure = closure(&CacheDrvSource { session }, drv_paths).await?;
-    let evaluation = add_to_user_evaluation(session, &closure, drv_paths).await?;
+    let drv_paths = normalize_store_paths(drv_paths)?;
+    let closure = closure(&VerifiedProjectDrvSource { session }, &drv_paths).await?;
+    let evaluation = add_to_user_evaluation(session, &closure, &drv_paths).await?;
 
     let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
-    let paths = closure.iter().map(|(path, _)| path.clone()).collect();
+    let paths = closure
+        .read_stored_derivation_path_and_derivation_file_record_pairs
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect();
     let requested_drvs = closure
+        .read_stored_derivation_path_and_derivation_file_record_pairs
         .into_iter()
         .filter(|(path, _)| requested.contains(path.as_str()))
+        .map(|(path, record)| (path, record.to_discovered_derivation().outputs))
         .collect();
     Ok(Started {
         evaluation,
@@ -177,7 +167,9 @@ pub async fn start(session: &Session, drv_paths: &[String]) -> anyhow::Result<St
 
 async fn add_to_user_evaluation(
     session: &Session,
-    closure: &[(String, Derivation)],
+    closure: &DerivationClosureCheckReadFilesAndHashModulosForClientPathEqualToStoredPath<
+        StorePathVerifiedDerivationRecord,
+    >,
     drv_paths: &[String],
 ) -> anyhow::Result<EvaluationId> {
     let target = evaluation_for(session, drv_paths).await?;
@@ -207,9 +199,13 @@ async fn evaluation_for(session: &Session, drv_paths: &[String]) -> anyhow::Resu
     )
     .await?;
 
-    let running = running_evaluation(task.id, session.user.id)
-        .one(&handles.db.web_db)
-        .await?;
+    let running = running_evaluation(
+        task.id,
+        session.user.id,
+        session.allows_project_credentials_and_privileged_actions,
+    )
+    .one(&handles.db.web_db)
+    .await?;
     let evaluation = match running {
         Some(running) => running.id,
         None => create_evaluation(session, task.id, drv_paths).await?,
@@ -222,11 +218,19 @@ async fn evaluation_for(session: &Session, drv_paths: &[String]) -> anyhow::Resu
     })
 }
 
-fn running_evaluation(task: TaskId, user: UserId) -> Select<EEvaluation> {
+fn running_evaluation(
+    task: TaskId,
+    user: UserId,
+    allows_project_credentials_and_privileged_actions: bool,
+) -> Select<EEvaluation> {
     EEvaluation::find()
         .filter(CEvaluation::Task.eq(task))
         .filter(CEvaluation::Kind.eq(EvaluationKind::Ssh))
         .filter(CEvaluation::StartedBy.eq(user))
+        .filter(
+            CEvaluation::AllowsProjectCredentialsAndPrivilegedActions
+                .eq(allows_project_credentials_and_privileged_actions),
+        )
         .filter(CEvaluation::Status.is_in(JOINABLE))
         .order_by_desc(CEvaluation::CreatedAt)
 }
@@ -267,6 +271,8 @@ async fn create_evaluation(
         created_at: created,
         updated_at: created,
         eval_drv_started_at: Some(created),
+        allows_project_credentials_and_privileged_actions: session
+            .allows_project_credentials_and_privileged_actions,
         ..Default::default()
     }
     .into_active_model()
@@ -280,7 +286,9 @@ async fn create_evaluation(
 async fn add(
     session: &Session,
     target: Target,
-    closure: &[(String, Derivation)],
+    closure: &DerivationClosureCheckReadFilesAndHashModulosForClientPathEqualToStoredPath<
+        StorePathVerifiedDerivationRecord,
+    >,
     drv_paths: &[String],
 ) -> anyhow::Result<Added> {
     let Target {
@@ -317,11 +325,28 @@ async fn add_batches(
     session: &Session,
     task: TaskId,
     evaluation: EvaluationId,
-    closure: &[(String, Derivation)],
+    closure: &DerivationClosureCheckReadFilesAndHashModulosForClientPathEqualToStoredPath<
+        StorePathVerifiedDerivationRecord,
+    >,
     drv_paths: &[String],
 ) -> anyhow::Result<Added> {
     let handles = &session.handles;
-    let derivations = discovered(closure, drv_paths)?;
+    let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
+    let derivations: Vec<EvaluationBatchDerivation> = closure
+        .read_stored_derivation_path_and_derivation_file_record_pairs
+        .iter()
+        .map(|(path, record)| EvaluationBatchDerivation {
+            attr: entry_point_name_for_requested_closure_entry(&requested, path),
+            ifd: false,
+            licenses: record.to_discovered_derivation().licenses,
+            exec: None,
+            store_path_verified_derivation_record: record.clone(),
+            closure_checked_hash_modulo: closure
+                .verified_hash_modulo_by_stored_derivation_path_for_equal_client_and_stored_paths
+                .get(path)
+                .cloned(),
+        })
+        .collect();
     for batch in derivations.chunks(RECORD_BATCH_SIZE) {
         let report = handles
             .graph
@@ -333,7 +358,11 @@ async fn add_batches(
                 errors: vec![],
                 continuation: None,
             })
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::warn!(%evaluation, error = format!("{e:#}"), "Failed to save the batch of derivations for the request to build over SSH.");
+                anyhow::anyhow!(gradient_graph::writer::derivation_save_failure_user_message(&e))
+            })?;
         if report.skipped {
             return Ok(Added::EvaluationEnded);
         }
@@ -342,30 +371,12 @@ async fn add_batches(
     Ok(Added::Yes)
 }
 
-fn discovered(
-    closure: &[(String, Derivation)],
-    drv_paths: &[String],
-) -> anyhow::Result<Vec<DiscoveredDerivation>> {
-    let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
-    closure
-        .iter()
-        .map(|(path, drv)| {
-            let base = StorePath::parse_stored(path)?.base();
-            let attr = requested
-                .contains(path.as_str())
-                .then(|| entry_point_name(&base));
-            let mut discovered = discovered_derivation(attr, base, drv);
-            for dependency in &mut discovered.dependencies {
-                *dependency = StorePath::parse_stored(dependency)?.base();
-            }
-
-            Ok(discovered)
-        })
-        .collect()
-}
-
 // Entry points are unique per evaluation and name; many derivations share a name like `source`.
-fn entry_point_name(base: &str) -> String {
+fn entry_point_name_for_requested_closure_entry(requested: &HashSet<&str>, path: &str) -> String {
+    if !requested.contains(path) {
+        return String::new();
+    }
+    let base = path.rsplit_once('/').map_or(path, |(_, base)| base);
     base.strip_suffix(".drv").unwrap_or(base).to_owned()
 }
 
@@ -386,23 +397,88 @@ pub async fn run(
 mod tests {
     use super::*;
     use crate::session::SshHandles;
-    use gradient_derivation::DerivationOutput;
+    use gradient_derivation::{Derivation, DerivationOutput, discovered_derivation, parse_drv};
     use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_graph::derivation_closure_input_addressed_output_verification::check_input_addressed_output_paths;
     use gradient_test_support::state::TestState;
+    use gradient_wire::types::DiscoveredDerivation;
+    use harmonia_store_aterm::parse_derivation_aterm;
+    use harmonia_store_path::{StoreDir, StorePath as ClientPath};
     use sea_orm::{DbBackend, QueryTrait};
-    use std::collections::HashMap;
+
     use std::sync::Mutex;
 
+    #[derive(Debug, Clone)]
+    struct CacheRewrittenDerivationWithOriginalDrv {
+        stored_derivation: Derivation,
+        original_drv_store_path: ClientPath,
+        derivation_with_original_paths: harmonia_store_derivation::derivation::Derivation,
+    }
+
+    impl DerivationFileInBuildRequestClosure for CacheRewrittenDerivationWithOriginalDrv {
+        fn stored_derivation(&self) -> DiscoveredDerivation {
+            discovered_derivation(
+                None,
+                self.original_drv_store_path.to_string(),
+                &self.stored_derivation,
+            )
+        }
+
+        fn original_drv_store_path(&self) -> anyhow::Result<ClientPath> {
+            Ok(self.original_drv_store_path.clone())
+        }
+
+        fn derivation_with_original_paths(
+            &self,
+        ) -> anyhow::Result<harmonia_store_derivation::derivation::Derivation> {
+            Ok(self.derivation_with_original_paths.clone())
+        }
+    }
+
+    #[derive(Default)]
     struct Fake {
-        drvs: HashMap<String, Derivation>,
+        drvs: HashMap<String, CacheRewrittenDerivationWithOriginalDrv>,
         reads: Mutex<Vec<String>>,
+        hash_modulo_text_by_drv_store_path: HashMap<String, String>,
+        drv_path_count_per_hash_per_lookup_call: Mutex<Vec<usize>>,
     }
 
     impl DrvSource for Fake {
-        async fn read(&self, drv_path: &str) -> anyhow::Result<Option<Derivation>> {
+        type Drv = CacheRewrittenDerivationWithOriginalDrv;
+
+        async fn read(&self, drv_path: &str) -> anyhow::Result<Option<Self::Drv>> {
             self.reads.lock().expect("reads").push(drv_path.to_string());
             Ok(self.drvs.get(drv_path).cloned())
         }
+
+        async fn read_stored_derivation_hash_modulo_text_for_drv_paths(
+            &self,
+            drv_paths: &[String],
+        ) -> anyhow::Result<HashMap<String, String>> {
+            self.drv_path_count_per_hash_per_lookup_call
+                .lock()
+                .expect("lookups")
+                .push(drv_paths.len());
+            Ok(drv_paths
+                .iter()
+                .filter_map(|path| {
+                    let text = self.hash_modulo_text_by_drv_store_path.get(path)?;
+                    Some((path.clone(), text.clone()))
+                })
+                .collect())
+        }
+
+        fn error_for_input_derivation_without_readable_drv_or_stored_verified_hash(
+            &self,
+            input: &str,
+            dependent: &str,
+        ) -> anyhow::Error {
+            input_drv_not_in_project_cache_error(input, dependent)
+        }
+    }
+
+    fn client_path(path: &str) -> ClientPath {
+        ClientPath::from_base_path(path.trim().trim_start_matches("/nix/store/")).expect("path")
     }
 
     fn path(name: &str) -> String {
@@ -430,10 +506,273 @@ mod tests {
     }
 
     fn fake(drvs: &[(&str, Derivation)]) -> Fake {
+        let read = |name: &str, drv: &Derivation| CacheRewrittenDerivationWithOriginalDrv {
+            stored_derivation: drv.clone(),
+            original_drv_store_path: client_path(&path(name)),
+            derivation_with_original_paths: harmonia_store_derivation::derivation::Derivation::new(
+                name.parse().expect("name"),
+                "x86_64-linux".into(),
+                "/bin/sh".into(),
+            ),
+        };
         Fake {
-            drvs: drvs.iter().map(|(n, d)| (path(n), d.clone())).collect(),
+            drvs: drvs.iter().map(|(n, d)| (path(n), read(n, d))).collect(),
             reads: Mutex::new(Vec::new()),
+            ..Fake::default()
         }
+    }
+
+    const DEP_ATERM: &[u8] = include_bytes!("../testdata/input-addressed-dep.drv");
+    const DEP_PATH: &str = include_str!("../testdata/input-addressed-dep.drv.path");
+    const TOP_ATERM: &[u8] = include_bytes!("../testdata/input-addressed-top.drv");
+    const TOP_PATH: &str = include_str!("../testdata/input-addressed-top.drv.path");
+
+    fn fake_derivation_source_from_aterm_files_with_original_store_paths(
+        drvs: &[(&str, &[u8])],
+    ) -> Fake {
+        let read = |drv_path: &str, aterm: &[u8]| {
+            let original_drv_store_path = client_path(drv_path);
+            let name = original_drv_store_path.name().to_string();
+            CacheRewrittenDerivationWithOriginalDrv {
+                stored_derivation: parse_drv(aterm).expect("drv"),
+                derivation_with_original_paths: parse_derivation_aterm(
+                    &StoreDir::default(),
+                    aterm,
+                    name.strip_suffix(".drv")
+                        .expect("drv")
+                        .parse()
+                        .expect("name"),
+                )
+                .expect("aterm"),
+                original_drv_store_path,
+            }
+        };
+        Fake {
+            drvs: drvs
+                .iter()
+                .map(|(p, aterm)| (p.trim().to_owned(), read(p, aterm)))
+                .collect(),
+            reads: Mutex::new(Vec::new()),
+            ..Fake::default()
+        }
+    }
+
+    fn drv_aterm_text_with_out_output_path_changed_by_one_hash_character(aterm: &[u8]) -> Vec<u8> {
+        let text = std::str::from_utf8(aterm).expect("utf8");
+        let marker = "(\"out\",\"/nix/store/";
+        let start = text.find(marker).expect("out output") + marker.len() - "/nix/store/".len();
+        let end = start + text[start..].find('"').expect("path end");
+        let stated = &text[start..end];
+        let hash_start = "/nix/store/".len();
+        let replacement = if &stated[hash_start..=hash_start] == "a" {
+            "b"
+        } else {
+            "a"
+        };
+        let forged = format!(
+            "{}{replacement}{}",
+            &stated[..hash_start],
+            &stated[hash_start + 1..]
+        );
+        text.replace(stated, &forged).into_bytes()
+    }
+
+    #[tokio::test]
+    async fn unchanged_real_input_addressed_derivation_and_its_input_derivation_pass_output_path_check()
+     {
+        let source = fake_derivation_source_from_aterm_files_with_original_store_paths(&[
+            (TOP_PATH, TOP_ATERM),
+            (DEP_PATH, DEP_ATERM),
+        ]);
+
+        let closure = closure(&source, &[TOP_PATH.trim().to_owned()])
+            .await
+            .expect("closure");
+
+        assert_eq!(
+            closure
+                .read_stored_derivation_path_and_derivation_file_record_pairs
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn derivation_output_path_changed_to_other_valid_store_path_is_refused_and_refusal_names_output()
+     {
+        let forged = drv_aterm_text_with_out_output_path_changed_by_one_hash_character(TOP_ATERM);
+        let source = fake_derivation_source_from_aterm_files_with_original_store_paths(&[
+            (TOP_PATH, &forged),
+            (DEP_PATH, DEP_ATERM),
+        ]);
+
+        let e = closure(&source, &[TOP_PATH.trim().to_owned()])
+            .await
+            .expect_err("forged output path");
+
+        assert!(e.to_string().contains("shows output out at"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn requesting_top_drv_is_refused_when_input_derivation_dep_drv_states_forged_output_path()
+    {
+        let forged = drv_aterm_text_with_out_output_path_changed_by_one_hash_character(DEP_ATERM);
+        let source = fake_derivation_source_from_aterm_files_with_original_store_paths(&[
+            (TOP_PATH, TOP_ATERM),
+            (DEP_PATH, &forged),
+        ]);
+
+        let e = closure(&source, &[TOP_PATH.trim().to_owned()])
+            .await
+            .expect_err("forged input output path");
+
+        assert!(
+            e.to_string()
+                .contains(DEP_PATH.trim().trim_start_matches("/nix/store/")),
+            "{e}"
+        );
+        assert!(e.to_string().contains("shows output out at"), "{e}");
+    }
+
+    fn build_test_derivation_source_with_top_derivation_and_dependency_hash_modulo_text(
+        dependency_hash_modulo_text: Option<&str>,
+    ) -> Fake {
+        let mut source = fake_derivation_source_from_aterm_files_with_original_store_paths(&[(
+            TOP_PATH, TOP_ATERM,
+        )]);
+        source.hash_modulo_text_by_drv_store_path = dependency_hash_modulo_text
+            .map(|text| (DEP_PATH.trim().to_owned(), text.to_owned()))
+            .into_iter()
+            .collect();
+        source
+    }
+
+    #[tokio::test]
+    async fn closure_check_of_top_derivation_with_unreadable_input_drv_uses_stored_hash_modulo_and_reads_only_top_file_with_one_lookup()
+     {
+        let source =
+            build_test_derivation_source_with_top_derivation_and_dependency_hash_modulo_text(Some(
+                "drv:sha256:2f147701429b5cb2d91db5743a8edbab066eedeb5f5a7afe7c5be32def86670c",
+            ));
+
+        let found = closure(&source, &[TOP_PATH.trim().to_owned()])
+            .await
+            .expect("The stored hash modulo of the input can substitute for that unreadable file.");
+
+        assert_eq!(
+            found
+                .read_stored_derivation_path_and_derivation_file_record_pairs
+                .len(),
+            1
+        );
+        assert_eq!(*source.reads.lock().expect("reads"), [TOP_PATH.trim()]);
+        assert_eq!(
+            *source
+                .drv_path_count_per_hash_per_lookup_call
+                .lock()
+                .expect("lookups"),
+            [1]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wrong_stored_hash_modulo_for_unreported_input_fails_top_derivation_output_path_check()
+     {
+        let source =
+            build_test_derivation_source_with_top_derivation_and_dependency_hash_modulo_text(Some(
+                "drv:sha256:93fde50a3163cc333d4ed43c059ac5b5a580b1dd33a6d88a6ab2d4988b54ddba",
+            ));
+
+        let e = closure(&source, &[TOP_PATH.trim().to_owned()])
+            .await
+            .expect_err(
+                "An incorrect remainder of the stored hash can produce a different output path.",
+            );
+
+        assert!(e.to_string().contains("shows output out at"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn test_ssh_input_without_verified_hash_or_readable_drv_file_fails_closure_check_with_copy_input_to_project_cache_message()
+     {
+        let source =
+            build_test_derivation_source_with_top_derivation_and_dependency_hash_modulo_text(None);
+
+        let e = closure(&source, &[TOP_PATH.trim().to_owned()])
+            .await
+            .expect_err("Inputs with no stored value and no file fail.");
+
+        assert!(
+            e.to_string().contains(&format!(
+                "Copy {} into the project cache first.",
+                DEP_PATH.trim()
+            )),
+            "{e}"
+        );
+    }
+
+    #[tokio::test]
+    async fn lookup_five_thousand_unreported_inputs_of_one_derivation_takes_five_calls_of_at_most_one_thousand_paths_and_reads_only_root_file()
+     {
+        let inputs: Vec<String> = (0..5000).map(|index| format!("input{index}")).collect();
+        let input_names: Vec<&str> = inputs.iter().map(String::as_str).collect();
+        let mut source = fake(&[("root", drv(&input_names))]);
+        source.hash_modulo_text_by_drv_store_path = inputs
+            .iter()
+            .map(|name| (path(name), "deferred".to_owned()))
+            .collect();
+
+        closure(&source, &[path("root")])
+            .await
+            .expect("All inputs have a stored value.");
+
+        assert_eq!(*source.reads.lock().expect("reads"), [path("root")]);
+        let lookups = source
+            .drv_path_count_per_hash_per_lookup_call
+            .lock()
+            .expect("lookups")
+            .clone();
+        assert_eq!(lookups, [1000; 5]);
+    }
+
+    #[test]
+    fn output_path_check_refuses_derivation_with_missing_input_derivation_in_build_request_and_reports_output_path_cannot_be_checked()
+     {
+        let source = fake_derivation_source_from_aterm_files_with_original_store_paths(&[(
+            TOP_PATH, TOP_ATERM,
+        )]);
+        let top = source.drvs[TOP_PATH.trim()].clone();
+        let derivations = HashMap::from([(
+            top.original_drv_store_path,
+            top.derivation_with_original_paths,
+        )]);
+
+        let e = check_input_addressed_output_paths(&derivations, &HashMap::new())
+            .expect_err("missing input");
+
+        assert!(e.to_string().contains("Can't check the output path"), "{e}");
+    }
+
+    #[test]
+    fn floating_content_addressed_output_with_store_path_is_rejected() {
+        let text = std::str::from_utf8(DEP_ATERM).expect("utf8");
+        let output_start = text.find("(\"out\",").expect("out output");
+        let fields_end = output_start + text[output_start..].find(",\"\",\"\")").expect("fields");
+        let floating = format!(
+            "{}{}{}",
+            &text[..fields_end],
+            ",\"r:sha256\",\"\")",
+            &text[fields_end + ",\"\",\"\")".len()..]
+        );
+        let parsed = parse_derivation_aterm(
+            &StoreDir::default(),
+            floating.as_bytes(),
+            "dep".parse().expect("name"),
+        );
+
+        let e = parsed.expect_err("floating output with a stated path");
+
+        assert!(format!("{e:?}").contains("InvalidCombination"), "{e:?}");
     }
 
     #[tokio::test]
@@ -442,7 +781,11 @@ mod tests {
 
         let closure = closure(&source, &[path("a")]).await.expect("closure");
 
-        let mut found: Vec<String> = closure.into_iter().map(|(p, _)| p).collect();
+        let mut found: Vec<String> = closure
+            .read_stored_derivation_path_and_derivation_file_record_pairs
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
         found.sort();
         assert_eq!(found, [path("a"), path("b"), path("c")]);
         assert_eq!(source.reads.lock().expect("reads").len(), 3);
@@ -454,7 +797,7 @@ mod tests {
 
         let e = closure(&source, &[path("a")]).await.expect_err("missing");
         assert!(e.to_string().contains(&path("b")), "{e}");
-        assert!(e.to_string().contains("copy"), "{e}");
+        assert!(e.to_string().contains("Copy"), "{e}");
     }
 
     #[tokio::test]
@@ -465,6 +808,120 @@ mod tests {
 
         let e = closure(&source, &[path("a")]).await.expect_err("ca");
         assert!(e.to_string().contains("content-addressed"), "{e}");
+    }
+
+    struct TestDatabaseWithOneProjectBuiltContentVariantAndLocalNarStorage {
+        db: gradient_fixtures::database::TestDatabase,
+        nar_storage_dir: std::path::PathBuf,
+        trusting: ProjectId,
+        other: ProjectId,
+    }
+
+    impl TestDatabaseWithOneProjectBuiltContentVariantAndLocalNarStorage {
+        async fn new(stored_text: &[u8]) -> Self {
+            use gradient_fixtures::shape::shape;
+            use gradient_fixtures::store_path_content_variants::{BUILD_A, BUILD_B};
+            use gradient_test_support::cache_fixture::zstd_compressed_nar_of_bytes;
+
+            let base = DEP_PATH.trim().trim_start_matches("/nix/store/");
+            let (hash, package) = base.split_once('-').expect("base path");
+            let (trusting, other) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+            let db = shape()
+                .evaluation(trusting)
+                .derivation(BUILD_A)
+                .job()
+                .cached_path(hash, package)
+                .evaluation(other)
+                .derivation(BUILD_B)
+                .job()
+                .into_database()
+                .await;
+            let nar_storage_dir =
+                std::env::temp_dir().join(format!("gradient-ssh-drv-{}", uuid::Uuid::now_v7()));
+            gradient_storage::NarStore::local(&nar_storage_dir)
+                .expect("local NAR storage")
+                .put(
+                    &format!("{hash}-abc"),
+                    zstd_compressed_nar_of_bytes(stored_text).await,
+                )
+                .await
+                .expect("store the variant");
+            Self {
+                trusting: db.project_of(trusting).await,
+                other: db.project_of(other).await,
+                db,
+                nar_storage_dir,
+            }
+        }
+
+        async fn open_ssh_session_for_project(&self, project: ProjectId) -> Session {
+            let state = TestState::new()
+                .web_db(self.db.connection())
+                .nar_storage(
+                    gradient_storage::NarStore::local(&self.nar_storage_dir)
+                        .expect("local NAR storage"),
+                )
+                .build();
+            Session::open(
+                SshHandles::for_tests(&state),
+                gradient_fixtures::rows::user(),
+                MProject {
+                    id: project,
+                    ..gradient_fixtures::rows::project()
+                },
+                0,
+                vec![],
+                true,
+            )
+            .await
+            .expect("session")
+        }
+    }
+
+    #[tokio::test]
+    async fn ssh_build_request_refuses_content_variant_trusted_by_other_project_but_passes_for_trusting_project()
+     {
+        let stored =
+            TestDatabaseWithOneProjectBuiltContentVariantAndLocalNarStorage::new(DEP_ATERM).await;
+        let roots = [DEP_PATH.trim().to_owned()];
+
+        let trusting = stored.open_ssh_session_for_project(stored.trusting).await;
+        let read = closure(&VerifiedProjectDrvSource { session: &trusting }, &roots)
+            .await
+            .expect("The requesting project built the only stored variant of the .drv, so the closure can read and check that variant.");
+        let other = stored.open_ssh_session_for_project(stored.other).await;
+        let e = closure(&VerifiedProjectDrvSource { session: &other }, &roots)
+            .await
+            .expect_err("A project cannot get derivations from a .drv if the project never built the only stored variant of that .drv.");
+
+        assert_eq!(
+            read.read_stored_derivation_path_and_derivation_file_record_pairs
+                .len(),
+            1
+        );
+        assert!(e.to_string().contains("copy it first"), "{e}");
+        stored.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn rejects_ssh_build_request_for_drv_whose_text_hash_does_not_match_store_path() {
+        let forged = drv_aterm_text_with_out_output_path_changed_by_one_hash_character(DEP_ATERM);
+        let stored =
+            TestDatabaseWithOneProjectBuiltContentVariantAndLocalNarStorage::new(&forged).await;
+        let session = stored.open_ssh_session_for_project(stored.trusting).await;
+
+        let e = closure(
+            &VerifiedProjectDrvSource { session: &session },
+            &[DEP_PATH.trim().to_owned()],
+        )
+        .await
+        .expect_err("The build can reject saved `.drv` texts with a hash not equal to their store path before the check of that output path.");
+
+        assert!(
+            format!("{e:#}").contains("does not match its store path"),
+            "{e:#}"
+        );
+        stored.db.finish().await;
     }
 
     #[tokio::test]
@@ -478,12 +935,20 @@ mod tests {
     }
 
     async fn session(db: sea_orm::DatabaseConnection) -> Session {
+        session_with_project_credentials_and_privileged_actions_flag(db, true).await
+    }
+
+    async fn session_with_project_credentials_and_privileged_actions_flag(
+        db: sea_orm::DatabaseConnection,
+        allows_project_credentials_and_privileged_actions: bool,
+    ) -> Session {
         Session::open(
             SshHandles::for_tests(&TestState::new().web_db(db).build()),
             gradient_fixtures::rows::user(),
             gradient_fixtures::rows::project(),
             0,
             vec![],
+            allows_project_credentials_and_privileged_actions,
         )
         .await
         .unwrap()
@@ -581,12 +1046,75 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn grpc_build_request_writes_session_project_credentials_flag_into_evaluation_and_join_lookup()
+     {
+        for allows_project_credentials_and_privileged_actions in [true, false] {
+            let task = build_request_task();
+            let created = ssh_evaluation(&task);
+            let db = mock_db()
+                .append_query_results([vec![task.clone()]])
+                .append_query_results([Vec::<MEvaluation>::new()])
+                .append_query_results([vec![commit()]])
+                .append_query_results([vec![created.clone()]])
+                .into_connection();
+            let session = session_with_project_credentials_and_privileged_actions_flag(
+                db.clone(),
+                allows_project_credentials_and_privileged_actions,
+            )
+            .await;
+
+            drop(
+                evaluation_for(&session, &[path("a")])
+                    .await
+                    .expect("target"),
+            );
+
+            let bound_flag =
+                sea_orm::Value::Bool(Some(allows_project_credentials_and_privileged_actions));
+            let log = db.into_transaction_log();
+            let statements: Vec<_> = log.iter().flat_map(|t| t.statements()).collect();
+            let insert = statements
+                .iter()
+                .find(|s| s.sql.starts_with("INSERT INTO \"evaluation\""))
+                .expect("evaluation insert");
+            let columns = &insert.sql[insert.sql.find('(').expect("columns") + 1
+                ..insert.sql.find(')').expect("columns")];
+            let flag = columns
+                .split(", ")
+                .position(|c| c == "\"allows_project_credentials_and_privileged_actions\"")
+                .expect("flag column");
+            assert_eq!(insert.values.as_ref().expect("values").0[flag], bound_flag);
+            let lookup = statements
+                .iter()
+                .find(|s| s.sql.starts_with("SELECT") && s.sql.contains("FROM \"evaluation\""))
+                .expect("running evaluation lookup");
+            assert!(
+                lookup
+                    .sql
+                    .contains("\"allows_project_credentials_and_privileged_actions\" ="),
+                "{}",
+                lookup.sql
+            );
+            assert!(
+                lookup
+                    .values
+                    .as_ref()
+                    .expect("values")
+                    .0
+                    .contains(&bound_flag),
+                "{:?}",
+                lookup.values
+            );
+        }
+    }
+
     #[test]
     fn the_lookup_matches_task_kind_user_and_the_statuses_that_take_batches() {
         let task = TaskId::now_v7();
         let user = UserId::now_v7();
 
-        let sql = running_evaluation(task, user)
+        let sql = running_evaluation(task, user, true)
             .build(DbBackend::Postgres)
             .to_string();
 
@@ -601,13 +1129,12 @@ mod tests {
         let first = format!("/nix/store/{}-source.drv", "a".repeat(32));
         let second = format!("/nix/store/{}-source.drv", "b".repeat(32));
 
-        let entry_point = |path: &String| {
-            let found = discovered(&[(path.clone(), drv(&[]))], std::slice::from_ref(path))
-                .expect("discovered");
-            found[0].attr.clone()
-        };
+        let requested = HashSet::from([first.as_str(), second.as_str()]);
+        let entry_point =
+            |path: &String| entry_point_name_for_requested_closure_entry(&requested, path);
 
         assert_ne!(entry_point(&first), entry_point(&second));
+        assert!(!entry_point(&first).is_empty());
     }
 
     #[test]

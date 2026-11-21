@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use gradient_db::evaluations::failed_attributes::failed_attributes;
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReport, CiStatus};
+use gradient_types::events::fork_pull_request_approval_events;
 use gradient_types::input::vec_to_hex;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::{
@@ -72,8 +73,8 @@ pub(crate) async fn build_ci_reports_from_commit_status_check_rows(
     ctx: &CiContext,
     check: &CommitStatusCheckWithIds,
 ) -> Result<Vec<CiReport>> {
-    if let CommitStatusCheckWithIds::Approval { approval } = check {
-        return approval_reports(ctx, *approval).await;
+    if let CommitStatusCheckWithIds::Approval { approval, phase } = check {
+        return approval_reports(ctx, *approval, *phase).await;
     }
     let Some(evaluation_id) = check.evaluation_id() else {
         return Ok(Vec::new());
@@ -114,6 +115,7 @@ pub(crate) async fn build_ci_reports_from_commit_status_check_rows(
 async fn approval_reports(
     ctx: &CiContext,
     approval: PullRequestApprovalId,
+    phase: fork_pull_request_approval_events::Phase,
 ) -> Result<Vec<CiReport>> {
     let db = &ctx.db.worker_db;
     let Some(approval) = by_id::<EForkPullRequestApproval, _>(db, approval)
@@ -132,16 +134,17 @@ async fn approval_reports(
         parse_owner_repo(&task.repository).ok_or_else(|| ActionError::RepositoryUnparsable {
             repository: task.repository.clone(),
         })?;
-    let status = reporting::ci_status_for_approval_check(approval.approved_at.is_some());
+    let approved = approval.approved_at.is_some();
+    let status = reporting::ci_status_for_approval_check(approved);
+    let sha = vec_to_hex(&approval.commit_hash);
     Ok(vec![CiReport {
         owner,
         repo,
-        sha: vec_to_hex(&approval.commit_hash),
         context: reporting::approval_check_context(&task.name),
         existing_check_id: approval.check_run_id,
         requested_actions: requested_actions_for(status.clone()),
-        description: (status == CiStatus::ActionRequired)
-            .then(|| reporting::APPROVAL_PENDING_DESCRIPTION.to_owned()),
+        description: reporting::fork_pull_request_approval_check_description(approved, phase, &sha),
+        sha,
         status,
         details_url: None,
     }])

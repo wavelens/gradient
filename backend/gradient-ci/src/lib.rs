@@ -17,6 +17,7 @@ pub mod manifest_state;
 pub mod pull_request_summary;
 pub mod pull_requests;
 pub mod reactions;
+pub mod reporter_restricted_to_granted_repository;
 pub mod reporting;
 pub mod task_commit_status_posting;
 pub mod trigger;
@@ -25,8 +26,8 @@ pub mod webhooks;
 
 pub use self::abort::{AbortKind, abort_evaluation};
 pub use self::apply::{
-    ApplyError, ApplyInput, ApplyOutcome, PathFilterBaseCommit, PathFilterCommitComparison,
-    apply_trigger, park_if_no_cache, park_if_no_workers, park_storage_full,
+    ApplyError, ApplyInput, ApplyOutcome, EvaluationCodeTrust, PathFilterBaseCommit,
+    PathFilterCommitComparison, apply_trigger, park_storage_full,
     should_fire_trigger_for_path_filter,
 };
 pub use self::context::CiContext;

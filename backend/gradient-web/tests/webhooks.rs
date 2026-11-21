@@ -148,7 +148,7 @@ async fn create_rejects_a_private_url() {
     let res = server
         .post(PROJECT_URL)
         .add_header("authorization", bearer(session_id))
-        .json(&json!({ "name": "ci", "url": "http://127.0.0.1/hook", "events": [] }))
+        .json(&json!({ "name": "ci", "url": "http://10.0.0.5/hook", "events": [] }))
         .await;
 
     res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);

@@ -126,6 +126,7 @@ pub enum RamFit {
     Fits,
     FitsOnceRamIsReleased,
     DoesNotFit,
+    WaitsForLargerWorker,
 }
 
 impl WorkerMetricsView {

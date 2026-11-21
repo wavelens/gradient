@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use futures::future::BoxFuture;
+use gradient_wire::types::GuestSize;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinSet;
 use tracing::debug;
@@ -18,11 +19,7 @@ pub type OutputUpload = BoxFuture<'static, Result<()>>;
 const MAX_OPEN_UPLOADS_PER_JOB: usize = 64;
 
 pub fn guest_upload_staging_bytes_from_requested_disk_mb(disk_mb: u64) -> u64 {
-    let disk_mb = match disk_mb {
-        0 => gradient_wire::types::GuestSize::default_request().disk_mb,
-        requested => requested,
-    };
-    disk_mb.saturating_mul(1024 * 1024)
+    GuestSize::work_disk_size_mb_for_requested_disk_size_mb(disk_mb).saturating_mul(1024 * 1024)
 }
 
 enum StagedUpload {

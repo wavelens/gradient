@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![allow(clippy::disallowed_methods, reason = "test harness server")]
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "test harness server"
+)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,7 +35,7 @@ async fn live_route(
             rx,
             |env| Some(env.to_line()),
             gradient_web::endpoints::live::skip_lag,
-            gradient_web::authorization::LiveStreamAuthToken::anonymous(),
+            std::future::pending(),
             shutdown.token(),
         )
         .await;

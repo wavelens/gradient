@@ -34,7 +34,7 @@ pub struct TaskUpdateCheck {
 }
 
 impl TaskGitContext<'_> {
-    #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name))]
+    #[instrument(skip_all, fields(task_id = %self.task.id, task_name = %self.task.name))]
     pub(super) async fn check_for_updates(
         &self,
         branch: Option<&str>,
@@ -97,7 +97,7 @@ impl TaskGitContext<'_> {
         T: Send + 'static,
         F: FnOnce(&[AdvertisedRef]) -> Result<T, SourceError> + Send + 'static,
     {
-        let url = self.task.repository.clone();
+        let url = self.repository.clone();
         let credentials = self.credentials.clone();
 
         let selected =

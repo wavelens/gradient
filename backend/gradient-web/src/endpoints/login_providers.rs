@@ -8,8 +8,8 @@ use super::auth::{csrf_clear_cookie, csrf_set_cookie};
 use crate::audit::Audit;
 use crate::authorization::{
     ConnectRefusal, PasswordLogin, ProviderCallback, ProviderPurpose, can_disconnect,
-    connect_identity, cookie_value, create_session_and_token, jwt_cookie, provider_authorize,
-    provider_callback, session_claims, sign_in_external,
+    connect_identity, cookie_value, create_session_and_token_with_locked_authorization_recheck,
+    jwt_cookie, provider_authorize, provider_callback, session_claims, sign_in_external,
 };
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
@@ -23,7 +23,7 @@ use axum::response::Response;
 use axum::{Extension, Json};
 use gradient_core::{ExternalIdentity, LoginMethods, LoginProvider, LoginRefusal, ServerState};
 use gradient_db::WebDb;
-use gradient_state::PendingProjectMemberships;
+use gradient_db::users::VerifiedFactForSessionOrCredentialCreation;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -150,7 +150,7 @@ pub async fn get_provider_callback(
         };
         let (purpose, identity) = provider_callback(
             &state.config,
-            &state.http,
+            &state.admin_configured_endpoint_http_client,
             &state.jwt_secret,
             provider.as_ref(),
             callback,
@@ -162,7 +162,6 @@ pub async fn get_provider_callback(
             ProviderPurpose::Login => {
                 let token = sign_in(
                     &state.web_db,
-                    &state.memory.pending_project_memberships,
                     &state.jwt_secret,
                     PasswordLogin::of(&state.login_methods()),
                     &audit,
@@ -218,23 +217,27 @@ fn refusal_code(stage: &'static str) -> impl FnOnce(anyhow::Error) -> &'static s
 
 async fn sign_in(
     db: &WebDb,
-    pending: &PendingProjectMemberships,
     jwt_secret: &SecretString,
     password_login: PasswordLogin,
     audit: &Audit,
     identity: ExternalIdentity,
 ) -> Result<String, &'static str> {
-    let user = sign_in_external(db, pending, identity, password_login)
+    let identity_link = VerifiedFactForSessionOrCredentialCreation::ExternalLoginLink {
+        issuer: identity.issuer.clone(),
+        subject: identity.subject.clone(),
+    };
+    let user = sign_in_external(db, identity, password_login)
         .await
         .map_err(refusal_code("provider_sign_in"))?;
 
-    let (_session_id, token) = create_session_and_token(
+    let (_session_id, token) = create_session_and_token_with_locked_authorization_recheck(
         db,
         jwt_secret,
         user.id,
+        identity_link,
         false,
-        audit.info().user_agent.clone(),
-        audit.info().ip.clone(),
+        false,
+        audit.info(),
     )
     .await
     .map_err(|_| "failed")?;

@@ -21,7 +21,9 @@ use tracing::{info, warn};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
-use crate::jobs::{AwaitingReclaim, HeldReclaim, PendingJob, Reattached};
+use crate::jobs::{
+    AwaitingReclaim, HeldReclaim, PendingJob, Reattached, RefusedAndRevokedReattachedJobs,
+};
 
 #[derive(Debug, Default)]
 pub struct Reclaimed {
@@ -79,7 +81,9 @@ impl Scheduler {
         listed: Vec<DispatchedJobId>,
     ) -> Reclaimed {
         let listed = without_repeats(listed);
-        let held = self.reclaim_held(worker_id, &listed).await;
+        let mut held = self.reclaim_held(worker_id, &listed).await;
+        self.requeue_revoked(worker_id, &std::mem::take(&mut held.revoked))
+            .await;
         let rows = match assignment_rows(&self.db.worker_db, &held.unresolved).await {
             Ok(rows) => rows,
             Err(e) => return self.keep_holding(worker_id, held, e.into()).await,
@@ -92,13 +96,19 @@ impl Scheduler {
         let settled = settle_rows(rows, row_jobs);
         unknown.extend(self.abandon_finished(settled.finished).await);
         unknown.extend(self.requeue_live(settled.live).await);
-        let refused = self
+        let restored = self
             .restore_reclaimed(worker_id, settled.restored.clone(), Vec::new())
             .await;
-        let refused_ids: HashSet<DispatchedJobId> =
-            refused.iter().map(|job| job.assignment_id).collect();
+        let refused_ids: HashSet<DispatchedJobId> = restored
+            .refused
+            .iter()
+            .map(|job| job.assignment_id)
+            .collect();
+        let job_keys_taken_back_from_worker: HashSet<String> =
+            restored.revoked.into_iter().map(|(key, _)| key).collect();
         unknown.extend(
-            refused
+            restored
+                .refused
                 .into_iter()
                 .map(|job| (job.assignment_id, Some(job.job_id))),
         );
@@ -106,12 +116,10 @@ impl Scheduler {
         self.requeue_untracked_rows(worker_id, &listed).await;
 
         let mut reattached = held.reattached;
-        reattached.extend(
-            settled
-                .restored
-                .into_iter()
-                .filter(|job| !refused_ids.contains(&job.assignment_id)),
-        );
+        reattached.extend(settled.restored.into_iter().filter(|job| {
+            !refused_ids.contains(&job.assignment_id)
+                && !job_keys_taken_back_from_worker.contains(&job.job_id)
+        }));
         Reclaimed {
             reattached,
             unknown,
@@ -236,19 +244,27 @@ impl Scheduler {
         worker_id: &str,
         reattached: Vec<Reattached>,
         hold_again: Vec<(String, AwaitingReclaim)>,
-    ) -> Vec<Reattached> {
+    ) -> RefusedAndRevokedReattachedJobs {
         let worker = worker_id.to_owned();
-        self.call(|reply| SchedulerMsg::RestoreReclaimed {
-            worker,
-            reattached,
-            hold_again,
-            reply,
-        })
-        .await
-        .unwrap_or_else(|e| {
-            warn!(error = %e, %worker_id, "restoring reclaimed jobs did not reach the scheduler");
-            Vec::new()
-        })
+        let restored = self
+            .call(|reply| SchedulerMsg::RestoreReclaimed {
+                worker,
+                reattached,
+                hold_again,
+                reply,
+            })
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, %worker_id, "restoring reclaimed jobs did not reach the scheduler");
+                RefusedAndRevokedReattachedJobs::default()
+            });
+        self.requeue_revoked(worker_id, &restored.revoked).await;
+        restored
+    }
+
+    async fn requeue_revoked(&self, worker_id: &str, revoked: &[(String, PendingJob)]) {
+        let jobs: Vec<PendingJob> = revoked.iter().map(|(_, job)| job.clone()).collect();
+        self.requeue_revoked_jobs(worker_id, &jobs).await;
     }
 
     async fn requeue_unlisted(&self, worker_id: &str, listed: &[DispatchedJobId]) {

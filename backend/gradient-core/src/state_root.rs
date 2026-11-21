@@ -24,7 +24,6 @@ use gradient_entity::{MappingError, StorePathMapper};
 use gradient_git_host::GitHostRegistry;
 use gradient_graph::Graph;
 use gradient_notify::EmailSender;
-use gradient_state::PendingProjectMemberships;
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
 use gradient_types::ids::ClusterAttemptId;
 use gradient_types::{
@@ -50,7 +49,6 @@ pub struct InstanceMemory {
     pub github_app_page_url: Arc<gradient_git_host::github_app::GitHubAppPageUrlCache>,
     pub manifest_state: ManifestStateStore,
     pub pending_credentials: PendingCredentialsStore,
-    pub pending_project_memberships: PendingProjectMemberships,
     pub upstream_query: Arc<Semaphore>,
     pub nar_downloads: Arc<Semaphore>,
     pub upload_admission: Arc<gradient_storage::admission::UploadAdmission>,
@@ -67,7 +65,8 @@ pub struct AppState {
     pub log_storage: Arc<dyn LogStorage>,
     pub email: Arc<dyn EmailSender>,
     pub nar_storage: NarStore,
-    pub http: reqwest::Client,
+    pub admin_configured_endpoint_http_client: reqwest::Client,
+    pub user_supplied_url_http_client: gradient_util::http::HttpClientForUserSuppliedUrls,
     pub git_host: GitHostRegistry,
     pub shutdown: Shutdown,
     pub jwt_secret: SecretString,
@@ -128,6 +127,7 @@ impl AppState {
             wake: self.wake.clone(),
             memory: self.memory.db.clone(),
             store_path_mapping: Arc::clone(&self.extensions.store_path_mapping),
+            user_supplied_url_http_client: self.user_supplied_url_http_client.clone(),
         }
     }
 
@@ -153,7 +153,6 @@ impl AppState {
     pub fn ci(&self) -> CiContext {
         CiContext {
             db: self.db(),
-            http: self.http.clone(),
             git_host: self.git_host.clone(),
             email: self.email.clone(),
         }

@@ -56,7 +56,8 @@ pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
     let store_path_obj = make_store_path_from_ca(&store_dir, name, ca);
 
     let store_hash = store_path_obj.hash().to_string();
-    let store_path = gradient_types::StorePath::from_stored(store_hash.clone(), "source").full();
+    let store_path =
+        gradient_types::StorePath::parse_stored(&format!("{store_hash}-source"))?.full();
 
     let compressed_bytes = zstd::encode_all(
         std::io::Cursor::new(&nar_bytes),

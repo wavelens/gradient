@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::can_view_project;
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::MaybeApiKey;
 use crate::error::WebError;
 use crate::extractors::Path;
-use crate::resource::Resource;
 use async_stream::stream;
 use axum::Extension;
 use axum::extract::State;
@@ -115,18 +114,14 @@ pub async fn post_evaluation_builds(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> Result<StreamBodyAs<'static>, WebError> {
-    let api_key_ref = api_key.as_ref();
     let ctx = EvalAccessContext::load(
         &state.web_db,
         evaluation_id,
-        &Some(user.clone()),
-        api_key_ref,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::ProjectMemberOnlyViewProject,
     )
     .await?;
-
-    if !can_view_project(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found(Resource::Evaluation));
-    }
 
     let evaluation = ctx.evaluation;
 

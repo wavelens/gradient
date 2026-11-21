@@ -337,8 +337,17 @@ impl MessageLoopState {
                 assignment_id,
                 job,
                 cluster,
+                ssh_key,
+                ssh_host_keys,
+                https_git_credentials,
             } => {
-                self.on_assign_job(job_id, assignment_id, job, cluster.map(|m| *m))
+                let credentials = self.take_credentials_for_job_assignment(
+                    &job_id,
+                    ssh_key,
+                    ssh_host_keys,
+                    https_git_credentials,
+                );
+                self.on_assign_job(job_id, assignment_id, job, cluster.map(|m| *m), credentials)
                     .await?;
             }
             ServerMessage::StartCluster { attempt, roster } => {
@@ -715,8 +724,8 @@ impl MessageLoopState {
         assignment_id: String,
         job: Job,
         cluster: Option<ClusterMembership>,
+        credentials: JobCredentials,
     ) -> Result<()> {
-        let credentials = self.credentials.take_credentials_for_job(&job_id);
         let readoption = self.jobs.registry.lock().readopt(&job_id, &assignment_id);
         match readoption {
             Readoption::Readopted => {
@@ -1040,6 +1049,21 @@ impl MessageLoopState {
     ) {
         debug!(?kind, "received credential");
         self.credentials.store(kind, data);
+    }
+
+    fn take_credentials_for_job_assignment(
+        &mut self,
+        job_id: &str,
+        ssh_key: Option<gradient_types::SecretString>,
+        ssh_host_keys: Vec<gradient_wire::messages::GitServerSshHostKey>,
+        https_git_credentials: Vec<gradient_sources::HttpsGitCredential>,
+    ) -> JobCredentials {
+        self.credentials.take_credentials_for_job(
+            job_id,
+            ssh_key,
+            ssh_host_keys,
+            https_git_credentials,
+        )
     }
 
     fn on_cache_status(&mut self, query_id: String, cached: Vec<CachedPath>) {
@@ -1374,7 +1398,9 @@ mod tests {
             .route(ServerMessage::FetchInput {
                 fetch_id: "f1".into(),
                 project: "p1".into(),
-                request: "{}".into(),
+                request:
+                    r#"{"builtin":"fetchTree","args":{"type":"github","owner":"o","repo":"r"}}"#
+                        .into(),
                 ssh_key: None,
                 ssh_host_keys: Vec::new(),
                 https_git_credentials: Vec::new(),
@@ -1392,9 +1418,74 @@ mod tests {
             ClientMessage::InputFetched {
                 fetch_id: "f1".into(),
                 outcome: gradient_wire::types::InputOutcome::Failed {
-                    message: "offline".into()
+                    message: crate::executor::input_fetch::InputFetchFailureReason::Other
+                        .to_string()
                 },
             }
+        );
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test stands in for the server by hand"
+    )]
+    async fn start_fake_protocol_server_connect_worker_and_make_message_loop_state()
+    -> (MessageLoopState, tempfile::TempDir) {
+        let server = gradient_test_support::prelude::MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        tokio::spawn(async move {
+            let _conn = server.accept().await;
+            std::future::pending::<()>().await
+        });
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader, _flush) = conn.split();
+        let gcroots = tempfile::tempdir().unwrap();
+        let config = WorkerConfig {
+            base_dir: gcroots.path().to_owned(),
+            ..WorkerConfig::default()
+        };
+        let jobs = Arc::new(WorkerJobs::new(&config));
+        let state = MessageLoopState::new(
+            writer,
+            &jobs,
+            config,
+            super::super::test_executor(gcroots.path()),
+        );
+        (state, gcroots)
+    }
+
+    #[tokio::test]
+    async fn two_job_assignments_do_not_share_ssh_key_or_git_credential() {
+        let (mut state, _gcroots) =
+            start_fake_protocol_server_connect_worker_and_make_message_loop_state().await;
+
+        let first = state.take_credentials_for_job_assignment(
+            "build:1",
+            Some("project-b".into()),
+            Vec::new(),
+            vec![gradient_sources::HttpsGitCredential {
+                host: "github.com".into(),
+                username: "x-access-token".into(),
+                password: "ghp-secret".into(),
+            }],
+        );
+        let second =
+            state.take_credentials_for_job_assignment("build:2", None, Vec::new(), Vec::new());
+
+        assert_eq!(
+            [&first, &second].map(|credentials| credentials.ssh_private_key_text()),
+            [Some("project-b"), None]
+        );
+        assert_eq!(
+            [&first, &second].map(|credentials| {
+                credentials
+                    .git_credentials_for_clone_and_fetch()
+                    .https_git_credentials
+                    .len()
+            }),
+            [1, 0]
         );
     }
 

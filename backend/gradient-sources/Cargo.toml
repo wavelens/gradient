@@ -22,6 +22,7 @@ gradient-types = { workspace = true }
 gradient-derivation = { workspace = true }
 gradient-db    = { workspace = true }
 gradient-util  = { workspace = true }
+gradient-wildcard = { workspace = true }
 gradient-wire  = { workspace = true }
 
 anyhow      = { workspace = true }
@@ -57,5 +58,7 @@ ssh-key         = { workspace = true }
 
 [dev-dependencies]
 gradient-fixtures = { workspace = true }
+gradient-types    = { workspace = true, features = ["test-functions"] }
 rand  = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "test-util"] }
+tracing-subscriber = { workspace = true }

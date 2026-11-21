@@ -98,14 +98,18 @@ mod tests {
         crypt_file: &str,
         project: StateProject,
     ) -> Result<(), DynError> {
+        let transaction = sea_orm::TransactionTrait::begin(db).await?;
         let app = StateApplicator {
-            db,
+            db: &transaction,
             crypt_secret_file: crypt_file,
             credentials_dir: credentials,
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
         app.apply_project_secrets(&HashMap::from([(project.name.clone(), project)]))
-            .await
+            .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     #[tokio::test]

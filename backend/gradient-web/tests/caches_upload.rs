@@ -6,9 +6,104 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use axum_test::multipart::{MultipartForm, Part};
+use gradient_fixtures::rows::{cache, cache_admin_role, cache_member};
 use gradient_test_support::cache_fixture::{FIXTURE_CACHE_NAME, public_cache_empty_nars};
+use gradient_test_support::state::TestState;
+use gradient_test_support::web::signed_in;
+use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use gradient_web::create_router;
+use sea_orm::DatabaseConnection;
 use std::sync::Arc;
+
+fn mock_database_and_auth_header_for_signed_in_cache_admin() -> (DatabaseConnection, String) {
+    let (db, auth) = signed_in();
+    let db = db
+        .append_query_results([vec![cache()]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]]);
+    (db.into_connection(), auth)
+}
+
+#[tokio::test]
+async fn chunk_upload_rejects_too_long_or_forbidden_store_path_name_with_bad_request_and_no_staging_file()
+ {
+    let hash = "a".repeat(32);
+    for segment in [
+        format!("{hash}-{}", "n".repeat(212)),
+        format!("{hash}-hello~world"),
+    ] {
+        let upload_server_base_temp_dir = tempfile::TempDir::new().unwrap();
+        let base_dir = upload_server_base_temp_dir.path().to_path_buf();
+        let (db, auth) = mock_database_and_auth_header_for_signed_in_cache_admin();
+        let server = TestState::new()
+            .web_db(db)
+            .config(move |config| config.server.base_dir = base_dir)
+            .server();
+
+        let response = server
+            .put(&format!(
+                "/api/v1/caches/{}/nars/{segment}/chunk?offset=0",
+                cache().name
+            ))
+            .add_header("authorization", auth)
+            .bytes(vec![1u8, 2, 3].into())
+            .await;
+
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let partial_dir = upload_server_base_temp_dir
+            .path()
+            .join("nar-upload-partial");
+        assert!(
+            std::fs::read_dir(&partial_dir)
+                .map(|entries| entries.count() == 0)
+                .unwrap_or(true),
+            "{segment}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn chunk_upload_with_longest_valid_store_path_name_succeeds_and_uses_same_partial_file_name()
+{
+    let hash = "a".repeat(32);
+    let longest_valid_chunk_url_path_segment = format!("{hash}-{}", "n".repeat(211));
+    let mut partial_upload_staging_file_names = Vec::new();
+    for segment in [hash.clone(), longest_valid_chunk_url_path_segment] {
+        let upload_server_base_temp_dir = tempfile::TempDir::new().unwrap();
+        let base_dir = upload_server_base_temp_dir.path().to_path_buf();
+        let (db, auth) = mock_database_and_auth_header_for_signed_in_cache_admin();
+        let server = TestState::new()
+            .web_db(db)
+            .config(move |config| config.server.base_dir = base_dir)
+            .server();
+
+        let response = server
+            .put(&format!(
+                "/api/v1/caches/{}/nars/{segment}/chunk?offset=0",
+                cache().name
+            ))
+            .add_header("authorization", auth)
+            .bytes(vec![1u8, 2, 3].into())
+            .await;
+
+        response.assert_status_ok();
+        let partial_dir = upload_server_base_temp_dir
+            .path()
+            .join("nar-upload-partial");
+        partial_upload_staging_file_names.push(
+            std::fs::read_dir(&partial_dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .filter(|name| name.ends_with(".partial"))
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(partial_upload_staging_file_names[0].len(), 1);
+    assert_eq!(
+        partial_upload_staging_file_names[0],
+        partial_upload_staging_file_names[1]
+    );
+}
 
 #[tokio::test]
 async fn upload_unauthenticated_returns_403() {

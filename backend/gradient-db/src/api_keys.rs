@@ -88,8 +88,11 @@ mod tests {
     use gradient_migration::{Migrator, MigratorTrait};
     use gradient_types::permissions::{
         CachePermission, Permission, PermissionMask, admin_mask, cache_mask_from, mask_from,
+        view_mask, write_mask,
     };
     use sea_orm_migration::SchemaManager;
+
+    const ADD_OPEN_JOB_TERMINAL_PERMISSION_TO_TRIGGER_EVALUATION_ROLES_AND_ALL_PROJECT_PERMISSIONS_API_KEYS_MIGRATION_NAME: &str = "m20261231_000000_add_open_job_terminal_bit_to_roles_with_trigger_evaluation_and_api_keys_with_all_project_permissions";
 
     const USE_SUPERUSER_RIGHTS: &str = "m20261210_000001_add_use_superuser_rights_bit_to_existing_api_keys_not_pinned_to_cache_owned_by_superuser_with_all_project_permissions";
 
@@ -191,7 +194,7 @@ mod tests {
     #[tokio::test]
     async fn running_use_superuser_rights_migration_marks_only_unpinned_keys_of_superusers_with_all_project_permissions_and_is_idempotent()
      {
-        assert_eq!(admin_mask(), 32767);
+        assert_eq!(admin_mask(), 294911);
         assert_eq!(Permission::WriteSuperuser.bit(), 65536);
         let db = TestDatabase::create().await;
         let conn = db.connection();
@@ -359,6 +362,110 @@ mod tests {
                 "{}",
                 stored.name
             );
+        }
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn add_open_job_terminal_permission_to_roles_and_api_keys_migration_is_idempotent() {
+        let terminal = Permission::OpenJobTerminal.bit();
+        assert_eq!(terminal, 262144);
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let trigger_only = mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]);
+
+        let role_cases: [(MRole, PermissionMask); 5] = [
+            (
+                MRole {
+                    permission: admin_mask() & !terminal,
+                    ..rows::admin_role()
+                },
+                admin_mask(),
+            ),
+            (
+                MRole {
+                    permission: write_mask() & !terminal,
+                    ..rows::write_role()
+                },
+                write_mask(),
+            ),
+            (rows::view_role(), view_mask()),
+            (
+                MRole {
+                    id: RoleId::now_v7(),
+                    name: "deploy".into(),
+                    project: None,
+                    permission: trigger_only,
+                    managed: false,
+                },
+                trigger_only | terminal,
+            ),
+            (
+                MRole {
+                    id: RoleId::now_v7(),
+                    name: "reader".into(),
+                    project: None,
+                    permission: view_mask(),
+                    managed: false,
+                },
+                view_mask(),
+            ),
+        ];
+        let mut expected_roles: Vec<(RoleId, PermissionMask)> = Vec::new();
+        for (role, want) in role_cases {
+            let row = crate::rows::insert::<ERole, _>(&conn, role)
+                .await
+                .expect("the role is written");
+            expected_roles.push((row.id, want));
+        }
+
+        let owner = crate::rows::insert::<EUser, _>(&conn, rows::superuser())
+            .await
+            .expect("the owner is written");
+        let old_full: PermissionMask = 32767;
+        let superuser_full = old_full | Permission::WriteSuperuser.bit();
+        let key_cases: [(PermissionMask, PermissionMask); 3] = [
+            (old_full, old_full | terminal),
+            (superuser_full, superuser_full | terminal),
+            (trigger_only, trigger_only),
+        ];
+        let mut expected_keys: Vec<(ApiId, PermissionMask)> = Vec::new();
+        for (index, (permission, want)) in key_cases.iter().enumerate() {
+            let name = format!("key-{index}");
+            let row = crate::rows::insert::<EApi, _>(
+                &conn,
+                MApi {
+                    id: ApiId::now_v7(),
+                    owned_by: owner.id,
+                    name: name.clone(),
+                    key: name,
+                    last_used_at: test_date(),
+                    created_at: test_date(),
+                    permission: *permission,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the key is written");
+            expected_keys.push((row.id, *want));
+        }
+
+        run_migrations(
+            &conn,
+            &[
+                ADD_OPEN_JOB_TERMINAL_PERMISSION_TO_TRIGGER_EVALUATION_ROLES_AND_ALL_PROJECT_PERMISSIONS_API_KEYS_MIGRATION_NAME,
+                ADD_OPEN_JOB_TERMINAL_PERMISSION_TO_TRIGGER_EVALUATION_ROLES_AND_ALL_PROJECT_PERMISSIONS_API_KEYS_MIGRATION_NAME,
+            ],
+        )
+        .await;
+
+        for (id, want) in &expected_roles {
+            let stored = db.find::<ERole>(*id).await.expect("the role exists");
+            assert_eq!(stored.permission, *want, "role {}", stored.name);
+        }
+        for (id, want) in &expected_keys {
+            let stored = db.find::<EApi>(*id).await.expect("the key exists");
+            assert_eq!(stored.permission, *want, "{}", stored.name);
         }
         db.finish().await;
     }

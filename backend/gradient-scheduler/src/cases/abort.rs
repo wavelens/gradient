@@ -124,7 +124,7 @@ async fn a01_aborting_an_evaluation_with_a_running_eval_job_keeps_it_active_unti
 async fn a01b_a_worker_cancel_of_a_build_requeues_it_without_failure() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -249,7 +249,7 @@ async fn a01c_a_worker_cancel_of_an_eval_job_requeues_it_without_failure() {
 async fn a02_aborting_an_evaluation_stops_its_unshared_running_build() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().chain(e1)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let b = case.key(B).await;
 
     case.admit_startable_moves().await;
@@ -341,7 +341,7 @@ async fn a02_aborting_an_evaluation_stops_its_unshared_running_build() {
 async fn a03_a_build_wanted_by_a_second_live_evaluation_is_not_stopped() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().shared(e1, e2)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -390,7 +390,7 @@ async fn a03_a_build_wanted_by_a_second_live_evaluation_is_not_stopped() {
     case.check("step 2").await;
 
     case.commit_nar(NarCommit {
-        targets: case.project_caches(e2).await,
+        producer: case.make_worker_producer_for_evaluation_project(e2).await,
         ..output_nar(A, A_OUT)
     })
     .await;
@@ -425,7 +425,7 @@ async fn a03_a_build_wanted_by_a_second_live_evaluation_is_not_stopped() {
 async fn a04_aborting_the_last_live_wanting_evaluation_stops_the_build() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().shared(e1, e2)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -498,7 +498,7 @@ async fn a04_aborting_the_last_live_wanting_evaluation_stops_the_build() {
 async fn a05_a_pending_build_another_live_evaluation_wants_stays_pending() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().shared(e1, e2)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -540,7 +540,7 @@ async fn a05_a_pending_build_another_live_evaluation_wants_stays_pending() {
 async fn a06_aborting_an_evaluation_drops_only_its_own_pending_jobs() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().evalq(e1).one(e2, B, B_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (k, b) = (eval_key(e1), case.key(B).await);
 
     case.assign_queued_evals().await;
@@ -579,7 +579,7 @@ async fn a06_aborting_an_evaluation_drops_only_its_own_pending_jobs() {
 async fn a07_an_unconfirmed_abort_is_reaped_after_the_grace() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().two(e1)).await;
-    case.connect(W1, w_all().slots(1), &[]).await;
+    case.connect(W1, w_all().slots(1)).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -670,7 +670,7 @@ async fn a07_an_unconfirmed_abort_is_reaped_after_the_grace() {
 #[tokio::test]
 async fn a08_a_running_job_nobody_aborted_is_not_reaped_even_with_a_zero_grace() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -721,7 +721,7 @@ async fn a08_a_running_job_nobody_aborted_is_not_reaped_even_with_a_zero_grace()
 async fn a09_a_building_report_for_an_aborted_build_is_answered_with_abort() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -798,7 +798,7 @@ async fn a09_a_building_report_for_an_aborted_build_is_answered_with_abort() {
 async fn a10_abort_build_is_refused_while_another_live_evaluation_names_the_build() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().shared(e1, e2)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -918,7 +918,7 @@ async fn a12_retry_of_build_aborted_in_running_evaluation_is_refused_until_worke
             .output(B_OUT),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1115,7 +1115,7 @@ async fn a14_cancel_aborts_running_keys_and_drops_pending_keys_without_moving_th
     case.evalrun(W1, e1).await;
     case.advance_evaluation(W1, &key, EvaluationStatus::EvaluatingDerivation)
         .await;
-    case.connect(W2, w_all().slots(2), &[]).await;
+    case.connect(W2, w_all().slots(2)).await;
     let (a, b, c) = (case.key(A).await, case.key(B).await, case.key(C).await);
     case.check("step 0").await;
 
@@ -1181,7 +1181,7 @@ async fn a14_cancel_aborts_running_keys_and_drops_pending_keys_without_moving_th
 async fn a15_a_late_completed_report_after_an_abort_moves_nothing_in_the_graph() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1286,7 +1286,7 @@ async fn a16_a_waiting_evaluation_with_unmet_systems_is_aborted_unless_the_task_
             .task_option(|t| t.wait_for_workers = true),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     case.backdate_evaluation(e1, ago(301)).await;
     case.backdate_evaluation(e2, ago(301)).await;
 
@@ -1380,7 +1380,7 @@ async fn a17_aborting_a_waiting_evaluation_clears_its_waiting_reason() {
 async fn a18_a_prioritized_evaluation_wins_against_an_equal_smaller_id_candidate() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().one(e2, B, B_OUT).one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
     assert!(b < a, "seed: build:B sorts before build:A");
 
@@ -1434,7 +1434,7 @@ async fn a18_a_prioritized_evaluation_wins_against_an_equal_smaller_id_candidate
 #[tokio::test]
 async fn a19_prioritize_build_marks_the_shared_build_and_the_pending_job() {
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
     assert!(a < b, "seed: build:A sorts before build:B");
 
@@ -1475,7 +1475,7 @@ async fn a20_aborting_one_of_two_evaluations_sharing_a_passthrough_keeps_the_sub
             .job(),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1522,7 +1522,7 @@ async fn a20_aborting_one_of_two_evaluations_sharing_a_passthrough_keeps_the_sub
     )
     .await;
     case.commit_nar(NarCommit {
-        targets: case.project_caches(e2).await,
+        producer: case.make_worker_producer_for_evaluation_project(e2).await,
         ..output_nar(A, A_OUT)
     })
     .await;
@@ -1578,6 +1578,217 @@ async fn a21_aborting_an_evaluation_as_a_user_records_the_user_and_reason() {
         "after 1: evaluation(E1)"
     );
     case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a22_aborted_build_whose_output_is_referenced_by_cached_build_stays_aborted_until_admin_retry()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(B)
+            .walked()
+            .drv_cached()
+            .job()
+            .output(B_OUT)
+            .cached_output(B)
+            .derivation(A)
+            .walked()
+            .drv_cached()
+            .entry_point(&attr_of(A))
+            .job()
+            .output(A_OUT)
+            .runtime_depends_on(B)
+            .cached_output(A),
+    )
+    .await;
+
+    case.upstream_probed(&[A, B]).await;
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Queued,
+        "after 1: sb(B).status"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 1: sb(A).status"
+    );
+    case.check("step 1").await;
+
+    assert_eq!(case.abort_build(e1, B).await, Ok(()), "after 2: result");
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 2: sb(B).status"
+    );
+    assert!(!case.sb(B).await.wanted, "after 2: sb(B).wanted");
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 2: sb(A).status"
+    );
+    case.check("step 2").await;
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 2: sb(B).status after check"
+    );
+
+    assert_eq!(case.retry_build(e1, B).await, Ok(()), "after 3: result");
+    assert!(case.sb(B).await.wanted, "after 3: sb(B).wanted");
+    assert_ne!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 3: sb(B).status"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 3: sb(A).status"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a23_admin_abort_of_build_whose_referenced_output_is_not_cached_fails_cached_parent_and_leaves_build_aborted_with_no_wait_or_drift()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(B)
+            .walked()
+            .drv_cached()
+            .job()
+            .output(B_OUT)
+            .derivation(A)
+            .walked()
+            .drv_cached()
+            .entry_point(&attr_of(A))
+            .job()
+            .output(A_OUT)
+            .runtime_depends_on(B)
+            .cached_output(A),
+    )
+    .await;
+
+    case.upstream_probed(&[A, B]).await;
+    assert!(case.sb(B).await.wanted, "after 1: sb(B).wanted");
+    case.check("step 1").await;
+
+    assert_eq!(case.abort_build(e1, B).await, Ok(()), "after 2: result");
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 2: sb(B).status"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::DependencyFailed,
+        "after 2: sb(A).status"
+    );
+    assert!(
+        case.evaluation(e1).await.status.is_terminal(),
+        "after 2: evaluation(E1).status terminal"
+    );
+    case.check("step 2").await;
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 2: sb(B).status after check"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::DependencyFailed,
+        "after 2: sb(A).status after check"
+    );
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a24_admin_abort_of_build_with_output_not_in_cache_and_unrecorded_runtime_dependency_from_cached_parent_keeps_parent_untouched_build_aborted_not_wanted_and_no_drift_until_admin_retry_makes_build_wanted()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(B)
+            .walked()
+            .drv_cached()
+            .job()
+            .output(B_OUT)
+            .derivation(A)
+            .walked()
+            .drv_cached()
+            .entry_point(&attr_of(A))
+            .job()
+            .output(A_OUT)
+            .runtime_depends_on(B)
+            .cached_output(A)
+            .references(&[(A_OUT, "a")]),
+    )
+    .await;
+
+    case.upstream_probed(&[A, B]).await;
+    assert!(case.sb(B).await.wanted, "after 1: sb(B).wanted");
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 1: sb(A).status"
+    );
+    case.check("step 1").await;
+
+    assert_eq!(case.abort_build(e1, B).await, Ok(()), "after 2: result");
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 2: sb(B).status"
+    );
+    assert!(!case.sb(B).await.wanted, "after 2: sb(B).wanted");
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 2: sb(A).status"
+    );
+    case.check("step 2").await;
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 2: sb(B).status after check"
+    );
+    assert!(
+        !case.sb(B).await.wanted,
+        "after 2: sb(B).wanted after check"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 2: sb(A).status after check"
+    );
+
+    assert_eq!(case.retry_build(e1, B).await, Ok(()), "after 3: result");
+    assert!(case.sb(B).await.wanted, "after 3: sb(B).wanted");
+    assert_ne!(
+        case.sb(B).await.status,
+        BuildStatus::Aborted,
+        "after 3: sb(B).status"
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 3: sb(A).status"
+    );
+    case.check("step 3").await;
 
     case.finish().await;
 }

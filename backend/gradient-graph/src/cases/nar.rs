@@ -12,6 +12,7 @@ use gradient_entity::cached_path;
 use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
+use gradient_entity::store_path_content_producer::CacheUploadChannel;
 use gradient_fixtures::shape::{Shape, shape};
 use sea_orm::sea_query::LockType;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait};
@@ -19,8 +20,9 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTra
 use super::{
     A, A_OUT, B, B_OUT, B_OUT2, C, C_OUT, Case, D, D_OUT, F_OUT, F1, F2, M, M_OUT, P, P_OUT,
     SOURCE, X, X_OUT, assert_only_unstored_outputs, chain, chain_done, commit_of, drv_nar, nar,
+    with_verified_content_from_nar_bytes,
 };
-use crate::messages::NarCommit;
+use crate::messages::{NarCommit, StoredContentProducer};
 
 fn chain_with_b_building(evaluation: EvaluationId) -> Shape {
     chain(evaluation)
@@ -84,8 +86,7 @@ async fn end_state_of_the_runtime_chain(case: &Case, evaluation: EvaluationId) -
 
     for hash in [A_OUT, B_OUT, C_OUT] {
         let path = case.cached_path(hash).await;
-        let stored = (path.confirmed, path.references);
-        state.push(format!("{hash}: {stored:?}"));
+        state.push(format!("{hash}: {:?}", path.references));
     }
 
     state.push(format!("sb(X).wanted: {}", case.sb(X).await.wanted));
@@ -100,18 +101,16 @@ async fn n01_committing_the_output_of_a_completed_leaf_makes_it_fetchable_and_qu
     let case = Case::start_with_unstored_outputs(seed, 1).await;
     let gv = case.gv(e1).await;
 
+    let facts = gradient_storage::compress_nar_bytes_and_verify_stream(b"fh");
     let report = case
-        .commit_nar(NarCommit {
-            file_hash: "sha256:fh".into(),
-            built_by_worker: true,
-            ..commit_of(B_OUT, "b", &[(B_OUT, "b")])
-        })
+        .commit_nar(with_verified_content_from_nar_bytes(
+            commit_of(B_OUT, "b", &[(B_OUT, "b")]),
+            b"fh",
+        ))
         .await;
 
     let path = case.cached_path(B_OUT).await;
-    assert!(path.confirmed, "after 1: cached_path(B_OUT).confirmed");
-    let file_hash = path.file_hash.as_deref();
-    assert_eq!(file_hash, Some("sha256:fh"), "after 1: file_hash");
+    assert_eq!(path.file_hash, facts.file_hash(), "after 1: file_hash");
     let references = Some(format!("{B_OUT}-b"));
     assert_eq!(path.references, references, "after 1: references");
     let signatures = case.signatures(B_OUT).await;
@@ -333,54 +332,8 @@ async fn n06_a_reference_to_a_missing_path_leaves_the_producer_incomplete() {
 }
 
 #[tokio::test]
-async fn n07_an_unconfirmed_row_is_present_and_its_confirming_recommit_can_drop_fetchable() {
-    let e1 = EvaluationId::now_v7();
-    let case = Case::start(
-        chain_done(e1)
-            .unconfirmed()
-            .references(&[(B_OUT, "b")])
-            .derivation(D)
-            .walked()
-            .job()
-            .probed()
-            .drv_cached()
-            .output(D_OUT)
-            .build_status(Skipped),
-    )
-    .await;
-
-    assert!(case.sb(B).await.fetchable, "given: sb(B) is present");
-
-    case.commit_nar(NarCommit {
-        file_hash: "sha256:fh2".into(),
-        ..commit_of(B_OUT, "b", &[(B_OUT, "b"), (D_OUT, "d")])
-    })
-    .await;
-
-    let path = case.cached_path(B_OUT).await;
-    assert!(path.confirmed, "after 1: cached_path(B_OUT).confirmed");
-    let file_hash = path.file_hash.as_deref();
-    assert_eq!(file_hash, Some("sha256:fh2"), "after 1: file_hash");
-    let references = Some(format!("{B_OUT}-b {D_OUT}-d"));
-    assert_eq!(path.references, references, "after 1: references");
-    let edge = case.edge_kind(B, D).await;
-    assert_eq!(edge, Some(EdgeKind::Runtime), "after 1: edge(B,D).kind");
-    let b = case.sb(B).await;
-    let b = (b.status, b.missing_runtime_deps, b.fetchable, b.wanted);
-    assert_eq!(b, (Completed, 1, false, true), "after 1: sb(B)");
-    let a = case.queue_state(A).await;
-    assert_eq!(a, (Created, 1), "after 1: sb(A)");
-    let d = case.sb(D).await;
-    let d = (d.status, d.attempt, d.wanted);
-    assert_eq!(d, (Queued, 0, true), "after 1: sb(D), answers Q8");
-    let counters = case.counters(e1).await;
-    assert_eq!(counters, [3, 2, 0, 1, 0], "after 1: counters, answers Q8");
-    case.zero_drift("step 1").await;
-    case.finish().await;
-}
-
-#[tokio::test]
-async fn n08_references_are_stored_in_the_given_order_and_a_self_reference_adds_no_edge() {
+async fn commit_stores_references_sorted_and_without_duplicates_and_a_self_reference_adds_no_dependency()
+ {
     let e1 = EvaluationId::now_v7();
     let case = Case::start_with_unstored_outputs(
         shape()
@@ -410,7 +363,7 @@ async fn n08_references_are_stored_in_the_given_order_and_a_self_reference_adds_
         .await;
 
     let references = case.cached_path(B_OUT).await.references;
-    let given = Some(format!("{C_OUT}-c {B_OUT}-b"));
+    let given = Some(format!("{B_OUT}-b {C_OUT}-c"));
     assert_eq!(references, given, "after 1: references of B_OUT");
     let own = case.edge_kind(B, B).await;
     assert_eq!(own, None, "after 1: no edge(B,B)");
@@ -714,6 +667,8 @@ async fn n14_committing_nar_of_unneeded_output_keeps_missing_runtime_dep_count_o
 async fn the_cached_path_row_is_read_under_a_row_lock() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(chain_done(e1)).await;
+    case.commit_nar(commit_of(B_OUT, "b", &[(B_OUT, "b")]))
+        .await;
     let second_connection = case.db.connection();
     let locking = second_connection
         .begin()
@@ -722,6 +677,7 @@ async fn the_cached_path_row_is_read_under_a_row_lock() {
 
     cached_path::Entity::find()
         .filter(cached_path::Column::Hash.eq(B_OUT))
+        .filter(cached_path::Column::ServerComputedHashesAndSizes.eq(true))
         .lock(LockType::NoKeyUpdate)
         .one(&locking)
         .await
@@ -750,29 +706,18 @@ async fn a_commit_stores_the_content_address_of_its_path() {
 
     case.commit_nar(NarCommit {
         ca: Some(ca.to_owned()),
+        producer: StoredContentProducer::Upload {
+            caches: Vec::new(),
+            user: None,
+            api_key: None,
+            channel: CacheUploadChannel::RestHttpApiUpload,
+        },
         ..nar(SOURCE, "source")
     })
     .await;
 
     let stored = case.cached_path(SOURCE).await.ca;
     assert_eq!(stored.as_deref(), Some(ca), "cached_path(SOURCE).ca");
-    case.zero_drift("the commit").await;
-    case.finish().await;
-}
-
-#[tokio::test]
-async fn a_commit_that_is_not_confirmed_stores_an_unconfirmed_row() {
-    let case = Case::start(shape()).await;
-
-    case.commit_nar(NarCommit {
-        confirmed: false,
-        ..nar(SOURCE, "source")
-    })
-    .await;
-
-    let row = case.cached_path(SOURCE).await;
-    assert!(!row.confirmed, "cached_path(SOURCE).confirmed: {row:?}");
-    assert!(row.file_hash.is_some(), "the row is stored: {row:?}");
     case.zero_drift("the commit").await;
     case.finish().await;
 }

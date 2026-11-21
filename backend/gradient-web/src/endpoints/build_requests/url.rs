@@ -20,10 +20,8 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_sources::resolve_remote_ref;
-use gradient_types::input::{
-    check_flake_input_override, hex_to_vec, repository_url_to_nix, vec_to_hex,
-};
-use gradient_types::{BaseResponse, MUser};
+use gradient_types::input::{InputError, check_flake_input_override, hex_to_vec, vec_to_hex};
+use gradient_types::{BaseResponse, MUser, RepositoryUrl};
 use sea_orm::TransactionTrait;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -91,6 +89,14 @@ pub async fn post_url(
         check_flake_input_override(input_name, override_url)?;
     }
 
+    let repository_url_parse_error_to_invalid_repository_url_refusal =
+        |e: InputError| BuildRequestRefusal::InvalidRepositoryUrl {
+            reason: e.to_string(),
+        };
+    let repository_url: RepositoryUrl = url
+        .parse()
+        .map_err(repository_url_parse_error_to_invalid_repository_url_refusal)?;
+
     let (commit_hash, label) = match body.rev.as_deref() {
         Some(rev) => {
             let hash = hex_to_vec(rev)
@@ -101,7 +107,7 @@ pub async fn post_url(
         }
         None => {
             let git_ref = body.git_ref.as_deref();
-            let hash = resolve_remote_ref(&state.db(), &project, url, git_ref)
+            let hash = resolve_remote_ref(&state.db(), &project, &repository_url, git_ref)
                 .await
                 .map_err(|e| {
                     tracing::warn!(project_id = %project.id, error = %e, "reject build request because of failure to resolve git ref of repository");
@@ -111,11 +117,10 @@ pub async fn post_url(
         }
     };
 
-    let repository = repository_url_to_nix(url, &vec_to_hex(&commit_hash)).map_err(|e| {
-        BuildRequestRefusal::InvalidRepositoryUrl {
-            reason: e.to_string(),
-        }
-    })?;
+    let repository = repository_url
+        .with_rev(&vec_to_hex(&commit_hash))
+        .map_err(repository_url_parse_error_to_invalid_repository_url_refusal)?
+        .to_string();
     refuse_when_caches_full(&state.web_db, &state.0.config, project.id).await?;
 
     let tx = state.web_db.inner().begin().await?;

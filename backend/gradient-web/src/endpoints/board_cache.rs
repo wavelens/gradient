@@ -5,9 +5,11 @@
  */
 
 use crate::access::board_cache_condition;
-use crate::authorization::{LiveStreamAuthToken, MaybeUser};
+use crate::authorization::{
+    MaybeUser, WebSocketAuthorizationRecheck, WebSocketUpgradeCredentialRecheckRequestExtractor,
+};
 use crate::endpoints::board_metrics::{SeriesPoint, WindowParams, infra_series, window_clause};
-use crate::endpoints::live::revoked_session_or_api_key_close_message;
+use crate::endpoints::live::{ClientPingTimerAndLastReceivedTime, stream_access_lost_close_frame};
 use crate::endpoints::metrics::{Observations, collect};
 use crate::endpoints::stats::{TrafficKind, TrafficParams};
 use crate::error::{WebError, WebResult};
@@ -15,7 +17,8 @@ use crate::extractors::Query;
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocket};
+use axum::http::Method;
 use axum::response::Response;
 use axum::{Extension, Json};
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -26,6 +29,7 @@ use gradient_scheduler::Scheduler;
 use gradient_storage::admission::UploadAdmission;
 use gradient_types::events::{Event, EventRx};
 use gradient_types::*;
+use gradient_util::http_base_url::upstream_cache_url_for_display_without_username_password_query_and_fragment;
 use gradient_util::shutdown::CancellationToken;
 use gradient_util::telemetry::metric;
 use sea_orm::Condition;
@@ -171,15 +175,25 @@ pub async fn cache_live_ws(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Query(params): Query<WindowParams>,
     Query(TrafficParams { traffic }): Query<TrafficParams>,
-    credentials: LiveStreamAuthToken,
-    ws: WebSocketUpgrade,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let db = state.web_db.clone();
+    let admitted = scope.clone();
+    let guard = credentials.watch_caller_access_with_recheck(Method::GET, move |user, _| {
+        let (db, admitted) = (db.clone(), admitted.clone());
+        async move {
+            admitted
+                .recheck_metrics_scope_still_visible(&db, &user)
+                .await
+        }
+    });
     let feed = CacheFeed {
         db: state.web_db.clone(),
         started_at: state.started_at,
         admission: state.memory.upload_admission.clone(),
         scheduler,
-        scope: MetricsScope::resolve(&state.web_db, &maybe_user).await?,
+        scope,
         visible: board_cache_condition(state.config.server.public_listing, &maybe_user),
         window: window_clause(&params),
         traffic,
@@ -187,9 +201,9 @@ pub async fn cache_live_ws(
     let rx = state.events.subscribe();
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
-    Ok(ws.on_upgrade(move |socket| async move {
+    Ok(guard.on_upgrade(move |socket, guard| async move {
         let _ = shutdown
-            .spawn(stream_snapshots(socket, rx, feed, credentials, cancel))
+            .spawn(stream_snapshots(socket, rx, feed, guard, cancel))
             .await;
     }))
 }
@@ -334,8 +348,12 @@ async fn upstream_caches(
 ) -> WebResult<BoardUpstreamCacheStats> {
     let mut by_upstream: HashMap<String, UpstreamTally> = HashMap::new();
     for row in series::upstream_cache_buckets(db, window).await? {
-        if let Some(url) = row.upstream_url.clone() {
-            by_upstream.entry(url).or_default().add(row);
+        if let Some(shown) = row
+            .upstream_url
+            .as_deref()
+            .and_then(upstream_cache_url_for_display_without_username_password_query_and_fragment)
+        {
+            by_upstream.entry(shown.url).or_default().add(row);
         }
     }
 
@@ -409,7 +427,7 @@ async fn stream_snapshots(
     socket: WebSocket,
     mut rx: EventRx,
     feed: CacheFeed,
-    credentials: LiveStreamAuthToken,
+    guard: WebSocketAuthorizationRecheck,
     cancel: CancellationToken,
 ) {
     use futures::{SinkExt, StreamExt};
@@ -420,18 +438,27 @@ async fn stream_snapshots(
     gap.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut stale = true;
     let mut last = None;
-    let revoked = credentials.wait_until_session_or_api_key_is_revoked();
-    tokio::pin!(revoked);
+    let mut liveness = ClientPingTimerAndLastReceivedTime::new();
+    let access_lost = guard.wait_until_access_lost();
+    tokio::pin!(access_lost);
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
-            _ = &mut revoked => {
-                let _ = sink.send(revoked_session_or_api_key_close_message()).await;
+            _ = &mut access_lost => {
+                let _ = sink.send(stream_access_lost_close_frame()).await;
                 break;
             }
             incoming = stream.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
-                Some(Ok(_)) => {}
+                Some(Ok(_)) => liveness.reset_silence_timer_after_client_frame(),
+            },
+            ping = liveness.wait_for_next_ping_or_silence_deadline() => match ping {
+                Some(ping) => {
+                    if sink.send(ping).await.is_err() {
+                        break;
+                    }
+                }
+                None => break,
             },
             event = rx.recv() => match event {
                 Ok(env) => stale |= matches!(env.event, Event::CacheChanged(_)),

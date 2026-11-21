@@ -8,16 +8,24 @@ use super::commands::{
     first_task_with_reporter, github_installation_id_from_comment_body,
     load_active_pull_request_tasks_for_event_repository,
 };
-use super::fanout::{project_name_for, record_trigger_apply_outcome, touch_trigger_last_fired};
-use super::installation::{resolve_github_app_targets, task_serves_repository};
+use super::fanout::{
+    CHANGED_PATHS_CHECK_TIMEOUT, parse_trigger_config, project_name_for,
+    record_trigger_apply_outcome, touch_trigger_last_fired,
+};
+use super::installation::resolve_github_app_targets;
 use super::payloads::GithubCheckRunRequestedAction;
-use super::response::WebhookTriggerOutcome;
+use super::response::{TaskEvaluationNotStartedReason, WebhookTriggerOutcome};
 use gradient_ci::CiContext;
-use gradient_ci::{APPROVAL_ACTION_ID, ApplyError, ApplyInput, ApplyOutcome, apply_trigger};
+use gradient_ci::{
+    APPROVAL_ACTION_ID, ApplyError, ApplyInput, ApplyOutcome, EvaluationCodeTrust,
+    PathFilterBaseCommit, PathFilterCommitComparison, apply_trigger,
+    should_fire_trigger_for_path_filter,
+};
 use gradient_db::fork_pull_request_approvals as approvals;
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::evaluation::WalkMode;
+use gradient_git_host::webhook::ApprovedCommitSource;
 use gradient_git_host::{ParsedPullRequestEvent, ParsedPullRequestReviewEvent};
 use gradient_scheduler::Scheduler;
 use gradient_types::branch_key;
@@ -25,16 +33,22 @@ use gradient_types::events::fork_pull_request_approval_events::{Phase, Reported}
 use gradient_types::input::vec_to_hex;
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
-use sea_orm::TransactionTrait;
+use sea_orm::{IntoActiveModel, Set, TransactionTrait};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{info, warn};
+
+const PULL_REQUEST_REVIEW_WEBHOOK_REVIEWER_PUSH_CHECK_AND_APPROVED_COMMIT_READ_TIME_LIMIT:
+    Duration = Duration::from_secs(4);
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct PullRequestApprovalContext {
     pub pr_number: Option<u64>,
     pub pr_author: Option<String>,
     pub is_fork: Option<bool>,
-    pub sender: Option<String>,
+    pub head_repo_owner_login: Option<String>,
+    pub unknown_author_requires_approval: bool,
+    pub approved_head_commit_sha: Option<Vec<u8>>,
 }
 
 impl From<&ParsedPullRequestEvent> for PullRequestApprovalContext {
@@ -43,15 +57,11 @@ impl From<&ParsedPullRequestEvent> for PullRequestApprovalContext {
             pr_number: parsed.pr_number,
             pr_author: parsed.pr_author.clone(),
             is_fork: parsed.is_fork,
-            sender: parsed.sender.clone(),
+            head_repo_owner_login: parsed.head_repo_owner_login.clone(),
+            unknown_author_requires_approval: parsed.unknown_author_requires_approval,
+            approved_head_commit_sha: None,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ApprovalInfo {
-    pub pr_number: u64,
-    pub pr_author: String,
 }
 
 fn approval_event(
@@ -76,11 +86,24 @@ pub(super) async fn store_pending_approval_for_untrusted_fork_pull_request_commi
     project: ProjectId,
     pending: MForkPullRequestApproval,
 ) -> Result<(), sea_orm::DbErr> {
+    let pr_base_branch_name = pending.pr_base_branch_name.clone();
     let stored =
         approvals::add_pending_approval_for_pull_request_commit_and_remove_older_pending_approvals(
             &db.web_db, pending,
         )
         .await?;
+    let stored = if stored.pr_base_branch_name == pr_base_branch_name {
+        stored
+    } else {
+        let mut pending_fork_pull_request_approval_active_model = stored.into_active_model();
+        pending_fork_pull_request_approval_active_model.pr_base_branch_name =
+            Set(pr_base_branch_name);
+        gradient_db::rows::update::<EForkPullRequestApproval, _>(
+            &db.web_db,
+            pending_fork_pull_request_approval_active_model,
+        )
+        .await?
+    };
     db.record(approval_event(
         &stored,
         project,
@@ -122,6 +145,33 @@ pub(super) async fn approve_approval_and_start_approved_commit_evaluation(
         return false;
     };
 
+    if let Some(base_branch_name) = pending.pr_base_branch_name.clone()
+        && let Some(config) = parse_trigger_config(&trigger)
+        && let Some(filter) = config.path_filter()
+        && !should_fire_trigger_for_path_filter(
+            &ci.db.web_db,
+            &ci.db,
+            &task,
+            filter,
+            PathFilterCommitComparison {
+                base: &PathFilterBaseCommit::TargetBranchTip(base_branch_name),
+                head: &pending.commit_hash,
+                head_repository: pending.head_repo_clone_url.as_deref(),
+            },
+            CHANGED_PATHS_CHECK_TIMEOUT,
+        )
+        .await
+    {
+        return record_approval_approved_without_evaluation_when_no_path_filter_match(
+            ci,
+            &task,
+            &trigger,
+            approval,
+            maintainer_login,
+        )
+        .await;
+    }
+
     let pr_number = pending.pr_number as u64;
     let source_comment = source_comment.unwrap_or_else(
         || serde_json::json!({ "pr_number": pr_number, "pr_author": pending.pr_author }),
@@ -135,7 +185,8 @@ pub(super) async fn approve_approval_and_start_approved_commit_evaluation(
         author_name: pending.author_name,
         manual: true,
         honors_skip_marker: false,
-        repository_override: pending.head_repo_clone_url,
+        code_trust: EvaluationCodeTrust::ForkPullRequestCodeApprovedForHeadCommit,
+        repository_override: pending.head_repo_clone_url.and_then(|url| url.parse().ok()),
         wildcard_override,
         source_comment: Some(source_comment),
         started_by: None,
@@ -196,7 +247,46 @@ pub(super) async fn approve_approval_and_start_approved_commit_evaluation(
     true
 }
 
-/// Approval rows stay pending unless the same transaction can also create an evaluation.
+async fn record_approval_approved_without_evaluation_when_no_path_filter_match(
+    ci: &CiContext,
+    task: &MTask,
+    trigger: &MTaskTrigger,
+    approval: PullRequestApprovalId,
+    maintainer_login: &str,
+) -> bool {
+    let approved = match approvals::mark_pull_request_approval_approved(
+        &ci.db.web_db,
+        approval,
+        maintainer_login,
+    )
+    .await
+    {
+        Ok(Some(approved)) => approved,
+        Ok(None) => return false,
+        Err(e) => {
+            warn!(error = %e, %approval, "Mark fork pull request approval as approved");
+            return false;
+        }
+    };
+    touch_trigger_last_fired(&ci.db.web_db, trigger).await;
+    ci.db
+        .record(approval_event(
+            &approved,
+            task.project,
+            Phase::ApprovalWithoutChangedFileMatchingTriggerPath,
+        ))
+        .await;
+    info!(
+        %approval,
+        task_id = %task.id,
+        maintainer = maintainer_login,
+        reason = ?TaskEvaluationNotStartedReason::NoChangedFileMatchesPathFilter,
+        "A maintainer approved the commit on a pull request from a fork. The changed files don't match the path filter for triggers. The evaluation doesn't start."
+    );
+    true
+}
+
+/// An approval row can remain pending. The same transaction must also create the evaluation. The only exception is a path filter of the trigger with no matching changed file. The caller can then mark the row approved without an evaluation.
 async fn approve_pending_fork_pull_request_approval_and_apply_trigger_in_transaction(
     db: &WebDb,
     task: &MTask,
@@ -216,44 +306,6 @@ async fn approve_pending_fork_pull_request_approval_and_apply_trigger_in_transac
         transaction.commit().await?;
     }
     Ok(Some((approved, applied)))
-}
-
-pub(super) async fn approve_newest_pending_approval_and_start_its_evaluation(
-    ci: &CiContext,
-    scheduler: &Arc<Scheduler>,
-    task_ids: &[TaskId],
-    pr_number: u64,
-    maintainer_login: &str,
-    wildcard_override: &Option<String>,
-    source_comment: Option<serde_json::Value>,
-) -> bool {
-    let mut started_any = false;
-    for task_id in task_ids {
-        let pending = match approvals::get_newest_pending_pull_request_approval_for_task(
-            &ci.db.web_db,
-            *task_id,
-            pr_number,
-        )
-        .await
-        {
-            Ok(Some(pending)) => pending,
-            Ok(None) => continue,
-            Err(e) => {
-                warn!(error = %e, %task_id, pr_number, "Loading Pending Approvals for Fork Pull Requests");
-                continue;
-            }
-        };
-        started_any |= approve_approval_and_start_approved_commit_evaluation(
-            ci,
-            scheduler,
-            pending.id,
-            maintainer_login,
-            wildcard_override.clone(),
-            source_comment.clone(),
-        )
-        .await;
-    }
-    started_any
 }
 
 async fn approve_pending_fork_pull_request_approvals_for_reviewed_commit_and_start_commit_evaluations(
@@ -341,21 +393,8 @@ pub(super) async fn handle_github_check_run(
         );
         return;
     };
-    let task_repository = by_id::<ETask, _>(&ci.db.web_db, approval.task)
-        .await
-        .ok()
-        .flatten()
-        .map(|task| task.repository);
-    if !task_repository.is_some_and(|url| task_serves_repository(&url, owner, repo)) {
-        warn!(
-            approval_id = %approval.id,
-            %full_name,
-            "Reject approval click - this approval is for a different repository"
-        );
-        return;
-    }
 
-    if !sender_is_trusted(ci, approval.task, owner, repo, sender.login).await {
+    if !login_can_push_to_repository(ci, approval.task, owner, repo, sender.login).await {
         warn!(
             approval_id = %approval.id,
             sender = %sender.login,
@@ -376,12 +415,12 @@ pub(super) async fn handle_github_check_run(
 }
 
 /// The trust probe is failing closed on any error.
-pub(super) async fn sender_is_trusted(
+pub(super) async fn login_can_push_to_repository(
     ci: &CiContext,
     task_id: TaskId,
     owner: &str,
     repo: &str,
-    sender: &str,
+    login: &str,
 ) -> bool {
     let reporter = match gradient_ci::task_commit_status_posting::reporter_for_task(ci, task_id)
         .await
@@ -393,7 +432,7 @@ pub(super) async fn sender_is_trusted(
             return false;
         }
     };
-    match reporter.is_repo_writer(owner, repo, sender).await {
+    match reporter.is_repo_writer(owner, repo, login).await {
         Ok(b) => b,
         Err(e) => {
             warn!(error = %e, %task_id, "is_repo_writer probe failed");
@@ -426,13 +465,6 @@ pub(super) async fn handle_pull_request_review(
         warn!("pull_request_review: approval without a PR number");
         return;
     };
-    let Some(commit_hash) = review.commit_hash else {
-        warn!(
-            pr_number,
-            "pull_request_review: approval without a reviewed commit"
-        );
-        return;
-    };
     let Some(reviewer) = review.reviewer else {
         warn!(
             pr_number,
@@ -449,6 +481,13 @@ pub(super) async fn handle_pull_request_review(
     };
     let Some((owner, repo)) = owner_repo.rsplit_once('/') else {
         warn!(owner_repo, "pull_request_review: malformed repo full_name");
+        return;
+    };
+    let Some(approved_commit_source) = review.approved_commit_source else {
+        warn!(
+            pr_number,
+            "pull_request_review: approval names no reviewed commit and no sender ID, nothing approved"
+        );
         return;
     };
 
@@ -487,24 +526,106 @@ pub(super) async fn handle_pull_request_review(
         let Some(probe_task) = first_task_with_reporter(ci, &task_ids).await else {
             continue;
         };
-        if !sender_is_trusted(ci, probe_task, owner, repo, &reviewer).await {
-            warn!(
-                %connection_id,
-                pr_number,
-                %reviewer,
-                "Ignoring PR review approval - reviewer is not a repo writer"
-            );
-            continue;
-        }
+        let reviewer_push_check_and_approved_commit_read_future = async {
+            if !login_can_push_to_repository(ci, probe_task, owner, repo, &reviewer).await {
+                warn!(
+                    %connection_id,
+                    pr_number,
+                    %reviewer,
+                    "Ignoring PR review approval - reviewer is not a repo writer"
+                );
+                return None;
+            }
+            match &approved_commit_source {
+                ApprovedCommitSource::CommitId(commit) => Some(commit.clone()),
+                ApprovedCommitSource::ReviewSenderUserIdOnly { sender_user_id } => {
+                    load_sender_newest_undismissed_approving_review_commit(
+                        ci,
+                        probe_task,
+                        owner,
+                        repo,
+                        pr_number,
+                        *sender_user_id,
+                        &reviewer,
+                    )
+                    .await
+                }
+            }
+        };
+        let reviewed_commit = match tokio::time::timeout(
+            PULL_REQUEST_REVIEW_WEBHOOK_REVIEWER_PUSH_CHECK_AND_APPROVED_COMMIT_READ_TIME_LIMIT,
+            reviewer_push_check_and_approved_commit_read_future,
+        )
+        .await
+        {
+            Ok(Some(commit)) => commit,
+            Ok(None) => continue,
+            Err(_) => {
+                warn!(
+                    %connection_id,
+                    pr_number,
+                    "pull_request_review: The Git host didn't answer the reviewer push permission check and the review API within the 4 second time limit, so no approval happened"
+                );
+                continue;
+            }
+        };
         approve_pending_fork_pull_request_approvals_for_reviewed_commit_and_start_commit_evaluations(
             ci,
             scheduler,
             &task_ids,
             pr_number,
-            &commit_hash,
+            &reviewed_commit,
             &reviewer,
         )
         .await;
+    }
+}
+
+async fn load_sender_newest_undismissed_approving_review_commit(
+    ci: &CiContext,
+    task_id: TaskId,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    sender_user_id: i64,
+    webhook_sender_login: &str,
+) -> Option<Vec<u8>> {
+    let lookup = async {
+        let Some(reporter) =
+            gradient_ci::task_commit_status_posting::reporter_for_task(ci, task_id).await?
+        else {
+            return Ok(None);
+        };
+        reporter
+            .get_newest_undismissed_approval_review_commit_id_for_user(
+                owner,
+                repo,
+                pr_number,
+                sender_user_id,
+                webhook_sender_login,
+            )
+            .await
+    };
+    match lookup.await {
+        Ok(Some(commit)) => Some(commit),
+        Ok(None) => {
+            info!(
+                %task_id,
+                pr_number,
+                reviewer = webhook_sender_login,
+                "pull_request_review: git host did not specify approved commits for sender (no matching reviews, 404, or page limit), so there are no approved commits"
+            );
+            None
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                %task_id,
+                pr_number,
+                "pull_request_review: failed to read the commit under review from the review API of the git host, so no approval happened"
+            );
+            None
+        }
     }
 }
 
@@ -512,10 +633,15 @@ pub(super) async fn handle_pull_request_review(
 mod tests {
     use super::*;
     use gradient_fixtures::database::TestDatabase;
-    use gradient_fixtures::ids::task_id;
+    use gradient_fixtures::ids::{project_id, task_id, user_id};
     use gradient_fixtures::{rows, test_date};
+    use gradient_test_support::git_daemon_and_fork_repository_fixtures::{
+        create_forked_repository_with_base_commit_and_fork_commit_and_return_fork_head_commit_hash,
+        start_git_daemon_on_free_loopback_port_serving_base_directory,
+    };
     use gradient_test_support::state::TestState;
     use gradient_types::triggers::{ChangedFilePathFilter, TriggerConfig};
+    use sea_orm::DatabaseConnection;
 
     #[tokio::test]
     async fn approving_pending_fork_pull_request_approval_starts_one_approved_commit_evaluation_and_approving_again_or_approving_next_commit_during_evaluation_starts_no_evaluation_and_leaves_next_approval_pending()
@@ -531,6 +657,30 @@ mod tests {
         gradient_db::rows::insert::<ETask, _>(&conn, rows::task())
             .await
             .expect("the task is written");
+        gradient_db::rows::insert::<ECache, _>(&conn, rows::cache())
+            .await
+            .expect("the cache is written");
+        gradient_db::rows::insert::<EProjectCache, _>(
+            &conn,
+            rows::project_cache_link(
+                ProjectCacheId::now_v7(),
+                project_id(),
+                rows::cache().id,
+                gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
+            ),
+        )
+        .await
+        .expect("the project writes to the cache");
+        gradient_db::rows::insert::<EWorkerRegistration, _>(
+            &conn,
+            MWorkerRegistration {
+                peer_id: project_id(),
+                created_by: Some(user_id()),
+                ..rows::worker_registration(true, true)
+            },
+        )
+        .await
+        .expect("the evaluating worker is registered");
         let pull_request = TriggerConfig::ReporterPullRequest {
             branches: vec![],
             actions: vec![],
@@ -599,6 +749,13 @@ mod tests {
         let evaluations = db.rows::<EEvaluation>().await;
         assert_eq!(evaluations.len(), 1);
         assert_eq!(
+            (
+                evaluations[0].status,
+                evaluations[0].allows_project_credentials_and_privileged_actions,
+            ),
+            (gradient_entity::evaluation::EvaluationStatus::Queued, true)
+        );
+        assert_eq!(
             evaluations[0].repository,
             "https://github.com/external/repo"
         );
@@ -616,15 +773,22 @@ mod tests {
             Some("maintainer")
         );
 
-        gradient_db::status::change_evaluation_status(
-            &db.connection(),
-            evaluations[0].id,
-            gradient_entity::evaluation::EvaluationStatus::Building.report(),
-            |update| update,
-        )
-        .await
-        .expect("the evaluation builds")
-        .expect("the parked evaluation can start building");
+        for status in [
+            gradient_entity::evaluation::EvaluationStatus::Fetching,
+            gradient_entity::evaluation::EvaluationStatus::EvaluatingFlake,
+            gradient_entity::evaluation::EvaluationStatus::EvaluatingDerivation,
+            gradient_entity::evaluation::EvaluationStatus::Building,
+        ] {
+            gradient_db::status::change_evaluation_status(
+                &db.connection(),
+                evaluations[0].id,
+                status.report(),
+                |update| update,
+            )
+            .await
+            .expect("Write the evaluation status")
+            .expect("Approved evaluations move to the next status step in the scheduler.");
+        }
         let blocked = gradient_db::rows::insert::<EForkPullRequestApproval, _>(
             &db.connection(),
             MForkPullRequestApproval {
@@ -659,6 +823,309 @@ mod tests {
             .expect("the approval");
         assert!(still_pending.approved_at.is_none());
         assert!(still_pending.approving_maintainer_login.is_none());
+        db.finish().await;
+    }
+
+    async fn write_user_project_task_cache_and_evaluating_worker(
+        conn: &DatabaseConnection,
+        git_server_url: &str,
+    ) {
+        gradient_db::rows::insert::<EUser, _>(conn, rows::user())
+            .await
+            .expect("the user is written");
+        gradient_db::rows::insert::<EProject, _>(conn, rows::project())
+            .await
+            .expect("the project is written");
+        gradient_db::rows::insert::<ETask, _>(
+            conn,
+            MTask {
+                repository: format!("{git_server_url}/test-org/repo"),
+                ..rows::task()
+            },
+        )
+        .await
+        .expect("the task is written");
+        gradient_db::rows::insert::<ECache, _>(conn, rows::cache())
+            .await
+            .expect("the cache is written");
+        gradient_db::rows::insert::<EProjectCache, _>(
+            conn,
+            rows::project_cache_link(
+                ProjectCacheId::now_v7(),
+                project_id(),
+                rows::cache().id,
+                gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
+            ),
+        )
+        .await
+        .expect("the project writes to the cache");
+        gradient_db::rows::insert::<EWorkerRegistration, _>(
+            conn,
+            MWorkerRegistration {
+                peer_id: project_id(),
+                created_by: Some(user_id()),
+                ..rows::worker_registration(true, true)
+            },
+        )
+        .await
+        .expect("the evaluating worker is registered");
+    }
+
+    async fn create_pending_fork_pull_request_approval(
+        conn: &DatabaseConnection,
+        task: TaskId,
+        git_server_url: &str,
+        include_path: &str,
+        head_commit_hash: &str,
+    ) -> MForkPullRequestApproval {
+        let pull_request = TriggerConfig::ReporterPullRequest {
+            branches: vec![],
+            actions: vec![],
+            require_approval: true,
+            path_filter: ChangedFilePathFilter {
+                include_paths: vec![include_path.to_owned()],
+                exclude_paths: vec![],
+            },
+        };
+        let trigger = gradient_db::triggers::insert(
+            conn,
+            MTaskTrigger {
+                id: TaskTriggerId::now_v7(),
+                task,
+                trigger_type: pull_request.trigger_type(),
+                config: pull_request.to_db_json(),
+                active: true,
+                created_at: test_date(),
+                updated_at: test_date(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the trigger is written");
+        gradient_db::rows::insert::<EForkPullRequestApproval, _>(
+            conn,
+            MForkPullRequestApproval {
+                id: PullRequestApprovalId::now_v7(),
+                task,
+                trigger: trigger.id,
+                pr_number: 7,
+                pr_author: "contributor".into(),
+                commit_hash: hex::decode(head_commit_hash).expect("a hex commit hash"),
+                head_repo_clone_url: Some(format!("{git_server_url}/external/repo")),
+                pr_base_branch_name: Some("main".into()),
+                created_at: test_date(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the pending approval is written")
+    }
+
+    async fn write_second_project_with_pending_approval_for_same_commit(
+        conn: &DatabaseConnection,
+        git_server_url: &str,
+        head_commit_hash: &str,
+    ) -> MForkPullRequestApproval {
+        let project = gradient_db::rows::insert::<EProject, _>(
+            conn,
+            rows::project_with_id(ProjectId::now_v7(), "second-project"),
+        )
+        .await
+        .expect("the second project is written");
+        let task = gradient_db::rows::insert::<ETask, _>(
+            conn,
+            MTask {
+                id: TaskId::now_v7(),
+                project: project.id,
+                repository: format!("{git_server_url}/test-org/repo"),
+                ..rows::task()
+            },
+        )
+        .await
+        .expect("the task of the second project is written");
+        create_pending_fork_pull_request_approval(
+            conn,
+            task.id,
+            git_server_url,
+            "src/*",
+            head_commit_hash,
+        )
+        .await
+    }
+
+    fn build_test_ci_context_and_scheduler_from_db_connection(
+        conn: DatabaseConnection,
+    ) -> (CiContext, Arc<Scheduler>) {
+        let state = TestState::new()
+            .web_db(conn.clone())
+            .worker_db(conn)
+            .build();
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        (state.ci(), scheduler)
+    }
+
+    async fn pending_delivery_event_phases(db: &TestDatabase) -> Vec<serde_json::Value> {
+        db.rows::<EPendingDelivery>()
+            .await
+            .into_iter()
+            .filter_map(|delivery| {
+                delivery
+                    .payload
+                    .pointer("/ForkPullRequestApprovalReported/phase")
+                    .cloned()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn approving_fork_pull_request_commit_skips_approved_commit_evaluation_when_path_filter_finds_no_changed_file_matching_stored_base_branch_and_marks_approval_approved()
+     {
+        let served = tempfile::tempdir().expect("a temporary directory");
+        let head = create_forked_repository_with_base_commit_and_fork_commit_and_return_fork_head_commit_hash(
+            served.path(),
+            "src/main.rs",
+            "docs/guide.md",
+        );
+        let (_daemon, git_server_url) =
+            start_git_daemon_on_free_loopback_port_serving_base_directory(served.path());
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        write_user_project_task_cache_and_evaluating_worker(&conn, &git_server_url).await;
+        let pending = create_pending_fork_pull_request_approval(
+            &conn,
+            task_id(),
+            &git_server_url,
+            "src/*",
+            &head,
+        )
+        .await;
+        let (ci, scheduler) = build_test_ci_context_and_scheduler_from_db_connection(conn);
+
+        let recorded = approve_approval_and_start_approved_commit_evaluation(
+            &ci,
+            &scheduler,
+            pending.id,
+            "maintainer",
+            None,
+            None,
+        )
+        .await;
+
+        assert!(recorded);
+        assert!(db.rows::<EEvaluation>().await.is_empty());
+        let approved = db
+            .find::<EForkPullRequestApproval>(pending.id)
+            .await
+            .expect("the approval");
+        assert_eq!(
+            approved.approving_maintainer_login.as_deref(),
+            Some("maintainer")
+        );
+        assert!(
+            pending_delivery_event_phases(&db)
+                .await
+                .contains(&serde_json::json!(
+                    "approval_without_changed_file_matching_trigger_path"
+                ))
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn approving_fork_pull_request_commit_that_changes_matching_file_starts_one_evaluation() {
+        let served = tempfile::tempdir().expect("a temporary directory");
+        let head = create_forked_repository_with_base_commit_and_fork_commit_and_return_fork_head_commit_hash(
+            served.path(),
+            "src/main.rs",
+            "docs/guide.md",
+        );
+        let (_daemon, git_server_url) =
+            start_git_daemon_on_free_loopback_port_serving_base_directory(served.path());
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        write_user_project_task_cache_and_evaluating_worker(&conn, &git_server_url).await;
+        let pending = create_pending_fork_pull_request_approval(
+            &conn,
+            task_id(),
+            &git_server_url,
+            "docs/*",
+            &head,
+        )
+        .await;
+        let (ci, scheduler) = build_test_ci_context_and_scheduler_from_db_connection(conn);
+
+        let started = approve_approval_and_start_approved_commit_evaluation(
+            &ci,
+            &scheduler,
+            pending.id,
+            "maintainer",
+            None,
+            None,
+        )
+        .await;
+
+        assert!(started);
+        assert_eq!(db.rows::<EEvaluation>().await.len(), 1);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn changed_file_list_from_path_filter_is_not_reused_for_other_project() {
+        let served = tempfile::tempdir().expect("a temporary directory");
+        let head = create_forked_repository_with_base_commit_and_fork_commit_and_return_fork_head_commit_hash(
+            served.path(),
+            "src/main.rs",
+            "docs/guide.md",
+        );
+        let (_daemon, git_server_url) =
+            start_git_daemon_on_free_loopback_port_serving_base_directory(served.path());
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        write_user_project_task_cache_and_evaluating_worker(&conn, &git_server_url).await;
+        let pending = create_pending_fork_pull_request_approval(
+            &conn,
+            task_id(),
+            &git_server_url,
+            "src/*",
+            &head,
+        )
+        .await;
+        let second_project_task_pending_approval_row =
+            write_second_project_with_pending_approval_for_same_commit(
+                &conn,
+                &git_server_url,
+                &head,
+            )
+            .await;
+        let (ci, scheduler) = build_test_ci_context_and_scheduler_from_db_connection(conn);
+        let second_project_approval_recorded =
+            approve_approval_and_start_approved_commit_evaluation(
+                &ci,
+                &scheduler,
+                second_project_task_pending_approval_row.id,
+                "maintainer",
+                None,
+                None,
+            )
+            .await;
+        std::fs::rename(
+            served.path().join("test-org/repo"),
+            served.path().join("test-org/removed"),
+        )
+        .expect("the base repository is moved away");
+
+        let started = approve_approval_and_start_approved_commit_evaluation(
+            &ci,
+            &scheduler,
+            pending.id,
+            "maintainer",
+            None,
+            None,
+        )
+        .await;
+
+        assert!(second_project_approval_recorded && started);
+        assert_eq!(db.rows::<EEvaluation>().await.len(), 1);
         db.finish().await;
     }
 }

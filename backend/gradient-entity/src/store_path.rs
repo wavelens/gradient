@@ -13,6 +13,7 @@ pub const STORE_DIR: &str = "/nix/store";
 
 pub const NIX32_ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
 const STORE_HASH_LENGTH: usize = 32;
+const STORE_PATH_NAME_MAX_LENGTH: usize = 211;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StoreHash(String);
@@ -56,6 +57,32 @@ fn split_base(input: &str) -> Result<(&str, &str), StorePathError> {
     }
 }
 
+fn validate_store_path_base_name(base_name: &str) -> Result<(StoreHash, &str), StorePathError> {
+    let malformed = || StorePathError::Malformed(base_name.to_owned());
+    let (hash, name) = base_name.split_once('-').ok_or_else(malformed)?;
+    let is_dot_or_parent_directory_name =
+        matches!(name, "." | "..") || name.starts_with(".-") || name.starts_with("..-");
+    let store_path_name_follows_nix_rules = !name.is_empty()
+        && name.len() <= STORE_PATH_NAME_MAX_LENGTH
+        && !is_dot_or_parent_directory_name
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"+-._?=".contains(&byte));
+    if !store_path_name_follows_nix_rules {
+        return Err(malformed());
+    }
+    let hash = StoreHash::parse(hash).map_err(|_| malformed())?;
+
+    Ok((hash, name))
+}
+
+fn strip_nix_store_prefix(input: &str) -> &str {
+    input
+        .strip_prefix(STORE_DIR)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(input)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct OriginalStorePath {
     hash: StoreHash,
@@ -71,14 +98,16 @@ impl OriginalStorePath {
     }
 
     pub fn parse(input: &str) -> Result<Self, StorePathError> {
-        let (hash, name) = split_base(input)?;
-        let hash =
-            StoreHash::parse(hash).map_err(|_| StorePathError::Malformed(input.to_owned()))?;
+        let (hash, name) = validate_store_path_base_name(strip_nix_store_prefix(input))
+            .map_err(|_| StorePathError::Malformed(input.to_owned()))?;
+        Ok(Self::from_hash(hash, name))
+    }
 
-        Ok(Self {
-            hash,
-            name: name.to_owned(),
-        })
+    /// Accept only ``<hash>-<name>`` without the store directory, with the characters that Nix
+    /// allows in names of store paths.
+    pub fn parse_store_path_base_name(input: &str) -> Result<Self, StorePathError> {
+        let (hash, name) = validate_store_path_base_name(input)?;
+        Ok(Self::from_hash(hash, name))
     }
 
     pub fn hash(&self) -> &StoreHash {
@@ -112,7 +141,10 @@ pub struct StorePath {
 }
 
 impl StorePath {
-    pub fn from_stored(hash: impl Into<String>, name: impl Into<String>) -> Self {
+    pub fn from_hash_and_name_without_validation(
+        hash: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
         Self {
             hash: StoreHash::stored(hash.into()),
             name: name.into(),
@@ -131,8 +163,14 @@ impl StorePath {
     }
 
     pub fn parse_stored(input: &str) -> Result<Self, StorePathError> {
-        let (hash, name) = split_base(input)?;
-        Ok(Self::from_stored(hash, name))
+        let (hash, name) = validate_store_path_base_name(strip_nix_store_prefix(input))
+            .map_err(|_| StorePathError::Malformed(input.to_owned()))?;
+        Ok(Self::from_hash(hash, name))
+    }
+
+    fn store_path_from_database_column_text(text: &str) -> Result<Self, StorePathError> {
+        let (hash, name) = split_base(text)?;
+        Ok(Self::from_hash_and_name_without_validation(hash, name))
     }
 
     pub fn hash(&self) -> &str {
@@ -195,7 +233,7 @@ impl sea_orm::TryGetable for StorePath {
         idx: I,
     ) -> Result<Self, sea_orm::TryGetError> {
         let raw = String::try_get_by(res, idx)?;
-        StorePath::parse_stored(&raw)
+        StorePath::store_path_from_database_column_text(&raw)
             .map_err(|e| sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(e.to_string())))
     }
 }
@@ -203,9 +241,8 @@ impl sea_orm::TryGetable for StorePath {
 impl sea_orm::sea_query::ValueType for StorePath {
     fn try_from(v: sea_orm::Value) -> Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
-            sea_orm::Value::String(Some(s)) => {
-                StorePath::parse_stored(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)
-            }
+            sea_orm::Value::String(Some(s)) => StorePath::store_path_from_database_column_text(&s)
+                .map_err(|_| sea_orm::sea_query::ValueTypeErr),
             _ => Err(sea_orm::sea_query::ValueTypeErr),
         }
     }
@@ -260,46 +297,63 @@ mod tests {
         assert!(OriginalStorePath::parse("abc123-hello").is_err());
         assert!(OriginalStorePath::parse("0123456789abcdfghijklmnpqrsvwxye-hello").is_err());
         assert!(OriginalStorePath::parse(&format!("{hash}-")).is_err());
-        assert_eq!(
-            StorePath::parse_stored("abc123-hello").unwrap().hash(),
-            "abc123"
-        );
+        assert!(StorePath::parse_stored("abc123-hello").is_err());
     }
 
     #[test]
     fn parse_reads_hash_name_and_derivation_flag() {
-        let p = StorePath::parse_stored("/nix/store/abc123-hello-2.12.1").unwrap();
-        assert_eq!(p.hash(), "abc123");
+        let p = StorePath::parse_stored("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-hello-2.12.1")
+            .unwrap();
+        assert_eq!(p.hash(), "0123456789abcdfghijklmnpqrsvwxyz");
         assert_eq!(p.name(), "hello-2.12.1");
         assert!(!p.is_derivation());
 
-        let p = StorePath::parse_stored("abc123-hello-2.12.1.drv").unwrap();
-        assert_eq!(p.hash(), "abc123");
+        let p =
+            StorePath::parse_stored("0123456789abcdfghijklmnpqrsvwxyz-hello-2.12.1.drv").unwrap();
+        assert_eq!(p.hash(), "0123456789abcdfghijklmnpqrsvwxyz");
         assert_eq!(p.name(), "hello-2.12.1.drv");
         assert!(p.is_derivation());
     }
 
     #[test]
     fn full_and_base_round_trip_and_display_blanks_the_prefix() {
-        let p = StorePath::from_stored("abc123", "hello-2.12.1");
-        assert_eq!(p.base(), "abc123-hello-2.12.1");
-        assert_eq!(p.full(), "/nix/store/abc123-hello-2.12.1");
+        let p = StorePath::from_hash_and_name_without_validation(
+            "0123456789abcdfghijklmnpqrsvwxyz",
+            "hello-2.12.1",
+        );
+        assert_eq!(p.base(), "0123456789abcdfghijklmnpqrsvwxyz-hello-2.12.1");
+        assert_eq!(
+            p.full(),
+            "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-hello-2.12.1"
+        );
         assert_eq!(StorePath::parse_stored(&p.full()).unwrap(), p);
         assert_eq!(StorePath::parse_stored(&p.base()).unwrap(), p);
 
-        let drv = StorePath::from_stored("abc123", "hello.drv");
-        assert_eq!(drv.to_string(), "abc123-hello.drv");
+        let drv = StorePath::from_hash_and_name_without_validation(
+            "0123456789abcdfghijklmnpqrsvwxyz",
+            "hello.drv",
+        );
+        assert_eq!(
+            drv.to_string(),
+            "0123456789abcdfghijklmnpqrsvwxyz-hello.drv"
+        );
     }
 
     #[test]
     fn serde_uses_base_form() {
-        let p = StorePath::from_stored("abc123", "hello-2.12.1");
+        let p = StorePath::from_hash_and_name_without_validation(
+            "0123456789abcdfghijklmnpqrsvwxyz",
+            "hello-2.12.1",
+        );
         let json = serde_json::to_string(&p).unwrap();
-        assert_eq!(json, "\"abc123-hello-2.12.1\"");
+        assert_eq!(json, "\"0123456789abcdfghijklmnpqrsvwxyz-hello-2.12.1\"");
 
-        let back: StorePath = serde_json::from_str("\"/nix/store/abc123-hello-2.12.1\"").unwrap();
+        let back: StorePath =
+            serde_json::from_str("\"/nix/store/0123456789abcdfghijklmnpqrsvwxyz-hello-2.12.1\"")
+                .unwrap();
         assert_eq!(back, p);
-        let from_base: StorePath = serde_json::from_str("\"abc123-hello-2.12.1\"").unwrap();
+        let from_base: StorePath =
+            serde_json::from_str("\"0123456789abcdfghijklmnpqrsvwxyz-hello-2.12.1\"").unwrap();
         assert_eq!(from_base, p);
     }
 
@@ -311,10 +365,89 @@ mod tests {
         assert!(StorePath::parse_stored("/nix/store/").is_err());
     }
 
+    const VALID_HASH: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+
+    #[test]
+    fn parse_stored_rejects_invalid_store_path_names_and_hashes() {
+        let long_name = "a".repeat(212);
+        let refused_names = [
+            "hello\nStorePath: x",
+            "hello world",
+            "hello/world",
+            "hello\0",
+            ".",
+            "..",
+            ".-x",
+            "..-x",
+            "",
+            long_name.as_str(),
+        ];
+        for name in refused_names {
+            assert!(
+                StorePath::parse_stored(&format!("{VALID_HASH}-{name}")).is_err(),
+                "name {name:?} must be refused"
+            );
+        }
+
+        let hash_of_33_characters = format!("{VALID_HASH}a");
+        let refused_hashes = [
+            &VALID_HASH[..31],
+            hash_of_33_characters.as_str(),
+            "0123456789abcdfghijklmnpqrsvwxye",
+            "0123456789abcdfghijklmnpqrsvwxyo",
+            "0123456789abcdfghijklmnpqrsvwxyt",
+            "0123456789abcdfghijklmnpqrsvwxyu",
+            "0123456789ABCDFGHIJKLMNPQRSVWXYZ",
+        ];
+        for hash in refused_hashes {
+            assert!(
+                StorePath::parse_stored(&format!("{hash}-hello")).is_err(),
+                "hash {hash:?} must be refused"
+            );
+            assert!(OriginalStorePath::parse(&format!("{hash}-hello")).is_err());
+        }
+
+        assert!(OriginalStorePath::parse(&format!("{VALID_HASH}-hello\n")).is_err());
+        assert!(serde_json::from_str::<StorePath>(&format!("\"{VALID_HASH}-a b\"")).is_err());
+        assert!(format!("{VALID_HASH}-a/b").parse::<StorePath>().is_err());
+    }
+
+    #[test]
+    fn parse_stored_accepts_valid_store_paths_of_every_kind() {
+        let longest_name = "a".repeat(211);
+        let accepted_names = [
+            "hello-2.12.1",
+            "hello-2.12.1.drv",
+            "gtk+-3.24.0",
+            "source?ref=main",
+            "foo=bar",
+            "under_score",
+            ".gitignore",
+            "..hidden",
+            longest_name.as_str(),
+        ];
+        for name in accepted_names {
+            let path = StorePath::parse_stored(&format!("/nix/store/{VALID_HASH}-{name}"))
+                .unwrap_or_else(|_| panic!("name {name:?} must be accepted"));
+            assert_eq!(path.hash(), VALID_HASH);
+            assert_eq!(path.name(), name);
+        }
+    }
+
+    #[test]
+    fn database_column_text_with_short_legacy_hash_loads_into_store_path_while_parse_stored_rejects_it()
+     {
+        use sea_orm::sea_query::ValueType;
+        let column = sea_orm::Value::String(Some("abc123-hello".to_owned()));
+        let path = <StorePath as ValueType>::try_from(column).unwrap();
+        assert_eq!(path.hash(), "abc123");
+        assert!(StorePath::parse_stored("abc123-hello").is_err());
+    }
+
     #[test]
     fn sea_orm_value_round_trip_is_prefix_free() {
         use sea_orm::sea_query::ValueType;
-        let p = StorePath::from_stored("abc123", "hello-2.12.1");
+        let p = StorePath::from_hash_and_name_without_validation("abc123", "hello-2.12.1");
         let v = sea_orm::Value::from(p.clone());
         assert_eq!(v, sea_orm::Value::String(Some(p.base())));
         assert_eq!(<StorePath as ValueType>::try_from(v).unwrap(), p);

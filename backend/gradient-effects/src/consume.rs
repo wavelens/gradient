@@ -23,9 +23,10 @@ use gradient_db::deliveries::pending::{
     Outcome, PendingDelivery, PendingDeliveryKind, enqueue, enqueue_or_increment_revision,
 };
 use gradient_db::deliveries::trigger_fire::TriggerFire;
+use gradient_db::eval_cache::DecodedCompactionJob;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
-use gradient_types::ids::{BuildAttemptId, CacheId, TaskActionId, WebhookId};
+use gradient_types::ids::{BuildAttemptId, TaskActionId, WebhookId};
 use gradient_types::*;
 use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
 use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
@@ -70,13 +71,22 @@ fn failed_delivery_error_to_outcome(e: &anyhow::Error) -> Outcome {
 }
 
 async fn compact_eval_cache(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
-    let cache = CacheId::new(uuid_field(row, "cache")?);
-    let fingerprint = field(row, "fingerprint")?
-        .as_str()
-        .ok_or_else(|| anyhow!("pending delivery payload fingerprint is not a string"))?;
-    let copies: Vec<CacheId> = serde_json::from_value(field(row, "copies")?.clone())
-        .context("decode the caches that hold a copy")?;
-    gradient_db::eval_cache::compact(&ctx.db(), cache, fingerprint, &copies).await
+    match decode_queued_eval_cache_compaction_from_delivery_payload(row)? {
+        Some(queued) => {
+            gradient_db::eval_cache::compact(&ctx.db(), &queued.store, &queued.copies).await
+        }
+        None => Ok(()),
+    }
+}
+
+fn decode_queued_eval_cache_compaction_from_delivery_payload(
+    row: &PendingDelivery,
+) -> Result<Option<DecodedCompactionJob>> {
+    let queued = gradient_db::eval_cache::decode_queued_compaction_payload(&row.payload)?;
+    if queued.is_none() {
+        warn!(key = %row.key, "Discard compaction of the eval cache with no project.");
+    }
+    Ok(queued)
 }
 
 fn field<'a>(row: &'a PendingDelivery, name: &str) -> Result<&'a JsonValue> {
@@ -225,7 +235,7 @@ async fn load_task_commit_status_check_for_event_name_and_content(
     let Some((task, _)) = load_task_git_host_connection(ci, task)
         .await
         .context("load the task's git host connection")?
-        .filter(|(task, connection)| task_should_post_commit_statuses(task, connection))
+        .filter(|(task, allowed)| task_should_post_commit_statuses(task, allowed.connection()))
     else {
         return Ok(None);
     };
@@ -250,7 +260,7 @@ fn task_commit_status_check_delivery_queue_key(
     check: &CommitStatusCheckWithIds,
 ) -> String {
     match check {
-        CommitStatusCheckWithIds::Approval { approval } => {
+        CommitStatusCheckWithIds::Approval { approval, .. } => {
             format!("{task}:approval:{approval}")
         }
         CommitStatusCheckWithIds::Evaluation { evaluation } => {
@@ -473,6 +483,40 @@ mod tests {
                 .to_string()
                 .contains("no event")
         );
+    }
+
+    const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn an_eval_cache_compaction_queued_without_a_project_is_dropped() {
+        let queued_before_the_upgrade = row(serde_json::json!({
+            "cache": uuid::Uuid::now_v7(),
+            "fingerprint": FINGERPRINT,
+            "copies": [],
+        }));
+
+        assert!(
+            decode_queued_eval_cache_compaction_from_delivery_payload(&queued_before_the_upgrade)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_eval_cache_compaction_runs_for_the_project_it_names() {
+        let project = gradient_types::ids::ProjectId::now_v7();
+        let queued = row(serde_json::json!({
+            "cache": uuid::Uuid::now_v7(),
+            "project": project,
+            "fingerprint": FINGERPRINT,
+            "copies": [],
+        }));
+
+        let compaction = decode_queued_eval_cache_compaction_from_delivery_payload(&queued)
+            .unwrap()
+            .expect("a compaction with a project runs");
+        assert_eq!(compaction.store.project, project);
+        assert_eq!(compaction.store.fingerprint.as_str(), FINGERPRINT);
     }
 
     #[tokio::test]

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::accept_header_parsing::request_accepts_media_type;
 use crate::error::{WebError, WebResult};
@@ -67,8 +68,14 @@ pub async fn get_build_log(
     Query(attempt): Query<super::BuildLogAttemptQuery>,
     headers: HeaderMap,
 ) -> WebResult<Response> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let mut log = match super::effective_log_id(&state.web_db, &ctx.shared_build, &attempt).await? {
         Some(key) => state.log_storage.read(key).await?,
         None => String::new(),
@@ -117,8 +124,14 @@ pub async fn post_build_log(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> Result<Response, WebError> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &Some(user), api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let shared_build_id = ctx.shared_build.id;
 
     let stream = stream! {

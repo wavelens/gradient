@@ -5,7 +5,6 @@
  */
 
 use crate::error::ErrorCode;
-use crate::permissions::Permission;
 use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
@@ -34,8 +33,10 @@ pub(crate) enum TaskRefusal {
     KeepEvaluationsAboveMaximum { maximum: i32 },
     #[error("Failed to access the repository: {reason}")]
     RepositoryCheckFailed { reason: String },
-    #[error("Only the task owner or a project admin can transfer ownership.")]
-    TransferNotPermitted,
+    #[error(
+        "The task has a running evaluation or exec job. Wait for the evaluation or exec job to finish, or cancel it. Then move the task."
+    )]
+    TaskCannotMoveProjectWhileRunningEvaluationsOrExecJobs,
     #[error("Task is already in this project.")]
     AlreadyInProject,
     #[error(
@@ -48,6 +49,10 @@ pub(crate) enum TaskRefusal {
     InvalidWebhookUrl(String),
     #[error("access_token must not be empty")]
     EmptyAccessToken,
+    #[error(
+        "Send the access_token again if the homeserver URL moves to another scheme, host, or port."
+    )]
+    StoredAccessTokenWouldBeSentToNewMatrixHomeserver,
     #[error("room_id must be a Matrix room ID like !abc123 or !abc:example.org")]
     InvalidMatrixRoomId,
     #[error("SMTP is not configured on this server")]
@@ -96,6 +101,8 @@ pub(crate) enum TaskRefusal {
     )]
     ProvisionSecretMissing,
     #[error("{0}")]
+    OAuthConnectionBaseUrlMissingOrDifferent(String),
+    #[error("{0}")]
     ProvisionUnsupported(String),
     #[error("git host did not accept the request: {reason}")]
     ProvisionRefused { reason: String },
@@ -123,11 +130,14 @@ impl Refusal for TaskRefusal {
             | Self::EvaluationInProgress
             | Self::AttrNotConcrete
             | Self::UnknownEvaluationStatus { .. }
-            | Self::GitHostConnectionMissing => RefusalStatus::BadRequest,
-            Self::TransferNotPermitted => RefusalStatus::Forbidden,
+            | Self::GitHostConnectionMissing
+            | Self::StoredAccessTokenWouldBeSentToNewMatrixHomeserver => RefusalStatus::BadRequest,
             Self::ActionNameTaken
             | Self::DefaultTriggerDeletion
-            | Self::TaskUsesGitHostConnectionTargetProjectCannotUse => RefusalStatus::Conflict,
+            | Self::TaskUsesGitHostConnectionTargetProjectCannotUse
+            | Self::TaskCannotMoveProjectWhileRunningEvaluationsOrExecJobs => {
+                RefusalStatus::Conflict
+            }
             Self::TeamWithoutProjectAccess { .. }
             | Self::InvalidWebhookUrl(_)
             | Self::EmptyAccessToken
@@ -141,6 +151,7 @@ impl Refusal for TaskRefusal {
             | Self::TokenRegenerationNotSupported
             | Self::ProvisionTokenMissing
             | Self::ProvisionSecretMissing
+            | Self::OAuthConnectionBaseUrlMissingOrDifferent(_)
             | Self::ProvisionUnsupported(_) => RefusalStatus::UnprocessableEntity,
             Self::ProvisionRefused { .. } => RefusalStatus::BadGateway,
         }
@@ -153,13 +164,6 @@ impl Refusal for TaskRefusal {
             }
             Self::ActionNameTaken => ErrorCode::ALREADY_EXISTS,
             _ => self.status().default_code(),
-        }
-    }
-
-    fn missing_permission_wire_names(&self) -> Vec<&'static str> {
-        match self {
-            Self::TransferNotPermitted => vec![Permission::EditTask.as_wire_name()],
-            _ => Vec::new(),
         }
     }
 }

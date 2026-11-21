@@ -6,6 +6,7 @@
 
 use crate::ipc::AttrError;
 use anyhow::Result;
+use gradient_wildcard::matches_pattern_with_only_star_wildcard;
 
 pub trait WalkNode: Sized {
     fn child_names(&self) -> Result<Vec<String>>;
@@ -31,30 +32,6 @@ pub fn collapse_deep(segs: &[String]) -> Vec<String> {
     }
 
     out
-}
-
-fn glob_covers(glob: &str, name: &str) -> bool {
-    let (pattern, subject) = (glob.as_bytes(), name.as_bytes());
-    let (mut p, mut s) = (0, 0);
-    let mut backtrack: Option<(usize, usize)> = None;
-
-    while s < subject.len() {
-        if p < pattern.len() && pattern[p] == b'*' {
-            backtrack = Some((p, s));
-            p += 1;
-        } else if p < pattern.len() && pattern[p] == subject[s] {
-            p += 1;
-            s += 1;
-        } else if let Some((star, at)) = backtrack {
-            p = star + 1;
-            s = at + 1;
-            backtrack = Some((star, at + 1));
-        } else {
-            return false;
-        }
-    }
-
-    pattern[p..].iter().all(|b| *b == b'*')
 }
 
 pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
@@ -165,7 +142,8 @@ fn wildcard_children<N: WalkNode>(
     names
         .into_iter()
         .filter(|n| {
-            glob.is_none_or(|glob| glob_covers(glob, n)) && only.is_none_or(|only| only.contains(n))
+            glob.is_none_or(|glob| matches_pattern_with_only_star_wildcard(glob, n))
+                && only.is_none_or(|only| only.contains(n))
         })
         .collect()
 }
@@ -1151,30 +1129,12 @@ mod tests {
         assert_eq!(rendered, r#"packages.x86_64-linux."python3.12""#);
         assert_eq!(parse_pattern(&rendered).1, dotted);
     }
-
-    #[test]
-    fn leading_wildcard_glob_covers_name_with_literal_star() {
-        assert!(glob_covers("*a", "*ba"));
-    }
 }
 
 #[cfg(test)]
 mod property_tests {
     use super::*;
     use proptest::prelude::*;
-
-    fn recursive_glob_match(glob: &[u8], name: &[u8]) -> bool {
-        match glob.split_first() {
-            None => name.is_empty(),
-            Some((b'*', rest)) => {
-                recursive_glob_match(rest, name)
-                    || (!name.is_empty() && recursive_glob_match(glob, &name[1..]))
-            }
-            Some((byte, rest)) => {
-                name.first() == Some(byte) && recursive_glob_match(rest, &name[1..])
-            }
-        }
-    }
 
     fn nonempty_attribute_path_segments_strategy_without_double_quote_or_leading_exclamation_mark()
     -> impl Strategy<Value = Vec<String>> {
@@ -1199,17 +1159,6 @@ mod property_tests {
             let collapsed = collapse_deep(&segs);
             prop_assert_eq!(collapse_deep(&collapsed), collapsed.clone());
             prop_assert!(!collapsed.windows(2).any(|pair| pair[0] == "**" && pair[1] == "**"));
-        }
-
-        #[test]
-        fn glob_covers_agrees_with_recursive_reference_for_random_globs_and_names(
-            glob in "[ab*]{0,6}",
-            name in "[ab.*]{0,8}",
-        ) {
-            prop_assert_eq!(
-                glob_covers(&glob, &name),
-                recursive_glob_match(glob.as_bytes(), name.as_bytes())
-            );
         }
 
         #[test]

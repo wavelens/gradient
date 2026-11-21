@@ -604,6 +604,136 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn push_outputs_uploads_uncached_input_addressed_reference_and_output() {
+        use gradient_worker_client::nar::{PathMeta, PathMetaSource};
+
+        let temporary_build_output_directory = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temporary_build_output_directory.path().join("hello"),
+            b"output",
+        )
+        .unwrap();
+        let output = temporary_build_output_directory
+            .path()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let temporary_input_addressed_store_path_content_directory =
+            tempfile::TempDir::new().unwrap();
+        let input_addressed_store_path_referenced_by_output =
+            temporary_input_addressed_store_path_content_directory
+                .path()
+                .to_str()
+                .unwrap()
+                .to_owned();
+
+        struct Store(HashMap<String, PathMeta>);
+
+        #[async_trait::async_trait]
+        impl PathMetaSource for Store {
+            async fn path_meta(&self, store_path: &str) -> Option<PathMeta> {
+                self.0.get(store_path).cloned()
+            }
+        }
+
+        let store: &'static Store = Box::leak(Box::new(Store(HashMap::from([
+            (
+                output.clone(),
+                PathMeta {
+                    references: vec![input_addressed_store_path_referenced_by_output.clone()],
+                    ..Default::default()
+                },
+            ),
+            (
+                input_addressed_store_path_referenced_by_output.clone(),
+                PathMeta {
+                    nar_size: Some(1),
+                    ..Default::default()
+                },
+            ),
+        ]))));
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let received_upload_store_paths: Arc<Mutex<Vec<String>>> = Arc::default();
+        let received_by_server = received_upload_store_paths.clone();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            loop {
+                match sc.recv().await.unwrap() {
+                    ClientMessage::CacheQuery {
+                        query_id, paths, ..
+                    } => {
+                        let cached = paths.iter().map(|p| uncached(p)).collect();
+                        sc.send(ServerMessage::CacheStatus { query_id, cached })
+                            .await
+                            .unwrap();
+                    }
+                    ClientMessage::UploadRequest {
+                        request_id,
+                        object: UploadObject::Nar { store_path },
+                        ..
+                    } => {
+                        received_by_server.lock().push(store_path);
+                        sc.send(ServerMessage::UploadGrant {
+                            request_id,
+                            target: GrantTarget::Passthrough { resume_offset: 0 },
+                        })
+                        .await
+                        .unwrap();
+                    }
+                    ClientMessage::UploadFinished { request_id, .. } => {
+                        sc.send(ServerMessage::UploadCommitted {
+                            request_id,
+                            outcome: UploadOutcome::Ok,
+                        })
+                        .await
+                        .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let conn = ProtoConnection::open(&url).await.unwrap();
+        let (writer, reader, _flush) = conn.split();
+        let uploads = UploadClient::new(ReconnectingWriter::attached_to(writer.clone()), 8);
+        let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let mut updater = updater(
+            "job-referenced-store-path",
+            writer,
+            cache_waiters.clone(),
+            uploads.clone(),
+        );
+        let pump = pump(reader, cache_waiters, uploads);
+        let (_tx, abort) = crate::executor::AbortSignal::channel();
+
+        let pushed = tokio::time::timeout(
+            Duration::from_secs(30),
+            push_outputs(
+                &mut updater,
+                vec![OutputNar {
+                    build_id: "b1".to_owned(),
+                    store_path: output.clone(),
+                    source: NarSource::Path { meta: Some(store) },
+                }],
+                &abort,
+            ),
+        )
+        .await
+        .expect("The push finishes.");
+
+        server_task.abort();
+        pump.abort();
+        assert!(pushed.is_ok(), "{pushed:?}");
+        let mut received = received_upload_store_paths.lock().clone();
+        received.sort_unstable();
+        let mut expected = vec![output, input_addressed_store_path_referenced_by_output];
+        expected.sort_unstable();
+        assert_eq!(received, expected);
+    }
+
+    #[tokio::test]
     async fn each_build_reports_the_upload_of_its_own_uncached_outputs() {
         use gradient_wire::messages::BuildProgressPhase;
 

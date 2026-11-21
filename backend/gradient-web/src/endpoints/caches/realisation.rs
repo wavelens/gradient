@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip};
+use super::helpers::{CacheContext, cache_client_ip, content_variant_served_by_cache};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::extractors::Path;
@@ -86,12 +86,8 @@ pub async fn realisation(
 }
 
 async fn require_in_cache(web_db: &WebDb, cache: &MCache, path: &StorePath) -> WebResult<()> {
-    let cached = gradient_db::cached_paths::by_hash(web_db, path.hash())
+    content_variant_served_by_cache(web_db, cache.id, path.hash())
         .await?
-        .filter(|row| row.is_fully_cached())
-        .or_not_found(Resource::Path)?;
-    gradient_db::cached_paths::signature_in_cache(web_db, cached.id, cache.id)
-        .await?
-        .or_not_found(Resource::Path)?;
-    Ok(())
+        .or_not_found(Resource::Path)
+        .map(drop)
 }

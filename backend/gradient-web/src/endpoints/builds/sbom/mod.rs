@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 mod document;
 
 use crate::extractors::Path;
@@ -17,6 +18,7 @@ use gradient_core::ServerState;
 use gradient_db::graph::runtime_closure::runtime_closure_reachable;
 use gradient_db::graph::sbom::{build_outputs, derivation_names, with_referenced_paths};
 use gradient_db::lookup::by_id;
+use gradient_db::store_path_content_variant_reader_choice::StorePathContentVariantReader;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use std::sync::Arc;
@@ -44,8 +46,14 @@ pub async fn get_build_sbom(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Response> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let job = &ctx.build_job;
     let evaluation = require::<EEvaluation>(&state.web_db, job.evaluation).await?;
     let name = by_id::<EDerivation, _>(&state.web_db, job.derivation)
@@ -57,8 +65,9 @@ pub async fn get_build_sbom(
 
     let roots = build_outputs(&state.web_db, evaluation.id, job.derivation).await?;
     let seeds: Vec<String> = roots.iter().map(|root| root.hash.clone()).collect();
-    let reached = runtime_closure_reachable(&state.web_db, &seeds).await?;
-    let reached = with_referenced_paths(&state.web_db, reached).await?;
+    let reader = StorePathContentVariantReader::Project(ctx.project.id);
+    let reached = runtime_closure_reachable(&state.web_db, reader.clone(), &seeds).await?;
+    let reached = with_referenced_paths(&state.web_db, reader, reached).await?;
     let names = derivation_names(&state.web_db, &component_hashes(&roots, &reached)).await?;
 
     let input = SbomInput {

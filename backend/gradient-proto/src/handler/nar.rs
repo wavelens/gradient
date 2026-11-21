@@ -5,27 +5,31 @@
  */
 
 use gradient_db::DbContext;
-use gradient_graph::{Graph, NarCommit, SignTargets};
+use gradient_db::store_path_content_variant_trust::find_worker_credentials_for_project_job;
+use gradient_graph::{Graph, NarCommit, NarCommitContent, StoredContentProducer};
+use gradient_storage::ServerComputedNarAndCompressedFileHashesAndSizes;
 use gradient_types::events::cache::NarSigned;
-use gradient_types::ids::ProjectId;
+use gradient_types::ids::{DispatchedJobId, ProjectId};
 use gradient_types::*;
 use std::sync::Arc;
 
 pub(super) struct NarUploadRecord<'a> {
-    pub file_hash: &'a str,
-    pub file_size: i64,
-    pub nar_size: i64,
-    pub nar_hash: &'a str,
+    pub verified: &'a ServerComputedNarAndCompressedFileHashesAndSizes,
     pub references: &'a [String],
     pub deriver: Option<&'a str>,
     pub ca: Option<&'a str>,
-    pub confirmed: bool,
+}
+
+pub(super) struct NarUploadWorkerSession<'a> {
+    pub worker_id: &'a str,
+    pub project: ProjectId,
+    pub dispatched_job: Option<DispatchedJobId>,
 }
 
 pub(super) async fn mark_nar_stored(
     graph: &Graph,
     db: &DbContext,
-    project_id: ProjectId,
+    worker: &NarUploadWorkerSession<'_>,
     store_path: &str,
     record: &NarUploadRecord<'_>,
 ) -> anyhow::Result<()> {
@@ -33,19 +37,23 @@ pub(super) async fn mark_nar_stored(
         return Ok(());
     };
 
+    let credentials =
+        find_worker_credentials_for_project_job(&db.worker_db, worker.worker_id, worker.project)
+            .await?;
     let committed = graph
         .commit_nar(NarCommit {
             store_path: store_path.to_owned(),
-            file_hash: record.file_hash.to_owned(),
-            file_size: record.file_size,
-            nar_size: record.nar_size,
-            nar_hash: record.nar_hash.to_owned(),
+            content: NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(
+                record.verified.clone(),
+            ),
             references: record.references.to_vec(),
             deriver: record.deriver.map(str::to_owned),
             ca: record.ca.map(str::to_owned),
-            targets: SignTargets::ProjectCaches(project_id),
-            confirmed: record.confirmed,
-            built_by_worker: true,
+            producer: StoredContentProducer::Worker {
+                project: worker.project,
+                credentials,
+                dispatched_job: worker.dispatched_job,
+            },
         })
         .await?;
 

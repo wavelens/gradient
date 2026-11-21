@@ -19,7 +19,7 @@ use chrono::Utc;
 use gradient_core::ServerState;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
-use gradient_types::input::validate_flake_input_override_flake_ref;
+use gradient_types::input::check_flake_input_override_reference_is_remote_flake_or_single_store_path;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
@@ -103,7 +103,7 @@ fn validate_url(input_name: &str, url: Option<&str>) -> WebResult<()> {
     if url.trim().is_empty() {
         return Err(SharedRefusal::EmptyField("url").into());
     }
-    validate_flake_input_override_flake_ref(input_name, url)?;
+    check_flake_input_override_reference_is_remote_flake_or_single_store_path(input_name, url)?;
     Ok(())
 }
 

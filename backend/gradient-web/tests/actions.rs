@@ -10,8 +10,12 @@
 )]
 
 use axum_test::TestServer;
-use gradient_entity::{evaluation, ids::*, task_action, task_action_delivery, team};
-use gradient_fixtures::ids::{task_id, user_id};
+use gradient_entity::git_host_connection_repository_grant::RepositoryGrantSource;
+use gradient_entity::{
+    evaluation, git_host_connection, git_host_connection_repository_grant, ids::*, task_action,
+    task_action_delivery, team,
+};
+use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
@@ -21,7 +25,7 @@ use gradient_test_support::state::TestState;
 use gradient_test_support::web::make_token;
 use gradient_test_support::web::{make_test_server, with_auth};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use gradient_types::{ActionType, SessionId};
+use gradient_types::{ActionType, GitHostType, SessionId};
 use sea_orm::MockDatabase;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -401,9 +405,9 @@ async fn create_chat_action_invalid_config_returns_422() {
         (
             json!({
                 "type": "send_slack_message",
-                "webhook_url": "http://127.0.0.1/hook",
+                "webhook_url": "http://10.0.0.5/hook",
             }),
-            "disallowed address",
+            "private address",
         ),
     ];
 
@@ -488,6 +492,121 @@ async fn update_rejects_action_type_change() {
         "expected action_type mention, got: {}",
         body["message"]
     );
+}
+
+async fn patch_stored_matrix_action_with_config_and_read_response_status_body_and_database_transaction_log(
+    config: Value,
+    accepted: bool,
+) -> (axum::http::StatusCode, Value, String) {
+    let session_id = SessionId::now_v7();
+    let mut db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![matrix_action_row()]]);
+    if accepted {
+        db = db
+            .append_query_results([vec![matrix_action_row()]])
+            .append_query_results([Vec::<task_action_delivery::Model>::new()])
+            .append_query_results([Vec::<task_action_delivery::Model>::new()]);
+    }
+    let db = db.into_connection();
+
+    let res = TestState::new()
+        .web_db(db.clone())
+        .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .server()
+        .patch(&format!("{BASE_URL}/{}", action_id()))
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&json!({ "config": config }))
+        .await;
+
+    (
+        res.status_code(),
+        res.json(),
+        format!("{:?}", db.into_transaction_log()),
+    )
+}
+
+#[tokio::test]
+async fn patch_task_action_without_access_token_from_other_homeserver_is_refused_and_stored_action_is_not_updated()
+ {
+    let (status, body, log) =
+        patch_stored_matrix_action_with_config_and_read_response_status_body_and_database_transaction_log(
+            json!({
+                "type": "send_matrix_message",
+                "homeserver": "https://chat.example.net",
+                "room_id": "!ops:example.org",
+            }),
+            false,
+        )
+        .await;
+
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["message"].as_str().unwrap().contains("access_token"),
+        "{body}"
+    );
+    assert!(!log.contains(r#"UPDATE \"task_action\""#), "{log}");
+}
+
+#[tokio::test]
+async fn test_patch_task_action_without_token_rejects_https_to_http_homeserver_url_change() {
+    let (status, body, log) =
+        patch_stored_matrix_action_with_config_and_read_response_status_body_and_database_transaction_log(
+            json!({
+                "type": "send_matrix_message",
+                "homeserver": "http://matrix.example.org",
+                "room_id": "!ops:example.org",
+            }),
+            false,
+        )
+        .await;
+
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(!log.contains(r#"UPDATE \"task_action\""#), "{log}");
+}
+
+#[tokio::test]
+async fn test_patch_matrix_task_action_with_different_host_homeserver_and_new_access_token_is_accepted_and_stores_new_token()
+ {
+    let (status, body, log) =
+        patch_stored_matrix_action_with_config_and_read_response_status_body_and_database_transaction_log(
+            json!({
+                "type": "send_matrix_message",
+                "homeserver": "https://chat.example.net",
+                "room_id": "!ops:example.org",
+                "access_token": "syt_new_plain",
+            }),
+            true,
+        )
+        .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK, "{body} {log}");
+    assert!(log.contains(r#"UPDATE \"task_action\""#), "{log}");
+    assert!(log.contains("https://chat.example.net"), "{log}");
+    assert!(log.contains("access_token"), "{log}");
+    assert!(!log.contains("ENCRYPTED_BLOB"), "{log}");
+    assert!(!log.contains("syt_new_plain"), "{log}");
+}
+
+#[tokio::test]
+async fn test_patch_task_action_changing_only_homeserver_url_path_without_token_keeps_stored_token()
+{
+    let (status, body, log) =
+        patch_stored_matrix_action_with_config_and_read_response_status_body_and_database_transaction_log(
+            json!({
+                "type": "send_matrix_message",
+                "homeserver": "https://matrix.example.org/chat/",
+                "room_id": "!ops:example.org",
+            }),
+            true,
+        )
+        .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK, "{body} {log}");
+    assert!(log.contains("https://matrix.example.org/chat/"), "{log}");
+    assert!(log.contains("ENCRYPTED_BLOB"), "{log}");
 }
 
 #[tokio::test]
@@ -754,4 +873,139 @@ async fn delete_returns_404_when_unknown() {
     res.assert_status(axum::http::StatusCode::NOT_FOUND);
     let body: Value = res.json();
     assert_eq!(body["error"], true);
+}
+
+fn build_instance_gitea_connection_for_task_repository_host() -> git_host_connection::Model {
+    git_host_connection::Model {
+        id: GitHostConnectionId::now_v7(),
+        project: None,
+        name: "instance-gitea".into(),
+        display_name: "Instance Gitea".into(),
+        git_host_type: GitHostType::Gitea,
+        base_url: Some("https://github.com".into()),
+        access_token: Some("encrypted".into()),
+        reports_status: true,
+        created_by: user_id(),
+        created_at: test_date(),
+        ..Default::default()
+    }
+}
+
+fn build_task_repository_grant_for_git_host_connection(
+    connection: GitHostConnectionId,
+) -> git_host_connection_repository_grant::Model {
+    git_host_connection_repository_grant::Model {
+        id: GitHostConnectionRepositoryGrantId::now_v7(),
+        git_host_connection: connection,
+        project: project_id(),
+        repository_owner: "test".into(),
+        repository_name: Some("repo".into()),
+        source: RepositoryGrantSource::Admin,
+        created_by: Some(user_id()),
+        created_at: test_date(),
+    }
+}
+
+fn build_open_pull_request_action_request_body_with_git_host_connection(
+    connection: GitHostConnectionId,
+) -> Value {
+    json!({
+        "name": "update-inputs",
+        "config": { "type": "open_pr", "git_host_connection_id": connection },
+    })
+}
+
+#[tokio::test]
+async fn open_pull_request_action_with_instance_connection_is_refused_without_repository_grant() {
+    let session_id = SessionId::now_v7();
+    let connection = build_instance_gitea_connection_for_task_repository_host();
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![connection.clone()]])
+        .append_query_results([vec![project()]])
+        .append_query_results([Vec::<git_host_connection_repository_grant::Model>::new()])
+        .into_connection();
+
+    let res = make_test_server(db.clone())
+        .post(BASE_URL)
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&build_open_pull_request_action_request_body_with_git_host_connection(connection.id))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+    let message = res.json::<Value>()["message"].as_str().unwrap().to_owned();
+    assert!(
+        message.contains("has no grant for this repository"),
+        "{message}"
+    );
+    assert!(!format!("{:?}", db.into_transaction_log()).contains(r#"INSERT INTO \"task_action\""#));
+}
+
+#[tokio::test]
+async fn open_pull_request_action_with_instance_connection_succeeds_with_repository_grant() {
+    let session_id = SessionId::now_v7();
+    let connection = build_instance_gitea_connection_for_task_repository_host();
+    let stored = task_action::Model {
+        name: "update-inputs".into(),
+        action_type: ActionType::OpenPr,
+        config: json!({ "type": "open_pr", "git_host_connection_id": connection.id }),
+        events: json!([]),
+        ..send_mail_action_row()
+    };
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![connection.clone()]])
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![build_task_repository_grant_for_git_host_connection(
+            connection.id,
+        )]])
+        .append_query_results([Vec::<task_action::Model>::new()])
+        .append_query_results([vec![stored]]);
+
+    let res = make_test_server(db.into_connection())
+        .post(BASE_URL)
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&build_open_pull_request_action_request_body_with_git_host_connection(connection.id))
+        .await;
+
+    res.assert_status_ok();
+    assert_eq!(
+        res.json::<Value>()["message"]["action"]["action_type"],
+        "open_pr"
+    );
+}
+
+#[tokio::test]
+async fn updating_open_pull_request_action_to_instance_owned_git_host_connection_without_repository_grant_is_refused()
+ {
+    let session_id = SessionId::now_v7();
+    let connection = build_instance_gitea_connection_for_task_repository_host();
+    let existing = task_action::Model {
+        action_type: ActionType::OpenPr,
+        config: json!({ "type": "open_pr", "git_host_connection_id": GitHostConnectionId::now_v7() }),
+        events: json!([]),
+        ..send_mail_action_row()
+    };
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![existing]])
+        .append_query_results([vec![connection.clone()]])
+        .append_query_results([vec![project()]])
+        .append_query_results([Vec::<git_host_connection_repository_grant::Model>::new()])
+        .into_connection();
+
+    let res = make_test_server(db.clone())
+        .patch(&format!("{BASE_URL}/{}", action_id()))
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&json!({ "config": { "type": "open_pr", "git_host_connection_id": connection.id } }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+    assert!(!format!("{:?}", db.into_transaction_log()).contains(r#"UPDATE \"task_action\""#));
 }

@@ -13,6 +13,9 @@ use gradient_sources::{
     AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FlakeEvalTarget,
     FoundDerivations, Resolved, ResolvedDerivation, ShardSpec,
 };
+use gradient_types::fetch_source_allowlist_and_request_validation::{
+    ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES, check_allowed_uri_prefix_has_remote_nix_scheme,
+};
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
 use gradient_wire::types::License;
@@ -45,21 +48,41 @@ impl gradient_eval::pool::EvalDependencies for SourceDependencies<'_> {
 fn eval_target_to_flake_eval_target(
     eval_target: &FlakeEvalTarget,
 ) -> gradient_eval::ipc::FlakeEvalTarget {
-    use gradient_eval::ipc::NixEvaluationFetchUrlAccess as IpcAccess;
-
     gradient_eval::ipc::FlakeEvalTarget {
         repository: eval_target.repository.clone(),
         input_overrides: eval_target.input_overrides.clone(),
-        nix_evaluation_fetch_url_access: match &eval_target.nix_evaluation_fetch_url_access {
-            NixEvaluationFetchUrlAccess::UnrestrictedEvaluation => {
-                IpcAccess::UnrestrictedEvaluation
-            }
-            NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
-                extra_allowed_uri_prefixes,
-            } => IpcAccess::LockedInputsPlusExtraUrlPrefixes {
-                extra_allowed_uri_prefixes: extra_allowed_uri_prefixes.clone(),
-            },
-        },
+        nix_evaluation_fetch_url_access:
+            map_wire_fetch_url_access_to_ipc_access_and_filter_remote_scheme_prefixes(
+                &eval_target.nix_evaluation_fetch_url_access,
+            ),
+    }
+}
+
+fn map_wire_fetch_url_access_to_ipc_access_and_filter_remote_scheme_prefixes(
+    access: &NixEvaluationFetchUrlAccess,
+) -> gradient_eval::ipc::NixEvaluationFetchUrlAccess {
+    let allowed_uri_prefixes: Vec<String> = ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES
+        .iter()
+        .map(|scheme| (*scheme).to_owned())
+        .collect();
+    let extra_allowed_uri_prefixes = match access {
+        NixEvaluationFetchUrlAccess::UnrestrictedEvaluation => allowed_uri_prefixes.clone(),
+        NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+            extra_allowed_uri_prefixes,
+        } => extra_allowed_uri_prefixes
+            .iter()
+            .filter_map(|prefix| {
+                check_allowed_uri_prefix_has_remote_nix_scheme(prefix)
+                    .inspect_err(|error| {
+                        tracing::warn!(%prefix, %error, "The resolver dropped extra allowed URI prefixes for a project when they don't start with an allowed remote source scheme.");
+                    })
+                    .ok()
+            })
+            .collect(),
+    };
+    gradient_eval::ipc::NixEvaluationFetchUrlAccess {
+        allowed_uri_prefixes,
+        extra_allowed_uri_prefixes,
     }
 }
 
@@ -301,6 +324,37 @@ mod tests {
             attrs: vec![],
             rss: 0,
         }
+    }
+
+    #[test]
+    fn unrestricted_wire_access_maps_to_remote_scheme_prefixes_and_drops_path_and_file_prefixes() {
+        let schemes: Vec<String> = ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES
+            .iter()
+            .map(|scheme| (*scheme).to_owned())
+            .collect();
+
+        let unrestricted =
+            map_wire_fetch_url_access_to_ipc_access_and_filter_remote_scheme_prefixes(
+                &NixEvaluationFetchUrlAccess::UnrestrictedEvaluation,
+            );
+        let restricted = map_wire_fetch_url_access_to_ipc_access_and_filter_remote_scheme_prefixes(
+            &NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes: vec![
+                    "path:/".into(),
+                    "file:".into(),
+                    "/".into(),
+                    "https://example.com/".into(),
+                ],
+            },
+        );
+
+        assert_eq!(unrestricted.allowed_uri_prefixes, schemes);
+        assert_eq!(unrestricted.extra_allowed_uri_prefixes, schemes);
+        assert_eq!(restricted.allowed_uri_prefixes, schemes);
+        assert_eq!(
+            restricted.extra_allowed_uri_prefixes,
+            vec!["https://example.com/".to_owned()]
+        );
     }
 
     #[tokio::test]

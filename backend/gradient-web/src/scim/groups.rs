@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::WebDb;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use std::sync::Arc;
 
 use axum::Json;
@@ -18,7 +18,6 @@ use gradient_types::*;
 use super::dto::*;
 use super::error::{SCIM_CONTENT_TYPE, ScimError, ScimResult};
 use super::filter::parse_eq_filter;
-use crate::error::is_unique_violation;
 
 fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     match serde_json::to_value(body) {
@@ -34,14 +33,14 @@ fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     }
 }
 
-async fn team_for_group(db: &WebDb, group: &str) -> ScimResult<MTeam> {
-    gradient_db::teams::by_scim_group(db.inner(), group)
+async fn team_for_group<C: ConnectionTrait>(db: &C, group: &str) -> ScimResult<MTeam> {
+    gradient_db::teams::by_scim_group(db, group)
         .await?
         .ok_or_else(|| ScimError::not_found("group not found"))
 }
 
-async fn group_resource(db: &WebDb, team: &MTeam) -> ScimResult<GroupResource> {
-    let memberships = gradient_db::teams::members::memberships_of(db.inner(), team.id).await?;
+async fn group_resource<C: ConnectionTrait>(db: &C, team: &MTeam) -> ScimResult<GroupResource> {
+    let memberships = gradient_db::teams::members::scim_memberships_of_team(db, team.id).await?;
 
     Ok(GroupResource::new(team, memberships))
 }
@@ -58,7 +57,7 @@ pub struct GroupListQuery {
     operation_id = "scimListGroups",
     tag = "scim",
     summary = "List SCIM groups",
-    description = "Lists SCIM groups. A SCIM group is a team with `scim_group` set, and its\nmembers are the team's members; groups are not created through SCIM. Supports the `displayName eq \"...\"` filter.",
+    description = "List SCIM groups. A SCIM group is a team with `scim_group` set. SCIM can't create groups. Group members are team members whose accounts SCIM provisioned. The response leaves out members from another method. The endpoint can take `displayName eq \"...\"` filters.",
     params(GroupListQuery),
     responses((status = OK, description = "Group list", body = super::dto::ListResponse<GroupResource>, content_type = "application/scim+json"), ScimError)
 )]
@@ -117,7 +116,7 @@ pub async fn get(
     operation_id = "scimPatchGroup",
     tag = "scim",
     summary = "Patch SCIM group membership",
-    description = "Use this endpoint to add, remove, or replace members of the team with a matching `scim_group`. Added users join as members. Use a `replace` for `members` to remove SCIM-added members that aren't in the new list. Members added manually or by the state remain. Unknown group names return 404.",
+    description = "Use this endpoint to add, remove, or replace members of the team named in `scim_group`. Users from the add operation join as members. Use `replace` with `members` to remove members that SCIM added and that the new list doesn't contain. Members added manually or by the state remain. Set member values in `add` and `replace` to ids of users that SCIM provisioned. Other ids return 400. Let `remove` skip ids that don't belong to such users. Rejected operations leave the whole request unapplied. Return 404 for an unknown group name.",
     params(("id" = String, Path)),
     request_body(content = PatchRequest, content_type = "application/scim+json"),
     responses((status = OK, description = "Group patched", body = GroupResource, content_type = "application/scim+json"), ScimError)
@@ -127,7 +126,9 @@ pub async fn patch(
     Path(id): Path<String>,
     Json(body): Json<PatchRequest>,
 ) -> ScimResult<impl IntoResponse> {
-    let team = team_for_group(&state.web_db, &id).await?;
+    let tx = state.web_db.inner().begin().await?;
+    let team = team_for_group(&tx, &id).await?;
+    let mut resolved_operations = Vec::with_capacity(body.operations.len());
     for op in &body.operations {
         let path = op.path.as_deref().unwrap_or("").to_ascii_lowercase();
         if !path.is_empty() && !path.starts_with("members") {
@@ -135,30 +136,55 @@ pub async fn patch(
         }
 
         let member_ids = extract_member_ids(op);
-        match op.op.to_ascii_lowercase().as_str() {
-            "add" => {
-                for uid in &member_ids {
-                    add_member(&state.web_db, team.id, uid).await?;
-                }
-            }
+        resolved_operations.push(match op.op.to_ascii_lowercase().as_str() {
+            "add" => ScimGroupPatchOperationWithResolvedUserIds::Add(
+                parse_scim_group_member_ids_to_provisioned_user_ids(&tx, &member_ids).await?,
+            ),
             "replace" => {
                 let members =
                     replacement_member_ids(op, &path).ok_or_else(ScimError::unsupported_path)?;
-                replace_members(&state.web_db, team.id, &members).await?;
+                ScimGroupPatchOperationWithResolvedUserIds::Replace(
+                    parse_scim_group_member_ids_to_provisioned_user_ids(&tx, &members).await?,
+                )
             }
-            "remove" => {
-                for uid in member_ids_for_remove(op, &member_ids) {
-                    remove_member(&state.web_db, team.id, &uid).await?;
+            "remove" => ScimGroupPatchOperationWithResolvedUserIds::Remove(
+                filter_scim_group_remove_member_ids_to_scim_provisioned_user_ids(
+                    &tx,
+                    &member_ids_for_remove(op, &member_ids),
+                )
+                .await?,
+            ),
+            _ => return Err(ScimError::unsupported_operation()),
+        });
+    }
+
+    for operation in resolved_operations {
+        match operation {
+            ScimGroupPatchOperationWithResolvedUserIds::Add(users) => {
+                for user in users {
+                    add_member(&tx, team.id, user).await?;
                 }
             }
-            _ => return Err(ScimError::unsupported_operation()),
+            ScimGroupPatchOperationWithResolvedUserIds::Replace(wanted) => {
+                replace_members(&tx, team.id, &wanted).await?;
+            }
+            ScimGroupPatchOperationWithResolvedUserIds::Remove(users) => {
+                for user in users {
+                    gradient_db::teams::members::remove_group_member(&tx, team.id, user).await?;
+                }
+            }
         }
     }
 
-    Ok(scim_json(
-        StatusCode::OK,
-        group_resource(&state.web_db, &team).await?,
-    ))
+    let group = group_resource(&tx, &team).await?;
+    tx.commit().await?;
+    Ok(scim_json(StatusCode::OK, group))
+}
+
+enum ScimGroupPatchOperationWithResolvedUserIds {
+    Add(Vec<UserId>),
+    Replace(Vec<UserId>),
+    Remove(Vec<UserId>),
 }
 
 fn extract_member_ids(op: &PatchOperation) -> Vec<String> {
@@ -189,26 +215,18 @@ fn member_ids_for_remove(op: &PatchOperation, parsed: &[String]) -> Vec<String> 
         .collect()
 }
 
-async fn add_member(web_db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
-    let user = parse_uid(uid)?;
-    let db = web_db.inner();
-    let existing = gradient_db::teams::members::membership(db, team, user).await?;
-    if existing.is_none()
-        && let Err(e) = gradient_db::teams::members::add_member(
-            db,
-            MTeamUser {
-                id: TeamUserId::now_v7(),
-                team,
-                user,
-                role: TeamRole::Member,
-                source: TeamMemberSource::Group,
-            },
-        )
-        .await
-        && !is_unique_violation(&e)
-    {
-        return Err(e.into());
-    }
+async fn add_member<C: ConnectionTrait>(db: &C, team: TeamId, user: UserId) -> ScimResult<()> {
+    gradient_db::teams::members::add_team_user_if_absent(
+        db,
+        MTeamUser {
+            id: TeamUserId::now_v7(),
+            team,
+            user,
+            role: TeamRole::Member,
+            source: TeamMemberSource::ScimGroup,
+        },
+    )
+    .await?;
     Ok(())
 }
 
@@ -225,30 +243,62 @@ fn replacement_member_ids(op: &PatchOperation, path: &str) -> Option<Vec<String>
     )
 }
 
-async fn replace_members(web_db: &WebDb, team: TeamId, uids: &[String]) -> ScimResult<()> {
-    let wanted = uids
-        .iter()
-        .map(|uid| parse_uid(uid))
-        .collect::<ScimResult<Vec<UserId>>>()?;
-    for uid in uids {
-        add_member(web_db, team, uid).await?;
+async fn replace_members<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+    wanted: &[UserId],
+) -> ScimResult<()> {
+    for user in wanted {
+        add_member(db, team, *user).await?;
     }
-    let db = web_db.inner();
-    for membership in gradient_db::teams::members::memberships_of(db, team).await? {
-        if membership.source == TeamMemberSource::Group && !wanted.contains(&membership.user) {
+    for membership in gradient_db::teams::members::scim_memberships_of_team(db, team).await? {
+        if membership.source == TeamMemberSource::ScimGroup && !wanted.contains(&membership.user) {
             gradient_db::teams::members::remove_group_member(db, team, membership.user).await?;
         }
     }
     Ok(())
 }
 
-async fn remove_member(db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
-    let user = parse_uid(uid)?;
-    gradient_db::teams::members::remove_group_member(db.inner(), team, user).await?;
-    Ok(())
+async fn parse_scim_group_member_ids_to_provisioned_user_ids<C: ConnectionTrait>(
+    db: &C,
+    uids: &[String],
+) -> ScimResult<Vec<UserId>> {
+    let mut users = Vec::with_capacity(uids.len());
+    for uid in uids {
+        users.push(parse_scim_group_member_id_to_provisioned_user_id(db, uid).await?);
+    }
+    Ok(users)
 }
 
-fn parse_uid(uid: &str) -> ScimResult<UserId> {
-    uid.parse::<UserId>()
-        .map_err(|_| ScimError::bad_request("invalidValue", "member value must be a user id"))
+async fn filter_scim_group_remove_member_ids_to_scim_provisioned_user_ids<C: ConnectionTrait>(
+    db: &C,
+    uids: &[String],
+) -> ScimResult<Vec<UserId>> {
+    let mut users = Vec::with_capacity(uids.len());
+    for user in uids.iter().filter_map(|uid| uid.parse::<UserId>().ok()) {
+        if let Some(provisioned) =
+            gradient_db::users::fetch_scim_provisioned_user_by_id(db, user).await?
+        {
+            users.push(provisioned.id);
+        }
+    }
+    Ok(users)
+}
+
+async fn parse_scim_group_member_id_to_provisioned_user_id<C: ConnectionTrait>(
+    db: &C,
+    uid: &str,
+) -> ScimResult<UserId> {
+    let user = uid
+        .parse::<UserId>()
+        .map_err(|_| ScimError::bad_request("invalidValue", "member value must be a user id"))?;
+    gradient_db::users::fetch_scim_provisioned_user_by_id(db, user)
+        .await?
+        .map(|provisioned| provisioned.id)
+        .ok_or_else(|| {
+            ScimError::bad_request(
+                "invalidValue",
+                "use the ID of a user that SCIM provisioned as the member value",
+            )
+        })
 }

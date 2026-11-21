@@ -13,34 +13,42 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
+use gradient_pool::ProjectAccess;
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_scheduler::Scheduler;
 use gradient_storage::admission::UploadAdmission;
-use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
+use gradient_types::{RuntimeConfig, SecretString};
 use gradient_util::shutdown::Shutdown;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
+use sea_orm::DbErr;
 use tokio::sync::{Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use super::SessionHandles;
-use super::dialed::{DialedSession, refresh_dialed_peers};
+use super::auth::{check_worker_tokens, load_inbound_worker_challenge};
 use super::guest_channel::outbound_guest_channel;
 use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
-use super::session::on_reauth_notify;
-use super::socket::{InputFetch, ProtoSocket, ProtoWriter, send_input_fetch, send_server_msg};
+use super::session_authorization::{
+    HandshakeProof, SessionAuthorization, derive_session_authorization,
+};
+use super::socket::{
+    InputFetch, ProtoSocket, ProtoWriter, send_error, send_input_fetch, send_server_msg,
+};
 use super::store_paths::{outbound_message, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
-use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
+use gradient_wire::messages::{ClientMessage, FailedPeer, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::ProtoReader;
 use gradient_wire::types::JobKind;
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilterChunkCollector;
 
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
+const AUTHORIZATION_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
+const FAILED_AUTHORIZATION_RECHECKS_BEFORE_CLOSE: u32 = 3;
 
 pub enum SessionMsg {
     Frame(ClientMessage, RpcReplyPort<bool>),
@@ -49,6 +57,7 @@ pub enum SessionMsg {
     ReaderClosed,
     Admitted(gradient_storage::admission::Admitted),
     SweepUploads,
+    RecheckAuthorization(RpcReplyPort<bool>),
 }
 
 #[derive(Clone)]
@@ -65,9 +74,10 @@ pub struct SessionArgs {
     pub handles: SessionHandles,
     pub scheduler: Arc<Scheduler>,
     pub socket: ProtoSocket,
+    pub advertised_capabilities: GradientCapabilities,
     pub capabilities: GradientCapabilities,
     pub authorized_peers: HashSet<ProjectId>,
-    pub dialed: Option<DialedSession>,
+    pub proof: HandshakeProof,
 }
 
 pub struct SessionState {
@@ -75,9 +85,11 @@ pub struct SessionState {
     handles: SessionHandles,
     scheduler: Arc<Scheduler>,
     writer: ProtoWriter,
+    advertised_capabilities: GradientCapabilities,
     capabilities: GradientCapabilities,
     authorized_peers: HashSet<ProjectId>,
-    dialed: Option<DialedSession>,
+    proof: HandshakeProof,
+    failed_authorization_rechecks: u32,
     reclaims_jobs: bool,
     uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
@@ -86,6 +98,7 @@ pub struct SessionState {
     job_events: JobEvents,
     logs: LogLane,
     reader: JoinHandle<()>,
+    authorization_recheck_task: JoinHandle<()>,
 }
 
 pub struct SessionActor;
@@ -105,9 +118,10 @@ impl Actor for SessionActor {
             handles,
             scheduler,
             mut socket,
+            advertised_capabilities,
             capabilities,
             authorized_peers,
-            dialed,
+            proof,
         } = args;
         let uploads = open_uploads(
             &handles.upload_admission,
@@ -118,12 +132,12 @@ impl Actor for SessionActor {
         )
         .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
         let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
-        let reclaims_jobs = dialed.is_none() && socket.version().is_some();
+        let reclaims_jobs = proof.dialed_session().is_none() && socket.version().is_some();
         let registered = match scheduler
             .register_worker(
                 &peer_id,
                 capabilities.clone(),
-                authorized_peers.clone(),
+                ProjectAccess::OnlyListedProjects(authorized_peers.clone()),
                 port,
                 reclaims_jobs,
             )
@@ -136,11 +150,13 @@ impl Actor for SessionActor {
                 return Err(ActorProcessingErr::from(e.to_string()));
             }
         };
+        let authorization_recheck_task =
+            spawn_authorization_rechecks(&handles.db.shutdown, &myself);
 
         let nar_cfg = &handles.db.config.nar;
         let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get());
         let max_serves = nar_cfg.max_concurrent_serves.get();
-        let (reader, writer) = socket.split(send_chunk_timeout, &handles.db.shutdown);
+        let (reader, writer) = socket.split(send_chunk_timeout, None, &handles.db.shutdown);
         let tap = Arc::new(super::tap::ProtoTap {
             bus: handles.db.events.clone(),
             worker_id: peer_id.clone(),
@@ -183,9 +199,11 @@ impl Actor for SessionActor {
             handles,
             scheduler,
             writer,
+            advertised_capabilities,
             capabilities,
             authorized_peers,
-            dialed,
+            proof,
+            failed_authorization_rechecks: 0,
             reclaims_jobs,
             uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
@@ -194,6 +212,7 @@ impl Actor for SessionActor {
             logs,
             job_events,
             reader,
+            authorization_recheck_task,
         })
     }
 
@@ -204,6 +223,20 @@ impl Actor for SessionActor {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match msg {
+            SessionMsg::Frame(ClientMessage::ReauthRequest, reply) => {
+                let keep = answer_reauth_request(st).await;
+                let _ = reply.send(keep);
+                if !keep {
+                    myself.stop(Some("authorization withdrawn".into()));
+                }
+            }
+            SessionMsg::Frame(ClientMessage::AuthResponse { tokens }, reply) => {
+                let keep = record_auth_response(st, tokens).await;
+                let _ = reply.send(keep);
+                if !keep {
+                    myself.stop(Some("authorization withdrawn".into()));
+                }
+            }
             SessionMsg::Frame(msg, reply) => {
                 let keep = {
                     let mut ctx = InboundContext {
@@ -215,7 +248,7 @@ impl Actor for SessionActor {
                         active: &st.active,
                         job_events: &st.job_events,
                         logs: &st.logs,
-                        dialed: st.dialed.as_ref(),
+                        dialed: st.proof.dialed_session(),
                         worker_store_path_bloom_filter_chunk_collector: &mut st
                             .worker_store_path_bloom_filter_chunk_collector,
                     };
@@ -249,23 +282,15 @@ impl Actor for SessionActor {
                 }
             }
             SessionMsg::Signal(SessionSignal::Reauth) => {
-                let kept = match &st.dialed {
-                    Some(dialed) => {
-                        refresh_dialed_peers(
-                            &st.writer,
-                            &st.handles.db.worker_db,
-                            &st.scheduler,
-                            &st.peer_id,
-                            dialed,
-                        )
-                        .await
-                    }
-                    None => {
-                        on_reauth_notify(&st.writer, &st.handles.db.worker_db, &st.peer_id).await
-                    }
-                };
-                if !kept {
-                    myself.stop(Some("deactivated".into()));
+                if !reauthorize(st).await {
+                    myself.stop(Some("authorization withdrawn".into()));
+                }
+            }
+            SessionMsg::RecheckAuthorization(reply) => {
+                let keep = recheck_authorization(st).await;
+                let _ = reply.send(keep);
+                if !keep {
+                    myself.stop(Some("authorization withdrawn".into()));
                 }
             }
             SessionMsg::Signal(SessionSignal::Abort { job_id, reason }) => {
@@ -453,9 +478,9 @@ impl Actor for SessionActor {
                 let Some(prepared) = st.scheduler.cluster.prepared.take(&job_id).await else {
                     return Ok(());
                 };
-                let (mut ctx, _) = split_uploads(st);
+                let (mut ctx, uploads) = split_uploads(st);
                 if !ctx
-                    .hand_out(prepared.assignment, Some(prepared.membership))
+                    .hand_out(prepared.assignment, Some(prepared.membership), uploads)
                     .await
                 {
                     myself.stop(Some("write failed".into()));
@@ -473,7 +498,7 @@ impl Actor for SessionActor {
                     .reattach_worker(
                         &st.peer_id,
                         st.capabilities.clone(),
-                        st.authorized_peers.clone(),
+                        ProjectAccess::OnlyListedProjects(st.authorized_peers.clone()),
                         port,
                         active,
                         st.reclaims_jobs,
@@ -496,6 +521,7 @@ impl Actor for SessionActor {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         st.reader.abort();
+        st.authorization_recheck_task.abort();
         for granted in st.uploads.table.drain_granted() {
             let nar_storage = st.handles.db.storage.nar_storage.clone();
             st.handles
@@ -524,10 +550,10 @@ async fn answer_waiting_job_requests_and_send_assignments(
     st: &mut SessionState,
     job_kinds: Vec<JobKind>,
 ) -> bool {
-    let (mut ctx, _) = split_uploads(st);
+    let (mut ctx, uploads) = split_uploads(st);
     for kind in job_kinds {
         if !ctx
-            .send_assign_job_for_available_requested_job_kind(kind)
+            .send_assign_job_for_available_requested_job_kind(kind, uploads)
             .await
         {
             return false;
@@ -623,6 +649,191 @@ fn open_uploads(
     Ok(uploads)
 }
 
+fn spawn_authorization_rechecks(
+    shutdown: &Shutdown,
+    myself: &ActorRef<SessionMsg>,
+) -> JoinHandle<()> {
+    let session = myself.clone();
+    let server_shutdown_cancel_token = shutdown.token();
+    shutdown.spawn(async move {
+        let start = tokio::time::Instant::now() + AUTHORIZATION_RECHECK_INTERVAL;
+        let mut tick = tokio::time::interval_at(start, AUTHORIZATION_RECHECK_INTERVAL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                () = server_shutdown_cancel_token.cancelled() => break,
+                _ = tick.tick() => {}
+            }
+            let recheck = session.call(SessionMsg::RecheckAuthorization, None).await;
+            if !matches!(recheck, Ok(ractor::rpc::CallResult::Success(true))) {
+                break;
+            }
+        }
+    })
+}
+
+async fn reauthorize(st: &mut SessionState) -> bool {
+    reauthorize_reporting_failed_tokens(st, Vec::new()).await
+}
+
+async fn recheck_authorization(st: &mut SessionState) -> bool {
+    let decision = derive_session_authorization(
+        &st.handles.db.worker_db,
+        &st.handles.db.config,
+        &st.peer_id,
+        &st.proof,
+        st.advertised_capabilities.clone(),
+    )
+    .await;
+    if decision.is_err() {
+        st.failed_authorization_rechecks += 1;
+        if st.failed_authorization_rechecks >= FAILED_AUTHORIZATION_RECHECKS_BEFORE_CLOSE {
+            warn!(peer_id = %st.peer_id, failed = st.failed_authorization_rechecks, "The session's authorization could not be read for several intervals in a row. Closing the session.");
+            return false;
+        }
+    }
+    apply_session_authorization(st, decision, AuthUpdateRule::OnlyWhenProjectsChange).await
+}
+
+async fn reauthorize_reporting_failed_tokens(
+    st: &mut SessionState,
+    failed_tokens: Vec<FailedPeer>,
+) -> bool {
+    let decision = derive_session_authorization(
+        &st.handles.db.worker_db,
+        &st.handles.db.config,
+        &st.peer_id,
+        &st.proof,
+        st.advertised_capabilities.clone(),
+    )
+    .await
+    .map(|decision| decision.including_failed_peers(failed_tokens));
+    apply_session_authorization(st, decision, AuthUpdateRule::Always).await
+}
+
+async fn answer_reauth_request(st: &mut SessionState) -> bool {
+    debug!(peer_id = %st.peer_id, "ReauthRequest");
+    if !reauthorize(st).await {
+        return false;
+    }
+    if st.proof.dialed_session().is_some() {
+        return true;
+    }
+    let registered = match load_inbound_worker_challenge(&st.handles.db.worker_db, &st.peer_id)
+        .await
+    {
+        Ok((_, registered)) => registered,
+        Err(e) => {
+            warn!(peer_id = %st.peer_id, error = %e, "Failed to read the worker's registrations for the challenge. The session stays open and no challenge is sent.");
+            return true;
+        }
+    };
+    send_server_msg(
+        &st.writer,
+        &ServerMessage::AuthChallenge {
+            peers: registered.into_iter().map(|(peer, _)| peer).collect(),
+        },
+    )
+    .await
+    .is_ok()
+}
+
+async fn record_auth_response(st: &mut SessionState, tokens: Vec<(String, SecretString)>) -> bool {
+    if st.proof.dialed_session().is_some() {
+        warn!(peer_id = %st.peer_id, variant = "AuthResponse", "A message that only a worker-connected session can send reached a server-dialed session. Close the session.");
+        send_error(
+            &st.writer,
+            400,
+            "Unexpected AuthResponse in server-dialed session".into(),
+        )
+        .await;
+        return false;
+    }
+    let db = &st.handles.db.worker_db;
+    let checked = match load_inbound_worker_challenge(db, &st.peer_id).await {
+        Ok((_, registered)) => check_worker_tokens(&registered, &tokens).await,
+        Err(e) => Err(e.into()),
+    };
+    let checked = match checked {
+        Ok(checked) => checked,
+        Err(e) => {
+            warn!(peer_id = %st.peer_id, error = %e, "Failed to look up data for re-authentication. Closing connection.");
+            return false;
+        }
+    };
+    st.proof = HandshakeProof::WorkerDialed {
+        proven_peer_token_hashes: checked.proven_peer_token_hashes,
+    };
+    reauthorize_reporting_failed_tokens(st, checked.failed_peers).await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AuthUpdateRule {
+    Always,
+    OnlyWhenProjectsChange,
+}
+
+async fn apply_session_authorization(
+    st: &mut SessionState,
+    decision: Result<SessionAuthorization, DbErr>,
+    rule: AuthUpdateRule,
+) -> bool {
+    if decision.is_ok() {
+        st.failed_authorization_rechecks = 0;
+    }
+    match decision {
+        Ok(SessionAuthorization::Authorized {
+            projects,
+            failed_peers,
+            capabilities,
+        }) => {
+            st.scheduler
+                .replace_worker_authorization(
+                    &st.peer_id,
+                    ProjectAccess::OnlyListedProjects(projects.clone()),
+                    capabilities.clone(),
+                )
+                .await;
+            let projects_changed = projects != st.authorized_peers;
+            let authorized_peers = projects.iter().map(ToString::to_string).collect();
+            st.authorized_peers = projects;
+            st.capabilities = capabilities;
+            if rule == AuthUpdateRule::OnlyWhenProjectsChange && !projects_changed {
+                return true;
+            }
+            send_server_msg(
+                &st.writer,
+                &ServerMessage::AuthUpdate {
+                    authorized_peers,
+                    failed_peers,
+                },
+            )
+            .await
+            .is_ok()
+        }
+        Ok(SessionAuthorization::RedialForUncoveredProject { project }) => {
+            info!(peer_id = %st.peer_id, %project, "project not covered by this session's tokens - closing for a redial");
+            false
+        }
+        Ok(SessionAuthorization::Rejected(rejection)) => {
+            info!(peer_id = %st.peer_id, code = rejection.code(), reason = %rejection, "worker is no longer authorized - disconnecting");
+            st.scheduler
+                .replace_worker_authorization(
+                    &st.peer_id,
+                    ProjectAccess::no_project_access(),
+                    GradientCapabilities::default(),
+                )
+                .await;
+            let _ = send_server_msg(&st.writer, &ServerMessage::from(rejection)).await;
+            false
+        }
+        Err(e) => {
+            warn!(peer_id = %st.peer_id, error = %e, "failed to read the session's authorization; keeping the current one");
+            true
+        }
+    }
+}
+
 fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSession) {
     (
         InboundContext {
@@ -634,7 +845,7 @@ fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSessi
             active: &st.active,
             job_events: &st.job_events,
             logs: &st.logs,
-            dialed: st.dialed.as_ref(),
+            dialed: st.proof.dialed_session(),
             worker_store_path_bloom_filter_chunk_collector: &mut st
                 .worker_store_path_bloom_filter_chunk_collector,
         },
@@ -788,9 +999,12 @@ pub(in crate::handler) mod tests {
                 handles: SessionHandles::from_state(&state),
                 scheduler: Arc::clone(&scheduler),
                 socket,
+                advertised_capabilities: GradientCapabilities::default(),
                 capabilities: GradientCapabilities::default(),
                 authorized_peers: HashSet::new(),
-                dialed: None,
+                proof: HandshakeProof::WorkerDialed {
+                    proven_peer_token_hashes: Vec::new(),
+                },
             },
         )
         .await
@@ -834,9 +1048,12 @@ pub(in crate::handler) mod tests {
                 handles: SessionHandles::from_state(&state),
                 scheduler: Arc::clone(&scheduler),
                 socket,
+                advertised_capabilities: GradientCapabilities::default(),
                 capabilities: GradientCapabilities::default(),
                 authorized_peers: HashSet::new(),
-                dialed: None,
+                proof: HandshakeProof::WorkerDialed {
+                    proven_peer_token_hashes: Vec::new(),
+                },
             },
         )
         .await
@@ -887,9 +1104,12 @@ pub(in crate::handler) mod tests {
             handles: SessionHandles::from_state(&state),
             scheduler: Arc::clone(&scheduler),
             socket,
+            advertised_capabilities: GradientCapabilities::default(),
             capabilities: GradientCapabilities::default(),
             authorized_peers: HashSet::new(),
-            dialed: None,
+            proof: HandshakeProof::WorkerDialed {
+                proven_peer_token_hashes: Vec::new(),
+            },
         };
         let CallResult::Success(Ok((_session, session_join))) = sessions
             .call(|reply| SessionsMsg::Attach(Box::new(args), reply), None)
@@ -918,10 +1138,63 @@ pub(in crate::handler) mod tests {
     }
 
     #[tokio::test]
+    async fn cancel_and_drain_with_a_short_budget_returns_true_while_a_session_authorization_recheck_task_is_open()
+     {
+        let shutdown = Shutdown::new();
+        let (session, join) = Actor::spawn(None, DecliningSession, ()).await.unwrap();
+        spawn_authorization_rechecks(&shutdown, &session);
+
+        let drained_all_tasks_in_time = shutdown.cancel_and_drain(Duration::from_millis(200)).await;
+
+        session.stop(None);
+        join.await.unwrap();
+        assert!(drained_all_tasks_in_time);
+    }
+
+    #[tokio::test]
+    async fn stopping_worker_session_actor_ends_tracked_tasks_without_server_shutdown() {
+        let (socket, _client) = connected_pair().await;
+        let state = test_state(empty_db());
+        let second_server_state = test_state(empty_db());
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        scheduler.spawn_core(None).await.unwrap();
+        let (actor, join) = Actor::spawn(
+            None,
+            SessionActor,
+            SessionArgs {
+                peer_id: "w1".into(),
+                handles: SessionHandles::from_state(&second_server_state),
+                scheduler: Arc::clone(&scheduler),
+                socket,
+                advertised_capabilities: GradientCapabilities::default(),
+                capabilities: GradientCapabilities::default(),
+                authorized_peers: HashSet::new(),
+                proof: HandshakeProof::WorkerDialed {
+                    proven_peer_token_hashes: Vec::new(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+        actor.stop(None);
+        join.await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while second_server_state.shutdown.pending() > 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!second_server_state.shutdown.is_cancelled());
+    }
+
+    #[tokio::test]
     async fn the_reader_stamps_liveness_on_receipt() {
         let (socket, mut client) = connected_pair().await;
         let state = test_state(empty_db());
-        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let (reader, _writer) = socket.split(Duration::from_secs(5), None, &state.shutdown);
         let (session, join) = Actor::spawn(None, DecliningSession, ()).await.unwrap();
         let last_seen = Arc::new(AtomicI64::new(0));
 
@@ -952,7 +1225,7 @@ pub(in crate::handler) mod tests {
     async fn the_reader_keeps_stamping_while_a_frame_is_in_flight() {
         let (socket, mut client) = connected_pair().await;
         let state = test_state(empty_db());
-        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let (reader, _writer) = socket.split(Duration::from_secs(5), None, &state.shutdown);
         let received = Arc::new(Notify::new());
         let (session, join) = Actor::spawn(None, HoldingSession, Arc::clone(&received))
             .await
@@ -992,7 +1265,7 @@ pub(in crate::handler) mod tests {
     async fn a_cache_query_is_served_while_an_earlier_frame_is_held() {
         let (socket, mut client) = connected_pair().await;
         let state = test_state(empty_db());
-        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let (reader, _writer) = socket.split(Duration::from_secs(5), None, &state.shutdown);
         let received = Arc::new(Notify::new());
         let (session, join) = Actor::spawn(None, HoldingSession, Arc::clone(&received))
             .await
@@ -1047,7 +1320,7 @@ pub(in crate::handler) mod tests {
     async fn a_cache_query_behind_hundreds_of_unanswered_log_chunks_is_served() {
         let (socket, mut client) = connected_pair().await;
         let state = test_state(empty_db());
-        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let (reader, _writer) = socket.split(Duration::from_secs(5), None, &state.shutdown);
         let (catch_up, graph_caught_up) = tokio::sync::watch::channel(false);
         let (session, join) = Actor::spawn(None, BacklogSession, graph_caught_up)
             .await

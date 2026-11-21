@@ -40,4 +40,10 @@ pub struct SchedulerArgs {
     /// one cluster-reserve-after period before they can reserve workers again.
     #[arg(default_value = "1800")]
     pub cluster_reserve_timeout_secs: NonZeroU64,
+
+    /// Seconds for a worker to respond to an input fetch. A different worker takes over a fetch
+    /// with no response in time if that worker can fetch it. Waiting evaluations end in failure if
+    /// no connected workers remain.
+    #[arg(default_value = "3600")]
+    pub input_fetch_timeout_secs: NonZeroU64,
 }

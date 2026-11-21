@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::store_path_content_variant_reader_choice::cached_path_by_store_hash_subquery_sql;
 use gradient_entity::project_cache::{self, CacheSubscriptionMode};
 use gradient_types::*;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType, QueryFilter,
-    QuerySelect, RelationTrait, Value,
+    QuerySelect, RelationTrait, Select, Value,
 };
 use std::collections::HashSet;
 
@@ -16,21 +17,26 @@ use std::collections::HashSet;
 pub struct ServedPath {
     pub hash: String,
     pub package: String,
-    pub nar_hash: Option<String>,
-    pub nar_size: Option<i64>,
+    pub nar_hash: String,
+    pub nar_size: i64,
+    pub nar_object_storage_key: String,
     pub deriver: Option<String>,
     pub ca: Option<String>,
     pub signatures: Vec<(String, Vec<u8>)>,
+    pub referenced_store_paths: Vec<String>,
 }
 
 #[derive(FromQueryResult)]
 struct ServedRow {
+    id: CachedPathId,
     hash: String,
     package: String,
-    nar_hash: Option<String>,
-    nar_size: Option<i64>,
+    nar_hash: String,
+    nar_size: i64,
+    nar_object_storage_key: String,
     deriver: Option<String>,
     ca: Option<String>,
+    references: Option<String>,
     cache_name: String,
     signature: Vec<u8>,
 }
@@ -40,21 +46,25 @@ struct ServedHash {
     hash: String,
 }
 
-crate::sql! {
-    SERVED_PATH = "SELECT cp.hash, cp.package, cp.nar_hash, cp.nar_size, cp.deriver, cp.ca, \
-                   c.name AS cache_name, s.signature \
-                   FROM cached_path cp \
-                   JOIN cached_path_signature s ON s.cached_path = cp.id \
-                   JOIN cache c ON c.id = s.cache \
-                   WHERE cp.hash = $1 AND s.cache = ANY($2) \
-                   AND coalesce(s.signature, s.previous_signing_key_signature) IS NOT NULL AND cp.file_hash IS NOT NULL \
-                   ORDER BY c.name",
+crate::sql_fn! {
+    SERVED_PATH = || format!(
+        "SELECT chosen.id, chosen.hash, chosen.package, chosen.nar_hash, chosen.nar_size, chosen.nar_object_storage_key, \
+                chosen.deriver, chosen.ca, chosen.\"references\", c.name AS cache_name, s.signature \
+         FROM cache c \
+         CROSS JOIN LATERAL ({choice}) chosen \
+         JOIN cached_path_signature s ON s.cached_path = chosen.id AND s.cache = c.id \
+         WHERE c.id = ANY($2) \
+         ORDER BY c.name",
+        choice = cached_path_by_store_hash_subquery_sql("$1::text", "c.id"),
+    ),
         params = [CachedPathHash, CacheIds(4)];
 
-    SERVED_HASHES = "SELECT DISTINCT cp.hash FROM cached_path cp \
-                     JOIN cached_path_signature s ON s.cached_path = cp.id \
-                     WHERE cp.hash = ANY($1) AND s.cache = ANY($2) \
-                     AND coalesce(s.signature, s.previous_signing_key_signature) IS NOT NULL AND cp.file_hash IS NOT NULL",
+    SERVED_HASHES = || format!(
+        "SELECT DISTINCT chosen.hash FROM unnest($1::text[]) wanted(hash) \
+         JOIN cache c ON c.id = ANY($2) \
+         CROSS JOIN LATERAL ({choice}) chosen",
+        choice = cached_path_by_store_hash_subquery_sql("wanted.hash", "c.id"),
+    ),
         params = [CachedPathHashes(64), CacheIds(4)];
 }
 
@@ -66,17 +76,21 @@ fn cache_ids(caches: &[CacheId]) -> Value {
         .into()
 }
 
+pub(crate) fn project_cache_read_subscription_rows_select() -> Select<EProjectCache> {
+    EProjectCache::find()
+        .join(JoinType::InnerJoin, project_cache::Relation::Cache.def())
+        .filter(CProjectCache::Mode.ne(CacheSubscriptionMode::WriteOnly))
+        .filter(CCache::Active.eq(true))
+}
+
 pub async fn project_read_caches<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
 ) -> Result<Vec<CacheId>, DbErr> {
-    EProjectCache::find()
+    project_cache_read_subscription_rows_select()
         .select_only()
         .column(CProjectCache::Cache)
-        .join(JoinType::InnerJoin, project_cache::Relation::Cache.def())
         .filter(CProjectCache::Project.eq(project))
-        .filter(CProjectCache::Mode.ne(CacheSubscriptionMode::WriteOnly))
-        .filter(CCache::Active.eq(true))
         .into_tuple()
         .all(db)
         .await
@@ -131,17 +145,22 @@ pub async fn served_path<C: ConnectionTrait>(
         return Ok(None);
     };
 
+    let variant = first.id;
     let mut path = ServedPath {
         signatures: vec![(first.cache_name, first.signature)],
+        referenced_store_paths: crate::graph::runtime_closure::tokens(first.references),
         hash: first.hash,
         package: first.package,
         nar_hash: first.nar_hash,
         nar_size: first.nar_size,
+        nar_object_storage_key: first.nar_object_storage_key,
         deriver: first.deriver,
         ca: first.ca,
     };
-    path.signatures
-        .extend(rows.map(|r| (r.cache_name, r.signature)));
+    path.signatures.extend(
+        rows.filter(|r| r.id == variant)
+            .map(|r| (r.cache_name, r.signature)),
+    );
 
     Ok(Some(path))
 }
@@ -174,15 +193,53 @@ mod tests {
 
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+    #[test]
+    fn read_subscription_rows_select_matches_reading_subscription_sql_fragment() {
+        let normalize_where_conditions = |sql: &str| -> HashSet<String> {
+            sql.split_once(" WHERE ")
+                .map_or("", |(_, conditions)| conditions)
+                .replace('"', "")
+                .split(" AND ")
+                .map(|condition| {
+                    let condition = condition.trim().trim_end_matches(" = TRUE");
+                    condition
+                        .split_once('.')
+                        .map_or(condition, |(_, column)| column)
+                        .to_owned()
+                })
+                .filter(|condition| !condition.starts_with("project = "))
+                .collect()
+        };
+        let rows_select = sea_orm::QueryTrait::build(
+            &project_cache_read_subscription_rows_select(),
+            sea_orm::DbBackend::Postgres,
+        )
+        .to_string();
+
+        assert_eq!(
+            normalize_where_conditions(&rows_select),
+            normalize_where_conditions(
+                &crate::store_path_content_variant_trust::reading_subscription("project")
+            ),
+            "{rows_select}"
+        );
+    }
+
     fn row(cache_name: &str) -> BTreeMap<String, Value> {
         BTreeMap::from([
+            ("id".to_owned(), Value::from(uuid::Uuid::nil())),
+            (
+                "references".to_owned(),
+                Value::from(Some(format!("{HASH}-hello"))),
+            ),
             ("hash".to_owned(), Value::from(HASH)),
             ("package".to_owned(), Value::from("hello")),
+            ("nar_hash".to_owned(), Value::from("sha256:abc")),
+            ("nar_size".to_owned(), Value::from(42_i64)),
             (
-                "nar_hash".to_owned(),
-                Value::from(Some("sha256:abc".to_owned())),
+                "nar_object_storage_key".to_owned(),
+                Value::from(format!("{HASH}-hello")),
             ),
-            ("nar_size".to_owned(), Value::from(Some(42_i64))),
             ("deriver".to_owned(), Value::from(None::<String>)),
             ("ca".to_owned(), Value::from(None::<String>)),
             ("cache_name".to_owned(), Value::from(cache_name)),
@@ -201,7 +258,7 @@ mod tests {
             .expect("query")
             .expect("served");
         assert_eq!(path.package, "hello");
-        assert_eq!(path.nar_size, Some(42));
+        assert_eq!(path.nar_size, 42);
         let names: Vec<&str> = path.signatures.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["main", "mirror"]);
     }
@@ -228,5 +285,57 @@ mod tests {
             .expect("query");
         assert!(hashes.is_empty());
         assert!(db.into_transaction_log().is_empty());
+    }
+
+    #[tokio::test]
+    async fn served_path_returns_signatures_of_one_variant_per_hash() {
+        use gradient_fixtures::store_path_content_variants::{
+            FIRST_KEY, SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+        };
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        let (one, two) = (readers.cache_one, readers.cache_two);
+        readers
+            .db
+            .execute("UPDATE cached_path SET \"references\" = nar_object_storage_key")
+            .await;
+        let conn = readers.db.connection();
+
+        let alone = served_path(&conn, &[one], SHARED)
+            .await
+            .expect("query")
+            .expect("served");
+        assert_eq!(
+            (
+                alone.nar_hash.as_str(),
+                alone.signatures.len(),
+                alone.referenced_store_paths
+            ),
+            ("sha256:def", 1, vec![FIRST_KEY.to_owned()]),
+            "Cache C1 can show only the variants that C1 can provide, with C1's own signature."
+        );
+
+        let together = served_path(&conn, &[one, two], SHARED)
+            .await
+            .expect("query")
+            .expect("served");
+        assert_eq!(
+            together.signatures.len(),
+            1,
+            "A signature can belong only to the one variant with visible metadata when several caches load together."
+        );
+
+        let untrusted = served_hashes(
+            &conn,
+            &[one],
+            &["33333333333333333333333333333333".to_owned()],
+        )
+        .await
+        .expect("query");
+        assert_eq!(
+            untrusted.len(),
+            1,
+            "The cache can supply the hash of the only variant that it signed, even when zero subscribed projects trust a producer."
+        );
+        readers.db.finish().await;
     }
 }

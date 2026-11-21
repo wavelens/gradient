@@ -12,6 +12,7 @@ mod clusters;
 mod control;
 mod estimates;
 mod eval_queue;
+mod evaluation_retry_scheduler_test_cases;
 mod exec;
 mod exec_cluster;
 mod imports;
@@ -44,9 +45,8 @@ use gradient_fixtures::shape::Shape;
 use gradient_graph::writer::GraphMsg;
 use gradient_graph::{Graph, testing};
 use gradient_pool::session_port::{SessionPort, SessionSignal};
-use gradient_pool::{EveryJobAllowed, WorkerJobPolicy};
+use gradient_pool::{EveryJobAllowed, ProjectAccess, WorkerJobPolicy};
 use gradient_test_support::state::TestState;
-use gradient_types::ids::ProjectId;
 use gradient_types::{BuildArgs, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::types::{GradientCapabilities, JobKind};
@@ -92,7 +92,7 @@ struct Session {
     port: Arc<dyn SessionPort>,
     inbox: UnboundedReceiver<SessionSignal>,
     caps: GradientCapabilities,
-    projects: HashSet<ProjectId>,
+    project_access: ProjectAccess,
     last_seen: Arc<AtomicI64>,
     jobs: HashMap<String, SessionJob>,
 }
@@ -339,6 +339,23 @@ impl SchedulerCase {
         );
         rows.s12_no_open_job_pending(&self.scheduler, &self.workers_of_other_instances(), after)
             .await;
+    }
+
+    pub async fn kill_graph_writer_actor(&self) {
+        let writer = lock(&self.writer).clone();
+        writer
+            .kill_and_wait(None)
+            .await
+            .expect("The test killed the graph writer.");
+    }
+
+    pub async fn start_graph_writer_after_kill(&self) {
+        let writer = self
+            .graph
+            .spawn(self.ctx.clone(), None, None)
+            .await
+            .expect("Graph writers start again.");
+        *lock(&self.writer) = writer;
     }
 
     pub async fn finish(self) {

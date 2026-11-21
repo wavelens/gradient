@@ -12,10 +12,12 @@ use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::exec_job::{self, ExecJobStatus};
 use gradient_entity::ids::{ClusterJobId, DispatchedJobId, EvaluationId};
 use gradient_entity::{cluster_job, dispatched_job, exec_job_attempt, exec_job_token};
+use gradient_pool::ProjectAccess;
 use gradient_pool::guest_channels::GuestChannelSignal;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
 use gradient_types::exec::{ExecInventory, ExecSpec, Phase, hash_job_token};
+use gradient_types::ids::ClusterAttemptId;
 use gradient_wire::types::GuestChannelKind;
 use gradient_wire::types::{BuildFailureKind, ClusterPeer, ExecJob, Job, JobKind};
 
@@ -99,10 +101,8 @@ pub(super) async fn node_rows(case: &SchedulerCase) -> Vec<exec_job::Model> {
 }
 
 pub(super) async fn connect_pair(case: &SchedulerCase) {
-    case.connect(W1, w_exec(pair_inventory()).zone(ZONE), &[])
-        .await;
-    case.connect(W2, w_exec(pair_inventory()).zone(ZONE), &[])
-        .await;
+    case.connect(W1, w_exec(pair_inventory()).zone(ZONE)).await;
+    case.connect(W2, w_exec(pair_inventory()).zone(ZONE)).await;
 }
 
 pub(super) async fn place_pair(case: &SchedulerCase) {
@@ -349,7 +349,7 @@ async fn a_lost_node_restarts_until_the_budget_is_spent() {
             vec![(ExecJobStatus::Failed, 1), (ExecJobStatus::Failed, 1)]
         };
         assert_eq!(statuses(&case).await, expected, "after loss {loss}");
-        case.connect(lost, w_exec(pair_inventory()).zone(ZONE), &[])
+        case.connect(lost, w_exec(pair_inventory()).zone(ZONE))
             .await;
     }
     case.finish().await;
@@ -625,8 +625,7 @@ async fn a_two_node_job_is_placed_on_two_workers_with_one_master_port() {
 #[tokio::test]
 async fn a_two_node_job_never_runs_as_single_jobs() {
     let (case, _) = with_queued_cluster(pair_spec(1, false)).await;
-    case.connect(W1, w_exec(pair_inventory()).zone(ZONE), &[])
-        .await;
+    case.connect(W1, w_exec(pair_inventory()).zone(ZONE)).await;
 
     case.assign_exec_jobs().await;
     case.idle(W1, JobKind::Exec).await;
@@ -693,6 +692,153 @@ async fn a_two_node_job_that_waits_long_reserves_two_exec_workers() {
                 (W2.to_owned(), SlotKind::Exec)
             ]
         ),
+        "after 2: cluster_snapshot.reservation == C on W1 and W2"
+    );
+    case.finish().await;
+}
+
+const W3: &str = "w3";
+
+async fn cluster_reserved_on_w1_and_w2() -> (SchedulerCase, EvaluationId, ClusterJobId) {
+    let (evaluation, cluster) = (EvaluationId::now_v7(), ClusterJobId::now_v7());
+    let spec = pair_spec(1, false);
+    let case = SchedulerCase::start_with_then(
+        exec_shape(evaluation),
+        |config| {
+            config.scheduler.cluster_reserve_after_secs =
+                NonZeroU64::new(1).expect("a positive number of seconds");
+        },
+        async |case| seed_queued_cluster(case, &spec, cluster).await,
+    )
+    .await;
+    connect_pair(&case).await;
+    case.assign_exec_jobs().await;
+    tokio::time::sleep(Duration::from_secs_f64(1.2)).await;
+    case.plan_clusters().await;
+    assert_eq!(
+        case.reservation().await.map(|r| r.cluster()),
+        Some(cluster),
+        "after 1: cluster_snapshot.reservation == C on W1 and W2"
+    );
+    (case, evaluation, cluster)
+}
+
+async fn assert_w2_and_w3_take_the_cluster_and_w1_gets_nothing(case: &SchedulerCase) {
+    case.connect(W3, w_exec(pair_inventory()).zone(ZONE)).await;
+    case.assign_exec_jobs().await;
+    case.idle(W1, JobKind::Exec).await;
+    case.idle(W2, JobKind::Exec).await;
+    case.idle(W3, JobKind::Exec).await;
+    case.plan_clusters().await;
+    let on_w1: Vec<SessionSignal> =
+        remove_jobs_available_for_requested_kinds_signals(case.signals(W1))
+            .into_iter()
+            .filter(|signal| matches!(signal, SessionSignal::ClusterAssign { .. }))
+            .collect();
+    assert!(on_w1.is_empty(), "after 3: W1 gets no member: {on_w1:?}");
+    assigned_key(case, W2);
+    assigned_key(case, W3);
+}
+
+#[tokio::test]
+async fn a_worker_that_loses_the_project_gives_up_its_planned_cluster_seat() {
+    let (case, _, _) = cluster_reserved_on_w1_and_w2().await;
+
+    case.replace_authorization(
+        W1,
+        ProjectAccess::OnlyListedProjects(Default::default()),
+        w_exec(pair_inventory()).caps,
+    )
+    .await;
+    assert!(
+        case.reservation().await.is_none(),
+        "after 2: cluster_snapshot.reservation == none"
+    );
+
+    assert_w2_and_w3_take_the_cluster_and_w1_gets_nothing(&case).await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_worker_that_loses_exec_gives_up_its_planned_cluster_seat() {
+    let (case, _, _) = cluster_reserved_on_w1_and_w2().await;
+
+    let mut without_exec = w_exec(pair_inventory()).caps;
+    without_exec.exec = false;
+    case.replace_authorization(W1, ProjectAccess::AllProjects, without_exec)
+        .await;
+    assert!(
+        case.reservation().await.is_none(),
+        "after 2: cluster_snapshot.reservation == none"
+    );
+
+    assert_w2_and_w3_take_the_cluster_and_w1_gets_nothing(&case).await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_planned_cluster_seat_never_starts_on_a_worker_that_lost_the_project() {
+    let (case, _, _) = cluster_reserved_on_w1_and_w2().await;
+    let planned = case
+        .reservation()
+        .await
+        .expect("after 1: a reservation")
+        .placement;
+
+    case.replace_authorization(
+        W1,
+        ProjectAccess::OnlyListedProjects(Default::default()),
+        w_exec(pair_inventory()).caps,
+    )
+    .await;
+    case.idle(W1, JobKind::Exec).await;
+    case.idle(W2, JobKind::Exec).await;
+    let taken = case
+        .scheduler
+        .take_placement(planned, ClusterAttemptId::now_v7())
+        .await;
+    assert!(
+        taken.is_none(),
+        "after 2: the placement planned before the replace does not start"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_reservation_planned_before_the_project_was_removed_does_not_seat_the_worker() {
+    let (case, _, _) = cluster_reserved_on_w1_and_w2().await;
+    let planned_before_the_replace = case.reservation().await.expect("after 1: a reservation");
+
+    case.replace_authorization(
+        W1,
+        ProjectAccess::OnlyListedProjects(Default::default()),
+        w_exec(pair_inventory()).caps,
+    )
+    .await;
+    let reserved = case.scheduler.reserve(planned_before_the_replace).await;
+    assert!(
+        !reserved && case.reservation().await.is_none(),
+        "after 2: the reservation planned before the replace does not seat W1"
+    );
+
+    assert_w2_and_w3_take_the_cluster_and_w1_gets_nothing(&case).await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_worker_that_keeps_the_project_keeps_its_planned_cluster_seat() {
+    let (case, evaluation, cluster) = cluster_reserved_on_w1_and_w2().await;
+    let project = case.db.project_of(evaluation).await;
+
+    case.replace_authorization(
+        W1,
+        ProjectAccess::OnlyListedProjects([project].into_iter().collect()),
+        w_exec(pair_inventory()).caps,
+    )
+    .await;
+    assert_eq!(
+        case.reservation().await.map(|r| r.cluster()),
+        Some(cluster),
         "after 2: cluster_snapshot.reservation == C on W1 and W2"
     );
     case.finish().await;

@@ -75,21 +75,24 @@ impl ScoreRule for ResourceSaturationRule {
         s
     }
 
-    /// A hold needs reserved RAM the worker is going to release. A build larger than the whole
-    /// worker, or short of RAM on a worker without reservations, is only penalized.
+    /// Vetoes need reserved RAM that the worker can free, or a larger worker that the project can
+    /// use. A build with too little RAM can only get a penalty on a worker without reservations.
     fn veto(
         &self,
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> bool {
-        worker
-            .metrics
-            .is_some_and(|m| Self::ram_fit(job, &m, instance) == RamFit::FitsOnceRamIsReleased)
+        worker.metrics.is_some_and(|m| {
+            matches!(
+                Self::ram_fit(job, &m, instance),
+                RamFit::FitsOnceRamIsReleased | RamFit::WaitsForLargerWorker
+            )
+        })
     }
 
     fn description(&self) -> &'static str {
-        "Strongly penalizes sending a real build to a worker whose CPU or RAM is already saturated. Holds a build while the worker's free RAM, less the RAM reserved for the jobs already assigned to it and for a held build waiting for it, cannot take the build's predicted peak RAM at any of its core counts, each a third fewer than the last down to one. The largest core count that fits now wins; a build that fits only after a wait keeps its full core count and waits. A prioritized build, or a build held for 60 seconds, keeps its RAM free on a single worker and starts there first. A build no instance has measured yet counts as the mean peak RAM of the instance's builds. Substitute-only builtin fetches get a more lenient CPU threshold."
+        "Strongly penalizes sending a real build to a worker whose CPU or RAM is already saturated. Holds a build while the worker's free RAM, less the RAM reserved for the jobs already assigned to it and for a held build waiting for it, cannot take the build's predicted peak RAM at any of its core counts, each a third fewer than the last down to one. The largest core count that fits now wins; a build that fits only after a wait keeps its full core count and waits. A prioritized build, or a build held for 60 seconds, keeps its RAM free on a single worker and starts there first. A build no instance has measured yet counts as the mean peak RAM of the instance's builds. Substitute-only builtin fetches get a more lenient CPU threshold. Builds too large for any worker that the project can use have an upper bound equal to the total RAM of the largest such worker. They wait for that worker and run there. Smaller workers play no part."
     }
 }
 

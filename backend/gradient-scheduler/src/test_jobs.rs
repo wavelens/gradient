@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_types::ids::*;
+use gradient_wire::host_resource_project_access::WorkerResourceProjectAccess;
 use gradient_wire::types::{
     BuildJob, BuildSpec, BuildSpecKind, FlakeJob, FlakeStep, GradientCapabilities,
 };
@@ -83,6 +84,8 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
         eval_index: 0,
         continuation: None,
         flake_fetch_needs_secrets: false,
+        derivation_batch_save_failure_message: None,
+        allows_project_credentials_and_privileged_actions: true,
     }
 }
 
@@ -160,6 +163,7 @@ pub(crate) fn exec_job(spec: ExecSpec) -> PendingExecJob {
         api_url: "http://127.0.0.1:3000".into(),
         assignment: None,
         secrets: Default::default(),
+        allows_project_credentials_and_privileged_actions: true,
     }
 }
 
@@ -230,6 +234,24 @@ pub(crate) fn eight_gpu_exec_caps_with_free(free: u32) -> WorkerCaps {
     caps
 }
 
+pub(crate) fn exec_worker_caps_allowing_all_commands_with_sops_secret_for_one_project(
+    name: &str,
+    project_id: ProjectId,
+) -> WorkerCaps {
+    let mut caps = exec_caps(allow_all(), ExecDefaults::default());
+    if let Some(inventory) = caps.exec.as_mut() {
+        inventory.secrets = vec![name.to_owned()];
+        inventory
+            .project_release_by_resource_name
+            .released_projects_by_worker_sops_secret_name = [(
+            name.to_owned(),
+            WorkerResourceProjectAccess::OnlyProjects([project_id.into_inner()].into()),
+        )]
+        .into();
+    }
+    caps
+}
+
 pub(crate) fn exec_caps_labelled(label: &str) -> WorkerCaps {
     let mut caps = exec_caps(allow_all(), ExecDefaults::default());
     if let Some(inventory) = caps.exec.as_mut() {
@@ -248,7 +270,7 @@ pub(crate) fn worker_info(id: &str, caps: WorkerCaps) -> WorkerInfo {
         assigned_job_count: 0,
         assigned_build_count: 0,
         draining: false,
-        authorized_peers: None,
+        project_access: gradient_pool::ProjectAccess::AllProjects,
         cpu_usage_pct: None,
         ram_free_mb: None,
         ram_total_mb: 0,

@@ -25,10 +25,6 @@ fn project_id() -> ProjectId {
     ProjectId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
 }
 
-fn deriv_id() -> DerivationId {
-    DerivationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000003").unwrap())
-}
-
 fn cached_path_id() -> CachedPathId {
     CachedPathId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000005").unwrap())
 }
@@ -65,13 +61,12 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         id: cached_path_id(),
         hash: FIXTURE_PATH_HASH.into(),
         package: "hello".into(),
-        file_hash: Some(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
+        file_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         file_size: Some(12345),
-        nar_size: Some(67890),
-        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+        nar_size: 67890,
+        nar_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH)),
+        nar_object_storage_key: FIXTURE_PATH_HASH.into(),
         created_at: test_date(),
         ..Default::default()
     };
@@ -125,7 +120,27 @@ pub async fn public_cache_with_foreign_nar() -> Arc<ServerState> {
     public_cache_storing_nar(false).await
 }
 
+pub async fn public_cache_serving_store_path_without_nar_file() -> Arc<ServerState> {
+    build_test_server_state_with_public_cache_answering_whether_it_serves_fixture_path(true)
+}
+
 async fn public_cache_storing_nar(served: bool) -> Arc<ServerState> {
+    let state =
+        build_test_server_state_with_public_cache_answering_whether_it_serves_fixture_path(served);
+
+    let compressed = synthetic_nar_zst().await;
+    state
+        .nar_storage
+        .put(FIXTURE_PATH_HASH, compressed)
+        .await
+        .expect("put NAR into test storage");
+
+    state
+}
+
+fn build_test_server_state_with_public_cache_answering_whether_it_serves_fixture_path(
+    served: bool,
+) -> Arc<ServerState> {
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
         name: FIXTURE_CACHE_NAME.into(),
@@ -145,25 +160,15 @@ async fn public_cache_storing_nar(served: bool) -> Arc<ServerState> {
         .append_query_results([served_gate(served)])
         .into_connection();
 
-    let state = TestState::new().web_db(db).build();
-
-    let compressed = synthetic_nar_zst().await;
-    state
-        .nar_storage
-        .put(FIXTURE_PATH_HASH, compressed)
-        .await
-        .expect("put NAR into test storage");
-
-    state
+    TestState::new().web_db(db).build()
 }
 
-fn served_gate(served: bool) -> Vec<std::collections::BTreeMap<&'static str, sea_orm::Value>> {
-    let row = std::collections::BTreeMap::from([("served", sea_orm::Value::Int(Some(1)))]);
-    if served { vec![row] } else { Vec::new() }
-}
-
-fn shared_build_id() -> DerivationBuildId {
-    DerivationBuildId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000008").unwrap())
+fn served_gate(served: bool) -> Vec<gradient_entity::cached_path::Model> {
+    if served {
+        vec![cached_path_row_fixture()]
+    } else {
+        Vec::new()
+    }
 }
 
 fn attempt_id() -> BuildAttemptId {
@@ -190,37 +195,12 @@ fn cache_row_with_visibility(public: bool) -> gradient_entity::cache::Model {
     }
 }
 
-fn derivation_row() -> gradient_entity::derivation::Model {
-    gradient_entity::derivation::Model {
-        id: deriv_id(),
-        hash: FIXTURE_PATH_HASH.into(),
-        name: "hello".into(),
-        architecture: "x86_64-linux".into(),
-        created_at: test_date(),
-        ..Default::default()
-    }
-}
-
-fn shared_build_row(
-    status: gradient_entity::build::BuildStatus,
-) -> gradient_entity::derivation_build::Model {
-    gradient_entity::derivation_build::Model {
-        id: shared_build_id(),
-        derivation: deriv_id(),
-        status,
-        created_at: test_date(),
-        updated_at: test_date(),
-        ..Default::default()
-    }
-}
-
-fn attempt_row() -> gradient_entity::build_attempt::Model {
-    gradient_entity::build_attempt::Model {
-        id: attempt_id(),
-        derivation_build: shared_build_id(),
-        created_at: test_date(),
-        ..Default::default()
-    }
+fn mock_served_derivation_output_row_with_build_attempt_id()
+-> std::collections::BTreeMap<&'static str, sea_orm::Value> {
+    std::collections::BTreeMap::from([(
+        "id",
+        sea_orm::Value::Uuid(Some(attempt_id().into_inner())),
+    )])
 }
 
 fn make_state(
@@ -238,11 +218,9 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
 
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![derivation_row()]])
-        .append_query_results([vec![shared_build_row(
-            gradient_entity::build::BuildStatus::Completed,
-        )]])
-        .append_query_results([vec![attempt_row()]])
+        .append_query_results([vec![
+            mock_served_derivation_output_row_with_build_attempt_id(),
+        ]])
         .into_connection();
 
     (make_state(db, log_storage), log_body)
@@ -261,8 +239,7 @@ pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
 pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![derivation_row()]])
-        .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
+        .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
         .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
         .into_connection();
 
@@ -294,11 +271,9 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
 
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![derivation_row()]])
-        .append_query_results([vec![shared_build_row(
-            gradient_entity::build::BuildStatus::Completed,
-        )]])
-        .append_query_results([vec![attempt_row()]])
+        .append_query_results([vec![
+            mock_served_derivation_output_row_with_build_attempt_id(),
+        ]])
         .into_connection();
 
     (make_state(db, log_storage), newer_log)
@@ -327,13 +302,12 @@ fn cached_path_row_fixture() -> gradient_entity::cached_path::Model {
         id: cached_path_id(),
         hash: FIXTURE_PATH_HASH.into(),
         package: "hello".into(),
-        file_hash: Some(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
+        file_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         file_size: Some(12345),
-        nar_size: Some(67890),
-        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+        nar_size: 67890,
+        nar_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH)),
+        nar_object_storage_key: FIXTURE_PATH_HASH.into(),
         created_at: test_date(),
         ..Default::default()
     }
@@ -462,11 +436,45 @@ async fn synthetic_nar_zst() -> Vec<u8> {
 
     std::os::unix::fs::symlink("hello", bin.join("link")).expect("create symlink");
 
-    let chunks: Vec<bytes::Bytes> = NarByteStream::new(tmp.path().to_path_buf())
+    zstd_compressed_nar_of_path(tmp.path()).await
+}
+
+async fn zstd_compressed_nar_of_path(directory: &std::path::Path) -> Vec<u8> {
+    let chunks: Vec<bytes::Bytes> = NarByteStream::new(directory.to_path_buf())
         .try_collect()
         .await
         .expect("dump NAR");
     let nar_bytes: Vec<u8> = chunks.into_iter().flatten().collect();
 
     zstd::encode_all(std::io::Cursor::new(nar_bytes), 1).expect("zstd compress")
+}
+
+pub async fn zstd_compressed_nar_of_bytes(contents: &[u8]) -> Vec<u8> {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let file = tmp.path().join("file");
+    std::fs::write(&file, contents).expect("Writing a Single File");
+
+    zstd_compressed_nar_of_path(&file).await
+}
+
+pub async fn create_temp_directory_with_one_file_and_get_zstd_compressed_nar(
+    file_name: &str,
+    contents: &[u8],
+) -> Vec<u8> {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(tmp.path().join(file_name), contents).expect("Writing a Single File");
+
+    zstd_compressed_nar_of_path(tmp.path()).await
+}
+
+pub async fn compressed_nar_with_one_debug_file_and_its_build_id() -> (Vec<u8>, String) {
+    let (bucket, rest) = ("7d", "beaca53fbc9a489b633871093c37dae3857a37");
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let dir = tmp.path().join("lib/debug/.build-id").join(bucket);
+    std::fs::create_dir_all(&dir).expect("create build-id dir");
+    std::fs::write(dir.join(format!("{rest}.debug")), b"\x7fELF").expect("write debug file");
+
+    let compressed = zstd_compressed_nar_of_path(tmp.path()).await;
+
+    (compressed, format!("{bucket}{rest}"))
 }

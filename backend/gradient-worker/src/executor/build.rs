@@ -20,6 +20,7 @@ use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::path::Path;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -30,6 +31,9 @@ use crate::proto::job::JobUpdater;
 
 use super::build_metrics::{
     BuildHost, RUNNING_BUILDS, ResourceUsage, build_cores_for, build_metrics,
+};
+use super::capped_regular_file_below_trusted_root_reader::{
+    SizeCappedNoFollowReadError, open_regular_file_below_root_and_read_at_most_max_bytes,
 };
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
@@ -270,10 +274,28 @@ fn output_pairs_from_built_or_drv(
         .collect()
 }
 
+const MAX_HYDRA_BUILD_PRODUCTS_SIZE_BYTES: u64 = 1024 * 1024;
+
 pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
-    let file_path = format!("{}/nix-support/hydra-build-products", store_path);
-    let Ok(content) = tokio::fs::read_to_string(&file_path).await else {
-        return Vec::new();
+    let read = open_regular_file_below_root_and_read_at_most_max_bytes(
+        Path::new(store_path),
+        Path::new("nix-support/hydra-build-products"),
+        MAX_HYDRA_BUILD_PRODUCTS_SIZE_BYTES,
+    )
+    .await;
+    let content = match read {
+        Ok(bytes) => String::from_utf8(bytes).map_err(|error| error.to_string()),
+        Err(SizeCappedNoFollowReadError::FileOrAncestorDirectoryNotFound { .. }) => {
+            return Vec::new();
+        }
+        Err(error) => Err(error.to_string()),
+    };
+    let content = match content {
+        Ok(content) => content,
+        Err(error) => {
+            warn!(output = %store_path, %error, "Ignoring the file for the build artifact of the output");
+            return Vec::new();
+        }
     };
     let mut products = Vec::new();
     for line in content.lines() {
@@ -767,6 +789,49 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let products = load_products(dir.path().to_str().unwrap()).await;
         assert!(products.is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_products_returns_no_products_when_hydra_build_products_is_symlink_to_dev_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let support = dir.path().join("nix-support");
+        tokio::fs::create_dir_all(&support).await.unwrap();
+        tokio::fs::symlink("/dev/zero", support.join("hydra-build-products"))
+            .await
+            .unwrap();
+
+        let products = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            load_products(dir.path().to_str().unwrap()),
+        )
+        .await
+        .expect("a device is refused without reading it");
+
+        assert!(products.is_empty(), "{products:?}");
+    }
+
+    #[tokio::test]
+    async fn load_products_returns_no_products_when_nix_support_symlink_target_directory_has_valid_products_file()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let report_path = dir.path().join("index.html");
+        tokio::fs::write(&report_path, b"<html></html>")
+            .await
+            .unwrap();
+        tokio::fs::write(
+            elsewhere.path().join("hydra-build-products"),
+            format!("file html {}", report_path.display()),
+        )
+        .await
+        .unwrap();
+        tokio::fs::symlink(elsewhere.path(), dir.path().join("nix-support"))
+            .await
+            .unwrap();
+
+        let products = load_products(dir.path().to_str().unwrap()).await;
+
+        assert!(products.is_empty(), "{products:?}");
     }
 
     #[tokio::test]

@@ -4,15 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod fixtures;
+pub(crate) mod fixtures;
 
 use super::{ApplyInput, ApplyOutcome, apply_trigger, park_storage_full};
 use fixtures::{
     input, make_commit, make_eval, make_task_with_concurrency, make_task_with_last_eval,
-    one_active_per_branch_violation, with_eval_worker, with_writable_cache,
+    mock_database_returning_task_row_for_lock, one_active_per_branch_violation, with_eval_worker,
+    with_writable_cache,
 };
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_fixtures::mock::{empty_db, mock_db};
+use gradient_fixtures::mock::empty_db;
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
 use sea_orm::MockExecResult;
@@ -40,7 +41,7 @@ async fn skips_when_same_commit_as_last_eval() {
     let task = make_task_with_last_eval(Some(prev_eval_id));
     let same_hash = vec![1u8; 20];
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([vec![make_eval(
             prev_eval_id,
             task.id,
@@ -71,10 +72,11 @@ async fn time_trigger_bypasses_same_commit_check() {
     let new_commit_id = CommitId::now_v7();
     let trig = TaskTriggerId::now_v7();
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let db = with_eval_worker(with_writable_cache(db))
         .append_query_results([vec![make_eval(
             prev_eval_id,
             task.id,
@@ -97,8 +99,8 @@ async fn time_trigger_bypasses_same_commit_check() {
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]);
-    let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        }])
+        .into_connection();
 
     let res = apply_trigger(&db, &task, input(trig, TriggerType::Time, same_hash, false))
         .await
@@ -117,7 +119,7 @@ async fn skip_concurrency_with_running_eval() {
         EvaluationStatus::Building,
     );
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
@@ -150,7 +152,7 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
         EvaluationStatus::Building,
     );
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(running_commit_id, same_hash.clone())]])
@@ -178,9 +180,10 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
     let trig = TaskTriggerId::now_v7();
     let new_hash = vec![9u8; 20];
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let db = with_eval_worker(with_writable_cache(db))
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         .append_query_results([vec![{
             let mut m = make_eval(
@@ -198,8 +201,8 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]);
-    let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        }])
+        .into_connection();
 
     let res = apply_trigger(
         &db,
@@ -227,10 +230,11 @@ async fn unique_constraint_violation_returns_skipped_concurrency() {
     let new_commit_id = CommitId::now_v7();
     let trig = TaskTriggerId::now_v7();
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let db = with_eval_worker(with_writable_cache(db))
         .append_query_results([vec![make_commit(new_commit_id, vec![1u8; 20])]])
         .append_query_errors([one_active_per_branch_violation()])
         .into_connection();
@@ -257,10 +261,11 @@ async fn manual_bypasses_same_commit_check() {
     let new_commit_id = CommitId::now_v7();
     let trig = TaskTriggerId::now_v7();
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let db = with_eval_worker(with_writable_cache(db))
         .append_query_results([vec![make_eval(
             prev_eval_id,
             task.id,
@@ -279,8 +284,8 @@ async fn manual_bypasses_same_commit_check() {
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]);
-    let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        }])
+        .into_connection();
 
     let res = apply_trigger(
         &db,
@@ -307,7 +312,7 @@ async fn hard_abort_populates_aborted_fields() {
     let trig = TaskTriggerId::now_v7();
     let new_hash = vec![7u8; 20];
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
@@ -317,7 +322,8 @@ async fn hard_abort_populates_aborted_fields() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let db = with_eval_worker(with_writable_cache(db))
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         .append_query_results([vec![{
             let mut m = make_eval(
@@ -334,8 +340,8 @@ async fn hard_abort_populates_aborted_fields() {
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]);
-    let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        }])
+        .into_connection();
 
     let res = apply_trigger(
         &db,
@@ -361,6 +367,57 @@ async fn hard_abort_populates_aborted_fields() {
 }
 
 #[tokio::test]
+async fn apply_trigger_rolls_back_evaluation_insert_when_later_statement_fails() {
+    let task = make_task_with_last_eval(None);
+    let new_eval_id = EvaluationId::now_v7();
+    let new_commit_id = CommitId::now_v7();
+    let trig = TaskTriggerId::now_v7();
+    let new_hash = vec![1u8; 20];
+
+    let db = mock_database_returning_task_row_for_lock(&task)
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let db = with_eval_worker(with_writable_cache(db))
+        .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
+        .append_query_results([vec![{
+            let mut m = make_eval(
+                new_eval_id,
+                task.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            );
+            m.trigger = Some(trig);
+            m
+        }]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        .append_query_errors([sea_orm::DbErr::Custom("task update failed".into())])
+        .into_connection();
+
+    let res = apply_trigger(
+        &db,
+        &task,
+        input(trig, TriggerType::Polling, new_hash, false),
+    )
+    .await;
+    assert!(res.is_err(), "expected an error, got {res:?}");
+
+    let statements: Vec<String> = db
+        .into_transaction_log()
+        .iter()
+        .flat_map(|t| t.statements().iter().map(|s| s.to_string()))
+        .collect();
+    assert!(
+        statements
+            .iter()
+            .any(|s| s.starts_with(r#"INSERT INTO "evaluation""#)),
+        "{statements:?}"
+    );
+    assert!(!statements.iter().any(|s| s == "COMMIT"), "{statements:?}");
+    assert_eq!(statements.last().map(String::as_str), Some("ROLLBACK"));
+}
+
+#[tokio::test]
 async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
     use gradient_types::waiting_reason::WaitingReason;
     let task = make_task_with_last_eval(None);
@@ -381,29 +438,15 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
         m
     };
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
-        .append_query_results([vec![{
-            let mut m = make_eval(
-                new_eval_id,
-                task.id,
-                new_commit_id,
-                EvaluationStatus::Queued,
-            );
-            m.trigger = Some(trig);
-            m
-        }]])
+        .append_query_results([vec![parked_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .append_query_results([vec![task.clone()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-        .append_query_results([vec![parked_eval.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -454,31 +497,17 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
         m
     };
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
-        .append_query_results([vec![{
-            let mut m = make_eval(
-                new_eval_id,
-                task.id,
-                new_commit_id,
-                EvaluationStatus::Queued,
-            );
-            m.trigger = Some(trig);
-            m
-        }]])
-        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        .append_query_results([vec![task.clone()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }]);
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
     let db = with_writable_cache(db)
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
+        .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         .append_query_results([vec![parked_eval.clone()]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        .append_query_results([vec![task.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -546,10 +575,11 @@ async fn a_trigger_not_honoring_the_skip_marker_still_creates_the_evaluation() {
     let new_commit_id = CommitId::now_v7();
     let trig = TaskTriggerId::now_v7();
 
-    let db = mock_db()
+    let db = mock_database_returning_task_row_for_lock(&task)
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let db = with_eval_worker(with_writable_cache(db))
         .append_query_results([vec![make_eval(
             prev_eval_id,
             task.id,
@@ -568,8 +598,8 @@ async fn a_trigger_not_honoring_the_skip_marker_still_creates_the_evaluation() {
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]);
-    let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        }])
+        .into_connection();
 
     let applied = ApplyInput {
         commit_message: Some("docs: fix typo [skip ci]".into()),

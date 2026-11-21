@@ -39,19 +39,32 @@ impl MockProtoServer {
     }
 
     pub async fn accept(&self) -> MockServerConn {
+        self.accept_worker_websocket_with_max_protocol_version(*PROTO_VERSIONS.end())
+            .await
+    }
+
+    pub async fn accept_worker_websocket_with_max_protocol_version(
+        &self,
+        newest: u16,
+    ) -> MockServerConn {
         let (stream, _) = self.listener.accept().await.expect("accept failed");
         let mut socket = accept_async(stream)
             .await
             .expect("WebSocket handshake failed");
+        let offered_protocol_version_range = *PROTO_VERSIONS.start()..=newest;
 
         socket
-            .send(Message::Binary(version_frame(&PROTO_VERSIONS)))
+            .send(Message::Binary(version_frame(
+                &offered_protocol_version_range,
+            )))
             .await
             .expect("send the version frame");
 
         MockServerConn {
             socket,
             peer_version_read: false,
+            protocol_version: newest,
+            offered_protocol_version_range,
         }
     }
 }
@@ -59,11 +72,13 @@ impl MockProtoServer {
 pub struct MockServerConn {
     socket: WebSocketStream<TcpStream>,
     peer_version_read: bool,
+    protocol_version: u16,
+    offered_protocol_version_range: std::ops::RangeInclusive<u16>,
 }
 
 impl MockServerConn {
     pub async fn send(&mut self, msg: ServerMessage) -> Result<()> {
-        let bytes = to_bytes(&msg, *PROTO_VERSIONS.end()).context("encode ServerMessage")?;
+        let bytes = to_bytes(&msg, self.protocol_version).context("encode ServerMessage")?;
         self.socket
             .send(Message::Binary(bytes))
             .await
@@ -74,11 +89,12 @@ impl MockServerConn {
         loop {
             match self.socket.next().await {
                 Some(Ok(Message::Binary(bytes))) if !self.peer_version_read => {
-                    agree(&PROTO_VERSIONS, &bytes).map_err(anyhow::Error::msg)?;
+                    self.protocol_version = agree(&self.offered_protocol_version_range, &bytes)
+                        .map_err(anyhow::Error::msg)?;
                     self.peer_version_read = true;
                 }
                 Some(Ok(Message::Binary(bytes))) => {
-                    return from_bytes(bytes, *PROTO_VERSIONS.end())
+                    return from_bytes(bytes, self.protocol_version)
                         .context("decode ClientMessage");
                 }
                 Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
@@ -186,6 +202,9 @@ impl MockServerConn {
             assignment_id: assignment_id.into(),
             job,
             cluster: None,
+            ssh_key: None,
+            ssh_host_keys: Vec::new(),
+            https_git_credentials: Vec::new(),
         })
         .await?;
         self.recv_until(|msg| match msg {

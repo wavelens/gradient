@@ -57,7 +57,10 @@ static PROGRAM_EXITED_SQL: LazyLock<String> = LazyLock::new(|| {
 static LOSSES_IN_A_ROW_SQL: LazyLock<String> = LazyLock::new(|| {
     let lost = i16::from(AttemptEndReason::Lost);
     format!(
-        "SELECT count(*) AS losses FROM exec_job_attempt a \
+        "SELECT count(*) AS losses, \
+         CASE WHEN count(a.message) = count(*) AND min(a.message) = max(a.message) \
+              THEN min(a.message) END AS shared_loss_failure_text \
+         FROM exec_job_attempt a \
          WHERE a.exec_job = $1 AND a.end_reason = {lost} \
          AND a.number > COALESCE((SELECT max(b.number) FROM exec_job_attempt b \
               WHERE b.exec_job = $1 AND b.end_reason <> {lost}), 0)"
@@ -286,10 +289,24 @@ pub async fn finish<C: ConnectionTrait>(
     .await
 }
 
-pub async fn losses_in_a_row<C: ConnectionTrait>(db: &C, job: ExecJobId) -> Result<i64, DbErr> {
-    EXEC_LOSSES_IN_A_ROW
-        .scalar(db, [job.into()], "losses")
-        .await
+#[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
+pub struct ConsecutiveLostWorkerAttemptsWithSharedFailureText {
+    pub losses: i64,
+    pub shared_loss_failure_text: Option<String>,
+}
+
+pub async fn get_latest_consecutive_attempts_that_lost_worker_count_and_shared_failure_text_for_exec_job<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    job: ExecJobId,
+) -> Result<ConsecutiveLostWorkerAttemptsWithSharedFailureText, DbErr> {
+    ConsecutiveLostWorkerAttemptsWithSharedFailureText::find_by_statement(
+        EXEC_LOSSES_IN_A_ROW.bind([job.into()]),
+    )
+    .one(db)
+    .await?
+    .ok_or_else(|| DbErr::Custom("loss count returned no row".into()))
 }
 
 pub async fn open_of_job<C: ConnectionTrait>(

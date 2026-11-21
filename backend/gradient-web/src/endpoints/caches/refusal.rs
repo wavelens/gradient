@@ -7,6 +7,7 @@
 use crate::error::ErrorCode;
 use crate::permissions::CachePermission;
 use crate::refusal::{Refusal, RefusalStatus};
+use gradient_util::upstream_cache_credential::UpstreamCacheCredentialError;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CacheRefusal {
@@ -42,6 +43,20 @@ pub(crate) enum CacheRefusal {
         "An API key requires an https:// upstream URL so the key is not transmitted in cleartext."
     )]
     ApiKeyOverCleartext,
+    #[error("Place the user name and password in `credential`, not in the upstream URL.")]
+    UpstreamCacheUrlContainsCredentials,
+    #[error("An upstream URL can't contain a query. Send the token in `credential`.")]
+    CacheUrlContainsQueryString,
+    #[error(
+        "Credentials need an https:// upstream URL. URLs without https:// send them in plaintext."
+    )]
+    UpstreamCacheCredentialSentOverPlainHttp,
+    #[error("{0}")]
+    InvalidUpstreamCacheCredential(#[from] UpstreamCacheCredentialError),
+    #[error(
+        "Send the credentials again, or remove them with `{{\"scheme\": \"none\"}}`, if the upstream URL moves to another scheme, host, or port."
+    )]
+    StoredCredentialWouldBeSentToNewUpstreamCacheHost,
     #[error("Remote cache name is required for a Gradient Proto upstream.")]
     RemoteCacheNameRequired,
     #[error("Remote cache name is invalid.")]
@@ -78,6 +93,11 @@ pub(crate) enum CacheRefusal {
         "This account reached the maximum number of caches. Ask an administrator to raise the limit."
     )]
     CacheLimitReached,
+    #[error(
+        "This cache reached the maximum number of upstream caches ({}). Delete an upstream cache before adding another.",
+        gradient_db::caches::upstream::MAX_UPSTREAM_CACHE_COUNT
+    )]
+    MaximumUpstreamCacheCountReached,
 }
 
 impl Refusal for CacheRefusal {
@@ -86,7 +106,9 @@ impl Refusal for CacheRefusal {
             Self::AuthenticationRequired | Self::ReadCachePermissionRequired => {
                 RefusalStatus::Unauthorized
             }
-            Self::AnonymousAccessDisabled | Self::CacheLimitReached => RefusalStatus::Forbidden,
+            Self::AnonymousAccessDisabled
+            | Self::CacheLimitReached
+            | Self::MaximumUpstreamCacheCountReached => RefusalStatus::Forbidden,
             Self::SignaturePending | Self::NotRecorded(_) => RefusalStatus::NotFound,
             Self::NarTooLarge { .. } => RefusalStatus::PayloadTooLarge,
             Self::ConnectionCapacityReached | Self::TooManyConnectionsFromIp => {
@@ -100,6 +122,11 @@ impl Refusal for CacheRefusal {
             | Self::InvalidNarFilePath
             | Self::HttpPublicKeyRequired
             | Self::ApiKeyOverCleartext
+            | Self::UpstreamCacheUrlContainsCredentials
+            | Self::CacheUrlContainsQueryString
+            | Self::UpstreamCacheCredentialSentOverPlainHttp
+            | Self::InvalidUpstreamCacheCredential(_)
+            | Self::StoredCredentialWouldBeSentToNewUpstreamCacheHost
             | Self::RemoteCacheNameRequired
             | Self::RemoteCacheNameInvalid
             | Self::RemoteCacheNameBadCharacters

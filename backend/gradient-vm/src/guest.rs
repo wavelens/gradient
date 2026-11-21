@@ -26,24 +26,22 @@ use crate::console::{CONSOLE_LOG, console_tail};
 use crate::devices::DeviceUnit;
 use crate::hypervisor::{GuestImage, HypervisorApi, vm_config};
 use crate::state::{GuestId, GuestState, HeldDevice, StoredRelay, write_state};
-use crate::supervisor::TAP_PREFIX;
+use crate::supervisor::{
+    CONTROL_SOCKET, GuestSupervisorHostConfigurationError, TAP_PREFIX,
+    guest_supervisor_directory_path,
+};
 use crate::unit::{GuestUnits, unit_name};
+use crate::vsock::VSOCK_SOCKET;
 use crate::writable_store::create_writable_store;
 
 pub const WORK_MOUNT_TAG: &str = "work";
 const SOCKET_WAIT: Duration = Duration::from_secs(30);
 const USBIP_PORT: u16 = 3240;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorkVolume {
-    Share(PathBuf),
-    Disk(PathBuf),
-}
-
 pub struct PlugPlan {
     pub units: Vec<(String, DeviceUnit)>,
     pub mounts: Vec<(MountConfig, PathBuf)>,
-    pub work: WorkVolume,
+    pub work_disk_image_path: PathBuf,
     pub network: Option<GuestNetwork>,
 }
 
@@ -132,13 +130,16 @@ impl Guest {
     }
 
     pub fn vsock_socket(&self) -> PathBuf {
-        self.dir.join("vsock.sock")
+        self.dir.join(VSOCK_SOCKET)
     }
 
     pub fn console_tail(&self, max: u64) -> String {
-        console_tail(&self.dir.join(CONSOLE_LOG), max)
-            .map(|tail| String::from_utf8_lossy(&tail).into_owned())
-            .unwrap_or_default()
+        console_tail(
+            &guest_supervisor_directory_path(self.id()).join(CONSOLE_LOG),
+            max,
+        )
+        .map(|tail| String::from_utf8_lossy(&tail).into_owned())
+        .unwrap_or_default()
     }
 
     pub async fn resume(&mut self) -> Result<()> {
@@ -314,29 +315,24 @@ impl Guest {
     }
 
     async fn plug_mounts(&mut self, plan: &PlugPlan) -> Result<()> {
-        match &plan.work {
-            WorkVolume::Share(dir) => self.add_mount(WORK_MOUNT_TAG, dir, false).await?,
-            WorkVolume::Disk(image) => self.add_disk(WORK_MOUNT_TAG, image).await?,
-        }
+        self.add_disk(WORK_MOUNT_TAG, &plan.work_disk_image_path)
+            .await?;
         for (mount, dir) in &plan.mounts {
             if mount.per_job {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| format!("create {}", dir.display()))?;
                 self.state.per_job_dirs.push(dir.clone());
                 self.save()?;
             }
-            self.add_mount(&mount.name, dir, mount.read_only).await?;
+            self.add_mount(&mount.name, mount.read_only).await?;
             self.state.mounts.push(mount.name.clone());
             self.save()?;
         }
         Ok(())
     }
 
-    async fn add_mount(&mut self, tag: &str, dir: &Path, read_only: bool) -> Result<()> {
+    async fn add_mount(&mut self, tag: &str, read_only: bool) -> Result<()> {
         let reply = self
             .request(SupervisorRequest::PrepareMount {
                 tag: tag.to_owned(),
-                dir: dir.display().to_string(),
                 read_only,
             })
             .await?;
@@ -355,6 +351,7 @@ impl Guest {
         self.request(SupervisorRequest::PrepareTap {
             name: tap.clone(),
             bridge: self.bridge.clone(),
+            guest_ipv4_address: Some(network.address.parse()?),
         })
         .await?;
         self.state.tap = Some(tap.clone());
@@ -368,7 +365,8 @@ impl Guest {
         let control = match &mut self.control {
             Some(control) => control,
             None => {
-                let socket = self.dir.join("control.sock");
+                let socket =
+                    guest_supervisor_directory_path(&self.state.guest_id).join(CONTROL_SOCKET);
                 let stream = UnixStream::connect(&socket)
                     .await
                     .with_context(|| format!("connect to {}", socket.display()))?;
@@ -378,6 +376,9 @@ impl Guest {
         control.send(&request).await?;
         match control.recv::<SupervisorReply>().await? {
             Some(SupervisorReply::Failed { message }) => Err(anyhow!(message)),
+            Some(SupervisorReply::RejectedByConfiguration { message }) => {
+                Err(GuestSupervisorHostConfigurationError(message).into())
+            }
             Some(reply) => Ok(reply),
             None => {
                 self.control = None;
@@ -490,6 +491,7 @@ mod tests {
     fn scratch_mount(root: &Path) -> MountConfig {
         MountConfig {
             name: "scratch".to_owned(),
+            projects: gradient_wire::host_resource_project_access::WorkerResourceProjectAccess::EveryProject,
             path: root.join("scratch"),
             read_only: false,
             per_job: true,

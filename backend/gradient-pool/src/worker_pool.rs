@@ -4,18 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{
-    BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, GuestSize, JobKind,
+    BuildMetrics, BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities,
+    GuestSize, JobKind,
 };
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
 use crate::job_policy::{AllowedJobs, EveryJobAllowed, WorkerJobPolicy};
-use crate::peer_auth::PeerAuth;
+use crate::project_access::ProjectAccess;
 use crate::session_port::{SessionPort, SessionSignal};
 use crate::worker_state::{Active, AssignedJob, Draining, TypedWorker, WorkerShared};
 
@@ -88,7 +89,7 @@ impl WorkerPool {
         &mut self,
         id: String,
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<ProjectId>,
+        project_access: ProjectAccess,
         session: Arc<dyn SessionPort>,
     ) -> Arc<AtomicI64> {
         let prior = self.workers.get(&id).map(|slot| {
@@ -97,7 +98,7 @@ impl WorkerPool {
                 Arc::clone(&slot.shared().last_seen),
             )
         });
-        let mut worker = TypedWorker::<Active>::new(capabilities, authorized_peers, session);
+        let mut worker = TypedWorker::<Active>::new(capabilities, project_access, session);
         if let Some((profile, last_seen)) = prior {
             worker.apply_profile(profile);
             last_seen.store(
@@ -150,14 +151,25 @@ impl WorkerPool {
         self.signal(worker_id, SessionSignal::Abort { job_id, reason })
     }
 
-    pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<ProjectId>) {
-        if let Some(slot) = self.workers.get_mut(id) {
-            slot.shared_mut().peer_auth = PeerAuth::from(authorized_peers);
-        }
+    pub fn replace_worker_authorization(
+        &mut self,
+        id: &str,
+        project_access: ProjectAccess,
+        capabilities: GradientCapabilities,
+    ) -> bool {
+        let Some(slot) = self.workers.get_mut(id) else {
+            return false;
+        };
+        let shared = slot.shared_mut();
+        shared.project_access = project_access;
+        shared.capabilities = capabilities;
+        true
     }
 
-    pub fn peer_auth_for(&self, id: &str) -> Option<&PeerAuth> {
-        self.workers.get(id).map(|slot| &slot.shared().peer_auth)
+    pub fn project_access_for_worker_id(&self, id: &str) -> Option<&ProjectAccess> {
+        self.workers
+            .get(id)
+            .map(|slot| &slot.shared().project_access)
     }
 
     pub fn gradient_caps_for(&self, id: &str) -> Option<GradientCapabilities> {
@@ -254,11 +266,46 @@ impl WorkerPool {
         };
         let s = slot.shared_mut();
         s.observes_build_ram = peak_ram_mb.is_some();
+        let ram_total_mb = s.ram_total_mb;
         for (job_id, peak) in peak_ram_mb.into_iter().flatten() {
             if let Some(job) = s.assigned_jobs.get_mut(&job_id) {
-                job.observed_ram_mb = job.observed_ram_mb.max(peak);
+                if peak > ram_total_mb {
+                    tracing::debug!(worker = %id, %job_id, ram_total_mb, "A worker reported a peak RAM above the advertised RAM for a build in progress. The server clamps that value to the advertised RAM.");
+                }
+                job.observed_ram_mb = job.observed_ram_mb.max(peak.min(ram_total_mb));
             }
         }
+    }
+
+    pub fn clamp_reported_build_metrics_to_advertised_worker_capabilities(
+        &self,
+        id: &str,
+        job_id: &str,
+        metrics: BuildMetrics,
+    ) -> BuildMetrics {
+        let (ram_total_mb, cpu_count) = self
+            .workers
+            .get(id)
+            .map(|slot| (slot.shared().ram_total_mb, slot.shared().cpu_count))
+            .unwrap_or_default();
+        let worker_reported_peak_ram_or_core_count_above_advertised =
+            metrics.peak_ram_mb.is_some_and(|peak| peak > ram_total_mb)
+                || metrics.build_cores.is_some_and(|cores| cores > cpu_count);
+        let clamped = BuildMetrics {
+            peak_ram_mb: metrics
+                .peak_ram_mb
+                .filter(|&peak| ram_total_mb > 0 && peak > 0)
+                .map(|peak| peak.min(ram_total_mb)),
+            build_cores: metrics
+                .build_cores
+                .filter(|&cores| cpu_count > 0 && cores > 0)
+                .map(|cores| cores.min(cpu_count)),
+            ..metrics.clone()
+        };
+        if worker_reported_peak_ram_or_core_count_above_advertised {
+            tracing::warn!(worker = %id, %job_id, ram_total_mb, cpu_count, "A worker reported values above the limits that the worker advertised. Build metrics stay clamped to the RAM and core count that the worker advertised.");
+        }
+        clamped
     }
 
     pub fn observed_build_ram(&self, id: &str) -> HashMap<String, u64> {
@@ -496,7 +543,7 @@ impl WorkerPool {
             assigned_job_count: s.assigned_jobs.len(),
             assigned_build_count: s.build_jobs() as usize,
             draining: slot.is_draining(),
-            authorized_peers: s.peer_auth.as_filter().cloned(),
+            project_access: s.project_access.clone(),
             cpu_usage_pct: s.cpu_usage_pct,
             ram_free_mb: s.ram_free_mb,
             ram_total_mb: s.ram_total_mb,
@@ -537,7 +584,9 @@ pub struct WorkerInfo {
     #[serde(skip)]
     pub assigned_build_count: usize,
     pub draining: bool,
-    pub authorized_peers: Option<HashSet<ProjectId>>,
+    #[serde(rename = "authorized_peers")]
+    #[schema(value_type = Option<HashSet<ProjectId>>)]
+    pub project_access: ProjectAccess,
     #[serde(skip)]
     pub cpu_usage_pct: Option<f32>,
     #[serde(skip)]
@@ -582,9 +631,9 @@ fn serialize_exec_offer<S: serde::Serializer>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::peer_auth::PeerAuth;
     use crate::session_port::{SessionPort, SessionSignal};
     use crate::worker_state::WorkerProfile;
+    use std::collections::HashSet;
     use tokio::sync::mpsc;
 
     fn caps() -> GradientCapabilities {
@@ -607,7 +656,12 @@ mod tests {
     #[test]
     fn idle_eval_only_worker_detected() {
         let mut pool = WorkerPool::new();
-        pool.register("f1".into(), eval_caps(true, true), HashSet::new(), port().0);
+        pool.register(
+            "f1".into(),
+            eval_caps(true, true),
+            ProjectAccess::AllProjects,
+            port().0,
+        );
         assert!(
             !pool.has_idle_eval_only_worker(),
             "only a network worker present"
@@ -616,7 +670,7 @@ mod tests {
         pool.register(
             "e1".into(),
             eval_caps(true, false),
-            HashSet::new(),
+            ProjectAccess::AllProjects,
             port().0,
         );
         assert!(
@@ -637,7 +691,7 @@ mod tests {
         pool.register(
             "e1".into(),
             eval_caps(true, false),
-            HashSet::new(),
+            ProjectAccess::AllProjects,
             port().0,
         );
         pool.mark_draining("e1");
@@ -651,7 +705,7 @@ mod tests {
     fn test_register_and_is_connected() {
         let mut pool = WorkerPool::new();
         assert!(!pool.is_connected("w1"));
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         assert!(pool.is_connected("w1"));
         assert_eq!(pool.worker_count(), 1);
     }
@@ -659,7 +713,7 @@ mod tests {
     #[test]
     fn test_unregister_returns_assigned_jobs() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.assign_job("w1", "j1", JobKind::Build, 0);
         pool.assign_job("w1", "j2", JobKind::Build, 0);
 
@@ -674,7 +728,7 @@ mod tests {
     fn fleet_speed_means_skip_workers_that_measured_nothing() {
         let mut pool = WorkerPool::new();
         for (id, upload) in [("w1", Some(100.0)), ("w2", Some(300.0)), ("w3", None)] {
-            pool.register(id.into(), caps(), HashSet::new(), port().0);
+            pool.register(id.into(), caps(), ProjectAccess::AllProjects, port().0);
             pool.update_metrics(id, 0.0, 0, None, upload, None);
         }
 
@@ -687,7 +741,7 @@ mod tests {
         let mut pool = WorkerPool::new();
         assert_eq!(pool.mean_cpu_core_score(), None);
         for (id, score) in [("w1", 1_000), ("w2", 3_000), ("w3", 0)] {
-            pool.register(id.into(), caps(), HashSet::new(), port().0);
+            pool.register(id.into(), caps(), ProjectAccess::AllProjects, port().0);
             pool.update_capabilities(
                 id,
                 WorkerProfile {
@@ -705,7 +759,7 @@ mod tests {
     #[test]
     fn reregister_preserves_reported_capabilities() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -722,7 +776,7 @@ mod tests {
             },
         );
 
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
 
         let workers = pool.all_workers();
         assert_eq!(workers[0].architectures, vec!["x86_64-linux"]);
@@ -739,7 +793,7 @@ mod tests {
     #[test]
     fn an_empty_zone_is_no_zone() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -757,7 +811,7 @@ mod tests {
     #[test]
     fn worker_caps_carry_the_zone() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -775,7 +829,7 @@ mod tests {
     #[test]
     fn test_update_metrics_updates_view() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -818,7 +872,7 @@ mod tests {
                 eval: true,
                 ..Default::default()
             },
-            HashSet::new(),
+            ProjectAccess::AllProjects,
             port().0,
         );
         pool.update_capabilities(
@@ -848,7 +902,7 @@ mod tests {
     #[test]
     fn test_draining_worker_has_no_capacity() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -870,7 +924,8 @@ mod tests {
     }
 
     #[test]
-    fn test_authorized_peers_for() {
+    fn test_project_access_for_worker_id_returns_project_set_for_registered_worker_and_none_for_unknown_worker()
+     {
         let mut pool = WorkerPool::new();
         let peer_a = ProjectId::now_v7();
         let peer_b = ProjectId::now_v7();
@@ -878,48 +933,99 @@ mod tests {
         pool.register(
             "w1".into(),
             caps(),
-            HashSet::from([peer_a, peer_b]),
+            ProjectAccess::OnlyListedProjects(HashSet::from([peer_a, peer_b])),
             port().0,
         );
-        let auth = pool.peer_auth_for("w1").unwrap();
-        assert!(auth.contains(&peer_a));
-        assert!(auth.contains(&peer_b));
-        assert!(matches!(auth, PeerAuth::Restricted(_)));
+        let access = pool.project_access_for_worker_id("w1").unwrap();
+        assert!(access.contains(&peer_a));
+        assert!(access.contains(&peer_b));
+        assert!(!access.contains(&ProjectId::now_v7()));
 
-        assert!(pool.peer_auth_for("w2").is_none());
+        assert!(pool.project_access_for_worker_id("w2").is_none());
     }
 
     #[test]
-    fn test_update_authorized_peers() {
+    fn test_replace_worker_authorization_updates_projects_and_capabilities_and_returns_false_for_unknown_worker()
+     {
         let mut pool = WorkerPool::new();
         let peer_a = ProjectId::now_v7();
         let peer_b = ProjectId::now_v7();
-
-        pool.register("w1".into(), caps(), HashSet::from([peer_a]), port().0);
-        assert!(matches!(
-            pool.peer_auth_for("w1").unwrap(),
-            PeerAuth::Restricted(_)
-        ));
-
-        pool.update_authorized_peers("w1", HashSet::from([peer_a, peer_b]));
-        let auth = pool.peer_auth_for("w1").unwrap();
-        let PeerAuth::Restricted(set) = auth else {
-            panic!("expected Restricted");
+        let with_exec = GradientCapabilities {
+            exec: true,
+            secrets: true,
+            ..GradientCapabilities::default()
         };
-        assert_eq!(set.len(), 2);
+
+        pool.register(
+            "w1".into(),
+            with_exec,
+            ProjectAccess::OnlyListedProjects(HashSet::from([peer_a, peer_b])),
+            port().0,
+        );
+
+        assert!(pool.replace_worker_authorization(
+            "w1",
+            ProjectAccess::OnlyListedProjects(HashSet::from([peer_b])),
+            caps(),
+        ));
+        let access = pool.project_access_for_worker_id("w1").unwrap();
+        assert!(!access.contains(&peer_a));
+        assert!(access.contains(&peer_b));
+        let replaced = pool.gradient_caps_for("w1").unwrap();
+        assert!(!replaced.exec && !replaced.secrets);
+
+        assert!(!pool.replace_worker_authorization(
+            "w2",
+            ProjectAccess::no_project_access(),
+            caps()
+        ));
+        assert!(pool.project_access_for_worker_id("w2").is_none());
     }
 
     #[test]
-    fn test_open_mode_on_empty_peers() {
+    fn worker_with_empty_only_projects_set_serves_no_project() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        assert!(matches!(pool.peer_auth_for("w1").unwrap(), PeerAuth::Open));
+        pool.register(
+            "w1".into(),
+            caps(),
+            ProjectAccess::OnlyListedProjects(HashSet::new()),
+            port().0,
+        );
+        assert!(
+            !pool
+                .project_access_for_worker_id("w1")
+                .unwrap()
+                .contains(&ProjectId::now_v7())
+        );
+
+        pool.register(
+            "w2".into(),
+            caps(),
+            ProjectAccess::OnlyListedProjects(HashSet::from([ProjectId::now_v7()])),
+            port().0,
+        );
+        pool.replace_worker_authorization(
+            "w2",
+            ProjectAccess::OnlyListedProjects(HashSet::new()),
+            caps(),
+        );
+        assert!(
+            !pool
+                .project_access_for_worker_id("w2")
+                .unwrap()
+                .contains(&ProjectId::now_v7())
+        );
+
+        let shown = serde_json::to_value(pool.all_workers()).unwrap();
+        for worker in shown.as_array().unwrap() {
+            assert_eq!(worker["authorized_peers"], serde_json::json!([]));
+        }
     }
 
     #[test]
     fn build_capacity_strict_at_limit() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -944,7 +1050,7 @@ mod tests {
     #[test]
     fn an_eval_job_leaves_build_capacity_alone() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -966,7 +1072,7 @@ mod tests {
     #[test]
     fn the_worker_info_counts_build_jobs_apart_from_eval_jobs() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.assign_job("w1", "eval", JobKind::Flake, 0);
         pool.assign_job("w1", "build", JobKind::Build, 0);
 
@@ -978,7 +1084,7 @@ mod tests {
     #[test]
     fn test_assign_and_release_job() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
 
         pool.assign_job("w1", "j1", JobKind::Build, 0);
         assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
@@ -997,7 +1103,7 @@ mod tests {
     fn a_jobs_stage_counts_for_its_worker_and_the_fleet_until_it_is_released() {
         let mut pool = WorkerPool::new();
         for id in ["w1", "w2"] {
-            pool.register(id.into(), caps(), HashSet::new(), port().0);
+            pool.register(id.into(), caps(), ProjectAccess::AllProjects, port().0);
         }
         pool.assign_job("w1", "a", JobKind::Build, 0);
         pool.assign_job("w1", "b", JobKind::Build, 0);
@@ -1018,9 +1124,78 @@ mod tests {
     }
 
     #[test]
+    fn test_reported_build_peaks_are_none_when_worker_advertises_no_ram_or_cores() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
+
+        let BuildMetrics {
+            peak_ram_mb,
+            build_cores,
+            ..
+        } = pool.clamp_reported_build_metrics_to_advertised_worker_capabilities(
+            "w1",
+            "job",
+            BuildMetrics {
+                peak_ram_mb: Some(4_000),
+                build_cores: Some(8),
+                oom_killed: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            (peak_ram_mb, build_cores),
+            (None, None),
+            "A worker can leave both total RAM and core count unset. The stored peak RAM and build cores for that worker stay absent. Neither field can equal measured 0."
+        );
+    }
+
+    #[test]
+    fn test_zero_reported_build_cores_and_peak_ram_are_stored_as_none() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
+        pool.update_capabilities(
+            "w1",
+            WorkerProfile {
+                cpu_count: 8,
+                ram_total_mb: 16_000,
+                ..Default::default()
+            },
+        );
+
+        let BuildMetrics {
+            peak_ram_mb,
+            build_cores,
+            ..
+        } = pool.clamp_reported_build_metrics_to_advertised_worker_capabilities(
+            "w1",
+            "job",
+            BuildMetrics {
+                peak_ram_mb: Some(0),
+                build_cores: Some(0),
+                oom_killed: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            (peak_ram_mb, build_cores),
+            (None, None),
+            "A worker can advertise RAM and cores, yet report 0 for both. That reported 0 is not a measurement, so the saved peak RAM and build cores do not exist."
+        );
+    }
+
+    #[test]
     fn a_build_outgrowing_its_prediction_reserves_its_observed_peak() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
+        pool.update_capabilities(
+            "w1",
+            crate::WorkerProfile {
+                ram_total_mb: 128_000,
+                ..Default::default()
+            },
+        );
         pool.assign_job("w1", "young", JobKind::Build, 50_000);
         pool.assign_job("w1", "runaway", JobKind::Build, 2_000);
         assert_eq!(pool.metrics_for("w1").unwrap().ram_reserved_unused_mb, None);
@@ -1040,8 +1215,22 @@ mod tests {
     #[test]
     fn the_fleet_reports_observed_build_ram_only_once_every_worker_observes_it() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.register("w2".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
+        pool.register("w2".into(), caps(), ProjectAccess::AllProjects, port().0);
+        pool.update_capabilities(
+            "w1",
+            crate::WorkerProfile {
+                ram_total_mb: 128_000,
+                ..Default::default()
+            },
+        );
+        pool.update_capabilities(
+            "w2",
+            crate::WorkerProfile {
+                ram_total_mb: 128_000,
+                ..Default::default()
+            },
+        );
         pool.assign_job("w1", "a", JobKind::Build, 0);
         pool.assign_job("w2", "b", JobKind::Build, 0);
         pool.assign_job("w2", "not-started", JobKind::Build, 0);
@@ -1064,7 +1253,7 @@ mod tests {
     #[test]
     fn an_assigned_job_reserves_its_predicted_peak_ram_until_released() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             crate::WorkerProfile {
@@ -1090,8 +1279,8 @@ mod tests {
     #[test]
     fn test_all_workers_info() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.register("w2".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
+        pool.register("w2".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_capabilities(
             "w1",
             WorkerProfile {
@@ -1116,35 +1305,36 @@ mod tests {
     }
 
     #[test]
-    fn test_all_workers_info_exposes_authorized_peers() {
+    fn test_all_worker_info_entries_expose_project_access_for_each_worker() {
         let mut pool = WorkerPool::new();
         let project_a = ProjectId::now_v7();
         let project_b = ProjectId::now_v7();
 
-        pool.register("w1".into(), caps(), HashSet::from([project_a]), port().0);
-        pool.register("w2".into(), caps(), HashSet::new(), port().0);
+        pool.register(
+            "w1".into(),
+            caps(),
+            ProjectAccess::OnlyListedProjects(HashSet::from([project_a])),
+            port().0,
+        );
+        pool.register("w2".into(), caps(), ProjectAccess::AllProjects, port().0);
 
         let mut workers = pool.all_workers();
         workers.sort_by(|a, b| a.id.cmp(&b.id));
 
-        let w1_peers = workers[0]
-            .authorized_peers
-            .as_ref()
-            .expect("restricted worker should expose authorized peers");
-        assert!(w1_peers.contains(&project_a));
-        assert!(!w1_peers.contains(&project_b));
+        assert!(workers[0].project_access.contains(&project_a));
+        assert!(!workers[0].project_access.contains(&project_b));
+        assert_eq!(workers[1].project_access, ProjectAccess::AllProjects);
 
-        assert!(
-            workers[1].authorized_peers.is_none(),
-            "open-mode worker reports None"
-        );
+        let shown = serde_json::to_value(&workers).unwrap();
+        assert_eq!(shown[0]["authorized_peers"], serde_json::json!([project_a]));
+        assert_eq!(shown[1]["authorized_peers"], serde_json::Value::Null);
     }
 
     #[test]
     fn test_request_reauth_notifies_connected_worker() {
         let mut pool = WorkerPool::new();
         let (session, mut signals) = port();
-        pool.register("w1".into(), caps(), HashSet::new(), session);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, session);
 
         pool.request_reauth("w1");
 
@@ -1155,7 +1345,7 @@ mod tests {
     fn send_abort_reaches_the_session_and_reports_unknown_workers() {
         let mut pool = WorkerPool::new();
         let (session, mut signals) = port();
-        pool.register("w1".into(), caps(), HashSet::new(), session);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, session);
 
         assert!(pool.send_abort("w1", "j1".into(), "why".into()));
         assert!(!pool.send_abort("nope", "j1".into(), "why".into()));
@@ -1172,7 +1362,7 @@ mod tests {
     fn unregister_closes_the_evicted_session() {
         let mut pool = WorkerPool::new();
         let (session, mut signals) = port();
-        pool.register("w1".into(), caps(), HashSet::new(), session);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, session);
 
         pool.unregister("w1");
 
@@ -1194,7 +1384,7 @@ mod tests {
     #[test]
     fn stale_worker_ids_flags_only_silent_workers() {
         let mut pool = WorkerPool::new();
-        let handle = pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        let handle = pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
 
         let now_ms = 1_000_000_000_000i64;
         let timeout_ms = 30_000i64;
@@ -1211,7 +1401,7 @@ mod tests {
             vec!["w1".to_string()]
         );
 
-        pool.register("w2".into(), caps(), HashSet::new(), port().0);
+        pool.register("w2".into(), caps(), ProjectAccess::AllProjects, port().0);
         let real_now = gradient_types::now().and_utc().timestamp_millis();
         assert!(
             !pool
@@ -1223,8 +1413,8 @@ mod tests {
     #[test]
     fn reregistering_a_worker_keeps_the_liveness_handle_its_reader_holds() {
         let mut pool = WorkerPool::new();
-        let first = pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        let second = pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        let first = pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
+        let second = pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         assert!(
             Arc::ptr_eq(&first, &second),
             "a re-registration must hand back the Arc the prior reader still stamps"
@@ -1246,7 +1436,7 @@ mod tests {
             "a stamp through the first handle keeps the worker live"
         );
 
-        let other = pool.register("w2".into(), caps(), HashSet::new(), port().0);
+        let other = pool.register("w2".into(), caps(), ProjectAccess::AllProjects, port().0);
         assert!(
             !Arc::ptr_eq(&first, &other),
             "a different worker gets its own handle"
@@ -1257,7 +1447,7 @@ mod tests {
     fn a_held_device_is_not_free_before_the_worker_reports_it() {
         use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory};
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_exec_inventory(
             "w1",
             Some(ExecInventory {
@@ -1301,7 +1491,7 @@ mod tests {
             free: 1_000_000,
         };
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_exec_inventory(
             "w1",
             Some(ExecInventory {
@@ -1334,15 +1524,15 @@ mod tests {
             guest: GuestSize::default_request(),
             ..ExecRequirement::default()
         };
-        assert!(!worker.fits_exec(&third, DeviceCount::Free));
-        assert!(worker.fits_exec(&third, DeviceCount::Total));
+        assert!(!worker.fits_exec(&third, DeviceCount::Free, ProjectId::nil()));
+        assert!(worker.fits_exec(&third, DeviceCount::Total, ProjectId::nil()));
     }
 
     #[test]
     fn a_listed_worker_shows_only_exec_labels_and_devices() {
         use gradient_wire::types::{ExecAllow, ExecDefaults};
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w1".into(), caps(), ProjectAccess::AllProjects, port().0);
         pool.update_exec_inventory(
             "w1",
             Some(ExecInventory {

@@ -17,8 +17,8 @@ use gradient_util::supervision::SupervisorHealth;
 use gradient_util::telemetry::{STATS, metric};
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use std::collections::{HashMap, HashSet};
+use tracing::{debug, error, info, warn};
 
 use crate::messages::{
     DemoteReport, Demotion, GcReport, GcRequest, NarCommit, NarCommitted, RecordBatch,
@@ -41,11 +41,20 @@ pub const DEFAULT_GRAPH_WRITER_MESSAGE_TRANSACTION_LIMITS: GraphWriterTransactio
         statement_lock_wait_timeout: Duration::from_secs(10),
         max_transaction_attempts: GRAPH_TX_ATTEMPTS,
     };
+pub const GRAPH_WRITER_SIGNED_DEPENDENCY_OUTPUT_ROW_INSERT_TRANSACTION_LIMITS:
+    GraphWriterTransactionLimits = GraphWriterTransactionLimits {
+    message_kind: "insert_signed_dependency_output_rows",
+    transaction_wall_clock_time_limit: Duration::from_secs(10),
+    statement_lock_wait_timeout: Duration::from_secs(2),
+    max_transaction_attempts: 1,
+};
 const GRAPH_TX_RETRY_DELAY: Duration = Duration::from_millis(250);
 pub const RECORD_ROW_BUDGET: usize = 5000;
 pub const NAR_COMMIT_BUDGET: usize = 128;
 pub const NAR_FLUSH_TIME: Duration = Duration::from_millis(100);
 pub const HEALTH_NAME: &str = "graph";
+pub const DEMOTE_COMPLETED_BUILDS_MISSING_NEEDED_STORED_OUTPUT_COPIES_STEP_NAME: &str =
+    "demote_completed_builds_missing_needed_stored_output_copies";
 
 type Reply<T> = RpcReplyPort<anyhow::Result<T>>;
 
@@ -66,8 +75,12 @@ impl GraphWriterTransactionLimits {
     }
 
     pub const fn for_consistency_check_step(step: BuildGraphConsistencyCheckStep) -> Self {
+        Self::for_consistency_check_message_kind(step.step_name())
+    }
+
+    pub const fn for_consistency_check_message_kind(message_kind: &'static str) -> Self {
         Self {
-            message_kind: step.step_name(),
+            message_kind,
             transaction_wall_clock_time_limit: GRAPH_TX_BUDGET,
             statement_lock_wait_timeout: Duration::from_secs(2),
             max_transaction_attempts: 1,
@@ -257,6 +270,9 @@ impl Actor for GraphWriter {
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                if let Ok(report) = &result {
+                    gc::delete_gc_removed_and_orphan_nar_objects(&st.ctx, report).await;
+                }
                 let _ = reply.send(result);
             }
         }
@@ -271,6 +287,14 @@ fn graph_writer_transaction_limits_for_transition_message(
     match transition {
         Transition::RunConsistencyCheckStep { step, .. } => {
             GraphWriterTransactionLimits::for_consistency_check_step(*step)
+        }
+        Transition::DemoteCompletedBuildsMissingNeededStoredOutputCopies => {
+            GraphWriterTransactionLimits::for_consistency_check_message_kind(
+                DEMOTE_COMPLETED_BUILDS_MISSING_NEEDED_STORED_OUTPUT_COPIES_STEP_NAME,
+            )
+        }
+        Transition::SignStoredInputsIntoReadWriteBinaryCache { .. } => {
+            GRAPH_WRITER_SIGNED_DEPENDENCY_OUTPUT_ROW_INSERT_TRANSACTION_LIMITS
         }
         _ => GraphWriterTransactionLimits::for_message_kind("transition"),
     }
@@ -328,7 +352,13 @@ async fn write_record_batch_group_in_own_transaction(
             }
         }
         Err(e) => {
-            record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
+            error!(evaluation = %group.evaluation, error = format!("{e:#}"), "Failed to save a batch of derivations. The evaluation status changes to failed.");
+            record::fail_evaluation(
+                &st.ctx,
+                group.evaluation,
+                &derivation_save_failure_user_message(&e),
+            )
+            .await;
             let mut replies = replies.into_iter();
             let first = replies.next();
             for reply in replies {
@@ -348,10 +378,13 @@ async fn commit_queued_nar_uploads(
 ) {
     let (commits, commit_replies): (Vec<NarCommit>, Vec<Reply<NarCommitted>>) =
         queued.into_iter().unzip();
+    // Demotion and garbage collection remove objects only inside this writer and so do the orphan pass of shard repair and deletion of unused uploads. So objects found here remain when commits write their keys into rows.
+    let existing_object_keys =
+        &nar::find_object_keys_in_storage_at_batch_start(&st.ctx, &commits).await;
     let commits_ref = &commits;
     let limits = GraphWriterTransactionLimits::for_message_kind("commit_nar");
     let committed = transact(&st.ctx, limits, move |scoped| async move {
-        let committed = commit_nars(&scoped, commits_ref).await?;
+        let committed = commit_nars(&scoped, commits_ref, existing_object_keys).await?;
         claim_landed_paths(&scoped, commits_ref, &committed).await?;
         Ok(committed)
     })
@@ -364,6 +397,8 @@ async fn commit_queued_nar_uploads(
             let deferred = landed.split_off(committed.len());
             for ((commit, reply), outcome) in landed.into_iter().zip(committed) {
                 if let Ok(done) = &outcome {
+                    nar::delete_uploaded_object_if_no_row_references_it(&st.ctx, &commit, done)
+                        .await;
                     nar::after_commit(&st.ctx, done, &commit.store_path);
                 }
                 let _ = reply.send(outcome);
@@ -382,6 +417,21 @@ async fn commit_queued_nar_uploads(
             }
         }
     }
+}
+
+pub fn derivation_save_failure_user_message(err: &anyhow::Error) -> String {
+    let cause = match err.chain().find_map(|cause| {
+        cause.downcast_ref::<GraphWriterTransactionWallClockTimeLimitExceededError>()
+    }) {
+        Some(exceeded) => format!(
+            "database transaction ran longer than the {secs} second limit",
+            secs = exceeded.transaction_wall_clock_time_limit.as_secs()
+        ),
+        None => "the database or storage rejected the write".to_owned(),
+    };
+    format!(
+        "The server failed to save the batch of derivations. Evaluation can't continue: {cause}. Run the evaluation again. The server log records the details."
+    )
 }
 
 fn merge_queued(
@@ -429,12 +479,13 @@ async fn record_one(scoped: &DbContext, batch: &RecordBatch) -> anyhow::Result<R
 async fn commit_nars(
     scoped: &DbContext,
     commits: &[NarCommit],
+    existing_object_keys: &HashSet<String>,
 ) -> anyhow::Result<Vec<anyhow::Result<NarCommitted>>> {
     if commits.is_empty() {
         return Ok(Vec::new());
     }
     match in_savepoint(scoped, |inner| async move {
-        nar::commit_batch(&inner, commits).await
+        nar::commit_batch(&inner, commits, existing_object_keys).await
     })
     .await
     {
@@ -451,7 +502,9 @@ async fn commit_nars(
         if !committed.is_empty() && started.elapsed() >= NAR_FLUSH_TIME {
             break;
         }
-        committed.push(escalate_retryable(commit_one(scoped, commit).await)?);
+        committed.push(escalate_retryable(
+            commit_one(scoped, commit, existing_object_keys).await,
+        )?);
     }
     Ok(committed)
 }
@@ -486,11 +539,14 @@ async fn claim_landed_paths(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn commit_one(scoped: &DbContext, commit: &NarCommit) -> anyhow::Result<NarCommitted> {
-    in_savepoint(
-        scoped,
-        |inner| async move { nar::commit(&inner, commit).await },
-    )
+async fn commit_one(
+    scoped: &DbContext,
+    commit: &NarCommit,
+    existing_object_keys: &HashSet<String>,
+) -> anyhow::Result<NarCommitted> {
+    in_savepoint(scoped, |inner| async move {
+        nar::commit(&inner, commit, existing_object_keys).await
+    })
     .await
 }
 
@@ -562,17 +618,7 @@ fn build_graph_writer_transaction_timeouts_and_application_name_sql(
 }
 
 pub(crate) fn postgres_sqlstate_from_error_chain(err: &anyhow::Error) -> Option<String> {
-    err.chain().find_map(|cause| {
-        let (sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
-        | sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(e))
-        | sea_orm::DbErr::Conn(sea_orm::RuntimeErr::SqlxError(e))) =
-            cause.downcast_ref::<sea_orm::DbErr>()?
-        else {
-            return None;
-        };
-
-        e.as_database_error()?.code().map(|code| code.into_owned())
-    })
+    gradient_db::database_error_kind_text_and_sqlstate_for_warning_log(err).1
 }
 
 fn is_retryable(err: &anyhow::Error) -> bool {
@@ -664,6 +710,7 @@ where
     let scoped = ctx.in_transaction(Arc::clone(&tx));
     let startable_set = scoped.memory.startable_set.clone();
     let probe_requests = scoped.memory.probe_requests.clone();
+    let signature_sweep_wake_request = scoped.memory.signature_sweep_wake_requested.clone();
     let outcome = tokio::time::timeout(budget, work(scoped)).await;
     let tx =
         Arc::try_unwrap(tx).map_err(|_| anyhow!("a transaction handle escaped its message"))?;
@@ -678,6 +725,7 @@ where
             ctx.wake.delivery.notify_one();
             startable_set.publish();
             probe_requests.publish();
+            signature_sweep_wake_request.publish(&ctx.wake.run_signature_sweep_now);
             Ok(value)
         }
         Ok(Err(e)) => {
@@ -757,9 +805,13 @@ mod tests {
             continuation,
             derivations: paths
                 .iter()
-                .map(|path| gradient_wire::types::DiscoveredDerivation {
-                    drv_path: (*path).to_owned(),
-                    ..Default::default()
+                .map(|path| {
+                    crate::messages::EvaluationBatchDerivation::test_batch_entry_from_discovered_derivation(
+                        gradient_wire::types::DiscoveredDerivation {
+                            drv_path: (*path).to_owned(),
+                            ..Default::default()
+                        },
+                    )
                 })
                 .collect(),
             warnings: paths.iter().map(|path| format!("warning {path}")).collect(),
@@ -778,7 +830,10 @@ mod tests {
         batch
             .derivations
             .iter()
-            .map(|d| d.drv_path.as_str())
+            .map(|d| {
+                d.store_path_verified_derivation_record
+                    .derivation_file_store_path()
+            })
             .collect()
     }
 
@@ -886,7 +941,41 @@ mod tests {
     #[test]
     fn anything_else_does_not_retry() {
         assert!(!is_retryable(&coded("23505")));
-        assert!(!is_retryable(&anyhow!("graph transaction exceeded 120s")));
+        assert!(!is_retryable(
+            &GraphWriterTransactionWallClockTimeLimitExceededError {
+                transaction_wall_clock_time_limit: GRAPH_TX_BUDGET
+            }
+            .into()
+        ));
+    }
+
+    #[test]
+    fn failed_save_after_transaction_time_budget_exceeded_shows_seconds_in_user_message() {
+        let message = derivation_save_failure_user_message(
+            &anyhow::Error::new(GraphWriterTransactionWallClockTimeLimitExceededError {
+                transaction_wall_clock_time_limit: Duration::from_secs(120),
+            })
+            .context("upsert walked derivations"),
+        );
+
+        assert_eq!(
+            message,
+            "The server failed to save the batch of derivations. Evaluation can't continue: database transaction ran longer than the 120 second limit. Run the evaluation again. The server log records the details."
+        );
+    }
+
+    #[test]
+    fn save_failure_with_other_database_error_gives_general_cause_not_raw_database_error_text() {
+        let message = derivation_save_failure_user_message(
+            &coded("23505").context("upsert walked derivations"),
+        );
+
+        assert!(
+            message.contains("the database or storage rejected the write")
+                && !message.contains("23505")
+                && !message.contains("upsert"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -904,6 +993,28 @@ mod tests {
                 limits.max_transaction_attempts
             ),
             ("recount_wanted", Duration::from_secs(2), 1)
+        );
+    }
+
+    #[test]
+    fn signed_dependency_output_insert_message_uses_ten_second_statement_timeout_two_second_lock_wait_and_single_attempt()
+     {
+        let limits = graph_writer_transaction_limits_for_transition_message(
+            &Transition::SignStoredInputsIntoReadWriteBinaryCache {
+                signed_dependency_output_rows_to_insert: Vec::new(),
+            },
+        );
+        assert_eq!(
+            (
+                build_graph_writer_transaction_timeouts_and_application_name_sql(limits),
+                limits.max_transaction_attempts
+            ),
+            (
+                "SET LOCAL statement_timeout = 10000; SET LOCAL lock_timeout = 2000; \
+                 SET LOCAL application_name = 'gradient graph: insert_signed_dependency_output_rows'"
+                    .to_owned(),
+                1
+            )
         );
     }
 

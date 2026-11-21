@@ -10,90 +10,51 @@ use std::sync::Arc;
 
 use gradient_core::{WorkerJob, WorkerJobPolicy};
 use gradient_db::CacheDb;
+use gradient_db::store_path_content_variant_reader_choice::StorePathContentVariantReader;
 use gradient_storage::NarStore;
 use gradient_types::ids::{CacheId, CacheUpstreamId, CachedPathId, ProjectId};
 use gradient_types::*;
 use gradient_wire::transport::{
     Transport, external_arity_ok, may_consult_upstream_caches, pull_transport,
 };
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
-use tokio::sync::Semaphore;
+use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::warn;
 
 use super::SessionHandles;
 use super::store_paths::project_mapper;
 
-fn stored_sizes(
-    cached_paths: &[gradient_entity::cached_path::Model],
-) -> HashMap<String, (Option<i64>, Option<i64>)> {
-    cached_paths
-        .iter()
-        .filter(|cp| cp.is_fully_cached())
-        .map(|cp| (cp.hash.clone(), (cp.file_size, cp.nar_size)))
-        .collect()
+type ContentVariantByStoreHash = HashMap<String, gradient_entity::cached_path::Model>;
+
+#[derive(Debug, Clone)]
+pub(super) struct CacheQueryJob {
+    pub(super) project: ProjectId,
+    pub(super) content_variant_reader: StorePathContentVariantReader,
 }
 
-async fn load_cached_path_rows(
-    db: &CacheDb,
-    hashes: &[&str],
-) -> Result<Vec<gradient_entity::cached_path::Model>, DbErr> {
-    ECachedPath::find()
-        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(db)
-        .await
-}
-
-gradient_db::sql! {
-    INSERT_PUSH_SIGNATURE_PLACEHOLDERS = r#"
-                INSERT INTO cached_path_signature (id, cached_path, cache, created_at)
-                SELECT uuidv7(), cp.id, c.cache_id, (now() AT TIME ZONE 'UTC')
-                FROM cached_path cp
-                CROSS JOIN unnest($2::uuid[]) AS c(cache_id)
-                WHERE cp.id = ANY($1::uuid[])
-                ON CONFLICT (cached_path, cache) DO NOTHING
-                "#,
-        params = [
-            Text("{11111111-1111-1111-1111-111111111111}"),
-            Text("{22222222-2222-2222-2222-222222222222}"),
-        ];
+impl CacheQueryJob {
+    #[cfg(test)]
+    pub(super) fn for_test_project(project: ProjectId) -> Self {
+        Self {
+            project,
+            content_variant_reader: StorePathContentVariantReader::Project(project),
+        }
+    }
 }
 
 async fn ensure_push_signatures(
     db: &CacheDb,
     project_id: ProjectId,
-    cached_path_rows: &[gradient_entity::cached_path::Model],
+    trusted: &ContentVariantByStoreHash,
 ) {
-    if cached_path_rows.is_empty() {
-        return;
-    }
-
-    let project_caches = EProjectCache::find()
-        .filter(CProjectCache::Project.eq(project_id))
-        .all(db)
-        .await
-        .unwrap_or_default();
-    if project_caches.is_empty() {
-        return;
-    }
-
-    let cache_ids: Vec<uuid::Uuid> = project_caches
-        .iter()
-        .map(|oc| oc.cache.into_inner())
-        .collect();
-    let path_ids: Vec<uuid::Uuid> = cached_path_rows
-        .iter()
-        .map(|cp| cp.id.into_inner())
-        .collect();
+    let hashes: Vec<String> = trusted.keys().cloned().collect();
 
     const SIGNATURE_PATH_BATCH: usize = 8000;
 
-    for chunk in path_ids.chunks(SIGNATURE_PATH_BATCH) {
-        let result = db
-            .execute_raw(
-                INSERT_PUSH_SIGNATURE_PLACEHOLDERS
-                    .bind([chunk.to_vec().into(), cache_ids.clone().into()]),
-            )
-            .await;
+    for chunk in hashes.chunks(SIGNATURE_PATH_BATCH) {
+        let result = gradient_db::store_path_content_variant_trust::insert_unsigned_signature_placeholders_for_trusted_content_variants(
+            db, project_id, chunk,
+        )
+        .await;
         if let Err(e) = result {
             warn!(
                 %project_id,
@@ -108,7 +69,6 @@ async fn ensure_push_signatures(
 /// 4000 sequential round trips in front of the 75 s deadline.
 #[derive(Default)]
 struct PullMetadata {
-    references: HashMap<String, Vec<String>>,
     signatures: HashMap<CachedPathId, Vec<String>>,
 }
 
@@ -116,21 +76,18 @@ impl PullMetadata {
     async fn load(
         db: &CacheDb,
         config: &RuntimeConfig,
-        rows: &[gradient_entity::cached_path::Model],
+        rows: &ContentVariantByStoreHash,
+        readable_binary_cache_ids: &[CacheId],
     ) -> Result<Self, DbErr> {
-        if rows.is_empty() {
+        if rows.is_empty() || readable_binary_cache_ids.is_empty() {
             return Ok(Self::default());
         }
 
-        let hashes: Vec<String> = rows.iter().map(|r| r.hash.clone()).collect();
-        let references = gradient_db::graph::runtime_closure::references_for_hashes(db, &hashes)
-            .await
-            .unwrap_or_default();
-
-        let ids: Vec<CachedPathId> = rows.iter().map(|r| r.id).collect();
+        let ids: Vec<CachedPathId> = rows.values().map(|r| r.id).collect();
         let signature_rows = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
             ECachedPathSignature::find()
                 .filter(CCachedPathSignature::CachedPath.is_in(chunk))
+                .filter(CCachedPathSignature::Cache.is_in(readable_binary_cache_ids.to_vec()))
                 .all(db)
                 .await
         })
@@ -157,15 +114,7 @@ impl PullMetadata {
             );
         }
 
-        Ok(Self {
-            references,
-            signatures,
-        })
-    }
-
-    fn references(&self, hash: &str) -> Option<Vec<String>> {
-        let tokens = self.references.get(hash)?;
-        expand_references(Some(&tokens.join(" ")))
+        Ok(Self { signatures })
     }
 
     fn signatures(&self, id: CachedPathId) -> Option<Vec<String>> {
@@ -183,38 +132,24 @@ struct PullFields {
     ca: Option<String>,
 }
 
-fn pull_fields(
-    row: Option<&gradient_entity::cached_path::Model>,
-    meta: &PullMetadata,
-) -> PullFields {
-    let Some(row) = row else {
-        return PullFields::default();
-    };
-
+fn pull_fields(row: &gradient_entity::cached_path::Model, meta: &PullMetadata) -> PullFields {
     PullFields {
-        nar_hash: row.nar_hash.clone(),
-        file_hash: row.file_hash.clone(),
-        references: meta.references(&row.hash),
+        nar_hash: Some(row.nar_hash.clone()),
+        file_hash: Some(row.file_hash.clone()),
+        references: expand_references(row.references.as_deref()),
         signatures: meta.signatures(row.id),
         deriver: row.deriver.clone(),
         ca: row.ca.clone(),
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one wire entry; splitting it would only move the arguments"
-)]
 async fn build_cached_entry(
     config: &RuntimeConfig,
     nar_storage: &NarStore,
-    hash: &str,
     path: &str,
-    file_size: &Option<i64>,
-    nar_size: &Option<i64>,
     mode: gradient_wire::types::QueryMode,
     expire: std::time::Duration,
-    row: Option<&gradient_entity::cached_path::Model>,
+    row: &gradient_entity::cached_path::Model,
     meta: &PullMetadata,
 ) -> gradient_wire::types::CachedPath {
     use gradient_wire::types::{CachedPath, QueryMode};
@@ -237,20 +172,19 @@ async fn build_cached_entry(
 
     let (url, fields) = match mode {
         QueryMode::Pull => {
-            let confirmed = row.is_none_or(|r| r.confirmed);
-            let size = file_size.unwrap_or(0).max(0) as u64;
+            let size = row.file_size.unwrap_or(0).max(0) as u64;
             let transport = pull_transport(
-                confirmed,
                 size,
                 config.nar.small_bytes,
                 nar_storage.presigner_available(),
             );
+            let key = &row.nar_object_storage_key;
             let url = match transport {
                 Transport::Passthrough => None,
-                Transport::Presigned => match nar_storage.presigned_get_url(hash, expire).await {
+                Transport::Presigned => match nar_storage.presigned_get_url(key, expire).await {
                     Ok(u) => u,
                     Err(e) => {
-                        warn!(%hash, error = %e, "failed to generate presigned GET URL");
+                        warn!(%key, error = %e, "failed to generate presigned GET URL");
                         None
                     }
                 },
@@ -263,8 +197,8 @@ async fn build_cached_entry(
     CachedPath {
         path: path.to_string(),
         cached: true,
-        file_size: file_size.map(|v| v as u64),
-        nar_size: nar_size.map(|v| v as u64),
+        file_size: row.file_size.map(|v| v as u64),
+        nar_size: Some(row.nar_size as u64),
         url,
         nar_hash: fields.nar_hash,
         file_hash: fields.file_hash,
@@ -320,18 +254,18 @@ async fn extend_with_persisted_upstream(
     }
 
     let hashes: Vec<String> = uncached_pairs.iter().map(|(h, _)| h.clone()).collect();
-    let rows = match EDerivationOutput::find()
-        .filter(CDerivationOutput::Hash.is_in(hashes))
-        .filter(CDerivationOutput::ExternalUrl.is_not_null())
-        .all(db)
+    let rows =
+        match gradient_db::caches::upstream::find_build_outputs_by_hashes_with_nar_urls_from_upstream_caches_workers_may_use(
+            db, hashes,
+        )
         .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            warn!(error = %e, "persisted upstream lookup failed");
-            return served;
-        }
-    };
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(error = %e, "persisted upstream lookup failed");
+                return served;
+            }
+        };
 
     let upstream_ids: Vec<CacheUpstreamId> =
         rows.iter().filter_map(|r| r.verified_by_upstream).collect();
@@ -381,15 +315,15 @@ async fn extend_with_persisted_upstream(
 }
 
 async fn extend_with_upstream_results(
-    db: &CacheDb,
+    handles: &SessionHandles,
     allowed: AllowedUpstreams<'_>,
-    upstream_query: &Arc<Semaphore>,
     project_id: ProjectId,
     mapper: &StorePathMapper,
     uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
+    let db = &handles.cache_db;
 
     let endpoints = match gradient_db::caches::upstream::upstream_endpoints_for_project(
         db,
@@ -411,7 +345,10 @@ async fn extend_with_upstream_results(
         return;
     }
 
-    let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
+    let id_to_url: HashMap<_, String> = endpoints
+        .iter()
+        .map(|e| (e.id, e.url.to_string()))
+        .collect();
 
     let requested: HashMap<&str, &str> = uncached_pairs
         .iter()
@@ -422,8 +359,9 @@ async fn extend_with_upstream_results(
         .filter_map(|(_, path)| StorePath::parse_stored(path).ok())
         .collect();
     let batch = gradient_core::upstream::probe_batch(
+        &handles.db.user_supplied_url_http_client,
         endpoints,
-        Arc::clone(upstream_query),
+        Arc::clone(&handles.upstream_query),
         mapper.clone(),
         targets,
     )
@@ -460,8 +398,7 @@ async fn extend_with_upstream_results(
 }
 
 async fn extend_with_gradient_proto_results(
-    db: &CacheDb,
-    config: &RuntimeConfig,
+    handles: &SessionHandles,
     project_id: ProjectId,
     mapper: &StorePathMapper,
     uncached_pairs: &[(String, String)],
@@ -469,7 +406,8 @@ async fn extend_with_gradient_proto_results(
 ) {
     let upstream_caches =
         match gradient_db::caches::upstream::gradient_proto_upstream_caches_for_project(
-            db, project_id,
+            &handles.cache_db,
+            project_id,
         )
         .await
         {
@@ -494,14 +432,14 @@ async fn extend_with_gradient_proto_results(
     }
 
     for up in upstream_caches {
-        let api_key = up
-            .api_key_enc
-            .as_deref()
-            .and_then(|enc| gradient_sources::decrypt_secret(&config.secrets.crypt_file, enc).ok());
+        let api_key = up.encrypted_credential.as_deref().and_then(|enc| {
+            gradient_sources::decrypt_secret(&handles.db.config.secrets.crypt_file, enc).ok()
+        });
         let found = super::cache_consumer::pull_paths(
             &up.url,
             &up.remote_cache,
             api_key.as_ref().map(SecretString::expose),
+            handles.db.user_supplied_url_http_client.allowlist(),
             mapper,
             &want,
         )
@@ -517,7 +455,7 @@ async fn extend_with_gradient_proto_results(
 async fn query(
     handles: &SessionHandles,
     worker: &str,
-    project_id: ProjectId,
+    job: CacheQueryJob,
     paths: &[String],
     nar_sizes: &[Option<u64>],
     mode: gradient_wire::types::QueryMode,
@@ -525,6 +463,7 @@ async fn query(
 ) -> Result<Vec<gradient_wire::types::CachedPath>, DbErr> {
     use gradient_wire::types::QueryMode;
 
+    let project_id = job.project;
     if matches!(mode, QueryMode::Push) && nar_sizes.len() != paths.len() {
         return Err(DbErr::Custom(format!(
             "nar_sizes has {} entries for {} paths",
@@ -549,22 +488,34 @@ async fn query(
         return Ok(vec![]);
     }
 
-    let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
+    let hashes: Vec<String> = hash_path_pairs
+        .iter()
+        .map(|(h, _)| (*h).to_owned())
+        .collect();
 
-    let cached_path_rows = load_cached_path_rows(&handles.cache_db, &hashes).await?;
-    let cached_map = stored_sizes(&cached_path_rows);
+    let trusted = gradient_db::store_path_content_variant_reader_choice::get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
+        &handles.cache_db,
+        job.content_variant_reader,
+        &hashes,
+    )
+    .await?;
 
     if matches!(mode, QueryMode::Push) {
-        ensure_push_signatures(&handles.cache_db, project_id, &cached_path_rows).await;
+        ensure_push_signatures(&handles.cache_db, project_id, &trusted).await;
     }
 
-    let rows_by_hash: HashMap<&str, &gradient_entity::cached_path::Model> = cached_path_rows
-        .iter()
-        .map(|r| (r.hash.as_str(), r))
-        .collect();
     let meta = match mode {
-        QueryMode::Pull => {
-            PullMetadata::load(&handles.cache_db, &handles.db.config, &cached_path_rows).await?
+        QueryMode::Pull if !trusted.is_empty() => {
+            let readable_binary_cache_ids =
+                gradient_db::cache_paths::project_read_caches(&handles.cache_db, project_id)
+                    .await?;
+            PullMetadata::load(
+                &handles.cache_db,
+                &handles.db.config,
+                &trusted,
+                &readable_binary_cache_ids,
+            )
+            .await?
         }
         _ => PullMetadata::default(),
     };
@@ -573,18 +524,15 @@ async fn query(
     let mut result: Vec<gradient_wire::types::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
-        if let Some((file_size, nar_size)) = cached_map.get(*hash) {
+        if let Some(row) = trusted.get(*hash) {
             result.push(
                 build_cached_entry(
                     &handles.db.config,
                     &handles.db.storage.nar_storage,
-                    hash,
                     path,
-                    file_size,
-                    nar_size,
                     mode,
                     expire,
-                    rows_by_hash.get(hash).copied(),
+                    row,
                     &meta,
                 )
                 .await,
@@ -598,11 +546,9 @@ async fn query(
         return Ok(result);
     }
 
-    let locally_cached_hashes: std::collections::HashSet<&str> =
-        cached_map.keys().map(|s| s.as_str()).collect();
     let uncached_pairs: Vec<(String, String)> = hash_path_pairs
         .iter()
-        .filter(|(hash, _)| !locally_cached_hashes.contains(hash))
+        .filter(|(hash, _)| !trusted.contains_key(*hash))
         .map(|(h, p)| (h.to_string(), p.to_string()))
         .collect();
 
@@ -623,9 +569,8 @@ async fn query(
     }
     if let Some(mapper) = project_mapper(&handles.db, project_id).await {
         extend_with_upstream_results(
-            &handles.cache_db,
+            handles,
             allowed,
-            &handles.upstream_query,
             project_id,
             &mapper,
             &uncached_pairs,
@@ -634,8 +579,7 @@ async fn query(
         .await;
         if allowed.allow(None) {
             extend_with_gradient_proto_results(
-                &handles.cache_db,
-                &handles.db.config,
+                handles,
                 project_id,
                 &mapper,
                 &uncached_pairs,
@@ -648,52 +592,19 @@ async fn query(
     Ok(result)
 }
 
-async fn hashes_in_cache(db: &CacheDb, cache_id: CacheId, hashes: &[&str]) -> HashSet<String> {
-    if hashes.is_empty() {
-        return HashSet::new();
-    }
-
-    let cached_paths = match ECachedPath::find()
-        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "cache-scoped query cached_path lookup failed");
-            return HashSet::new();
-        }
-    };
-
-    let id_to_hash: HashMap<CachedPathId, String> = cached_paths
-        .into_iter()
-        .map(|cp| (cp.id, cp.hash))
-        .collect();
-    if id_to_hash.is_empty() {
-        return HashSet::new();
-    }
-
-    let ids: Vec<CachedPathId> = id_to_hash.keys().copied().collect();
-    let signatures = match ECachedPathSignature::find()
-        .filter(
-            sea_orm::Condition::all()
-                .add(CCachedPathSignature::Cache.eq(cache_id))
-                .add(CCachedPathSignature::CachedPath.is_in(ids)),
-        )
-        .all(db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "cache-scoped query signature lookup failed");
-            return HashSet::new();
-        }
-    };
-
-    signatures
-        .into_iter()
-        .filter_map(|s| id_to_hash.get(&s.cached_path).cloned())
-        .collect()
+async fn content_variants_served_by_cache(
+    db: &CacheDb,
+    cache_id: CacheId,
+    hashes: &[String],
+) -> ContentVariantByStoreHash {
+    gradient_db::store_path_content_variant_reader_choice::get_content_variants_served_by_binary_cache_for_store_path_hashes(
+        db, cache_id, hashes,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        warn!(%cache_id, error = %e, "cache-scoped query content variant lookup failed");
+        HashMap::new()
+    })
 }
 
 pub(super) async fn query_for_cache(
@@ -718,21 +629,15 @@ pub(super) async fn query_for_cache(
         return vec![];
     }
 
-    let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
-
-    let in_cache = hashes_in_cache(&handles.cache_db, cache_id, &hashes).await;
-    let cached_path_rows = load_cached_path_rows(&handles.cache_db, &hashes)
-        .await
-        .unwrap_or_default();
-    let cached_map = stored_sizes(&cached_path_rows);
-
-    let rows_by_hash: HashMap<&str, &gradient_entity::cached_path::Model> = cached_path_rows
+    let hashes: Vec<String> = hash_path_pairs
         .iter()
-        .map(|r| (r.hash.as_str(), r))
+        .map(|(h, _)| (*h).to_owned())
         .collect();
+    let served = content_variants_served_by_cache(&handles.cache_db, cache_id, &hashes).await;
+
     let meta = match mode {
         QueryMode::Pull => {
-            PullMetadata::load(&handles.cache_db, &handles.db.config, &cached_path_rows)
+            PullMetadata::load(&handles.cache_db, &handles.db.config, &served, &[cache_id])
                 .await
                 .unwrap_or_default()
         }
@@ -743,21 +648,15 @@ pub(super) async fn query_for_cache(
     let mut result: Vec<gradient_wire::types::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
-        if !in_cache.contains(*hash) {
-            continue;
-        }
-        if let Some((file_size, nar_size)) = cached_map.get(*hash) {
+        if let Some(row) = served.get(*hash) {
             result.push(
                 build_cached_entry(
                     &handles.db.config,
                     &handles.db.storage.nar_storage,
-                    hash,
                     path,
-                    file_size,
-                    nar_size,
                     mode,
                     expire,
-                    rows_by_hash.get(hash).copied(),
+                    row,
                     &meta,
                 )
                 .await,
@@ -769,7 +668,7 @@ pub(super) async fn query_for_cache(
 }
 
 pub(super) async fn path_in_cache(db: &CacheDb, cache_id: CacheId, path: &StorePath) -> bool {
-    !hashes_in_cache(db, cache_id, &[path.hash()])
+    !content_variants_served_by_cache(db, cache_id, &[path.hash().to_owned()])
         .await
         .is_empty()
 }
@@ -784,16 +683,13 @@ fn parse_stored_paths(paths: &[String]) -> Vec<(StorePath, &str)> {
 pub(super) async fn handle_cache_query(
     handles: &SessionHandles,
     worker: &str,
-    project_id: ProjectId,
+    job: CacheQueryJob,
     paths: &[String],
     nar_sizes: &[Option<u64>],
     mode: gradient_wire::types::QueryMode,
     external: bool,
 ) -> Result<Vec<gradient_wire::types::CachedPath>, DbErr> {
-    query(
-        handles, worker, project_id, paths, nar_sizes, mode, external,
-    )
-    .await
+    query(handles, worker, job, paths, nar_sizes, mode, external).await
 }
 
 fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
@@ -898,7 +794,7 @@ mod tests {
                 let found = query(
                     &handles,
                     worker,
-                    ProjectId::nil(),
+                    CacheQueryJob::for_test_project(ProjectId::nil()),
                     &[path],
                     &[],
                     QueryMode::Pull,
@@ -926,6 +822,259 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn worker_receives_persisted_nar_urls_only_from_active_upstream_caches_without_credential()
+     {
+        use gradient_entity::cache_upstream::{
+            ActiveModel as ACacheUpstream, CacheUpstreamKind, UpstreamCredentialScheme,
+        };
+        use gradient_entity::project_cache::CacheSubscriptionMode;
+        use gradient_fixtures::shape::shape;
+        use sea_orm::ActiveValue::Set;
+
+        const C_OUT: &str = "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0";
+        const D_OUT: &str = "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0";
+        let (open, private, inactive) = (
+            CacheUpstreamId::now_v7(),
+            CacheUpstreamId::now_v7(),
+            CacheUpstreamId::now_v7(),
+        );
+        let db = shape()
+            .evaluation(gradient_types::ids::EvaluationId::now_v7())
+            .derivation("brik07vzpr94765f88nfvnn6ip95vcnf-a.drv")
+            .cache_available()
+            .output(A_OUT)
+            .verified_by(open)
+            .derivation("a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5-b.drv")
+            .cache_available()
+            .output(B_OUT)
+            .verified_by(private)
+            .derivation("1if07p7njnc1w7airw4mwfnh5wrvf8sj-c.drv")
+            .cache_available()
+            .output(C_OUT)
+            .verified_by(inactive)
+            .derivation("njh5k7lsibz3r2r87zwsanl138fxqyr4-d.drv")
+            .cache_available()
+            .output(D_OUT)
+            .into_cache(CacheId::now_v7())
+            .upstream(
+                open,
+                "https://open.invalid",
+                "open-1:o0o0",
+                CacheUpstreamKind::Http,
+                CacheSubscriptionMode::ReadOnly,
+                true,
+            )
+            .upstream(
+                private,
+                "https://private.invalid",
+                "private-1:p0p0",
+                CacheUpstreamKind::Http,
+                CacheSubscriptionMode::ReadOnly,
+                true,
+            )
+            .upstream(
+                inactive,
+                "https://inactive.invalid",
+                "inactive-1:i0i0",
+                CacheUpstreamKind::Http,
+                CacheSubscriptionMode::ReadOnly,
+                false,
+            )
+            .into_database()
+            .await;
+        gradient_db::rows::update::<ECacheUpstream, _>(
+            &db.connection(),
+            ACacheUpstream {
+                id: Set(private),
+                encrypted_credential: Set(Some("c2VjcmV0LWNpcGhlcnRleHQ=".into())),
+                credential_scheme: Set(Some(UpstreamCredentialScheme::Basic)),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let state = TestState::new()
+            .worker_db(db.connection())
+            .web_db(db.connection())
+            .cache_db(db.connection())
+            .build();
+        let handles = SessionHandles::from_state(&state);
+
+        let mut answered = Vec::new();
+        for (hash, name) in [(A_OUT, "a"), (B_OUT, "b"), (C_OUT, "c"), (D_OUT, "d")] {
+            let path = format!("/nix/store/{hash}-{name}");
+            let url = query(
+                &handles,
+                "worker",
+                CacheQueryJob::for_test_project(ProjectId::nil()),
+                &[path],
+                &[],
+                QueryMode::Pull,
+                true,
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .find_map(|c| c.url);
+            answered.push((name, url));
+        }
+
+        assert_eq!(
+            answered,
+            vec![
+                (
+                    "a",
+                    Some(format!("https://upstream.invalid/nar/{A_OUT}.nar"))
+                ),
+                ("b", None),
+                ("c", None),
+                ("d", None),
+            ]
+        );
+        drop((handles, state));
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_project_or_cache_is_answered_only_with_the_content_variant_it_trusts() {
+        use gradient_fixtures::store_path_content_variants::{
+            SECOND_KEY, SHARED, UNTRUSTED, two_variants_of_one_hash_and_one_untrusted_hash,
+        };
+
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute("UPDATE cached_path SET file_size = 1099511627776")
+            .await;
+        let state = TestState::new()
+            .worker_db(readers.db.connection())
+            .web_db(readers.db.connection())
+            .cache_db(readers.db.connection())
+            .nar_storage(s3_nar_storage())
+            .build();
+        let handles = SessionHandles::from_state(&state);
+        let shared = format!("/nix/store/{SHARED}-shared");
+        let untrusted = format!("/nix/store/{UNTRUSTED}-untrusted");
+        let ask = async |path: &str, mode: QueryMode| {
+            query(
+                &handles,
+                "w1",
+                CacheQueryJob::for_test_project(readers.project_b),
+                &[path.to_owned()],
+                &[Some(1)],
+                mode,
+                false,
+            )
+            .await
+            .unwrap()
+        };
+
+        let pulled = ask(&shared, QueryMode::Pull).await;
+        assert!(
+            pulled.len() == 1
+                && pulled[0].nar_hash.as_deref() == Some("sha256:second")
+                && pulled[0]
+                    .url
+                    .as_deref()
+                    .is_some_and(|url| url.contains(&SECOND_KEY[2..])),
+            "Project B trusts only its own variant of the shared hash, so the answer carries the NAR hash and the download link of that variant: {pulled:?}"
+        );
+        let pulled_untrusted = ask(&untrusted, QueryMode::Pull).await;
+        let pushed_untrusted = ask(&untrusted, QueryMode::Push).await;
+        assert!(
+            pulled_untrusted.is_empty()
+                && pushed_untrusted.len() == 1
+                && !pushed_untrusted[0].cached
+                && pushed_untrusted[0].url.is_none(),
+            "Project B trusts no variant of this hash, so a pull gets no entry and a push hears that the path is not cached: {pulled_untrusted:?} {pushed_untrusted:?}"
+        );
+
+        let mut served = Vec::new();
+        for cache in [readers.cache_one, readers.cache_two] {
+            let answer = query_for_cache(
+                &handles,
+                cache,
+                std::slice::from_ref(&shared),
+                QueryMode::Pull,
+            )
+            .await;
+            served.push(answer.first().and_then(|entry| entry.nar_hash.clone()));
+        }
+        assert!(
+            served[0].is_some()
+                && served[0].as_deref() != Some("sha256:second")
+                && served[1].as_deref() == Some("sha256:second"),
+            "Each cache answers with the variant it serves: cache C1 with the variant of project A, cache C2 with the variant of project B: {served:?}"
+        );
+        drop((handles, state));
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn pull_answer_does_not_include_signature_of_other_projects_private_cache() {
+        use gradient_fixtures::store_path_content_variants::{
+            SECOND_KEY, SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+        };
+
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute(&format!(
+                "CREATE TEMP TABLE private_cache AS SELECT * FROM cache WHERE id = '{}'; \
+                 UPDATE private_cache SET id = uuidv7(), name = 'private-cache-of-another-project'; \
+                 INSERT INTO cache SELECT * FROM private_cache; \
+                 INSERT INTO cached_path_signature (id, cached_path, cache, signature, fetch_count, created_at) \
+                 SELECT uuidv7(), signed.id, private_cache.id, convert_to('signature', 'UTF8'), 0, now() \
+                 FROM cached_path signed, private_cache WHERE signed.nar_object_storage_key = '{SECOND_KEY}'",
+                readers.cache_one,
+            ))
+            .await;
+        let state = TestState::new()
+            .worker_db(readers.db.connection())
+            .web_db(readers.db.connection())
+            .cache_db(readers.db.connection())
+            .nar_storage(s3_nar_storage())
+            .build();
+        let handles = SessionHandles::from_state(&state);
+        let shared = format!("/nix/store/{SHARED}-shared");
+
+        let pulled_by_project_b = query(
+            &handles,
+            "w1",
+            CacheQueryJob::for_test_project(readers.project_b),
+            std::slice::from_ref(&shared),
+            &[Some(1)],
+            QueryMode::Pull,
+            false,
+        )
+        .await
+        .unwrap();
+        let pulled_from_cache_two = query_for_cache(
+            &handles,
+            readers.cache_two,
+            std::slice::from_ref(&shared),
+            QueryMode::Pull,
+        )
+        .await;
+
+        for answer in [&pulled_by_project_b, &pulled_from_cache_two] {
+            let signatures = answer
+                .first()
+                .and_then(|entry| entry.signatures.clone())
+                .unwrap_or_default();
+            assert!(
+                signatures.len() == 1
+                    && !signatures
+                        .iter()
+                        .any(|signature| signature.contains("private-cache-of-another-project")),
+                "Neither Project B nor cache C2 can read the private cache. Only the signatures of cache C2 appear in the answer: {signatures:?}"
+            );
+        }
+        drop((handles, state));
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
     async fn a_push_query_with_mismatched_sizes_is_an_error() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
@@ -933,7 +1082,7 @@ mod tests {
             query(
                 &SessionHandles::from_state(&state),
                 "w1",
-                ProjectId::nil(),
+                CacheQueryJob::for_test_project(ProjectId::nil()),
                 &paths,
                 &[],
                 QueryMode::Push,
@@ -945,8 +1094,8 @@ mod tests {
         );
     }
 
-    fn make_s3_state() -> Arc<ServerState> {
-        let nar_storage = gradient_storage::NarStore::s3(
+    fn s3_nar_storage() -> gradient_storage::NarStore {
+        gradient_storage::NarStore::s3(
             "bucket",
             "us-east-1",
             Some("http://127.0.0.1:1"),
@@ -956,8 +1105,11 @@ mod tests {
             false,
             gradient_storage::S3Timeouts::default(),
         )
-        .expect("an S3 client builds and presigns without a network");
-        cache_state_builder().nar_storage(nar_storage).build()
+        .expect("an S3 client builds and presigns without a network")
+    }
+
+    fn make_s3_state() -> Arc<ServerState> {
+        cache_state_builder().nar_storage(s3_nar_storage()).build()
     }
 
     #[tokio::test]
@@ -971,7 +1123,7 @@ mod tests {
         let result = query(
             &SessionHandles::from_state(&state),
             "w1",
-            ProjectId::nil(),
+            CacheQueryJob::for_test_project(ProjectId::nil()),
             &paths,
             &sizes,
             QueryMode::Push,
@@ -997,7 +1149,7 @@ mod tests {
             query(
                 &SessionHandles::from_state(&state),
                 "w1",
-                ProjectId::nil(),
+                CacheQueryJob::for_test_project(ProjectId::nil()),
                 &paths,
                 &[],
                 QueryMode::Pull,
@@ -1015,7 +1167,7 @@ mod tests {
         let err = handle_cache_query(
             &SessionHandles::from_state(&state),
             "w1",
-            ProjectId::nil(),
+            CacheQueryJob::for_test_project(ProjectId::nil()),
             &["/nix/store/a-a".to_owned(), "/nix/store/b-b".to_owned()],
             &[],
             QueryMode::Pull,
@@ -1034,7 +1186,7 @@ mod tests {
             query(
                 &SessionHandles::from_state(&state),
                 "w1",
-                ProjectId::nil(),
+                CacheQueryJob::for_test_project(ProjectId::nil()),
                 &[],
                 &[],
                 QueryMode::Normal,
@@ -1048,7 +1200,7 @@ mod tests {
             query(
                 &SessionHandles::from_state(&state),
                 "w1",
-                ProjectId::nil(),
+                CacheQueryJob::for_test_project(ProjectId::nil()),
                 &[],
                 &[],
                 QueryMode::Push,
@@ -1062,7 +1214,7 @@ mod tests {
             query(
                 &SessionHandles::from_state(&state),
                 "w1",
-                ProjectId::nil(),
+                CacheQueryJob::for_test_project(ProjectId::nil()),
                 &[],
                 &[],
                 QueryMode::Pull,
@@ -1081,7 +1233,7 @@ mod tests {
         let result = query(
             &SessionHandles::from_state(&state),
             "w1",
-            ProjectId::nil(),
+            CacheQueryJob::for_test_project(ProjectId::nil()),
             &paths,
             &[],
             QueryMode::Normal,
@@ -1106,7 +1258,7 @@ mod tests {
         let result = query(
             &SessionHandles::from_state(&state),
             "w1",
-            ProjectId::nil(),
+            CacheQueryJob::for_test_project(ProjectId::nil()),
             &paths,
             &[],
             QueryMode::Pull,
@@ -1131,7 +1283,7 @@ mod tests {
         let result = query(
             &SessionHandles::from_state(&state),
             "w1",
-            ProjectId::nil(),
+            CacheQueryJob::for_test_project(ProjectId::nil()),
             &paths,
             &[None; 2],
             QueryMode::Push,

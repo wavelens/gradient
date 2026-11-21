@@ -39,7 +39,7 @@ fn drv_file(drv: &BasicDerivation) -> anyhow::Result<DrvFile> {
     };
     let aterm = print_derivation_aterm(&StoreDir::default(), &with_inputs);
     let digest = Sha256::digest(&aterm);
-    let path = gradient_daemon::ca_path::path_for(
+    let path = gradient_wire::content_addressed_store_path_from_name_address_references::path_for(
         &format!("{}.drv", drv.name),
         &ContentAddress::Text(digest),
         &drv.inputs,
@@ -135,7 +135,11 @@ mod tests {
         for input in &drv.inputs {
             let input =
                 gradient_types::OriginalStorePath::parse(&input.to_string()).expect("input");
-            assert!(info.references.contains(&mapper.inbound(&input).base()));
+            assert!(
+                info.stated
+                    .references()
+                    .contains(&mapper.inbound(&input).base())
+            );
         }
     }
 

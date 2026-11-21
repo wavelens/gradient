@@ -89,8 +89,31 @@ mod m20261217_000000_create_project_git_https_credential_table;
 mod m20261218_000000_add_wanted_open_index_to_derivation_build_concurrently;
 mod m20261219_000000_add_encrypted_secret_to_task_trigger;
 mod m20261220_000000_create_fork_pull_request_approval_table_and_convert_evaluations_waiting_for_approval;
+mod m20261220_000001_create_index_for_cached_path_hash_concurrently;
+mod m20261221_000000_add_credentials_flag_column_to_evaluation_table;
 mod m20261221_000000_add_refused_signature_columns_to_git_host_connection;
+mod m20261221_000001_allow_multiple_contents_per_store_path_add_object_key_column_add_producer_table_with_backfill_store_hash_on_signatures_unique_per_cache_and_read_only_cache_subscriptions_do_not_sign;
+mod m20261221_000002_create_indexes_for_cached_path_and_cached_path_signature_concurrently;
 mod m20261222_000000_add_recent_git_host_connection_indexes_to_incoming_webhook_delivery_and_task_commit_status_post_concurrently;
+mod m20261222_000000_add_user_origin_column_and_backfill_from_scim_external_id_managed_flag_and_linked_external_identities;
+mod m20261223_000000_split_group_team_membership_source_into_scim_group_and_sign_in_group_sync;
+mod m20261224_000000_normalise_upstream_cache_urls;
+mod m20261225_000000_add_credential_columns_to_cache_upstream_and_copy_api_key;
+mod m20261226_000000_clear_persisted_upstream_nar_urls_with_user_password_or_query;
+mod m20261227_000000_clear_persisted_nar_urls_when_upstream_cache_is_deleted;
+mod m20261228_000000_backfill_gitlab_base_url_and_require_base_url_of_new_gitea_forgejo_and_gitlab_connections;
+mod m20261229_000000_create_git_host_connection_repository_grant_table_and_grant_shared_connections_to_the_repositories_of_tasks_already_using_them;
+mod m20261230_000000_add_project_to_eval_cache_store;
+mod m20261230_000001_move_timeout_secs_and_max_silent_secs_to_derivation_and_add_derivation_file_hash_modulo;
+mod m20261230_000002_add_worker_registration_team_worker_and_project_to_derivation_metric;
+mod m20261230_000003_add_eval_cache_project_index_and_delete_rows_without_project_concurrently;
+mod m20261230_000004_add_partial_indexes_to_derivation_metric_for_worker_registration_team_worker_and_project_concurrently;
+mod m20261231_000000_add_open_job_terminal_bit_to_roles_with_trigger_evaluation_and_api_keys_with_all_project_permissions;
+mod m20270101_000000_add_is_cli_device_sign_in_session_to_session_table_delete_cli_device_authorization_rows_add_approving_session_id;
+mod m20270102_000000_delete_cached_paths_without_file_hash_nar_hash_or_nar_size_add_validated_check_constraint_requiring_file_hash_nar_hash_and_nar_size_and_replace_ripple_missing_runtime_deps;
+mod m20270103_000000_delete_cached_path_rows_with_unconfirmed_upload;
+mod m20270104_000000_add_nullable_base_branch_to_fork_pull_request_approval;
+mod m20270105_000000_add_cached_path_kind_index_to_store_path_content_producer_concurrently;
 mod sql_on_one_connection;
 
 pub struct UpgradeFloor {
@@ -110,6 +133,7 @@ pub fn function_sql(name: &str) -> &'static str {
     let replaced = format!("CREATE OR REPLACE FUNCTION public.{name}(");
     let created = format!("CREATE FUNCTION public.{name}(");
     [
+        m20270102_000000_delete_cached_paths_without_file_hash_nar_hash_or_nar_size_add_validated_check_constraint_requiring_file_hash_nar_hash_and_nar_size_and_replace_ripple_missing_runtime_deps::UP,
         m20261105_000000_partial_substitution::UP,
         include_str!("m20261013_000000_baseline.sql"),
     ]
@@ -120,6 +144,13 @@ pub fn function_sql(name: &str) -> &'static str {
         Some(&sql[start..end])
     })
     .expect("a migration defining the function")
+}
+
+pub fn add_project_to_eval_cache_store_migration_version() -> &'static str {
+    let add_project_to_eval_cache_store_migration:
+        &'static m20261230_000000_add_project_to_eval_cache_store::Migration =
+        &m20261230_000000_add_project_to_eval_cache_store::Migration;
+    add_project_to_eval_cache_store_migration.name()
 }
 
 pub struct Migrator;
@@ -210,6 +241,29 @@ impl MigratorTrait for Migrator {
             Box::new(m20261220_000000_create_fork_pull_request_approval_table_and_convert_evaluations_waiting_for_approval::Migration),
             Box::new(m20261221_000000_add_refused_signature_columns_to_git_host_connection::Migration),
             Box::new(m20261222_000000_add_recent_git_host_connection_indexes_to_incoming_webhook_delivery_and_task_commit_status_post_concurrently::Migration),
+            Box::new(m20261220_000001_create_index_for_cached_path_hash_concurrently::Migration),
+            Box::new(m20261221_000000_add_credentials_flag_column_to_evaluation_table::Migration),
+            Box::new(m20261221_000001_allow_multiple_contents_per_store_path_add_object_key_column_add_producer_table_with_backfill_store_hash_on_signatures_unique_per_cache_and_read_only_cache_subscriptions_do_not_sign::Migration),
+            Box::new(m20261221_000002_create_indexes_for_cached_path_and_cached_path_signature_concurrently::Migration),
+            Box::new(m20261222_000000_add_user_origin_column_and_backfill_from_scim_external_id_managed_flag_and_linked_external_identities::Migration),
+            Box::new(m20261223_000000_split_group_team_membership_source_into_scim_group_and_sign_in_group_sync::Migration),
+            Box::new(m20261224_000000_normalise_upstream_cache_urls::Migration),
+            Box::new(m20261225_000000_add_credential_columns_to_cache_upstream_and_copy_api_key::Migration),
+            Box::new(m20261226_000000_clear_persisted_upstream_nar_urls_with_user_password_or_query::Migration),
+            Box::new(m20261227_000000_clear_persisted_nar_urls_when_upstream_cache_is_deleted::Migration),
+            Box::new(m20261228_000000_backfill_gitlab_base_url_and_require_base_url_of_new_gitea_forgejo_and_gitlab_connections::Migration),
+            Box::new(m20261229_000000_create_git_host_connection_repository_grant_table_and_grant_shared_connections_to_the_repositories_of_tasks_already_using_them::Migration),
+            Box::new(m20261230_000000_add_project_to_eval_cache_store::Migration),
+            Box::new(m20261230_000001_move_timeout_secs_and_max_silent_secs_to_derivation_and_add_derivation_file_hash_modulo::Migration),
+            Box::new(m20261230_000002_add_worker_registration_team_worker_and_project_to_derivation_metric::Migration),
+            Box::new(m20261230_000003_add_eval_cache_project_index_and_delete_rows_without_project_concurrently::Migration),
+            Box::new(m20261230_000004_add_partial_indexes_to_derivation_metric_for_worker_registration_team_worker_and_project_concurrently::Migration),
+            Box::new(m20261231_000000_add_open_job_terminal_bit_to_roles_with_trigger_evaluation_and_api_keys_with_all_project_permissions::Migration),
+            Box::new(m20270101_000000_add_is_cli_device_sign_in_session_to_session_table_delete_cli_device_authorization_rows_add_approving_session_id::Migration),
+            Box::new(m20270102_000000_delete_cached_paths_without_file_hash_nar_hash_or_nar_size_add_validated_check_constraint_requiring_file_hash_nar_hash_and_nar_size_and_replace_ripple_missing_runtime_deps::Migration),
+            Box::new(m20270103_000000_delete_cached_path_rows_with_unconfirmed_upload::Migration),
+            Box::new(m20270104_000000_add_nullable_base_branch_to_fork_pull_request_approval::Migration),
+            Box::new(m20270105_000000_add_cached_path_kind_index_to_store_path_content_producer_concurrently::Migration),
         ]
     }
 }

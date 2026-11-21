@@ -6,6 +6,7 @@
 
 use super::config::*;
 use crate::error::{CliError, FileAction};
+use crate::logfmt::{TerminalColorOrPlainText, filter_complete_text_for_terminal_output};
 use crate::output::{ExitKind, Output};
 use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
 use connector::{Client, ConnectorError};
@@ -259,6 +260,11 @@ fn parse_edited(
     Ok(values)
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "The prompt can output the text that passed the escape filter."
+)]
 pub fn confirm_delete(question: &str, yes: bool, out: Output) -> bool {
     if yes {
         return true;
@@ -269,7 +275,13 @@ pub fn confirm_delete(question: &str, yes: bool, out: Output) -> bool {
             "Specify --yes to delete without a confirmation prompt.",
         );
     }
-    eprint!("{question} [y/N]: ");
+    eprint!(
+        "{} [y/N]: ",
+        filter_complete_text_for_terminal_output(
+            question,
+            TerminalColorOrPlainText::StripEscapeSequences
+        )
+    );
     io::stderr().flush().ok();
     let mut answer = String::new();
     io::stdin()
@@ -282,11 +294,21 @@ pub fn confirm_delete(question: &str, yes: bool, out: Output) -> bool {
     confirmed
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "The prompt can output the text that passed the escape filter."
+)]
 pub fn ask_for_secret(prompt: &str, out: Output) -> String {
     if out.is_json() {
         out.fail(CliError::EmptyField(prompt.to_owned()));
     }
-    print!("{}: ", prompt);
+    print!(
+        "{}: ",
+        filter_complete_text_for_terminal_output(
+            prompt,
+            TerminalColorOrPlainText::StripEscapeSequences
+        )
+    );
     flush_stdout(out);
 
     let input =
@@ -303,11 +325,21 @@ pub fn ask_for_password(out: Output) -> String {
     ask_for_secret("Password", out)
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "The prompt can output the text that passed the escape filter."
+)]
 pub fn ask_for_input(prompt: &str, out: Output) -> String {
     if out.is_json() {
         out.fail(CliError::EmptyField(prompt.to_owned()));
     }
-    print!("{}: ", prompt);
+    print!(
+        "{}: ",
+        filter_complete_text_for_terminal_output(
+            prompt,
+            TerminalColorOrPlainText::StripEscapeSequences
+        )
+    );
     flush_stdout(out);
 
     let mut input = String::new();
@@ -323,16 +355,31 @@ pub fn ask_for_input(prompt: &str, out: Output) -> String {
     input
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "check only whether stdout is a terminal"
+)]
 pub fn is_interactive(out: Output) -> bool {
     !out.is_json() && io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "The prompt can output the text that passed the escape filter."
+)]
 pub fn ask_for_choice(prompt: &str, options: &[String], out: Output) -> Option<String> {
     for (i, option) in options.iter().enumerate() {
         out.human(format!("  {}) {}", i + 1, option));
     }
     loop {
-        print!("{} [1-{}, empty to skip]: ", prompt, options.len());
+        print!(
+            "{} [1-{}, empty to skip]: ",
+            filter_complete_text_for_terminal_output(
+                prompt,
+                TerminalColorOrPlainText::StripEscapeSequences
+            ),
+            options.len()
+        );
         flush_stdout(out);
 
         let mut input = String::new();
@@ -366,6 +413,10 @@ fn parse_choice(input: &str, options: &[String]) -> Result<Option<String>, Strin
         .ok_or_else(|| format!("Invalid choice: {}", input))
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "The prompt can output the text that passed the escape filter."
+)]
 pub fn flush_stdout(out: Output) {
     io::stdout()
         .flush()

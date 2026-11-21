@@ -9,7 +9,8 @@ use std::collections::HashSet;
 use anyhow::{Result, bail};
 use futures::StreamExt as _;
 use gradient_storage::NarStore;
-use gradient_types::ids::CacheId;
+use gradient_storage::eval_cache_segment::CheckedEvalCacheFingerprint;
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_wire::types::{EvalCachePullOutcome, SegmentFetch, SegmentSource};
 use tracing::warn;
 
@@ -20,11 +21,20 @@ pub(super) async fn handle_eval_cache_pull(
     nar_storage: &NarStore,
     writer: &ProtoWriter,
     readable: &[CacheId],
+    requesting_project_id: Option<ProjectId>,
     job_id: String,
     fingerprint: String,
     applied: Vec<String>,
 ) {
-    let (outcome, inline) = segments_outcome(nar_storage, readable, &fingerprint, applied).await;
+    let (outcome, inline) = match (
+        requesting_project_id,
+        CheckedEvalCacheFingerprint::parse(&fingerprint),
+    ) {
+        (Some(project), Ok(fingerprint)) => {
+            segments_outcome(nar_storage, readable, project, &fingerprint, applied).await
+        }
+        _ => (EvalCachePullOutcome::Miss, Vec::new()),
+    };
 
     if send_server_msg(
         writer,
@@ -49,14 +59,15 @@ pub(super) async fn handle_eval_cache_pull(
 async fn segments_outcome(
     nar_storage: &NarStore,
     readable: &[CacheId],
-    fingerprint: &str,
+    project: ProjectId,
+    fingerprint: &CheckedEvalCacheFingerprint,
     applied: Vec<String>,
 ) -> (EvalCachePullOutcome, Vec<String>) {
     let listed = futures::future::join_all(readable.iter().map(|&cache| async move {
         (
             cache,
             nar_storage
-                .list_eval_cache_segments(cache, fingerprint)
+                .list_eval_cache_segments(cache, project, fingerprint)
                 .await,
         )
     }))
@@ -77,7 +88,7 @@ async fn segments_outcome(
         .filter(|f| matches!(f.source, SegmentSource::Inline { .. }))
         .map(|f| f.key.clone())
         .collect();
-    let stream_token = (!inline.is_empty()).then(|| stream_token(fingerprint));
+    let stream_token = (!inline.is_empty()).then(|| stream_token(fingerprint.as_str()));
     let outcome = EvalCachePullOutcome::Segments {
         keys,
         fetch,
@@ -213,8 +224,17 @@ mod tests {
     use gradient_storage::eval_cache_segment::eval_cache_segment_key;
     use uuid::Uuid;
 
+    const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn fingerprint() -> CheckedEvalCacheFingerprint {
+        CheckedEvalCacheFingerprint::parse(FINGERPRINT).unwrap()
+    }
+
     fn segment(cache: CacheId) -> (String, u64) {
-        (eval_cache_segment_key(cache, "fp", Uuid::now_v7()), 10)
+        (
+            eval_cache_segment_key(cache, ProjectId::now_v7(), &fingerprint(), Uuid::now_v7()),
+            10,
+        )
     }
 
     fn decode(bytes: bytes::Bytes) -> ServerMessage {
@@ -266,7 +286,16 @@ mod tests {
         let store = NarStore::local(dir.path()).unwrap();
         let (writer, mut sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
 
-        handle_eval_cache_pull(&store, &writer, &[], "j1".into(), "fp".into(), Vec::new()).await;
+        handle_eval_cache_pull(
+            &store,
+            &writer,
+            &[],
+            Some(ProjectId::now_v7()),
+            "j1".into(),
+            FINGERPRINT.into(),
+            Vec::new(),
+        )
+        .await;
 
         assert!(matches!(
             decode(sent.try_recv().unwrap()),
@@ -279,11 +308,11 @@ mod tests {
 
     #[tokio::test]
     async fn inline_segments_stream_back_to_back_in_fetch_order() {
-        let cache = CacheId::now_v7();
+        let (cache, project) = (CacheId::now_v7(), ProjectId::now_v7());
         let dir = tempfile::TempDir::new().unwrap();
         let store = NarStore::local(dir.path()).unwrap();
         let keys: Vec<String> = (0..3)
-            .map(|_| eval_cache_segment_key(cache, "fp", Uuid::now_v7()))
+            .map(|_| eval_cache_segment_key(cache, project, &fingerprint(), Uuid::now_v7()))
             .collect();
         for (key, body) in keys.iter().zip([&b"first"[..], b"second", b"third"]) {
             store.put_eval_cache(key, body.to_vec()).await.unwrap();
@@ -294,8 +323,9 @@ mod tests {
             &store,
             &writer,
             &[cache],
+            Some(project),
             "j1".into(),
-            "fp".into(),
+            FINGERPRINT.into(),
             vec![keys[1].clone()],
         )
         .await;
@@ -326,7 +356,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(stream_token, Some("ec-fp".into()));
+        assert_eq!(stream_token, Some(format!("ec-{FINGERPRINT}")));
 
         let chunks: Vec<(Vec<u8>, u64, bool)> = std::iter::from_fn(|| sent.try_recv().ok())
             .map(|bytes| match decode(bytes) {

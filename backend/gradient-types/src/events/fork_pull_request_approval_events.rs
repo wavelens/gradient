@@ -15,6 +15,7 @@ pub enum Phase {
     #[default]
     NeedsMaintainerApproval,
     EvaluationStartedAfterApproval,
+    ApprovalWithoutChangedFileMatchingTriggerPath,
 }
 
 impl Phase {
@@ -25,6 +26,9 @@ impl Phase {
             }
             Phase::EvaluationStartedAfterApproval => {
                 names::FORK_PULL_REQUEST_APPROVAL_EVALUATION_STARTED_AFTER_APPROVAL
+            }
+            Phase::ApprovalWithoutChangedFileMatchingTriggerPath => {
+                names::FORK_PULL_REQUEST_APPROVAL_APPROVAL_WITHOUT_CHANGED_FILE_MATCHING_TRIGGER_PATH
             }
         }
     }
@@ -48,6 +52,7 @@ impl EventKind for Reported {
     const NAMES: &'static [&'static str] = &[
         names::FORK_PULL_REQUEST_APPROVAL_NEEDS_MAINTAINER_APPROVAL,
         names::FORK_PULL_REQUEST_APPROVAL_EVALUATION_STARTED_AFTER_APPROVAL,
+        names::FORK_PULL_REQUEST_APPROVAL_APPROVAL_WITHOUT_CHANGED_FILE_MATCHING_TRIGGER_PATH,
     ];
 
     fn name(&self) -> Cow<'static, str> {

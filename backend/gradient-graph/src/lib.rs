@@ -14,11 +14,13 @@ mod cases;
 mod claims;
 mod continuation;
 mod demote;
+pub mod derivation_closure_input_addressed_output_verification;
 mod exec;
 mod gc;
 mod known;
 mod nar;
 pub mod policy;
+pub mod read_derivation_from_trusted_nar;
 mod record;
 mod requeue;
 mod self_heal;
@@ -27,6 +29,7 @@ pub mod testing;
 mod transition;
 
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use anyhow::Context as _;
 use gradient_db::DbContext;
@@ -36,21 +39,63 @@ use gradient_db::graph::consistency::{
 use gradient_types::DerivationId;
 use gradient_types::events::{Event, EventBus, graph};
 use gradient_util::supervision::{ChildCtx, ChildSpec, SupervisorHealth};
+use gradient_util::sync::Mutex;
 use ractor::rpc::CallResult;
-use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
+use ractor::{ACTIVE_STATES, Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 use tokio::sync::watch;
 
+use claims::PublishFailurePageSizeAndWaitingParentBuilds;
+pub use claims::{
+    DEPENDENCY_OUTPUT_SIGNING_SELECT_STATEMENT_TIMEOUT, DependencyOutputPublishRoundResult,
+    PARENT_BUILD_PAGE_READ_STATEMENT_TIMEOUT,
+    PARENT_BUILD_SKIP_DURATION_AFTER_ONLY_PARENT_PAGE_PUBLISH_FAILURE,
+    SignatureRowForGraphWriterInsert,
+};
 pub use messages::*;
 pub use policy::retry_backoff_elapsed;
 use writer::{CALL_TIMEOUT, GraphArgs, GraphMsg, GraphWriter, HEALTH_NAME};
 
+#[derive(Debug)]
+pub struct ConsistencyCheckDemotionFailed {
+    pub consistency_report_after_failed_demotion: Option<ConsistencyReport>,
+    demotion_error: anyhow::Error,
+}
+
+impl std::fmt::Display for ConsistencyCheckDemotionFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Failed to demote a completed build with no stored copy for a required output.")
+    }
+}
+
+impl std::error::Error for ConsistencyCheckDemotionFailed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.demotion_error.as_ref())
+    }
+}
+
 pub struct Graph {
     writer: watch::Sender<Option<ActorRef<GraphMsg>>>,
     events: OnceLock<EventBus>,
-    reads: OnceLock<gradient_db::WorkerDb>,
+    ctx: OnceLock<DbContext>,
+    publish_failure_page_size_and_waiting_parent_builds:
+        Mutex<PublishFailurePageSizeAndWaitingParentBuilds>,
     #[cfg(feature = "stub")]
     stub: bool,
 }
+
+struct FailedPublishRoundPage {
+    page: Vec<DerivationId>,
+    published_parent_builds: Vec<DerivationId>,
+    error: anyhow::Error,
+}
+
+enum PublishRoundChoiceAfterFailedPage {
+    SetAsideParentBuildAndMovePastPage(Vec<DerivationId>),
+    RetryFromSameCursorWithHalfPageSize,
+    StopPublishRoundWithError(anyhow::Error),
+}
+
+const MAX_PARENT_BUILDS_LISTED_IN_FAILED_PAGE_WARNING: usize = 20;
 
 impl std::fmt::Debug for Graph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -63,7 +108,8 @@ impl Graph {
         Arc::new(Self {
             writer: watch::channel(None).0,
             events: OnceLock::new(),
-            reads: OnceLock::new(),
+            ctx: OnceLock::new(),
+            publish_failure_page_size_and_waiting_parent_builds: Default::default(),
             #[cfg(feature = "stub")]
             stub: false,
         })
@@ -74,7 +120,8 @@ impl Graph {
         Arc::new(Self {
             writer: watch::channel(None).0,
             events: OnceLock::new(),
-            reads: OnceLock::new(),
+            ctx: OnceLock::new(),
+            publish_failure_page_size_and_waiting_parent_builds: Default::default(),
             stub: true,
         })
     }
@@ -104,7 +151,7 @@ impl Graph {
         parent: Option<ActorCell>,
     ) -> Result<ActorRef<GraphMsg>, SpawnErr> {
         let _ = self.events.set(ctx.events.clone());
-        let _ = self.reads.set(ctx.worker_db.clone());
+        let _ = self.ctx.set(ctx.clone());
         let args = GraphArgs { ctx, health };
         let (writer, _) = match parent {
             Some(parent) => Actor::spawn_linked(None, GraphWriter, args, parent).await?,
@@ -122,10 +169,16 @@ impl Graph {
 
     async fn live(&self) -> anyhow::Result<ActorRef<GraphMsg>> {
         let mut rx = self.writer.subscribe();
-        let live = tokio::time::timeout(CALL_TIMEOUT, rx.wait_for(|a| a.is_some()))
-            .await
-            .map_err(|_| anyhow::anyhow!("graph writer unavailable"))?
-            .map_err(|_| anyhow::anyhow!("graph writer closed"))?;
+        let live = tokio::time::timeout(
+            CALL_TIMEOUT,
+            rx.wait_for(|a| {
+                a.as_ref()
+                    .is_some_and(|a| ACTIVE_STATES.contains(&a.get_status()))
+            }),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("graph writer unavailable"))?
+        .map_err(|_| anyhow::anyhow!("graph writer closed"))?;
         Ok(live.clone().expect("wait_for guarantees Some"))
     }
 
@@ -168,11 +221,11 @@ impl Graph {
         if self.stub {
             return Ok(Vec::new());
         }
-        let db = self
-            .reads
+        let ctx = self
+            .ctx
             .get()
             .ok_or_else(|| anyhow::anyhow!("graph writer never started"))?;
-        Ok(known::prunable(db, drv_hashes).await?)
+        Ok(known::prunable(&ctx.worker_db, drv_hashes).await?)
     }
 
     pub async fn upstream_hits(
@@ -200,6 +253,7 @@ impl Graph {
         if self.stub {
             return Ok(NarCommitted {
                 cached_path: gradient_types::ids::CachedPathId::now_v7(),
+                nar_object_storage_key: String::new(),
                 created: true,
                 signed: Vec::new(),
             });
@@ -227,6 +281,219 @@ impl Graph {
             prioritized: report.prioritized_shared_builds.len(),
         });
         Ok(report)
+    }
+
+    /// Page reads and signatures happen outside the graph writer. Only inserts of a non-empty page
+    /// go out as exactly one writer message. Rounds stopped by the deadline always keep the cursor
+    /// and always request one more signature sweep wake.
+    pub async fn run_publish_round_for_signed_dependency_outputs_of_parent_builds_in_recent_evaluations_until_deadline(
+        &self,
+        start: Option<DerivationId>,
+        maximum_parent_builds_per_page: usize,
+        deadline: Instant,
+    ) -> DependencyOutputPublishRoundResult {
+        let mut round = DependencyOutputPublishRoundResult {
+            last_handled_parent_build_id: start,
+            ..Default::default()
+        };
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return round;
+        }
+        let Some(ctx) = self.ctx.get() else {
+            round.failure = Some(anyhow::anyhow!("graph writer never started"));
+            return round;
+        };
+        let mut segments = vec![(
+            start.unwrap_or_else(DerivationId::nil),
+            DerivationId::new(uuid::Uuid::max()),
+        )];
+        segments.extend(start.map(|start| (DerivationId::nil(), start)));
+        let segment_count = segments.len();
+        for (segment_index, (mut after, upto)) in segments.into_iter().enumerate() {
+            loop {
+                let parent_builds_per_page = self
+                    .publish_failure_page_size_and_waiting_parent_builds
+                    .lock()
+                    .next_page_size_after_failures(maximum_parent_builds_per_page);
+                let page = match self
+                    .read_parent_build_page_sign_dependency_outputs_and_send_insert_to_graph_writer(
+                        ctx,
+                        after,
+                        upto,
+                        parent_builds_per_page,
+                        &mut round,
+                    )
+                    .await
+                {
+                    Ok(page) => {
+                        self.publish_failure_page_size_and_waiting_parent_builds
+                            .lock()
+                            .parent_builds_per_page = Some(
+                            parent_builds_per_page
+                                .saturating_mul(2)
+                                .min(maximum_parent_builds_per_page),
+                        );
+                        page
+                    }
+                    Err(failed_page) => {
+                        round.failed_page_count += 1;
+                        match self.log_failed_publish_page_and_decide_round_next_step(
+                            failed_page,
+                            parent_builds_per_page,
+                            &mut round,
+                        ) {
+                            PublishRoundChoiceAfterFailedPage::SetAsideParentBuildAndMovePastPage(
+                                page,
+                            ) => page,
+                            PublishRoundChoiceAfterFailedPage::RetryFromSameCursorWithHalfPageSize => {
+                                if Instant::now() >= deadline {
+                                    round.stopped_at_deadline_with_parent_builds_remaining = true;
+                                    ctx.wake.run_signature_sweep_now.notify_one();
+                                    return round;
+                                }
+                                continue;
+                            }
+                            PublishRoundChoiceAfterFailedPage::StopPublishRoundWithError(error) => {
+                                round.failure = Some(error);
+                                return round;
+                            }
+                        }
+                    }
+                };
+                let Some(&page_last) = page.last() else {
+                    break;
+                };
+                round.last_handled_parent_build_id = Some(page_last);
+                after = page_last;
+                let page_was_full = page.len() >= parent_builds_per_page;
+                let parent_builds_may_be_left = page_was_full || segment_index + 1 < segment_count;
+                if parent_builds_may_be_left && Instant::now() >= deadline {
+                    round.stopped_at_deadline_with_parent_builds_remaining = true;
+                    ctx.wake.run_signature_sweep_now.notify_one();
+                    return round;
+                }
+                if !page_was_full {
+                    break;
+                }
+            }
+        }
+        round
+    }
+
+    async fn read_parent_build_page_sign_dependency_outputs_and_send_insert_to_graph_writer(
+        &self,
+        ctx: &DbContext,
+        after: DerivationId,
+        upto: DerivationId,
+        parent_builds_per_page: usize,
+        round: &mut DependencyOutputPublishRoundResult,
+    ) -> Result<Vec<DerivationId>, FailedPublishRoundPage> {
+        let page = claims::read_page_of_parent_builds_with_dependency_outputs_to_publish(
+            &ctx.worker_db,
+            after,
+            upto,
+            parent_builds_per_page,
+        )
+        .await
+        .map_err(|error| FailedPublishRoundPage {
+            page: Vec::new(),
+            published_parent_builds: Vec::new(),
+            error,
+        })?;
+        let published_parent_builds = self
+            .publish_failure_page_size_and_waiting_parent_builds
+            .lock()
+            .drop_expired_set_asides_and_return_page_parent_builds_not_set_aside(
+                &page,
+                Instant::now(),
+            );
+        if published_parent_builds.is_empty() {
+            return Ok(page);
+        }
+        let publish = async {
+            let signed_dependency_output_rows_to_insert =
+                claims::select_and_sign_dependency_outputs_of_parent_build_page(
+                    ctx,
+                    &published_parent_builds,
+                )
+                .await?;
+            if !signed_dependency_output_rows_to_insert.is_empty() {
+                self.transition(Transition::SignStoredInputsIntoReadWriteBinaryCache {
+                    signed_dependency_output_rows_to_insert,
+                })
+                .await?;
+                round.insert_messages_sent_to_graph_writer += 1;
+            }
+            anyhow::Ok(())
+        };
+        match publish.await {
+            Ok(()) => Ok(page),
+            Err(error) => Err(FailedPublishRoundPage {
+                page,
+                published_parent_builds,
+                error,
+            }),
+        }
+    }
+
+    fn log_failed_publish_page_and_decide_round_next_step(
+        &self,
+        failed_page: FailedPublishRoundPage,
+        parent_builds_per_page: usize,
+        round: &mut DependencyOutputPublishRoundResult,
+    ) -> PublishRoundChoiceAfterFailedPage {
+        let FailedPublishRoundPage {
+            page,
+            published_parent_builds,
+            error,
+        } = failed_page;
+        tracing::debug!(
+            parent_build_count = page.len(),
+            error = format!("{error:#}"),
+            "publish of dependency outputs: full error of the failed page"
+        );
+        let (error_kind, sqlstate) =
+            gradient_db::database_error_kind_text_and_sqlstate_for_warning_log(&error);
+        let mut failure_state = self
+            .publish_failure_page_size_and_waiting_parent_builds
+            .lock();
+        if let [failing_parent_build] = published_parent_builds[..] {
+            failure_state.set_aside_end_by_parent_build.insert(
+                failing_parent_build,
+                Instant::now() + PARENT_BUILD_SKIP_DURATION_AFTER_ONLY_PARENT_PAGE_PUBLISH_FAILURE,
+            );
+            round
+                .parent_build_ids_set_aside_in_publish_round
+                .push(failing_parent_build);
+            tracing::warn!(
+                parent_build = ?failing_parent_build,
+                set_aside_seconds = PARENT_BUILD_SKIP_DURATION_AFTER_ONLY_PARENT_PAGE_PUBLISH_FAILURE.as_secs(),
+                error_kind,
+                sqlstate = ?sqlstate,
+                "publish of dependency outputs: failure in a page of one parent build. Set this parent build aside for a waiting period. Skip it and move on."
+            );
+            return PublishRoundChoiceAfterFailedPage::SetAsideParentBuildAndMovePastPage(page);
+        }
+        if page.is_empty() && parent_builds_per_page <= 1 {
+            return PublishRoundChoiceAfterFailedPage::StopPublishRoundWithError(error);
+        }
+        let failed_page_size = if page.is_empty() {
+            parent_builds_per_page
+        } else {
+            page.len()
+        };
+        let smaller_parent_builds_per_page = (failed_page_size / 2).max(1);
+        failure_state.parent_builds_per_page = Some(smaller_parent_builds_per_page);
+        tracing::warn!(
+            parent_builds = ?&page[..page.len().min(MAX_PARENT_BUILDS_LISTED_IN_FAILED_PAGE_WARNING)],
+            parent_build_count = page.len(),
+            parent_builds_per_page = smaller_parent_builds_per_page,
+            error_kind,
+            sqlstate = ?sqlstate,
+            "publish of dependency outputs: page failed, retrying from the same cursor with a smaller page"
+        );
+        PublishRoundChoiceAfterFailedPage::RetryFromSameCursorWithHalfPageSize
     }
 
     pub async fn run_consistency_checks(&self) -> anyhow::Result<ConsistencyReport> {
@@ -260,7 +527,27 @@ impl Graph {
         let is_postgres_lock_timeout_error = |e: &anyhow::Error| {
             writer::postgres_sqlstate_from_error_chain(e).as_deref() == Some("55P03")
         };
-        run_consistency_check_steps(
+        let demotion_error_to_return_after_consistency_check_steps = match self
+            .call(|reply| {
+                GraphMsg::Transition(
+                    Transition::DemoteCompletedBuildsMissingNeededStoredOutputCopies,
+                    reply,
+                )
+            })
+            .await
+        {
+            Ok(_) => None,
+            Err(e) if is_postgres_lock_timeout_error(&e) => {
+                tracing::warn!(
+                    step = writer::DEMOTE_COMPLETED_BUILDS_MISSING_NEEDED_STORED_OUTPUT_COPIES_STEP_NAME,
+                    error = %format_args!("{e:#}"),
+                    "consistency check step hit a lock timeout. skipping to the next step"
+                );
+                None
+            }
+            Err(e) => Some(e),
+        };
+        let consistency_check_steps_result = run_consistency_check_steps(
             starting_progress,
             is_postgres_lock_timeout_error,
             move |step, progress| async move {
@@ -277,7 +564,23 @@ impl Graph {
                     })
             },
         )
-        .await
+        .await;
+        let Some(demotion_error) = demotion_error_to_return_after_consistency_check_steps else {
+            return consistency_check_steps_result;
+        };
+        let consistency_report_after_failed_demotion = consistency_check_steps_result
+            .inspect_err(|e| {
+                tracing::error!(
+                    error = %format_args!("{e:#}"),
+                    "The demotion failed. The integrity check failed as well."
+                );
+            })
+            .ok();
+        Err(ConsistencyCheckDemotionFailed {
+            consistency_report_after_failed_demotion,
+            demotion_error,
+        }
+        .into())
     }
 
     pub async fn requeue(&self, scope: RequeueScope) -> anyhow::Result<u64> {
@@ -312,7 +615,7 @@ impl Graph {
         self.announce(|| graph::Collected {
             derivations: report.deleted_derivations.len(),
             evaluations: report.deleted_evaluations.len(),
-            retired_paths: report.retired.len(),
+            retired_paths: report.unreferenced_cached_path_object_storage_keys.len(),
         });
         Ok(report)
     }
@@ -385,6 +688,89 @@ mod tests {
             .unwrap();
 
         writer.stop(None);
+    }
+
+    #[derive(Clone, Default)]
+    struct WarningEventFieldTextSubscriber(Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl tracing::Subscriber for WarningEventFieldTextSubscriber {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Fields(Vec<String>);
+            impl tracing::field::Visit for Fields {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    self.0.push(format!("{}={value:?}", field.name()));
+                }
+            }
+            if *event.metadata().level() == tracing::Level::WARN {
+                let mut fields = Fields(Vec::new());
+                event.record(&mut fields);
+                self.0.lock().unwrap().push(fields.0.join(" "));
+            }
+        }
+
+        fn enter(&self, _: &tracing::span::Id) {}
+
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn test_failed_page_warnings_show_at_most_twenty_parent_builds_and_error_kind_and_sqlstate_without_database_error_text()
+     {
+        let graph = Graph::new();
+        let page: Vec<DerivationId> = (0..25).map(|_| DerivationId::now_v7()).collect();
+        let database_error_text = "duplicate key value (/nix/store/aaaa-other-project-output)";
+        let warnings = WarningEventFieldTextSubscriber::default();
+        tracing::subscriber::with_default(warnings.clone(), || {
+            let mut round = DependencyOutputPublishRoundResult::default();
+            graph.log_failed_publish_page_and_decide_round_next_step(
+                FailedPublishRoundPage {
+                    page: page[..1].to_vec(),
+                    published_parent_builds: page[..1].to_vec(),
+                    error: anyhow::anyhow!(database_error_text),
+                },
+                1,
+                &mut round,
+            );
+            graph.log_failed_publish_page_and_decide_round_next_step(
+                FailedPublishRoundPage {
+                    page: page.clone(),
+                    published_parent_builds: page.clone(),
+                    error: anyhow::anyhow!(database_error_text),
+                },
+                25,
+                &mut round,
+            );
+        });
+
+        assert_eq!(
+            *warnings.0.lock().unwrap(),
+            vec![
+                format!(
+                    "message=publish of dependency outputs: failure in a page of one parent build. Set this parent build aside for a waiting period. Skip it and move on. parent_build={:?} set_aside_seconds=600 error_kind=\"not a database error\" sqlstate=None",
+                    page[0]
+                ),
+                format!(
+                    "message=publish of dependency outputs: page failed, retrying from the same cursor with a smaller page parent_builds={:?} parent_build_count=25 parent_builds_per_page=12 error_kind=\"not a database error\" sqlstate=None",
+                    &page[..20]
+                ),
+            ]
+        );
     }
 }
 

@@ -10,11 +10,12 @@ use gradient_types::consts::BASE_ROLE_VIEW_ID;
 use std::sync::Arc;
 
 use gradient_entity::team_user::TeamRole;
-use gradient_entity::{ids::*, project_user, team_user, team_worker, worker_registration};
+use gradient_entity::{ids::*, project_user, role, team_user, team_worker, worker_registration};
 use gradient_fixtures::ids::user_id;
 use gradient_fixtures::rows::{project, project_member, team, view_role};
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
 use gradient_types::SessionId;
+use gradient_types::permissions::{Permission, mask_from};
 use sea_orm::{DbErr, MockDatabase, RuntimeErr, sqlx};
 use serde_json::{Value, json};
 
@@ -67,11 +68,20 @@ fn temp_crypt_file() -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn as_member(session_id: SessionId) -> MockDatabase {
+fn mock_database_with_signed_in_project_member_whose_role_grants_manage_workers(
+    session_id: SessionId,
+) -> MockDatabase {
+    let role = role::Model {
+        id: RoleId::now_v7(),
+        name: "Workers".into(),
+        project: Some(project().id),
+        permission: mask_from(&[Permission::ViewProject, Permission::ManageWorkers]),
+        managed: false,
+    };
     with_auth(mock_db(), session_id)
         .append_query_results([vec![project()]])
-        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
-        .append_query_results([vec![view_role()]])
+        .append_query_results([vec![project_member(role.id)]])
+        .append_query_results([vec![role]])
 }
 
 async fn connect_project(
@@ -146,7 +156,7 @@ async fn a_project_connection_is_hidden_from_non_members() {
 }
 
 #[tokio::test]
-async fn a_misplaced_paste_is_a_bad_request_naming_the_prefix() {
+async fn project_member_with_view_role_cannot_connect_project_to_gradient_ci() {
     let (db, auth) = signed_in();
     let db = db
         .append_query_results([vec![project()]])
@@ -157,6 +167,25 @@ async fn a_misplaced_paste_is_a_bad_request_naming_the_prefix() {
     let res = server
         .post(URL)
         .add_header("authorization", auth)
+        .json(&json!({ "scope": "project", "project": "test-project", "token": TOKEN }))
+        .await;
+
+    res.assert_status_forbidden();
+}
+
+#[tokio::test]
+async fn a_misplaced_paste_is_a_bad_request_naming_the_prefix() {
+    let session_id = SessionId::now_v7();
+    let db =
+        mock_database_with_signed_in_project_member_whose_role_grants_manage_workers(session_id);
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .post(URL)
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
         .json(&json!({ "scope": "project", "project": "test-project", "token": "GRADabc" }))
         .await;
 
@@ -173,14 +202,15 @@ async fn a_misplaced_paste_is_a_bad_request_naming_the_prefix() {
 #[tokio::test]
 async fn a_worker_connected_by_another_project_cannot_be_claimed() {
     let session_id = SessionId::now_v7();
-    let db = as_member(session_id)
-        .append_query_results([vec![worker_registration::Model {
-            peer_id: ProjectId::now_v7(),
-            worker_id: WORKER_ID.into(),
-            gradient_ci: true,
-            ..Default::default()
-        }]])
-        .append_query_results([Vec::<team_worker::Model>::new()]);
+    let db =
+        mock_database_with_signed_in_project_member_whose_role_grants_manage_workers(session_id)
+            .append_query_results([vec![worker_registration::Model {
+                peer_id: ProjectId::now_v7(),
+                worker_id: WORKER_ID.into(),
+                gradient_ci: true,
+                ..Default::default()
+            }]])
+            .append_query_results([Vec::<team_worker::Model>::new()]);
     let server = make_test_server(db.into_connection());
 
     let res = connect_project(&server, session_id).await;
@@ -191,10 +221,11 @@ async fn a_worker_connected_by_another_project_cannot_be_claimed() {
 #[tokio::test]
 async fn a_concurrent_second_connection_is_a_conflict() {
     let session_id = SessionId::now_v7();
-    let db = as_member(session_id)
-        .append_query_results([Vec::<worker_registration::Model>::new()])
-        .append_query_results([Vec::<team_worker::Model>::new()])
-        .append_query_errors([unique_violation()]);
+    let db =
+        mock_database_with_signed_in_project_member_whose_role_grants_manage_workers(session_id)
+            .append_query_results([Vec::<worker_registration::Model>::new()])
+            .append_query_results([Vec::<team_worker::Model>::new()])
+            .append_query_errors([unique_violation()]);
     let server = TestState::new()
         .web_db(db.into_connection())
         .cli(|cli| cli.secrets.crypt_file = temp_crypt_file())

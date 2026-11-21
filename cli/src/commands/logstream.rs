@@ -11,7 +11,6 @@ use connector::api::EvaluationMessageResponse;
 use futures::StreamExt;
 use futures::pin_mut;
 use std::collections::HashSet;
-use std::io::Write as _;
 use std::time::Duration;
 
 pub async fn stream_eval_logs(
@@ -24,31 +23,35 @@ pub async fn stream_eval_logs(
     pin_mut!(stream);
 
     let mut seen: HashSet<String> = HashSet::new();
+    let mut filter =
+        logfmt::StreamingTerminalEscapeSequenceFilter::new(logfmt::stdout_filter_mode());
     let mut messages = tokio::time::interval(Duration::from_millis(1500));
 
     let outcome = loop {
         tokio::select! {
             item = stream.next() => match item {
-                Some(Ok(line)) => print_log(&line, out),
+                Some(Ok(line)) => print_log(&line, &mut filter, out),
                 Some(Err(e)) => break Err(e),
                 None => break Ok(()),
             },
             _ = messages.tick() => flush_messages(client, evaluation, &mut seen, out).await,
         }
     };
+    out.write_unfinished_last_line_and_flush(&mut filter);
     flush_messages(client, evaluation, &mut seen, out).await;
     outcome
 }
 
-fn print_log(line: &str, out: Output) {
+fn print_log(line: &str, filter: &mut logfmt::StreamingTerminalEscapeSequenceFilter, out: Output) {
     if line.is_empty() {
         return;
     }
     if out.is_json() {
-        println!("{}", serde_json::json!({"error": false, "message": line}));
+        out.print_serializable_value_as_json_line(
+            &serde_json::json!({"error": false, "message": line}),
+        );
     } else {
-        print!("{}", logfmt::render_log(line));
-        let _ = std::io::stdout().flush();
+        out.write_filtered_log_chunk_to_stdout_without_newline_and_flush(filter, line);
     }
 }
 
@@ -68,11 +71,10 @@ async fn flush_messages(
 
 fn emit_message(m: &EvaluationMessageResponse, out: Output) {
     if out.is_json() {
-        println!(
-            "{}",
-            serde_json::json!({"error": false, "message": m.message, "level": m.level})
+        out.print_serializable_value_as_json_line(
+            &serde_json::json!({"error": false, "message": m.message, "level": m.level}),
         );
     } else {
-        println!("{}", logfmt::eval_message_line(m.level, &m.message));
+        out.human(logfmt::eval_message_line(m.level, &m.message));
     }
 }

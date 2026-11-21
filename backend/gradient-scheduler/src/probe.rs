@@ -36,6 +36,7 @@ type Inbox = Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>;
 
 pub(crate) struct UpstreamProbe {
     db: WorkerDb,
+    user_supplied_url_http_client: gradient_util::http::HttpClientForUserSuppliedUrls,
     store_path_mapping: Arc<dyn StorePathMapping>,
     graph: Arc<Graph>,
     upstream_query: Arc<Semaphore>,
@@ -49,6 +50,7 @@ impl UpstreamProbe {
     pub(crate) fn new(db: &DbContext, graph: &Arc<Graph>, upstream_query: &Arc<Semaphore>) -> Self {
         Self {
             db: db.worker_db.clone(),
+            user_supplied_url_http_client: db.user_supplied_url_http_client.clone(),
             store_path_mapping: Arc::clone(&db.store_path_mapping),
             graph: Arc::clone(graph),
             upstream_query: Arc::clone(upstream_query),
@@ -109,6 +111,7 @@ impl UpstreamProbe {
             for chunk in outputs_missing_from_upstream_cache.chunks(PROBE_BATCH) {
                 let answer = crate::eval::probe_outputs(
                     &self.db,
+                    &self.user_supplied_url_http_client,
                     &self.store_path_mapping,
                     &self.upstream_query,
                     evaluation,
@@ -319,7 +322,7 @@ pub(crate) async fn plan_probes(
     })
     .await
     .context("load the outputs of the shared builds that became wanted")?;
-    let cached = gradient_db::derivation_outputs::cached_anywhere(db, &outputs)
+    let cached = gradient_db::derivation_outputs::output_ids_skipping_build_or_probe_for_external_url_or_cached_variant_trusted_by_shared_build(db, &outputs)
         .await
         .context("find the outputs some cache already holds")?;
     let to_ask: Vec<&MDerivationOutput> =

@@ -6,16 +6,21 @@
 
 use crate::access::{
     AccessRefusal, Caller, caller_project_mask, has_permission, key_limited_project_mask,
+    load_caller_project_permissions_and_require_can_grant,
 };
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::access::{TeamNameAndDisplayName, team_names};
-use crate::endpoints::teams::grants::{apply_owner_team_grant_change_to_workers, grant_workers};
-use crate::endpoints::teams::management::lookup_owner_team_id_and_check_user_is_member_or_admin;
+use crate::endpoints::membership::load_permission_mask_by_role_id;
+use crate::endpoints::teams::grants::{
+    apply_owner_team_grant_change_to_workers,
+    ensure_caller_can_remove_grant_removed_by_project_owner_team_change, grant_workers,
+};
+use crate::endpoints::teams::management::lookup_team_id_by_name_if_user_is_team_admin_or_superuser;
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::extractors::{JsonBody, Query};
-use crate::helpers::{CreatedEntityResponse, ok_json, paginate};
+use crate::helpers::{CreatedEntityResponse, OptionExt, ok_json, paginate};
 use crate::names::{ProjectDisplayName, ProjectName};
 use crate::permissions::{Permission, PermissionMask, mask_to_vec};
 use crate::refusal::SharedRefusal;
@@ -27,6 +32,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
+use gradient_db::lookup::by_id;
 use gradient_db::projects::ProjectEvaluationProgressCounts;
 use gradient_scheduler::Scheduler;
 use gradient_sources::generate_ssh_key;
@@ -272,7 +278,7 @@ pub async fn get(
     operation_id = "createProject",
     tag = "projects",
     summary = "Create project",
-    description = "Create a new project for the current user. The response fields list the project UUID, the project name, and the URL of the web page for the project. A signed-in session can call this endpoint. An API key with `createProject` and no project pinning can also call this endpoint. Use the `owner_team` field to name a team with the caller as a member. Place the project in that team. Members of that team receive the default role for members of team projects.",
+    description = "Create a new project for the current user. The response fields list the project UUID, the project name, and the URL of the web page for the project. A signed-in session can call this endpoint. An API key with `createProject` and no project pinning can also call this endpoint. Use the `owner_team` field to name the team where the caller is Admin. Place the project in that team. Members of that team receive the default role for members of team projects.",
     request_body = MakeProjectRequest,
     responses((status = OK, description = "Project created", body = CreatedEntityResponse), WebError)
 )]
@@ -304,7 +310,7 @@ pub async fn put(
 
     let owner_team = match body.owner_team.as_deref() {
         Some(name) => Some(
-            lookup_owner_team_id_and_check_user_is_member_or_admin(&state.web_db, &user, name)
+            lookup_team_id_by_name_if_user_is_team_admin_or_superuser(&state.web_db, &user, name)
                 .await?,
         ),
         None => None,
@@ -463,7 +469,7 @@ pub async fn get_project(
     operation_id = "patchProject",
     tag = "projects",
     summary = "Update project",
-    description = "Update one or more fields of a project. The API can't edit managed projects. API calls need an admin role for the project. Changes to `owner_team` also need the `manageMembers` permission. Callers need to be members of the new team.",
+    description = "Update one or more fields of a project. The API can't edit managed projects. API calls need an admin role for the project. Changes to `owner_team` also need the `manageMembers` permission. Callers need Admin permission in the new team. Callers also need all permissions of the team's default role for members on team projects.",
     params(ProjectPath),
     request_body = PatchProjectRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
@@ -497,14 +503,56 @@ pub async fn patch_project(
                 );
             }
             Some(match owner_team.as_deref() {
-                Some(name) => Some(
-                    lookup_owner_team_id_and_check_user_is_member_or_admin(&db.web_db, &user, name)
-                        .await?,
-                ),
+                Some(name) => {
+                    let new_project_owner_team_id =
+                        lookup_team_id_by_name_if_user_is_team_admin_or_superuser(
+                            &db.web_db, &user, name,
+                        )
+                        .await?;
+                    let new_project_owner_team =
+                        by_id::<ETeam, _>(&db.web_db, new_project_owner_team_id)
+                            .await?
+                            .or_not_found(Resource::Team)?;
+                    if let (true, Some(new_project_role_id_given_to_team_users)) = (
+                        new_project_owner_team.new_project_users,
+                        new_project_owner_team.new_project_role,
+                    ) {
+                        load_caller_project_permissions_and_require_can_grant(
+                            &db.web_db,
+                            Caller::User(&user),
+                            project.id,
+                            api_key.as_ref(),
+                            load_permission_mask_by_role_id::<ERole>(
+                                &db.web_db,
+                                new_project_role_id_given_to_team_users,
+                            )
+                            .await?,
+                        )
+                        .await?;
+                    }
+                    Some(new_project_owner_team_id)
+                }
                 None => None,
             })
         }
     };
+    if let Some(owner_team) = owner_team {
+        for grant in
+            gradient_db::teams::grants::load_project_owned_team_grants_to_remove_on_owner_change(
+                &db.web_db, project.id, owner_team,
+            )
+            .await?
+        {
+            ensure_caller_can_remove_grant_removed_by_project_owner_team_change(
+                &db.web_db,
+                &user,
+                api_key.as_ref(),
+                project.id,
+                &grant,
+            )
+            .await?;
+        }
+    }
     let fields = changed_fields([
         ("owner_team", owner_team.is_some()),
         ("name", body.name.is_some()),
@@ -593,10 +641,16 @@ pub async fn patch_project(
 pub async fn delete_project(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::DeleteProject>>,
     audit: Audit,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project_id = project.id;
     let project_name = project.name.clone();
+    let workers =
+        gradient_db::projects::workers::worker_ids_for_project(&db.web_db, project_id).await?;
     gradient_db::rows::delete::<EProject, _>(&db.web_db, project).await?;
+    for worker_id in &workers {
+        scheduler.request_reauth(worker_id).await;
+    }
 
     audit.write(Action::ProjectDelete, EventOwner::project(project_id), serde_json::json!({ "project_id": project_id.to_string(), "project_name": project_name, }))
     .await;

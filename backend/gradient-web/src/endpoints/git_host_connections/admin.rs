@@ -8,6 +8,9 @@ use super::{
     CreateGitHostConnectionRequest, GitHostConnectionReaderScope, GitHostConnectionResponse,
     GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
     IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    repository_grant_list_create_delete::{
+        self, CreateRepositoryGrantRequest, RepositoryGrantResponse,
+    },
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -108,7 +111,7 @@ pub async fn get_instance_git_host_connection(
     operation_id = "patchInstanceGitHostConnection",
     tag = "admin",
     summary = "Update instance git host connection",
-    description = "Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.",
+    description = "Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Changes to the scheme, host, or port of `base_url` remove the stored access token, its refresh token, its expiry, and the webhook secret. Changes to `git_host_type` remove those values too. Requests store `access_token` or `secret` that they carry. Connections that receive events and have no new `secret` get a new webhook secret. Responses show that secret once in `generated_secret`. Requests for GitHub App connections and for connections that declarative state manages fail.",
     params(("id" = GitHostConnectionId, Path)),
     request_body = PatchGitHostConnectionRequest,
     responses((status = OK, description = "Connection updated", body = GitHostConnectionResponse), WebError)
@@ -149,6 +152,76 @@ pub async fn delete_instance_git_host_connection(
     audit: Audit,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     super::delete(&state.web_db, Owner::Instance, id, &audit).await?;
+    Ok(ok_json(true))
+}
+
+#[utoipa::path(
+    get,
+    path = "/git-host-connections/{id}/repository-grants",
+    operation_id = "listInstanceGitHostConnectionRepositoryGrants",
+    tag = "admin",
+    summary = "List repository grants of an instance git host connection",
+    description = "List the repositories where each project can use this instance connection. Grants without `repository_name` apply to all repositories in `repository_owner`.",
+    params(("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Repository Grants", body = Vec<RepositoryGrantResponse>), WebError)
+)]
+pub async fn list_instance_git_host_connection_repository_grants(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<GitHostConnectionId>,
+) -> WebResult<Json<BaseResponse<Vec<RepositoryGrantResponse>>>> {
+    Ok(ok_json(
+        repository_grant_list_create_delete::list(&state.web_db, Owner::Instance, id).await?,
+    ))
+}
+
+#[utoipa::path(
+    put,
+    path = "/git-host-connections/{id}/repository-grants",
+    operation_id = "createInstanceGitHostConnectionRepositoryGrant",
+    tag = "admin",
+    summary = "Create repository grant for an instance git host connection",
+    description = "Let tasks of `project` use this instance connection on repository `repository_owner/repository_name`. Omit `repository_name` to grant all repositories of the owner. Both parts stay lowercase in Gradient. Existing grants give a 409 response.",
+    params(("id" = GitHostConnectionId, Path)),
+    request_body = CreateRepositoryGrantRequest,
+    responses((status = OK, description = "Created the repository grant.", body = RepositoryGrantResponse), WebError)
+)]
+pub async fn create_repository_grant_for_instance_git_host_connection(
+    State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(id): Path<GitHostConnectionId>,
+    audit: Audit,
+    JsonBody(body): JsonBody<CreateRepositoryGrantRequest>,
+) -> WebResult<Json<BaseResponse<RepositoryGrantResponse>>> {
+    Ok(ok_json(
+        repository_grant_list_create_delete::create(
+            &state.web_db,
+            Owner::Instance,
+            id,
+            user.id,
+            body,
+            &audit,
+        )
+        .await?,
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/git-host-connections/{id}/repository-grants/{grant}",
+    operation_id = "deleteInstanceGitHostConnectionRepositoryGrant",
+    tag = "admin",
+    summary = "Delete repository grant of an instance git host connection",
+    description = "Remove the repository permission. Project tasks can no longer use the connection to that repository.",
+    params(("id" = GitHostConnectionId, Path), ("grant" = GitHostConnectionRepositoryGrantId, Path)),
+    responses((status = OK, description = "Deleted", body = bool, content_type = "application/json"), WebError)
+)]
+pub async fn delete_instance_git_host_connection_repository_grant(
+    State(state): State<Arc<ServerState>>,
+    Path((id, grant)): Path<(GitHostConnectionId, GitHostConnectionRepositoryGrantId)>,
+    audit: Audit,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    repository_grant_list_create_delete::delete(&state.web_db, Owner::Instance, id, grant, &audit)
+        .await?;
     Ok(ok_json(true))
 }
 

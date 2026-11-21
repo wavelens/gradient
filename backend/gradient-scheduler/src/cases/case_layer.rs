@@ -38,7 +38,7 @@ fn queued_build(evaluation: EvaluationId) -> Shape {
 }
 
 async fn connect_builder(case: &SchedulerCase) {
-    case.connect(W, w_build(), &[]).await;
+    case.connect(W, w_build()).await;
 }
 
 async fn admit(case: &SchedulerCase) {
@@ -125,7 +125,7 @@ async fn a_seeded_queued_build_is_pending_after_admission() {
 #[tokio::test]
 async fn signals_are_taken_once() {
     let case = SchedulerCase::start(shape()).await;
-    case.connect(W, w_eval(), &[]).await;
+    case.connect(W, w_eval()).await;
     case.idle(W, JobKind::Flake).await;
     let project = ProjectId::now_v7();
 

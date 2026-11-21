@@ -49,6 +49,14 @@ pub struct PrRef {
     pub url: Option<String>,
 }
 
+fn percent_encode_branch_name_path_segments(branch: &str) -> String {
+    branch
+        .split('/')
+        .map(|segment| url::form_urlencoded::byte_serialize(segment.as_bytes()).collect())
+        .collect::<Vec<String>>()
+        .join("/")
+}
+
 fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
@@ -78,7 +86,10 @@ pub(crate) mod github {
         let gh = client.with_user_agent("gradient");
 
         let base_sha: RefObject = gh
-            .get_json(&format!("/repos/{owner}/{repo}/git/ref/heads/{base}"))
+            .get_json(&format!(
+                "/repos/{owner}/{repo}/git/ref/heads/{}",
+                percent_encode_branch_name_path_segments(base)
+            ))
             .await?;
         let base_commit: CommitObject = gh
             .get_json(&format!(
@@ -300,6 +311,42 @@ pub(crate) mod github {
     struct UpdatePullReq<'a> {
         title: &'a str,
         body: &'a str,
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::client::http_client_allow_loopback;
+        use wiremock::MockServer;
+
+        #[tokio::test]
+        async fn upsert_branch_percent_encodes_each_base_branch_path_segment_in_ref_get() {
+            for (base, ref_path) in [
+                ("fix#12", "/repos/acme/infra/git/ref/heads/fix%2312"),
+                (
+                    "feature+x/y",
+                    "/repos/acme/infra/git/ref/heads/feature%2Bx/y",
+                ),
+            ] {
+                let server = MockServer::start().await;
+                let client = HostClient::github(
+                    http_client_allow_loopback(),
+                    server.uri().parse().expect("base url"),
+                    "tok",
+                );
+                let commit = super::super::BranchCommit {
+                    message: "update".into(),
+                    author: None,
+                    files: Vec::new(),
+                };
+
+                let _ =
+                    upsert_branch(&client, "acme", "infra", "gradient/update", base, &commit).await;
+
+                let requests = server.received_requests().await.expect("recorded requests");
+                assert_eq!(requests[0].url.path(), ref_path, "{base}");
+            }
+        }
     }
 }
 

@@ -12,6 +12,7 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId};
+use gradient_entity::worker_registration;
 use gradient_fixtures::shape::shape;
 use gradient_pool::score::weights::REFERENCE_CORES;
 use gradient_pool::score::{ScoreBreakdown, Windowed};
@@ -19,7 +20,7 @@ use gradient_wire::types::{BuildFailureKind, BuildMetrics, FlakeStep, JobKind, J
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, N, N_OUT, SchedulerCase, ago, attr_of,
-    failure, is_recent, output_nar, span, w_all,
+    build_output, failure, is_recent, output_nar, span, w_all,
 };
 
 const W1: &str = "w1";
@@ -177,7 +178,7 @@ async fn m07_eval_history_takes_the_p95_rss_per_task_and_the_fleet_fetch_mean() 
 #[tokio::test]
 async fn m08_only_a_real_build_or_an_oom_kill_writes_a_metric_row() {
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2).ram_total_mb(8_000)).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -259,9 +260,230 @@ async fn m08_only_a_real_build_or_an_oom_kill_writes_a_metric_row() {
 }
 
 #[tokio::test]
+async fn m13_derivation_metric_rows_carry_the_build_project_and_its_worker_registration_not_the_workers_other_project()
+ {
+    let project_x_evaluation_id = EvaluationId::now_v7();
+    let second_project_evaluation_id_without_dispatched_job = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evalq(second_project_evaluation_id_without_dispatched_job)
+            .worker_registration(W1)
+            .two(project_x_evaluation_id)
+            .worker_registration(W1),
+    )
+    .await;
+    let built_project_id = case.db.project_of(project_x_evaluation_id).await;
+    let worker_1_worker_registration_id_in_project_x = case
+        .db
+        .rows::<worker_registration::Entity>()
+        .await
+        .into_iter()
+        .find(|row| row.worker_id == W1 && row.peer_id == built_project_id)
+        .expect("W1 is on the registration list for project X.")
+        .id;
+    case.connect(W1, w_all().slots(2)).await;
+    let (a, b) = (case.key(A).await, case.key(B).await);
+
+    case.admit_startable_moves().await;
+    let mut assignments: HashMap<String, DispatchedJobId> = HashMap::new();
+    for _ in 0..2 {
+        let taken = case
+            .request_job(W1, JobKind::Build)
+            .await
+            .expect("step 1: W1 takes a build");
+        assignments.insert(taken.job_id().to_owned(), taken.assignment_id());
+    }
+    for key in [&a, &b] {
+        case.report_building(W1, key).await;
+    }
+    case.check("step 1").await;
+
+    case.report_build_output(
+        W1,
+        &a,
+        vec![build_output(A, A_OUT)],
+        false,
+        Some(BuildMetrics {
+            peak_ram_mb: Some(100),
+            ..Default::default()
+        }),
+    )
+    .await;
+    case.fail(
+        W1,
+        &b,
+        assignments[&b],
+        failure(BuildFailureKind::Transient)
+            .error("oom")
+            .spans(vec![span(JobPhase::Build, 0, 1)])
+            .elapsed_ms(1)
+            .metrics(BuildMetrics {
+                oom_killed: true,
+                peak_ram_mb: Some(4000),
+                ..Default::default()
+            }),
+    )
+    .await;
+    let mut worker_registration_team_worker_project_rows_from_all_derivation_metrics_of_both_builds =
+        case.derivation_metrics(A).await;
+    worker_registration_team_worker_project_rows_from_all_derivation_metrics_of_both_builds
+        .extend(case.derivation_metrics(B).await);
+    assert_eq!(
+        worker_registration_team_worker_project_rows_from_all_derivation_metrics_of_both_builds
+            .into_iter()
+            .map(|m| (m.worker_registration, m.team_worker, m.project))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                Some(worker_1_worker_registration_id_in_project_x),
+                None,
+                Some(built_project_id),
+            );
+            2
+        ],
+        "After 2: credentials and project of derivation_metric(A) and derivation_metric(B)"
+    );
+
+    case.finish().await;
+}
+
+const TEST_WORKER_ADVERTISED_TOTAL_RAM_MB: u64 = 16_000;
+const TEST_WORKER_CPU_CORE_COUNT: u32 = 8;
+
+type PeakRamAndBuildCorePairs = Vec<(Option<i64>, Option<i32>)>;
+
+async fn run_scheduler_case_build_a_then_oom_b_and_return_peak_ram_and_cores_pairs(
+    success_build_metrics: BuildMetrics,
+    out_of_memory_failure_build_metrics: BuildMetrics,
+) -> (PeakRamAndBuildCorePairs, PeakRamAndBuildCorePairs) {
+    let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
+    case.connect(
+        W1,
+        w_all()
+            .slots(2)
+            .cpus(TEST_WORKER_CPU_CORE_COUNT)
+            .ram_total_mb(TEST_WORKER_ADVERTISED_TOTAL_RAM_MB),
+    )
+    .await;
+    let (a, b) = (case.key(A).await, case.key(B).await);
+
+    case.admit_startable_moves().await;
+    let mut dispatched_job_id_by_job_id: HashMap<String, DispatchedJobId> = HashMap::new();
+    for _ in 0..2 {
+        let taken = case
+            .request_job(W1, JobKind::Build)
+            .await
+            .expect("W1 can obtain a build.");
+        dispatched_job_id_by_job_id.insert(taken.job_id().to_owned(), taken.assignment_id());
+    }
+    for key in [&a, &b] {
+        case.report_building(W1, key).await;
+    }
+
+    case.report_build_output(
+        W1,
+        &a,
+        vec![build_output(A, A_OUT)],
+        false,
+        Some(success_build_metrics),
+    )
+    .await;
+    case.fail(
+        W1,
+        &b,
+        dispatched_job_id_by_job_id[&b],
+        failure(BuildFailureKind::Transient)
+            .error("oom")
+            .spans(vec![span(JobPhase::Build, 0, 1)])
+            .elapsed_ms(1)
+            .metrics(BuildMetrics {
+                oom_killed: true,
+                ..out_of_memory_failure_build_metrics
+            }),
+    )
+    .await;
+    let derivation_metric_row_to_peak_ram_and_build_cores =
+        |rows: Vec<gradient_entity::derivation_metric::Model>| {
+            rows.into_iter()
+                .map(|m| (m.peak_ram_mb, m.build_cores))
+                .collect::<Vec<_>>()
+        };
+    let pairs_of_a_and_b = (
+        derivation_metric_row_to_peak_ram_and_build_cores(case.derivation_metrics(A).await),
+        derivation_metric_row_to_peak_ram_and_build_cores(case.derivation_metrics(B).await),
+    );
+    case.finish().await;
+    pairs_of_a_and_b
+}
+
+#[tokio::test]
+async fn m14_derivation_metric_row_holds_advertised_ram_and_cores_for_successful_build_and_keeps_out_of_memory_sample_unchanged()
+ {
+    let (a, b) = run_scheduler_case_build_a_then_oom_b_and_return_peak_ram_and_cores_pairs(
+        BuildMetrics {
+            peak_ram_mb: Some(TEST_WORKER_ADVERTISED_TOTAL_RAM_MB * 1_000),
+            build_cores: Some(TEST_WORKER_CPU_CORE_COUNT * 64),
+            ..Default::default()
+        },
+        BuildMetrics {
+            peak_ram_mb: Some(4_000),
+            build_cores: Some(4),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert_eq!(
+        a,
+        vec![(
+            Some(TEST_WORKER_ADVERTISED_TOTAL_RAM_MB as i64),
+            Some(TEST_WORKER_CPU_CORE_COUNT as i32)
+        )],
+        "The nominal RAM and core count of W1 fill the metric row for A instead of the reported values."
+    );
+    assert_eq!(
+        b,
+        vec![(Some(4_000), Some(4))],
+        "Tests store the honest out-of-memory sample for B unchanged."
+    );
+}
+
+#[tokio::test]
+async fn m15_out_of_memory_build_metric_row_limits_overreported_worker_peak_ram_and_build_core_count_to_advertised_total_and_keeps_honest_success_sample()
+ {
+    let (a, b) = run_scheduler_case_build_a_then_oom_b_and_return_peak_ram_and_cores_pairs(
+        BuildMetrics {
+            peak_ram_mb: Some(2_000),
+            build_cores: Some(2),
+            ..Default::default()
+        },
+        BuildMetrics {
+            peak_ram_mb: Some(TEST_WORKER_ADVERTISED_TOTAL_RAM_MB * 1_000),
+            build_cores: Some(TEST_WORKER_CPU_CORE_COUNT * 64),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert_eq!(
+        b,
+        vec![(
+            Some(TEST_WORKER_ADVERTISED_TOTAL_RAM_MB as i64),
+            Some(TEST_WORKER_CPU_CORE_COUNT as i32)
+        )],
+        "The out-of-memory metric rows for B store the nominal RAM and core count of W1, not the reported values."
+    );
+    assert_eq!(
+        a,
+        vec![(Some(2_000), Some(2))],
+        "Honest samples of A keep their original form in storage."
+    );
+}
+
+#[tokio::test]
 async fn m09_build_assigned_to_first_requesting_worker_without_score_report() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -299,7 +521,7 @@ async fn m10_equal_scores_tie_to_the_smaller_job_id_and_the_row_keeps_the_score(
         .add_missing_cached_build_input(A, D, D_OUT)
         .add_missing_cached_build_input(B, N, N_OUT);
     let case = SchedulerCase::start(seed).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
     let smaller = a.clone().min(b.clone());
 
@@ -349,8 +571,8 @@ async fn m11_outputs_present_on_the_worker_lift_the_predicted_resource_penalty()
         });
     }
     let case = SchedulerCase::start(seed).await;
-    case.connect(W1, w_all().ram_total_mb(8000), &[]).await;
-    case.connect(W2, w_all().ram_total_mb(8000), &[]).await;
+    case.connect(W1, w_all().ram_total_mb(16_000)).await;
+    case.connect(W2, w_all().ram_total_mb(8000)).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -387,8 +609,8 @@ async fn m13_completed_build_updates_only_the_completing_workers_store_summary()
         .output(C_OUT)
         .depends_on(B);
     let case = SchedulerCase::start_with(seed, |c| c.build.retry_backoff_secs = 1).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     case.install_worker_local_store_bloom_filter(W1, &[]).await;
     case.install_worker_local_store_bloom_filter(W2, &[]).await;
     let (a, b, c) = (case.key(A).await, case.key(B).await, case.key(C).await);
@@ -486,6 +708,46 @@ async fn m13_completed_build_updates_only_the_completing_workers_store_summary()
         "after 6: the failed build added nothing to W2's store summary"
     );
     case.check("step 6").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn m16_ram_above_only_worker_capacity_is_taken_by_that_worker() {
+    let mut seed = shape().one(EvaluationId::now_v7(), A, A_OUT);
+    for i in 1..=20 {
+        seed = seed.derivation_metric(move |m| {
+            m.peak_ram_mb = Some(60_000);
+            m.build_time_ms = Some(60_000);
+            m.created_at = ago(60 * i);
+        });
+    }
+    let case = SchedulerCase::start(seed).await;
+    case.connect(W1, w_all().ram_total_mb(8000)).await;
+    let a = case.key(A).await;
+    case.admit_startable_moves().await;
+    case.sample_workers().await;
+
+    case.stranded_build_sweep().await;
+    case.abandoned_dispatch_sweep().await;
+    case.eval_completion_watchdog().await;
+
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 1: sb(A).status"
+    );
+    assert!(case.attempts(A).await.is_empty(), "after 1: attempts(A)");
+    assert!(case.pending(&a).await, "after 1: pending(A)");
+    case.check("step 1").await;
+
+    let taken = case.request_job(W1, JobKind::Build).await;
+    assert_eq!(
+        taken.as_ref().map(|j| j.job_id().to_owned()),
+        Some(a.clone()),
+        "After 1: W1 acquired A"
+    );
+    case.check("step 2").await;
 
     case.finish().await;
 }

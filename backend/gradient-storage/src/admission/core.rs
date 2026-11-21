@@ -26,26 +26,16 @@ pub struct Request {
     pub priority: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Decision {
-    Grant(Request),
-    Skip(Request),
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub concurrency: usize,
     pub bytes: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Committed,
-    Failed,
-}
-
 /// Uploads are granted round-robin across sessions and FIFO within one. Priority requests are
-/// getting their own window, and no request is ever bypassing a blocked head.
+/// getting their own window and no request is ever bypassing a blocked head. Only one upload per
+/// object can proceed at a time. The next upload for that object can start after the current one
+/// ended. Each producer can then upload its own bytes and get its own row.
 pub struct AdmissionCore {
     limits: Limits,
     ring: VecDeque<SessionId>,
@@ -89,23 +79,22 @@ impl AdmissionCore {
         self.queues.iter().map(|(s, q)| (*s, q.len())).collect()
     }
 
-    pub fn enqueue(&mut self, request: Request) -> Vec<Decision> {
+    pub fn enqueue(&mut self, request: Request) -> Vec<Request> {
         self.push_back(request);
         self.pump()
     }
 
-    pub fn release(&mut self, session: SessionId, id: u64, outcome: Outcome) -> Vec<Decision> {
-        let mut decisions = self.finish(session, id, outcome);
-        decisions.extend(self.pump());
-        decisions
+    pub fn release(&mut self, session: SessionId, id: u64) -> Vec<Request> {
+        self.finish(session, id);
+        self.pump()
     }
 
-    pub fn release_budget(&mut self, session: SessionId, id: u64) -> Vec<Decision> {
+    pub fn release_budget(&mut self, session: SessionId, id: u64) -> Vec<Request> {
         self.return_budget(session, id);
         self.pump()
     }
 
-    pub fn cancel(&mut self, session: SessionId, id: u64) -> Vec<Decision> {
+    pub fn cancel(&mut self, session: SessionId, id: u64) -> Vec<Request> {
         if self.granted.contains_key(&(session, id)) {
             return self.release_budget(session, id);
         }
@@ -119,7 +108,7 @@ impl AdmissionCore {
         Vec::new()
     }
 
-    pub fn remove_session(&mut self, session: SessionId) -> Vec<Decision> {
+    pub fn remove_session(&mut self, session: SessionId) -> Vec<Request> {
         self.queues.remove(&session);
         self.ring.retain(|s| *s != session);
         for followers in self.followers.values_mut() {
@@ -150,25 +139,19 @@ impl AdmissionCore {
         self.budget_returned.insert((session, id), request.object);
     }
 
-    fn finish(&mut self, session: SessionId, id: u64, outcome: Outcome) -> Vec<Decision> {
+    fn finish(&mut self, session: SessionId, id: u64) {
         self.return_budget(session, id);
         let Some(object) = self.budget_returned.remove(&(session, id)) else {
-            return Vec::new();
+            return;
         };
 
         self.leaders.remove(&object);
         let followers = self.followers.remove(&object).unwrap_or_default();
-        match outcome {
-            Outcome::Committed => followers.into_iter().map(Decision::Skip).collect(),
-            Outcome::Failed => {
-                self.requeue_in_order(followers);
-                Vec::new()
-            }
-        }
+        self.requeue_in_order(followers);
     }
 
-    fn pump(&mut self) -> Vec<Decision> {
-        let mut decisions = Vec::new();
+    fn pump(&mut self) -> Vec<Request> {
+        let mut grants = Vec::new();
         while let Some(head) = self.head() {
             if self.leaders.contains(&head.object) {
                 self.pop_head();
@@ -191,9 +174,9 @@ impl AdmissionCore {
             }
             self.leaders.insert(head.object.clone());
             self.granted.insert((head.session, head.id), head.clone());
-            decisions.push(Decision::Grant(head));
+            grants.push(head);
         }
-        decisions
+        grants
     }
 
     fn head(&mut self) -> Option<Request> {
@@ -301,10 +284,7 @@ mod tests {
         assert_eq!(granted(&core.enqueue(req(1, 2, "b", 1))), vec![]);
         assert_eq!(granted(&core.enqueue(small_req(2, 3, "c"))), vec![(2, 3)]);
         assert_eq!(granted(&core.enqueue(small_req(1, 4, "d"))), vec![(1, 4)]);
-        assert_eq!(
-            granted(&core.release(1, 1, Outcome::Committed)),
-            vec![(1, 2)]
-        );
+        assert_eq!(granted(&core.release(1, 1)), vec![(1, 2)]);
     }
 
     #[test]
@@ -318,20 +298,11 @@ mod tests {
         }
         let over = SMALL_UPLOADS_IN_FLIGHT as u64;
         assert_eq!(granted(&core.enqueue(small_req(1, over, "over"))), vec![]);
-        assert_eq!(
-            granted(&core.release(1, 0, Outcome::Committed)),
-            vec![(1, over)]
-        );
+        assert_eq!(granted(&core.release(1, 0)), vec![(1, over)]);
     }
 
-    fn granted(decisions: &[Decision]) -> Vec<(SessionId, u64)> {
-        decisions
-            .iter()
-            .filter_map(|d| match d {
-                Decision::Grant(r) => Some((r.session, r.id)),
-                Decision::Skip(_) => None,
-            })
-            .collect()
+    fn granted(grants: &[Request]) -> Vec<(SessionId, u64)> {
+        grants.iter().map(|r| (r.session, r.id)).collect()
     }
 
     fn core(concurrency: usize, bytes: u64) -> AdmissionCore {
@@ -345,7 +316,7 @@ mod tests {
         assert_eq!(granted(&c.enqueue(req(1, 2, "b", 1))), vec![(1, 2)]);
         assert!(c.enqueue(req(1, 3, "c", 1)).is_empty());
         assert_eq!(c.queued(1), 1);
-        assert_eq!(granted(&c.release(1, 1, Outcome::Committed)), vec![(1, 3)]);
+        assert_eq!(granted(&c.release(1, 1)), vec![(1, 3)]);
     }
 
     #[test]
@@ -355,9 +326,9 @@ mod tests {
         c.enqueue(req(1, 2, "b", 1));
         c.enqueue(req(1, 3, "c", 1));
         c.enqueue(req(2, 1, "d", 1));
-        assert_eq!(granted(&c.release(1, 1, Outcome::Committed)), vec![(1, 2)]);
-        assert_eq!(granted(&c.release(1, 2, Outcome::Committed)), vec![(2, 1)]);
-        assert_eq!(granted(&c.release(2, 1, Outcome::Committed)), vec![(1, 3)]);
+        assert_eq!(granted(&c.release(1, 1)), vec![(1, 2)]);
+        assert_eq!(granted(&c.release(1, 2)), vec![(2, 1)]);
+        assert_eq!(granted(&c.release(2, 1)), vec![(1, 3)]);
     }
 
     #[test]
@@ -367,8 +338,8 @@ mod tests {
         c.enqueue(req(1, 1, "a", 1));
         c.enqueue(req(2, 1, "b", 1));
         c.enqueue(req(3, 1, "c", 1));
-        assert_eq!(granted(&c.release(9, 1, Outcome::Committed)), vec![(1, 1)]);
-        assert_eq!(granted(&c.release(1, 1, Outcome::Committed)), vec![(2, 1)]);
+        assert_eq!(granted(&c.release(9, 1)), vec![(1, 1)]);
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 1)]);
     }
 
     #[test]
@@ -377,7 +348,7 @@ mod tests {
         assert_eq!(granted(&c.enqueue(req(1, 1, "a", 6 * GIB))), vec![(1, 1)]);
         assert!(c.enqueue(req(2, 1, "b", 6 * GIB)).is_empty());
         assert_eq!(c.bytes_in_flight(), 6 * GIB);
-        assert_eq!(granted(&c.release(1, 1, Outcome::Committed)), vec![(2, 1)]);
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 1)]);
     }
 
     #[test]
@@ -389,10 +360,7 @@ mod tests {
             c.enqueue(req(3, 1, "c", 1)).is_empty(),
             "a small request must wait behind the blocked head"
         );
-        assert_eq!(
-            granted(&c.release(1, 1, Outcome::Committed)),
-            vec![(2, 1), (3, 1)]
-        );
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 1), (3, 1)]);
     }
 
     #[test]
@@ -400,24 +368,21 @@ mod tests {
         let mut c = core(16, 10 * GIB);
         c.enqueue(req(1, 1, "a", 1));
         assert!(c.enqueue(req(2, 1, "big", 20 * GIB)).is_empty());
-        assert_eq!(granted(&c.release(1, 1, Outcome::Committed)), vec![(2, 1)]);
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 1)]);
         assert!(
             c.enqueue(req(3, 1, "c", 1)).is_empty(),
             "the oversized upload runs alone"
         );
-        assert_eq!(granted(&c.release(2, 1, Outcome::Committed)), vec![(3, 1)]);
+        assert_eq!(granted(&c.release(2, 1)), vec![(3, 1)]);
     }
 
     #[test]
-    fn a_duplicate_object_follows_its_leader_and_skips_on_commit() {
+    fn second_upload_waits_for_first_upload_to_end() {
         let mut c = core(16, 10 * GIB);
         c.enqueue(req(1, 1, "a", 1));
         assert!(c.enqueue(req(2, 7, "a", 1)).is_empty());
         assert_eq!(c.in_flight(), 1, "a follower holds no permit");
-        assert_eq!(
-            c.release(1, 1, Outcome::Committed),
-            vec![Decision::Skip(req(2, 7, "a", 1))]
-        );
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 7)]);
     }
 
     #[test]
@@ -429,16 +394,13 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_leader_promotes_its_follower() {
+    fn waiting_upload_requests_for_same_object_are_granted_in_request_order() {
         let mut c = core(16, 10 * GIB);
         c.enqueue(req(1, 1, "a", 1));
         c.enqueue(req(2, 1, "a", 1));
         c.enqueue(req(3, 1, "a", 1));
-        assert_eq!(granted(&c.release(1, 1, Outcome::Failed)), vec![(2, 1)]);
-        assert_eq!(
-            c.release(2, 1, Outcome::Committed),
-            vec![Decision::Skip(req(3, 1, "a", 1))]
-        );
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 1)]);
+        assert_eq!(granted(&c.release(2, 1)), vec![(3, 1)]);
     }
 
     #[test]
@@ -447,7 +409,7 @@ mod tests {
         c.enqueue(req(1, 1, "a", 1));
         c.enqueue(req(1, 2, "b", 1));
         assert!(c.cancel(1, 2).is_empty());
-        assert!(c.release(1, 1, Outcome::Committed).is_empty());
+        assert!(c.release(1, 1).is_empty());
         assert_eq!(c.in_flight(), 0);
     }
 
@@ -471,7 +433,7 @@ mod tests {
         assert_eq!(granted(&decisions), vec![(2, 1)]);
         assert_eq!(c.queued(1), 0);
         assert_eq!(c.in_flight(), 1);
-        assert_eq!(granted(&c.release(1, 1, Outcome::Failed)), vec![(2, 2)]);
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 2)]);
     }
 
     #[test]
@@ -482,10 +444,8 @@ mod tests {
         assert!(c.enqueue(req(2, 2, "b", 1)).is_empty());
         assert_eq!(granted(&c.release_budget(1, 1)), vec![(2, 2)]);
         assert_eq!(c.in_flight(), 1);
-        assert_eq!(
-            c.release(1, 1, Outcome::Committed),
-            vec![Decision::Skip(req(2, 1, "a", 1))]
-        );
+        assert!(c.release(1, 1).is_empty());
+        assert_eq!(granted(&c.release(2, 2)), vec![(2, 1)]);
     }
 
     #[test]
@@ -495,6 +455,6 @@ mod tests {
         c.enqueue(req(2, 1, "a", 1));
         assert!(c.cancel(1, 1).is_empty());
         assert_eq!(c.in_flight(), 0);
-        assert_eq!(granted(&c.release(1, 1, Outcome::Failed)), vec![(2, 1)]);
+        assert_eq!(granted(&c.release(1, 1)), vec![(2, 1)]);
     }
 }

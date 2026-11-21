@@ -29,10 +29,7 @@ pub async fn authorize(
 ) -> Result<Arc<Session>, Rejected> {
     let login = parse_login(login).map_err(|_| Rejected)?;
     match load_session(handles, &login.project, fingerprint).await {
-        Ok(Some(session)) => Ok(Arc::new(Session {
-            target: login.target,
-            ..session
-        })),
+        Ok(Some(session)) => Ok(Arc::new(session.with_gateway_target(login.target))),
         Ok(None) => Err(Rejected),
         Err(error) => {
             tracing::warn!(%error, "ssh login lookup failed");
@@ -75,6 +72,7 @@ async fn load_session(
             login.project,
             login.permissions,
             login.caches,
+            true,
         )
         .await?,
     ))
@@ -91,10 +89,12 @@ pub async fn check_session_access_still_matches_login(
     )
     .await?;
     Ok(login.is_some_and(|login| {
-        login.user.id == session.user.id
-            && login.project.id == session.project.id
-            && login.permissions == session.permissions
-            && login.caches == session.caches
+        session.matches_user_project_permissions_and_readable_cache_ids_if_not_closed(
+            login.user.id,
+            login.project.id,
+            login.permissions,
+            &login.caches,
+        )
     }))
 }
 
@@ -143,6 +143,7 @@ async fn find_user_project_permission_mask_and_caches_by_ssh_key_fingerprint_and
     }))
 }
 
+/// Reject job tokens for evaluations without project credentials first. Every session opened here can use those credentials.
 pub async fn open_project_store_backend_for_api_key(
     handles: SshHandles,
     user: UserId,
@@ -150,6 +151,62 @@ pub async fn open_project_store_backend_for_api_key(
     key_mask: PermissionMask,
     cache_pin: Option<CacheId>,
 ) -> anyhow::Result<Option<Arc<SshBackend>>> {
+    let Some(access) =
+        load_project_store_backend_record_for_api_key(&handles, user, project, key_mask, cache_pin)
+            .await?
+    else {
+        return Ok(None);
+    };
+    let session = Session::open(
+        handles,
+        access.user,
+        access.project,
+        access.permissions,
+        access.caches,
+        true,
+    )
+    .await?;
+    Ok(Some(Arc::new(SshBackend::new(Arc::new(session)))))
+}
+
+pub async fn check_session_access_still_matches_api_key(
+    backend: &SshBackend,
+    key_mask: PermissionMask,
+    cache_pin: Option<CacheId>,
+) -> anyhow::Result<bool> {
+    let session = backend.session();
+    let access = load_project_store_backend_record_for_api_key(
+        &session.handles,
+        session.user.id,
+        session.project.id,
+        key_mask,
+        cache_pin,
+    )
+    .await?;
+    Ok(access.is_some_and(|access| {
+        session.matches_user_project_permissions_and_readable_cache_ids_if_not_closed(
+            access.user.id,
+            access.project.id,
+            access.permissions,
+            &access.caches,
+        )
+    }))
+}
+
+struct ApiKeyUserProjectAccessRecord {
+    user: MUser,
+    project: MProject,
+    permissions: PermissionMask,
+    caches: Vec<CacheId>,
+}
+
+async fn load_project_store_backend_record_for_api_key(
+    handles: &SshHandles,
+    user: UserId,
+    project: ProjectId,
+    key_mask: PermissionMask,
+    cache_pin: Option<CacheId>,
+) -> anyhow::Result<Option<ApiKeyUserProjectAccessRecord>> {
     let Some(user) = by_id::<EUser, _>(&handles.db.web_db, user)
         .await?
         .filter(|u| u.active)
@@ -173,8 +230,12 @@ pub async fn open_project_store_backend_for_api_key(
         .into_iter()
         .filter(|cache| cache_pin.is_none_or(|pinned| pinned == *cache))
         .collect();
-    let session = Session::open(handles, user, project, permissions & key_mask, caches).await?;
-    Ok(Some(Arc::new(SshBackend::new(Arc::new(session)))))
+    Ok(Some(ApiKeyUserProjectAccessRecord {
+        user,
+        project,
+        permissions: permissions & key_mask,
+        caches,
+    }))
 }
 
 #[cfg(test)]
@@ -182,6 +243,8 @@ mod tests {
     use super::*;
     use gradient_fixtures::mock::mock_db;
     use gradient_test_support::state::TestState;
+    use sea_orm::Value;
+    use std::collections::BTreeMap;
 
     const KEY: &str =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHfwJ61+Nu5yJhfB3PfAyywWMtpJcwybHAVPzGWnPQ6v test";
@@ -254,6 +317,7 @@ mod tests {
             gradient_fixtures::rows::project(),
             0,
             Vec::new(),
+            true,
         )
         .await
         .unwrap();
@@ -263,6 +327,63 @@ mod tests {
             .unwrap();
 
         assert!(!still);
+    }
+
+    #[tokio::test]
+    async fn api_key_store_access_check_returns_false_after_cache_removed_from_readable_caches() {
+        let user = gradient_fixtures::rows::user();
+        let project = gradient_fixtures::rows::project();
+        let role = MRole {
+            id: RoleId::now_v7(),
+            permission: i64::MAX,
+            ..Default::default()
+        };
+        let access = MProjectAccess {
+            project: project.id,
+            user: user.id,
+            role: role.id,
+            ..Default::default()
+        };
+        let cache = CacheId::now_v7();
+        let readable_caches = |caches: &[CacheId]| -> Vec<BTreeMap<String, Value>> {
+            caches
+                .iter()
+                .map(|cache| {
+                    BTreeMap::from([("cache".to_owned(), Value::from(cache.into_inner()))])
+                })
+                .collect()
+        };
+        let mut db = mock_db();
+        for caches in [&[cache][..], &[cache], &[]] {
+            db = db
+                .append_query_results([vec![user.clone()]])
+                .append_query_results([vec![project.clone()]])
+                .append_query_results([vec![access.clone()]])
+                .append_query_results([vec![role.clone()]])
+                .append_query_results([readable_caches(caches)]);
+        }
+        let state = TestState::new().web_db(db.into_connection()).build();
+        let backend = open_project_store_backend_for_api_key(
+            SshHandles::for_tests(&state),
+            user.id,
+            project.id,
+            PermissionMask::MAX,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("store backend opens");
+
+        assert!(
+            check_session_access_still_matches_api_key(&backend, PermissionMask::MAX, None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !check_session_access_still_matches_api_key(&backend, PermissionMask::MAX, None)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

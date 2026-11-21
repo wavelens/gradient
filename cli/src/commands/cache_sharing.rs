@@ -5,6 +5,7 @@
  */
 
 use crate::commands::completion;
+use crate::commands::mcp_command_run_decisions::McpToolCommandPermission::McpToolMayRunCommand;
 use crate::input::client_from_config;
 use crate::output::Output;
 use clap::Subcommand;
@@ -18,12 +19,14 @@ use connector::api::{
 #[derive(Subcommand, Debug)]
 pub enum CacheUserCommands {
     /// Show cache members
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
     },
     /// Invite a user to the cache with a role.
+    #[command(add = McpToolMayRunCommand)]
     Add {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -37,6 +40,7 @@ pub enum CacheUserCommands {
         add_as_member_immediately: bool,
     },
     /// Change the role of a cache member
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -47,6 +51,7 @@ pub enum CacheUserCommands {
         role: String,
     },
     /// Remove a member from the cache.
+    #[command(add = McpToolMayRunCommand)]
     Remove {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -59,12 +64,14 @@ pub enum CacheUserCommands {
 #[derive(Subcommand, Debug)]
 pub enum CacheInvitationCommands {
     /// Display pending invitations for the cache.
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
     },
     /// Revoke a user's pending invitation
+    #[command(add = McpToolMayRunCommand)]
     Revoke {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -77,12 +84,14 @@ pub enum CacheInvitationCommands {
 #[derive(Subcommand, Debug)]
 pub enum CacheRoleCommand {
     /// Show the roles of the cache and the permissions that custom roles can use.
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
     },
     /// Show one role with its permissions.
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -91,6 +100,7 @@ pub enum CacheRoleCommand {
         role_id: String,
     },
     /// Create a custom role.
+    #[command(add = McpToolMayRunCommand)]
     Create {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -102,6 +112,7 @@ pub enum CacheRoleCommand {
         role_permission_names: Vec<String>,
     },
     /// Change the name or permissions of a custom role.
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -116,6 +127,7 @@ pub enum CacheRoleCommand {
         role_permission_names: Option<Vec<String>>,
     },
     /// Delete a custom role
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -128,12 +140,14 @@ pub enum CacheRoleCommand {
 #[derive(Subcommand, Debug)]
 pub enum CacheTeamCommand {
     /// List the teams that can access the cache
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
     },
     /// Grant a team access to the cache with a role.
+    #[command(add = McpToolMayRunCommand)]
     Add {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -144,6 +158,7 @@ pub enum CacheTeamCommand {
         role: String,
     },
     /// Change the role of a team on the cache
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -154,6 +169,7 @@ pub enum CacheTeamCommand {
         role: String,
     },
     /// Revoke a team's access to a cache
+    #[command(add = McpToolMayRunCommand)]
     Remove {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -166,12 +182,14 @@ pub enum CacheTeamCommand {
 #[derive(Subcommand, Debug)]
 pub enum CacheRequestSubcommand {
     /// Display projects that request a cache subscription.
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
     },
     /// Approve requests for a project subscription.
+    #[command(add = McpToolMayRunCommand)]
     Approve {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -180,6 +198,7 @@ pub enum CacheRequestSubcommand {
         project: String,
     },
     /// Reject the subscription request for the project.
+    #[command(add = McpToolMayRunCommand)]
     Deny {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]

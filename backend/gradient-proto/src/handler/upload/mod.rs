@@ -11,12 +11,14 @@ use std::time::{Duration, Instant};
 
 use gradient_db::scheduling::assignment_record::exec_job_of_key;
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
-use gradient_storage::eval_cache_segment::{SEGMENT_MAX_BYTES, eval_cache_segment_key};
+use gradient_storage::eval_cache_segment::{
+    CheckedEvalCacheFingerprint, SEGMENT_MAX_BYTES, eval_cache_segment_key,
+};
 use gradient_storage::{NarStore, PartialStore, StorageTarget, exec_output_key, upload_lease};
 use gradient_types::StorePath;
 use gradient_types::exec::{ContinueFileError, MAX_CONTINUE_FILE_BYTES};
 use gradient_types::ids::{CacheId, ProjectId};
-use gradient_wire::messages::{ServerMessage, is_small_upload};
+use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{
     CONTINUE_OUTPUT, GrantTarget, UploadMetadata, UploadObject, UploadOutcome, check_output_path,
 };
@@ -26,7 +28,10 @@ use uuid::Uuid;
 
 use super::inbound::InboundContext;
 use super::socket::send_server_msg;
-pub(super) use table::{Granted, Lease, Transfer, UploadTable};
+pub(super) use table::{
+    Granted, Lease, Queued, TemporaryNarUploadObject, Transfer, UploadTable,
+    UploadedStorePathDeriverChoice,
+};
 
 pub(super) struct UploadSession {
     pub admission: AdmissionSession,
@@ -64,7 +69,7 @@ impl InboundContext<'_> {
                 .settle(
                     request_id,
                     UploadOutcome::Rejected {
-                        reason: format!("job {job_id} is not running on this session"),
+                        reason: format!("This session does not run job {job_id}."),
                     },
                 )
                 .await;
@@ -116,17 +121,28 @@ impl InboundContext<'_> {
                     .await;
             }
             UploadObject::EvalCacheSegment { fingerprint } => {
-                match self.eval_cache_target(project, fingerprint).await {
-                    Some((cache, key)) => (ObjectKey::EvalCache(key), Some(cache)),
-                    None => return self.grant(request_id, GrantTarget::Skip).await,
+                match self.parse_fingerprint_for_active_evaluation_job(&job_id, fingerprint) {
+                    Ok(fingerprint) => match self.eval_cache_target(project, &fingerprint).await {
+                        Some((cache, key)) => (ObjectKey::EvalCache(key), Some(cache)),
+                        None => return self.grant(request_id, GrantTarget::Skip).await,
+                    },
+                    Err(reason) => {
+                        return self
+                            .settle(request_id, UploadOutcome::Rejected { reason })
+                            .await;
+                    }
                 }
             }
         };
         let priority = gradient_wire::messages::is_small_upload(size);
-        if !uploads
-            .table
-            .queue(request_id, job_id, project, object, segment_cache, size)
-        {
+        let queued = Queued {
+            job_id,
+            project,
+            object,
+            segment_cache,
+            size,
+        };
+        if !uploads.table.queue(request_id, queued) {
             return self
                 .settle(
                     request_id,
@@ -145,69 +161,44 @@ impl InboundContext<'_> {
         admitted: Admitted,
         uploads: &mut UploadSession,
     ) {
-        match admitted {
-            Admitted::Skip { id } => {
-                uploads.table.take_queued(id);
-                self.grant(id, GrantTarget::Skip).await;
+        let Admitted {
+            id,
+            object: key,
+            permit,
+        } = admitted;
+        let Some(queued) = uploads.table.take_queued(id) else {
+            return;
+        };
+        match self.open_transfer(&key, queued.size, uploads).await {
+            Ok((target, transfer, lease)) => {
+                uploads.table.grant(
+                    id,
+                    Granted {
+                        key,
+                        segment_cache: queued.segment_cache,
+                        job_id: queued.job_id,
+                        project: queued.project,
+                        object: queued.object,
+                        size: queued.size,
+                        permit,
+                        transfer,
+                        lease,
+                        finished: None,
+                        final_seen: false,
+                    },
+                );
+                self.grant(id, target).await;
             }
-            Admitted::Granted {
-                id,
-                object: key,
-                permit,
-            } => {
-                let Some(queued) = uploads.table.take_queued(id) else {
-                    return;
-                };
-                match self.already_stored(&key, queued.size).await {
-                    Ok(false) => {}
-                    Ok(true) => {
-                        permit.committed();
-                        return self.grant(id, GrantTarget::Skip).await;
-                    }
-                    Err(e) => {
-                        drop(permit);
-                        return self
-                            .settle(
-                                id,
-                                UploadOutcome::Retry {
-                                    reason: format!("checking the cache index: {e:#}"),
-                                },
-                            )
-                            .await;
-                    }
-                }
-                match self.open_transfer(&key, queued.size, uploads).await {
-                    Ok((target, transfer, lease)) => {
-                        uploads.table.grant(
-                            id,
-                            Granted {
-                                key,
-                                segment_cache: queued.segment_cache,
-                                job_id: queued.job_id,
-                                project: queued.project,
-                                object: queued.object,
-                                size: queued.size,
-                                permit,
-                                transfer,
-                                lease,
-                                finished: None,
-                                final_seen: false,
-                            },
-                        );
-                        self.grant(id, target).await;
-                    }
-                    Err(e) => {
-                        warn!(peer_id = %self.peer_id, request_id = id, error = %e, "upload target failed");
-                        drop(permit);
-                        self.settle(
-                            id,
-                            UploadOutcome::Retry {
-                                reason: format!("{e:#}"),
-                            },
-                        )
-                        .await;
-                    }
-                }
+            Err(e) => {
+                warn!(peer_id = %self.peer_id, request_id = id, error = %e, "upload target failed");
+                drop(permit);
+                self.settle(
+                    id,
+                    UploadOutcome::Retry {
+                        reason: format!("{e:#}"),
+                    },
+                )
+                .await;
             }
         }
     }
@@ -238,10 +229,23 @@ impl InboundContext<'_> {
         Ok(exec_output_key(exec_job.into_inner(), path))
     }
 
+    fn parse_fingerprint_for_active_evaluation_job(
+        &self,
+        job_id: &str,
+        fingerprint: &str,
+    ) -> Result<CheckedEvalCacheFingerprint, String> {
+        if self.active.eval(job_id).is_none() {
+            return Err(format!(
+                "Job {job_id} is not an evaluation. Only evaluations can upload segments of the eval cache."
+            ));
+        }
+        CheckedEvalCacheFingerprint::parse(fingerprint).map_err(|e| format!("{e:#}"))
+    }
+
     async fn eval_cache_target(
         &self,
         project: ProjectId,
-        fingerprint: &str,
+        fingerprint: &CheckedEvalCacheFingerprint,
     ) -> Option<(CacheId, String)> {
         let db = &self.handles.db.worker_db;
         let writable = gradient_db::cache_paths::project_write_caches(db, project)
@@ -253,23 +257,8 @@ impl InboundContext<'_> {
         let &target = writable.first()?;
         Some((
             target,
-            eval_cache_segment_key(target, fingerprint, Uuid::now_v7()),
+            eval_cache_segment_key(target, project, fingerprint, Uuid::now_v7()),
         ))
-    }
-
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn already_stored(&self, key: &ObjectKey, size: u64) -> Result<bool, sea_orm::DbErr> {
-        let ObjectKey::Nar(hash) = key else {
-            return Ok(false);
-        };
-        // The commit is dropping a duplicate. A small transfer is costing less than this lookup.
-        if is_small_upload(size) {
-            return Ok(false);
-        }
-
-        Ok(crate::import::stored_path(&self.handles.db.worker_db, hash)
-            .await?
-            .is_some())
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -322,11 +311,17 @@ impl InboundContext<'_> {
                 },
                 lease,
             ),
-            StorageTarget::Multipart(grant) => {
+            StorageTarget::Multipart {
+                grant,
+                temporary_nar_storage_key,
+            } => {
                 let upload_id = grant.upload_id.clone();
                 (
                     GrantTarget::Multipart(grant),
-                    Transfer::Multipart { upload_id },
+                    Transfer::Multipart {
+                        upload_id,
+                        temporary_nar_storage_key,
+                    },
                     lease,
                 )
             }
@@ -419,9 +414,18 @@ impl InboundContext<'_> {
             peer_id: self.peer_id.to_owned(),
             request_id,
             project: granted.project,
+            dispatched_job: self.active.assignment_id(&granted.job_id),
             key: granted.key,
             segment_cache: granted.segment_cache,
-            object: granted.object,
+            object: match granted.object {
+                UploadObject::Nar { store_path } => commit::CommittedUpload::Nar {
+                    deriver_decision: self
+                        .active
+                        .deriver_decision_for_job_upload(&granted.job_id, &store_path),
+                    store_path,
+                },
+                other => commit::CommittedUpload::Other(other),
+            },
             transfer: granted.transfer,
             metadata,
             permit: granted.permit,
@@ -464,23 +468,21 @@ impl InboundContext<'_> {
 }
 
 pub(super) async fn abandon_transfer(nar_storage: &NarStore, granted: Granted) {
-    match (&granted.transfer, &granted.object) {
-        (Transfer::Multipart { upload_id }, UploadObject::Nar { store_path }) => {
-            if let Some(hash) = nar_key(store_path) {
-                nar_storage.abort_multipart(&hash, upload_id).await;
-            }
-        }
-        (
-            Transfer::PutToTemporaryUploadObject {
-                temporary_nar_storage_key,
-            },
-            _,
-        ) => {
-            let _ = nar_storage
-                .delete_temporary_nar_upload(temporary_nar_storage_key)
-                .await;
-        }
-        _ => {}
+    if let Some(upload) = granted.transfer.to_temporary_nar_upload_object() {
+        abort_multipart_upload_and_delete_nar_upload_object(nar_storage, upload).await;
+    }
+}
+
+async fn abort_multipart_upload_and_delete_nar_upload_object(
+    nar_storage: &NarStore,
+    upload: TemporaryNarUploadObject,
+) {
+    let key = upload.temporary_nar_storage_key;
+    if let Some(upload_id) = upload.multipart_upload_id {
+        nar_storage.abort_multipart(&key, &upload_id).await;
+    }
+    if let Err(error) = nar_storage.delete_temporary_nar_upload(&key).await {
+        warn!(%key, %error, "Failed to delete temporary NAR upload");
     }
 }
 
@@ -509,7 +511,10 @@ impl InboundContext<'_> {
 mod tests {
     use super::*;
     use crate::handler::inbound::ActiveJob;
-    use crate::handler::inbound::fixture::{JOB, TestSession, decode, pending_exec};
+    use crate::handler::inbound::fixture::{
+        JOB, TestSession, decode, pending_build,
+        pending_build_job_for_project_with_output_store_paths, pending_exec,
+    };
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_scheduler::jobs::PendingJob;
     use gradient_test_support::state::test_state;
@@ -532,11 +537,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_request_for_a_stored_path_is_skipped_without_a_transfer() {
+    async fn worker_upload_request_for_nar_of_already_stored_path_gets_transfer_grant() {
         let stored = MCachedPath {
             hash: "h".repeat(32),
-            file_hash: Some("sha256:stored".into()),
-            confirmed: true,
+            nar_object_storage_key: "h".repeat(32),
+            file_hash: "sha256:stored".into(),
+            nar_hash: "sha256:stored-nar".into(),
+            nar_size: 1,
+            server_computed_hashes_and_sizes: true,
             ..Default::default()
         };
         let state = test_state(
@@ -554,10 +562,9 @@ mod tests {
             decode(sent.try_recv().unwrap()),
             ServerMessage::UploadGrant {
                 request_id: 1,
-                target: GrantTarget::Skip
+                target: GrantTarget::Passthrough { resume_offset: 0 }
             }
         ));
-        assert_eq!(state.memory.upload_admission.in_flight(), 0);
     }
 
     #[tokio::test]
@@ -579,6 +586,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn nar_upload_request_with_line_feed_in_store_path_name_is_rejected() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        let object = UploadObject::Nar {
+            store_path: format!("/nix/store/{}-p\nInjected: 1", "l".repeat(32)),
+        };
+        ctx.on_upload_request(JOB.into(), 1, object, SMALL_UPLOAD_BYTES, uploads)
+            .await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadCommitted {
+                request_id: 1,
+                outcome: UploadOutcome::Rejected { .. }
+            }
+        ));
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
     async fn a_request_for_a_job_this_session_does_not_run_is_rejected() {
         let state = test_state(empty_db());
         let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
@@ -593,6 +620,93 @@ mod tests {
             }
         ));
         assert_eq!(state.memory.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_worker_session_without_job_rejects_nar_upload_request() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        session.active.remove(JOB);
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request(JOB.into(), 1, nar('a'), SMALL_UPLOAD_BYTES, uploads)
+            .await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadCommitted {
+                request_id: 1,
+                outcome: UploadOutcome::Rejected { .. }
+            }
+        ));
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_build_job_upload_of_other_derivation_output_path_is_allowed() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let own = format!("/nix/store/{}-own", "a".repeat(32));
+        let other = format!("/nix/store/{}-other", "b".repeat(32));
+        session.active.insert(
+            "build:own".into(),
+            ActiveJob {
+                assignment_id: gradient_types::ids::DispatchedJobId::now_v7(),
+                pending: pending_build_job_for_project_with_output_store_paths(
+                    ProjectId::now_v7(),
+                    &[&own],
+                ),
+                cluster: None,
+                input_closure_set: Default::default(),
+            },
+        );
+        let (mut ctx, uploads) = session.split();
+        let object = UploadObject::Nar { store_path: other };
+        ctx.on_upload_request("build:own".into(), 1, object, SMALL_UPLOAD_BYTES, uploads)
+            .await;
+        assert!(sent.try_recv().is_err());
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadGrant { request_id: 1, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn build_job_upload_requests_for_its_own_derivation_output_paths_are_granted() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let out = format!("/nix/store/{}-out", "a".repeat(32));
+        let dev = format!("/nix/store/{}-dev", "d".repeat(32));
+        session.active.insert(
+            "build:own".into(),
+            ActiveJob {
+                assignment_id: gradient_types::ids::DispatchedJobId::now_v7(),
+                pending: pending_build_job_for_project_with_output_store_paths(
+                    ProjectId::now_v7(),
+                    &[&out, &dev],
+                ),
+                cluster: None,
+                input_closure_set: Default::default(),
+            },
+        );
+        let (mut ctx, uploads) = session.split();
+        for (request_id, store_path) in [(1, out), (2, dev)] {
+            let object = UploadObject::Nar { store_path };
+            ctx.on_upload_request(
+                "build:own".into(),
+                request_id,
+                object,
+                SMALL_UPLOAD_BYTES,
+                uploads,
+            )
+            .await;
+            ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+                .await;
+            assert!(matches!(
+                decode(sent.try_recv().unwrap()),
+                ServerMessage::UploadGrant { request_id: granted, .. } if granted == request_id
+            ));
+        }
     }
 
     #[tokio::test]
@@ -687,9 +801,25 @@ mod tests {
     async fn a_finish_that_overtakes_the_final_chunk_waits_for_it() {
         let state = test_state(unknown_path());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let UploadObject::Nar { store_path } = nar('f') else {
+            unreachable!()
+        };
+        session.active.insert(
+            "build:f".into(),
+            ActiveJob {
+                assignment_id: gradient_types::ids::DispatchedJobId::now_v7(),
+                pending: pending_build_job_for_project_with_output_store_paths(
+                    ProjectId::now_v7(),
+                    &[&store_path],
+                ),
+                cluster: None,
+                input_closure_set: Default::default(),
+            },
+        );
         let (mut ctx, uploads) = session.split();
-        let body = b"compressed nar bytes".to_vec();
-        ctx.on_upload_request(JOB.into(), 1, nar('e'), 64, uploads)
+        let uncompressed_nar_bytes = b"uncompressed nar bytes";
+        let body = zstd::encode_all(&uncompressed_nar_bytes[..], 3).unwrap();
+        ctx.on_upload_request("build:f".into(), 1, nar('f'), 64, uploads)
             .await;
         ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
             .await;
@@ -701,8 +831,13 @@ mod tests {
             UploadMetadata::Nar(Box::new(gradient_wire::types::NarUploadMetadata {
                 file_hash: gradient_storage::file_hash_sri(&body),
                 file_size: body.len() as u64,
-                nar_size: 64,
-                nar_hash: "sha256:n".into(),
+                nar_size: uncompressed_nar_bytes.len() as u64,
+                nar_hash: format!(
+                    "sha256:{}",
+                    hex::encode(<sha2::Sha256 as sha2::Digest>::digest(
+                        uncompressed_nar_bytes
+                    ))
+                ),
                 references: Vec::new(),
                 deriver: None,
                 ca: None,
@@ -765,6 +900,109 @@ mod tests {
         assert!(uploads.table.is_empty());
     }
 
+    #[tokio::test]
+    async fn withdraw_assignment_removes_queued_and_granted_uploads() {
+        let state = test_state(unknown_path());
+        let (mut session, _sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request(JOB.into(), 1, nar('f'), 8, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        ctx.on_upload_request(JOB.into(), 2, nar('g'), 8, uploads)
+            .await;
+        assert_eq!(state.memory.upload_admission.in_flight(), 2);
+
+        let refused = ClientMessage::AssignJobResponse {
+            job_id: JOB.into(),
+            accepted: false,
+            reason: None,
+            endpoint: None,
+        };
+        ctx.handle(refused, uploads).await;
+
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+        assert!(uploads.table.is_empty());
+    }
+
+    #[tokio::test]
+    async fn refuses_nar_upload_commit_and_stores_no_object_when_job_assignment_is_withdrawn() {
+        let state = test_state(unknown_path());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let UploadObject::Nar { store_path } = nar('w') else {
+            unreachable!()
+        };
+        let nar_object_key = nar_key(&store_path).unwrap();
+        session.active.insert(
+            "build:w".into(),
+            ActiveJob {
+                assignment_id: gradient_types::ids::DispatchedJobId::now_v7(),
+                pending: pending_build_job_for_project_with_output_store_paths(
+                    ProjectId::now_v7(),
+                    &[&store_path],
+                ),
+                cluster: None,
+                input_closure_set: Default::default(),
+            },
+        );
+        let (mut ctx, uploads) = session.split();
+        let uncompressed_nar_bytes = b"uncompressed nar bytes";
+        let body = zstd::encode_all(&uncompressed_nar_bytes[..], 3).unwrap();
+        ctx.on_upload_request("build:w".into(), 1, nar('w'), 64, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        let _grant = sent.try_recv().unwrap();
+        ctx.on_upload_chunk(1, 0, &body, false, uploads).await;
+        ctx.on_upload_chunk(1, body.len() as u64, &[], true, uploads)
+            .await;
+
+        ctx.active.remove("build:w");
+        ctx.on_upload_finished(
+            1,
+            UploadMetadata::Nar(Box::new(gradient_wire::types::NarUploadMetadata {
+                file_hash: gradient_storage::file_hash_sri(&body),
+                file_size: body.len() as u64,
+                nar_size: uncompressed_nar_bytes.len() as u64,
+                nar_hash: format!(
+                    "sha256:{}",
+                    hex::encode(<sha2::Sha256 as sha2::Digest>::digest(
+                        uncompressed_nar_bytes
+                    ))
+                ),
+                references: Vec::new(),
+                deriver: None,
+                ca: None,
+                multipart: None,
+            })),
+            uploads,
+        )
+        .await;
+        let committed = tokio::time::timeout(Duration::from_secs(60), sent.recv())
+            .await
+            .expect("the commit answers")
+            .unwrap();
+
+        assert!(
+            matches!(
+                decode(committed),
+                ServerMessage::UploadCommitted {
+                    outcome: UploadOutcome::Rejected { .. },
+                    ..
+                }
+            ),
+            "Commits for withdrawn jobs fail with a rejection."
+        );
+        assert!(
+            state
+                .nar_storage
+                .get(&nar_object_key)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
     fn running_exec_job(session: &TestSession) -> (String, String) {
         let pending = pending_exec(ExecJobAttemptId::now_v7());
         let key = pending.job_key();
@@ -778,6 +1016,7 @@ mod tests {
                 assignment_id: gradient_types::ids::DispatchedJobId::now_v7(),
                 pending,
                 cluster: None,
+                input_closure_set: Default::default(),
             },
         );
         (key, job)
@@ -842,5 +1081,112 @@ mod tests {
 
         rejection(sent.try_recv().unwrap());
         assert_eq!(state.memory.upload_admission.in_flight(), 0);
+    }
+
+    const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn segment(fingerprint: &str) -> UploadObject {
+        UploadObject::EvalCacheSegment {
+            fingerprint: fingerprint.into(),
+        }
+    }
+
+    fn writable_cache(project: ProjectId, cache: CacheId) -> sea_orm::DatabaseConnection {
+        mock_db()
+            .append_query_results([vec![gradient_types::MProjectCache {
+                project,
+                cache,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![gradient_types::MCache {
+                id: cache,
+                active: true,
+                ..Default::default()
+            }]])
+            .into_connection()
+    }
+
+    #[tokio::test]
+    async fn a_segment_with_an_empty_fingerprint_is_rejected() {
+        let cache = CacheId::now_v7();
+        let state = test_state(writable_cache(ProjectId::now_v7(), cache));
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+
+        ctx.on_upload_request(JOB.into(), 1, segment(""), 3, uploads)
+            .await;
+
+        rejection(sent.try_recv().unwrap());
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_segment_from_a_build_job_is_rejected_and_not_stored() {
+        let pending = pending_build(gradient_types::ids::DerivationBuildId::now_v7());
+        let state = test_state(writable_cache(pending.project_id(), CacheId::now_v7()));
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let key = pending.job_key();
+        session.active.insert(
+            key.clone(),
+            ActiveJob {
+                assignment_id: gradient_types::ids::DispatchedJobId::now_v7(),
+                pending,
+                cluster: None,
+                input_closure_set: Default::default(),
+            },
+        );
+        let (mut ctx, uploads) = session.split();
+
+        ctx.on_upload_request(key, 1, segment(FINGERPRINT), 3, uploads)
+            .await;
+
+        let reason = rejection(sent.try_recv().unwrap());
+        assert!(reason.contains("not an evaluation"), "{reason}");
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+        assert!(uploads.table.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_evaluation_cache_segment_uploaded_by_a_program_run_job_is_rejected_and_not_stored()
+    {
+        let state = test_state(writable_cache(ProjectId::now_v7(), CacheId::now_v7()));
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (key, _job) = running_exec_job(&session);
+        let (mut ctx, uploads) = session.split();
+
+        ctx.on_upload_request(key, 1, segment(FINGERPRINT), 3, uploads)
+            .await;
+
+        let reason = rejection(sent.try_recv().unwrap());
+        assert!(reason.contains("not an evaluation"), "{reason}");
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+        assert!(uploads.table.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_segment_of_an_evaluation_lands_under_the_key_of_its_project() {
+        let cache = CacheId::now_v7();
+        let state = test_state(writable_cache(ProjectId::now_v7(), cache));
+        let (mut session, _sent, mut admitted) = TestSession::new(&state).await;
+        let project = session
+            .active
+            .project(JOB)
+            .expect("the session runs an evaluation");
+        let (mut ctx, uploads) = session.split();
+
+        ctx.on_upload_request(JOB.into(), 1, segment(FINGERPRINT), 3, uploads)
+            .await;
+
+        let ObjectKey::EvalCache(key) = admitted.recv().await.unwrap().object else {
+            panic!("an eval cache segment is admitted as an eval cache object")
+        };
+        let fingerprint = CheckedEvalCacheFingerprint::parse(FINGERPRINT).unwrap();
+        let prefix = gradient_storage::eval_cache_segment::eval_cache_segment_prefix(
+            cache,
+            project,
+            &fingerprint,
+        );
+        assert!(key.starts_with(&format!("{prefix}/")), "{key}");
+        assert!(key.contains(&project.to_string()), "{key}");
     }
 }

@@ -11,8 +11,10 @@ use gradient_entity::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use gradient_entity::git_host_connection_repository_grant::RepositoryGrantSource;
 pub use gradient_entity::team_project::TeamGrantSource;
 pub use gradient_entity::team_user::{TeamMemberSource, TeamRole};
+pub use gradient_entity::user::AccountOrigin;
 pub use gradient_entity::{
     IdentityMapping, MappingContext, MappingError, OriginalStorePath, STORE_DIR, StoreHash,
     StorePath, StorePathMapper, StorePathMapping,
@@ -79,6 +81,7 @@ pub type EPendingDelivery = pending_delivery::Entity;
 pub type EEvaluationMessage = evaluation_message::Entity;
 pub type EFeature = feature::Entity;
 pub type EGitHostConnection = git_host_connection::Entity;
+pub type EGitHostConnectionRepositoryGrant = git_host_connection_repository_grant::Entity;
 pub type EProject = project::Entity;
 pub type EProjectCache = project_cache::Entity;
 pub type EProjectInvitation = project_invitation::Entity;
@@ -168,6 +171,7 @@ pub type MEvaluationMetric = evaluation_metric::Model;
 pub type MFlakeOutputNode = flake_output_node::Model;
 pub type MFeature = feature::Model;
 pub type MGitHostConnection = git_host_connection::Model;
+pub type MGitHostConnectionRepositoryGrant = git_host_connection_repository_grant::Model;
 pub type MProject = project::Model;
 pub type MProjectCache = project_cache::Model;
 pub type MProjectInvitation = project_invitation::Model;
@@ -251,6 +255,7 @@ pub type AEvaluationMetric = evaluation_metric::ActiveModel;
 pub type AFlakeOutputNode = flake_output_node::ActiveModel;
 pub type AFeature = feature::ActiveModel;
 pub type AGitHostConnection = git_host_connection::ActiveModel;
+pub type AGitHostConnectionRepositoryGrant = git_host_connection_repository_grant::ActiveModel;
 pub type AProject = project::ActiveModel;
 pub type AProjectCache = project_cache::ActiveModel;
 pub type AProjectInvitation = project_invitation::ActiveModel;
@@ -330,6 +335,7 @@ pub type CPendingDelivery = pending_delivery::Column;
 pub type CEvaluationMessage = evaluation_message::Column;
 pub type CFeature = feature::Column;
 pub type CGitHostConnection = git_host_connection::Column;
+pub type CGitHostConnectionRepositoryGrant = git_host_connection_repository_grant::Column;
 pub type CProject = project::Column;
 pub type CProjectCache = project_cache::Column;
 pub type CProjectInvitation = project_invitation::Column;

@@ -10,12 +10,15 @@ use sea_orm::{
 };
 use std::collections::{HashMap, VecDeque};
 
+use crate::store_path_content_variant_reader_choice::{
+    StorePathContentVariantReader,
+    get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache,
+};
 use gradient_types::*;
 
 #[derive(FromQueryResult)]
-struct ReferenceTokens {
+struct RuntimeClosureStorePathHash {
     hash: String,
-    references: Option<String>,
 }
 
 pub fn parse_reference_hash(reference: &str) -> Option<String> {
@@ -24,7 +27,7 @@ pub fn parse_reference_hash(reference: &str) -> Option<String> {
         .map(|path| path.hash().to_owned())
 }
 
-fn tokens(references: Option<String>) -> Vec<String> {
+pub(crate) fn tokens(references: Option<String>) -> Vec<String> {
     references
         .as_deref()
         .unwrap_or_default()
@@ -52,54 +55,30 @@ pub async fn output_hashes_for_drvs<C: ConnectionTrait>(
     .collect())
 }
 
-crate::sql! {
-    REFERENCES_FOR_HASHES = "SELECT hash, \"references\" FROM cached_path WHERE hash = ANY($1)",
-        params = [CachedPathHashes(64)];
-}
-
-pub async fn references_for_hash<C: ConnectionTrait>(
+pub async fn runtime_references_by_store_path_hash_for_trusted_content_variant<
+    C: ConnectionTrait,
+>(
     db: &C,
-    hash: &str,
-) -> Result<Vec<String>, DbErr> {
+    reader: StorePathContentVariantReader,
+    hashes: &[String],
+) -> Result<HashMap<String, Vec<String>>, DbErr> {
     Ok(
-        references_for_hashes(db, std::slice::from_ref(&hash.to_owned()))
-            .await?
-            .remove(hash)
-            .unwrap_or_default(),
+        get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
+            db, reader, hashes,
+        )
+        .await?
+        .into_iter()
+        .map(|(hash, variant)| (hash, tokens(variant.references)))
+        .collect(),
     )
 }
 
-pub async fn references_for_hashes<C: ConnectionTrait>(
-    db: &C,
-    hashes: &[String],
-) -> Result<HashMap<String, Vec<String>>, DbErr> {
-    if hashes.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let rows = crate::fetch_in_chunks(hashes, |chunk| async move {
-        ReferenceTokens::find_by_statement(REFERENCES_FOR_HASHES.bind([chunk.into()]))
-            .all(db)
-            .await
-    })
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| (row.hash, tokens(row.references)))
-        .collect())
-}
-
-/// The path lookup is fenced like the walk.
-/// A plain join is giving the planner no closure size.
-/// The planner would then hash-join every path in the cache.
 fn runtime_closure_reachable_sql() -> String {
     format!(
         "{cte} \
-         SELECT s.* FROM (\
          SELECT o.hash FROM derivation_output o JOIN runtime t ON t.derivation = o.derivation \
-         UNION SELECT u.h FROM unnest($1::text[]) AS u(h)) r, \
-         LATERAL (SELECT cp.* FROM cached_path cp WHERE cp.hash = r.hash OFFSET 0) s",
+         WHERE o.hash IS NOT NULL \
+         UNION SELECT u.h FROM unnest($1::text[]) AS u(h)",
         cte = crate::graph::walks::runtime_closure_cte(
             "runtime",
             "SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1::text[])",
@@ -116,6 +95,7 @@ crate::sql_fn! {
 
 pub async fn runtime_closure_reachable<C>(
     db: &C,
+    reader: StorePathContentVariantReader,
     seed_hashes: &[String],
 ) -> Result<HashMap<String, gradient_entity::cached_path::Model>, DbErr>
 where
@@ -126,15 +106,23 @@ where
     }
 
     let walk = crate::graph::walks::begin_walk(db, &RUNTIME_CLOSURE_REACHABLE).await?;
-    let reached: HashMap<String, gradient_entity::cached_path::Model> = ECachedPath::find()
-        .from_raw_sql(RUNTIME_CLOSURE_REACHABLE.bind([seed_hashes.to_vec().into()]))
-        .all(&walk)
-        .await?
-        .into_iter()
-        .map(|row| (row.hash.clone(), row))
-        .collect();
+    let reached_hashes: Vec<String> = RuntimeClosureStorePathHash::find_by_statement(
+        RUNTIME_CLOSURE_REACHABLE.bind([seed_hashes.to_vec().into()]),
+    )
+    .all(&walk)
+    .await?
+    .into_iter()
+    .map(|row| row.hash)
+    .collect();
     walk.commit().await?;
 
+    let reached =
+        get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
+            db,
+            reader,
+            &reached_hashes,
+        )
+        .await?;
     Ok(referenced_from(seed_hashes, reached))
 }
 
@@ -160,12 +148,16 @@ fn referenced_from(
     closure
 }
 
-pub async fn runtime_closure_size<C>(db: &C, seed_hashes: &[String]) -> Result<i64, DbErr>
+pub async fn runtime_closure_size<C>(
+    db: &C,
+    reader: StorePathContentVariantReader,
+    seed_hashes: &[String],
+) -> Result<i64, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let reached = runtime_closure_reachable(db, seed_hashes).await?;
-    Ok(reached.values().filter_map(|r| r.nar_size).sum())
+    let reached = runtime_closure_reachable(db, reader, seed_hashes).await?;
+    Ok(reached.values().map(|r| r.nar_size).sum())
 }
 
 #[cfg(test)]
@@ -176,9 +168,10 @@ mod tests {
     #[test]
     fn reference_hash_strips_name() {
         assert_eq!(
-            parse_reference_hash("abc123-hello-2.10").as_deref(),
-            Some("abc123")
+            parse_reference_hash("0123456789abcdfghijklmnpqrsvwxyz-hello-2.10").as_deref(),
+            Some("0123456789abcdfghijklmnpqrsvwxyz")
         );
+        assert_eq!(parse_reference_hash("abc123-hello-2.10"), None);
         assert_eq!(parse_reference_hash("abc123"), None);
         assert_eq!(parse_reference_hash(""), None);
     }
@@ -186,16 +179,21 @@ mod tests {
     #[tokio::test]
     async fn empty_seeds_is_zero() {
         let db = empty_db();
-        assert_eq!(runtime_closure_size(&db, &[]).await.unwrap(), 0);
+        assert_eq!(
+            runtime_closure_size(&db, project_reader_with_random_project_id(), &[])
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    fn project_reader_with_random_project_id() -> StorePathContentVariantReader {
+        StorePathContentVariantReader::Project(ProjectId::now_v7())
     }
 
     #[test]
-    fn the_line_is_a_column_and_the_closure_is_a_graph_walk() {
-        let refs = REFERENCES_FOR_HASHES.text();
-        assert!(
-            refs.contains("SELECT hash, \"references\" FROM cached_path"),
-            "{refs}"
-        );
+    fn runtime_closure_query_sql_uses_only_kind_1_and_2_graph_edges_and_not_cached_path_reference()
+    {
         let walk = RUNTIME_CLOSURE_REACHABLE.text();
         assert!(walk.contains("e.kind IN (1, 2)"), "{walk}");
         assert!(!walk.contains("cached_path_reference"), "{walk}");
@@ -211,10 +209,14 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         assert!(
-            runtime_closure_reachable(&db, &["abc".to_string()])
-                .await
-                .expect("the walk runs")
-                .is_empty()
+            runtime_closure_reachable(
+                &db,
+                project_reader_with_random_project_id(),
+                &["abc".to_string()]
+            )
+            .await
+            .expect("the walk runs")
+            .is_empty()
         );
 
         let log = statements(db.into_transaction_log());
@@ -233,35 +235,42 @@ mod tests {
     fn path(hash: &str, references: &str) -> gradient_entity::cached_path::Model {
         gradient_entity::cached_path::Model {
             hash: hash.into(),
+            nar_object_storage_key: hash.into(),
             package: format!("{hash}-pkg"),
             references: Some(references.into()),
-            nar_size: Some(10),
+            nar_size: 10,
             ..Default::default()
         }
     }
 
     #[tokio::test]
     async fn an_output_nothing_references_is_outside_the_runtime_closure() {
+        let [root, lib, dev, headers] = ["1", "2", "3", "4"].map(|digit| digit.repeat(32));
+        let reached_paths = vec![
+            path(&root, &format!("{root}-pkg {lib}-pkg")),
+            path(&lib, &format!("{lib}-pkg")),
+            path(&dev, &format!("{dev}-pkg {lib}-pkg {headers}-pkg")),
+            path(&headers, ""),
+        ];
         let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
             }])
-            .append_query_results([vec![
-                path("root", "root-pkg lib-pkg"),
-                path("lib", "lib-pkg"),
-                path("dev", "dev-pkg lib-pkg headers-pkg"),
-                path("headers", ""),
-            ]])
+            .append_query_results([reached_paths.clone(), reached_paths])
             .into_connection();
 
-        let reached = runtime_closure_reachable(&db, &["root".to_string()])
-            .await
-            .expect("the walk runs");
+        let reached = runtime_closure_reachable(
+            &db,
+            project_reader_with_random_project_id(),
+            std::slice::from_ref(&root),
+        )
+        .await
+        .expect("the walk runs");
 
         let mut hashes: Vec<&str> = reached.keys().map(String::as_str).collect();
         hashes.sort_unstable();
-        assert_eq!(hashes, ["lib", "root"]);
+        assert_eq!(hashes, [root.as_str(), lib.as_str()]);
     }
 
     /// The walk must dedupe on the derivation alone.

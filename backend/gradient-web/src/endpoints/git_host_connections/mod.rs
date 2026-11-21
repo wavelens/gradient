@@ -10,6 +10,7 @@ pub mod admin;
 pub mod project;
 pub mod project_gitea_oauth2_connection;
 mod refusal;
+pub mod repository_grant_list_create_delete;
 mod summaries;
 pub mod team;
 
@@ -31,16 +32,16 @@ use anyhow::Context;
 use gradient_ci::CiContext;
 use gradient_ci::actions::{encrypt_secret_with_file, new_webhook_secret};
 use gradient_db::git_host_connections::{self as connections, GitHostConnectionOwnerByDatabaseId};
-use gradient_db::lookup::by_id;
+use gradient_db::lookup::{by_id, lock_for_admin_change};
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
 use gradient_git_host::repository_fit::GitHostConnectionAddress;
-pub(crate) use gradient_git_host::repository_fit::url_host;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::git_host::{
     GitHostConnectionCapabilities, GitHostConnectionOwner, MissingGitHostConnectionSetting,
 };
 use gradient_types::*;
+use gradient_util::http_base_url::{ValidatedHttpBaseUrl, urls_differ_in_scheme_host_or_port};
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 
@@ -101,11 +102,6 @@ impl RepositoryFit {
                 fits: false,
                 can_be_selected: false,
                 reason: Some(reason),
-            },
-            Ok(()) if address_of(connection).expected_host().is_none() => Self {
-                fits: false,
-                can_be_selected: true,
-                reason: Some("No host URL".to_owned()),
             },
             Ok(()) => Self {
                 fits: true,
@@ -317,7 +313,7 @@ async fn link_fitting_tasks_without_connection(
         }
         _ => Vec::new(),
     };
-    let linked: Vec<MTask> = candidates
+    let fitting: Vec<MTask> = candidates
         .into_iter()
         .filter(|task| {
             !task.managed
@@ -325,6 +321,28 @@ async fn link_fitting_tasks_without_connection(
                 && repository_fits_connection_with_known_host(&task.repository, connection)
         })
         .collect();
+    let fitting_ids: Vec<TaskId> = fitting.iter().map(|task| task.id).collect();
+    let granted =
+        gradient_db::git_host_connection_repository_grants::filter_task_ids_by_git_host_connection_repository_grants(
+            db,
+            connection.id,
+            &fitting_ids,
+        )
+        .await?;
+    let (linked, without_grant): (Vec<MTask>, Vec<MTask>) = fitting
+        .into_iter()
+        .partition(|task| granted.contains(&task.id));
+    for task in &without_grant {
+        let repository = gradient_types::flake_url::parse_owner_repo(&task.repository)
+            .map(|(owner, name)| format!("{owner}/{name}"));
+        tracing::info!(
+            connection = %connection.id,
+            task = %task.id,
+            project = %task.project,
+            repository = ?repository,
+            "Task repositories that match a Git host connection stay unlinked when there is no repository grant for the repository in the task's project."
+        );
+    }
     let ids: Vec<TaskId> = linked.iter().map(|task| task.id).collect();
     connections::link_tasks_to_connection(db, &ids, connection.id, connection.reports_status)
         .await?;
@@ -341,16 +359,19 @@ pub(crate) async fn load_of_owner(
         .or_not_found(Resource::GitHostConnection)
 }
 
-async fn write_audit(audit: &Audit, action: Action, connection: &MGitHostConnection) {
-    let owner = match GitHostConnectionOwnerByDatabaseId::of(connection) {
+fn audit_log_owner_of_git_host_connection(connection: &MGitHostConnection) -> EventOwner {
+    match GitHostConnectionOwnerByDatabaseId::of(connection) {
         GitHostConnectionOwnerByDatabaseId::Instance => EventOwner::default(),
         GitHostConnectionOwnerByDatabaseId::Team(team) => EventOwner::team(team),
         GitHostConnectionOwnerByDatabaseId::Project(project) => EventOwner::project(project),
-    };
+    }
+}
+
+async fn write_audit(audit: &Audit, action: Action, connection: &MGitHostConnection) {
     audit
         .write(
             action,
-            owner,
+            audit_log_owner_of_git_host_connection(connection),
             serde_json::json!({
                 "git_host_connection_id": connection.id.to_string(),
                 "name": connection.name,
@@ -381,18 +402,31 @@ fn parse_git_host(s: &str) -> WebResult<GitHostType> {
 }
 
 fn http_base_url(url: &str) -> WebResult<String> {
-    url::Url::parse(url)
-        .ok()
-        .filter(|u| matches!(u.scheme(), "http" | "https"))
-        .map(|_| url.trim_end_matches('/').to_owned())
-        .ok_or_else(|| GitHostConnectionRefusal::InvalidBaseUrl.into())
+    url.parse::<ValidatedHttpBaseUrl>()
+        .map(|base_url| base_url.to_string())
+        .map_err(|e| GitHostConnectionRefusal::InvalidBaseUrl(e.to_string()).into())
 }
 
 fn non_blank(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
 }
 
+fn resolve_base_url_for_git_host(
+    git_host_type: GitHostType,
+    base_url: Option<&str>,
+) -> WebResult<Option<String>> {
+    gradient_types::git_host::base_url_of_git_host_type_and_base_url(
+        git_host_type,
+        non_blank(base_url),
+    )
+    .map(http_base_url)
+    .transpose()
+}
+
 fn check_capabilities(connection: &MGitHostConnection) -> WebResult<()> {
+    if connection.github_installation_id.is_none() && connection.base_url.is_none() {
+        return Err(GitHostConnectionRefusal::GitHostConnectionBaseUrlMissing.into());
+    }
     GitHostConnectionCapabilities {
         github_app: connection.github_installation_id.is_some(),
         receives_events: connection.receives_events,
@@ -444,7 +478,7 @@ async fn create_github_app_connection(
         .await
         .context("read github app key")?;
     let account = gradient_git_host::github_app::get_installation(
-        &ci.http,
+        &ci.db.user_supplied_url_http_client,
         app.app_id,
         &pem,
         installation_id,
@@ -509,9 +543,7 @@ pub(crate) async fn create(
         name,
         git_host_type: git_host,
         secret,
-        base_url: non_blank(body.base_url.as_deref())
-            .map(http_base_url)
-            .transpose()?,
+        base_url: resolve_base_url_for_git_host(git_host, body.base_url.as_deref())?,
         access_token,
         encrypted_refresh_token: None,
         access_token_expires_at: None,
@@ -544,7 +576,11 @@ pub(crate) async fn patch(
     body: PatchGitHostConnectionRequest,
     audit: &Audit,
 ) -> WebResult<GitHostConnectionResponse> {
-    let current = load_of_owner(&ci.db.web_db, owner, id).await?;
+    let txn = ci.db.web_db.inner().begin().await?;
+    let current = lock_for_admin_change::<EGitHostConnection, _>(&txn, id)
+        .await?
+        .filter(|connection| GitHostConnectionOwnerByDatabaseId::of(connection) == owner)
+        .or_not_found(Resource::GitHostConnection)?;
     reject_managed(&current)?;
     if current.github_installation_id.is_some() {
         return Err(GitHostConnectionRefusal::GitHubConnectionNotEditable.into());
@@ -553,7 +589,7 @@ pub(crate) async fn patch(
     let mut next = current.clone();
     if let Some(name) = body.name {
         let name = name.into_inner();
-        if connections::other_by_name(&ci.db.web_db, owner, &name, id)
+        if connections::other_by_name(&txn, owner, &name, id)
             .await?
             .is_some()
         {
@@ -572,7 +608,18 @@ pub(crate) async fn patch(
         next.git_host_type = host;
     }
     if let Some(base_url) = body.base_url {
-        next.base_url = non_blank(Some(&base_url)).map(http_base_url).transpose()?;
+        next.base_url = resolve_base_url_for_git_host(next.git_host_type, Some(&base_url))?;
+    }
+    let git_host_target_changed = next.git_host_type != current.git_host_type
+        || match (next.base_url.as_deref(), current.base_url.as_deref()) {
+            (Some(next), Some(current)) => urls_differ_in_scheme_host_or_port(next, current),
+            (next, current) => next.is_some() != current.is_some(),
+        };
+    if git_host_target_changed {
+        next.access_token = None;
+        next.encrypted_refresh_token = None;
+        next.access_token_expires_at = None;
+        next.secret = None;
     }
     if let Some(secret) = body.secret {
         next.secret = non_blank(Some(&secret))
@@ -591,17 +638,19 @@ pub(crate) async fn patch(
     }
     next.receives_events = body.receives_events.unwrap_or(next.receives_events);
     next.reports_status = body.reports_status.unwrap_or(next.reports_status);
-    let generated_secret =
-        (next.receives_events && !current.receives_events && next.secret.is_none())
-            .then(new_webhook_secret);
+    let generated_secret = (next.receives_events
+        && (!current.receives_events || git_host_target_changed)
+        && next.secret.is_none())
+    .then(new_webhook_secret);
     if let Some(secret) = &generated_secret {
         next.secret = Some(encrypt(ci, secret)?);
     }
     check_capabilities(&next)?;
 
-    let updated = connections::write_all_columns_of_git_host_connection(&ci.db.web_db, next)
+    let updated = connections::write_all_columns_of_git_host_connection(&txn, next)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GitHostConnectionName))?;
+    txn.commit().await?;
     write_audit(audit, Action::GitHostConnectionUpdate, &updated).await;
     let mut out = response(
         &ci.db.web_db,
@@ -642,7 +691,7 @@ async fn sign_in_account(
             .await
             .map_err(|_| "Cannot read the private key for the GitHub App".to_owned())?;
         return gradient_git_host::github_app::get_installation(
-            &ci.http,
+            &ci.db.user_supplied_url_http_client,
             app.app_id,
             &pem,
             installation_id,
@@ -650,25 +699,27 @@ async fn sign_in_account(
         .await
         .map_err(|e| e.to_string());
     }
-    let base_url = connection
-        .base_url
-        .as_deref()
-        .ok_or_else(|| "The connection has no base URL.".to_owned())?;
-    gradient_util::http_validation::validate_webhook_url(base_url)
-        .map_err(|e| format!("Gradient does not call {base_url}: {e}"))?;
-    let token = gradient_ci::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token(
+    let base_url = read_checked_git_host_connection_base_url_or_host_type_default(connection)
+        .map_err(|e| e.to_string())?
+        .to_string();
+    gradient_util::http_validation::parse_and_check_allowed_outbound_url(
+        &base_url,
+        ci.db.user_supplied_url_http_client.allowlist(),
+    )
+    .map_err(|e| format!("Gradient does not call {base_url}: {e}"))?;
+    let token = gradient_ci::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token_for_git_host_connection_owner(
         ci.db.web_db.inner(),
         &ci.db.config,
-        &ci.http,
+        &ci.db.user_supplied_url_http_client,
         connection,
     )
     .await
     .map_err(|e| format!("Gradient failed to obtain a working access token: {e}"))?
     .ok_or_else(|| "The connection has no access token.".to_owned())?;
     gradient_git_host::provision::token_account_login(
-        ci.http.clone(),
+        ci.db.user_supplied_url_http_client.clone(),
         connection.git_host_type,
-        base_url,
+        &base_url,
         token.expose(),
     )
     .await
@@ -767,10 +818,23 @@ pub(crate) fn repository_fits_connection_with_known_host(
     RepositoryFit::of(repository, connection).fits
 }
 
+pub(crate) fn read_checked_git_host_connection_base_url_or_host_type_default(
+    connection: &MGitHostConnection,
+) -> Result<ValidatedHttpBaseUrl, GitHostConnectionRefusal> {
+    gradient_types::git_host::base_url_of_git_host_connection(connection)
+        .ok_or(GitHostConnectionRefusal::GitHostConnectionBaseUrlMissing)?
+        .parse::<ValidatedHttpBaseUrl>()
+        .map_err(|e| GitHostConnectionRefusal::InvalidBaseUrl(e.to_string()))
+}
+
 pub(crate) fn check_task_repository_url_can_use_git_host_connection(
     repository: &str,
     connection: &MGitHostConnection,
 ) -> Result<(), String> {
+    if connection.git_host_type != GitHostType::GitHub || connection.base_url.is_some() {
+        read_checked_git_host_connection_base_url_or_host_type_default(connection)
+            .map_err(|e| e.to_string())?;
+    }
     address_of(connection).check_repository(repository)
 }
 
@@ -855,7 +919,7 @@ mod tests {
             "https://git.example.com/acme/infra",
         ] {
             assert!(
-                check_task_repository_url_can_use_git_host_connection(repo, &unknown_host).is_ok()
+                check_task_repository_url_can_use_git_host_connection(repo, &unknown_host).is_err()
             );
             assert!(
                 !repository_fits_connection_with_known_host(repo, &unknown_host),
@@ -874,14 +938,19 @@ mod tests {
     }
 
     #[test]
-    fn a_connection_without_host_url_does_not_fit_but_can_be_selected() {
+    fn connection_without_base_url_does_not_fit_and_cannot_be_selected() {
         let fit = RepositoryFit::of(
             "https://git.example.com/acme/infra",
             &connection(GitHostType::Forgejo, None),
         );
         assert!(!fit.fits);
-        assert!(fit.can_be_selected);
-        assert_eq!(fit.reason.as_deref(), Some("No host URL"));
+        assert!(!fit.can_be_selected);
+        assert!(
+            fit.reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("base_url")),
+            "{fit:?}"
+        );
         let other_host = RepositoryFit::of(
             "https://github.com/acme/infra",
             &connection(GitHostType::Gitea, Some("https://git.example.com")),
@@ -919,5 +988,98 @@ mod tests {
         row.github_installation_id = None;
         row.receives_events = false;
         assert_eq!(webhook_url("https://ci.example.com", &row), None);
+    }
+
+    #[tokio::test]
+    async fn linking_fitting_tasks_to_existing_instance_wide_github_app_connection_links_only_task_of_project_with_repository_grant_and_creates_no_grant()
+     {
+        use gradient_fixtures::rows;
+        let test_db = gradient_fixtures::database::TestDatabase::create().await;
+        let db = test_db.connection();
+        gradient_db::rows::insert::<gradient_entity::user::Entity, _>(&db, rows::user())
+            .await
+            .unwrap();
+        let granted_project = rows::project();
+        let other_project = gradient_entity::project::Model {
+            id: ProjectId::now_v7(),
+            name: "other-project".into(),
+            ..rows::project()
+        };
+        let mut task_ids = Vec::new();
+        for project in [&granted_project, &other_project] {
+            gradient_db::rows::insert::<gradient_entity::project::Entity, _>(&db, project.clone())
+                .await
+                .unwrap();
+            let task = gradient_db::rows::insert::<ETask, _>(
+                &db,
+                MTask {
+                    id: TaskId::now_v7(),
+                    project: project.id,
+                    repository: "https://github.com/acme/infra".into(),
+                    ..rows::task()
+                },
+            )
+            .await
+            .unwrap();
+            task_ids.push(task.id);
+        }
+        let connection = gradient_db::rows::insert::<EGitHostConnection, _>(
+            &db,
+            MGitHostConnection {
+                id: GitHostConnectionId::now_v7(),
+                name: "github-acme".into(),
+                display_name: "GitHub".into(),
+                git_host_type: GitHostType::GitHub,
+                receives_events: true,
+                reports_status: true,
+                github_installation_id: Some(9999),
+                account_login: Some("acme".into()),
+                created_by: gradient_fixtures::ids::user_id(),
+                created_at: gradient_fixtures::test_date(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        gradient_db::git_host_connection_repository_grants::insert(
+            &db,
+            gradient_db::git_host_connection_repository_grants::NewGitHostConnectionRepositoryGrant {
+                connection: connection.id,
+                project: granted_project.id,
+                repository_owner: "acme",
+                repository_name: Some("infra"),
+                source: gradient_entity::git_host_connection_repository_grant::RepositoryGrantSource::Admin,
+                created_by: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let linked = link_fitting_tasks_without_connection(&db, &connection)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            linked.iter().map(|task| task.id).collect::<Vec<_>>(),
+            [task_ids[0]]
+        );
+        let tasks = test_db.rows::<ETask>().await;
+        let connection_of = |id: TaskId| {
+            tasks
+                .iter()
+                .find(|task| task.id == id)
+                .unwrap()
+                .git_host_connection
+        };
+        assert_eq!(connection_of(task_ids[0]), Some(connection.id));
+        assert_eq!(connection_of(task_ids[1]), None);
+        assert_eq!(
+            test_db
+                .rows::<gradient_entity::git_host_connection_repository_grant::Entity>()
+                .await
+                .len(),
+            1
+        );
+        test_db.finish().await;
     }
 }

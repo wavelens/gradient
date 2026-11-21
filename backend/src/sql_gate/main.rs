@@ -10,6 +10,8 @@ mod report;
 mod sample;
 mod unanalyzed;
 
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use gradient_db::sql::{Param, registry, status_write};
@@ -23,7 +25,6 @@ const LINKED: &[(&str, fn())] = &[
     ("gradient-ci", gradient_ci::link),
     ("gradient-db", || {}),
     ("gradient-graph", gradient_graph::link),
-    ("gradient-proto", gradient_proto::link),
     ("gradient-report", gradient_report::link),
     ("gradient-scheduler", gradient_scheduler::link),
 ];
@@ -110,10 +111,16 @@ async fn main() -> Result<()> {
     std::process::exit(report::exit_code(&rows, cli.max_unmeasured));
 }
 
+const STATEMENT_TIMEOUT_DURATION: Duration = Duration::from_secs(30);
+
 async fn bounded(url: &str) -> Result<DatabaseConnection> {
+    let statement_timeout = format!("{}s", STATEMENT_TIMEOUT_DURATION.as_secs());
     let mut options = ConnectOptions::new(url);
-    options.map_sqlx_postgres_opts(|pg| {
-        pg.options([("statement_timeout", "30s"), ("lock_timeout", "2s")])
+    options.map_sqlx_postgres_opts(move |pg| {
+        pg.options([
+            ("statement_timeout", statement_timeout.as_str()),
+            ("lock_timeout", "2s"),
+        ])
     });
 
     Ok(Database::connect(options).await?)
@@ -155,7 +162,19 @@ fn list() {
 
 #[cfg(test)]
 mod tests {
-    use super::statement_text;
+    use super::{missing_crates, statement_text};
+
+    #[test]
+    fn every_crate_in_linked_has_a_registered_sql_statement_after_linking_all_crates() {
+        for (_, link) in super::LINKED {
+            link();
+        }
+        let missing = missing_crates();
+        assert!(
+            missing.is_empty(),
+            "Linked Crates Without Registered Statements: {missing:?}"
+        );
+    }
 
     #[test]
     fn print_answers_a_registered_name_with_its_text_and_nothing_else() {

@@ -5,6 +5,7 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
+use gradient_types::input::check_index_name;
 use std::collections::HashSet;
 
 const PROJECT_ROLES: [&str; 3] = ["Admin", "Write", "View"];
@@ -13,6 +14,10 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let config = lookup.config;
 
     for team in config.teams.values() {
+        errors.record_input_error_at_field(
+            format!("teams.{}.name", team.name),
+            check_index_name(&team.name),
+        );
         let mut seen = HashSet::new();
         for member in &team.members {
             let field = format!("teams.{}.members.{}", team.name, member.user);

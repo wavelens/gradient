@@ -4,6 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_types::NixPathInfo;
+
+pub(super) fn narinfo_signing_fingerprint(path_info: &NixPathInfo) -> String {
+    fingerprint(
+        &path_info.store_path,
+        &path_info.nar_hash,
+        path_info.nar_size,
+        path_info.references.iter().map(String::as_str),
+    )
+}
+
 pub(super) fn fingerprint<'a, I, N>(
     store_path: &str,
     nar_hash: &str,

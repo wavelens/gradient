@@ -10,7 +10,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::events::evaluation::Phase;
-use gradient_types::events::names;
+use gradient_types::events::{fork_pull_request_approval_events, names};
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::{BuildJobId, EvaluationId, ExecJobId, PullRequestApprovalId};
 use serde::Deserialize;
@@ -60,7 +60,8 @@ pub enum CheckContextKind {
 pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
     match event {
         names::FORK_PULL_REQUEST_APPROVAL_NEEDS_MAINTAINER_APPROVAL
-        | names::FORK_PULL_REQUEST_APPROVAL_EVALUATION_STARTED_AFTER_APPROVAL => {
+        | names::FORK_PULL_REQUEST_APPROVAL_EVALUATION_STARTED_AFTER_APPROVAL
+        | names::FORK_PULL_REQUEST_APPROVAL_APPROVAL_WITHOUT_CHANGED_FILE_MATCHING_TRIGGER_PATH => {
             Some(CheckContextKind::Approval)
         }
         names::EVALUATION_QUEUED
@@ -87,6 +88,7 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
 pub enum CommitStatusCheckWithIds {
     Approval {
         approval: PullRequestApprovalId,
+        phase: fork_pull_request_approval_events::Phase,
     },
     Evaluation {
         evaluation: EvaluationId,
@@ -110,6 +112,8 @@ struct EvaluationEventContentId {
 #[derive(Deserialize)]
 struct ApprovalEventContentId {
     approval_id: PullRequestApprovalId,
+    #[serde(default)]
+    phase: fork_pull_request_approval_events::Phase,
 }
 
 #[derive(Deserialize)]
@@ -147,6 +151,7 @@ impl CommitStatusCheckWithIds {
                     deserialize_id_from_event_content(event, content)?;
                 Self::Approval {
                     approval: ids.approval_id,
+                    phase: ids.phase,
                 }
             }
             CheckContextKind::Evaluation => {
@@ -227,8 +232,30 @@ pub fn queued_or_waiting_evaluation_description(
     Phase::of_created(status, reason).and_then(|(_, description)| description)
 }
 
-pub const APPROVAL_PENDING_DESCRIPTION: &str =
-    "Awaiting maintainer approval for external contributor PR.";
+pub fn fork_pull_request_pending_approval_status_description(commit_hex: &str) -> String {
+    format!(
+        "Waiting for maintainer approval of this fork pull request commit. Comment /gradient approve {commit_hex}"
+    )
+}
+
+pub fn fork_pull_request_approval_check_description(
+    approved: bool,
+    phase: fork_pull_request_approval_events::Phase,
+    commit_hex: &str,
+) -> Option<String> {
+    match phase {
+        _ if !approved => Some(fork_pull_request_pending_approval_status_description(
+            commit_hex,
+        )),
+        fork_pull_request_approval_events::Phase::ApprovalWithoutChangedFileMatchingTriggerPath => {
+            Some(
+                "Approved. No evaluation started because the changed files don't match the path filter of the trigger."
+                    .to_owned(),
+            )
+        }
+        _ => None,
+    }
+}
 
 pub fn ci_status_for_approval_check(approved: bool) -> CiStatus {
     if approved {
@@ -367,6 +394,33 @@ mod tests {
             CiStatus::ActionRequired
         );
         assert_eq!(ci_status_for_approval_check(true), CiStatus::Success);
+        let commit_hex = "3f786850e387550fdab836ed7e6dc881de23001b";
+        assert_eq!(
+            fork_pull_request_approval_check_description(
+                false,
+                fork_pull_request_approval_events::Phase::NeedsMaintainerApproval,
+                commit_hex
+            ),
+            Some(fork_pull_request_pending_approval_status_description(
+                commit_hex
+            ))
+        );
+        assert_eq!(
+            fork_pull_request_approval_check_description(
+                true,
+                fork_pull_request_approval_events::Phase::EvaluationStartedAfterApproval,
+                commit_hex
+            ),
+            None
+        );
+        let description = fork_pull_request_approval_check_description(
+            true,
+            fork_pull_request_approval_events::Phase::ApprovalWithoutChangedFileMatchingTriggerPath,
+            commit_hex,
+        )
+        .unwrap_or_default();
+        assert!(description.contains("path filter"), "{description}");
+        assert!(description.chars().count() <= 140, "{description}");
     }
 
     #[test]
@@ -375,6 +429,7 @@ mod tests {
         for phase in [
             fork_pull_request_approval_events::Phase::NeedsMaintainerApproval,
             fork_pull_request_approval_events::Phase::EvaluationStartedAfterApproval,
+            fork_pull_request_approval_events::Phase::ApprovalWithoutChangedFileMatchingTriggerPath,
         ] {
             let content =
                 gradient_types::Event::from(fork_pull_request_approval_events::Reported {
@@ -389,9 +444,25 @@ mod tests {
                     &content
                 )
                 .unwrap(),
-                Some(CommitStatusCheckWithIds::Approval { approval })
+                Some(CommitStatusCheckWithIds::Approval { approval, phase })
             );
         }
+    }
+
+    #[test]
+    fn pending_approval_status_description_for_full_40_character_commit_hash_names_gradient_approve_command_and_fits_140_character_github_limit()
+     {
+        let commit_hex = "3f786850e387550fdab836ed7e6dc881de23001b";
+        let description = fork_pull_request_pending_approval_status_description(commit_hex);
+        assert!(
+            description.contains(&format!("/gradient approve {commit_hex}")),
+            "{description}"
+        );
+        assert!(
+            description.chars().count() <= 140,
+            "{} characters: {description}",
+            description.chars().count()
+        );
     }
 
     #[test]

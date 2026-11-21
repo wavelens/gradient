@@ -5,21 +5,28 @@
  */
 
 //! The core keeps its pool in actor state, so a respawned core starts empty. The latest worker
-//! reports live here, outside the core, and a reattach hands them to the new core.
+//! reports live here, outside the core and a reattach hands them to the new core.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use gradient_types::ids::ProjectId;
+use gradient_pool::ProjectAccess;
 use gradient_util::sync::Mutex;
+use gradient_wire::types::GradientCapabilities;
 
 use crate::actor::{WorkerCapabilities, WorkerMetrics};
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WorkerProjectAccessAndCapabilities {
+    pub project_access: ProjectAccess,
+    pub capabilities: GradientCapabilities,
+}
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct WorkerReports {
     pub capabilities: Option<WorkerCapabilities>,
     pub metrics: Option<WorkerMetrics>,
-    pub authorized_peers: Option<HashSet<ProjectId>>,
+    pub authorization: Option<WorkerProjectAccessAndCapabilities>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -41,17 +48,29 @@ impl WorkerMemory {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
+    use gradient_types::ids::ProjectId;
+
     use super::*;
 
     #[test]
     fn the_latest_report_wins_until_the_worker_is_forgotten() {
         let memory = WorkerMemory::default();
-        let narrowed = HashSet::from([ProjectId::now_v7()]);
-        memory.update("w1", |r| r.authorized_peers = Some(HashSet::new()));
-        memory.update("w1", |r| r.authorized_peers = Some(narrowed.clone()));
+        let narrowed = WorkerProjectAccessAndCapabilities {
+            project_access: ProjectAccess::OnlyListedProjects(HashSet::from([ProjectId::now_v7()])),
+            capabilities: GradientCapabilities::default(),
+        };
+        memory.update("w1", |r| {
+            r.authorization = Some(WorkerProjectAccessAndCapabilities {
+                project_access: ProjectAccess::no_project_access(),
+                capabilities: GradientCapabilities::default(),
+            })
+        });
+        memory.update("w1", |r| r.authorization = Some(narrowed.clone()));
 
-        assert_eq!(memory.reports("w1").authorized_peers, Some(narrowed));
+        assert_eq!(memory.reports("w1").authorization, Some(narrowed));
         memory.forget("w1");
-        assert!(memory.reports("w1").authorized_peers.is_none());
+        assert!(memory.reports("w1").authorization.is_none());
     }
 }

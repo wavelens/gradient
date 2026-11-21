@@ -73,35 +73,12 @@ impl EventFilter {
     /// An empty filter is matching everything. A `*` is matching any run of characters,
     /// dots included.
     pub fn matches(&self, name: &str) -> bool {
-        self.0.is_empty() || self.0.iter().any(|p| glob(p.as_bytes(), name.as_bytes()))
+        self.0.is_empty()
+            || self
+                .0
+                .iter()
+                .any(|p| gradient_wildcard::matches_pattern_with_only_star_wildcard(p, name))
     }
-}
-
-/// One backtrack point is keeping the greedy match linear in `pattern` times `name`.
-fn glob(pattern: &[u8], name: &[u8]) -> bool {
-    let (mut p, mut n) = (0, 0);
-    let mut backtrack: Option<(usize, usize)> = None;
-    while n < name.len() {
-        match pattern.get(p) {
-            Some(b'*') => {
-                backtrack = Some((p, n));
-                p += 1;
-            }
-            Some(&c) if c == name[n] => {
-                p += 1;
-                n += 1;
-            }
-            _ => match backtrack {
-                Some((star, matched)) => {
-                    p = star + 1;
-                    n = matched + 1;
-                    backtrack = Some((star, matched + 1));
-                }
-                None => return false,
-            },
-        }
-    }
-    pattern[p..].iter().all(|&c| c == b'*')
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{CacheId, ClusterJobId, EvaluationId};
-use gradient_graph::{NarCommit, UpstreamHit};
+use gradient_graph::{NarCommit, NarCommitContent, UpstreamHit};
 use gradient_pool::WorkerProfile;
 use gradient_types::exec::ExecInventory;
 use gradient_wire::types::{
@@ -345,6 +345,33 @@ pub(crate) fn drv_path(path: &str) -> String {
     format!("/nix/store/{path}")
 }
 
+pub(crate) fn test_derivation_store_file_name(reported: &DiscoveredDerivation) -> String {
+    gradient_test_support::derivation_file_from_reported_facts::DerivationFileFromReportedFacts::from_reported_derivation_facts(reported)
+        .derivation
+        .drv_path
+        .trim_start_matches("/nix/store/")
+        .to_owned()
+}
+
+pub(crate) fn computed_out_output_path_hash(reported: &DiscoveredDerivation) -> String {
+    let file = gradient_test_support::derivation_file_from_reported_facts::DerivationFileFromReportedFacts::from_reported_derivation_facts(reported);
+    let out = file
+        .derivation
+        .outputs
+        .iter()
+        .find(|output| output.name == "out")
+        .unwrap_or_else(|| {
+            panic!(
+                "The outputs of {} include one named out.",
+                file.derivation.drv_path
+            )
+        });
+    gradient_entity::StorePath::parse_stored(&out.path)
+        .unwrap_or_else(|e| panic!("{}: {e}", out.path))
+        .hash()
+        .to_owned()
+}
+
 pub(crate) fn drv(path: &str, dependencies: &[&str]) -> DiscoveredDerivation {
     DiscoveredDerivation {
         drv_path: drv_path(path),
@@ -382,12 +409,21 @@ pub(crate) fn with_ifd(mut derivation: DiscoveredDerivation) -> DiscoveredDeriva
 pub(crate) fn nar(hash: &str, package: &str) -> NarCommit {
     NarCommit {
         store_path: store_path(hash, package),
-        file_hash: "sha256:abc".into(),
-        file_size: 5,
-        nar_size: 5,
-        nar_hash: "sha256:def".into(),
-        confirmed: true,
-        ..Default::default()
+        content: NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(
+            gradient_storage::compress_nar_bytes_and_verify_stream(b"nar-5"),
+        ),
+        references: Vec::new(),
+        deriver: None,
+        ca: None,
+        producer: test_stand_in_nar_upload_commit_producer(),
+    }
+}
+
+pub(crate) fn test_stand_in_nar_upload_commit_producer() -> gradient_graph::StoredContentProducer {
+    gradient_graph::StoredContentProducer::Worker {
+        project: gradient_entity::ids::ProjectId::nil(),
+        credentials: Default::default(),
+        dispatched_job: None,
     }
 }
 

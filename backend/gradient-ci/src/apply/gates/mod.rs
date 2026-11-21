@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod cache;
 mod storage;
-mod workers;
 
 use gradient_db::status::change_evaluation_status;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -15,21 +13,7 @@ use gradient_types::*;
 use sea_orm::ConnectionTrait;
 use sea_orm::sea_query::Expr;
 
-pub use cache::park_if_no_cache;
 pub use storage::park_storage_full;
-pub use workers::park_if_no_workers;
-
-/// The first parking gate is short-circuiting the rest because each gate is a no-op once the
-/// evaluation left `Queued`.
-pub(super) async fn run_gates<C: ConnectionTrait>(
-    db: &C,
-    eval: MEvaluation,
-    project: ProjectId,
-) -> Result<MEvaluation, sea_orm::DbErr> {
-    let eval = park_if_no_cache(db, eval, project).await?;
-    let eval = park_if_no_workers(db, eval, project).await?;
-    Ok(eval)
-}
 
 async fn park<C: ConnectionTrait>(
     db: &C,

@@ -15,6 +15,8 @@ use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::debug;
 
+use crate::guest_dir::OpenedGuestDirectory;
+
 pub const CONSOLE_LOG: &str = "console.log";
 pub const CONSOLE_SOCKET: &str = "console.sock";
 pub const SERIAL_SOCKET: &str = "serial.sock";
@@ -24,11 +26,16 @@ const SERIAL_RETRY: Duration = Duration::from_millis(100);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_CHUNK: usize = 32 * 1024;
 
-pub async fn serve_console(dir: &Path, clients: UnixListener) -> Result<()> {
-    let log_path = dir.join(CONSOLE_LOG);
+pub(crate) async fn serve_console(
+    guest_supervisor_directory_path: &Path,
+    worker_guest_directory: &OpenedGuestDirectory,
+    clients: UnixListener,
+) -> Result<()> {
+    let log_path = guest_supervisor_directory_path.join(CONSOLE_LOG);
     let log = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o640)
         .open(&log_path)
         .await
         .with_context(|| format!("open {}", log_path.display()))?;
@@ -40,7 +47,7 @@ pub async fn serve_console(dir: &Path, clients: UnixListener) -> Result<()> {
         client: None,
     };
     loop {
-        let serial = connect_serial(&dir.join(SERIAL_SOCKET)).await;
+        let serial = connect_serial(worker_guest_directory).await;
         relay.relay(serial, &clients).await?;
     }
 }
@@ -54,9 +61,14 @@ pub fn console_tail(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
     Ok(tail)
 }
 
-async fn connect_serial(socket: &Path) -> UnixStream {
+async fn connect_serial(worker_guest_directory: &OpenedGuestDirectory) -> UnixStream {
     loop {
-        match UnixStream::connect(socket).await {
+        match worker_guest_directory
+            .connect_to_worker_owned_socket_in_guest_directory_without_following_symlinks(
+                SERIAL_SOCKET,
+            )
+            .await
+        {
             Ok(stream) => return stream,
             Err(_) => tokio::time::sleep(SERIAL_RETRY).await,
         }
@@ -163,8 +175,8 @@ pub struct ConsoleLink {
 }
 
 impl ConsoleLink {
-    pub async fn connect(dir: &Path) -> Result<ConsoleLink> {
-        let socket = dir.join(CONSOLE_SOCKET);
+    pub async fn connect(guest_supervisor_directory_path: &Path) -> Result<ConsoleLink> {
+        let socket = guest_supervisor_directory_path.join(CONSOLE_SOCKET);
         let stream = UnixStream::connect(&socket)
             .await
             .with_context(|| format!("connect to {}", socket.display()))?;
@@ -205,6 +217,11 @@ mod tests {
         let serial = UnixListener::bind(dir.path().join(SERIAL_SOCKET)).unwrap();
         let clients = UnixListener::bind(dir.path().join(CONSOLE_SOCKET)).unwrap();
         let log = dir.path().join(CONSOLE_LOG);
+        let opened_guest_directory =
+            OpenedGuestDirectory::open_guest_directory_without_symlink_and_reject_root_owner(
+                dir.path(),
+            )
+            .unwrap();
 
         let scenario = async {
             let (mut guest, _) = serial.accept().await.unwrap();
@@ -225,7 +242,7 @@ mod tests {
         };
 
         tokio::select! {
-            served = serve_console(dir.path(), clients) => panic!("the relay ended: {served:?}"),
+            served = serve_console(dir.path(), &opened_guest_directory, clients) => panic!("the relay ended: {served:?}"),
             () = scenario => {}
         }
     }
@@ -236,6 +253,11 @@ mod tests {
         let serial = UnixListener::bind(dir.path().join(SERIAL_SOCKET)).unwrap();
         let clients = UnixListener::bind(dir.path().join(CONSOLE_SOCKET)).unwrap();
         let log = dir.path().join(CONSOLE_LOG);
+        let opened_guest_directory =
+            OpenedGuestDirectory::open_guest_directory_without_symlink_and_reject_root_owner(
+                dir.path(),
+            )
+            .unwrap();
 
         let scenario = async {
             let (mut guest, _) = serial.accept().await.unwrap();
@@ -257,10 +279,73 @@ mod tests {
         };
 
         tokio::select! {
-            served = serve_console(dir.path(), clients) => panic!("the relay ended: {served:?}"),
+            served = serve_console(dir.path(), &opened_guest_directory, clients) => panic!("the relay ended: {served:?}"),
             () = tokio::time::sleep(Duration::from_secs(30)) => panic!("the console log was not cut down"),
             () = scenario => {}
         }
+    }
+
+    #[tokio::test]
+    async fn console_log_symlink_in_guest_directory_is_ignored_and_log_written_in_supervisor_directory()
+     {
+        let worker_writable_guest_directory_tempdir = tempfile::tempdir().unwrap();
+        let temporary_supervisor_directory = tempfile::tempdir().unwrap();
+        let outside_file_path_that_planted_console_log_symlink_points_to_and_must_stay_unchanged =
+            tempfile::NamedTempFile::new().unwrap().into_temp_path();
+        std::fs::write(
+            &outside_file_path_that_planted_console_log_symlink_points_to_and_must_stay_unchanged,
+            b"unchanged",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            &outside_file_path_that_planted_console_log_symlink_points_to_and_must_stay_unchanged,
+            worker_writable_guest_directory_tempdir
+                .path()
+                .join(CONSOLE_LOG),
+        )
+        .unwrap();
+        let serial = UnixListener::bind(
+            worker_writable_guest_directory_tempdir
+                .path()
+                .join(SERIAL_SOCKET),
+        )
+        .unwrap();
+        let clients =
+            UnixListener::bind(temporary_supervisor_directory.path().join(CONSOLE_SOCKET)).unwrap();
+        let log = temporary_supervisor_directory.path().join(CONSOLE_LOG);
+        let opened_guest_directory =
+            OpenedGuestDirectory::open_guest_directory_without_symlink_and_reject_root_owner(
+                worker_writable_guest_directory_tempdir.path(),
+            )
+            .unwrap();
+
+        let scenario = async {
+            let (mut guest, _) = serial.accept().await.unwrap();
+            guest.write_all(b"boot ok\n").await.unwrap();
+            while std::fs::read(&log).unwrap_or_default() != b"boot ok\n"
+                && std::fs::read(
+                    &outside_file_path_that_planted_console_log_symlink_points_to_and_must_stay_unchanged,
+                )
+                .unwrap()
+                    == b"unchanged"
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+
+        tokio::select! {
+            served = serve_console(temporary_supervisor_directory.path(), &opened_guest_directory, clients) => panic!("the relay ended: {served:?}"),
+            () = tokio::time::sleep(Duration::from_secs(10)) => panic!("no console output arrived"),
+            () = scenario => {}
+        }
+        assert_eq!(
+            std::fs::read(
+                &outside_file_path_that_planted_console_log_symlink_points_to_and_must_stay_unchanged
+            )
+            .unwrap(),
+            b"unchanged"
+        );
+        assert_eq!(std::fs::read(&log).unwrap(), b"boot ok\n");
     }
 
     #[test]

@@ -85,19 +85,22 @@ async fn query_distinct_producer_derivation_ids_for_hashes<C: ConnectionTrait>(
         .collect())
 }
 
-crate::sql! {
+crate::sql_fn! {
     /// Reserved `build-request` tasks are always signable, no matter how the project sets its cache
     /// subscription.
     /// Always substitute those outputs on the submitting client.
-    PRIVATE_OUTPUT_HASHES = "SELECT DISTINCT o.hash FROM derivation_output o \
-             WHERE o.hash = ANY($1) \
-               AND EXISTS (SELECT 1 FROM build_job b WHERE b.derivation = o.derivation) \
-               AND NOT EXISTS (SELECT 1 FROM derivation_output s \
-                   JOIN build_job b ON b.derivation = s.derivation \
-                   JOIN evaluation e ON e.id = b.evaluation \
-                   JOIN task t ON t.id = e.task \
-                   WHERE s.hash = o.hash AND (t.name = 'build-request' OR t.project IN (SELECT pc.project \
-                       FROM project_cache pc WHERE pc.sign_outputs)))",
+    PRIVATE_OUTPUT_HASHES = || format!(
+        "SELECT DISTINCT o.hash FROM derivation_output o \
+         WHERE o.hash = ANY($1) \
+           AND EXISTS (SELECT 1 FROM build_job b WHERE b.derivation = o.derivation) \
+           AND NOT EXISTS (SELECT 1 FROM derivation_output s \
+               JOIN build_job b ON b.derivation = s.derivation \
+               JOIN evaluation e ON e.id = b.evaluation \
+               JOIN task t ON t.id = e.task \
+               WHERE s.hash = o.hash AND (t.name = 'build-request' OR t.project IN (SELECT pc.project \
+                   FROM project_cache pc WHERE {signing})))",
+        signing = crate::store_path_content_variant_trust::signing_subscription("pc"),
+    ),
         params = [CachedPathHashes(64)];
 }
 

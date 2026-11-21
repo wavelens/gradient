@@ -7,6 +7,7 @@
 use crate::client::HostClient;
 use anyhow::{Context, Result};
 use gradient_types::GiteaOAuthConfig;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use serde::Deserialize;
 use url::Url;
 
@@ -36,7 +37,7 @@ pub fn build_git_host_oauth_authorization_url(
 }
 
 pub async fn exchange_authorization_code_for_tokens(
-    http: &reqwest::Client,
+    http: &HttpClientForUserSuppliedUrls,
     app: &GiteaOAuthConfig,
     code: &str,
     redirect_uri: &str,
@@ -56,7 +57,7 @@ pub async fn exchange_authorization_code_for_tokens(
 }
 
 pub async fn get_new_tokens_from_git_host_with_refresh_token(
-    http: &reqwest::Client,
+    http: &HttpClientForUserSuppliedUrls,
     app: &GiteaOAuthConfig,
     refresh_token: &str,
 ) -> Result<GitHostOAuthTokenResponse> {
@@ -72,7 +73,7 @@ pub async fn get_new_tokens_from_git_host_with_refresh_token(
 }
 
 async fn post_client_credentials_and_grant_fields_to_token_endpoint_and_parse_token_response(
-    http: &reqwest::Client,
+    http: &HttpClientForUserSuppliedUrls,
     app: &GiteaOAuthConfig,
     grant_fields: &[(&str, &str)],
 ) -> Result<GitHostOAuthTokenResponse> {
@@ -85,11 +86,13 @@ async fn post_client_credentials_and_grant_fields_to_token_endpoint_and_parse_to
     ];
     form.extend_from_slice(grant_fields);
 
-    Ok(
-        HostClient::gitea_or_forgejo_oauth2(http.clone(), app.instance_base_url.as_str())
-            .post_form_json("/access_token", &form)
-            .await?,
-    )
+    let base_url = app
+        .instance_base_url
+        .parse()
+        .context("Parse the Instance URL of the Gitea App")?;
+    Ok(HostClient::gitea_or_forgejo_oauth2(http.clone(), base_url)
+        .post_form_json("/access_token", &form)
+        .await?)
 }
 
 #[cfg(test)]
@@ -153,7 +156,7 @@ mod tests {
 
         let secret = secret_file();
         let tokens = exchange_authorization_code_for_tokens(
-            &gradient_util::http::build_client().expect("build test http client"),
+            &crate::client::http_client_allow_loopback(),
             &app(&server.uri(), &secret),
             "code",
             "https://ci.example/callback",
@@ -181,13 +184,15 @@ mod tests {
 
         let secret = secret_file();
         let err = get_new_tokens_from_git_host_with_refresh_token(
-            &gradient_util::http::build_client().expect("build test http client"),
+            &crate::client::http_client_allow_loopback(),
             &app(&server.uri(), &secret),
             "stale",
         )
         .await
         .err()
         .expect("rejected refresh");
-        assert!(format!("{err:#}").contains("invalid_grant"), "got: {err:#}");
+        let err = format!("{err:#}");
+        assert!(err.contains("400 Bad Request"), "got: {err}");
+        assert!(!err.contains("invalid_grant"), "got: {err}");
     }
 }

@@ -98,11 +98,32 @@ impl Audit {
         self.write_as(self.actor, action, owner, details).await;
     }
 
+    pub async fn write_for_each_owner(
+        &self,
+        action: Action,
+        owners: &[EventOwner],
+        details: impl Into<Option<serde_json::Value>>,
+    ) {
+        self.write_as_for_each_owner(self.actor, action, owners, details)
+            .await;
+    }
+
     pub async fn write_as(
         &self,
         actor: Option<UserId>,
         action: Action,
         owner: EventOwner,
+        details: impl Into<Option<serde_json::Value>>,
+    ) {
+        self.write_as_for_each_owner(actor, action, &[owner], details)
+            .await;
+    }
+
+    async fn write_as_for_each_owner(
+        &self,
+        actor: Option<UserId>,
+        action: Action,
+        owners: &[EventOwner],
         details: impl Into<Option<serde_json::Value>>,
     ) {
         let metadata = details.into();
@@ -131,14 +152,16 @@ impl Audit {
             tracing::warn!(event, error = %e, "failed to write audit_log entry");
         }
 
-        self.db
-            .record(Audited {
-                action,
-                user: actor,
-                owner,
-                metadata,
-            })
-            .await;
+        for &owner in owners {
+            self.db
+                .record(Audited {
+                    action,
+                    user: actor,
+                    owner,
+                    metadata: metadata.clone(),
+                })
+                .await;
+        }
     }
 }
 

@@ -22,8 +22,8 @@ use gradient_wire::types::{DiscoveredDerivation, FlakeSource, Job, JobKind};
 use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_two_u64_words;
 
 use super::{
-    A, A_OUT, B, B_OUT, CaseShapes, SchedulerCase, drv, eval_key, failure, w_all, w_exec,
-    with_attr, with_output,
+    A, A_DEV, A_OUT, B, B_OUT, CaseShapes, SchedulerCase, drv, drv_path, eval_key, failure,
+    test_derivation_store_file_name, w_all, w_exec, with_attr, with_output,
 };
 use crate::jobs::{Assignment, exec_job_key};
 use crate::test_jobs::allow_all;
@@ -82,7 +82,7 @@ async fn seed_queued_job(case: &SchedulerCase, spec: &ExecSpec) {
         .await;
 }
 
-async fn with_queued_job(evaluation: EvaluationId, spec: ExecSpec) -> SchedulerCase {
+pub(super) async fn with_queued_job(evaluation: EvaluationId, spec: ExecSpec) -> SchedulerCase {
     SchedulerCase::start_then(exec_shape(evaluation), async |case| {
         seed_queued_job(case, &spec).await;
     })
@@ -90,7 +90,7 @@ async fn with_queued_job(evaluation: EvaluationId, spec: ExecSpec) -> SchedulerC
 }
 
 async fn dispatched(case: &SchedulerCase) -> (String, DispatchedJobId) {
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
     case.assign_exec_jobs().await;
     let assignment = case
         .request_job(W1, JobKind::Exec)
@@ -115,7 +115,7 @@ async fn the_job(case: &SchedulerCase) -> exec_job::Model {
 async fn a_queued_exec_job_reaches_a_matching_exec_worker() {
     let e1 = EvaluationId::now_v7();
     let case = with_queued_job(e1, spec()).await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
 
     case.assign_exec_jobs().await;
     let assignment = case
@@ -166,7 +166,7 @@ async fn queued_exec_job_program_closure_inputs_probe_words_sizes_flake_source_z
         seed_queued_job(case, &spec()).await;
     })
     .await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
 
     case.assign_exec_jobs().await;
     let rows = case.db.rows::<exec_job::Entity>().await;
@@ -203,7 +203,7 @@ async fn an_unplaceable_job_stores_its_wait_reason() {
         ..spec()
     };
     let case = with_queued_job(e1, printer).await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
 
     case.assign_exec_jobs().await;
 
@@ -242,7 +242,7 @@ fn ssh_spec() -> ExecSpec {
 async fn a_job_no_worker_can_run_fails_after_the_grace() {
     let e1 = EvaluationId::now_v7();
     let case = with_queued_job(e1, ssh_spec()).await;
-    case.connect(W1, w_exec(no_ssh_inventory()), &[]).await;
+    case.connect(W1, w_exec(no_ssh_inventory())).await;
 
     case.assign_exec_jobs().await;
     assert_eq!(
@@ -278,7 +278,7 @@ async fn a_task_waiting_for_workers_keeps_a_job_no_worker_can_run() {
             .await;
     })
     .await;
-    case.connect(W1, w_exec(no_ssh_inventory()), &[]).await;
+    case.connect(W1, w_exec(no_ssh_inventory())).await;
 
     case.assign_exec_jobs().await;
     case.backdate_unplaceable_exec_jobs(301);
@@ -319,7 +319,7 @@ async fn a_job_waiting_for_a_busy_worker_is_kept_past_the_grace() {
         },
         ..inventory()
     };
-    case.connect(W1, w_exec(busy), &[]).await;
+    case.connect(W1, w_exec(busy)).await;
 
     case.assign_exec_jobs().await;
     case.backdate_unplaceable_exec_jobs(301);
@@ -683,15 +683,16 @@ fn exec_root() -> DiscoveredDerivation {
 }
 
 fn queued_evaluation_with_a_cached_program(evaluation: EvaluationId) -> Shape {
+    let program = test_derivation_store_file_name(&exec_root());
     shape()
         .evalq(evaluation)
-        .derivation(A)
+        .derivation(&program)
         .walked()
         .probed()
         .drv_cached()
         .output(A_OUT)
         .build_status(BuildStatus::Completed)
-        .cached_output(A)
+        .cached_output(&program)
 }
 
 async fn exec_recorded_mid_stream(
@@ -699,15 +700,21 @@ async fn exec_recorded_mid_stream(
     evaluation: EvaluationId,
 ) -> (String, DispatchedJobId) {
     case.db.execute("UPDATE task SET exec_enabled = true").await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
-    case.connect(EVALUATOR, w_all(), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
+    case.connect(EVALUATOR, w_all()).await;
     let assignment = case.evalrun(EVALUATOR, evaluation).await;
     let key = eval_key(evaluation);
     case.advance_evaluation(EVALUATOR, &key, EvaluationStatus::EvaluatingDerivation)
         .await;
     case.signals(W1);
-    case.report_eval_result(EVALUATOR, &key, vec![exec_root()])
+    case.write_drv_nar_to_seeded_content_variant_object_key(&exec_root())
         .await;
+    case.assert_report_eval_result_matches_seeded_derivations_and_row_count_unchanged(
+        EVALUATOR,
+        &key,
+        vec![exec_root()],
+    )
+    .await;
     (key, assignment)
 }
 
@@ -791,7 +798,7 @@ async fn a_custom_image_or_finished_job_counts_nowhere() {
             .await;
     })
     .await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
 
     case.scheduler.refresh_pre_warm().await;
 
@@ -806,11 +813,11 @@ async fn a_custom_image_or_finished_job_counts_nowhere() {
 async fn a_reconnected_worker_gets_its_count_again() {
     let e1 = EvaluationId::now_v7();
     let case = with_queued_job(e1, spec()).await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
     assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 1: W1");
 
     case.disconnect(W1).await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
 
     assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 2: W1");
     case.finish().await;
@@ -821,9 +828,9 @@ async fn a_worker_of_another_project_gets_no_count() {
     let e1 = EvaluationId::now_v7();
     let case = with_queued_job(e1, spec()).await;
 
-    case.connect(W2, w_exec(inventory()), &[ProjectId::now_v7()])
+    case.connect_for_projects(W2, w_exec(inventory()), &[ProjectId::now_v7()])
         .await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
 
     assert_eq!(pre_warms(&case.signals(W1)), vec![1], "after 1: W1");
     assert!(
@@ -856,7 +863,7 @@ async fn a_wrong_sops_recipient_fails_the_job_before_dispatch() {
         seed_queued_job(case, &spec).await;
     })
     .await;
-    case.connect(W1, w_exec(inventory()), &[]).await;
+    case.connect(W1, w_exec(inventory())).await;
 
     case.assign_exec_jobs().await;
 
@@ -877,6 +884,134 @@ async fn a_wrong_sops_recipient_fails_the_job_before_dispatch() {
 }
 
 #[tokio::test]
+async fn exec_job_program_outside_derivation_outputs_fails_before_dispatch() {
+    let e1 = EvaluationId::now_v7();
+    let program = format!("/nix/store/{B_OUT}-b/bin/b");
+    let spec = ExecSpec {
+        program: program.clone(),
+        ..spec()
+    };
+    let case = with_queued_job(e1, spec).await;
+    case.connect(W1, w_exec(inventory())).await;
+
+    case.assign_exec_jobs().await;
+
+    let job = the_job(&case).await;
+    let expected = format!(
+        "program {program} is not inside an output of derivation {}",
+        drv_path(A)
+    );
+    assert_eq!(
+        (job.status, job.message.as_deref()),
+        (ExecJobStatus::Failed, Some(expected.as_str())),
+        "after 1: the job"
+    );
+    assert!(
+        case.db.rows::<dispatched_job::Entity>().await.is_empty(),
+        "after 1: no dispatch"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn refuses_store_path_with_same_hash_but_longer_name_before_dispatch() {
+    let e1 = EvaluationId::now_v7();
+    let program = format!("/nix/store/{A_OUT}-ab/bin/a");
+    let spec = ExecSpec {
+        program: program.clone(),
+        ..spec()
+    };
+    let case = with_queued_job(e1, spec).await;
+    case.connect(W1, w_exec(inventory())).await;
+
+    case.assign_exec_jobs().await;
+
+    let expected = format!(
+        "program {program} is not inside an output of derivation {}",
+        drv_path(A)
+    );
+    let job = the_job(&case).await;
+    assert_eq!(
+        (job.status, job.message.as_deref()),
+        (ExecJobStatus::Failed, Some(expected.as_str())),
+        "after 1: the job"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn program_in_second_output_is_dispatched() {
+    let e1 = EvaluationId::now_v7();
+    let spec = ExecSpec {
+        program: format!("/nix/store/{A_DEV}-a-dev/bin/a"),
+        ..spec()
+    };
+    let shape = shape()
+        .evaluation(e1)
+        .evaluation_status(EvaluationStatus::Building)
+        .derivation(A)
+        .walked()
+        .probed()
+        .drv_cached()
+        .entry_point(ATTR)
+        .job()
+        .output(A_OUT)
+        .named_output(A_DEV, "dev")
+        .build_status(BuildStatus::Completed)
+        .cached_path(A_OUT, "a")
+        .cached_path(A_DEV, "a-dev");
+    let case = SchedulerCase::start_then(shape, async |case| {
+        seed_queued_job(case, &spec).await;
+    })
+    .await;
+
+    dispatched(&case).await;
+
+    assert_eq!(
+        the_job(&case).await.status,
+        ExecJobStatus::Starting,
+        "after 1: the job"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_job_with_a_project_secret_fails_before_dispatch_when_project_credentials_are_not_allowed()
+ {
+    let e1 = EvaluationId::now_v7();
+    let spec = ExecSpec {
+        secrets: vec!["wandb-token".into()],
+        ..spec()
+    };
+    let case = SchedulerCase::start_then(
+        exec_shape(e1).mark_not_allowed_project_credentials(),
+        async |case| seed_queued_job(case, &spec).await,
+    )
+    .await;
+    case.connect(W1, w_exec(inventory())).await;
+
+    case.assign_exec_jobs().await;
+
+    let job = the_job(&case).await;
+    let refusal = crate::exec_secrets::SecretResolutionError::ProjectSecretsNotAllowedForUnapprovedForkPullRequest
+        .to_string();
+    assert_eq!(
+        (job.status, job.message.as_deref()),
+        (ExecJobStatus::Failed, Some(refusal.as_str())),
+        "after 1: the job"
+    );
+    assert!(
+        refusal.contains("`/gradient run <full 40-character commit hash>`"),
+        "after 1: the refusal names a command that runs the commit: {refusal}"
+    );
+    assert!(
+        case.db.rows::<dispatched_job::Entity>().await.is_empty(),
+        "after 1: no dispatch"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn a_requeued_job_carries_its_last_phase_to_the_next_attempt() {
     let e1 = EvaluationId::now_v7();
     let case = with_queued_job(e1, spec()).await;
@@ -886,7 +1021,7 @@ async fn a_requeued_job_carries_its_last_phase_to_the_next_attempt() {
         .await;
 
     case.disconnect(W1).await;
-    case.connect(W2, w_exec(inventory()), &[]).await;
+    case.connect(W2, w_exec(inventory())).await;
     case.assign_exec_jobs().await;
     let assignment = case
         .request_job(W2, JobKind::Exec)
@@ -927,7 +1062,7 @@ async fn with_queued_continuation(evaluation: EvaluationId) -> SchedulerCase {
 }
 
 async fn dispatched_continuation(case: &SchedulerCase) -> Assignment {
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     case.assign_queued_evals().await;
     case.request_job(W1, JobKind::Flake)
         .await

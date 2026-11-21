@@ -11,7 +11,6 @@ use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
 use gradient_types::ids::PendingDeliveryId;
 use gradient_types::*;
-use gradient_util::http_validation::validate_webhook_url;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 use serde_json::Value as JsonValue;
 use std::time::Instant;
@@ -75,12 +74,15 @@ async fn post(
     body: &str,
     delivery: PendingDeliveryId,
 ) -> Result<(i32, String)> {
-    validate_webhook_url(&hook.url).map_err(|cause| ActionError::UrlRejected { cause })?;
+    let request = ctx
+        .db
+        .user_supplied_url_http_client
+        .request_builder_for_checked_url(reqwest::Method::POST, &hook.url)
+        .map_err(|cause| ActionError::UrlRejected { cause })?;
     let secret = decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, &hook.secret)?;
     let signature = sign(secret.expose().as_bytes(), body.as_bytes())
         .ok_or_else(|| anyhow!("webhook secret cannot key an HMAC"))?;
-    let resp = gradient_util::http::public_client()
-        .post(&hook.url)
+    let resp = request
         .header("Content-Type", "application/json")
         .header("X-Gradient-Event", event)
         .header("X-Gradient-Delivery", delivery.to_string())

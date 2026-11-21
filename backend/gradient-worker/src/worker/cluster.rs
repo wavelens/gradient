@@ -218,7 +218,7 @@ impl ClusterChannels {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_vm::GuestAddresses;
+    use gradient_vm::{GuestAddresses, parse_guest_subnet};
     use gradient_wire::messages::{BuildJob, Job};
 
     fn membership(attempt: &str, hold_secs: u32) -> ClusterMembership {
@@ -254,7 +254,8 @@ mod tests {
 
     #[test]
     fn a_released_hold_returns_its_address() {
-        let addresses = GuestAddresses::new("10.233.0.0/30", &[]).unwrap();
+        let guest_bridge_ipv4_subnet = parse_guest_subnet("10.233.0.0/30").unwrap();
+        let addresses = GuestAddresses::new(guest_bridge_ipv4_subnet, None, &[]);
         let mut holds = ClusterHolds::default();
         let now = Instant::now();
         assert!(holds.hold(membership("t1", 5), held_exec(addresses.lease()), now));

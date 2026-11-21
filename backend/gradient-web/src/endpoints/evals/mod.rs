@@ -25,7 +25,9 @@ pub use self::report::*;
 pub use self::summary::*;
 pub use self::types::*;
 
-use crate::access::can_view_project;
+use crate::access::{
+    Caller, ProjectItemAccessRequirement, ProjectItemLocation, can_access_project_resource,
+};
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::lookup::require;
@@ -34,8 +36,6 @@ use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
 use gradient_types::*;
 
-/// Every failure is answered with `not_found(Resource::Evaluation)`. Callers cannot distinguish missing
-/// from forbidden.
 pub(super) struct EvalAccessContext {
     pub evaluation: MEvaluation,
     pub project_id: ProjectId,
@@ -52,23 +52,22 @@ impl EvalAccessContext {
     pub(super) async fn load(
         db: &WebDb,
         evaluation_id: EvaluationId,
-        maybe_user: &Option<MUser>,
+        caller: Caller<'_>,
         api_key: Option<&ApiKeyContext>,
+        requirement: ProjectItemAccessRequirement,
     ) -> WebResult<Self> {
         let (ctx, project) = Self::with_project(db, evaluation_id).await?;
-
-        let can_access = if project.public {
-            true
-        } else {
-            match maybe_user {
-                Some(user) => can_view_project(db, user.id, project.id, api_key).await?,
-                None => false,
-            }
-        };
-        if !can_access {
-            return Err(WebError::not_found(Resource::Evaluation));
-        }
-
+        let resource = ProjectItemLocation::from_evaluation(&ctx.evaluation)?;
+        can_access_project_resource(
+            db,
+            caller,
+            api_key,
+            &project,
+            resource,
+            requirement,
+            Resource::Evaluation,
+        )
+        .await?;
         Ok(ctx)
     }
 

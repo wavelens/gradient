@@ -178,6 +178,7 @@ async fn b03_walking_a_stub_marks_it_walked_and_drops_the_unwalked_inputs_of_its
             .evaluation(e1)
             .derivation(A)
             .walked()
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .entry_point("pkg.a")
             .job()
             .probed()
@@ -424,7 +425,8 @@ async fn b07_a_dependency_that_is_no_store_path_fails_the_whole_batch() {
 }
 
 #[tokio::test]
-async fn b08_the_limits_of_a_walked_derivation_are_written_onto_its_shared_build_only() {
+async fn b08_walked_derivation_build_limits_are_written_onto_its_derivation_row_only_dependency_keeps_no_limits_and_shared_build_keeps_other_columns()
+ {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         shape()
@@ -445,26 +447,23 @@ async fn b08_the_limits_of_a_walked_derivation_are_written_onto_its_shared_build
     )
     .await;
 
-    case.override_sb(B, |row| {
-        row.timeout_secs = Some(100);
-        row.max_silent_secs = Some(50);
-        row.prioritized = true;
-    })
-    .await;
-
-    case.override_sb(C, |row| row.timeout_secs = Some(7)).await;
+    case.override_sb(B, |row| row.prioritized = true).await;
     let b = with_limits(walked(B, B_OUT, &[C]), 3600, 600);
 
     walk(&case, e1, vec![b]).await;
 
+    let b = case.derivation(B).await;
+    let limits = (b.timeout_secs, b.max_silent_secs);
+    assert_eq!(limits, (Some(3600), Some(600)), "after 1: derivation(B)");
+    let c = case.derivation(C).await;
+    let limits = (c.timeout_secs, c.max_silent_secs);
+    assert_eq!(limits, (None, None), "after 1: derivation(C)");
     let b = case.sb(B).await;
-    let limits = (b.timeout_secs, b.max_silent_secs, b.prioritized);
-    assert_eq!(limits, (Some(3600), Some(600), true), "after 1: sb(B)");
-    let columns = (b.status, b.probed, b.wanted);
-    assert_eq!(columns, (Created, false, true), "after 1: sb(B)");
+    let columns = (b.status, b.probed, b.wanted, b.prioritized);
+    assert_eq!(columns, (Created, false, true, true), "after 1: sb(B)");
     let c = case.sb(C).await;
-    let columns = (c.timeout_secs, c.status, c.wanted);
-    assert_eq!(columns, (Some(7), Skipped, false), "after 1: sb(C)");
+    let columns = (c.status, c.wanted);
+    assert_eq!(columns, (Skipped, false), "after 1: sb(C)");
     let inputs = unwalked_inputs(&case, A).await;
     assert_eq!(inputs, 1, "after 1: derivation(A).unwalked_inputs");
     case.zero_drift("step 1").await;
@@ -597,7 +596,11 @@ async fn b12_an_entry_point_is_not_duplicated_and_a_batch_without_a_task_creates
     case.zero_drift("step 1").await;
 
     case.walk(Batch {
-        derivations: vec![c],
+        derivations: vec![
+            crate::messages::EvaluationBatchDerivation::test_batch_entry_from_discovered_derivation(
+                c,
+            ),
+        ],
         ..batch(e1)
     })
     .await;
@@ -985,6 +988,32 @@ async fn b22_a_batch_with_shared_and_two_feature_requirements_writes_expected_ro
         link_rows,
         "After 2: second write of same batch -> no new links"
     );
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn b23_recorded_evaluation_batch_writes_timeout_and_max_silent_limits_to_derivation_row_and_second_batch_leaves_it_unchanged()
+ {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(shape().evaluation(e1).evaluation(e2)).await;
+
+    walk(
+        &case,
+        e1,
+        vec![with_limits(walked(B, B_OUT, &[]), 3600, 600)],
+    )
+    .await;
+
+    let b = case.derivation(B).await;
+    let limits = (b.timeout_secs, b.max_silent_secs);
+    assert_eq!(limits, (Some(3600), Some(600)), "after 1: derivation(B)");
+
+    walk(&case, e2, vec![with_limits(walked(B, B_OUT, &[]), 7, 3)]).await;
+
+    let b = case.derivation(B).await;
+    let limits = (b.timeout_secs, b.max_silent_secs);
+    assert_eq!(limits, (Some(3600), Some(600)), "after 2: derivation(B)");
     case.zero_drift("step 2").await;
     case.finish().await;
 }

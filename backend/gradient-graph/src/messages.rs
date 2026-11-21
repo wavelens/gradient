@@ -11,13 +11,45 @@ use gradient_db::graph::consistency::{
 };
 use gradient_db::graph::repair::RepairScope;
 use gradient_db::status::BuildRefusal;
+use gradient_db::store_path_content_variant_trust::ProvenWorkerCredentialIds;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
+use gradient_entity::store_path_content_producer::CacheUploadChannel;
+use gradient_storage::ServerComputedNarAndCompressedFileHashesAndSizes;
 use gradient_types::MCachedPath;
 use gradient_types::ids::{
-    BuildAttemptId, CacheId, CacheUpstreamId, CachedPathId, DerivationBuildId, DerivationId,
-    DispatchedJobId, EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId,
+    ApiId, BuildAttemptId, CacheId, CacheUpstreamId, CachedPathId, DerivationBuildId, DerivationId,
+    DispatchedJobId, EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId, UserId,
 };
-use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
+use gradient_wire::types::{
+    BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation, ExecSpec, License,
+};
+
+use crate::derivation_closure_input_addressed_output_verification::VerifiedDerivationHashModulo;
+use crate::read_derivation_from_trusted_nar::StorePathVerifiedDerivationRecord;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvaluationBatchDerivation {
+    pub store_path_verified_derivation_record: StorePathVerifiedDerivationRecord,
+    pub attr: String,
+    pub ifd: bool,
+    pub licenses: Vec<License>,
+    pub exec: Option<ExecSpec>,
+    pub closure_checked_hash_modulo: Option<VerifiedDerivationHashModulo>,
+}
+
+impl EvaluationBatchDerivation {
+    pub fn to_discovered_derivation(&self) -> DiscoveredDerivation {
+        DiscoveredDerivation {
+            attr: self.attr.clone(),
+            ifd: self.ifd,
+            licenses: self.licenses.clone(),
+            exec: self.exec.clone(),
+            ..self
+                .store_path_verified_derivation_record
+                .to_discovered_derivation()
+        }
+    }
+}
 
 /// Paths are in bare `<hash>-<name>` form.
 /// Ids are only assigned inside the graph writer's transaction.
@@ -25,7 +57,7 @@ use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, Discover
 pub struct RecordBatch {
     pub evaluation: EvaluationId,
     pub task: Option<TaskId>,
-    pub derivations: Vec<DiscoveredDerivation>,
+    pub derivations: Vec<EvaluationBatchDerivation>,
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
     pub continuation: Option<ExecJobId>,
@@ -62,58 +94,64 @@ pub struct RecordReport {
     pub to_probe: Vec<DerivationId>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum SignTargets {
-    ProjectCaches(ProjectId),
-    Cache(CacheId),
-    #[default]
-    None,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoredContentProducer {
+    Worker {
+        project: ProjectId,
+        credentials: ProvenWorkerCredentialIds,
+        dispatched_job: Option<DispatchedJobId>,
+    },
+    Upload {
+        caches: Vec<CacheId>,
+        user: Option<UserId>,
+        api_key: Option<ApiId>,
+        channel: CacheUploadChannel,
+    },
+    ProjectUserContentUpload {
+        project: ProjectId,
+        user: UserId,
+        channel: CacheUploadChannel,
+    },
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
+pub enum NarCommitContent {
+    ServerComputedNarAndCompressedFileHashesAndSizes(
+        ServerComputedNarAndCompressedFileHashesAndSizes,
+    ),
+    ExistingServerVerifiedCachedPathId(CachedPathId),
+}
+
+#[derive(Debug, Clone)]
 pub struct NarCommit {
     pub store_path: String,
-    pub file_hash: String,
-    pub file_size: i64,
-    pub nar_size: i64,
-    pub nar_hash: String,
+    pub content: NarCommitContent,
     pub references: Vec<String>,
     pub deriver: Option<String>,
     pub ca: Option<String>,
-    pub targets: SignTargets,
-    pub confirmed: bool,
-    pub built_by_worker: bool,
+    pub producer: StoredContentProducer,
 }
 
 impl NarCommit {
-    pub fn from_stored_row(row: &MCachedPath, targets: SignTargets) -> Self {
-        Self {
-            store_path: row.store_path(),
-            file_hash: row.file_hash.clone().unwrap_or_default(),
-            file_size: row.file_size.unwrap_or_default(),
-            nar_size: row.nar_size.unwrap_or_default(),
-            nar_hash: row.nar_hash.clone().unwrap_or_default(),
-            references: row
-                .references
-                .as_deref()
-                .unwrap_or_default()
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect(),
-            deriver: row.deriver.clone(),
-            ca: row.ca.clone(),
-            targets,
-            confirmed: true,
-            built_by_worker: false,
-        }
+    pub fn content_address(&self) -> Option<&str> {
+        self.ca.as_deref().filter(|ca| !ca.is_empty())
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NarCommitted {
     pub cached_path: CachedPathId,
+    pub nar_object_storage_key: String,
     pub created: bool,
     pub signed: Vec<CacheId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FailedBuildDispatchReport {
+    pub dispatched_job: DispatchedJobId,
+    pub substitute: bool,
+    pub build_context: serde_json::Value,
+    pub metrics: Option<BuildMetrics>,
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +173,7 @@ pub enum Transition {
     },
     BuildOutput {
         shared_build: DerivationBuildId,
+        dispatched_job: DispatchedJobId,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
         substituted: bool,
@@ -148,7 +187,7 @@ pub enum Transition {
         log_banner: String,
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
-        metrics: Option<BuildMetrics>,
+        dispatch_that_reported_failure: Option<FailedBuildDispatchReport>,
     },
     Assigned {
         shared_build: DerivationBuildId,
@@ -168,6 +207,11 @@ pub enum Transition {
     RunConsistencyCheckStep {
         step: BuildGraphConsistencyCheckStep,
         progress: ConsistencyCheckRepairScopeChunkProgress,
+    },
+    DemoteCompletedBuildsMissingNeededStoredOutputCopies,
+    SignStoredInputsIntoReadWriteBinaryCache {
+        signed_dependency_output_rows_to_insert:
+            Vec<crate::claims::SignatureRowForGraphWriterInsert>,
     },
     AbortEvaluationSharedBuilds {
         evaluation: EvaluationId,
@@ -195,9 +239,6 @@ pub enum Transition {
         evaluation: EvaluationId,
         derivations: Vec<DerivationId>,
         without_output_paths: Vec<DerivationId>,
-    },
-    NotEnoughResources {
-        shortages: Vec<RamShortage>,
     },
     SettleExecJobs,
     ExecJobAssigned {
@@ -261,14 +302,6 @@ pub enum ClusterNext {
     End,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RamShortage {
-    pub shared_build: DerivationBuildId,
-    pub evaluation: EvaluationId,
-    pub needed_mb: u64,
-    pub largest_available_mb: u64,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TransitionReport {
     pub aborted_shared_builds: Vec<DerivationBuildId>,
@@ -306,8 +339,7 @@ pub enum RequeueScope {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Demotion {
-    MissingNar { hash: String },
-    Path { hash: String },
+    MissingNarOfContentVariant { content_variant: CachedPathId },
     CacheClaim { cache: CacheId, hash: String },
 }
 
@@ -333,11 +365,14 @@ pub enum GcRequest {
         scanned_at: NaiveDateTime,
     },
     /// The storage probe can already detect a missing NAR file, so live paths lose that row too.
-    MissingNarFileCachedPathHashes {
-        hashes: Vec<String>,
+    RetireCachedPathsWithMissingNarFiles {
+        ids: Vec<CachedPathId>,
     },
     Evaluations {
         ids: Vec<EvaluationId>,
+    },
+    OrphanObjects {
+        object_storage_keys: Vec<String>,
     },
 }
 
@@ -348,7 +383,8 @@ pub enum GcRequest {
 pub struct GcReport {
     pub deleted_derivations: Vec<DerivationId>,
     pub attempt_logs: Vec<BuildAttemptId>,
-    pub retired: Vec<String>,
+    pub unreferenced_cached_path_object_storage_keys: Vec<String>,
+    pub unreferenced_orphan_object_storage_keys: Vec<String>,
     pub deleted_claim_row_count: u64,
     pub deleted_evaluations: Vec<EvaluationId>,
     pub deleted_exec_jobs: Vec<ExecJobId>,

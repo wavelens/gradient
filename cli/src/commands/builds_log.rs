@@ -6,6 +6,9 @@
 
 use crate::error::CliError;
 use crate::input::client_from_config;
+use crate::logfmt::{
+    StreamingTerminalEscapeSequenceFilter, TerminalColorOrPlainText, stdout_filter_mode,
+};
 use crate::output::{ExitKind, Output};
 use futures::{StreamExt, pin_mut};
 
@@ -43,9 +46,11 @@ pub async fn handle_log(id: &str, flags: BuildsLogCommandFlags, out: Output) {
         match client.builds().log_lines(id, start, end, attempt).await {
             Ok(text) => {
                 if out.is_json() {
-                    println!("{}", serde_json::json!({"error": false, "message": text}));
+                    out.print_serializable_value_as_json_line(
+                        &serde_json::json!({"error": false, "message": text}),
+                    );
                 } else {
-                    print!("{text}");
+                    out.write_filtered_log_text_to_stdout_and_flush(&text);
                 }
             }
             Err(e) => out.fail(e),
@@ -73,14 +78,14 @@ pub async fn handle_log(id: &str, flags: BuildsLogCommandFlags, out: Output) {
                         break;
                     }
                     if out.is_json() {
-                        println!("{value}");
+                        out.print_serializable_value_as_json_line(&value);
                     } else {
                         let line = value
                             .get("line_number")
                             .and_then(|n| n.as_u64())
                             .unwrap_or(0);
                         let preview = value.get("preview").and_then(|p| p.as_str()).unwrap_or("");
-                        println!("{line}: {preview}");
+                        out.human(format!("{line}: {preview}"));
                     }
                 }
                 Err(e) => out.fail(e),
@@ -95,10 +100,10 @@ pub async fn handle_log(id: &str, flags: BuildsLogCommandFlags, out: Output) {
             .get_build_log_without_color_codes(id, attempt)
             .await
         {
-            Ok(text) if out.is_json() => {
-                println!("{}", serde_json::json!({"error": false, "message": text}))
-            }
-            Ok(text) => print!("{text}"),
+            Ok(text) if out.is_json() => out.print_serializable_value_as_json_line(
+                &serde_json::json!({"error": false, "message": text}),
+            ),
+            Ok(text) => out.write_filtered_log_text_to_stdout_and_flush(&text),
             Err(e) => out.fail(e),
         }
         return;
@@ -113,28 +118,43 @@ pub async fn handle_log(id: &str, flags: BuildsLogCommandFlags, out: Output) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         tokio::spawn(async move {
             pin_mut!(stream);
+            let mut filter = StreamingTerminalEscapeSequenceFilter::new(
+                TerminalColorOrPlainText::KeepSgrColorSequences,
+            );
             while let Some(Ok(chunk)) = stream.next().await {
+                let chunk = filter.filter_text_chunk_holding_incomplete_escape(&chunk);
                 if chunk.lines().any(|line| tx.send(line.to_owned()).is_err()) {
-                    break;
+                    return;
                 }
+            }
+            let last_line = filter.take_unfinished_line();
+            if !last_line.is_empty() {
+                let _ = tx.send(last_line);
             }
         });
         crate::tui::run(crate::tui::log_view::LogView::streaming(rx))
             .unwrap_or_else(|e| out.fail(CliError::TerminalUi(e)));
     } else {
         pin_mut!(stream);
+        let mut filter = StreamingTerminalEscapeSequenceFilter::new(stdout_filter_mode());
         while let Some(item) = stream.next().await {
             match item {
                 Ok(line) if line.is_empty() => {}
                 Ok(line) => {
                     if out.is_json() {
-                        println!("{}", serde_json::json!({"error": false, "message": line}));
+                        out.print_serializable_value_as_json_line(
+                            &serde_json::json!({"error": false, "message": line}),
+                        );
                     } else {
-                        print!("{}", line);
+                        out.write_filtered_log_chunk_to_stdout_without_newline_and_flush(
+                            &mut filter,
+                            &line,
+                        );
                     }
                 }
                 Err(e) => out.fail(e),
             }
         }
+        out.write_unfinished_last_line_and_flush(&mut filter);
     }
 }

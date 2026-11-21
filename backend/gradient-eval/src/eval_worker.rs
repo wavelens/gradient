@@ -89,7 +89,10 @@ impl<R: Read, W: Write> ParentPipe<R, W> {
     }
 }
 
-pub fn run_eval_worker(collect_stats: bool) -> std::io::Result<()> {
+pub fn run_eval_worker(
+    collect_stats: bool,
+    nix_computed_flake_lock_check: Option<crate::nix_eval::FlakeLockCheckFn>,
+) -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
     stdout.write_all(&[EVAL_IPC_VERSION])?;
     stdout.flush()?;
@@ -102,7 +105,11 @@ pub fn run_eval_worker(collect_stats: bool) -> std::io::Result<()> {
         Frames::new(stdout, nix_bindings::EvalStats::default()),
     ));
     let fetch_hook = fetch_through_parent.then(|| fetch_through(Arc::clone(&pipe)));
-    let evaluator = match NixEvaluator::new(Some(realise_through(Arc::clone(&pipe))), fetch_hook) {
+    let evaluator = match NixEvaluator::new(
+        Some(realise_through(Arc::clone(&pipe))),
+        fetch_hook,
+        nix_computed_flake_lock_check,
+    ) {
         Ok(e) => Some(e),
         Err(e) => {
             error!(
@@ -261,9 +268,10 @@ fn answer_requests<R: Read, W: Write>(
             EvalRequest::FetchInput {
                 request,
                 git_subprocess_environment,
+                allowed_fetch_uri_prefixes,
             } => with_evaluator(evaluator, |ev| {
                 or_err(
-                    ev.set_restrict_eval_and_allowed_uris(None)
+                    ev.set_restrict_eval_and_allowed_uris(&allowed_fetch_uri_prefixes)
                         .and_then(|()| ev.fetch_tree(&request, &git_subprocess_environment))
                         .map(|response| EvalResponse::FetchOk { response }),
                 )
@@ -271,9 +279,9 @@ fn answer_requests<R: Read, W: Write>(
             EvalRequest::Fingerprint { eval_target } => with_evaluator(evaluator, |ev| {
                 or_err(
                     ev.set_restrict_eval_and_allowed_uris(
-                        eval_target
+                        &eval_target
                             .nix_evaluation_fetch_url_access
-                            .extra_allowed_uri_prefixes(),
+                            .extra_allowed_uri_prefixes,
                     )
                     .and_then(|()| {
                         ev.fingerprint(&eval_target.repository, &eval_target.input_overrides)
@@ -307,7 +315,7 @@ fn or_err(result: anyhow::Result<EvalResponse>) -> EvalResponse {
 }
 
 /// Input overrides, fetch URL access and the full evaluation target define the cache key. Pooled workers never pass old locked flakes or looser fetch restrictions to a new target.
-type CachedWalker<'ev> = (FlakeEvalTarget, Option<Vec<String>>, FlakeWalker<'ev>);
+type CachedWalker<'ev> = (FlakeEvalTarget, Vec<String>, FlakeWalker<'ev>);
 
 struct WalkerCache<'ev> {
     entry: Option<CachedWalker<'ev>>,
@@ -325,24 +333,18 @@ impl<'ev> WalkerCache<'ev> {
             .is_none_or(|(cached, _, _)| cached != eval_target);
         if stale {
             self.entry = None;
-            let extra = eval_target
-                .nix_evaluation_fetch_url_access
-                .extra_allowed_uri_prefixes();
-            ev.set_restrict_eval_and_allowed_uris(extra)?;
+            let access = &eval_target.nix_evaluation_fetch_url_access;
+            ev.set_restrict_eval_and_allowed_uris(&access.extra_allowed_uri_prefixes)?;
             let walker = ev.walker(&eval_target.repository, &eval_target.input_overrides)?;
-            let allowed_uris = extra
-                .map(|extra| {
-                    walker.input_fetch_urls().map(|mut urls| {
-                        urls.extend_from_slice(extra);
-                        urls
-                    })
-                })
-                .transpose()?;
+            let allowed_uris = access
+                .nix_allowed_uris_from_locked_flake_input_fetch_urls_and_extra_prefixes(
+                    walker.input_fetch_urls()?,
+                );
             self.entry = Some((eval_target.clone(), allowed_uris, walker));
         }
 
         let (_, allowed_uris, walker) = self.entry.as_ref().expect("entry just ensured");
-        ev.set_restrict_eval_and_allowed_uris(allowed_uris.as_deref())?;
+        ev.set_restrict_eval_and_allowed_uris(allowed_uris)?;
         Ok(walker)
     }
 

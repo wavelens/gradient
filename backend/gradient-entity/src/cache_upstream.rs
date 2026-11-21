@@ -23,6 +23,15 @@ pub enum CacheUpstreamKind {
     Http,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+pub enum UpstreamCredentialScheme {
+    #[sea_orm(num_value = 0)]
+    Bearer,
+    #[sea_orm(num_value = 1)]
+    Basic,
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache_upstream")]
 pub struct Model {
@@ -36,7 +45,9 @@ pub struct Model {
     pub url: Option<String>,
     pub public_key: Option<String>,
     pub remote_cache_name: Option<String>,
-    pub api_key: Option<String>,
+    #[serde(skip_serializing)]
+    pub encrypted_credential: Option<String>,
+    pub credential_scheme: Option<UpstreamCredentialScheme>,
     pub http1_only: bool,
     pub active: bool,
 }
@@ -53,7 +64,8 @@ impl Default for Model {
             url: None,
             public_key: None,
             remote_cache_name: None,
-            api_key: None,
+            encrypted_credential: None,
+            credential_scheme: None,
             http1_only: false,
             active: true,
         }
@@ -129,7 +141,8 @@ mod tests {
             url: None,
             public_key: None,
             remote_cache_name: None,
-            api_key: None,
+            encrypted_credential: None,
+            credential_scheme: None,
             http1_only: false,
             active: true,
         }
@@ -183,6 +196,19 @@ mod tests {
                 public_key: "cache.nixos.org-1:abc",
             })
         );
+    }
+
+    #[test]
+    fn serialize_cache_upstream_model_omits_encrypted_credential() {
+        let m = Model {
+            encrypted_credential: Some("c2VjcmV0LWNpcGhlcnRleHQ=".into()),
+            credential_scheme: Some(UpstreamCredentialScheme::Basic),
+            ..base()
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(!json.contains("encrypted_credential"));
+        assert!(!json.contains("c2VjcmV0LWNpcGhlcnRleHQ="));
+        assert!(json.contains(r#""credential_scheme":"Basic""#));
     }
 
     #[test]

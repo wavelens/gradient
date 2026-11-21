@@ -19,6 +19,7 @@ use gradient_db::graph::{
     runtime_closure::{output_hashes_for_drvs, runtime_closure_size},
 };
 use gradient_db::lookup::by_ids;
+use gradient_db::store_path_content_variant_reader_choice::StorePathContentVariantReader;
 use gradient_types::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -56,6 +57,7 @@ pub async fn get_task_metrics(
     TaskScope { task, .. }: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<TaskMetricsResponse>>> {
+    let reader = StorePathContentVariantReader::Project(task.project);
     let evaluations = gradient_db::evaluations::get_newest_completed_or_failed_task_evaluations(
         &state.web_db,
         task.id,
@@ -113,12 +115,13 @@ pub async fn get_task_metrics(
         let closure = transitive_closure_reachable(&state.web_db, &ep_drv_ids).await?;
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
-        let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids.clone()).await?;
+        let output_size_bytes =
+            sum_output_sizes(&state.web_db, reader.clone(), ep_drv_ids.clone()).await?;
         let closure_size_bytes =
-            sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+            sum_output_sizes(&state.web_db, reader.clone(), closure.into_iter().collect()).await?;
 
         let seeds = output_hashes_for_drvs(&state.web_db, &ep_drv_ids).await?;
-        let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
+        let runtime = runtime_closure_size(&state.web_db, reader.clone(), &seeds).await?;
         let runtime_closure_size_bytes = (runtime > 0).then_some(runtime);
 
         points.push(TaskMetricPoint {
@@ -152,13 +155,18 @@ struct DerivationMetrics {
     runtime_closure_size_bytes: Option<i64>,
 }
 
-async fn derivation_metrics(db: &WebDb, derivation: DerivationId) -> WebResult<DerivationMetrics> {
+async fn derivation_metrics(
+    db: &WebDb,
+    reader: StorePathContentVariantReader,
+    derivation: DerivationId,
+) -> WebResult<DerivationMetrics> {
     let closure = transitive_closure_reachable(db, &[derivation]).await?;
     let dependencies_count = (closure.len() as i64).saturating_sub(1);
-    let output_size_bytes = sum_output_sizes(db, vec![derivation]).await?;
-    let closure_size_bytes = sum_output_sizes(db, closure.into_iter().collect()).await?;
+    let output_size_bytes = sum_output_sizes(db, reader.clone(), vec![derivation]).await?;
+    let closure_size_bytes =
+        sum_output_sizes(db, reader.clone(), closure.into_iter().collect()).await?;
     let seeds = output_hashes_for_drvs(db, &[derivation]).await?;
-    let runtime = runtime_closure_size(db, &seeds).await?;
+    let runtime = runtime_closure_size(db, reader, &seeds).await?;
 
     Ok(DerivationMetrics {
         dependencies_count,
@@ -209,6 +217,7 @@ pub async fn get_entry_point_metrics(
     state: State<Arc<ServerState>>,
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
+    let reader = StorePathContentVariantReader::Project(task.project);
     let entry_points = gradient_db::entry_points::newest_entry_points_for_task_attribute_path(
         &state.web_db,
         task.id,
@@ -268,7 +277,7 @@ pub async fn get_entry_point_metrics(
         let metrics = match by_derivation.get(&ep.derivation) {
             Some(m) => *m,
             None => {
-                let m = derivation_metrics(&state.0.web_db, ep.derivation).await?;
+                let m = derivation_metrics(&state.0.web_db, reader.clone(), ep.derivation).await?;
                 by_derivation.insert(ep.derivation, m);
                 m
             }
@@ -338,10 +347,11 @@ mod tests {
         cached_path::Model {
             id,
             hash: hash.into(),
+            nar_object_storage_key: hash.into(),
             package: "foo".into(),
-            file_hash: Some("sha256:dummy".into()),
+            file_hash: "sha256:dummy".into(),
             file_size: Some(nar_size / 2),
-            nar_size: Some(nar_size),
+            nar_size,
             created_at: now(),
             ..Default::default()
         }
@@ -356,7 +366,13 @@ mod tests {
             .append_query_results([vec![cached_row(cached_id, "abc", 1024)]])
             .into_connection();
 
-        let total = sum_output_sizes(&db, vec![drv_id]).await.unwrap();
+        let total = sum_output_sizes(
+            &db,
+            StorePathContentVariantReader::Project(ProjectId::now_v7()),
+            vec![drv_id],
+        )
+        .await
+        .unwrap();
         assert_eq!(total, Some(1024));
     }
 
@@ -373,9 +389,13 @@ mod tests {
             .append_query_results([vec![cached_row(cached_id, "subst", 512)]])
             .into_connection();
 
-        let total = sum_output_sizes(&db, vec![drv_built, drv_sub])
-            .await
-            .unwrap();
+        let total = sum_output_sizes(
+            &db,
+            StorePathContentVariantReader::Project(ProjectId::now_v7()),
+            vec![drv_built, drv_sub],
+        )
+        .await
+        .unwrap();
         assert_eq!(total, Some(2048 + 512));
     }
 
@@ -387,7 +407,13 @@ mod tests {
             .append_query_results([Vec::<cached_path::Model>::new()])
             .into_connection();
 
-        let total = sum_output_sizes(&db, vec![drv_id]).await.unwrap();
+        let total = sum_output_sizes(
+            &db,
+            StorePathContentVariantReader::Project(ProjectId::now_v7()),
+            vec![drv_id],
+        )
+        .await
+        .unwrap();
         assert_eq!(total, None);
     }
 }

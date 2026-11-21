@@ -43,6 +43,7 @@ impl ErrorCode {
 
     pub const FORBIDDEN: Self = Self("forbidden");
     pub const SUPERUSER_REQUIRED: Self = Self("superuser_required");
+    pub const CLI_AUTH_NEEDS_BROWSER_SESSION: Self = Self("cli_auth_needs_browser_session");
     pub const CREATION_DISABLED: Self = Self("creation_disabled");
     pub const FORBIDDEN_SOURCE_IP: Self = Self("forbidden_source_ip");
     pub const CACHE_LIMIT_REACHED: Self = Self("cache_limit_reached");
@@ -61,6 +62,8 @@ impl ErrorCode {
     pub const PAYLOAD_TOO_LARGE: Self = Self("payload_too_large");
 
     pub const UNPROCESSABLE_ENTITY: Self = Self("unprocessable_entity");
+
+    pub const RATE_LIMIT_EXCEEDED: Self = Self("rate_limit_exceeded");
 
     pub const INTERNAL: Self = Self("internal");
     pub const TOKEN_GENERATION_FAILED: Self = Self("token_generation_failed");
@@ -101,12 +104,20 @@ pub enum WebError {
     PayloadTooLarge(ErrorCode, String),
     #[error("Unprocessable Entity [{0}]: {1}")]
     UnprocessableEntity(ErrorCode, String),
+    #[error("Too Many Requests [{0}]: {1}")]
+    TooManyRequests(ErrorCode, String),
     #[error("Bad Gateway [{0}]: {1}")]
     BadGateway(ErrorCode, String),
     #[error("Service Unavailable [{0}]: {1}")]
     ServiceUnavailable(ErrorCode, String),
     #[error("Upload capacity exhausted; retry after {retry_after:?}")]
     UploadBusy { retry_after: std::time::Duration },
+    #[error(
+        "Too many wrong password attempts on this account. Password verification can continue in {retry_after:?}."
+    )]
+    SignInBusy { retry_after: std::time::Duration },
+    #[error("All slots for password hashing remained in use. Retry after {retry_after:?}.")]
+    PasswordHashBusy { retry_after: std::time::Duration },
     /// The rich-context warn line is emitted at the callsite. `IntoResponse` is silent for this
     /// variant.
     #[error("Data Inconsistency: {0}")]
@@ -140,9 +151,10 @@ impl WebError {
             Self::PayloadTooLarge(..) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnprocessableEntity(..) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::BadGateway(..) => StatusCode::BAD_GATEWAY,
-            Self::ServiceUnavailable(..) | Self::UploadBusy { .. } => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
+            Self::TooManyRequests(..) | Self::SignInBusy { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::ServiceUnavailable(..)
+            | Self::UploadBusy { .. }
+            | Self::PasswordHashBusy { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::DataInconsistency(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -157,9 +169,13 @@ impl WebError {
             | Self::Gone(c, _)
             | Self::PayloadTooLarge(c, _)
             | Self::UnprocessableEntity(c, _)
+            | Self::TooManyRequests(c, _)
             | Self::BadGateway(c, _)
             | Self::ServiceUnavailable(c, _) => *c,
-            Self::UploadBusy { .. } => ErrorCode::SERVICE_UNAVAILABLE,
+            Self::UploadBusy { .. } | Self::PasswordHashBusy { .. } => {
+                ErrorCode::SERVICE_UNAVAILABLE
+            }
+            Self::SignInBusy { .. } => ErrorCode::RATE_LIMIT_EXCEEDED,
             Self::DataInconsistency(_) | Self::Internal(_) => ErrorCode::INTERNAL,
         }
     }
@@ -188,6 +204,16 @@ pub(crate) fn unique_violation(err: &DbErr) -> Option<&str> {
 
 pub(crate) fn is_unique_violation(err: &DbErr) -> bool {
     unique_violation(err).is_some()
+}
+
+impl From<gradient_types::checked_uploader_stated_store_path_metadata::UploaderStatedFieldError>
+    for WebError
+{
+    fn from(
+        err: gradient_types::checked_uploader_stated_store_path_metadata::UploaderStatedFieldError,
+    ) -> Self {
+        Self::BadRequest(ErrorCode::INPUT_VALIDATION, err.to_string())
+    }
 }
 
 impl From<gradient_types::input::InputError> for WebError {
@@ -257,9 +283,12 @@ impl WebError {
             | Self::Gone(_, m)
             | Self::PayloadTooLarge(_, m)
             | Self::UnprocessableEntity(_, m)
+            | Self::TooManyRequests(_, m)
             | Self::BadGateway(_, m)
             | Self::ServiceUnavailable(_, m) => m.clone(),
             Self::UploadBusy { .. } => "upload capacity exhausted".to_string(),
+            Self::SignInBusy { .. } => "Too many incorrect password attempts for this account. Wait for the time in the Retry-After header. Then try again.".to_string(),
+            Self::PasswordHashBusy { .. } => "The server is busy with password checks. Wait for the duration in the Retry-After header. Then try again.".to_string(),
         }
     }
 }
@@ -290,6 +319,17 @@ impl IntoResponse for WebError {
                 [(
                     axum::http::header::RETRY_AFTER,
                     retry_after.as_secs().max(1).to_string(),
+                )],
+                body,
+            )
+                .into_response(),
+            Self::SignInBusy { retry_after } | Self::PasswordHashBusy { retry_after } => (
+                status,
+                [(
+                    axum::http::header::RETRY_AFTER,
+                    (retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0))
+                        .max(1)
+                        .to_string(),
                 )],
                 body,
             )

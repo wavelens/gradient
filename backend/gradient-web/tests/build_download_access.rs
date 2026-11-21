@@ -98,13 +98,13 @@ fn no_outputs(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
 }
 
-fn download_token(derivation: DerivationId) -> String {
+fn download_token(derivation: DerivationId, evaluation: EvaluationId) -> String {
     let now = Utc::now();
     let claims = serde_json::json!({
         "iat": now.timestamp(),
         "exp": (now + Duration::hours(1)).timestamp(),
         "derivation": derivation,
-        "evaluation": eval_id(),
+        "evaluation": evaluation,
     });
     encode(
         &Header::default(),
@@ -165,11 +165,82 @@ async fn a_token_for_the_derivation_admits_an_anonymous_caller() {
     let server = make_test_server(db.into_connection());
 
     let res = server
-        .get(&download_url(Some(&download_token(derivation_id()))))
+        .get(&download_url(Some(&download_token(
+            derivation_id(),
+            eval_id(),
+        ))))
         .await;
 
     res.assert_status_not_found();
     assert_eq!(message(&res), "File not found");
+}
+
+#[tokio::test]
+async fn build_download_serves_content_variant_trusted_by_build_project() {
+    use gradient_fixtures::store_path_content_variants::{
+        FIRST_KEY, SECOND_KEY, SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+    };
+    use gradient_test_support::cache_fixture::create_temp_directory_with_one_file_and_get_zstd_compressed_nar;
+    use gradient_test_support::state::TestState;
+
+    let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+    readers
+        .db
+        .execute(&format!(
+            "UPDATE project SET public = true WHERE id = '{project_b}'; \
+             INSERT INTO derivation_output (id, derivation, name, hash, package, path_known_after_build, created_at) \
+             SELECT uuidv7(), derivation, 'download', '{SHARED}', 'shared', false, now() \
+             FROM derivation_build WHERE id = '{build_b}'; \
+             INSERT INTO build_product (id, derivation_output, file_type, subtype, name, path, created_at) \
+             SELECT uuidv7(), id, 'file', 'iso', 'image.iso', '/nix/store/{SHARED}-shared/image.iso', now() \
+             FROM derivation_output WHERE name = 'download'",
+            project_b = readers.project_b,
+            build_b = readers.build_b,
+        ))
+        .await;
+    let build_id_in_project_b = readers
+        .db
+        .texts(&format!(
+            "SELECT id::text FROM build_job WHERE derivation_build = '{}'",
+            readers.build_b
+        ))
+        .await
+        .remove(0);
+    let state = TestState::new()
+        .web_db(readers.db.connection())
+        .worker_db(readers.db.connection())
+        .cache_db(readers.db.connection())
+        .build();
+    for (key, contents) in [(FIRST_KEY, b"variant of A"), (SECOND_KEY, b"variant of B")] {
+        state
+            .nar_storage
+            .put(
+                key,
+                create_temp_directory_with_one_file_and_get_zstd_compressed_nar(
+                    "image.iso",
+                    contents,
+                )
+                .await,
+            )
+            .await
+            .unwrap();
+    }
+    let server = axum_test::TestServer::new(gradient_web::create_router(state).unwrap());
+
+    let res = server
+        .get(&format!(
+            "/api/v1/builds/{build_id_in_project_b}/download/image.iso"
+        ))
+        .await;
+
+    res.assert_status_ok();
+    assert_eq!(
+        res.as_bytes().as_ref(),
+        b"variant of B",
+        "The build of project B downloads the bytes of the variant that project B trusts"
+    );
+    drop(server);
+    readers.db.finish().await;
 }
 
 #[tokio::test]
@@ -179,7 +250,23 @@ async fn a_token_for_another_derivation_is_refused() {
     let other = DerivationId::new(Uuid::from_u128(0xd9));
 
     let res = server
-        .get(&download_url(Some(&download_token(other))))
+        .get(&download_url(Some(&download_token(other, eval_id()))))
+        .await;
+
+    res.assert_status_not_found();
+    assert_eq!(message(&res), "Build not found");
+}
+
+#[tokio::test]
+async fn download_token_from_other_evaluation_for_same_derivation_is_refused() {
+    let db = no_outputs(with_private_build(mock_db()));
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .get(&download_url(Some(&download_token(
+            derivation_id(),
+            other_eval_id(),
+        ))))
         .await;
 
     res.assert_status_not_found();

@@ -32,6 +32,7 @@ pub struct ExecDispatchRow {
     pub attempts_done: i32,
     pub last_phase: Option<Phase>,
     pub open_attempt: Option<OpenAttempt>,
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +44,7 @@ pub struct OpenAttempt {
 fn dispatch_rows_sql(filter: &str) -> String {
     format!(
         "SELECT r.*, e.eval AS entry_point_name, ev.task AS task_id, t.project AS project_id, \
-         t.wait_for_workers, pr.name AS project_name, t.name AS task_name, ev.parent_exec_job AS parent_job, \
+         t.wait_for_workers, pr.name AS project_name, t.name AS task_name, ev.parent_exec_job AS parent_job, ev.allows_project_credentials_and_privileged_actions, \
          ev.repository, encode(c.hash, 'hex') AS commit_hash, d.architecture, \
          img.hash AS image_hash, img.package AS image_package, \
          (SELECT count(*) FROM exec_job_attempt a WHERE a.exec_job = r.id)::integer \
@@ -143,9 +144,9 @@ fn dispatch_row(row: &QueryResult) -> Result<ExecDispatchRow, DbErr> {
         repository: row.try_get("", "repository")?,
         commit: row.try_get("", "commit_hash")?,
         architecture: row.try_get("", "architecture")?,
-        image_path: image_hash
-            .zip(image_package)
-            .map(|(hash, package)| StorePath::from_stored(hash, package).full()),
+        image_path: image_hash.zip(image_package).map(|(hash, package)| {
+            StorePath::from_hash_and_name_without_validation(hash, package).full()
+        }),
         attempts_done: row.try_get("", "attempts_done")?,
         last_phase: phase_name.map(|name| Phase {
             name,
@@ -154,6 +155,8 @@ fn dispatch_row(row: &QueryResult) -> Result<ExecDispatchRow, DbErr> {
         open_attempt: open_attempt_id
             .zip(open_attempt_number)
             .map(|(id, number)| OpenAttempt { id, number }),
+        allows_project_credentials_and_privileged_actions: row
+            .try_get("", "allows_project_credentials_and_privileged_actions")?,
     })
 }
 

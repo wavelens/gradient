@@ -230,7 +230,7 @@ async fn the_last_admin_cannot_be_demoted() {
 async fn a_group_member_made_admin_stays_past_the_group_sync() {
     let session_id = SessionId::now_v7();
     let group_member = team_user::Model {
-        source: TeamMemberSource::Group,
+        source: TeamMemberSource::SignInGroupSync,
         ..member_row(other_user_id(), TeamRole::Member)
     };
     let conn = with_auth(mock_db(), session_id)

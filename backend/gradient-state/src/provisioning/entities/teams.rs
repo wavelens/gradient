@@ -6,7 +6,7 @@
 
 use super::super::DynError;
 use super::super::StateApplicator;
-use super::super::lookup_id;
+use super::super::{StateFileManagedUserIdsByUsername, lookup_id};
 use crate::config::*;
 use anyhow::Result;
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
@@ -52,12 +52,12 @@ impl<'a> StateApplicator<'a> {
         &self,
         state_teams: &HashMap<String, StateTeam>,
     ) -> Result<HashMap<String, TeamId>, DynError> {
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
         let mut team_ids = HashMap::new();
 
         for state_team in state_teams.values() {
             let team_id = self.upsert_team(state_team).await?;
-            self.reconcile_team_members(team_id, state_team, &user_map)
+            self.reconcile_team_members(team_id, state_team, &state_users)
                 .await?;
             team_ids.insert(state_team.name.clone(), team_id);
         }
@@ -116,11 +116,16 @@ impl<'a> StateApplicator<'a> {
         &self,
         team_id: TeamId,
         state_team: &StateTeam,
-        user_map: &HashMap<String, UserId>,
+        state_users: &StateFileManagedUserIdsByUsername,
     ) -> Result<(), DynError> {
         let mut declared = Vec::with_capacity(state_team.members.len());
         for member in &state_team.members {
-            let user = lookup_id(user_map, &member.user, "User")?;
+            let Some(user) = state_users.resolve_username_to_user_id(
+                &member.user,
+                &format!("team '{}' member", state_team.name),
+            ) else {
+                continue;
+            };
             let role = team_role(&member.role);
             declared.push(user);
 

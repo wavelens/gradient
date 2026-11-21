@@ -189,6 +189,64 @@ mod tests {
         )])]
     }
 
+    #[tokio::test]
+    async fn repair_fetchable_keeps_fetchable_build_with_stored_output_copy_and_marks_fetchable_build_without_stored_output_copy_not_fetchable_with_waiting_parent()
+     {
+        let [
+            path_of_completed_build_with_stored_output_copy,
+            completed_build_path_without_stored_output,
+            store_path_of_pending_parent_build_depending_on_both_completed_builds,
+        ] = ["4", "5", "6"].map(|c| format!("/nix/store/{}-repair.drv", c.repeat(32)));
+        let [
+            completed_build_output_path_hash_with_stored_copy,
+            completed_build_output_path_hash_without_stored_copy,
+        ] = ["7", "8"].map(|c| c.repeat(32));
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7())
+            .derivation(&path_of_completed_build_with_stored_output_copy)
+            .output(&completed_build_output_path_hash_with_stored_copy)
+            .build_status(BuildStatus::Completed)
+            .cached_path(
+                &completed_build_output_path_hash_with_stored_copy,
+                "with-copy",
+            )
+            .derivation(&completed_build_path_without_stored_output)
+            .output(&completed_build_output_path_hash_without_stored_copy)
+            .build_status(BuildStatus::Completed)
+            .derivation(&store_path_of_pending_parent_build_depending_on_both_completed_builds)
+            .depends_on(&path_of_completed_build_with_stored_output_copy)
+            .depends_on(&completed_build_path_without_stored_output)
+            .into_database()
+            .await;
+        db.execute(
+            "UPDATE derivation_build SET fetchable = true, missing_runtime_deps = 0 WHERE status = 3",
+        )
+        .await;
+        let connection = db.connection();
+
+        let scope = can_start_scope(&connection)
+            .await
+            .expect("Repair scope read.");
+        repair_fetchable(&connection, &scope)
+            .await
+            .expect("Scheduled repair ran.");
+        let fetchable_flags_of_completed_builds_after_repair = (
+            db.shared_build(&path_of_completed_build_with_stored_output_copy)
+                .await
+                .fetchable,
+            db.shared_build(&completed_build_path_without_stored_output)
+                .await
+                .fetchable,
+        );
+
+        assert_eq!(
+            fetchable_flags_of_completed_builds_after_repair,
+            (true, false),
+            "Completed builds with a copy in the output remain fetchable. Completed builds without a copy in the output receive a “not fetchable” mark."
+        );
+        db.finish().await;
+    }
+
     #[test]
     fn the_counter_recount_is_a_compare_and_swap_over_the_locked_chunk() {
         let sql = norm(&RECOUNT_BLOCKING_DEPS);
@@ -244,6 +302,7 @@ mod tests {
             .append_query_results([vec![startable_row(unblocked_parent)]])
             .append_query_results([vec![drv(no_longer_fetchable)]])
             .append_query_results([vec![transition_row(unqueued_parent, 1, 0)]])
+            .append_exec_results([exec(1)])
             .into_connection();
 
         let repaired = repair_fetchable(&db, &[now_fetchable, no_longer_fetchable])
@@ -263,8 +322,8 @@ mod tests {
         let inside: Vec<&str> = raw[0].statements().iter().map(|s| s.sql.as_str()).collect();
         assert_eq!(
             inside.len(),
-            7,
-            "BEGIN, lock, two marks with their parents, COMMIT: {inside:?}"
+            8,
+            "BEGIN, lock, fetchable mark and its parents, unfetchable mark and its parent lock and parents, COMMIT: {inside:?}"
         );
         assert!(inside[1].contains("FOR NO KEY UPDATE NOWAIT"), "{inside:?}");
         assert!(
@@ -273,7 +332,8 @@ mod tests {
         );
         assert!(
             inside[4].contains("SET fetchable = false")
-                && inside[5].contains("blocking_deps + c.n"),
+                && inside[5].contains("ORDER BY p.derivation FOR NO KEY UPDATE")
+                && inside[6].contains("SET blocking_deps = c.n,"),
             "{inside:?}"
         );
         assert!(

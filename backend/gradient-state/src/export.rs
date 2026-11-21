@@ -22,6 +22,7 @@ use gradient_types::permissions::{
     cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec,
 };
 use gradient_types::triggers::TriggerConfig;
+use gradient_util::http_base_url::upstream_cache_url_for_display_without_username_password_query_and_fragment;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 
@@ -34,11 +35,24 @@ const SECRET_KEYS: &[&str] = &[
     "secret_file",
     "access_token_file",
     "webhook_url_file",
+    "basic_auth_password_file",
+    "bearer_token_file",
 ];
 
-/// The scope of the snapshot is the whole running system, not only state-managed rows. Rows that an admin can't write by hand stay out. These rows are `build-request` tasks, Gradient.CI connections, members added through SSO groups, and built-in `Admin`/`Write`/`View` roles.
+/// The scope of the export is the whole running system. Rows that an admin cannot write by hand
+/// stay out. Those rows are `build-request` tasks, Gradient.CI connections, members that SSO groups
+/// add and the built-in `Admin`/`Write`/`View` roles. Users are the exception. Only accounts from
+/// the state file go into the export. Applying an export cannot take over registered accounts,
+/// SCIM accounts, or accounts with an external sign-in. References to other accounts stay empty,
+/// or an export removes them.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
-    let users = gradient_entity::user::Entity::find().all(db).await?;
+    let users = gradient_entity::user::Entity::find()
+        .filter(
+            gradient_entity::user::Column::AccountOrigin
+                .eq(gradient_types::AccountOrigin::DeclaredInStateFile),
+        )
+        .all(db)
+        .await?;
     let projects = gradient_entity::project::Entity::find().all(db).await?;
     let tasks = gradient_entity::task::Entity::find().all(db).await?;
     let caches = gradient_entity::cache::Entity::find().all(db).await?;
@@ -51,7 +65,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .await?;
     let teams = gradient_entity::team::Entity::find().all(db).await?;
     let team_users = gradient_entity::team_user::Entity::find()
-        .filter(gradient_entity::team_user::Column::Source.ne(TeamMemberSource::Group))
+        .filter(gradient_entity::team_user::Column::Source.is_not_in([
+            TeamMemberSource::ScimGroup,
+            TeamMemberSource::SignInGroupSync,
+        ]))
         .all(db)
         .await?;
     let team_projects = gradient_entity::team_project::Entity::find()
@@ -121,6 +138,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 username: u.username.clone(),
                 name: u.name.clone(),
                 email: u.email.clone(),
+                existing_account_id: Some(u.id.to_string()),
                 password_file: None,
                 email_verified: u.email_verified,
                 superuser: u.superuser,
@@ -213,11 +231,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             .iter()
             .filter(|oc| oc.cache == c.id)
             .filter_map(|oc| {
-                Some(StateCacheProject {
-                    name: project_name.get(&oc.project)?.clone(),
-                    mode: oc.mode.clone(),
-                    sign_outputs: oc.sign_outputs,
-                })
+                Some(cache_subscription_row_to_state_cache_project(
+                    oc,
+                    project_name.get(&oc.project)?.clone(),
+                ))
             })
             .collect();
         let upstream_caches = all_upstream_caches
@@ -638,6 +655,20 @@ pub(crate) fn export_action(
     })
 }
 
+pub(crate) fn cache_subscription_row_to_state_cache_project(
+    subscription: &gradient_entity::project_cache::Model,
+    project_name: String,
+) -> StateCacheProject {
+    let subscription_mode_writes_build_outputs = subscription.mode.writes_build_outputs_to_cache();
+    let cache_signs_outputs = subscription.sign_outputs && subscription_mode_writes_build_outputs;
+    StateCacheProject {
+        name: project_name,
+        mode: subscription.mode.clone(),
+        sign_outputs: (cache_signs_outputs != subscription_mode_writes_build_outputs)
+            .then_some(cache_signs_outputs),
+    }
+}
+
 fn export_upstream(
     u: &gradient_entity::cache_upstream::Model,
     cache_name: &HashMap<CacheId, String>,
@@ -651,10 +682,16 @@ fn export_upstream(
         }),
         CacheUpstreamKind::Http => Some(StateUpstream::External {
             display_name: u.display_name.clone(),
-            url: u.url.clone()?,
+            url: upstream_cache_url_for_display_without_username_password_query_and_fragment(
+                u.url.as_deref()?,
+            )?
+            .url,
             public_key: u.public_key.clone()?,
             http1_only: u.http1_only,
             active: u.active,
+            basic_auth_user: None,
+            basic_auth_password_file: None,
+            bearer_token_file: None,
         }),
         // GradientProto upstream caches have no `state` representation yet.
         CacheUpstreamKind::GradientProto => None,
@@ -848,6 +885,23 @@ mod tests {
             reread.extra_allowed_uri_prefixes,
             ["https://example.com/archives"]
         );
+    }
+
+    #[test]
+    fn test_inactive_upstream_cache_state_export_url_has_no_user_password_or_query() {
+        let upstream = gradient_entity::cache_upstream::Model {
+            kind: CacheUpstreamKind::Http,
+            url: Some("https://alice:secret@cache.example/prefix?token=x".into()),
+            public_key: Some("cache.example-1:abc".into()),
+            active: false,
+            ..Default::default()
+        };
+
+        let Some(StateUpstream::External { url, .. }) = export_upstream(&upstream, &HashMap::new())
+        else {
+            panic!("the external upstream cache is exported");
+        };
+        assert_eq!(url, "https://cache.example/prefix");
     }
 
     #[test]

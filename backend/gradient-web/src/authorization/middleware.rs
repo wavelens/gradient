@@ -14,6 +14,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
+use gradient_db::users::InsertWithAuthorisingSessionError;
 use gradient_util::debounce::Debounce;
 use uuid::Uuid;
 
@@ -31,7 +32,7 @@ use super::jwt::{
 };
 use crate::audit::{Audit, RequestInfo};
 use crate::client_ip::{ClientIp, read_tcp_peer_ip_from_extensions, resolve_client_ip};
-use crate::error::{WebError, WebResult};
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use axum::http::request::Parts;
@@ -54,15 +55,30 @@ enum Denial {
     UnknownUser,
     #[error("Access this endpoint with a signed-in session. API keys don't work.")]
     ApiKeyOnSessionOnlyRoute,
+    #[error(
+        "Send credentials in the Authorization header or the token query parameter. Don't send both."
+    )]
+    CredentialInHeaderAndQueryParameter,
+    #[error("A sign-in from the CLI can't do this. Sign in through the browser.")]
+    CliSessionOnBrowserOnlyRoute,
 }
 
 impl Refusal for Denial {
     fn status(&self) -> RefusalStatus {
         match self {
+            Self::CredentialInHeaderAndQueryParameter => RefusalStatus::BadRequest,
             Self::UndecodableToken | Self::UnknownUser => RefusalStatus::Unauthorized,
             Self::MalformedAuthorizationHeader
             | Self::NoCredentials
-            | Self::ApiKeyOnSessionOnlyRoute => RefusalStatus::Forbidden,
+            | Self::ApiKeyOnSessionOnlyRoute
+            | Self::CliSessionOnBrowserOnlyRoute => RefusalStatus::Forbidden,
+        }
+    }
+
+    fn code(&self) -> ErrorCode {
+        match self {
+            Self::CliSessionOnBrowserOnlyRoute => ErrorCode::CLI_AUTH_NEEDS_BROWSER_SESSION,
+            _ => self.status().default_code(),
         }
     }
 }
@@ -78,11 +94,71 @@ pub async fn require_session_authentication(req: Request, next: Next) -> WebResu
     Ok(next.run(req).await)
 }
 
+pub async fn require_browser_session_authentication(
+    req: Request,
+    next: Next,
+) -> WebResult<Response<Body>> {
+    let is_browser_session = req
+        .extensions()
+        .get::<MSession>()
+        .is_some_and(|session| !session.is_cli_device_sign_in_session);
+    if !is_browser_session {
+        return Err(Denial::CliSessionOnBrowserOnlyRoute.into());
+    }
+    Ok(next.run(req).await)
+}
+
+pub fn refuse_cli_session_revoking_other_session(
+    caller_session: &MSession,
+    session_to_revoke_id: SessionId,
+) -> WebResult<()> {
+    if caller_session.is_cli_device_sign_in_session && caller_session.id != session_to_revoke_id {
+        return Err(Denial::CliSessionOnBrowserOnlyRoute.into());
+    }
+    Ok(())
+}
+
+pub fn credential_insert_error_to_http_error<E>(
+    error: InsertWithAuthorisingSessionError<E>,
+    insert_error: impl FnOnce(E) -> WebError,
+) -> WebError {
+    match error {
+        InsertWithAuthorisingSessionError::AuthorisationNoLongerHoldsUnderUserRowLock => {
+            Denial::UndecodableToken.into()
+        }
+        InsertWithAuthorisingSessionError::Database(error) => error.into(),
+        InsertWithAuthorisingSessionError::InsertClosureError(error) => insert_error(error),
+    }
+}
+
 pub fn reject_api_key_authentication(api_key: Option<&ApiKeyContext>) -> WebResult<()> {
     match api_key {
         Some(_) => Err(Denial::ApiKeyOnSessionOnlyRoute.into()),
         None => Ok(()),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct TokenQueryParameter {
+    token: Option<String>,
+}
+
+pub async fn move_token_query_parameter_into_authorization_header(
+    mut req: Request,
+    next: Next,
+) -> WebResult<Response<Body>> {
+    let token = axum::extract::Query::<TokenQueryParameter>::try_from_uri(req.uri())
+        .ok()
+        .and_then(|query| query.0.token);
+    if let Some(token) = token {
+        if req.headers().contains_key(AUTHORIZATION) {
+            return Err(Denial::CredentialInHeaderAndQueryParameter.into());
+        }
+        let value = HeaderValue::from_str(&format!("Bearer {token}"))
+            .map_err(|_| Denial::MalformedAuthorizationHeader)?;
+        req.headers_mut().insert(AUTHORIZATION, value);
+    }
+    Ok(next.run(req).await)
 }
 
 fn token_decode_status_to_web_error(status: StatusCode) -> WebError {
@@ -174,7 +250,7 @@ pub async fn authorize(
     }
 
     let (mut parts, body) = req.into_parts();
-    if let Err(denial) = job_scope_of_caller(&mut parts, &decoded).await {
+    if let Err(denial) = job_scope_of_caller(&mut parts, &decoded, &state.web_db).await {
         return Err(deny(&audit, Some(user_id), method, path, denial).await);
     }
     if let Err(denial) = refuse_request_outside_api_key_scope(&parts, api_key_context) {
@@ -220,9 +296,10 @@ pub async fn authorize(
 async fn job_scope_of_caller(
     parts: &mut Parts,
     decoded: &DecodedRequest,
+    db: &WebDb,
 ) -> Result<(), JobScopeRefusal> {
     match decoded.job() {
-        Some(job) => job_scope_of_request(parts, job).await,
+        Some(job) => job_scope_of_request(parts, job, db).await,
         None => Ok(()),
     }
 }
@@ -250,7 +327,7 @@ async fn optional_caller(
     .map(Some)
 }
 
-pub async fn verify_credential_and_return_user_and_decoded_credential(
+async fn verify_credential_and_return_user_and_decoded_credential(
     db: &WebDb,
     jwt_secret: &SecretString,
     last_used_stamps: &Debounce<Uuid>,
@@ -328,7 +405,7 @@ pub async fn authorize_optional(
     let mut renewed_session_cookie = None;
     match caller {
         Some((user, decoded)) => {
-            if let Err(refusal) = job_scope_of_caller(&mut parts, &decoded).await {
+            if let Err(refusal) = job_scope_of_caller(&mut parts, &decoded, &state.web_db).await {
                 return WebError::from(refusal).into_response();
             }
             if let Err(refusal) =

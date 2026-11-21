@@ -213,6 +213,7 @@ async fn happy_path_reuses_existing_build_request_task() {
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role()]])
         .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
         .append_query_results([vec![commit_model.clone()]])
         .append_exec_results([MockExecResult {
@@ -265,13 +266,21 @@ fn job_token_auth() -> sea_orm::MockDatabase {
         ("project_name", Column::from("test-project")),
         ("task_name", Column::from("test-task")),
         ("acting_user", Column::from(user_id().into_inner())),
+        (
+            "allows_project_credentials_and_privileged_actions",
+            Column::from(false),
+        ),
     ]);
     gradient_fixtures::mock::mock_db()
         .append_query_results([vec![resolved]])
         .append_query_results([vec![gradient_fixtures::rows::user()]])
 }
 
-async fn dispatched_parent(db: sea_orm::MockDatabase, auth: &str) -> sea_orm::Value {
+async fn dispatched_parent(
+    db: sea_orm::MockDatabase,
+    auth: &str,
+    parent_exec_job_allows_project_credentials_and_privileged_actions: Option<bool>,
+) -> (sea_orm::Value, sea_orm::Value) {
     let upload = UploadSessionId::now_v7();
     let task_id = TaskId::now_v7();
     let commit_model = build_request_commit();
@@ -288,8 +297,25 @@ async fn dispatched_parent(db: sea_orm::MockDatabase, auth: &str) -> sea_orm::Va
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role()]])
         .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![build_request_task(task_id)]])
-        .append_query_results([vec![commit_model.clone()]])
+        .append_query_results([vec![commit_model.clone()]]);
+    let db = match parent_exec_job_allows_project_credentials_and_privileged_actions {
+        Some(allowed) => {
+            let parent_evaluation = gradient_entity::evaluation::Model {
+                allows_project_credentials_and_privileged_actions: allowed,
+                ..queued_evaluation(task_id, commit_model.id)
+            };
+            db.append_query_results([vec![gradient_entity::exec_job::Model {
+                id: job_id(),
+                evaluation: parent_evaluation.id,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![parent_evaluation]])
+        }
+        None => db,
+    };
+    let db = db
         .append_exec_results([executed()])
         .append_query_results([vec![queued_evaluation(task_id, commit_model.id)]])
         .append_exec_results([executed()])
@@ -314,19 +340,35 @@ async fn dispatched_parent(db: sea_orm::MockDatabase, auth: &str) -> sea_orm::Va
         ..insert.sql.find(')').expect("column list end")]
         .split(", ")
         .collect();
-    let at = columns
-        .iter()
-        .position(|c| *c == r#""parent_exec_job""#)
-        .expect("the insert names parent_exec_job");
-    insert.values.as_ref().expect("bound values").0[at].clone()
+    let inserted = |column: &str| {
+        let at = columns
+            .iter()
+            .position(|c| *c == column)
+            .expect("the insert names the column");
+        insert.values.as_ref().expect("bound values").0[at].clone()
+    };
+    (
+        inserted(r#""parent_exec_job""#),
+        inserted(r#""allows_project_credentials_and_privileged_actions""#),
+    )
 }
 
 #[tokio::test]
 async fn a_build_request_from_a_job_names_its_parent_job() {
-    let from_job = dispatched_parent(job_token_auth(), JOB_TOKEN).await;
+    let (from_job, job_credentials) =
+        dispatched_parent(job_token_auth(), JOB_TOKEN, Some(true)).await;
     assert_eq!(from_job, sea_orm::Value::Uuid(Some(job_id().into_inner())));
+    assert_eq!(job_credentials, sea_orm::Value::Bool(Some(true)));
 
     let (db, auth) = signed_in();
-    let from_user = dispatched_parent(db, &auth).await;
+    let (from_user, user_credentials) = dispatched_parent(db, &auth, None).await;
     assert_eq!(from_user, sea_orm::Value::Uuid(None));
+    assert_eq!(user_credentials, sea_orm::Value::Bool(Some(true)));
+}
+
+#[tokio::test]
+async fn exec_job_build_request_without_project_credentials_creates_evaluation_without_project_credentials()
+ {
+    let (_, credentials) = dispatched_parent(job_token_auth(), JOB_TOKEN, Some(false)).await;
+    assert_eq!(credentials, sea_orm::Value::Bool(Some(false)));
 }

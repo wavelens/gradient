@@ -6,6 +6,7 @@
 
 mod commands;
 mod config;
+mod download_file_path_and_write;
 mod error;
 mod input;
 mod logfmt;

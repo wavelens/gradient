@@ -5,11 +5,11 @@
  */
 
 use axum::http::StatusCode;
-use gradient_fixtures::rows::user;
+use gradient_fixtures::rows::{live_session, user};
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::make_test_server;
 use gradient_test_support::web::signed_in;
-use gradient_types::{MUserSshKey, UserId, UserSshKeyId};
+use gradient_types::{MUserSshKey, SessionId, UserId, UserSshKeyId};
 use serde_json::{Value, json};
 
 const ED25519: &str =
@@ -50,6 +50,8 @@ async fn supported_keys_are_stored_and_unsafe_or_malformed_ones_are_refused() {
         let (db, auth) = signed_in();
         let db = db
             .append_query_results([Vec::<MUserSshKey>::new()])
+            .append_query_results([vec![user()]])
+            .append_query_results([vec![live_session(SessionId::now_v7())]])
             .append_query_results([vec![MUserSshKey {
                 public_key: public_key.into(),
                 fingerprint: key_fingerprint.into(),

@@ -272,7 +272,7 @@ mod tests {
         use gradient_fixtures::shape::shape;
         use gradient_types::EvaluationId;
 
-        const HEAVY: &str = "/nix/store/aaaa-heavy.drv";
+        const HEAVY: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-heavy.drv";
         let now = chrono::Utc::now().naive_utc();
         let (older, newer) = (EvaluationId::now_v7(), EvaluationId::now_v7());
         let db = shape()

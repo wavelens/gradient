@@ -268,6 +268,7 @@ pub fn read_login_config_file() -> Result<LoginConfigFile, String> {
         .map(Option::unwrap_or_default)
 }
 
+#[expect(clippy::disallowed_macros, reason = "print local config values")]
 pub fn load_and_migrate_login_config_file() -> LoginConfigFile {
     read_login_config_file().unwrap_or_else(|message| {
         eprintln!("{message}");
@@ -312,6 +313,7 @@ fn save_login_config_file(file: &LoginConfigFile) -> std::io::Result<()> {
     Ok(())
 }
 
+#[expect(clippy::disallowed_macros, reason = "print local config values")]
 fn print_saved_accounts_file_write_error_and_exit(e: std::io::Error) -> ! {
     eprintln!(
         "Failed to write {}: {e}",
@@ -330,6 +332,7 @@ pub fn update_login_config_file<T>(change: impl FnOnce(&mut LoginConfigFile) -> 
     result
 }
 
+#[expect(clippy::disallowed_macros, reason = "print local config values")]
 pub fn update_or_create_saved_login_in_config_file<T>(
     change: impl FnOnce(&mut SavedLogin) -> T,
 ) -> T {
@@ -388,6 +391,7 @@ impl ConfigKey {
     }
 }
 
+#[expect(clippy::disallowed_macros, reason = "print local config values")]
 pub fn set_value(key: ConfigKey, value: String, quiet: bool) {
     update_or_create_saved_login_in_config_file(|login| match key {
         ConfigKey::Server => {
@@ -407,6 +411,7 @@ pub fn set_value(key: ConfigKey, value: String, quiet: bool) {
     }
 }
 
+#[expect(clippy::disallowed_macros, reason = "print local config values")]
 pub fn get_value(key: ConfigKey, quiet: bool) -> Option<String> {
     let value = saved_login_for_invocation().get(key);
 

@@ -18,7 +18,11 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{
     BuildAttemptId, BuildJobId, CacheId, CachedPathId, CachedPathSignatureId, DerivationBuildId,
     DerivationId, DerivationOutputId, DispatchedJobId, EntryPointId, EvaluationId, ProjectCacheId,
-    ProjectId, TaskId, UserId,
+    ProjectId, StorePathContentProducerId, TaskId, TeamId, TeamProjectId, TeamWorkerId, UserId,
+    WorkerRegistrationId,
+};
+use gradient_entity::store_path_content_producer::{
+    CacheUploadChannel, StoredContentVariantProducerKind,
 };
 use gradient_entity::{
     StorePath, build_attempt, build_job, cache, cache_upstream, cached_path, cached_path_signature,
@@ -26,8 +30,9 @@ use gradient_entity::{
     derivation_dependency, derivation_feature, derivation_input_source, derivation_metric,
     derivation_output, dispatched_job, dispatched_job_phase, entry_point, eval_cache_store,
     eval_split, evaluation, evaluation_flake_input_override, evaluation_input_update,
-    evaluation_metric, feature, project, project_cache, task, task_action,
-    task_flake_input_override, task_trigger, user, worker_registration,
+    evaluation_metric, feature, project, project_cache, store_path_content_producer, task,
+    task_action, task_flake_input_override, task_trigger, team, team_project, team_worker, user,
+    worker_registration,
 };
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
@@ -76,6 +81,10 @@ pub struct Shape {
     pub(super) evaluation_metrics: Vec<evaluation_metric::Model>,
     pub(super) eval_caches: Vec<eval_cache_store::Model>,
     pub(super) registrations: Vec<worker_registration::Model>,
+    pub(super) cached_path_producer_rows: Vec<store_path_content_producer::Model>,
+    pub(super) team_rows: Vec<team::Model>,
+    pub(super) team_worker_rows: Vec<team_worker::Model>,
+    pub(super) team_project_rows: Vec<team_project::Model>,
     task_of: Vec<usize>,
     evaluation: Option<usize>,
     derivation: Option<usize>,
@@ -123,11 +132,25 @@ impl Shape {
         self
     }
 
+    pub fn mark_not_allowed_project_credentials(mut self) -> Self {
+        let at = self.current_evaluation();
+        self.evaluations[at].allows_project_credentials_and_privileged_actions = false;
+        self
+    }
+
     pub fn same_task_as(mut self, evaluation: EvaluationId) -> Self {
         let at = self.current_evaluation();
         let shared = self.task_of[self.evaluation_at(evaluation)];
         let own = std::mem::replace(&mut self.task_of[at], shared);
         self.evaluations[at].task = Some(self.tasks[shared].id);
+        let (own_project, shared_project) = (self.projects[own].id, self.projects[shared].id);
+        for registration in self
+            .registrations
+            .iter_mut()
+            .filter(|r| r.peer_id == own_project)
+        {
+            registration.peer_id = shared_project;
+        }
         self.drop_unused_task(own);
         self
     }
@@ -162,6 +185,13 @@ impl Shape {
     pub fn walked(mut self) -> Self {
         let at = self.current_derivation();
         self.derivations[at].walked = true;
+        self
+    }
+
+    pub fn with_verified_serialized_derivation_hash_for_dependent_output_paths(mut self) -> Self {
+        let at = self.current_derivation();
+        self.derivations[at].serialized_derivation_hash_for_dependent_output_paths =
+            Some("deferred".to_owned());
         self
     }
 
@@ -470,12 +500,6 @@ impl Shape {
         self
     }
 
-    pub fn unconfirmed(mut self) -> Self {
-        let at = self.current_cached_path();
-        self.cached_paths[at].confirmed = false;
-        self
-    }
-
     pub fn into_cache(mut self, id: CacheId) -> Self {
         let owner = self.owner();
         let project = self.projects[self.current_task()].id;
@@ -514,6 +538,119 @@ impl Shape {
     pub fn keyed(mut self, private_key: impl Into<String>) -> Self {
         let at = self.cache.expect("name a cache first");
         self.caches[at].private_key = private_key.into();
+        self
+    }
+
+    pub fn mark_uploaded_by_user(mut self) -> Self {
+        let cache = self.caches[self.cache.expect("name a cache first")].id;
+        let uploaded_by_user = Some(self.owner());
+        let at = self.current_cached_path();
+        self.cached_path_producer_rows[at] = store_path_content_producer::Model {
+            kind: StoredContentVariantProducerKind::UploadedByUserOrApiKey,
+            worker_registration: None,
+            cache: Some(cache),
+            uploaded_by_user,
+            upload_channel: Some(CacheUploadChannel::RestHttpApiUpload),
+            ..self.cached_path_producer_rows[at].clone()
+        };
+        self
+    }
+
+    pub fn mark_cached_path_built_by_team_worker(mut self) -> Self {
+        let owner = self.owner();
+        let project = self.projects[self.current_task()].id;
+        let slug = Uuid::now_v7().simple().to_string();
+        let team = team::Model {
+            id: TeamId::now_v7(),
+            name: format!("team-{slug}"),
+            created_by: Some(owner),
+            ..rows::team()
+        };
+        let worker = team_worker::Model {
+            id: TeamWorkerId::now_v7(),
+            team: team.id,
+            worker_id: format!("team-worker-{slug}"),
+            token_hash: format!("token-team-worker-{slug}"),
+            display_name: format!("team-worker-{slug}"),
+            created_by: Some(owner),
+            created_at: test_date(),
+            ..Default::default()
+        };
+        self.team_project_rows.push(team_project::Model {
+            id: TeamProjectId::now_v7(),
+            team: team.id,
+            project,
+            includes_workers: true,
+            created_at: test_date(),
+            ..Default::default()
+        });
+        let at = self.current_cached_path();
+        self.cached_path_producer_rows[at].worker_registration = None;
+        self.cached_path_producer_rows[at].team_worker = Some(worker.id);
+        self.team_worker_rows.push(worker);
+        self.team_rows.push(team);
+        self
+    }
+
+    pub fn add_team_worker_with_team_grants_for_evaluation_projects(
+        mut self,
+        worker_id: &str,
+        evaluations: &[EvaluationId],
+    ) -> Self {
+        let owner = self.owner();
+        let slug = Uuid::now_v7().simple().to_string();
+        let team = team::Model {
+            id: TeamId::now_v7(),
+            name: format!("team-{slug}"),
+            created_by: Some(owner),
+            ..rows::team()
+        };
+        for &evaluation in evaluations {
+            let project = self.projects[self.task_of[self.evaluation_at(evaluation)]].id;
+            self.team_project_rows.push(team_project::Model {
+                id: TeamProjectId::now_v7(),
+                team: team.id,
+                project,
+                includes_workers: true,
+                created_at: test_date(),
+                ..Default::default()
+            });
+        }
+        self.team_worker_rows.push(team_worker::Model {
+            id: TeamWorkerId::now_v7(),
+            team: team.id,
+            worker_id: worker_id.into(),
+            token_hash: format!("token-{worker_id}"),
+            display_name: worker_id.into(),
+            active: true,
+            created_by: Some(owner),
+            created_at: test_date(),
+            ..Default::default()
+        });
+        self.team_rows.push(team);
+        self
+    }
+
+    pub fn with_legacy_cached_path_before_producer_tracking(mut self) -> Self {
+        let cache = self.caches[self.cache.expect("name a cache first")].id;
+        let at = self.current_cached_path();
+        let path = &mut self.cached_paths[at];
+        path.server_computed_hashes_and_sizes = false;
+        path.nar_object_storage_key = path.hash.clone();
+        let cached_path = path.id;
+        self.cached_path_producer_rows[at] = store_path_content_producer::Model {
+            kind: StoredContentVariantProducerKind::SignedCacheBackfill,
+            worker_registration: None,
+            ..self.cached_path_producer_rows[at].clone()
+        };
+        self.signatures.push(cached_path_signature::Model {
+            id: CachedPathSignatureId::now_v7(),
+            cached_path,
+            cache,
+            signature: Some(b"legacy-signature".to_vec()),
+            created_at: test_date(),
+            ..Default::default()
+        });
         self
     }
 
@@ -671,19 +808,74 @@ impl Shape {
         if let Some(declared) = self.cached_paths.iter().position(|p| p.hash == hash) {
             return declared;
         }
+        let project = self.project_id_for_new_cached_path();
+        let registration = self.ensure_worker_registration_id_for_project(project);
+        let id = CachedPathId::now_v7();
+        self.cached_path_producer_rows
+            .push(store_path_content_producer::Model {
+                id: StorePathContentProducerId::now_v7(),
+                cached_path: id,
+                kind: StoredContentVariantProducerKind::BuiltInDispatchedBuildJob,
+                worker_registration: Some(registration),
+                created_at: test_date(),
+                ..Default::default()
+            });
         self.cached_paths.push(cached_path::Model {
-            id: CachedPathId::now_v7(),
+            id,
             hash: hash.into(),
             package: package.into(),
-            file_hash: Some("sha256:abc".into()),
+            file_hash: "sha256:abc".into(),
             file_size: Some(5),
-            nar_size: Some(5),
-            nar_hash: Some("sha256:def".into()),
-            confirmed: true,
+            nar_size: 5,
+            nar_hash: "sha256:def".into(),
+            nar_object_storage_key: format!("{hash}-abc"),
+            server_computed_hashes_and_sizes: true,
             created_at: test_date(),
             ..Default::default()
         });
         self.cached_paths.len() - 1
+    }
+
+    fn project_id_for_new_cached_path(&mut self) -> ProjectId {
+        if let Some(evaluation) = self.evaluation {
+            return self.projects[self.task_of[evaluation]].id;
+        }
+        if let Some(first) = self.projects.first() {
+            return first.id;
+        }
+        self.owner();
+        let slug = Uuid::now_v7().simple().to_string();
+        let project = rows::project_with_id(ProjectId::now_v7(), &format!("project-{slug}"));
+        self.tasks.push(task::Model {
+            id: TaskId::now_v7(),
+            project: project.id,
+            name: format!("task-{slug}"),
+            ..rows::task()
+        });
+        let id = project.id;
+        self.projects.push(project);
+        id
+    }
+
+    fn ensure_worker_registration_id_for_project(
+        &mut self,
+        project: ProjectId,
+    ) -> WorkerRegistrationId {
+        if let Some(declared) = self.registrations.iter().find(|r| r.peer_id == project) {
+            return declared.id;
+        }
+        let owner = self.owner();
+        let registration = worker_registration::Model {
+            active: false,
+            ..scheduling::build_worker_registration_row(
+                project,
+                &format!("producer-{project}"),
+                owner,
+            )
+        };
+        let id = registration.id;
+        self.registrations.push(registration);
+        id
     }
 }
 
@@ -779,10 +971,7 @@ mod tests {
             EdgeKind::Buildtime
         );
         let stored = db.cached_path(B_OUT).await;
-        assert!(
-            stored.as_ref().is_some_and(|p| p.file_hash.is_some()),
-            "{stored:?}"
-        );
+        assert!(stored.is_some(), "{stored:?}");
         let caches = db.rows::<cache::Entity>().await;
         assert!(matches!(caches.as_slice(), [c] if c.id == cache && c.private_key == "key"));
         let project = db.project_of(evaluation).await;
@@ -832,6 +1021,133 @@ mod tests {
         assert!(
             matches!(edges.as_slice(), [edge] if edge.kind == EdgeKind::Runtime),
             "{edges:?}"
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn cached_store_path_from_other_project_worker_is_not_trusted_by_sql_trust_condition() {
+        let (producer, reader) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(producer)
+            .derivation(B)
+            .output(B_OUT)
+            .cached_output(B)
+            .evaluation(reader)
+            .into_database()
+            .await;
+
+        let trusted_by = async |evaluation| {
+            let project = format!("'{}'", db.project_of(evaluation).await);
+            db.texts(&format!(
+                "SELECT ({})::text FROM cached_path stored",
+                gradient_db::store_path_content_variant_trust::project_trusts_content_variant_exists_sql(
+                    "stored.id", &project
+                )
+            ))
+            .await
+        };
+        assert_eq!(trusted_by(producer).await, ["true"]);
+        assert_eq!(trusted_by(reader).await, ["false"]);
+        let stored = db.cached_path(B_OUT).await.expect("the cached output");
+        assert!(stored.server_computed_hashes_and_sizes);
+        assert_ne!(stored.nar_object_storage_key, stored.hash);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_uploaded_into_named_cache_builder_writes_store_path_content_producer_row_of_kind_upload_with_cache_and_uploading_user()
+     {
+        let (evaluation, cache) = (EvaluationId::now_v7(), CacheId::now_v7());
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(B)
+            .output(B_OUT)
+            .cached_output(B)
+            .into_cache(cache)
+            .mark_uploaded_by_user()
+            .into_database()
+            .await;
+
+        let stored = db.cached_path(B_OUT).await.expect("the cached output");
+        let producers = db.rows::<store_path_content_producer::Entity>().await;
+        assert!(
+            matches!(producers.as_slice(), [p] if p.cached_path == stored.id
+                && p.kind == StoredContentVariantProducerKind::UploadedByUserOrApiKey
+                && p.cache == Some(cache)
+                && p.uploaded_by_user == Some(rows::user().id)
+                && p.upload_channel == Some(CacheUploadChannel::RestHttpApiUpload)
+                && p.worker_registration.is_none()
+                && p.team_worker.is_none()),
+            "{producers:?}"
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn team_worker_builder_writes_producer_row_and_team_grant_with_project_workers() {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(B)
+            .output(B_OUT)
+            .cached_output(B)
+            .mark_cached_path_built_by_team_worker()
+            .into_database()
+            .await;
+
+        let workers = db.rows::<team_worker::Entity>().await;
+        let [worker] = workers.as_slice() else {
+            panic!("{workers:?}")
+        };
+        let producers = db.rows::<store_path_content_producer::Entity>().await;
+        assert!(
+            matches!(producers.as_slice(), [p] if p.team_worker == Some(worker.id)
+                && p.kind == StoredContentVariantProducerKind::BuiltInDispatchedBuildJob
+                && p.worker_registration.is_none()
+                && p.cache.is_none()),
+            "{producers:?}"
+        );
+        let project = db.project_of(evaluation).await;
+        let grants = db.rows::<team_project::Entity>().await;
+        assert!(
+            matches!(grants.as_slice(), [g] if g.team == worker.team
+                && g.project == project
+                && g.includes_workers),
+            "{grants:?}"
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn legacy_signed_builder_writes_signed_cache_backfill_producer_row_without_source() {
+        let (evaluation, cache) = (EvaluationId::now_v7(), CacheId::now_v7());
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(B)
+            .output(B_OUT)
+            .cached_output(B)
+            .into_cache(cache)
+            .with_legacy_cached_path_before_producer_tracking()
+            .into_database()
+            .await;
+
+        let stored = db.cached_path(B_OUT).await.expect("the cached output");
+        assert!(!stored.server_computed_hashes_and_sizes);
+        assert_eq!(stored.nar_object_storage_key, stored.hash);
+        let producers = db.rows::<store_path_content_producer::Entity>().await;
+        assert!(
+            matches!(producers.as_slice(), [p] if p.cached_path == stored.id
+                && p.kind == StoredContentVariantProducerKind::SignedCacheBackfill
+                && p.worker_registration.is_none()
+                && p.team_worker.is_none()
+                && p.cache.is_none()),
+            "{producers:?}"
+        );
+        let signatures = db.signatures(B_OUT).await;
+        assert!(
+            matches!(signatures.as_slice(), [s] if s.cache == cache && s.signature.is_some()),
+            "{signatures:?}"
         );
         db.finish().await;
     }
@@ -969,22 +1285,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn references_and_unconfirmed_change_the_cached_output_only() {
+    async fn references_on_cached_output_set_only_that_cached_path_references_and_not_the_derivation_cached_path_references()
+     {
         let db = shape()
             .derivation(A)
             .drv_cached()
             .output(A_OUT)
             .cached_output(A)
-            .unconfirmed()
             .references(&[(A_OUT, "a"), (B_OUT, "b")])
             .into_database()
             .await;
 
         let output = db.cached_path(A_OUT).await.expect("the output path");
-        assert!(
-            !output.confirmed && output.file_hash.is_some(),
-            "{output:?}"
-        );
         assert_eq!(
             output.references,
             Some(format!("{A_OUT}-a {B_OUT}-b")),
@@ -992,7 +1304,7 @@ mod tests {
         );
         let (drv_hash, _) = drv_hash_name(A);
         let drv = db.cached_path(&drv_hash).await.expect("the drv path");
-        assert!(drv.confirmed && drv.references.is_none(), "{drv:?}");
+        assert!(drv.references.is_none(), "{drv:?}");
         db.finish().await;
     }
 

@@ -7,6 +7,7 @@
 //! Building a report is reading every failed build's log. It is requiring a logged-in caller even
 //! where anonymous browsing is allowed.
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::api_spec::Binary;
 use crate::extractors::{Path, Query};
 use anyhow::Context;
@@ -75,8 +76,14 @@ pub async fn get_evaluation_report(
 ) -> WebResult<Response> {
     let user_id = user.id;
     let maybe_user = Some(user);
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let opts = query.options();
 
     if report_requires_manage_workers(&opts) {

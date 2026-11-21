@@ -8,7 +8,8 @@ use super::helpers::{EntityLookup, ErrorCollector};
 use crate::config::{StateAction, StateGitHostConnection, StateTask};
 use crate::provisioning::build_trigger_config;
 use gradient_types::git_host::GitHostConnectionOwner;
-use gradient_types::input::check_nix_restricted_evaluation_url_prefix;
+use gradient_types::input::check_allowed_uri_prefix_has_remote_nix_scheme;
+use gradient_types::input::check_task_name;
 use gradient_types::triggers::TriggerType;
 use gradient_types::{ActionType, RepositoryLocation};
 use sea_orm::Iterable;
@@ -18,6 +19,10 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let config = lookup.config;
     let mut pinned_trigger_uuids_across_tasks = HashMap::new();
     for task in config.tasks.values() {
+        errors.record_input_error_at_field(
+            format!("tasks.{}.name", task.name),
+            check_task_name(&task.name),
+        );
         if !lookup.project_exists(&task.project) {
             errors.push(
                 format!("tasks.{}.project", task.name),
@@ -25,7 +30,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        if !lookup.user_exists(&task.created_by) {
+        if !lookup.creator_is_blank_or_user_exists(&task.created_by) {
             errors.push(
                 format!("tasks.{}.created_by", task.name),
                 format!("User '{}' does not exist", task.created_by),
@@ -51,7 +56,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
         }
 
         for prefix in &task.extra_allowed_uri_prefixes {
-            if let Err(e) = check_nix_restricted_evaluation_url_prefix(prefix) {
+            if let Err(e) = check_allowed_uri_prefix_has_remote_nix_scheme(prefix) {
                 errors.push(
                     format!("tasks.{}.extra_allowed_uri_prefixes", task.name),
                     e.to_string(),

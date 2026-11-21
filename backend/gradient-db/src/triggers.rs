@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::git_host_connection_repository_grants::filter_task_ids_by_git_host_connection_repository_grants;
 use chrono::NaiveDateTime;
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
@@ -128,7 +129,14 @@ pub async fn list_active_triggers_of_type_on_tasks_using_git_host_connection<C: 
         active_triggers_sql(trigger_type),
         [Value::Uuid(Some(connection.into_inner()))],
     );
-    ETaskTrigger::find().from_raw_sql(stmt).all(db).await
+    let triggers = ETaskTrigger::find().from_raw_sql(stmt).all(db).await?;
+    let tasks: Vec<TaskId> = triggers.iter().map(|trigger| trigger.task).collect();
+    let allowed =
+        filter_task_ids_by_git_host_connection_repository_grants(db, connection, &tasks).await?;
+    Ok(triggers
+        .into_iter()
+        .filter(|trigger| allowed.contains(&trigger.task))
+        .collect())
 }
 
 crate::sql! {
@@ -154,8 +162,16 @@ pub async fn active_pull_request_task_ids_using_git_host_connection<C: Connectio
     struct TaskRow {
         task: TaskId,
     }
-    TaskRow::find_by_statement(stmt)
+    let tasks: Vec<TaskId> = TaskRow::find_by_statement(stmt)
         .all(db)
-        .await
-        .map(|rows| rows.into_iter().map(|r| r.task).collect())
+        .await?
+        .into_iter()
+        .map(|row| row.task)
+        .collect();
+    let allowed =
+        filter_task_ids_by_git_host_connection_repository_grants(db, connection, &tasks).await?;
+    Ok(tasks
+        .into_iter()
+        .filter(|task| allowed.contains(task))
+        .collect())
 }

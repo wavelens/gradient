@@ -5,13 +5,10 @@
  */
 
 use gradient_entity::cache::Model as MCache;
-use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::{CacheId, ProjectId};
 use sea_orm::sea_query::{Alias, Expr};
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 
 pub const STORAGE_HEADROOM_BYTES: i64 = 10 * 1024 * 1024;
 
@@ -142,15 +139,6 @@ pub async fn project_caches_all_full<C: ConnectionTrait>(
         }
     }
     Ok(true)
-}
-
-pub async fn unconfirmed_cached_path_count<C: ConnectionTrait>(
-    db: &C,
-) -> Result<u64, sea_orm::DbErr> {
-    ECachedPath::find()
-        .filter(CCachedPath::Confirmed.eq(false))
-        .count(db)
-        .await
 }
 
 #[cfg(test)]

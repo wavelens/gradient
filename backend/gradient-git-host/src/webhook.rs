@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_types::RepositoryUrl;
 use serde::Deserialize;
 use tracing::warn;
 
@@ -275,6 +276,8 @@ pub struct GiteaRepoStub {
 #[derive(Deserialize)]
 pub struct GiteaUser {
     #[serde(default)]
+    pub id: Option<i64>,
+    #[serde(default)]
     pub username: Option<String>,
     #[serde(default)]
     pub login: Option<String>,
@@ -392,8 +395,6 @@ pub struct GiteaReview {
 pub struct GiteaReviewPr {
     #[serde(default)]
     pub number: Option<u64>,
-    #[serde(default)]
-    pub head: Option<GiteaPRRef>,
 }
 
 pub struct ParsedPushEvent {
@@ -433,10 +434,11 @@ pub struct ParsedPullRequestEvent {
     pub base_branch: Option<String>,
     pub pr_number: Option<u64>,
     pub pr_author: Option<String>,
-    pub sender: Option<String>,
     /// `None` is set when the payload cannot decide. Callers must treat it as untrusted.
     pub is_fork: Option<bool>,
-    pub head_repo_clone_url: Option<String>,
+    pub head_repo_owner_login: Option<String>,
+    pub unknown_author_requires_approval: bool,
+    pub head_repo_clone_url: Option<RepositoryUrl>,
     pub title: Option<String>,
 }
 
@@ -465,7 +467,13 @@ pub struct ParsedPullRequestReviewEvent {
     pub reviewer: Option<String>,
     pub pr_number: Option<u64>,
     pub repository_full_name: Option<String>,
-    pub commit_hash: Option<Vec<u8>>,
+    pub approved_commit_source: Option<ApprovedCommitSource>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ApprovedCommitSource {
+    CommitId(Vec<u8>),
+    ReviewSenderUserIdOnly { sender_user_id: i64 },
 }
 
 pub struct PushCommit {
@@ -492,6 +500,19 @@ pub fn decode_push_commit(git_ref: &str, after: &str, git_host: &str) -> Option<
         }),
         Err(e) => {
             warn!(error = %e, sha = %after, git_host, "Push webhook: invalid commit SHA");
+            None
+        }
+    }
+}
+
+pub(crate) fn parse_allowed_fork_repository_clone_url(
+    url: &str,
+    git_host: &str,
+) -> Option<RepositoryUrl> {
+    match url.parse() {
+        Ok(parsed) => Some(parsed),
+        Err(e) => {
+            warn!(error = %e, url, git_host, "ignore fork clone URL that is not an allowed repository URL");
             None
         }
     }
@@ -667,17 +688,20 @@ impl ParsedPullRequestEvent {
             (Some(h), Some(b)) => Some(h != b),
             _ => None,
         };
+        let head_repo_owner_login = head_full
+            .as_deref()
+            .and_then(|full| full.split_once('/'))
+            .map(|(owner, _)| owner.to_owned());
         let pr_author = payload
             .pull_request
             .user
             .as_ref()
             .and_then(|u| u.login.clone());
-        let sender = payload.sender.as_ref().and_then(|s| s.login.clone());
         let mut repository_urls = Vec::with_capacity(4);
-        let mut head_repo_clone_url: Option<String> = None;
+        let mut head_repo_clone_url = None;
         if let (Some(true), Some(repo)) = (is_fork, head_repo) {
             if let Some(url) = repo.clone_url.clone() {
-                head_repo_clone_url = Some(url.clone());
+                head_repo_clone_url = parse_allowed_fork_repository_clone_url(&url, "github");
                 repository_urls.push(url);
             }
             if let Some(url) = repo.ssh_url.clone() {
@@ -694,8 +718,9 @@ impl ParsedPullRequestEvent {
             base_branch: payload.pull_request.base.map(|base| base.branch),
             pr_number: payload.pull_request.number,
             pr_author,
-            sender,
             is_fork,
+            head_repo_owner_login,
+            unknown_author_requires_approval: false,
             head_repo_clone_url,
             title: payload.pull_request.title,
         })
@@ -715,6 +740,14 @@ impl ParsedPullRequestEvent {
             "pull_request.head.sha",
         )?;
         let base_full = payload.repository.full_name.as_deref();
+        let head_repo_owner_login = payload
+            .pull_request
+            .head
+            .repo
+            .as_ref()
+            .and_then(|r| r.full_name.as_deref())
+            .and_then(|full| full.split_once('/'))
+            .map(|(owner, _)| owner.to_owned());
         let is_fork = payload.pull_request.is_fork(base_full);
         let fork_repo = payload.pull_request.fork_repo(base_full);
         let pr_author = payload
@@ -722,11 +755,9 @@ impl ParsedPullRequestEvent {
             .user
             .as_ref()
             .and_then(|u| u.username.clone().or_else(|| u.login.clone()));
-        let sender = payload
-            .sender
-            .as_ref()
-            .and_then(|s| s.username.clone().or_else(|| s.login.clone()));
-        let head_repo_clone_url = fork_repo.and_then(|r| r.clone_url.clone());
+        let head_repo_clone_url = fork_repo
+            .and_then(|r| r.clone_url.as_deref())
+            .and_then(|url| parse_allowed_fork_repository_clone_url(url, "gitea"));
         let mut repository_urls: Vec<String> = fork_repo
             .into_iter()
             .flat_map(|r| [r.clone_url.clone(), r.ssh_url.clone()])
@@ -741,8 +772,9 @@ impl ParsedPullRequestEvent {
             base_branch: payload.pull_request.base.and_then(|base| base.git_ref),
             pr_number: payload.pull_request.number,
             pr_author,
-            sender,
             is_fork,
+            head_repo_owner_login,
+            unknown_author_requires_approval: false,
             head_repo_clone_url,
             title: payload.pull_request.title,
         })
@@ -769,13 +801,11 @@ impl ParsedPullRequestEvent {
             (Some(src), Some(tgt)) => Some(src != tgt),
             _ => None,
         };
-        let pr_author = payload.user.as_ref().and_then(|u| u.username.clone());
-        let sender = pr_author.clone();
         let mut repository_urls = Vec::with_capacity(4);
-        let mut head_repo_clone_url: Option<String> = None;
+        let mut head_repo_clone_url = None;
         if let (Some(true), Some(src)) = (is_fork, payload.object_attributes.source.as_ref()) {
             if let Some(url) = src.git_http_url.clone() {
-                head_repo_clone_url = Some(url.clone());
+                head_repo_clone_url = parse_allowed_fork_repository_clone_url(&url, "gitlab");
                 repository_urls.push(url);
             }
             if let Some(url) = src.git_ssh_url.clone() {
@@ -790,9 +820,10 @@ impl ParsedPullRequestEvent {
             branch: Some(payload.object_attributes.source_branch),
             base_branch: payload.object_attributes.target_branch,
             pr_number: payload.object_attributes.iid,
-            pr_author,
-            sender,
+            pr_author: None,
             is_fork,
+            head_repo_owner_login: None,
+            unknown_author_requires_approval: true,
             head_repo_clone_url,
             title: payload.object_attributes.title,
         })
@@ -913,22 +944,23 @@ impl ParsedPullRequestReviewEvent {
                 .state
                 .as_deref()
                 .is_some_and(|s| s.eq_ignore_ascii_case("approved"));
-        let commit_hash = payload
-            .review
-            .commit_id
-            .as_deref()
-            .and_then(|sha| decode_sha_hex(sha, "github", "review.commit_id"));
         let reviewer = payload
             .review
             .user
             .and_then(|u| u.login)
             .or_else(|| payload.sender.and_then(|s| s.login));
+        let approved_commit_source = payload
+            .review
+            .commit_id
+            .as_deref()
+            .and_then(|sha| decode_sha_hex(sha, "github", "review.commit_id"))
+            .map(ApprovedCommitSource::CommitId);
         Some(Self {
             approved,
             reviewer,
             pr_number: payload.pull_request.number,
             repository_full_name: payload.repository.full_name,
-            commit_hash,
+            approved_commit_source,
         })
     }
 
@@ -942,18 +974,18 @@ impl ParsedPullRequestReviewEvent {
         };
         let approved = payload.action == "reviewed"
             && payload.review.review_type.as_deref() == Some("pull_request_review_approved");
-        let commit_hash = payload
-            .pull_request
-            .head
-            .as_ref()
-            .and_then(|head| decode_sha_hex(&head.sha, "gitea", "pull_request.head.sha"));
-        let reviewer = payload.sender.and_then(|s| s.username.or(s.login));
+        let (sender_user_id, reviewer) = payload
+            .sender
+            .map_or((None, None), |s| (s.id, s.username.or(s.login)));
+        let approved_commit_source = sender_user_id
+            .filter(|id| *id > 0)
+            .map(|sender_user_id| ApprovedCommitSource::ReviewSenderUserIdOnly { sender_user_id });
         Some(Self {
             approved,
             reviewer,
             pr_number: payload.pull_request.number,
             repository_full_name: payload.repository.full_name,
-            commit_hash,
+            approved_commit_source,
         })
     }
 }
@@ -1106,6 +1138,10 @@ mod tests {
         let ev = ParsedPullRequestEvent::from_github(body.as_bytes()).unwrap();
         assert_eq!(ev.pr_number, Some(42));
         assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
+        assert_eq!(
+            ev.head_repo_owner_login.as_deref(),
+            Some("external-contrib")
+        );
         assert_eq!(ev.is_fork, Some(true));
         assert_eq!(
             (ev.branch.as_deref(), ev.base_branch.as_deref()),
@@ -1114,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn github_pr_sender_distinct_from_author_on_force_push() {
+    fn force_push_pull_request_event_reports_author_not_sender() {
         let body = format!(
             r#"{{
                 "action": "synchronize",
@@ -1143,11 +1179,14 @@ mod tests {
         let ev = ParsedPullRequestEvent::from_github(body.as_bytes()).unwrap();
         assert_eq!(ev.is_fork, Some(true));
         assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
-        assert_eq!(ev.sender.as_deref(), Some("maintainer"));
+        assert_eq!(
+            ev.head_repo_owner_login.as_deref(),
+            Some("external-contrib")
+        );
     }
 
     #[test]
-    fn gitea_pr_parses_sender_login() {
+    fn gitea_maintainer_pull_request_event_reports_author_username() {
         let body = format!(
             r#"{{
                 "action": "synchronize",
@@ -1161,11 +1200,10 @@ mod tests {
         );
         let ev = ParsedPullRequestEvent::from_gitea(body.as_bytes()).unwrap();
         assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
-        assert_eq!(ev.sender.as_deref(), Some("maintainer"));
     }
 
     #[test]
-    fn gitlab_mr_sender_falls_back_to_event_user() {
+    fn gitlab_merge_request_event_author_stays_unknown() {
         let body = format!(
             r#"{{
                 "object_attributes": {{
@@ -1179,7 +1217,7 @@ mod tests {
             }}"#
         );
         let ev = ParsedPullRequestEvent::from_gitlab(body.as_bytes()).unwrap();
-        assert_eq!(ev.sender.as_deref(), Some("maintainer"));
+        assert_eq!(ev.pr_author, None);
     }
 
     #[test]
@@ -1212,6 +1250,85 @@ mod tests {
         assert_eq!(ev.is_fork, Some(false));
     }
 
+    fn parse_fork_pull_request_webhook_bodies_of_github_gitea_and_gitlab_with_clone_url(
+        clone_url: &str,
+    ) -> [ParsedPullRequestEvent; 3] {
+        let fork = format!(
+            r#""full_name": "external/repo", "clone_url": "{clone_url}", "ssh_url": "{clone_url}""#
+        );
+        let github = format!(
+            r#"{{
+                "action": "opened",
+                "pull_request": {{
+                    "head": {{ "sha": "{VALID_SHA}", "ref": "patch-1", "repo": {{ {fork} }} }},
+                    "base": {{ "sha": "{VALID_SHA}", "ref": "main", "repo": {{ "full_name": "org/repo" }} }}
+                }},
+                "repository": {{
+                    "clone_url": "https://github.com/org/repo.git",
+                    "ssh_url": "git@github.com:org/repo.git",
+                    "full_name": "org/repo"
+                }}
+            }}"#
+        );
+        let gitea = format!(
+            r#"{{
+                "action": "opened",
+                "pull_request": {{
+                    "head": {{ "sha": "{VALID_SHA}", "ref": "patch-1", "repo": {{ {fork} }} }},
+                    "base": {{ "sha": "{VALID_SHA}", "ref": "main", "repo": {{ "full_name": "org/repo" }} }}
+                }},
+                "repository": {{
+                    "clone_url": "https://gitea.example.com/org/repo.git",
+                    "ssh_url": "git@gitea.example.com:org/repo.git",
+                    "full_name": "org/repo"
+                }}
+            }}"#
+        );
+        let gitlab = format!(
+            r#"{{
+                "object_attributes": {{
+                    "action": "open",
+                    "source_branch": "patch-1",
+                    "source_project_id": 99,
+                    "target_project_id": 1,
+                    "source": {{ "git_http_url": "{clone_url}", "git_ssh_url": "{clone_url}" }},
+                    "last_commit": {{ "id": "{VALID_SHA}" }}
+                }},
+                "project": {{
+                    "http_url": "https://gitlab.example.com/group/repo.git",
+                    "ssh_url": "git@gitlab.example.com:group/repo.git",
+                    "path_with_namespace": "group/repo"
+                }}
+            }}"#
+        );
+        [
+            ParsedPullRequestEvent::from_github(github.as_bytes()).unwrap(),
+            ParsedPullRequestEvent::from_gitea(gitea.as_bytes()).unwrap(),
+            ParsedPullRequestEvent::from_gitlab(gitlab.as_bytes()).unwrap(),
+        ]
+    }
+
+    #[test]
+    fn fork_pull_request_webhook_gives_no_clone_url_for_fork_clone_url_on_server_disk_and_keeps_https_for_all_git_hosts()
+     {
+        for ev in parse_fork_pull_request_webhook_bodies_of_github_gitea_and_gitlab_with_clone_url(
+            "file:///srv/repo",
+        ) {
+            assert_eq!(ev.is_fork, Some(true));
+            assert_eq!(ev.head_repo_clone_url, None);
+        }
+        for ev in parse_fork_pull_request_webhook_bodies_of_github_gitea_and_gitlab_with_clone_url(
+            "https://example.com/external/repo.git",
+        ) {
+            assert_eq!(
+                ev.head_repo_clone_url
+                    .as_ref()
+                    .map(RepositoryUrl::git_connection_url),
+                Some("https://example.com/external/repo.git")
+            );
+        }
+    }
+
     #[test]
     fn gitlab_mr_different_projects_marks_is_fork() {
         let body = format!(
@@ -1235,7 +1352,7 @@ mod tests {
         );
         let ev = ParsedPullRequestEvent::from_gitlab(body.as_bytes()).unwrap();
         assert_eq!(ev.pr_number, Some(11));
-        assert_eq!(ev.pr_author.as_deref(), Some("external"));
+        assert_eq!(ev.pr_author, None);
         assert_eq!(ev.is_fork, Some(true));
         assert_eq!(ev.base_branch.as_deref(), Some("main"));
     }
@@ -1559,10 +1676,15 @@ mod tests {
         }"#;
         let ev = ParsedPullRequestReviewEvent::from_github(body.as_bytes()).unwrap();
         assert!(ev.approved);
+        assert_eq!(
+            ev.approved_commit_source,
+            Some(ApprovedCommitSource::CommitId(
+                hex::decode(VALID_SHA).unwrap()
+            ))
+        );
         assert_eq!(ev.reviewer.as_deref(), Some("maintainer"));
         assert_eq!(ev.pr_number, Some(42));
         assert_eq!(ev.repository_full_name.as_deref(), Some("org/repo"));
-        assert_eq!(ev.commit_hash, Some(hex::decode(VALID_SHA).unwrap()));
     }
 
     #[test]
@@ -1574,7 +1696,7 @@ mod tests {
             "repository": { "clone_url": "x", "ssh_url": "y", "full_name": "org/repo" }
         }"#;
         let ev = ParsedPullRequestReviewEvent::from_github(body.as_bytes()).unwrap();
-        assert_eq!(ev.commit_hash, None);
+        assert_eq!(ev.approved_commit_source, None);
     }
 
     #[test]
@@ -1602,7 +1724,7 @@ mod tests {
     }
 
     #[test]
-    fn gitea_review_approved_by_maintainer() {
+    fn gitea_approved_review_with_empty_commit_id_and_head_sha_uses_sender_user_id_only() {
         let body = r#"{
             "action": "reviewed",
             "review": { "type": "pull_request_review_approved", "content": "" },
@@ -1612,27 +1734,40 @@ mod tests {
                 "head": { "sha": "abcdef0123456789abcdef0123456789abcdef01", "ref": "feature", "label": "feature" }
             },
             "repository": { "clone_url": "x", "full_name": "org/repo" },
-            "sender": { "username": "maintainer" }
+            "sender": { "id": 42, "username": "maintainer" }
         }"#;
         let ev = ParsedPullRequestReviewEvent::from_gitea(body.as_bytes()).unwrap();
         assert!(ev.approved);
         assert_eq!(ev.reviewer.as_deref(), Some("maintainer"));
         assert_eq!(ev.pr_number, Some(7));
         assert_eq!(ev.repository_full_name.as_deref(), Some("org/repo"));
-        assert_eq!(ev.commit_hash, Some(hex::decode(VALID_SHA).unwrap()));
+        assert_eq!(
+            ev.approved_commit_source,
+            Some(ApprovedCommitSource::ReviewSenderUserIdOnly { sender_user_id: 42 })
+        );
     }
 
     #[test]
-    fn gitea_review_without_pull_request_head_has_no_commit_hash() {
-        let body = r#"{
-            "action": "reviewed",
-            "review": { "type": "pull_request_review_approved" },
-            "pull_request": { "number": 7 },
-            "repository": { "clone_url": "x", "full_name": "org/repo" },
-            "sender": { "username": "maintainer" }
-        }"#;
-        let ev = ParsedPullRequestReviewEvent::from_gitea(body.as_bytes()).unwrap();
-        assert_eq!(ev.commit_hash, None);
+    fn gitea_approved_review_with_sender_id_zero_or_missing_has_no_reviewed_commit_source() {
+        for sender in [
+            r#"{ "id": 0, "username": "maintainer" }"#,
+            r#"{ "id": -1, "username": "maintainer" }"#,
+            r#"{ "username": "maintainer" }"#,
+        ] {
+            let body = format!(
+                r#"{{
+                    "action": "reviewed",
+                    "review": {{ "type": "pull_request_review_approved" }},
+                    "commit_id": "abcdef0123456789abcdef0123456789abcdef01",
+                    "pull_request": {{ "number": 7 }},
+                    "repository": {{ "clone_url": "x", "full_name": "org/repo" }},
+                    "sender": {sender}
+                }}"#
+            );
+            let ev = ParsedPullRequestReviewEvent::from_gitea(body.as_bytes()).unwrap();
+            assert!(ev.approved);
+            assert_eq!(ev.approved_commit_source, None, "{sender}");
+        }
     }
 
     #[test]

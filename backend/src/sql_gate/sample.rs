@@ -37,6 +37,9 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM derivation ORDER BY id LIMIT $1) s"
         }
         Param::CachedPathId => "SELECT id AS v FROM cached_path ORDER BY id LIMIT 1",
+        Param::CachedPathIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM cached_path ORDER BY id LIMIT $1) s"
+        }
         Param::CachedPathHash => "SELECT hash AS v FROM cached_path ORDER BY id LIMIT 1",
         Param::CachedPathHashes(_) => {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM cached_path ORDER BY id LIMIT $1) s"
@@ -113,6 +116,7 @@ fn shape(param: &Param) -> Option<Shape> {
         | Param::SharedBuildIds(n)
         | Param::EvaluationIds(n)
         | Param::EntryPointIds(n)
+        | Param::CachedPathIds(n)
         | Param::CacheIds(n)
         | Param::TaskIds(n) => Shape::Uuids(*n),
         Param::DerivationHash
@@ -225,6 +229,7 @@ mod tests {
             Param::DerivationHash,
             Param::DerivationHashes(4),
             Param::CachedPathId,
+            Param::CachedPathIds(4),
             Param::CachedPathHash,
             Param::CachedPathHashes(4),
             Param::SharedBuildId,

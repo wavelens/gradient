@@ -15,6 +15,9 @@ use thiserror::Error;
 pub use gradient_entity::task::ConcurrencyPolicy;
 pub use gradient_entity::task_trigger::TriggerType;
 
+pub const MAX_TRIGGER_PATH_FILTER_PATTERN_COUNT: usize = 64;
+pub const MAX_TRIGGER_PATH_FILTER_PATTERN_CHARACTER_COUNT: usize = 512;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TriggerConfig {
@@ -99,6 +102,12 @@ pub enum TriggerConfigError {
     EmptyPathFilterPattern,
     #[error("The pattern '{0}' for the path filter needs to be relative to the repository root")]
     PathFilterNotRelative(String),
+    #[error(
+        "a path filter can have at most {max_count} patterns in total across include and exclude patterns"
+    )]
+    PathFilterHasTooManyPatterns { max_count: usize },
+    #[error("pattern for a path filter can't be longer than {max_length} characters")]
+    PathFilterPatternTooLong { max_length: usize },
     #[error("malformed config: {0}")]
     Malformed(#[from] serde_json::Error),
 }
@@ -139,6 +148,33 @@ impl TriggerConfig {
         }
         self.path_filter()
             .map_or(Ok(()), ChangedFilePathFilter::validate)
+    }
+
+    /// The checks cover new input only. Stored triggers above the limits still work and a later load doesn't reject them.
+    pub fn validate_path_filter_pattern_limits(&self) -> Result<(), TriggerConfigError> {
+        let Some(path_filter) = self.path_filter() else {
+            return Ok(());
+        };
+        if path_filter.include_paths.len() + path_filter.exclude_paths.len()
+            > MAX_TRIGGER_PATH_FILTER_PATTERN_COUNT
+        {
+            return Err(TriggerConfigError::PathFilterHasTooManyPatterns {
+                max_count: MAX_TRIGGER_PATH_FILTER_PATTERN_COUNT,
+            });
+        }
+        if path_filter
+            .include_paths
+            .iter()
+            .chain(&path_filter.exclude_paths)
+            .any(|pattern| {
+                pattern.chars().count() > MAX_TRIGGER_PATH_FILTER_PATTERN_CHARACTER_COUNT
+            })
+        {
+            return Err(TriggerConfigError::PathFilterPatternTooLong {
+                max_length: MAX_TRIGGER_PATH_FILTER_PATTERN_CHARACTER_COUNT,
+            });
+        }
+        Ok(())
     }
 
     pub fn path_filter(&self) -> Option<&ChangedFilePathFilter> {
@@ -577,6 +613,47 @@ mod tests {
             TriggerConfig::parse_row(TriggerType::ReporterPush, &empty),
             Err(TriggerConfigError::EmptyPathFilterPattern)
         ));
+    }
+
+    #[test]
+    fn create_rejects_too_many_or_too_long_patterns_but_parse_row_accepts_them() {
+        let polling_with_patterns =
+            |include_paths: Vec<String>, exclude_paths: Vec<String>| TriggerConfig::Polling {
+                interval_secs: 60,
+                branch: None,
+                path_filter: ChangedFilePathFilter {
+                    include_paths,
+                    exclude_paths,
+                },
+            };
+        let patterns = |count: usize| (0..count).map(|i| format!("src/{i}/*")).collect();
+        let at_limits = polling_with_patterns(
+            patterns(MAX_TRIGGER_PATH_FILTER_PATTERN_COUNT - 1),
+            vec!["é".repeat(MAX_TRIGGER_PATH_FILTER_PATTERN_CHARACTER_COUNT)],
+        );
+        assert!(at_limits.validate_path_filter_pattern_limits().is_ok());
+
+        let too_many = polling_with_patterns(
+            patterns(MAX_TRIGGER_PATH_FILTER_PATTERN_COUNT),
+            vec!["*.md".into()],
+        );
+        assert!(matches!(
+            too_many.validate_path_filter_pattern_limits(),
+            Err(TriggerConfigError::PathFilterHasTooManyPatterns { max_count: 64 })
+        ));
+        let too_long = polling_with_patterns(
+            vec!["a".repeat(MAX_TRIGGER_PATH_FILTER_PATTERN_CHARACTER_COUNT + 1)],
+            vec![],
+        );
+        assert!(matches!(
+            too_long.validate_path_filter_pattern_limits(),
+            Err(TriggerConfigError::PathFilterPatternTooLong { max_length: 512 })
+        ));
+
+        for stored in [too_many, too_long] {
+            let parsed = TriggerConfig::parse_row(TriggerType::Polling, &stored.to_db_json());
+            assert_eq!(parsed.unwrap(), stored);
+        }
     }
 
     #[test]

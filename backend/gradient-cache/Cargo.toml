@@ -76,6 +76,7 @@ mockall      = { workspace = true }
 tempfile     = { workspace = true }
 gradient-notify = { workspace = true }
 gradient-fixtures = { workspace = true }
+gradient-storage = { workspace = true, features = ["testing"] }
 gradient-test-support = { workspace = true }
 tokio        = { workspace = true, features = ["macros"] }
 tokio-test   = { workspace = true }

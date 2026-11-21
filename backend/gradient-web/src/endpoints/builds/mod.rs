@@ -32,7 +32,10 @@ pub use self::log_chunks::{
 };
 pub use self::query::{BuildWithOutputs, get_build};
 
-use crate::access::can_view_project;
+use crate::access::{
+    Caller, ProjectItemAccessRequirement, ProjectItemLocation, can_access_project_resource,
+    can_view_project,
+};
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::lookup::require;
@@ -48,6 +51,7 @@ use serde::Deserialize;
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
     pub shared_build: MDerivationBuild,
+    pub evaluation: MEvaluation,
     pub project: MProject,
 }
 
@@ -102,6 +106,7 @@ impl BuildAccessContext {
         Ok(Self {
             build_job,
             shared_build,
+            evaluation,
             project,
         })
     }
@@ -109,31 +114,37 @@ impl BuildAccessContext {
     pub(super) async fn load(
         db: &WebDb,
         build_job_id: BuildJobId,
-        maybe_user: &Option<MUser>,
+        caller: Caller<'_>,
         api_key: Option<&ApiKeyContext>,
+        requirement: ProjectItemAccessRequirement,
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(db, build_job_id).await?;
-
-        let direct_access = if ctx.project.public {
-            true
-        } else {
-            match maybe_user {
-                Some(user) => can_view_project(db, user.id, ctx.project.id, api_key).await?,
-                None => false,
-            }
+        let resource = ProjectItemLocation::from_evaluation(&ctx.evaluation)?;
+        let refusal = match can_access_project_resource(
+            db,
+            caller,
+            api_key,
+            &ctx.project,
+            resource,
+            requirement,
+            Resource::Build,
+        )
+        .await
+        {
+            Ok(()) => return Ok(ctx),
+            Err(refusal) => refusal,
         };
 
-        if direct_access {
-            return Ok(ctx);
-        }
-
-        if let Some(user) = maybe_user
+        let reads_through_another_project = requirement
+            == ProjectItemAccessRequirement::PublicProjectOrCanViewProject
+            && api_key.is_none_or(|key| key.job_binding.is_none());
+        if let Caller::User(user) = caller
+            && reads_through_another_project
             && reachable_projects_accessible(db, user, api_key, ctx.build_job.derivation).await?
         {
             return Ok(ctx);
         }
-
-        Err(WebError::not_found(Resource::Build))
+        Err(refusal)
     }
 }
 

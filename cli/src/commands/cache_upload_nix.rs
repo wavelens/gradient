@@ -118,6 +118,10 @@ async fn query_refs(pool: &ConnectionPool, store_path: &str) -> anyhow::Result<V
         .collect())
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "report errors for local store paths and the local database, not server data"
+)]
 async fn runtime_closure(pool: &ConnectionPool, seeds: &[String]) -> HashSet<String> {
     let mut visited: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
@@ -194,6 +198,7 @@ pub async fn upload_paths(args: &UploadArgs, out: Output) {
         let ni = Narinfo {
             store_path: store_path.clone(),
             url: None,
+            compression: Some("zstd".to_string()),
             file_hash,
             file_size: compressed.len() as i64,
             nar_hash: meta.nar_hash_sri,

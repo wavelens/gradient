@@ -17,6 +17,7 @@ pub struct ResolvedJobToken {
     pub project_name: String,
     pub task_name: String,
     pub acting_user: UserId,
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
@@ -40,7 +41,8 @@ crate::sql! {
         params = [NewUuid, NewUuid, Text("0000"), Now];
     RESOLVE_JOB_TOKEN = "SELECT a.exec_job AS job, t.attempt, t.project, t.task, \
          p.name AS project_name, tk.name AS task_name, \
-         COALESCE(ev.started_by, tk.created_by) AS acting_user \
+         COALESCE(ev.started_by, tk.created_by) AS acting_user, \
+         ev.allows_project_credentials_and_privileged_actions \
          FROM exec_job_token t \
          JOIN exec_job_attempt a ON a.id = t.attempt \
          JOIN exec_job j ON j.id = a.exec_job \

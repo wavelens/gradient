@@ -10,8 +10,12 @@ use super::board_subjects::{
 };
 use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
 use super::exec_jobs::timeline::with_reported_phases;
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::access::{can_view_project, key_limited_project_mask};
-use crate::authorization::{ApiKeyContext, LiveStreamAuthToken, MaybeApiKey, MaybeUser};
+use crate::authorization::{
+    ApiKeyContext, MaybeApiKey, MaybeUser, WebSocketAuthorizationRecheck,
+    WebSocketUpgradeCredentialRecheckRequestExtractor,
+};
 use crate::endpoints::board_metrics::{
     MAX_BOARD_STATISTICS_LOOKBACK_DAYS, bounded_window_hours_from_requested,
 };
@@ -25,7 +29,8 @@ use crate::permissions::{Permission, mask_to_vec};
 use crate::resource::Resource;
 use crate::store_paths::original_text;
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocket};
+use axum::http::Method;
 use axum::response::Response;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -1065,7 +1070,7 @@ pub async fn get_board_workers(
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|w| (scope.worker_projects(w.authorized_peers.as_ref()), w))
+        .map(|w| (scope.worker_projects(&w.project_access), w))
         .collect();
 
     let visible_projects: Vec<Uuid> = workers
@@ -1249,7 +1254,7 @@ pub async fn get_board_worker_load(
 
     let visible_workers: Vec<&gradient_pool::WorkerInfo> = workers
         .iter()
-        .filter(|w| scope.worker_projects(w.authorized_peers.as_ref()).is_some())
+        .filter(|w| scope.worker_projects(&w.project_access).is_some())
         .collect();
     let visible_jobs: Vec<&gradient_scheduler::BoardActiveJob> = jobs
         .iter()
@@ -1550,12 +1555,21 @@ pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    credentials: LiveStreamAuthToken,
-    ws: WebSocketUpgrade,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> Response {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user)
         .await
         .unwrap_or(MetricsScope::Projects(vec![]));
+    let db = state.web_db.clone();
+    let admitted = scope.clone();
+    let guard = credentials.watch_caller_access_with_recheck(Method::GET, move |user, _| {
+        let (db, admitted) = (db.clone(), admitted.clone());
+        async move {
+            admitted
+                .recheck_metrics_scope_still_visible(&db, &user)
+                .await
+        }
+    });
 
     let rx = state.events.subscribe();
     let (workers, pending, active) = scheduler.metrics_snapshot().await.unwrap_or_default();
@@ -1569,16 +1583,9 @@ pub async fn board_live_ws(
     );
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
-    ws.on_upgrade(move |socket| async move {
+    guard.on_upgrade(move |socket, guard| async move {
         let _ = shutdown
-            .spawn(board_live_loop(
-                socket,
-                rx,
-                scope,
-                initial,
-                credentials,
-                cancel,
-            ))
+            .spawn(board_live_loop(socket, rx, scope, initial, guard, cancel))
             .await;
     })
 }
@@ -1588,7 +1595,7 @@ async fn board_live_loop(
     rx: EventRx,
     scope: MetricsScope,
     initial: Envelope,
-    credentials: LiveStreamAuthToken,
+    guard: WebSocketAuthorizationRecheck,
     cancel: CancellationToken,
 ) {
     if let Some(text) = mask_event(&initial, &scope)
@@ -1602,7 +1609,7 @@ async fn board_live_loop(
         rx,
         move |env| mask_event(env, &scope),
         super::live::skip_lag,
-        credentials,
+        guard.wait_until_access_lost(),
         cancel,
     )
     .await;
@@ -1718,8 +1725,14 @@ pub async fn get_eval_flake_graph(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeGraphNode>>>> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let rows = gradient_db::flake_output_nodes::of_evaluation(&state.web_db, evaluation_id).await?;
 
     let mapper = state.project_mapper(ctx.project_id).await?;
@@ -1765,7 +1778,7 @@ mod tests {
             assigned_job_count: 0,
             assigned_build_count: 0,
             draining: false,
-            authorized_peers: None,
+            project_access: gradient_pool::ProjectAccess::AllProjects,
             cpu_usage_pct: None,
             ram_free_mb: None,
             ram_total_mb: 0,
@@ -2097,7 +2110,10 @@ mod tests {
             name: "hello".into(),
             kind: "derivation".into(),
             is_derivation: true,
-            drv_path: Some("/nix/store/abc-hello.drv".into()),
+            drv_path: Some(format!(
+                "/nix/store/{}-hello.drv",
+                gradient_entity::EXAMPLE_STORED_HASH
+            )),
         };
         let node = FlakeGraphNode::from(model);
         assert_eq!(node.path, "packages.x86_64-linux.hello");
@@ -2105,7 +2121,13 @@ mod tests {
         assert_eq!(node.name, "hello");
         assert_eq!(node.kind, "derivation");
         assert!(node.is_derivation);
-        assert_eq!(node.drv_path.as_deref(), Some("abc-hello.drv"));
+        assert_eq!(
+            node.drv_path,
+            Some(format!(
+                "{}-hello.drv",
+                gradient_entity::EXAMPLE_STORED_HASH
+            ))
+        );
     }
 
     #[test]

@@ -5,4 +5,13 @@ allow-unwrap-in-tests = true
 
 disallowed-methods = [
     { path = "reqwest::Client::new", reason = "use connector::Client::builder, which installs a CA bundle; a bare client panics in the Nix sandbox" },
+    { path = "std::io::stdout", reason = "output through `Output`, or use the escape filter in `logfmt`, because server text can contain terminal escape sequences" },
+    { path = "std::io::stderr", reason = "output through `Output`, or use the escape filter in `logfmt`, because server text can contain terminal escape sequences" },
+]
+
+disallowed-macros = [
+    { path = "std::print", reason = "output through `Output`, or use the escape filter in `logfmt`, because server text can contain terminal escape sequences" },
+    { path = "std::println", reason = "output through `Output`, or use the escape filter in `logfmt`, because server text can contain terminal escape sequences" },
+    { path = "std::eprint", reason = "output through `Output`, or use the escape filter in `logfmt`, because server text can contain terminal escape sequences" },
+    { path = "std::eprintln", reason = "output through `Output`, or use the escape filter in `logfmt`, because server text can contain terminal escape sequences" },
 ]

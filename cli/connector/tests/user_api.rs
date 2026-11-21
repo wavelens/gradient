@@ -83,6 +83,7 @@ fn connector_client_for_wiremock_with_bearer_token(server: &MockServer) -> Clien
 fn one_api_key_info_response_json() -> serde_json::Value {
     json!({
         "id": "00000000-0000-0000-0000-000000000001", "name": "ci", "managed": false, "permissions": ["viewProject"],
+        "cache_permissions": [],
         "created_at": "2026-01-01T00:00:00", "allowed_ips": []
     })
 }
@@ -155,6 +156,40 @@ async fn create_key_returns_the_token_string() {
         .await
         .unwrap();
     assert_eq!(token, "GRADabc");
+}
+
+#[tokio::test]
+async fn create_api_key_forbidden_with_cli_auth_needs_browser_session_returns_connector_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/user/keys"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "error": true,
+            "message": "forbidden",
+            "code": "cli_auth_needs_browser_session",
+        })))
+        .mount(&server)
+        .await;
+
+    let result = connector_client_for_wiremock_with_bearer_token(&server)
+        .user()
+        .create_key(CreateApiKeyRequest {
+            name: "ci".into(),
+            permissions: vec!["viewProject".into()],
+            cache_permissions: Vec::new(),
+            expires_in_days: None,
+            project: None,
+            cache: None,
+            allowed_ips: None,
+        })
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(connector::ConnectorError::WebBrowserSignInRequired)
+        ),
+        "{result:?}"
+    );
 }
 
 #[tokio::test]
@@ -304,8 +339,8 @@ async fn list_sessions_sends_page_and_per_page() {
         .and(query_param("per_page", "5"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!({
             "items": [{
-                "id": "[uuid2]", "created_at": "c", "last_used_at": "l", "expires_at": "e",
-                "remember_me": false, "current": true
+                "id": "34b99f2a-6867-43c0-a6b7-93e4da193444", "created_at": "c", "last_used_at": "l", "expires_at": "e",
+                "remember_me": false, "current": true, "is_cli_device_sign_in_session": false
             }],
             "total": 6, "page": 2, "per_page": 5
         }))))
@@ -324,7 +359,9 @@ async fn list_sessions_sends_page_and_per_page() {
 async fn delete_session_uses_the_session_path() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
-        .and(path("/api/v1/user/sessions/[uuid2]"))
+        .and(path(
+            "/api/v1/user/sessions/34b99f2a-6867-43c0-a6b7-93e4da193444",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok("Session revoked")))
         .expect(1)
         .mount(&server)
@@ -332,7 +369,7 @@ async fn delete_session_uses_the_session_path() {
 
     connector_client_for_wiremock_with_bearer_token(&server)
         .user()
-        .delete_session("[uuid2]")
+        .delete_session("34b99f2a-6867-43c0-a6b7-93e4da193444")
         .await
         .unwrap();
 }

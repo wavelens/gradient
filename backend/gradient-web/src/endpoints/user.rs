@@ -7,7 +7,8 @@
 use crate::access::{CacheAccess, Caller, caller_cache_mask, caller_project_mask, load_cache};
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{
-    MaybeUser, can_disconnect, generate_api_key, hash_api_key, session_claims,
+    MaybeUser, can_disconnect, credential_insert_error_to_http_error, generate_api_key,
+    hash_api_key, session_claims,
 };
 use crate::error::{WebError, WebResult, require_create_permission, unique_violation};
 use crate::extractors::{JsonBody, Path, Query};
@@ -34,17 +35,21 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use chrono::Duration;
-use email_address::EmailAddress;
 use gradient_core::ServerState;
 use gradient_types::consts::*;
-use gradient_types::input::validate_username;
+use gradient_types::input::{validate_email, validate_username};
 use gradient_types::*;
-use password_auth::verify_password;
 use sea_orm::ActiveValue::Set;
 use sea_orm::IntoActiveModel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::password_hashing_and_wrong_sign_in_attempts::{
+    WrongPasswordAttemptCountsAndLastAttemptTimesByUserId,
+    acquire_password_hashing_slot_with_five_second_timeout,
+    password_matches_account_hash_or_dummy_hash,
+};
 
 #[derive(Debug, thiserror::Error)]
 enum UserRefusal {
@@ -283,6 +288,8 @@ pub struct SessionInfo {
     pub expires_at: String,
     pub remember_me: bool,
     pub current: bool,
+    /// True if `gradient login` created the session through approval in the browser. Such sessions end 30 days after sign-in and can't change account credentials.
+    pub is_cli_device_sign_in_session: bool,
 }
 
 impl SessionInfo {
@@ -296,6 +303,7 @@ impl SessionInfo {
             expires_at: fmt_dt(session.expires_at),
             remember_me: session.remember_me,
             current: Some(session.id) == current_session,
+            is_cli_device_sign_in_session: session.is_cli_device_sign_in_session,
         }
     }
 }
@@ -489,8 +497,11 @@ pub async fn put_seen_version(
     request_body = DeleteUserRequest,
     responses((status = OK, description = "User deleted", body = String, content_type = "application/json"), WebError)
 )]
-pub async fn delete(
+pub(crate) async fn delete(
     state: State<Arc<ServerState>>,
+    Extension(wrong_password_counts_by_account): Extension<
+        Arc<WrongPasswordAttemptCountsAndLastAttemptTimesByUserId>,
+    >,
     audit: Audit,
     Extension(user): Extension<MUser>,
     JsonBody(body): JsonBody<DeleteUserRequest>,
@@ -498,12 +509,33 @@ pub async fn delete(
     if user.managed {
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::User).into());
     }
-    if let Some(ref hashed) = user.password {
+    if user.password.is_some() {
         let provided = body
             .password
-            .as_ref()
+            .clone()
             .ok_or(UserRefusal::PasswordConfirmationRequired)?;
-        verify_password(provided, hashed).map_err(|_| UserRefusal::PasswordConfirmationInvalid)?;
+        let password_hashing_slot =
+            acquire_password_hashing_slot_with_five_second_timeout().await?;
+        let recorded_password_attempt = wrong_password_counts_by_account
+            .record_password_attempt_or_refuse_with_429_when_wait_is_due_unless_client_network_has_same_account_live_session(
+                &state.web_db,
+                user.id,
+                audit.info().ip.as_deref(),
+            )
+            .await?;
+        if !password_matches_account_hash_or_dummy_hash(
+            password_hashing_slot,
+            provided,
+            user.password.clone(),
+        )
+        .await?
+        {
+            return Err(UserRefusal::PasswordConfirmationInvalid.into());
+        }
+        wrong_password_counts_by_account.remove_wrong_sign_in_attempts_through_recorded_attempt(
+            user.id,
+            recorded_password_attempt,
+        );
     } else {
         let confirm = body
             .confirm_username
@@ -918,6 +950,7 @@ pub async fn post_keys(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
+    Extension(session): Extension<MSession>,
     JsonBody(body): JsonBody<CreateApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
@@ -973,9 +1006,21 @@ pub async fn post_keys(
         ..Default::default()
     };
 
-    let inserted = gradient_db::rows::insert::<EApi, _>(&state.web_db, api_key)
+    let inserted =
+        gradient_db::users::insert_credential_after_locking_user_row_and_rechecking_authorisation(
+            state.web_db.inner(),
+            user.id,
+            gradient_db::users::VerifiedFactForSessionOrCredentialCreation::ExistingSignInSession(
+                session.id,
+            ),
+            |tx| Box::pin(async move { gradient_db::rows::insert::<EApi, _>(tx, api_key).await }),
+        )
         .await
-        .map_err(|e| WebError::from_db_err(e, Resource::ApiKeyName))?;
+        .map_err(|e| {
+            credential_insert_error_to_http_error(e, |e| {
+                WebError::from_db_err(e, Resource::ApiKeyName)
+            })
+        })?;
 
     audit.write(Action::ApiKeyCreate, EventOwner::default(), serde_json::json!({ "api_key_id": inserted.id.to_string(), "name": body.name, "expires_in_days": body.expires_in_days, "permissions_mask": masks.project_and_server_permission_bitmask, "cache_permissions_mask": masks.cache_permission_bitmask, "project_id": project_pin.map(|id| id.to_string()), "cache_id": cache_pin.map(|id| id.to_string()), }))
     .await;
@@ -1228,8 +1273,10 @@ pub async fn delete_session(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
+    Extension(caller_session): Extension<MSession>,
     Path(session_id): Path<SessionId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    crate::authorization::refuse_cli_session_revoking_other_session(&caller_session, session_id)?;
     let session = require::<ESession>(&state.web_db, session_id).await?;
 
     if session.user_id != user.id {
@@ -1362,7 +1409,7 @@ pub async fn patch_settings(
     }
 
     if let Some(email) = body.email {
-        if !EmailAddress::is_valid(&email) {
+        if validate_email(&email).is_err() {
             return Err(WebError::invalid_email());
         }
 

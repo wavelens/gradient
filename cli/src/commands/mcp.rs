@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::commands::base::parse_subcommand_name_chain_from_cli_args;
+use crate::commands::base::{CommandRunCheckResult, parse_cli_arguments_and_decide_run_permission};
 use crate::commands::poll_evaluation_until_finished::poll_evaluation_until_terminal;
 use crate::config::{
     ConfigKey, load_and_migrate_login_config_file, login_name_from_flag_env_or_config,
     saved_login_for_invocation,
 };
 use crate::input::client_from_config;
+use crate::logfmt::{TerminalColorOrPlainText, filter_complete_text_for_terminal_output};
 use crate::output::Output;
 use crate::tui::watch::eval_is_terminal;
 use connector::{Client, ConnectorError};
@@ -24,6 +25,7 @@ use rmcp::transport::stdio;
 use rmcp::{ErrorData, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -45,38 +47,6 @@ Pass CLI arguments for `gradient`. An example is [\"task\", \"create\", \"--name
 The command [\"task\", \"--help\"] can list the subcommands and flags of a command group. \
 `--project` and `--task` can select targets without changing the current selection.";
 
-const ALLOWED_GRADIENT_SUBCOMMANDS: &[&str] = &[
-    "project",
-    "task",
-    "cache",
-    "worker",
-    "team",
-    "builds",
-    "evaluation",
-    "logs",
-    "search",
-    "status",
-    "info",
-    "exec-job",
-];
-const DENIED_GRADIENT_SUBCOMMANDS: &[&[&str]] = &[
-    &["project", "secret", "set"],
-    &["project", "secret", "delete"],
-    &["task", "action", "create"],
-    &["project", "webhook", "create"],
-    &["project", "webhook", "rotate-secret"],
-    &["team", "webhook", "create"],
-    &["team", "webhook", "rotate-secret"],
-    &["cache", "webhook", "create"],
-    &["cache", "webhook", "rotate-secret"],
-    &["cache", "install-netrc"],
-    &["cache", "upload"],
-    &["worker", "register"],
-    &["team", "worker", "register"],
-    &["exec-job", "download"],
-    &["evaluation", "report"],
-    &["builds", "sbom"],
-];
 const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
 const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
 
@@ -205,7 +175,10 @@ fn to_result<T: Serialize>(value: Result<T, ConnectorError>) -> Result<CallToolR
 
 fn to_log_result(value: Result<String, ConnectorError>, start: u64) -> CallToolResult {
     let log = match value {
-        Ok(log) => log,
+        Ok(log) => filter_complete_text_for_terminal_output(
+            &log,
+            TerminalColorOrPlainText::StripEscapeSequences,
+        ),
         Err(e) => return to_error(e),
     };
 
@@ -220,6 +193,33 @@ fn to_log_result(value: Result<String, ConnectorError>, start: u64) -> CallToolR
             path.display()
         ))]),
         Err(e) => CallToolResult::error(vec![ContentBlock::text(format!("save log: {e}"))]),
+    }
+}
+
+fn strip_terminal_escape_sequences_from_json_string_values(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(filter_complete_text_for_terminal_output(
+            &text,
+            TerminalColorOrPlainText::StripEscapeSequences,
+        )),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(strip_terminal_escape_sequences_from_json_string_values)
+                .collect(),
+        ),
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, field)| {
+                    (
+                        key,
+                        strip_terminal_escape_sequences_from_json_string_values(field),
+                    )
+                })
+                .collect(),
+        ),
+        other => other,
     }
 }
 
@@ -428,7 +428,11 @@ impl GradientMcp {
             Err(e) => return Ok(to_error(e)),
         };
 
-        to_result(Ok::<_, ConnectorError>(hits))
+        to_result(Ok::<_, ConnectorError>(
+            hits.into_iter()
+                .map(strip_terminal_escape_sequences_from_json_string_values)
+                .collect::<Vec<_>>(),
+        ))
     }
 }
 
@@ -482,30 +486,25 @@ impl GradientMcp {
     }
 
     #[tool(
-        description = "Run a `gradient` CLI command with `--json` and return its output. The first \
+        description = "Run `gradient` CLI commands through `--json` and return the output. The first \
                        argument is the command group (project, task, cache, worker, team, \
-                       builds, evaluation, logs, search, status, info, exec-job)."
+                       builds, evaluation, logs, search, status, info, exec-job). Commands that \
+                       write local files, reveal secret values, or need a terminal don't run here."
     )]
     async fn run_gradient_command(
         &self,
         Parameters(RunGradientCommandArgs { args }): Parameters<RunGradientCommandArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let group = args.first().map(String::as_str).unwrap_or_default();
-        if !ALLOWED_GRADIENT_SUBCOMMANDS.contains(&group) {
-            let allowed = ALLOWED_GRADIENT_SUBCOMMANDS.join(", ");
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "`{group}` is not available here. Allowed command groups: {allowed}."
-            ))]));
-        }
-        if let Some(chain) = parse_subcommand_name_chain_from_cli_args(&args)
-            && DENIED_GRADIENT_SUBCOMMANDS
-                .iter()
-                .any(|denied| chain.iter().map(String::as_str).eq(denied.iter().copied()))
-        {
-            let command = chain.join(" ");
-            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "`gradient {command}` can't run here because the command can access secret values or local files."
-            ))]));
+        match parse_cli_arguments_and_decide_run_permission(&args) {
+            CommandRunCheckResult::CommandMayRun => {}
+            CommandRunCheckResult::McpPermissionDeniedCommandMustNotRun { command, reason } => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "`gradient {command}` can't run here. {reason}"
+                ))]));
+            }
+            CommandRunCheckResult::CommandArgumentsParseFailure(message) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+            }
         }
         if args
             .iter()
@@ -703,4 +702,32 @@ pub async fn run(control: bool) -> std::io::Result<()> {
 
     service.waiting().await.map_err(std::io::Error::other)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::base::collect_leaf_subcommands_with_name_chain_and_refusal;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn test_run_gradient_command_description_lists_top_level_groups_with_runnable_leaf() {
+        let description = GradientMcp::run_gradient_command_tool_attr()
+            .description
+            .expect("the tool has a description");
+        let listed: BTreeSet<String> = description
+            .split_once("command group (")
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .expect("the description lists the command groups")
+            .0
+            .split(", ")
+            .map(str::to_owned)
+            .collect();
+        let runnable: BTreeSet<String> = collect_leaf_subcommands_with_name_chain_and_refusal()
+            .into_iter()
+            .filter(|leaf| leaf.permission.is_ok())
+            .map(|leaf| leaf.names[0].clone())
+            .collect();
+        assert_eq!(listed, runnable);
+    }
 }

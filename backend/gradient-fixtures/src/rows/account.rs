@@ -11,6 +11,10 @@ use gradient_entity::{session, user};
 use crate::ids::user_id;
 use crate::test_date;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Test data require real Argon2 hashes. The password module of gradient-web is private, so tests cannot access that module."
+)]
 pub fn user() -> user::Model {
     user::Model {
         id: user_id(),

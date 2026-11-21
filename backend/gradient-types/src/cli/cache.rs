@@ -22,8 +22,10 @@ pub struct CacheArgs {
     #[arg(default_value_t = 0)]
     pub max_storage_gb: u32,
 
-    /// Seconds between NAR signature backfill passes. Uploads receive their signature
-    /// immediately. Only subscription placeholders and unsigned leftovers need the pass.
+    /// Seconds between passes that sign unsigned cache entries. Uploads receive a signature at
+    /// once. Only three kinds of rows need this pass. They are subscription placeholders, unsigned
+    /// leftovers and published dependency outputs. The cache publishes dependency outputs every
+    /// 300 seconds and on every wake.
     #[arg(default_value = "3600")]
     pub sign_sweep_interval_secs: NonZeroU64,
 

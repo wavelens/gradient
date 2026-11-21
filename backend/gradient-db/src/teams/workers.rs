@@ -11,17 +11,6 @@ use sea_orm::{
 };
 use std::collections::HashMap;
 
-pub async fn active_team_worker<C: ConnectionTrait>(
-    db: &C,
-    worker_id: &str,
-) -> Result<Option<MTeamWorker>, DbErr> {
-    ETeamWorker::find()
-        .filter(CTeamWorker::WorkerId.eq(worker_id))
-        .filter(CTeamWorker::Active.eq(true))
-        .one(db)
-        .await
-}
-
 pub async fn is_team_worker<C: ConnectionTrait>(db: &C, worker_id: &str) -> Result<bool, DbErr> {
     Ok(ETeamWorker::find()
         .filter(CTeamWorker::WorkerId.eq(worker_id))

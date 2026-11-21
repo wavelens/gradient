@@ -22,6 +22,7 @@ const OTHER_CONNECTION: &str = "00000000-0000-0000-0000-000000006202";
 const USER: &str = "00000000-0000-0000-0000-000000006203";
 const DELIVERY: &str = "00000000-0000-0000-0000-000000006204";
 const ATTEMPT: &str = "00000000-0000-0000-0000-000000006205";
+const REPOSITORY_GRANT_UUID: &str = "71da92de-bc06-4bb7-9d98-5bcfb9a5a4da";
 const CONNECTIONS: &str = "/api/v1/projects/web/git-host-connections";
 const REPOSITORY: &str = "/api/v1/tasks/web/nightly/repository";
 
@@ -121,6 +122,48 @@ async fn test_git_host_connection_list_defaults_to_the_selected_project() {
     ));
     assert!(output.contains("team/ops"), "{output}");
     assert!(output.contains("project/web"), "{output}");
+}
+
+#[tokio::test]
+async fn server_names_and_error_messages_are_printed_to_terminal_with_control_and_escape_sequences_removed()
+ {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(CONNECTIONS))
+        .respond_with(ok(json!([summary(
+            PROJECT_CONNECTION,
+            "evil\u{1b}]52;c;ZXZpbA==\u{7}\u{1b}[2Kname\u{202e}txt.exe\rcovered",
+            project_owner(),
+            true
+        )])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(REPOSITORY))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": true,
+            "message": "boom\u{1b}]52;c;ZXZpbA==\u{7}\u{1b}[2J\u{202e}"
+        })))
+        .mount(&server)
+        .await;
+    let home = home_with(&server);
+
+    let table = stdout_of(gradient(
+        &home,
+        false,
+        &["project", "git-host-connection", "list"],
+    ));
+    assert!(table.starts_with("COVERED"), "{table:?}");
+    for leaked in ["\u{1b}", "\u{7}", "\u{202e}", "\r", "52;c"] {
+        assert!(!table.contains(leaked), "{table:?}");
+    }
+
+    let failure = gradient(&home, false, &["task", "repository", "show"]).failure();
+    let error_text = String::from_utf8(failure.get_output().stderr.clone()).unwrap();
+    assert!(error_text.contains("boom"), "{error_text:?}");
+    for leaked in ["\u{1b}", "\u{7}", "\u{202e}", "52;c"] {
+        assert!(!error_text.contains(leaked), "{error_text:?}");
+    }
 }
 
 #[tokio::test]
@@ -258,6 +301,38 @@ async fn test_git_host_connection_edit_sends_only_given_flags_and_clears_with_em
 }
 
 #[tokio::test]
+async fn test_git_host_connection_edit_prints_generated_webhook_secret_once_like_create() {
+    let server = MockServer::start().await;
+    mount_project_connections_with_same_name_in_team(&server).await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("{CONNECTIONS}/{PROJECT_CONNECTION}")))
+        .and(body_json(json!({"base_url": "https://other.example.com"})))
+        .respond_with(ok(connection(PROJECT_CONNECTION, Some("generated-secret"))))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    let output = stdout_of(gradient(
+        &home,
+        false,
+        &[
+            "project",
+            "git-host-connection",
+            "edit",
+            "forgejo",
+            "--base-url",
+            "https://other.example.com",
+        ],
+    ));
+    assert_eq!(output.matches("generated-secret").count(), 1, "{output}");
+    assert!(
+        output.contains("Webhook secret: generated-secret"),
+        "{output}"
+    );
+}
+
+#[tokio::test]
 async fn test_git_host_connection_delete_and_deliveries_by_uuid_skip_the_name_lookup() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -334,6 +409,241 @@ async fn test_git_host_connection_rejects_invalid_owner_and_unknown_name() {
         &["project", "git-host-connection", "show", "gitlab"],
     )
     .code(2);
+}
+
+fn one_repository_grant_response_json() -> Value {
+    json!({
+        "id": REPOSITORY_GRANT_UUID, "project": USER, "project_name": "web",
+        "repository_owner": "org", "repository_name": "repo", "source": "api",
+        "created_by": USER, "created_at": "2026-11-11T00:00:00Z"
+    })
+}
+
+#[tokio::test]
+async fn test_repository_grant_create_list_and_delete_by_uuid_for_a_team_connection_sends_project_and_repository_flags_and_prints_grant()
+ {
+    let server = MockServer::start().await;
+    let grants =
+        format!("/api/v1/teams/ops/git-host-connections/{TEAM_CONNECTION}/repository-grants");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/teams/ops/git-host-connections"))
+        .respond_with(ok(json!([summary(
+            TEAM_CONNECTION,
+            "forgejo",
+            team_owner(),
+            true
+        )])))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(grants.clone()))
+        .and(body_json(json!({
+            "project": "web", "repository_owner": "org", "repository_name": "repo"
+        })))
+        .respond_with(ok(one_repository_grant_response_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(grants.clone()))
+        .respond_with(ok(json!([one_repository_grant_response_json()])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{grants}/{REPOSITORY_GRANT_UUID}")))
+        .respond_with(ok(json!(true)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    let forgejo_repository_grant_arguments_prefix = [
+        "project",
+        "git-host-connection",
+        "repository-grants",
+        "forgejo",
+        "--owner",
+        "team/ops",
+    ];
+    let created = stdout_of(gradient(
+        &home,
+        false,
+        &[
+            &forgejo_repository_grant_arguments_prefix[..],
+            &[
+                "create",
+                "--repository-owner",
+                "org",
+                "--repository-name",
+                "repo",
+            ],
+        ]
+        .concat(),
+    ));
+    assert!(created.contains("org/repo web api"), "{created}");
+    let listed = stdout_of(gradient(
+        &home,
+        false,
+        &[&forgejo_repository_grant_arguments_prefix[..], &["list"]].concat(),
+    ));
+    assert!(
+        listed.contains(&format!("org/repo web api: {REPOSITORY_GRANT_UUID}")),
+        "{listed}"
+    );
+    gradient(
+        &home,
+        true,
+        &[
+            &forgejo_repository_grant_arguments_prefix[..],
+            &["delete", REPOSITORY_GRANT_UUID],
+        ]
+        .concat(),
+    )
+    .success();
+}
+
+#[tokio::test]
+async fn test_repository_grant_rejects_invalid_project_owner_with_exit_code_2() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(CONNECTIONS))
+        .respond_with(ok(json!([])))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    gradient(
+        &home,
+        true,
+        &[
+            "project",
+            "git-host-connection",
+            "repository-grants",
+            "forgejo",
+            "list",
+        ],
+    )
+    .code(2);
+}
+
+#[tokio::test]
+async fn repository_grant_create_conflict_prints_api_message_and_fails() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path(format!(
+            "/api/v1/admin/git-host-connections/{OTHER_CONNECTION}/repository-grants"
+        )))
+        .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+            "error": true,
+            "message": "Repository grant already present."
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    let failure = gradient(
+        &home,
+        false,
+        &[
+            "project",
+            "git-host-connection",
+            "repository-grants",
+            OTHER_CONNECTION,
+            "--owner",
+            "instance",
+            "create",
+            "--repository-owner",
+            "org",
+            "--all-repositories",
+        ],
+    )
+    .failure();
+    let error_text = String::from_utf8(failure.get_output().stderr.clone()).unwrap();
+    assert!(
+        error_text.contains("Repository grant already present."),
+        "{error_text:?}"
+    );
+}
+
+fn repository_grant_create_command_arguments() -> Vec<&'static str> {
+    vec![
+        "project",
+        "git-host-connection",
+        "repository-grants",
+        OTHER_CONNECTION,
+        "--owner",
+        "instance",
+        "create",
+        "--repository-owner",
+        "org",
+    ]
+}
+
+async fn mock_put_instance_connection_repository_grant_with_expected_body_and_call_count(
+    server: &MockServer,
+    body: Value,
+    expected_calls: u64,
+) {
+    Mock::given(method("PUT"))
+        .and(path(format!(
+            "/api/v1/admin/git-host-connections/{OTHER_CONNECTION}/repository-grants"
+        )))
+        .and(body_json(body))
+        .respond_with(ok(one_repository_grant_response_json()))
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn repository_grants_create_with_only_repository_owner_exits_with_usage_code_two_and_sends_no_request()
+ {
+    let server = MockServer::start().await;
+    mock_put_instance_connection_repository_grant_with_expected_body_and_call_count(
+        &server,
+        json!({ "project": "web", "repository_owner": "org" }),
+        0,
+    )
+    .await;
+
+    let home = home_with(&server);
+    gradient(&home, true, &repository_grant_create_command_arguments()).code(2);
+}
+
+#[tokio::test]
+async fn repository_grants_create_with_repository_name_and_all_repositories_exits_usage_without_request()
+ {
+    let server = MockServer::start().await;
+    mock_put_instance_connection_repository_grant_with_expected_body_and_call_count(
+        &server,
+        json!({ "project": "web", "repository_owner": "org", "repository_name": "repo" }),
+        0,
+    )
+    .await;
+
+    let home = home_with(&server);
+    let mut arguments = repository_grant_create_command_arguments();
+    arguments.extend(["--repository-name", "repo", "--all-repositories"]);
+    gradient(&home, true, &arguments).code(2);
+}
+
+#[tokio::test]
+async fn repository_grants_create_with_all_repositories_sends_body_without_repository_name() {
+    let server = MockServer::start().await;
+    mock_put_instance_connection_repository_grant_with_expected_body_and_call_count(
+        &server,
+        json!({ "project": "web", "repository_owner": "org" }),
+        1,
+    )
+    .await;
+
+    let home = home_with(&server);
+    let mut arguments = repository_grant_create_command_arguments();
+    arguments.push("--all-repositories");
+    gradient(&home, true, &arguments).success();
 }
 
 fn task_repository(report_status: bool, current: Option<Value>) -> Value {

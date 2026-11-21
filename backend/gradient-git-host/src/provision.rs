@@ -6,6 +6,8 @@
 
 use crate::client::{HostClient, HostError};
 use gradient_types::GitHostType;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
+use gradient_util::http_base_url::{InvalidHttpBaseUrlError, ValidatedHttpBaseUrl};
 use serde_json::json;
 use tracing::warn;
 
@@ -51,12 +53,14 @@ pub struct ForgeAccess<'a> {
 }
 
 fn token_client(
-    http: reqwest::Client,
+    http: HttpClientForUserSuppliedUrls,
     git_host: GitHostType,
     endpoint_url: &str,
     token: &str,
 ) -> Result<HostClient, ProvisionError> {
-    let base = endpoint_url.trim_end_matches('/');
+    let base: ValidatedHttpBaseUrl = endpoint_url
+        .parse()
+        .map_err(|e: InvalidHttpBaseUrlError| ProvisionError::Host(e.to_string()))?;
     match git_host {
         GitHostType::Gitea | GitHostType::Forgejo => Ok(HostClient::gitea(http, base, token)),
         GitHostType::GitLab => Ok(HostClient::gitlab(http, base, token)),
@@ -71,7 +75,7 @@ struct TokenAccount {
 }
 
 pub async fn token_account_login(
-    http: reqwest::Client,
+    http: HttpClientForUserSuppliedUrls,
     git_host: GitHostType,
     endpoint_url: &str,
     token: &str,
@@ -85,7 +89,7 @@ pub async fn token_account_login(
 }
 
 impl ForgeAccess<'_> {
-    fn client(&self, http: reqwest::Client) -> Result<HostClient, ProvisionError> {
+    fn client(&self, http: HttpClientForUserSuppliedUrls) -> Result<HostClient, ProvisionError> {
         token_client(http, self.git_host, self.endpoint_url, self.token)
     }
 
@@ -113,7 +117,7 @@ pub fn repository_path(url: &str) -> Option<String> {
 }
 
 pub async fn install_webhook(
-    http: reqwest::Client,
+    http: HttpClientForUserSuppliedUrls,
     access: &ForgeAccess<'_>,
     webhook_url: &str,
     secret: &str,
@@ -189,7 +193,7 @@ fn webhook_body(git_host: GitHostType, webhook_url: &str, secret: &str) -> serde
 }
 
 pub async fn install_deploy_key(
-    http: reqwest::Client,
+    http: HttpClientForUserSuppliedUrls,
     access: &ForgeAccess<'_>,
     title: &str,
     public_key: &str,
@@ -214,8 +218,8 @@ mod tests {
     use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn http() -> reqwest::Client {
-        gradient_util::http::build_client().expect("build test http client")
+    fn http() -> HttpClientForUserSuppliedUrls {
+        crate::client::http_client_allow_loopback()
     }
 
     #[tokio::test]

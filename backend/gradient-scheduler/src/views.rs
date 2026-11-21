@@ -185,7 +185,7 @@ mod tests {
             job: BuildJob {
                 build: BuildSpec {
                     build_id: "b1".into(),
-                    drv_path: "/nix/store/aaa-curl.drv".into(),
+                    drv_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-curl.drv".into(),
                     kind: BuildSpecKind::Build,
                     is_fixed_output: false,
                     outputs: vec![],
@@ -243,6 +243,7 @@ mod tests {
             build_request: false,
             ifd: false,
             rescore_count: 0,
+            largest_usable_worker_ram_mb: None,
             now,
         };
         let view = JobContextView::new(&ctx, &job, None);
@@ -251,7 +252,10 @@ mod tests {
         let derivations = view.derivations.expect("build derivations");
         assert_eq!(derivations.len(), 1);
         assert_eq!(derivations[0].build_id, "b1");
-        assert_eq!(derivations[0].drv_path, "aaa-curl.drv");
+        assert_eq!(
+            derivations[0].drv_path,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-curl.drv"
+        );
         let estimate = view.estimate.expect("build estimate");
         assert_eq!((estimate.own_samples, estimate.ram_mb), (7, Some(900)));
     }

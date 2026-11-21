@@ -8,7 +8,9 @@ use gradient_wire::messages::{BuildFailureKind, BuildMetrics};
 use gradient_worker_client::connection::{Unresponsive, WriterUnavailable};
 
 use crate::executor::eval::CorruptEvalCache;
-use crate::proto::prefetch::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};
+use crate::proto::prefetch::{
+    CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream, UpstreamNarInfoMissingNarHash,
+};
 
 #[derive(Debug)]
 pub struct BuildError {
@@ -162,6 +164,9 @@ pub(super) fn classify_prefetch_error(build_id: &str, e: anyhow::Error) -> Build
 pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> BuildError {
     if e.chain().any(|c| c.is::<SubstituteNotOnUpstream>()) {
         tracing::warn!(%build_id, error = %e, "substitute: output on no upstream; SubstituteUnavailable");
+        BuildError::substitute_unavailable(e)
+    } else if e.chain().any(|c| c.is::<UpstreamNarInfoMissingNarHash>()) {
+        tracing::warn!(%build_id, error = %e, "substitute: upstream response has no NAR hash -> SubstituteUnavailable");
         BuildError::substitute_unavailable(e)
     } else if let Some(mi) = e.chain().find_map(|c| c.downcast_ref::<MissingInputs>()) {
         tracing::warn!(%build_id, error = %e, "substitute: advertised NAR object missing; InputsUnavailable");

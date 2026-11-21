@@ -278,12 +278,46 @@ async fn end_attempt(
     attempt: ExecJobAttemptId,
     reason: AttemptEndReason,
 ) -> TransitionReport {
+    end_exec_job_attempt_with_reason_and_optional_failure_message(
+        case,
+        attempt,
+        reason,
+        Some("the program exited with 1"),
+    )
+    .await
+}
+
+async fn end_exec_job_attempt_with_reason_and_optional_failure_message(
+    case: &Case,
+    attempt: ExecJobAttemptId,
+    reason: AttemptEndReason,
+    message: Option<&str>,
+) -> TransitionReport {
     case.transition(Transition::ExecAttemptEnded {
         attempt,
         reason,
-        message: Some("the program exited with 1".into()),
+        message: message.map(str::to_owned),
     })
     .await
+}
+
+async fn assign_and_end_lost_attempts_for_messages_and_return_exec_job(
+    case: &Case,
+    evaluation: EvaluationId,
+    first_number: u32,
+    messages: &[Option<&str>],
+) -> exec_job::Model {
+    for (number, message) in (first_number..).zip(messages) {
+        let attempt = assign(case, evaluation, number, 5).await;
+        end_exec_job_attempt_with_reason_and_optional_failure_message(
+            case,
+            attempt,
+            AttemptEndReason::Lost,
+            *message,
+        )
+        .await;
+    }
+    job(case, evaluation).await
 }
 
 async fn attempt_row(case: &Case, attempt: ExecJobAttemptId) -> exec_job_attempt::Model {
@@ -464,6 +498,108 @@ async fn ten_losses_in_a_row_fail_the_job() {
         count_status(&events, ExecJobStatus::Queued),
         10,
         "every re-queue is announced: {events:?}"
+    );
+    case.finish().await;
+}
+
+const WORKER_FAILURE_MESSAGE_GUEST_DID_NOT_START: &str = "guest did not start";
+
+#[tokio::test]
+async fn ten_consecutive_lost_attempts_with_same_worker_message_fail_exec_job_with_generic_text_followed_by_message()
+ {
+    let (case, e1) = queued_case(with_retries(3)).await;
+
+    let failed = assign_and_end_lost_attempts_for_messages_and_return_exec_job(
+        &case,
+        e1,
+        1,
+        &[Some(WORKER_FAILURE_MESSAGE_GUEST_DID_NOT_START); 10],
+    )
+    .await;
+
+    assert_eq!(
+        (failed.status, failed.message.as_deref()),
+        (
+            ExecJobStatus::Failed,
+            Some("the exec job lost its worker too many times in a row: guest did not start")
+        ),
+        "after loss 10: generic text and shared message"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn ten_lost_worker_attempts_in_a_row_with_different_messages_fail_exec_job_with_generic_text()
+{
+    let (case, e1) = queued_case(with_retries(3)).await;
+    let mut messages = [Some(WORKER_FAILURE_MESSAGE_GUEST_DID_NOT_START); 10];
+    messages[4] = Some("the worker disconnected");
+
+    let failed =
+        assign_and_end_lost_attempts_for_messages_and_return_exec_job(&case, e1, 1, &messages)
+            .await;
+
+    assert_eq!(
+        (failed.status, failed.message.as_deref()),
+        (
+            ExecJobStatus::Failed,
+            Some("the exec job lost its worker too many times in a row")
+        ),
+        "after loss 10: generic text only"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn ten_lost_attempts_in_a_row_with_one_missing_worker_message_fail_exec_job_with_generic_text_alone()
+ {
+    let (case, e1) = queued_case(with_retries(3)).await;
+    let mut messages = [Some(WORKER_FAILURE_MESSAGE_GUEST_DID_NOT_START); 10];
+    messages[4] = None;
+
+    let failed =
+        assign_and_end_lost_attempts_for_messages_and_return_exec_job(&case, e1, 1, &messages)
+            .await;
+
+    assert_eq!(
+        (failed.status, failed.message.as_deref()),
+        (
+            ExecJobStatus::Failed,
+            Some("the exec job lost its worker too many times in a row")
+        ),
+        "after loss 10: generic text only"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn failed_attempt_breaks_lost_attempt_row_and_later_losses_set_reported_failure_message() {
+    let (case, e1) = queued_case(with_retries(3)).await;
+    assign_and_end_lost_attempts_for_messages_and_return_exec_job(
+        &case,
+        e1,
+        1,
+        &[Some("the worker disconnected")],
+    )
+    .await;
+    let failed_run = assign(&case, e1, 2, 5).await;
+    end_attempt(&case, failed_run, AttemptEndReason::Failed).await;
+
+    let failed = assign_and_end_lost_attempts_for_messages_and_return_exec_job(
+        &case,
+        e1,
+        3,
+        &[Some(WORKER_FAILURE_MESSAGE_GUEST_DID_NOT_START); 10],
+    )
+    .await;
+
+    assert_eq!(
+        (failed.status, failed.message.as_deref()),
+        (
+            ExecJobStatus::Failed,
+            Some("the exec job lost its worker too many times in a row: guest did not start")
+        ),
+        "after loss 10 of the second row: only that row reports the shared message"
     );
     case.finish().await;
 }

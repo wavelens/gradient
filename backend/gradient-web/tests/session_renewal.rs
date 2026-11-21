@@ -100,6 +100,60 @@ async fn bearer_header_session_renew_returns_new_signed_jwt() {
     assert_eq!(token.split('.').count(), 3, "token = {token}");
 }
 
+fn build_session_signed_in_ago(
+    id: SessionId,
+    age: Duration,
+    remaining: Duration,
+) -> session::Model {
+    let now = Utc::now().naive_utc();
+    session::Model {
+        created_at: now - age,
+        ..build_session_that_expires_after(id, remaining)
+    }
+}
+
+#[tokio::test]
+async fn session_cookie_capped_at_absolute_end_is_not_renewed_again() {
+    let id = SessionId::now_v7();
+    let capped = build_session_signed_in_ago(
+        id,
+        Duration::days(90) - Duration::hours(1),
+        Duration::hours(1),
+    );
+    let db = mock_db()
+        .append_query_results([vec![capped.clone()]])
+        .append_query_results([vec![capped.clone()]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![capped]])
+        .into_connection();
+
+    let res = make_test_server(db)
+        .get("/api/v1/user")
+        .add_header(header::COOKIE, format!("jwt_token={}", make_token(id)))
+        .await;
+
+    res.assert_status_ok();
+    assert!(!response_sets_jwt_token_cookie(&res));
+}
+
+#[tokio::test]
+async fn session_cookie_past_day_90_after_sign_in_is_refused() {
+    let id = SessionId::now_v7();
+    let too_old = build_session_signed_in_ago(id, Duration::days(91), Duration::hours(23));
+    let db = mock_db()
+        .append_query_results([vec![too_old.clone()]])
+        .append_query_results([vec![too_old]])
+        .append_query_results([vec![user()]])
+        .into_connection();
+
+    let res = make_test_server(db)
+        .get("/api/v1/user")
+        .add_header(header::COOKIE, format!("jwt_token={}", make_token(id)))
+        .await;
+
+    res.assert_status_unauthorized();
+}
+
 #[tokio::test]
 async fn recently_renewed_session_cookie_is_not_renewed_again() {
     let id = SessionId::now_v7();

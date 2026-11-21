@@ -15,7 +15,6 @@ use gradient_fixtures::mock::mock_db;
 use gradient_test_support::state::TestState;
 use gradient_types::ids::*;
 use gradient_web::create_router;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -41,7 +40,52 @@ fn test_date() -> chrono::NaiveDateTime {
 const FIXTURE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 #[tokio::test]
-async fn narinfo_served_from_db_without_daemon_probe() {
+async fn a_cache_narinfo_shows_only_the_content_variant_that_cache_serves() {
+    use gradient_fixtures::store_path_content_variants::{
+        FIRST_KEY, SECOND_KEY, SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+    };
+
+    let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+    readers
+        .db
+        .execute(&format!(
+            "UPDATE cache SET public = true, active = true; \
+             UPDATE cached_path SET \"references\" = '{FIXTURE_HASH}-first' \
+             WHERE nar_object_storage_key = '{FIRST_KEY}'; \
+             UPDATE cached_path SET \"references\" = '{EXAMPLE_STORED_HASH}-second' \
+             WHERE nar_object_storage_key = '{SECOND_KEY}'"
+        ))
+        .await;
+    let state = TestState::new()
+        .web_db(readers.db.connection())
+        .worker_db(readers.db.connection())
+        .cache_db(readers.db.connection())
+        .build();
+    let server = TestServer::new(create_router(state).expect("router"));
+
+    let response = server
+        .get(&format!(
+            "/cache/cache-{}/{SHARED}.narinfo",
+            readers.cache_two.into_inner().simple()
+        ))
+        .await;
+
+    response.assert_status_ok();
+    let body = response.text();
+    assert!(
+        body.contains("NarHash: sha256:second\n")
+            && body.contains(&format!("References: {EXAMPLE_STORED_HASH}-second\n"))
+            && !body.contains(FIXTURE_HASH)
+            && body.contains("Sig: "),
+        "Cache C2 serves only the variant of project B, so its narinfo carries the NAR hash, the references and the signature of that variant:\n{body}"
+    );
+    drop(server);
+    readers.db.finish().await;
+}
+
+fn mock_database_for_narinfo_tests_with_public_cache_deriver_and_signature_rows(
+    deriver: String,
+) -> sea_orm::DatabaseConnection {
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
         name: "test-cache".into(),
@@ -59,14 +103,13 @@ async fn narinfo_served_from_db_without_daemon_probe() {
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
         hash: FIXTURE_HASH.into(),
+        nar_object_storage_key: FIXTURE_HASH.into(),
         package: "hello".into(),
-        file_hash: Some(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
+        file_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         file_size: Some(12345),
-        nar_size: Some(67890),
-        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
-        deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
+        nar_size: 67890,
+        nar_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
+        deriver: Some(deriver),
         created_at: test_date(),
         ..Default::default()
     };
@@ -80,13 +123,35 @@ async fn narinfo_served_from_db_without_daemon_probe() {
         ..Default::default()
     };
 
-    let db = mock_db()
+    mock_db()
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
-        .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-        .into_connection();
+        .into_connection()
+}
 
+#[tokio::test]
+async fn narinfo_returns_server_error_when_deriver_contains_whitespace() {
+    let db = mock_database_for_narinfo_tests_with_public_cache_deriver_and_signature_rows(format!(
+        "/nix/store/{FIXTURE_HASH}-hello.drv {FIXTURE_HASH}-other.drv"
+    ));
+    let server = TestServer::new(create_router(TestState::new().web_db(db).build()).unwrap());
+
+    let response = server
+        .get(&format!("/cache/test-cache/{FIXTURE_HASH}.narinfo"))
+        .await;
+
+    response.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    let body = response.text();
+    assert!(body.contains("Internal server error"), "{body}");
+    assert!(!body.contains("other.drv"), "{body}");
+}
+
+#[tokio::test]
+async fn narinfo_served_from_db_without_daemon_probe() {
+    let db = mock_database_for_narinfo_tests_with_public_cache_deriver_and_signature_rows(format!(
+        "/nix/store/{FIXTURE_HASH}-hello.drv"
+    ));
     let state = TestState::new().web_db(db).build();
 
     let router = create_router(state).expect("router");
@@ -151,13 +216,12 @@ async fn narinfo_returns_404_when_signature_null() {
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
         hash: FIXTURE_HASH.into(),
+        nar_object_storage_key: FIXTURE_HASH.into(),
         package: "hello".into(),
-        file_hash: Some(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
+        file_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         file_size: Some(12345),
-        nar_size: Some(67890),
-        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+        nar_size: 67890,
+        nar_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
         created_at: test_date(),
         ..Default::default()
@@ -204,14 +268,14 @@ async fn a_narinfo_names_the_path_the_client_asked_for() {
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
         hash: stored.into(),
+        nar_object_storage_key: stored.into(),
         package: "hello".into(),
-        file_hash: Some(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
+        file_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         file_size: Some(12345),
-        nar_size: Some(67890),
-        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+        nar_size: 67890,
+        nar_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
         deriver: Some(format!("/nix/store/{stored}-hello.drv")),
+        references: Some(format!("{stored}-hello")),
         created_at: test_date(),
         ..Default::default()
     };
@@ -223,18 +287,10 @@ async fn a_narinfo_names_the_path_the_client_asked_for() {
         created_at: test_date(),
         ..Default::default()
     };
-    let references_row = BTreeMap::from([
-        ("hash", sea_orm::Value::from(stored)),
-        (
-            "references",
-            sea_orm::Value::from(format!("{stored}-hello")),
-        ),
-    ]);
     let db = mock_db()
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![signature_row]])
-        .append_query_results([vec![references_row]])
         .into_connection();
     let state = TestState::new()
         .web_db(db.clone())

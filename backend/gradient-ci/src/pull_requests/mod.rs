@@ -9,15 +9,16 @@ pub mod branch;
 
 use crate::actions::send::open_pr::configured_commit_ident;
 use crate::context::CiContext;
-use crate::task_commit_status_posting::build_commit_status_posting_client_from_git_host_connection_id;
+use crate::task_commit_status_posting::build_task_repository_reporter_if_git_host_connection_allowed;
 use anyhow::{Context, anyhow};
+use gradient_db::git_host_connection_repository_grants::GitHostConnectionRepositoryGrantError;
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReporter, parse_owner_repo};
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
-use gradient_types::input::vec_to_hex;
+use gradient_types::input::{InputError, vec_to_hex};
 use gradient_types::{
     ActionConfig, ActionType, CTaskAction, ECommit, EEvaluation, EExecJob, EProject, ETaskAction,
-    ExecJobId, GitHostConnectionId, MCommit, MTask, TaskId,
+    ExecJobId, GitHostConnectionId, MCommit, MTask, RepositoryUrl, TaskId,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder};
 
@@ -25,6 +26,9 @@ pub use apply::{patch_paths, patched_files};
 pub use branch::default_branch_name;
 
 pub const MAX_PULL_REQUEST_PATCH_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_PULL_REQUEST_PATCH_FILE_COUNT: usize = 1000;
+pub const MAX_PULL_REQUEST_PATCH_FILE_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_PULL_REQUEST_PATCH_WRITTEN_FILES_TOTAL_BYTES: usize = 32 * 1024 * 1024;
 
 const COMMIT_HASH_BYTES: usize = 20;
 
@@ -58,8 +62,22 @@ pub enum PullRequestError {
     DeletesFile(String),
     #[error("the patch does not apply: {0}")]
     DoesNotApply(String),
+    #[error("{0} is not a relative path inside the repository")]
+    PathIsNotRelativeInsideRepository(String),
+    #[error(
+        "the patch ran and git stored file mode {mode:o} for {path}. that mode is not a regular file (symlink 120000, submodule 160000, missing 0)"
+    )]
+    PathIsNotRegularFile { path: String, mode: u32 },
+    #[error("too many files in patch: {count}, allowed {limit}")]
+    PatchExceedsMaximumFileCount { count: usize, limit: usize },
+    #[error("{path} is over the {limit} byte limit")]
+    PatchExceedsSizeLimit { path: String, limit: usize },
     #[error("the patch changes nothing")]
     Empty,
+    #[error("the repository URL of the task does not match an allowed URL: {0}")]
+    InvalidRepositoryUrl(InputError),
+    #[error("{0}")]
+    GitHostConnectionCannotActOnTaskRepository(GitHostConnectionRepositoryGrantError),
     #[error("the Git host refused the pull request: {0:#}")]
     Forge(anyhow::Error),
 }
@@ -68,19 +86,26 @@ pub async fn open_from_patch(
     ctx: &CiContext,
     request: PatchPullRequest,
 ) -> Result<OpenedPullRequest, PullRequestError> {
+    let repository: RepositoryUrl = request
+        .task
+        .repository
+        .parse()
+        .map_err(PullRequestError::InvalidRepositoryUrl)?;
     let (owner, repo) = parse_owner_repo(&request.task.repository).ok_or_else(|| {
         PullRequestError::Forge(anyhow!(
             "cannot read owner and repository from {}",
             request.task.repository
         ))
     })?;
-    let files = files_of_patch(ctx, &request).await?;
-    let reporter = build_commit_status_posting_client_from_git_host_connection_id(
+    let reporter = build_task_repository_reporter_if_git_host_connection_allowed(
         ctx,
+        &request.task,
         request.git_host_connection,
     )
     .await
-    .map_err(PullRequestError::Forge)?;
+    .map_err(PullRequestError::Forge)?
+    .map_err(PullRequestError::GitHostConnectionCannotActOnTaskRepository)?;
+    let files = files_of_patch(ctx, &request, repository).await?;
     let author = configured_commit_ident(
         &ctx.db.config.pull_requests.commit_name,
         &ctx.db.config.pull_requests.commit_email,
@@ -184,17 +209,23 @@ async fn evaluation_commit_row<C: ConnectionTrait>(
 async fn files_of_patch(
     ctx: &CiContext,
     request: &PatchPullRequest,
+    repository: RepositoryUrl,
 ) -> Result<Vec<CommitFile>, PullRequestError> {
-    let credentials = load_task_repository_git_credentials(ctx, &request.task).await?;
+    let credentials = load_task_repository_git_credentials(ctx, &request.task, &repository).await?;
     let blocking_credentials = credentials.clone();
-    let repository = request.task.repository.clone();
     let start_commit = request.start_commit.clone();
     let patch = request.patch.clone();
     let files = tokio::task::spawn_blocking(move || {
-        let checkout =
-            gradient_sources::checkout_commit(&repository, &start_commit, &blocking_credentials)
-                .map_err(|e| PullRequestError::DoesNotApply(format!("{e:#}")))?;
-        patched_files(checkout.path(), &patch)
+        let fetched = gradient_sources::fetch_commit_into_new_bare_temporary_repository(
+            &repository,
+            &start_commit,
+            &blocking_credentials,
+        )
+        .map_err(start_commit_fetch_error_to_does_not_apply)?;
+        let start = fetched
+            .fetched_commit_tree()
+            .map_err(start_commit_fetch_error_to_does_not_apply)?;
+        patched_files(fetched.repository(), &start, &patch)
     })
     .await;
     gradient_sources::git::save_observed_project_ssh_host_keys(
@@ -210,11 +241,16 @@ async fn files_of_patch(
     Ok(files)
 }
 
+fn start_commit_fetch_error_to_does_not_apply(error: anyhow::Error) -> PullRequestError {
+    PullRequestError::DoesNotApply(format!("{error:#}"))
+}
+
 async fn load_task_repository_git_credentials(
     ctx: &CiContext,
     task: &MTask,
+    repository: &RepositoryUrl,
 ) -> Result<gradient_sources::GitOperationCredentials, PullRequestError> {
-    if !gradient_sources::git::repository_url_may_need_stored_credentials(&task.repository) {
+    if !gradient_sources::git::repository_url_may_need_stored_credentials(repository) {
         return Ok(gradient_sources::GitOperationCredentials::default());
     }
     let project = by_id::<EProject, _>(&ctx.db.worker_db, task.project)
@@ -223,9 +259,7 @@ async fn load_task_repository_git_credentials(
         .map_err(PullRequestError::Forge)?
         .ok_or_else(|| PullRequestError::Forge(anyhow!("the task's project is gone")))?;
     gradient_sources::git::load_project_git_credentials_for_repository_url(
-        &ctx.db,
-        &project,
-        &task.repository,
+        &ctx.db, &project, repository,
     )
     .await
     .map_err(|e| PullRequestError::Forge(anyhow!("read the project's Git credentials: {e}")))

@@ -8,6 +8,9 @@ use std::convert::Infallible;
 
 use gradient_db::DbContext;
 use gradient_entity::StorePathError;
+use gradient_types::checked_uploader_stated_store_path_metadata::{
+    CheckedUploadedStorePathReferencesDeriverAndContentAddress, UploaderStatedFieldError,
+};
 use gradient_types::ids::ProjectId;
 use gradient_types::{MappingError, StorePathMapper};
 use gradient_wire::messages::{BuildFailureKind, ClientMessage, ServerMessage};
@@ -53,7 +56,7 @@ impl<E> TextMapper<'_, E> {
 fn inbound(mapper: &StorePathMapper) -> TextMapper<'_, StorePathError> {
     TextMapper {
         mapper,
-        map: StorePathMapper::inbound_text,
+        map: StorePathMapper::inbound_text_if_exact_store_path,
     }
 }
 
@@ -154,10 +157,23 @@ fn inbound_update(
         JobUpdateKind::BuildOutput { outputs, .. } => {
             for output in outputs {
                 paths.path(&mut output.store_path)?;
-                paths.path(&mut output.hash)?;
-                for product in &mut output.products {
-                    product.path = paths.mapper.inbound_if_store_path(&product.path);
+                TextMapper {
+                    mapper: paths.mapper,
+                    map: StorePathMapper::stored_hash_text_from_inbound_hash_text,
                 }
+                .path(&mut output.hash)?;
+                output.products.retain_mut(|product| {
+                    match paths.mapper.inbound_if_store_path(&product.path) {
+                        Ok(stored) => {
+                            product.path = stored;
+                            true
+                        }
+                        Err(error) => {
+                            tracing::warn!(product = %product.path, %error, "Drop build product because the path has a segment that is empty, dot, backslash, or control character");
+                            false
+                        }
+                    }
+                });
             }
         }
         _ => {}
@@ -179,18 +195,23 @@ pub(super) async fn inbound_or_refuse(
     }
 }
 
-pub(super) fn inbound_upload_metadata(
-    mut metadata: UploadMetadata,
+pub(super) fn check_nar_upload_metadata(
+    metadata: &UploadMetadata,
     mapper: &StorePathMapper,
-) -> Result<UploadMetadata, StorePathError> {
-    if let UploadMetadata::Nar(meta) = &mut metadata {
-        let paths = inbound(mapper);
-        paths.paths(&mut meta.references)?;
-        if let Some(deriver) = &mut meta.deriver {
-            paths.path(deriver)?;
-        }
-    }
-    Ok(metadata)
+) -> Result<
+    Option<CheckedUploadedStorePathReferencesDeriverAndContentAddress>,
+    UploaderStatedFieldError,
+> {
+    let UploadMetadata::Nar(meta) = metadata else {
+        return Ok(None);
+    };
+    CheckedUploadedStorePathReferencesDeriverAndContentAddress::checked_from_references_deriver_and_content_address(
+        meta.references.clone(),
+        meta.deriver.clone(),
+        meta.ca.clone(),
+    )?
+    .rewrite_reference_and_deriver_hashes_to_stored_hashes(mapper)
+    .map(Some)
 }
 
 pub(super) fn outbound_message(mut msg: ServerMessage, mapper: &StorePathMapper) -> ServerMessage {
@@ -433,6 +454,64 @@ mod tests {
     }
 
     #[test]
+    fn inbound_message_refuses_eval_source_ready_store_path_with_sub_path_or_parent_directory_path()
+    {
+        for store_path in [
+            format!("/nix/store/{O}-source/sub"),
+            format!("/nix/store/{O}-source/../x"),
+        ] {
+            let msg = ClientMessage::EvalSourceReady {
+                job_id: "j1".into(),
+                store_path: store_path.clone(),
+                fingerprint: "f".into(),
+            };
+            assert!(inbound_message(msg, &mapper()).is_err(), "{store_path}");
+        }
+    }
+
+    #[test]
+    fn build_output_report_drops_product_with_bad_sub_path_segment_and_keeps_valid_product() {
+        let product = |path: String| BuildProduct {
+            file_type: "doc".into(),
+            subtype: "pdf".into(),
+            name: "doc.pdf".into(),
+            path,
+            size: None,
+        };
+        let msg = ClientMessage::JobUpdate {
+            job_id: "j1".into(),
+            assignment_id: "a1".into(),
+            update: JobUpdateKind::BuildOutput {
+                build_id: "b1".into(),
+                outputs: vec![BuildOutput {
+                    name: "out".into(),
+                    store_path: format!("/nix/store/{O}-a"),
+                    hash: O.into(),
+                    nar_size: None,
+                    nar_hash: None,
+                    products: vec![
+                        product(format!("/nix/store/{O}-a/../doc.pdf")),
+                        product(format!("/nix/store/{O}-a/share/doc/a b.pdf")),
+                    ],
+                }],
+                metrics: None,
+                substituted: false,
+            },
+        };
+        let ClientMessage::JobUpdate {
+            update: JobUpdateKind::BuildOutput { outputs, .. },
+            ..
+        } = inbound_message(msg, &mapper()).unwrap()
+        else {
+            panic!("a BuildOutput stays a BuildOutput")
+        };
+        assert_eq!(
+            outputs[0].products,
+            vec![product(format!("/nix/store/{S}-a/share/doc/a b.pdf"))]
+        );
+    }
+
+    #[test]
     fn an_input_request_maps_its_store_path_key() {
         let request = |hash: &str| {
             format!(
@@ -463,16 +542,18 @@ mod tests {
             nar_hash: "sha256:n".into(),
             references: vec![format!("{O}-dep")],
             deriver: Some(format!("{O}-a.drv")),
-            ca: None,
+            ca: Some("fixed:r:sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf".into()),
             multipart: None,
         }));
-        let UploadMetadata::Nar(meta) = inbound_upload_metadata(metadata, &mapper()).unwrap()
-        else {
-            panic!("NAR metadata stays NAR metadata")
-        };
-        assert_eq!(meta.references, vec![format!("{S}-dep")]);
-        assert_eq!(meta.deriver, Some(format!("{S}-a.drv")));
-        assert_eq!(meta.file_hash, "sha256:f");
+        let stated = check_nar_upload_metadata(&metadata, &mapper())
+            .unwrap()
+            .expect("NAR metadata is checked");
+        assert_eq!(stated.references(), [format!("{S}-dep")]);
+        assert_eq!(stated.deriver(), Some(format!("{S}-a.drv").as_str()));
+        assert_eq!(
+            stated.checked_content_address_text(),
+            Some("fixed:r:sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf")
+        );
     }
 
     #[test]
@@ -552,6 +633,9 @@ mod tests {
                 requirement: Default::default(),
             }),
             cluster: None,
+            ssh_key: None,
+            ssh_host_keys: Vec::new(),
+            https_git_credentials: Vec::new(),
         };
         let ServerMessage::AssignJob {
             job: Job::Build(job),
@@ -595,6 +679,9 @@ mod tests {
                 wait_for_terminal: false,
             })),
             cluster: None,
+            ssh_key: None,
+            ssh_host_keys: Vec::new(),
+            https_git_credentials: Vec::new(),
         };
         let ServerMessage::AssignJob {
             job: Job::Exec(job),

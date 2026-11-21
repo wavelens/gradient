@@ -25,7 +25,9 @@ mod session;
 mod store;
 mod store_paths;
 
-pub use auth::open_project_store_backend_for_api_key;
+pub use auth::{
+    check_session_access_still_matches_api_key, open_project_store_backend_for_api_key,
+};
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use russh::server::Server as _;

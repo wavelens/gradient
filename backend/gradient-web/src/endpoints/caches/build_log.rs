@@ -51,6 +51,8 @@ pub async fn log(
     let drv = OriginalStorePath::parse(&drv).map_err(|_| not_found())?;
     let found = find_build_log(
         &state.web_db,
+        &state.user_supplied_url_http_client,
+        &state.config.secrets.crypt_file,
         state.log_storage.as_ref(),
         std::slice::from_ref(&ctx.cache),
         &state.cache_mapper(ctx.cache.id),

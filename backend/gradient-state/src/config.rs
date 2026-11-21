@@ -6,7 +6,9 @@
 
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_git_host::repository_fit::GitHostConnectionAddress;
-use gradient_types::git_host::GitHostConnectionCapabilities;
+use gradient_types::git_host::{
+    GitHostConnectionCapabilities, base_url_of_git_host_type_and_base_url,
+};
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerType};
 use gradient_types::{
     DEFAULT_TASK_WILDCARD, GitHostType, NIXOS_CACHE_NAME, NIXOS_CACHE_PUBLIC_KEY, NIXOS_CACHE_URL,
@@ -20,6 +22,8 @@ pub struct StateUser {
     pub username: String,
     pub name: String,
     pub email: String,
+    #[serde(default)]
+    pub existing_account_id: Option<String>,
     #[serde(default)]
     pub password_file: Option<String>,
     #[serde(default = "default_true")]
@@ -47,9 +51,9 @@ pub struct StateProject {
     #[serde(default)]
     pub allow_exec_in_build_requests: bool,
     pub created_by: String,
-    /// An empty list is keeping the legacy auto-add of `created_by` as Admin. A non-empty list is
-    /// authoritative and revoking unmatched memberships. Members referencing unknown users are
-    /// recorded as pending until registration or first OIDC login.
+    /// Empty lists keep the legacy behavior and add `created_by` as Admin. Non-empty lists are
+    /// authoritative. They revoke memberships not listed there. Only users declared in the state
+    /// file can appear as members.
     #[serde(default)]
     pub members: Vec<StateProjectMemberEntry>,
     #[serde(default)]
@@ -206,13 +210,16 @@ impl StateGitHostConnection {
     }
 
     pub fn address(&self) -> Option<GitHostConnectionAddress<'_>> {
+        let git_host_type = self.git_host_type()?;
         Some(GitHostConnectionAddress {
-            git_host_type: self.git_host_type()?,
-            base_url: self
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|url| !url.is_empty()),
+            git_host_type,
+            base_url: base_url_of_git_host_type_and_base_url(
+                git_host_type,
+                self.base_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|url| !url.is_empty()),
+            ),
             github_app_account: self.installation_id.and(self.account_login.as_deref()),
         })
     }
@@ -295,8 +302,17 @@ pub enum StateUpstream {
         http1_only: bool,
         #[serde(default = "default_true")]
         active: bool,
+        #[serde(default)]
+        basic_auth_user: Option<String>,
+        #[serde(default)]
+        basic_auth_password_file: Option<String>,
+        #[serde(default)]
+        bearer_token_file: Option<String>,
     },
 }
+
+pub(crate) const EXTERNAL_HTTP_UPSTREAM_CACHE_CREDENTIAL_FIELD_COMBINATION_ERROR_MESSAGE: &str =
+    "Set basic_auth_user together with basic_auth_password_file, or set only bearer_token_file.";
 
 fn default_upstream_mode() -> CacheSubscriptionMode {
     CacheSubscriptionMode::ReadWrite
@@ -395,8 +411,16 @@ pub struct StateCacheProject {
     pub name: String,
     #[serde(default = "default_upstream_mode")]
     pub mode: CacheSubscriptionMode,
-    #[serde(default = "default_true")]
-    pub sign_outputs: bool,
+    /// Omit the field to turn signing on for subscriptions that write to the cache and off for read-only subscriptions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_outputs: Option<bool>,
+}
+
+impl StateCacheProject {
+    pub fn signs_project_outputs(&self) -> bool {
+        self.sign_outputs
+            .unwrap_or_else(|| self.mode.writes_build_outputs_to_cache())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -442,6 +466,9 @@ fn default_upstream_caches() -> Vec<StateUpstream> {
         public_key: NIXOS_CACHE_PUBLIC_KEY.to_string(),
         http1_only: false,
         active: true,
+        basic_auth_user: None,
+        basic_auth_password_file: None,
+        bearer_token_file: None,
     }]
 }
 

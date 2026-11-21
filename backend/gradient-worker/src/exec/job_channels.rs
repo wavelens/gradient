@@ -34,7 +34,7 @@ pub struct JobChannels {
     inbox: Option<GuestChannelInbox>,
     channel_read_totals_watch: Option<watch::Receiver<GuestChannelReadBytesByChannelId>>,
     mux: GuestChannelMux,
-    guest_dir: PathBuf,
+    guest_supervisor_directory_path: PathBuf,
     console: Option<ConsoleLink>,
 }
 
@@ -43,13 +43,13 @@ impl JobChannels {
         inbox: GuestChannelInbox,
         channel_read_totals_watch: watch::Receiver<GuestChannelReadBytesByChannelId>,
         mux: GuestChannelMux,
-        guest_dir: PathBuf,
+        guest_supervisor_directory_path: PathBuf,
     ) -> Self {
         Self {
             inbox: Some(inbox),
             channel_read_totals_watch: Some(channel_read_totals_watch),
             mux,
-            guest_dir,
+            guest_supervisor_directory_path,
             console: None,
         }
     }
@@ -170,13 +170,15 @@ impl JobChannels {
                         pending.extend(self.lose_console(CONSOLE_CLOSED));
                     }
                 }
-                MuxAction::ConnectConsole => match ConsoleLink::connect(&self.guest_dir).await {
-                    Ok(link) => self.console = Some(link),
-                    Err(e) => {
-                        debug!(error = %format!("{e:#}"), "no console link to the guest");
-                        pending.extend(self.lose_console(NO_CONSOLE_SOCKET));
+                MuxAction::ConnectConsole => {
+                    match ConsoleLink::connect(&self.guest_supervisor_directory_path).await {
+                        Ok(link) => self.console = Some(link),
+                        Err(e) => {
+                            debug!(error = %format!("{e:#}"), "no console link to the guest");
+                            pending.extend(self.lose_console(NO_CONSOLE_SOCKET));
+                        }
                     }
-                },
+                }
                 MuxAction::DisconnectConsole => self.console = None,
             }
         }

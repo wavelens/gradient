@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::extractors::Path;
 use crate::helpers::ok_json;
+use crate::permissions::Permission;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -34,8 +36,14 @@ pub async fn post_exec_job_abort(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx =
-        ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::CanAbortRunningWork,
+    )
+    .await?;
     if ctx.detail.status.is_terminal() || !scheduler.abort_exec_job(ctx.detail.job.id).await? {
         return Err(ExecJobRefusal::Finished.into());
     }
@@ -49,7 +57,7 @@ pub async fn post_exec_job_abort(
     operation_id = "runExecJob",
     tag = "exec-jobs",
     summary = "Run exec job",
-    description = "Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.",
+    description = "Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. The caller needs the `TriggerEvaluation` permission on the project. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -60,8 +68,14 @@ pub async fn post_exec_job_run(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx =
-        ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::IncludesPermission(Permission::TriggerEvaluation),
+    )
+    .await?;
     scheduler.run_exec_job(ctx.detail.job.id).await??;
 
     Ok(ok_json("Success".to_string()))
@@ -73,7 +87,7 @@ pub async fn post_exec_job_run(
     operation_id = "keepExecJobVmRunning",
     tag = "exec-jobs",
     summary = "Keep the VM of an exec job running",
-    description = "Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.",
+    description = "Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. The caller needs the `TriggerEvaluation` permission on the project. Answers 409 when the job has already finished.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -93,7 +107,7 @@ pub async fn post_exec_job_keep_vm_running(
     operation_id = "releaseExecJobVm",
     tag = "exec-jobs",
     summary = "Let the VM of an exec job stop",
-    description = "Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.",
+    description = "Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. The caller needs the `TriggerEvaluation` permission on the project. Answers 409 when the job has already finished.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -115,7 +129,14 @@ async fn switch_keep_vm_running(
     job: ExecJobId,
     keep: bool,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = ExecJobAccessContext::load_triggerable(db, job, user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(
+        db,
+        job,
+        Caller::User(user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::IncludesPermission(Permission::TriggerEvaluation),
+    )
+    .await?;
     if ctx.detail.status.is_terminal()
         || !scheduler
             .keep_exec_vm_running(ctx.detail.job.id, keep)

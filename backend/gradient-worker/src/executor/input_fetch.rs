@@ -13,6 +13,9 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_eval::pool::{DownloadSink, EvalPoolConfig, EvalWorker};
 use gradient_types::SecretString;
+use gradient_types::fetch_source_allowlist_and_request_validation::{
+    ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES, AllowedFetchRequest,
+};
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     ClientMessage, GitServerSshHostKey, GitSshHostKeyObservation, PROGRESS_INTERVAL,
@@ -82,8 +85,17 @@ impl InputDownloader for SubprocessDownloader {
         sink: Arc<dyn DownloadSink>,
     ) -> Result<String> {
         let mut worker = EvalWorker::spawn_for_fetch(&self.0).await?;
+        let allowed_fetch_uri_prefixes = ALLOWED_URI_SCHEMES_FOR_ALL_REMOTE_SOURCES
+            .iter()
+            .map(|scheme| (*scheme).to_owned())
+            .collect();
         let fetched = worker
-            .fetch(request, git_subprocess_environment, sink)
+            .fetch(
+                request,
+                git_subprocess_environment,
+                allowed_fetch_uri_prefixes,
+                sink,
+            )
             .await;
         worker.shutdown().await;
         fetched
@@ -140,16 +152,126 @@ pub(crate) async fn fetch_input(
     binpath_ssh: &str,
 ) -> InputOutcome {
     info!(fetch_id = %job.fetch_id, project = %job.project, "fetching an input");
-    match fetch_and_push(&job, downloader, report, binpath_ssh).await {
+    let request = match AllowedFetchRequest::parse(&job.request) {
+        Ok(request) => request,
+        Err(refusal) => {
+            warn!(fetch_id = %job.fetch_id, error = %refusal, "Fetchable source allowlist denied the input fetch request.");
+            return InputOutcome::Failed {
+                message: refusal.to_string(),
+            };
+        }
+    };
+    match fetch_and_push(&job, &request, downloader, report, binpath_ssh).await {
         Ok(response) => InputOutcome::Fetched { response },
-        Err(e) => InputOutcome::Failed {
-            message: format!("{e:#}"),
-        },
+        Err(e) => {
+            warn!(fetch_id = %job.fetch_id, error = %format!("{e:#}"), "Failed to fetch input");
+            InputOutcome::Failed {
+                message: classify_input_fetch_failure(&request, &e).to_string(),
+            }
+        }
     }
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum InputFetchFailureReason {
+    #[error("The fetched content does not match the locked hash in flake.lock.")]
+    HashMismatch,
+    #[error(
+        "The fetched content does not match the hash that flake.lock pins. The hash of the fetched content is {got}."
+    )]
+    HashMismatchOfHttpFetch { got: String },
+    #[error("Input not found on the remote, or access to the input denied.")]
+    NotFoundOrAccessDenied,
+    #[error("A network error caused the input fetch to fail.")]
+    NetworkFailure,
+    #[error("the input fetch failed, see the worker log")]
+    Other,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("the input was fetched as {fetched}, expected {expected}")]
+struct FetchedStorePathDiffersFromExpectedError {
+    fetched: String,
+    expected: String,
+}
+
+const REMOTE_SOURCE_NOT_FOUND_OR_ACCESS_DENIED_ERROR_SUBSTRINGS: &[&str] = &[
+    "not found",
+    "does not exist",
+    "http error 401",
+    "http error 403",
+    "http error 404",
+    "permission denied",
+    "access denied",
+    "authentication failed",
+    "could not read username",
+    "host key verification failed",
+];
+
+const NETWORK_FAILURE_ERROR_MESSAGE_SUBSTRINGS: &[&str] = &[
+    "could not resolve",
+    "couldn't resolve",
+    "connection refused",
+    "connection reset",
+    "connection timed out",
+    "timed out",
+    "network is unreachable",
+    "no route to host",
+    "couldn't connect",
+    "failed to connect",
+];
+
+fn classify_input_fetch_failure(
+    request: &AllowedFetchRequest,
+    e: &anyhow::Error,
+) -> InputFetchFailureReason {
+    let message = format!("{e:#}");
+    let lowercase = message.to_ascii_lowercase();
+    if e.chain()
+        .any(|c| c.is::<FetchedStorePathDiffersFromExpectedError>())
+        || lowercase.contains("hash mismatch")
+    {
+        return match find_actual_hash_after_got_word(&message) {
+            Some(got) if fetch_url_uses_http_or_https_scheme(request) => {
+                InputFetchFailureReason::HashMismatchOfHttpFetch { got }
+            }
+            _ => InputFetchFailureReason::HashMismatch,
+        };
+    }
+    let mentions_any = |signatures: &[&str]| signatures.iter().any(|s| lowercase.contains(s));
+    if mentions_any(NETWORK_FAILURE_ERROR_MESSAGE_SUBSTRINGS) {
+        InputFetchFailureReason::NetworkFailure
+    } else if mentions_any(REMOTE_SOURCE_NOT_FOUND_OR_ACCESS_DENIED_ERROR_SUBSTRINGS) {
+        InputFetchFailureReason::NotFoundOrAccessDenied
+    } else {
+        InputFetchFailureReason::Other
+    }
+}
+
+fn find_actual_hash_after_got_word(message: &str) -> Option<String> {
+    let (_, after) = message.rsplit_once("got")?;
+    let hash: String = after
+        .trim_start_matches(|c: char| c == ':' || c == '\'' || c == '"' || c.is_whitespace())
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '+' | '/' | '=' | ':'))
+        .collect();
+    let hash = hash.trim_end_matches(':');
+    (hash.len() > "sha256-".len() && hash.starts_with("sha")).then(|| hash.to_owned())
+}
+
+fn fetch_url_uses_http_or_https_scheme(request: &AllowedFetchRequest) -> bool {
+    request.url_to_fetch().is_some_and(|url| {
+        let url = url
+            .strip_prefix("tarball+")
+            .or_else(|| url.strip_prefix("file+"))
+            .unwrap_or(url);
+        url.starts_with("https://") || url.starts_with("http://")
+    })
 }
 
 async fn fetch_and_push(
     job: &InputFetchJob,
+    request: &AllowedFetchRequest,
     downloader: &dyn InputDownloader,
     report: &dyn FetchReport,
     binpath_ssh: &str,
@@ -160,7 +282,11 @@ async fn fetch_and_push(
         .map(|credentials| credentials.environment.clone())
         .unwrap_or_default();
     let (transfers, totals) = Transfers::new();
-    let download = downloader.download(job.request.clone(), environment, transfers);
+    let download = downloader.download(
+        request.get_canonical_fetch_request_json(),
+        environment,
+        transfers,
+    );
     let downloaded = tokio::select! {
         downloaded = download => downloaded,
         never = report_progress(totals, report) => match never {},
@@ -180,7 +306,7 @@ async fn fetch_and_push(
     }
     let response = downloaded?;
 
-    let store_path = checked_store_path(&job.request, &response)?;
+    let store_path = checked_store_path(request, &response)?;
     report
         .push(store_path.clone())
         .await
@@ -188,17 +314,20 @@ async fn fetch_and_push(
     Ok(response)
 }
 
-fn checked_store_path(request: &str, response: &str) -> Result<String> {
-    let request: serde_json::Value = serde_json::from_str(request).context("parse the request")?;
+fn checked_store_path(request: &AllowedFetchRequest, response: &str) -> Result<String> {
     let response: serde_json::Value =
         serde_json::from_str(response).context("parse the fetch answer")?;
     let fetched = response["storePath"]
         .as_str()
         .context("a fetch answer without a store path")?;
-    if let Some(expected) = request["storePath"].as_str()
+    if let Some(expected) = request.store_path()
         && expected != fetched
     {
-        anyhow::bail!("the input was fetched as {fetched}, expected {expected}");
+        return Err(FetchedStorePathDiffersFromExpectedError {
+            fetched: fetched.to_owned(),
+            expected: expected.to_owned(),
+        }
+        .into());
     }
     Ok(fetched.to_owned())
 }
@@ -465,8 +594,8 @@ async fn report_progress(
 mod tests {
     use super::*;
 
-    const REQUEST: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.com/r"},"storePath":"/nix/store/aaaa-source"}"#;
-    const FETCHED: &str = r#"{"storePath":"/nix/store/aaaa-source"}"#;
+    const REQUEST: &str = r#"{"builtin":"fetchTree","args":{"type":"git","url":"git+ssh://git@example.com/r"},"storePath":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source"}"#;
+    const FETCHED: &str = r#"{"storePath":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source"}"#;
 
     #[derive(Default)]
     struct FakeDownloader {
@@ -475,6 +604,8 @@ mod tests {
         known_hosts_line_to_append: Option<String>,
         ssh_log_text_before_host_key_failure: Option<String>,
         seen: Mutex<Vec<FakeInputDownloaderDownloadRecord>>,
+        download_error_message: Option<String>,
+        download_call_count: std::sync::atomic::AtomicUsize,
     }
 
     #[derive(Debug, Default, PartialEq)]
@@ -516,6 +647,11 @@ mod tests {
             environment: Vec<(String, String)>,
             sink: Arc<dyn DownloadSink>,
         ) -> Result<String> {
+            self.download_call_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if let Some(message) = &self.download_error_message {
+                anyhow::bail!("{message}");
+            }
             let variable = |name: &str| {
                 environment
                     .iter()
@@ -612,7 +748,9 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_fetched_input_is_pushed_and_answered() {
-        let downloader = FakeDownloader::answering(r#"{"storePath":"/nix/store/aaaa-source"}"#);
+        let downloader = FakeDownloader::answering(
+            r#"{"storePath":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source"}"#,
+        );
         let report = RecordedReport::default();
 
         let outcome = fetch_input(job(None), &downloader, &report, "ssh").await;
@@ -620,18 +758,21 @@ mod tests {
         assert_eq!(
             outcome,
             InputOutcome::Fetched {
-                response: r#"{"storePath":"/nix/store/aaaa-source"}"#.into()
+                response: r#"{"storePath":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source"}"#
+                    .into()
             }
         );
         assert_eq!(
             *report.pushed.lock(),
-            vec!["/nix/store/aaaa-source".to_owned()]
+            vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".to_owned()]
         );
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_response_with_another_store_path_fails() {
-        let downloader = FakeDownloader::answering(r#"{"storePath":"/nix/store/bbbb-source"}"#);
+        let downloader = FakeDownloader::answering(
+            r#"{"storePath":"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-source"}"#,
+        );
         let report = RecordedReport::default();
 
         let outcome = fetch_input(job(None), &downloader, &report, "ssh").await;
@@ -639,10 +780,105 @@ mod tests {
         assert_eq!(
             outcome,
             InputOutcome::Failed {
-                message: "the input was fetched as /nix/store/bbbb-source, expected /nix/store/aaaa-source".into()
+                message: InputFetchFailureReason::HashMismatch.to_string()
             }
         );
         assert!(report.pushed.lock().is_empty(), "nothing pushed");
+    }
+
+    fn failing_download(request: &str, error: &str) -> (InputFetchJob, FakeDownloader) {
+        let job = InputFetchJob {
+            request: request.into(),
+            ..job(None)
+        };
+        let downloader = FakeDownloader {
+            download_error_message: Some(error.into()),
+            ..FakeDownloader::default()
+        };
+        (job, downloader)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn server_fetch_request_for_local_path_input_returns_failed_and_does_not_call_downloader()
+    {
+        let report = RecordedReport::default();
+        let downloader = FakeDownloader::answering(FETCHED);
+        let job = InputFetchJob {
+            request:
+                r#"{"builtin":"fetchTree","args":{"type":"path","path":"/run/credentials/x"}}"#
+                    .into(),
+            ..job(Some("PRIVATE KEY"))
+        };
+
+        let outcome = fetch_input(job, &downloader, &report, "ssh").await;
+
+        assert_eq!(
+            outcome,
+            InputOutcome::Failed {
+                message: gradient_types::InputError::InputTypeNotAllowed("path".into()).to_string()
+            }
+        );
+        assert_eq!(
+            downloader
+                .download_call_count
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert!(report.pushed.lock().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn git_ssh_fetch_hash_mismatch_error_reports_no_hash() {
+        let (job, downloader) = failing_download(
+            REQUEST,
+            "error: NAR hash mismatch in input 'git+ssh://git@example.com/r', expected 'sha256-LOCKED' but got 'sha256-REAL'",
+        );
+
+        let outcome = fetch_input(job, &downloader, &RecordedReport::default(), "ssh").await;
+
+        assert_eq!(
+            outcome,
+            InputOutcome::Failed {
+                message: InputFetchFailureReason::HashMismatch.to_string()
+            }
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn https_tarball_hash_mismatch_error_keeps_real_hash_in_message() {
+        let (job, downloader) = failing_download(
+            r#"{"builtin":"fetchTarball","args":{"url":"https://example.com/a.tar.gz","sha256":"sha256-LOCKED"}}"#,
+            "error: hash mismatch in file downloaded from 'https://example.com/a.tar.gz':\n  specified: sha256-LOCKED\n  got:       sha256-REAL",
+        );
+
+        let outcome = fetch_input(job, &downloader, &RecordedReport::default(), "ssh").await;
+
+        assert_eq!(
+            outcome,
+            InputOutcome::Failed {
+                message: InputFetchFailureReason::HashMismatchOfHttpFetch {
+                    got: "sha256-REAL".into()
+                }
+                .to_string()
+            }
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn raw_network_error_reports_fixed_network_failure_message() {
+        let (job, downloader) = failing_download(
+            REQUEST,
+            "error: ssh: Could not resolve hostname example.com: Name or service not known",
+        );
+
+        let outcome = fetch_input(job, &downloader, &RecordedReport::default(), "ssh").await;
+
+        assert_eq!(
+            outcome,
+            InputOutcome::Failed {
+                message: InputFetchFailureReason::NetworkFailure.to_string()
+            }
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -823,7 +1059,9 @@ mod tests {
     async fn download_progress_is_sent_as_input_fetch_progress() {
         let downloader = FakeDownloader {
             transfers: vec![(1, 100, 400), (2, 50, 100)],
-            ..FakeDownloader::answering(r#"{"storePath":"/nix/store/aaaa-source"}"#)
+            ..FakeDownloader::answering(
+                r#"{"storePath":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source"}"#,
+            )
         };
         let report = RecordedReport::default();
 

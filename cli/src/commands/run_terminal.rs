@@ -152,6 +152,10 @@ async fn finish(client: &connector::Client, job: &str, end: TerminalEnd, out: Ou
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Interactive sessions disable filtering on the serial console. Bytes go through unchanged."
+)]
 async fn forward(mut program: GuestSocket) -> TerminalEnd {
     let mut stdin = tokio::io::stdin();
     let mut stdout = std::io::stdout();

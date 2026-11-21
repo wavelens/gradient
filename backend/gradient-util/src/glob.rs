@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_wildcard::candidate_matches_wildcard_pattern;
 use std::collections::BTreeSet;
 
 pub fn is_pattern(name: &str) -> bool {
@@ -15,37 +16,6 @@ pub fn literal_prefix_len(pattern: &str) -> usize {
         .chars()
         .take_while(|c| !matches!(c, '*' | '?' | '['))
         .count()
-}
-
-pub fn glob_match(pattern: &str, candidate: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
-    let c: Vec<char> = candidate.chars().collect();
-    let (mut pattern_char_index, mut candidate_char_index) = (0, 0);
-    let mut last_star_pattern_and_candidate_index: Option<(usize, usize)> = None;
-    while candidate_char_index < c.len() {
-        match p.get(pattern_char_index) {
-            Some('*') => {
-                last_star_pattern_and_candidate_index =
-                    Some((pattern_char_index, candidate_char_index));
-                pattern_char_index += 1;
-            }
-            Some(&ch) if ch == '?' || ch == c[candidate_char_index] => {
-                pattern_char_index += 1;
-                candidate_char_index += 1;
-            }
-            _ => {
-                let Some(last_star_pattern_and_candidate_index_ref) =
-                    last_star_pattern_and_candidate_index.as_mut()
-                else {
-                    return false;
-                };
-                last_star_pattern_and_candidate_index_ref.1 += 1;
-                pattern_char_index = last_star_pattern_and_candidate_index_ref.0 + 1;
-                candidate_char_index = last_star_pattern_and_candidate_index_ref.1;
-            }
-        }
-    }
-    p[pattern_char_index..].iter().all(|&ch| ch == '*')
 }
 
 /// Literal entries are winning over any glob. Among globs the longest literal prefix is winning. A
@@ -67,7 +37,10 @@ pub fn expand_overrides(
         }
     }
     for (pat, _) in &globs {
-        if !declared.iter().any(|d| glob_match(pat, d)) {
+        if !declared
+            .iter()
+            .any(|d| candidate_matches_wildcard_pattern(pat, d))
+        {
             warnings.push(format!("override pattern '{pat}' matched no flake inputs"));
         }
     }
@@ -81,7 +54,7 @@ pub fn expand_overrides(
         let mut best: Option<(usize, &Option<String>)> = None;
         let mut tie = false;
         for (pat, url) in &globs {
-            if glob_match(pat, input) {
+            if candidate_matches_wildcard_pattern(pat, input) {
                 let spec = literal_prefix_len(pat);
                 match best {
                     Some((bspec, burl)) if spec == bspec && burl != url => tie = true,
@@ -115,23 +88,18 @@ mod tests {
 
     #[test]
     fn glob_star_and_question() {
-        assert!(glob_match("nixpkgs*", "nixpkgs"));
-        assert!(glob_match("nixpkgs*", "nixpkgs-unstable"));
-        assert!(glob_match("*", "anything"));
-        assert!(!glob_match("nixpkgs*", "flake-utils"));
-        assert!(glob_match("nix?", "nixa"));
-        assert!(!glob_match("nix?", "nix"));
-    }
-
-    #[test]
-    fn many_stars_long_path_without_b_returns_false() {
-        assert!(!glob_match("*a*a*a*a*a*a*a*b", &"a".repeat(60)));
-        assert!(glob_match(
-            "*a*a*a*a*a*a*a*b",
-            &format!("{}b", "a".repeat(60))
+        assert!(candidate_matches_wildcard_pattern("nixpkgs*", "nixpkgs"));
+        assert!(candidate_matches_wildcard_pattern(
+            "nixpkgs*",
+            "nixpkgs-unstable"
         ));
-        assert!(glob_match("src/*.rs", "src/nested/lib.rs"));
-        assert!(!glob_match("src/*.rs", "src/lib.rsx"));
+        assert!(candidate_matches_wildcard_pattern("*", "anything"));
+        assert!(!candidate_matches_wildcard_pattern(
+            "nixpkgs*",
+            "flake-utils"
+        ));
+        assert!(candidate_matches_wildcard_pattern("nix?", "nixa"));
+        assert!(!candidate_matches_wildcard_pattern("nix?", "nix"));
     }
 
     #[test]
