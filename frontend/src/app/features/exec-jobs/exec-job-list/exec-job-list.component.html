@@ -12,7 +12,7 @@
         <span class="sidebar-group-count">{{ jobs().length }}</span>
       </div>
       @for (job of jobs(); track job.id) {
-        <div class="sidebar-item exec-job-item" [title]="job.entry_point" (contextmenu)="openContextMenu($event, job, jobMenu)">
+        <div class="sidebar-item" [title]="job.entry_point" (contextmenu)="openContextMenu($event, job, jobMenu)">
           <a class="sidebar-row-link" [routerLink]="link(job)" [attr.aria-label]="job.entry_point + ', ' + detail(job)"></a>
           <gr-status-icon [phase]="phase(job.status)" [label]="statusLabel(job)" size="sm" />
           <span class="exec-job-text">

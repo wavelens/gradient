@@ -923,7 +923,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 1234567 } } });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeNull();
-    const wait = fixture.nativeElement.querySelector('.panel .pkg-wait');
+    const wait = fixture.nativeElement.querySelector('.panel [data-testid="package-panel-evaluation-pending"]');
     expect(wait?.textContent).toContain('Evaluating');
     expect(wait?.querySelector('gr-thunk-progress gr-segmented-bar')).toBeTruthy();
     expect(wait?.textContent).toContain('1.23M thunks');
@@ -949,7 +949,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
     });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.pkg')).toBeNull();
-    expect(fixture.nativeElement.querySelector('.panel .pkg-wait')?.textContent).toContain('Waiting for packages');
+    expect(fixture.nativeElement.querySelector('.panel [data-testid="package-panel-evaluation-pending"]')?.textContent).toContain('Waiting for packages');
   });
 
   it('falls back to the static text while Building, even with a late thunk frame', () => {
@@ -957,7 +957,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
     fixture.detectChanges();
     expect(fixture.componentInstance.selectedProgress()).toBeNull();
-    expect(fixture.nativeElement.querySelector('.panel .pkg-wait')?.textContent).not.toContain('thunks');
+    expect(fixture.nativeElement.querySelector('.panel [data-testid="package-panel-evaluation-pending"]')?.textContent).not.toContain('thunks');
   });
 
   it('keeps the latest frame of each running evaluation apart', () => {
@@ -1254,11 +1254,11 @@ describe('TaskDetailComponent - evaluation selection', () => {
         },
       },
     );
-    const text = (fixture.nativeElement as HTMLElement).querySelector('.pkg-wait')?.textContent ?? '';
+    const text = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="package-panel-evaluation-pending"]')?.textContent ?? '';
     expect(text).toContain('Waiting for a worker');
     expect(text).toContain('This project has no connected workers.');
     expect(text).toContain('aarch64-linux with feature kvm - 3 builds');
-    expect(fixture.nativeElement.querySelector('.pkg-wait a[grButton]')?.getAttribute('href')).toBe('/project/acme/workers');
+    expect(fixture.nativeElement.querySelector('[data-testid="package-panel-evaluation-pending"] a[grButton]')?.getAttribute('href')).toBe('/project/acme/workers');
   });
 
   it('Show attributes that failed evaluation above built rows on the first page', () => {
@@ -1793,7 +1793,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
     const { fixture } = setup(access, { primaryStatus: 'EvaluatingDerivation' });
     expect(fixture.nativeElement.textContent).not.toContain('No packages');
     expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeNull();
-    const wait = fixture.nativeElement.querySelector('.panel .pkg-wait');
+    const wait = fixture.nativeElement.querySelector('.panel [data-testid="package-panel-evaluation-pending"]');
     expect(wait?.querySelector('gr-icon')).toBeTruthy();
     expect(wait?.textContent).toContain('Waiting for packages');
   });

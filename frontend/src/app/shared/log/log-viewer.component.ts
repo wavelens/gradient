@@ -67,7 +67,7 @@ function extendsLog(shown: readonly string[], next: readonly string[]): boolean 
   standalone: true,
   imports: [ButtonComponent, DecimalPipe, IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective],
   templateUrl: './log-viewer.component.html',
-  styleUrl: './log-viewer.component.scss',
+  styleUrls: ['./log-viewer.header.scss', './log-viewer.component.scss'],
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class LogViewerComponent implements OnDestroy {

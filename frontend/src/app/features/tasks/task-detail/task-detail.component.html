@@ -327,13 +327,13 @@
                 }
               </div>
             } @else if (selectedThunkRow(); as row) {
-              <gr-empty-state class="pkg-wait" flat icon="manage_search" title="Evaluating">
+              <gr-empty-state data-testid="package-panel-evaluation-pending" flat icon="manage_search" title="Evaluating">
                 <gr-thunk-progress [progress]="row" />
               </gr-empty-state>
             } @else if (sel.status === 'Waiting') {
-              <gr-waiting-notice class="pkg-wait" [reason]="sel.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
+              <gr-waiting-notice data-testid="package-panel-evaluation-pending" [reason]="sel.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
             } @else {
-              <gr-empty-state class="pkg-wait" flat icon="hourglass_empty" title="Waiting for packages"
+              <gr-empty-state data-testid="package-panel-evaluation-pending" flat icon="hourglass_empty" title="Waiting for packages"
                 message="Packages appear as their entry points are found." />
             }
           } @else if (selectedEvaluationErrorFirstLine(); as error) {

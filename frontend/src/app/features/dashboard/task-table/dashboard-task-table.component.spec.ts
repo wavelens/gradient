@@ -245,7 +245,7 @@ describe('DashboardTaskTableComponent', () => {
     expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 60);
     expect(root.querySelector('.show-all')).toBeNull();
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    (root.querySelector('.show-less') as HTMLElement).click();
+    (root.querySelector('[data-testid="collapse-task-table-button"]') as HTMLElement).click();
     expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { page: null } }));
   });
 

@@ -18,6 +18,9 @@ const PALETTE_ALLOWED = new Set([
 ]);
 // PNG exports draw the yearly recap slides onto a canvas. That canvas can't read CSS variables, so the slides keep fixed colors in every theme.
 const FIXED_COLOR_FILES = new Set(['src/app/core/yearly-instance-summary/recap-slide-color-scheme-colors.ts']);
+// The viewer for build logs can turn the 256-colour and 24-bit ANSI codes in logs into rgb() colours at runtime. Only the opening part of an rgb() colour computed this way is exempt in that file.
+const ANSI_LOG_COMPUTED_RGB_COLOR_FILES = new Set(['src/app/shared/log/ansi.ts']);
+const rgbCallWithTemplateInterpolationStartRegex = /\brgb\(\$\{/g;
 
 const LITERAL = /(?<![\w&/])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b|\b(?:rgba?|hsla?)\((?!var\()/;
 const NAMED = /\b(?:color|background(?:-color)?|fill|stroke|border(?:-\w+)?)\s*:[^;]*\b(?:white|black|red|green|blue|yellow|orange|gray|grey|purple|pink)\b/;
@@ -40,7 +43,8 @@ for (const path of SOURCES.flatMap(files)) {
     if (COMMENT.test(line)) return;
     const where = `${file}:${index + 1}`;
     const stripped = line.replace(/var\(--gr-[\w-]+\)/g, '');
-    if (LITERAL.test(line) || (path.endsWith('.scss') && NAMED.test(stripped))) {
+    const lineWithoutRuntimeRgbOpenings = ANSI_LOG_COMPUTED_RGB_COLOR_FILES.has(file) ? line.replace(rgbCallWithTemplateInterpolationStartRegex, '') : line;
+    if (LITERAL.test(lineWithoutRuntimeRgbOpenings) || (path.endsWith('.scss') && NAMED.test(stripped))) {
       problems.push(`${where}: Color literal. Use a role from tokens.ts`);
     } else if (PALETTE.test(line) && !PALETTE_ALLOWED.has(file)) {
       problems.push(`${where}: Palette color. Use a role from tokens.ts`);

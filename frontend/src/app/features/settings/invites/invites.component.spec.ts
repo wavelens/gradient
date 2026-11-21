@@ -149,13 +149,13 @@ describe('RequestsPageComponent - requests', () => {
   it('lists invitations, cache subscription requests and team grant requests in their own sections', () => {
     const { fixture } = setup([], null, allRequests());
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('.invites')?.textContent).toContain('Wavelens');
-    const subscription = root.querySelector('.subscription-requests')!;
+    expect(root.querySelector('[data-testid="invites-list"]')?.textContent).toContain('Wavelens');
+    const subscription = root.querySelector('[data-testid="cache-subscription-request-list"]')!;
     expect(subscription.textContent).toContain('Web Shop');
     expect(subscription.textContent).toContain('Main Cache');
     expect(subscription.textContent).toContain('Read Only');
     expect(subscription.textContent).toContain('Requested by Dave');
-    const team = root.querySelector('.team-requests')!;
+    const team = root.querySelector('[data-testid="project-team-access-requests"]')!;
     expect(team.textContent).toContain('Docs Site');
     expect(team.textContent).toContain('Infra Team');
     expect(team.textContent).toContain('Members get Write');
@@ -166,65 +166,65 @@ describe('RequestsPageComponent - requests', () => {
     const { fixture } = setup([], null, allRequests());
     const root = fixture.nativeElement as HTMLElement;
     const hrefs = (section: string) => Array.from(root.querySelectorAll(`${section} gr-row a`)).map((a) => a.getAttribute('href'));
-    expect(hrefs('.subscription-requests')).toEqual(['/project/shop', '/caches/main']);
-    expect(hrefs('.team-requests')).toEqual(['/project/docs', '/team/infra']);
+    expect(hrefs('[data-testid="cache-subscription-request-list"]')).toEqual(['/project/shop', '/caches/main']);
+    expect(hrefs('[data-testid="project-team-access-requests"]')).toEqual(['/project/docs', '/team/infra']);
   });
 
   it('approves a subscription request through the cache endpoint and removes its row', () => {
     const { fixture, approveSubscriptionRequest, notify } = setup([], null, allRequests());
     const root = fixture.nativeElement as HTMLElement;
-    sectionButton(root, '.subscription-requests', 'Approve').click();
+    sectionButton(root, '[data-testid="cache-subscription-request-list"]', 'Approve').click();
     fixture.detectChanges();
     expect(approveSubscriptionRequest).toHaveBeenCalledWith('main', 'shop');
     expect(notify.success).toHaveBeenCalledWith('Subscription request approved');
-    expect(root.querySelector('.subscription-requests')).toBeNull();
+    expect(root.querySelector('[data-testid="cache-subscription-request-list"]')).toBeNull();
     expect(TestBed.inject(PendingUserDecisionsService).count()).toBe(2);
   });
 
   it('asks before denying a subscription request, then denies it and removes its row', () => {
     const { fixture, denySubscriptionRequest, confirm } = setup([], null, allRequests());
     const root = fixture.nativeElement as HTMLElement;
-    sectionButton(root, '.subscription-requests', 'Deny').click();
+    sectionButton(root, '[data-testid="cache-subscription-request-list"]', 'Deny').click();
     fixture.detectChanges();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Web Shop (shop) asks to use Main Cache (main)' }));
     expect(denySubscriptionRequest).toHaveBeenCalledWith('main', 'shop');
-    expect(root.querySelector('.subscription-requests')).toBeNull();
+    expect(root.querySelector('[data-testid="cache-subscription-request-list"]')).toBeNull();
   });
 
   it('keeps the subscription request when denying is cancelled', () => {
     const { fixture, denySubscriptionRequest, confirm } = setup([], null, allRequests());
     confirm.mockImplementation(() => EMPTY);
-    sectionButton(fixture.nativeElement, '.subscription-requests', 'Deny').click();
+    sectionButton(fixture.nativeElement, '[data-testid="cache-subscription-request-list"]', 'Deny').click();
     expect(denySubscriptionRequest).not.toHaveBeenCalled();
   });
 
   it('approves a team grant request through the team endpoint and removes its row', () => {
     const { fixture, approveRequest } = setup([], null, allRequests());
     const root = fixture.nativeElement as HTMLElement;
-    sectionButton(root, '.team-requests', 'Approve').click();
+    sectionButton(root, '[data-testid="project-team-access-requests"]', 'Approve').click();
     fixture.detectChanges();
     expect(approveRequest).toHaveBeenCalledWith('infra', 'req-1');
-    expect(root.querySelector('.team-requests')).toBeNull();
+    expect(root.querySelector('[data-testid="project-team-access-requests"]')).toBeNull();
   });
 
   it('asks before denying a team grant request, then denies it and removes its row', () => {
     const { fixture, denyRequest, confirm } = setup([], null, allRequests());
     const root = fixture.nativeElement as HTMLElement;
-    sectionButton(root, '.team-requests', 'Deny').click();
+    sectionButton(root, '[data-testid="project-team-access-requests"]', 'Deny').click();
     fixture.detectChanges();
     expect(confirm).toHaveBeenCalled();
     expect(denyRequest).toHaveBeenCalledWith('infra', 'req-1');
-    expect(root.querySelector('.team-requests')).toBeNull();
+    expect(root.querySelector('[data-testid="project-team-access-requests"]')).toBeNull();
   });
 
   it('reports a failed approval and keeps the row', () => {
     const { fixture, approveRequest, notify } = setup([], null, allRequests());
     approveRequest.mockReturnValue(throwError(() => new Error('refused')));
     const root = fixture.nativeElement as HTMLElement;
-    sectionButton(root, '.team-requests', 'Approve').click();
+    sectionButton(root, '[data-testid="project-team-access-requests"]', 'Approve').click();
     fixture.detectChanges();
     expect(notify.failure).toHaveBeenCalled();
-    expect(root.querySelector('.team-requests')).not.toBeNull();
+    expect(root.querySelector('[data-testid="project-team-access-requests"]')).not.toBeNull();
   });
 });
 
@@ -245,7 +245,7 @@ describe('RequestsPageComponent - invitations', () => {
     buttonByText(root, 'Accept')?.click();
     fixture.detectChanges();
     expect(root.querySelector('.joined')?.textContent).toContain('Wavelens');
-    expect(root.querySelector('.invites')).toBeNull();
+    expect(root.querySelector('[data-testid="invites-list"]')).toBeNull();
     expect(root.textContent).not.toContain('No pending requests');
   });
 

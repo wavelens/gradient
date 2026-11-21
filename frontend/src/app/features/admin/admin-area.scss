@@ -15,7 +15,7 @@ h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.5rem 0 0
 a.tile:hover { border-color: var(--gr-border); }
 .tile .label { color: var(--gr-text-secondary); font-size: $font-size-xs; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin: 0 0 1rem; }
-gr-table { display: block; margin-bottom: 1rem; }
+gr-table { margin-bottom: 1rem; }
 td.number, th.number { text-align: right; white-space: nowrap; }
 td.actions-cell { text-align: right; white-space: nowrap; }
 .muted { color: var(--gr-text-muted); }
