@@ -34,17 +34,35 @@ pub(crate) async fn bind(host: &str, port: u16) -> io::Result<TcpListener> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+    use tokio::net::TcpStream;
 
     #[tokio::test]
-    async fn the_unspecified_ipv6_address_accepts_ipv4_and_ipv6_clients() {
+    async fn unspecified_ipv6_address_accepts_ipv4_clients() {
         let listener = bind("::", 0).await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
-        for client in ["127.0.0.1", "::1"] {
-            tokio::net::TcpStream::connect((client, port))
-                .await
-                .unwrap();
-            listener.accept().await.unwrap();
-        }
+        TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let (_, peer) = listener.accept().await.unwrap();
+
+        assert_eq!(peer.ip().to_canonical(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    #[tokio::test]
+    async fn the_unspecified_ipv6_address_accepts_ipv6_clients_when_the_host_has_the_ipv6_loopback_address()
+     {
+        let listener = bind("::", 0).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        match TcpStream::connect(("::1", port)).await {
+            Err(error) if error.kind() == io::ErrorKind::AddrNotAvailable => {
+                eprintln!(
+                    "IPv6 part doesn't run because this host has no ::1 loopback address ({error})"
+                );
+                return;
+            }
+            connected => connected.unwrap(),
+        };
+        listener.accept().await.unwrap();
     }
 }
