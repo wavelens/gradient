@@ -44,6 +44,8 @@ in {
   nix.settings.sandbox = true;
 
   systemd.services = {
+    gradient-server.serviceConfig.EnvironmentFile = "-${stateDir}/server-environment";
+
     gradient-standalone-secrets = {
       wantedBy = [ "multi-user.target" ];
       requiredBy = [ "gradient-server.service" ];

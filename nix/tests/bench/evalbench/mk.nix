@@ -62,22 +62,28 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
   };
 
   nodes = {
-    server = import ../server-node.nix {
-      inherit self pkgs topo;
-      token = workerToken;
-      flakeFiles = {
-        "flake.nix" = "${e2e}/flake_repository.nix";
-        "flake.lock" = "${e2e}/flake_repository.lock";
-      };
-      tasks.task = {
-        project = "project";
-        repository = "git://server/test";
-        created_by = "admin";
-        triggers = [{
-          type = "time";
-          config.cron = "0 0 3 1 1 *";
-        }];
-      };
+    server = {
+      imports = [
+        (import ../server-node.nix {
+          inherit self pkgs topo;
+          token = workerToken;
+          flakeFiles = {
+            "flake.nix" = "${e2e}/flake_repository.nix";
+            "flake.lock" = "${e2e}/flake_repository.lock";
+          };
+          tasks.task = {
+            project = "project";
+            repository = "git://server/test";
+            created_by = "admin";
+            triggers = [{
+              type = "time";
+              config.cron = "0 0 3 1 1 *";
+            }];
+          };
+        })
+      ];
+
+      services.gradient.outbound.allowedNonPublicNetworkTargets = [ "server" ];
     };
   } // topo.nodes;
 

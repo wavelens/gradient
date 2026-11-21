@@ -6,6 +6,7 @@ BASE = "http://localhost:8080"
 RUN = ("docker run -dt --name gradient --privileged --cgroupns=host "
        "-p 127.0.0.1:8080:80 -v gradient:/var/lib gradient-standalone:latest")
 LOGIN_JOURNAL = "docker exec gradient journalctl -u gradient-standalone-login.service --no-pager"
+SERVER_ENVIRONMENT_FILE_PATH = "/var/lib/gradient-standalone/server-environment"
 
 
 def dump_container():
@@ -17,6 +18,18 @@ def dump_container():
         "docker exec gradient journalctl -b --no-pager -n 300",
     ]:
         print(f"=== {cmd} ===\n{machine.execute(cmd)[1]}")
+
+
+def write_outbound_allowed_non_public_network_targets_restart_gradient_server_and_wait_for_api():
+    subnet = machine.succeed(
+        "docker network inspect bridge -f '{{(index .IPAM.Config 0).Subnet}}'").strip()
+    setting = f"GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS={subnet}"
+    machine.succeed(
+        f"echo {setting} | docker exec -i gradient tee {SERVER_ENVIRONMENT_FILE_PATH} > /dev/null "
+        "&& docker exec gradient systemctl restart gradient-server.service"
+    )
+    assert_serving(machine, BASE)
+    return setting
 
 
 def start_container():
@@ -44,6 +57,7 @@ start_container()
 password = machine.succeed("docker exec gradient cat /var/lib/gradient-standalone/admin-password").strip()
 machine.succeed(f"{LOGIN_JOURNAL} | grep -F 'admin / {password}'")
 token = login(machine, BASE, password)
+outbound_setting = write_outbound_allowed_non_public_network_targets_restart_gradient_server_and_wait_for_api()
 
 gateway = machine.succeed(
     "docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}'").strip()
@@ -55,3 +69,8 @@ start_container()
 token = login(machine, BASE, password)
 status = api(machine, BASE, "GET", f"evals/{eval_id}", token)["status"]
 assert status == "Completed", f"evaluation lost across a container recreate: {status}"
+machine.succeed(
+    "docker exec gradient sh -c "
+    "'tr \"\\0\" \"\\n\" < /proc/$(systemctl show -p MainPID --value gradient-server.service)/environ' "
+    f"| grep -qxF {outbound_setting}"
+)
