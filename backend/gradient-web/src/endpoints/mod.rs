@@ -55,6 +55,7 @@ use gradient_core::ServerState;
 use gradient_git_host::github_app::GitHubAppPageUrlCache;
 use gradient_types::config::GitHubAppConfig;
 use gradient_types::{BaseResponse, CreatePermission};
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use gradient_util::shutdown::Shutdown;
 use serde::Serialize;
 use std::sync::Arc;
@@ -221,7 +222,7 @@ pub async fn get_config(
 ) -> WebResult<Json<BaseResponse<ServerConfig>>> {
     let github_app_page_url = github_app_page_url_from_cache_or_refresh_in_background(
         state.config.github_app.as_ref(),
-        &state.http,
+        &state.user_supplied_url_http_client,
         &state.memory.github_app_page_url,
         &state.shutdown,
     );
@@ -287,7 +288,7 @@ const GITHUB_APP_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 pub(crate) fn github_app_page_url_from_cache_or_refresh_in_background(
     github_app: Option<&GitHubAppConfig>,
-    http: &reqwest::Client,
+    http: &HttpClientForUserSuppliedUrls,
     github_app_page_url: &Arc<GitHubAppPageUrlCache>,
     shutdown: &Shutdown,
 ) -> Option<String> {

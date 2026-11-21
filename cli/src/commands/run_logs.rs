@@ -5,9 +5,9 @@
  */
 
 use crate::commands::run::{first_failure, has_finished, has_started, job_exit_code};
+use crate::logfmt::{StreamingTerminalEscapeSequenceFilter, stdout_filter_mode};
 use crate::output::Output;
 use connector::api::{ExecJobStatus, ExecJobSummary};
-use std::io::Write;
 use std::process::exit;
 use std::time::Duration;
 
@@ -20,6 +20,7 @@ struct FollowedJob {
     printed: u64,
     lines: LinePrefixer,
     finished: bool,
+    streaming_terminal_escape_filter: StreamingTerminalEscapeSequenceFilter,
 }
 
 pub(crate) async fn follow(
@@ -84,6 +85,9 @@ impl FollowedJob {
             printed: 0,
             lines: LinePrefixer::new(prefixed.then(|| format!("{} | ", job.entry_point))),
             finished: false,
+            streaming_terminal_escape_filter: StreamingTerminalEscapeSequenceFilter::new(
+                stdout_filter_mode(),
+            ),
         }
     }
 
@@ -101,15 +105,19 @@ impl FollowedJob {
         if fresh.is_empty() {
             return;
         }
-        let mut stdout = std::io::stdout();
-        let _ = stdout.write_all(self.lines.prefix(&fresh).as_bytes());
-        let _ = stdout.flush();
+        out.write_filtered_log_chunk_to_stdout_without_newline_and_flush(
+            &mut self.streaming_terminal_escape_filter,
+            &self.lines.prefix(&fresh),
+        );
     }
 
     fn finish(&mut self, summary: &ExecJobSummary, prefixed: bool, out: Output) {
         self.finished = true;
         if self.lines.end_line() {
-            println!();
+            out.write_filtered_log_chunk_to_stdout_without_newline_and_flush(
+                &mut self.streaming_terminal_escape_filter,
+                "\n",
+            );
         }
         let message = summary.message.as_deref().filter(|m| !m.is_empty());
         match message {

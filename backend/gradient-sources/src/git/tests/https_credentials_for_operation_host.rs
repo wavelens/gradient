@@ -11,6 +11,7 @@ use crate::git::https_credentials_for_operation_host::{
     make_username_password_callback_for_single_login_attempt_on_matching_host,
 };
 use git2::CredentialType;
+use std::time::{Duration, Instant};
 
 fn https_git_credential_for_host_with_fixed_username_and_password(
     host: &str,
@@ -55,6 +56,7 @@ fn https_credential_lookup_matches_only_exact_host_and_port() {
 fn credentials_callback_returns_username_and_password_on_first_call_and_errors_on_second_call() {
     let mut callback = make_username_password_callback_for_single_login_attempt_on_matching_host(
         https_git_credential_for_host_with_fixed_username_and_password("github.com"),
+        None,
     );
     let url = "https://github.com/o/r.git/info/refs?service=git-upload-pack";
 
@@ -63,6 +65,22 @@ fn credentials_callback_returns_username_and_password_on_first_call_and_errors_o
         .err()
         .expect("the second login attempt fails");
     assert!(second.message().contains("rejected"), "{second}");
+}
+
+#[test]
+fn https_credentials_callback_returns_error_when_fetch_deadline_has_passed() {
+    let mut callback = make_username_password_callback_for_single_login_attempt_on_matching_host(
+        https_git_credential_for_host_with_fixed_username_and_password("github.com"),
+        Some(Instant::now() - Duration::from_secs(1)),
+    );
+    let refused = callback(
+        "https://github.com/o/r.git/info/refs?service=git-upload-pack",
+        None,
+        CredentialType::USER_PASS_PLAINTEXT,
+    )
+    .err()
+    .expect("no username and password after the fetch deadline");
+    assert!(refused.message().contains("deadline"), "{refused}");
 }
 
 #[test]
@@ -75,6 +93,7 @@ fn credentials_callback_rejects_other_host_or_plain_http_on_first_call() {
         let mut callback =
             make_username_password_callback_for_single_login_attempt_on_matching_host(
                 https_git_credential_for_host_with_fixed_username_and_password("github.com"),
+                None,
             );
         assert!(
             callback(url, None, CredentialType::USER_PASS_PLAINTEXT).is_err(),
@@ -88,6 +107,7 @@ fn username_password_callback_returns_error_when_server_does_not_offer_plaintext
  {
     let mut callback = make_username_password_callback_for_single_login_attempt_on_matching_host(
         https_git_credential_for_host_with_fixed_username_and_password("github.com"),
+        None,
     );
     let refused = callback(
         "https://github.com/o/r.git/info/refs",

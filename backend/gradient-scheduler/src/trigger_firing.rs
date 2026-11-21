@@ -40,8 +40,8 @@ pub(crate) fn cron_due(cron_expr: &str, after: NaiveDateTime, now: NaiveDateTime
 
 use gradient_ci::trigger::{InputUpdateOutcome, maybe_trigger_input_update};
 use gradient_ci::{
-    ApplyInput, ApplyOutcome, PathFilterBaseCommit, PathFilterCommitComparison, apply_trigger,
-    should_fire_trigger_for_path_filter,
+    ApplyInput, ApplyOutcome, EvaluationCodeTrust, PathFilterBaseCommit,
+    PathFilterCommitComparison, apply_trigger, should_fire_trigger_for_path_filter,
 };
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::{DbContext, WorkerDb};
@@ -351,6 +351,7 @@ async fn apply_to_task(
             author_name: Some(author),
             manual: false,
             honors_skip_marker: trigger_config_honors_skip_marker(cfg),
+            code_trust: EvaluationCodeTrust::CodeWithProjectCredentials,
             repository_override: None,
             wildcard_override: None,
             source_comment: None,

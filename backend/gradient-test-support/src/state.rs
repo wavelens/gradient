@@ -142,6 +142,12 @@ impl TestState {
             NarStore::local(&config.server.base_dir).expect("create test NarStore")
         });
 
+        let user_supplied_url_http_client =
+            gradient_util::http::HttpClientForUserSuppliedUrls::new(
+                gradient_core::build_user_url_destination_allowlist_from_config(&config)
+                    .expect("valid test allowlist"),
+            )
+            .expect("build test HTTP client for user-supplied URLs");
         Arc::new(ServerState {
             web_db: WebDb::new(self.web_db),
             cache_db: CacheDb::new(self.cache_db),
@@ -150,7 +156,9 @@ impl TestState {
             log_storage: self.log_storage,
             email: self.email,
             nar_storage,
-            http: gradient_util::http::build_client().expect("build test HTTP client"),
+            admin_configured_endpoint_http_client: gradient_util::http::build_client()
+                .expect("build test HTTP client"),
+            user_supplied_url_http_client,
             git_host: gradient_git_host::GitHostRegistry::with_builtin(),
             shutdown: gradient_util::shutdown::Shutdown::new(),
             jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
@@ -170,7 +178,6 @@ impl TestState {
                 github_app_page_url: Default::default(),
                 manifest_state: Default::default(),
                 pending_credentials: Default::default(),
-                pending_project_memberships: Default::default(),
                 upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
                 nar_downloads: Arc::new(tokio::sync::Semaphore::new(16)),
                 upload_admission: gradient_storage::admission::UploadAdmission::new(

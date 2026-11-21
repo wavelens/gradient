@@ -10,12 +10,20 @@ use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
+pub const VSOCK_SOCKET: &str = "vsock.sock";
 const MAX_REPLY: usize = 64;
 
 pub async fn connect_vsock(socket: &Path, port: u32) -> Result<UnixStream> {
-    let mut stream = UnixStream::connect(socket)
+    let stream = UnixStream::connect(socket)
         .await
         .with_context(|| format!("connect to {}", socket.display()))?;
+    send_vsock_connect_line_and_wait_for_ok(stream, port).await
+}
+
+pub async fn send_vsock_connect_line_and_wait_for_ok(
+    mut stream: UnixStream,
+    port: u32,
+) -> Result<UnixStream> {
     stream
         .write_all(format!("CONNECT {port}\n").as_bytes())
         .await?;

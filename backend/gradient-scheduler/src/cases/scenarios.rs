@@ -21,8 +21,8 @@ use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildSpecKind, Job, J
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, SchedulerCase, UpstreamServer, attr_of,
-    build_output, drv, drv_nar, eval_key, failure, output_nar, w_all, with_attr, with_output,
-    with_references,
+    build_output, computed_out_output_path_hash, drv, eval_key, failure, output_nar,
+    test_derivation_store_file_name, w_all, with_attr, with_output, with_references,
 };
 use crate::jobs::Assignment;
 
@@ -33,9 +33,17 @@ const W3: &str = "w3";
 #[tokio::test]
 async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mid_walk() {
     let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let b_derivation_base_store_path =
+        test_derivation_store_file_name(&with_output(drv(B, &[]), B_OUT));
+    let test_derivation_b_output_path_hash =
+        computed_out_output_path_hash(&with_output(drv(B, &[]), B_OUT));
+    let output_path_hash_for_derivation_a = computed_out_output_path_hash(&with_output(
+        drv(A, &[&b_derivation_base_store_path]),
+        A_OUT,
+    ));
     let u1 = UpstreamServer::start().await;
-    u1.miss(A_OUT).await;
-    u1.miss(B_OUT).await;
+    u1.miss(&output_path_hash_for_derivation_a).await;
+    u1.miss(&test_derivation_b_output_path_hash).await;
     let case = SchedulerCase::start(
         shape()
             .evalq(e1)
@@ -51,7 +59,7 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
             ),
     )
     .await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     let eval = eval_key(e1);
 
     case.assign_queued_evals().await;
@@ -67,13 +75,16 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
         .await;
     case.check("step 2").await;
 
+    let derivation_a_drv_base_store_path = test_derivation_store_file_name(&with_attr(
+        with_output(drv(A, &[&b_derivation_base_store_path]), A_OUT),
+        &attr_of(A),
+    ));
     case.report_eval_result(W1, &eval, vec![with_output(drv(B, &[]), B_OUT)])
         .await;
-    case.commit_nar(drv_nar(B)).await;
-    case.probe_round(&[B]).await;
+    case.probe_round(&[&b_derivation_base_store_path]).await;
     case.admit_startable_moves().await;
-    let b = case.key(B).await;
-    let sb_b = case.sb(B).await;
+    let b = case.key(&b_derivation_base_store_path).await;
+    let sb_b = case.sb(&b_derivation_base_store_path).await;
     assert_eq!(
         (sb_b.status, sb_b.probed, sb_b.wanted),
         (BuildStatus::Skipped, false, false),
@@ -86,18 +97,26 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     case.report_eval_result(
         W1,
         &eval,
-        vec![with_attr(with_output(drv(A, &[B]), A_OUT), &attr_of(A))],
+        vec![with_attr(
+            with_output(
+                drv(
+                    &derivation_a_drv_base_store_path,
+                    &[&b_derivation_base_store_path],
+                ),
+                A_OUT,
+            ),
+            &attr_of(&derivation_a_drv_base_store_path),
+        )],
     )
     .await;
-    case.commit_nar(drv_nar(A)).await;
-    case.probe_round(&[A]).await;
-    let sb_a = case.sb(A).await;
+    case.probe_round(&[&derivation_a_drv_base_store_path]).await;
+    let sb_a = case.sb(&derivation_a_drv_base_store_path).await;
     assert_eq!(
         (sb_a.status, sb_a.probed, sb_a.blocking_deps),
         (BuildStatus::Created, true, 1),
         "after 4: sb(A)"
     );
-    let sb_b = case.sb(B).await;
+    let sb_b = case.sb(&b_derivation_base_store_path).await;
     assert_eq!(
         (sb_b.status, sb_b.wanted),
         (BuildStatus::Queued, true),
@@ -120,7 +139,7 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
         "after 5: active(build:B)"
     );
     assert_eq!(
-        case.sb(B).await.status,
+        case.sb(&b_derivation_base_store_path).await.status,
         BuildStatus::Building,
         "after 5: sb(B).status"
     );
@@ -147,7 +166,10 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     case.report_build_output(
         W1,
         &b,
-        vec![build_output(B, B_OUT)],
+        vec![build_output(
+            &b_derivation_base_store_path,
+            &test_derivation_b_output_path_hash,
+        )],
         false,
         Some(BuildMetrics {
             peak_ram_mb: Some(100),
@@ -156,28 +178,36 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     )
     .await;
     case.commit_nar(NarCommit {
-        targets: case.project_caches(e1).await,
-        ..output_nar(B, B_OUT)
+        producer: case.make_worker_producer_for_evaluation_project(e1).await,
+        ..output_nar(
+            &b_derivation_base_store_path,
+            &test_derivation_b_output_path_hash,
+        )
     })
     .await;
     case.complete(W1, &b, a2, Vec::new(), 500).await;
-    let sb_b = case.sb(B).await;
+    let sb_b = case.sb(&b_derivation_base_store_path).await;
     assert_eq!(
         (sb_b.status, sb_b.fetchable),
         (BuildStatus::Completed, true),
         "after 7: sb(B)"
     );
     assert_eq!(
-        case.sb(A).await.status,
+        case.sb(&derivation_a_drv_base_store_path).await.status,
         BuildStatus::Queued,
         "after 7: sb(A).status"
     );
     assert_eq!(
-        case.derivation_metrics(B).await.len(),
+        case.derivation_metrics(&b_derivation_base_store_path)
+            .await
+            .len(),
         1,
         "after 7: derivation_metric(B) rows"
     );
-    let signatures = case.db.signatures(B_OUT).await;
+    let signatures = case
+        .db
+        .signatures(&test_derivation_b_output_path_hash)
+        .await;
     assert!(
         signatures
             .iter()
@@ -187,19 +217,34 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
     case.check("step 7").await;
 
     case.admit_startable_moves().await;
-    let a = case.key(A).await;
+    let a = case.key(&derivation_a_drv_base_store_path).await;
     let a3 = requested_build(&case, W1, &a, "after 8").await;
     case.report_building(W1, &a).await;
-    case.report_build_output(W1, &a, vec![build_output(A, A_OUT)], false, None)
-        .await;
+    case.report_build_output(
+        W1,
+        &a,
+        vec![build_output(
+            &derivation_a_drv_base_store_path,
+            &output_path_hash_for_derivation_a,
+        )],
+        false,
+        None,
+    )
+    .await;
     case.commit_nar(NarCommit {
-        targets: case.project_caches(e1).await,
-        ..with_references(output_nar(A, A_OUT), &[(B_OUT, "b")])
+        producer: case.make_worker_producer_for_evaluation_project(e1).await,
+        ..with_references(
+            output_nar(
+                &derivation_a_drv_base_store_path,
+                &output_path_hash_for_derivation_a,
+            ),
+            &[(test_derivation_b_output_path_hash.as_str(), "b")],
+        )
     })
     .await;
     case.complete(W1, &a, a3, Vec::new(), 700).await;
     assert_eq!(
-        case.sb(A).await.status,
+        case.sb(&derivation_a_drv_base_store_path).await.status,
         BuildStatus::Completed,
         "after 8: sb(A).status"
     );
@@ -221,7 +266,10 @@ async fn z01_an_evaluation_runs_from_the_queue_to_completed_with_a_leaf_built_mi
             "after 8: dj({key})"
         );
     }
-    for path in [B, A] {
+    for path in [
+        &b_derivation_base_store_path,
+        &derivation_a_drv_base_store_path,
+    ] {
         assert_eq!(
             case.attempt_outcomes_with_reasons(path).await,
             vec![(AttemptOutcome::Built, None)],
@@ -254,8 +302,8 @@ async fn z02_aborted_evaluation_retry_is_refused_while_shared_leaf_finishes_for_
             .job(),
     )
     .await;
-    case.connect(W1, w_all().slots(2), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
+    case.connect(W2, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -292,7 +340,7 @@ async fn z02_aborted_evaluation_retry_is_refused_while_shared_leaf_finishes_for_
     case.report_build_output(W1, &b, vec![build_output(B, B_OUT)], false, None)
         .await;
     case.commit_nar(NarCommit {
-        targets: case.project_caches(e2).await,
+        producer: case.make_worker_producer_for_evaluation_project(e2).await,
         ..output_nar(B, B_OUT)
     })
     .await;
@@ -313,7 +361,7 @@ async fn z02_aborted_evaluation_retry_is_refused_while_shared_leaf_finishes_for_
     let c = case.key(C).await;
     let a2 = requested_build(&case, W2, &c, "after 4").await;
     let commit = NarCommit {
-        targets: case.project_caches(e2).await,
+        producer: case.make_worker_producer_for_evaluation_project(e2).await,
         ..with_references(output_nar(C, C_OUT), &[(B_OUT, "b")])
     };
     build_and_complete(&case, W2, &c, a2, commit, 10).await;
@@ -359,8 +407,8 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
     let e1 = EvaluationId::now_v7();
     let seed = shape().two(e1).add_missing_cached_build_input(B, D, D_OUT);
     let case = SchedulerCase::start_with(seed, |c| c.build.retry_backoff_secs = 1).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -423,7 +471,7 @@ async fn z03_a_lost_worker_and_a_transient_failure_both_end_in_completed_builds(
     );
     case.check("step 3").await;
 
-    case.connect(W3, w_all().slots(2), &[]).await;
+    case.connect(W3, w_all().slots(2)).await;
     let a3 = requested_build(&case, W3, &a, "after 4").await;
     build_and_complete(&case, W3, &a, a3, output_nar(A, A_OUT), 1).await;
     assert_eq!(
@@ -491,7 +539,7 @@ async fn z04_a_passthrough_missing_twice_becomes_a_real_build_after_its_input() 
             .build_status(BuildStatus::Skipped),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     for (step, line) in [("step 1", "after 1"), ("step 2", "after 2")] {
@@ -597,7 +645,7 @@ async fn z05_a_core_respawn_mid_run_loses_no_job() {
             .evalq(e2),
     )
     .await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     let (a, b, eval) = (case.key(A).await, case.key(B).await, eval_key(e2));
 
     case.admit_startable_moves().await;
@@ -684,8 +732,8 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().two(e1).evalq(e2)).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_all().slots(2), &[]).await;
-    second.connect(W2, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
+    second.connect(W2, w_all().slots(2)).await;
     let (a, b, eval) = (case.key(A).await, case.key(B).await, eval_key(e2));
     let builds: BTreeSet<String> = [a.clone(), b.clone()].into();
 
@@ -848,7 +896,7 @@ async fn z06_two_instances_on_a_database_share_the_jobs_without_a_double_claim()
 async fn z07_a_server_drain_mid_run_pauses_admission_and_the_run_resumes() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().chain(e1)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;

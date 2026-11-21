@@ -5,6 +5,7 @@
  */
 
 mod fixtures;
+mod postgres_state_apply_account_identity_tests;
 
 use super::StateConfiguration;
 use fixtures::{
@@ -169,6 +170,26 @@ fn test_state_validation_rejects_trigger_with_absolute_include_paths_pattern() {
 }
 
 #[test]
+fn test_state_validation_rejects_trigger_path_filter_with_more_than_64_patterns() {
+    let include_paths: Vec<String> = (0..65).map(|i| format!("\"src/{i}/*\"")).collect();
+    let cfg = make_state_with_git_host_connections_and_web_task_extra_fields(
+        "{}",
+        &format!(
+            r#""triggers": [{{ "type": "polling", "config": {{ "include_paths": [{}] }} }}]"#,
+            include_paths.join(", ")
+        ),
+    );
+    let errors = errors_of(&cfg);
+    assert!(
+        errors
+            .iter()
+            .any(|(field, message)| field == "tasks.web.triggers.0.config"
+                && message.contains("at most 64 patterns")),
+        "expected the path filter with 65 patterns to be rejected, got: {errors:?}"
+    );
+}
+
+#[test]
 fn state_validation_rejects_same_pinned_trigger_id_in_two_tasks() {
     let mut cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
     let mut api = cfg.tasks["web"].clone();
@@ -215,7 +236,7 @@ fn state_validation_rejects_extra_allowed_url_prefix_with_whitespace() {
 #[test]
 fn state_reporter_trigger_accepts_declared_receiving_connection() {
     let connections = r#"{
-        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "secret_file": "/dev/null", "created_by": "alice" }
+        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "base_url": "https://example.com", "secret_file": "/dev/null", "created_by": "alice" }
     }"#;
     let cfg = reporter_cfg("git-host", connections);
     let v = cfg.validate();
@@ -265,6 +286,36 @@ fn a_declared_connection_needs_the_credentials_of_its_capabilities() {
 }
 
 #[test]
+fn gitlab_connection_without_base_url_passes_state_validation_with_status_reports_off_and_on_with_token_file()
+ {
+    let cfg = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "events": { "name": "events", "owner": "instance", "git_host_type": "gitlab", "secret_file": "/dev/null", "created_by": "alice" },
+            "status": { "name": "status", "owner": "instance", "git_host_type": "gitlab", "receives_events": false, "reports_status": true, "access_token_file": "/dev/null", "created_by": "alice" }
+        }"#,
+    );
+    let errors = errors_of(&cfg);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn gitlab_connection_without_base_url_with_reports_status_and_without_access_token_file_has_only_access_token_file_error()
+ {
+    let cfg = state_with_one_user_one_project_and_git_host_connections(
+        r#"{
+            "status": { "name": "status", "owner": "instance", "git_host_type": "gitlab", "receives_events": false, "reports_status": true, "created_by": "alice" }
+        }"#,
+    );
+    let errors = errors_of(&cfg);
+    let fields: Vec<_> = errors.iter().map(|(field, _)| field.as_str()).collect();
+    assert_eq!(
+        fields,
+        ["git_host_connections.status.access_token_file"],
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn gitea_connection_without_secret_file_error_mentions_receives_events_false() {
     let cfg = state_with_one_user_one_project_and_git_host_connections(
         r#"{
@@ -297,7 +348,7 @@ fn state_reporter_trigger_rejects_unknown_connection() {
 #[test]
 fn push_trigger_rejects_missing_or_non_receiving_connection() {
     let deaf = r#"{
-        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "receives_events": false, "created_by": "alice" }
+        "git-host": { "name": "git-host", "owner": "project/acme", "git_host_type": "forgejo", "base_url": "https://git.example.com", "receives_events": false, "created_by": "alice" }
     }"#;
     let errors = errors_of(&reporter_cfg("git-host", deaf));
     assert!(
@@ -390,7 +441,7 @@ fn task_connection_name_resolves_to_project_before_owner_team_before_instance() 
 #[test]
 fn test_report_status_is_refused_for_task_without_reports_status_connection() {
     let silent = r#"{
-        "forge": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "created_by": "alice" }
+        "forge": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "base_url": "https://git.example.com", "created_by": "alice" }
     }"#;
     for task_fields in [
         r#""git_host_connection": "forge", "report_status": true"#,
@@ -412,7 +463,7 @@ fn test_report_status_is_refused_for_task_without_reports_status_connection() {
 fn git_host_connection_owner_that_does_not_parse_fails_validation() {
     for owner in ["cache/x", "team/", "acme"] {
         let cfg = state_with_one_user_one_project_and_git_host_connections(&format!(
-            r#"{{ "forge": {{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "created_by": "alice" }} }}"#
+            r#"{{ "forge": {{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "base_url": "https://git.example.com", "created_by": "alice" }} }}"#
         ));
         let errors = errors_of(&cfg);
         assert!(
@@ -429,7 +480,7 @@ fn git_host_connection_owner_that_does_not_parse_fails_validation() {
 fn rejects_owner_naming_undeclared_team_or_project() {
     for owner in ["team/ghost", "project/ghost"] {
         let cfg = state_with_one_user_one_project_and_git_host_connections(&format!(
-            r#"{{ "forge": {{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "created_by": "alice" }} }}"#
+            r#"{{ "forge": {{ "name": "forge", "owner": "{owner}", "git_host_type": "gitea", "base_url": "https://git.example.com", "created_by": "alice" }} }}"#
         ));
         let errors = errors_of(&cfg);
         assert!(
@@ -446,8 +497,8 @@ fn rejects_owner_naming_undeclared_team_or_project() {
 fn rejects_duplicate_connection_name_for_same_owner_but_allows_it_for_different_owners() {
     let duplicated = state_with_one_user_one_project_and_git_host_connections(
         r#"{
-            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "secret_file": "/dev/null", "created_by": "alice" },
-            "b": { "name": "forge", "owner": "project/acme", "git_host_type": "gitlab", "created_by": "alice" }
+            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "base_url": "https://git.example.com", "secret_file": "/dev/null", "created_by": "alice" },
+            "b": { "name": "forge", "owner": "project/acme", "git_host_type": "gitlab", "base_url": "https://git.example.com", "created_by": "alice" }
         }"#,
     );
     let errors = errors_of(&duplicated);
@@ -462,8 +513,8 @@ fn rejects_duplicate_connection_name_for_same_owner_but_allows_it_for_different_
 
     let spread = state_with_one_user_one_project_and_git_host_connections(
         r#"{
-            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "secret_file": "/dev/null", "created_by": "alice" },
-            "b": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "secret_file": "/dev/null", "created_by": "alice" }
+            "a": { "name": "forge", "owner": "project/acme", "git_host_type": "gitea", "base_url": "https://git.example.com", "secret_file": "/dev/null", "created_by": "alice" },
+            "b": { "name": "forge", "owner": "instance", "git_host_type": "gitea", "base_url": "https://git.example.com", "secret_file": "/dev/null", "created_by": "alice" }
         }"#,
     );
     let v = spread.validate();
@@ -491,6 +542,36 @@ fn test_state_validation_rejects_duplicate_and_invalid_git_host_connection_pinne
                 && message.contains("not-a-uuid")),
         "got: {id_errors:?}"
     );
+}
+
+#[test]
+fn state_validation_rejects_missing_or_non_plain_http_base_url_for_gitea_forgejo_and_gitlab_connections()
+ {
+    for (git_host_type, base_url) in [
+        ("gitea", ""),
+        ("forgejo", r#", "base_url": "  ""#),
+        ("gitlab", r#", "base_url": "ftp://gitlab.example.com""#),
+        (
+            "gitea",
+            r#", "base_url": "https://git.example.com?token=x""#,
+        ),
+        (
+            "gitea",
+            r#", "base_url": "https://user:pass@git.example.com""#,
+        ),
+        ("forgejo", r#", "base_url": "file:///srv/git""#),
+    ] {
+        let cfg = state_with_one_user_one_project_and_git_host_connections(&format!(
+            r#"{{ "forge": {{ "name": "forge", "owner": "instance", "git_host_type": "{git_host_type}", "created_by": "alice"{base_url} }} }}"#
+        ));
+        let errors = errors_of(&cfg);
+        assert!(
+            errors
+                .iter()
+                .any(|(field, _)| field == "git_host_connections.forge.base_url"),
+            "{git_host_type}{base_url}: expected base_url error, got: {errors:?}"
+        );
+    }
 }
 
 #[test]
@@ -943,7 +1024,7 @@ fn state_project_members_validator_rejects_unknown_role() {
 }
 
 #[test]
-fn state_project_members_validator_ignores_unknown_user() {
+fn state_project_members_validator_refuses_unknown_user() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
@@ -959,8 +1040,59 @@ fn state_project_members_validator_ignores_unknown_user() {
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
     let v = cfg.validate();
     assert!(
-        v.is_valid,
-        "missing user must not fail validation (issue #94): {:?}",
+        v.errors
+            .iter()
+            .any(|e| e.field == "projects.acme.members.ghost.user"),
+        "expected unknown-member error, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn state_declared_user_and_project_validator_rejects_invalid_fields() {
+    let json = r#"{
+        "users": {
+            "a@b": { "username": "a@b", "name": "Alice", "email": "not-an-email", "password_file": "/dev/null" }
+        },
+        "projects": {
+            "Acme Corp": {
+                "name": "Acme Corp", "display_name": "ACME",
+                "private_key_file": "/dev/null", "public": false, "created_by": "a@b"
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let fields: Vec<String> = cfg.validate().errors.into_iter().map(|e| e.field).collect();
+    for expected in [
+        "users.a@b.username",
+        "users.a@b.email",
+        "projects.Acme Corp.name",
+    ] {
+        assert!(
+            fields.iter().any(|f| f == expected),
+            "expected an error at {expected}, got: {fields:?}"
+        );
+    }
+}
+
+#[test]
+fn state_user_validator_rejects_usernames_equal_ignoring_case_and_equal_emails() {
+    let json = r#"{
+        "users": {
+            "alice": { "username": "alice", "name": "Alice", "email": "shared@x.io" },
+            "Alice": { "username": "Alice", "name": "Alice", "email": "SHARED@x.io" }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.errors.iter().any(|e| e.field.ends_with(".username")),
+        "expected a duplicate-username error, got: {:?}",
+        v.errors
+    );
+    assert!(
+        v.errors.iter().any(|e| e.field.ends_with(".email")),
+        "expected a duplicate-email error, got: {:?}",
         v.errors
     );
 }
@@ -1159,6 +1291,93 @@ fn a_worker_of_an_unknown_team_is_rejected() {
     );
 }
 
+fn parse_state_configuration_with_one_cache_subscription(
+    subscription: serde_json::Value,
+) -> StateConfiguration {
+    let mut cfg: serde_json::Value = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+    cfg["caches"]["main"]["projects"] = serde_json::json!([subscription]);
+    serde_json::from_value(cfg).unwrap()
+}
+
+#[test]
+fn declared_read_only_cache_subscription_with_sign_outputs_fails_state_validation() {
+    let cfg = parse_state_configuration_with_one_cache_subscription(
+        serde_json::json!({ "name": "acme", "mode": "ReadOnly", "sign_outputs": true }),
+    );
+
+    let v = cfg.validate();
+
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "caches.main.projects.acme.sign_outputs"),
+        "{:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn read_only_cache_subscription_without_signing_passes_validation() {
+    for subscription in [
+        serde_json::json!({ "name": "acme", "mode": "ReadOnly" }),
+        serde_json::json!({ "name": "acme", "mode": "ReadOnly", "sign_outputs": false }),
+    ] {
+        assert!(
+            parse_state_configuration_with_one_cache_subscription(subscription)
+                .validate()
+                .is_valid
+        );
+    }
+}
+
+#[test]
+fn cache_subscription_without_sign_outputs_signs_only_in_write_modes() {
+    for (mode, signs) in [
+        ("ReadWrite", true),
+        ("WriteOnly", true),
+        ("ReadOnly", false),
+    ] {
+        let cfg = parse_state_configuration_with_one_cache_subscription(
+            serde_json::json!({ "name": "acme", "mode": mode }),
+        );
+        assert_eq!(
+            cfg.caches["main"].projects[0].signs_project_outputs(),
+            signs,
+            "{mode}"
+        );
+    }
+}
+
+#[test]
+fn cache_subscription_export_import_roundtrip_keeps_signing_value() {
+    use gradient_entity::project_cache::{CacheSubscriptionMode, Model};
+
+    for (mode, sign_outputs) in [
+        (CacheSubscriptionMode::ReadOnly, true),
+        (CacheSubscriptionMode::ReadOnly, false),
+        (CacheSubscriptionMode::ReadWrite, false),
+        (CacheSubscriptionMode::WriteOnly, true),
+    ] {
+        let row = Model {
+            mode: mode.clone(),
+            sign_outputs,
+            ..Default::default()
+        };
+        let exported =
+            crate::export::cache_subscription_row_to_state_cache_project(&row, "acme".into());
+        let cfg = parse_state_configuration_with_one_cache_subscription(
+            serde_json::to_value(&exported).unwrap(),
+        );
+
+        assert!(cfg.validate().is_valid, "{mode:?} {sign_outputs}");
+        assert_eq!(
+            cfg.caches["main"].projects[0].signs_project_outputs(),
+            sign_outputs && mode.writes_build_outputs_to_cache(),
+            "{mode:?} {sign_outputs}"
+        );
+    }
+}
+
 #[test]
 fn a_start_evaluation_action_survives_export() {
     use gradient_entity::ids::TaskId;
@@ -1331,4 +1550,94 @@ fn state_validation_rejects_api_key_pinned_to_project_with_cache_permissions() {
         "errors: {:?}",
         result.errors
     );
+}
+
+#[test]
+fn state_validation_accepts_max_upstream_caches_and_rejects_one_more() {
+    let errors_with_upstream_count = |count: usize| {
+        let upstream: crate::config::StateUpstream = serde_json::from_value(serde_json::json!({
+            "type": "external",
+            "display_name": "Public",
+            "url": "https://public.example",
+            "public_key": "public:key",
+        }))
+        .unwrap();
+        let mut cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+        cfg.caches.get_mut("main").unwrap().upstream_caches = vec![upstream; count];
+        errors_of(&cfg)
+            .into_iter()
+            .filter(|(field, _)| field == "caches.main.upstream_caches")
+            .count()
+    };
+    let limit = gradient_db::caches::upstream::MAX_UPSTREAM_CACHE_COUNT;
+
+    assert_eq!(errors_with_upstream_count(limit), 0);
+    assert_eq!(errors_with_upstream_count(limit + 1), 1);
+}
+
+#[test]
+fn test_state_file_validation_accepts_external_upstream_credentials_as_none_basic_user_with_password_file_or_bearer_token_file_and_reports_one_error_for_incomplete_mixed_colon_containing_or_empty_user()
+ {
+    let validate_upstream = |credential: serde_json::Value| {
+        let mut upstream = serde_json::json!({
+            "type": "external",
+            "display_name": "Private",
+            "url": "https://private.example",
+            "public_key": "private:key",
+        });
+        upstream
+            .as_object_mut()
+            .unwrap()
+            .extend(credential.as_object().unwrap().clone());
+        let mut cfg: StateConfiguration = serde_json::from_str(WITHOUT_OPTIONAL_FIELDS).unwrap();
+        cfg.caches.get_mut("main").unwrap().upstream_caches =
+            vec![serde_json::from_value(upstream).unwrap()];
+        errors_of(&cfg)
+            .into_iter()
+            .filter(|(field, _)| field == "caches.main.upstream_caches.0")
+            .count()
+    };
+
+    assert_eq!(validate_upstream(serde_json::json!({})), 0);
+    assert_eq!(
+        validate_upstream(
+            serde_json::json!({ "basic_auth_user": "alice", "basic_auth_password_file": "/run/pw" })
+        ),
+        0
+    );
+    assert_eq!(
+        validate_upstream(serde_json::json!({ "bearer_token_file": "/run/t" })),
+        0
+    );
+    assert_eq!(
+        validate_upstream(serde_json::json!({ "basic_auth_user": "alice" })),
+        1
+    );
+    assert_eq!(
+        validate_upstream(serde_json::json!({ "basic_auth_password_file": "/run/pw" })),
+        1
+    );
+    assert_eq!(
+        validate_upstream(serde_json::json!({
+            "basic_auth_user": "alice",
+            "basic_auth_password_file": "/run/pw",
+            "bearer_token_file": "/run/t",
+        })),
+        1
+    );
+    assert_eq!(
+        validate_upstream(
+            serde_json::json!({ "basic_auth_user": "al:ice", "basic_auth_password_file": "/run/pw" })
+        ),
+        1
+    );
+    for empty_user in ["", "  "] {
+        assert_eq!(
+            validate_upstream(
+                serde_json::json!({ "basic_auth_user": empty_user, "basic_auth_password_file": "/run/pw" })
+            ),
+            1,
+            "{empty_user:?}"
+        );
+    }
 }

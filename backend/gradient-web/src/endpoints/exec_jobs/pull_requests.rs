@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::extractors::Path;
@@ -44,7 +45,14 @@ pub async fn list_exec_job_pull_requests(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<Vec<ExecJobPullRequestView>>>> {
-    ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let rows = pull_requests::of_job(&state.web_db, job).await?;
     Ok(ok_json(
         rows.into_iter()

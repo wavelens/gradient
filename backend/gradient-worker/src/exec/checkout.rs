@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use git2::ErrorClass;
-use gradient_types::RepositoryLocation;
+use gradient_types::{RepositoryLocation, RepositoryUrl};
 use gradient_wire::types::JobContext;
 use tokio_util::sync::CancellationToken;
 
@@ -23,19 +23,24 @@ use crate::proto::prefetch::{MissingInputs, SubstituteNotOnUpstream, ensure_path
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkSource<'a> {
     StorePath(&'a str),
-    Git { url: &'a str, commit: &'a str },
+    Git { url: RepositoryUrl, commit: &'a str },
 }
 
 impl<'a> WorkSource<'a> {
-    pub fn of(context: &'a JobContext) -> Self {
+    pub fn of(context: &'a JobContext) -> Result<Self, BuildError> {
         let clone_url = RepositoryLocation::of(&context.repository).clone_url;
-        match clone_url.starts_with(STORE_DIR) {
-            true => Self::StorePath(clone_url),
-            false => Self::Git {
-                url: &context.repository,
-                commit: &context.commit,
-            },
+        if clone_url.starts_with(STORE_DIR) {
+            return Ok(Self::StorePath(clone_url));
         }
+        let url = context
+            .repository
+            .parse()
+            .with_context(|| format!("job repository `{}`", context.repository))
+            .map_err(BuildError::permanent)?;
+        Ok(Self::Git {
+            url,
+            commit: &context.commit,
+        })
     }
 }
 
@@ -64,14 +69,14 @@ pub async fn checkout_work(
 
 async fn clone_commit(
     work: &Path,
-    url: &str,
+    url: RepositoryUrl,
     commit: &str,
     credentials: &JobCredentials,
     updater: &mut JobUpdater,
 ) -> Result<()> {
     let git_credentials = credentials.git_credentials_for_clone_and_fetch();
     let ssh = git_credentials.ssh_git_private_key_and_known_hosts.clone();
-    let (dir, url, commit) = (work.to_path_buf(), url.to_owned(), commit.to_owned());
+    let (dir, commit) = (work.to_path_buf(), commit.to_owned());
     let cloned = tokio::task::spawn_blocking(move || {
         gradient_sources::checkout_commit_into(&dir, &url, &commit, &git_credentials)
     })
@@ -170,17 +175,25 @@ mod tests {
     fn an_uploaded_source_is_copied_from_the_store_and_a_repository_is_cloned() {
         let uploaded = context("/nix/store/aaaa-source", NO_COMMIT);
         assert_eq!(
-            WorkSource::of(&uploaded),
+            WorkSource::of(&uploaded).unwrap(),
             WorkSource::StorePath("/nix/store/aaaa-source")
         );
         let repository = context("https://h/o/r?dir=nix", "abc123");
         assert_eq!(
-            WorkSource::of(&repository),
+            WorkSource::of(&repository).unwrap(),
             WorkSource::Git {
-                url: "https://h/o/r?dir=nix",
+                url: "https://h/o/r?dir=nix".parse().unwrap(),
                 commit: "abc123"
             }
         );
+    }
+
+    #[test]
+    fn exec_job_with_local_repository_directory_fails_permanently_without_checkout() {
+        for repository in ["/srv/repo", "file:///srv/repo", "path:/srv/repo"] {
+            let error = WorkSource::of(&context(repository, NO_COMMIT)).unwrap_err();
+            assert_eq!(error.kind, BuildFailureKind::Permanent, "{repository}");
+        }
     }
 
     #[test]
@@ -190,7 +203,7 @@ mod tests {
         let work = tempfile::tempdir().unwrap();
         let error = gradient_sources::checkout_commit_into(
             work.path(),
-            &source.path().to_string_lossy(),
+            &RepositoryUrl::local_test_repository(source.path()),
             NO_COMMIT,
             &GitOperationCredentials::default(),
         )

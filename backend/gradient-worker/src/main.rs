@@ -33,6 +33,7 @@ use connection_state::Disconnected;
 use exec::host::ExecHost;
 use exec::reattach::ResumedJob;
 use exec::sops::WorkerSecrets;
+use gradient_util::http_base_url::upstream_cache_url_for_display_without_username_password_query_and_fragment;
 use gradient_util::logging::{LogSetup, LogWriter, TraceSetup};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
@@ -67,12 +68,31 @@ fn main() -> Result<()> {
         None,
     );
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "GRADIENT_WORKER_EXEC_SUBNET is a removed Gradient option. Workers read the variable only to refuse to start when the option is still set."
+    )]
+    let removed_exec_subnet_env_var_value =
+        std::env::var_os(config::REMOVED_GRADIENT_WORKER_EXEC_SUBNET_ENV_VAR_NAME);
+    config::fail_on_removed_exec_subnet_env_var(removed_exec_subnet_env_var_value.as_deref())?;
+
+    if let Some(guest_id) = &config.release_guest_taps {
+        return gradient_vm::release_guest_taps_and_sync_ipv6_neighbours_after_supervisor_stop(
+            &guest_id.parse().map_err(anyhow::Error::msg)?,
+            &config.exec.supervisor_config()?,
+        );
+    }
+
     if let Some(dir) = &config.guest_supervisor {
-        return gradient_vm::run_supervisor(dir, config.exec.supervisor_config());
+        return gradient_vm::run_supervisor(dir, config.exec.supervisor_config()?);
     }
 
     if config.eval_subprocess {
-        return nix::eval_worker::run_eval_worker(config.eval.metrics).map_err(anyhow::Error::from);
+        return nix::eval_worker::run_eval_worker(
+            config.eval.metrics,
+            Some(nix::check_flake_lock_with_allowlist),
+        )
+        .map_err(anyhow::Error::from);
     }
 
     if let Some(requests_path) = config.eval_driver.clone() {
@@ -94,11 +114,18 @@ fn main() -> Result<()> {
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        info!(server_url = ?server_url, "gradient-worker starting");
+        let server_url_without_credentials_or_query_for_logging = server_url
+            .as_deref()
+            .and_then(upstream_cache_url_for_display_without_username_password_query_and_fragment)
+            .map(|shown| shown.url);
+        info!(
+            server_url = server_url_without_credentials_or_query_for_logging.as_deref(),
+            "gradient-worker starting"
+        );
 
-        if let Some(url) = server_url.as_deref().filter(|url| !url.contains("proto")) {
+        if server_url.as_deref().is_some_and(|url| !url.contains("proto")) {
             warn!(
-                server_url = %url,
+                server_url = server_url_without_credentials_or_query_for_logging.as_deref(),
                 "server URL does not contain 'proto'; expected the server's /proto WebSocket endpoint (e.g. wss://gradient.example.com/proto)"
             );
         }

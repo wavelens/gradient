@@ -7,8 +7,9 @@
 use super::narinfo;
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::{PublicKey, Signature};
+use gradient_types::NixPathInfo;
 
-pub fn verify_narinfo_signature(public_key: &str, narinfo_body: &str) -> bool {
+pub fn verify_narinfo_signature(public_key: &str, path_info: &NixPathInfo) -> bool {
     let Some((key_name, pub_b64)) = public_key.split_once(':') else {
         return false;
     };
@@ -19,50 +20,19 @@ pub fn verify_narinfo_signature(public_key: &str, narinfo_body: &str) -> bool {
         return false;
     };
 
-    let mut store_path: Option<&str> = None;
-    let mut nar_hash: Option<&str> = None;
-    let mut nar_size: Option<&str> = None;
-    let mut references: Vec<&str> = Vec::new();
-    let mut sigs: Vec<&str> = Vec::new();
+    let fingerprint = narinfo::narinfo_signing_fingerprint(path_info);
 
-    for line in narinfo_body.lines() {
-        if let Some(v) = line.strip_prefix("StorePath: ") {
-            store_path = Some(v.trim());
-        } else if let Some(v) = line.strip_prefix("NarHash: ") {
-            nar_hash = Some(v.trim());
-        } else if let Some(v) = line.strip_prefix("NarSize: ") {
-            nar_size = Some(v.trim());
-        } else if let Some(v) = line.strip_prefix("References: ") {
-            references = v.split_whitespace().collect();
-        } else if let Some(v) = line.strip_prefix("Sig: ") {
-            sigs.push(v.trim());
-        }
-    }
-
-    let (Some(store_path), Some(nar_hash), Some(nar_size)) = (store_path, nar_hash, nar_size)
-    else {
-        return false;
-    };
-
-    let fingerprint = narinfo::fingerprint(store_path, nar_hash, nar_size, references);
-
-    for sig_token in sigs {
+    path_info.signature_lines.iter().any(|sig_token| {
         let Some((sig_name, sig_b64)) = sig_token.split_once(':') else {
-            continue;
+            return false;
         };
         if sig_name != key_name {
-            continue;
+            return false;
         }
         let Ok(sig_bytes) = general_purpose::STANDARD.decode(sig_b64) else {
-            continue;
+            return false;
         };
-        let Ok(sig) = Signature::from_slice(&sig_bytes) else {
-            continue;
-        };
-        if pubkey.verify(fingerprint.as_bytes(), &sig).is_ok() {
-            return true;
-        }
-    }
-
-    false
+        Signature::from_slice(&sig_bytes)
+            .is_ok_and(|sig| pubkey.verify(fingerprint.as_bytes(), &sig).is_ok())
+    })
 }

@@ -8,10 +8,10 @@ use crate::build_log::BuildLogs;
 use crate::build_request::Started;
 use crate::session::Session;
 use gradient_db::lookup::by_id;
-use gradient_derivation::Derivation;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
+use gradient_wire::types::DerivationOutput;
 use harmonia_protocol::daemon::wire::types2::FailureStatus;
 use harmonia_protocol::log::LogMessage;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -155,10 +155,10 @@ pub async fn wait(
     logs.finish(&log);
 
     let mut results = Vec::with_capacity(started.requested.len());
-    for (path, drv) in &started.requested {
+    for (path, outputs) in &started.requested {
         let build = build_of.get(path).copied();
         let unbuilt = waiting.unbuilt(path, &evaluation);
-        let result = requested_result(session, build, path, drv, unbuilt).await?;
+        let result = requested_result(session, build, path, outputs, unbuilt).await?;
         results.push((path.clone(), result));
     }
 
@@ -205,11 +205,10 @@ async fn requested_result(
     session: &Session,
     build: Option<DerivationBuildId>,
     path: &str,
-    drv: &Derivation,
+    outputs: &[DerivationOutput],
     unbuilt: BuildFailure,
 ) -> anyhow::Result<DrvResult> {
-    let outputs: Outputs = drv
-        .outputs
+    let outputs: Outputs = outputs
         .iter()
         .map(|o| (o.name.clone(), o.path.clone()))
         .collect();

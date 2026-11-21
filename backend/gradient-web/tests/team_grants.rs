@@ -54,6 +54,9 @@ async fn a_project_admin_outside_the_team_asks_the_team_first() {
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![team()]])
         .append_query_results([vec![write_role()]])
+        .append_query_results([vec![write_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([Vec::<team_project::Model>::new()])
         .append_query_results([Vec::<team_user::Model>::new()])
         .append_query_results([vec![team_project_request::Model {
@@ -89,6 +92,9 @@ async fn a_team_admin_with_project_rights_grants_at_once() {
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![team()]])
         .append_query_results([vec![write_role()]])
+        .append_query_results([vec![write_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([Vec::<team_project::Model>::new()])
         .append_query_results([vec![team_member(TeamRole::Admin)]])
         .append_query_results([vec![grant(true, false)]])
@@ -147,6 +153,7 @@ async fn the_project_side_withdraws_a_pending_request() {
             requested_by: Some(user_id()),
             created_at: test_date(),
         }]])
+        .append_query_results([Vec::<team_user::Model>::new()])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_exec_results([exec_ok()])
@@ -172,6 +179,7 @@ async fn removing_a_grant_with_workers_withdraws_the_team_workers() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![team()]])
         .append_query_results([vec![grant(false, true)]])
+        .append_query_results([Vec::<team_user::Model>::new()])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_query_results([Vec::<team_worker::Model>::new()])
@@ -202,6 +210,7 @@ async fn managing_workers_is_enough_to_remove_a_workers_only_grant() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![team()]])
         .append_query_results([vec![grant(false, true)]])
+        .append_query_results([Vec::<team_user::Model>::new()])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![workers_manager_role()]])
         .append_query_results([Vec::<team_worker::Model>::new()])
@@ -226,9 +235,9 @@ async fn managing_workers_is_not_enough_to_remove_a_grant_with_users() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![team()]])
         .append_query_results([vec![grant(true, true)]])
+        .append_query_results([Vec::<team_user::Model>::new()])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![workers_manager_role()]])
-        .append_query_results([Vec::<team_user::Model>::new()]);
+        .append_query_results([vec![workers_manager_role()]]);
     let server = make_test_server(db.into_connection());
 
     let res = server
@@ -261,8 +270,7 @@ async fn a_team_admin_cannot_remove_a_grant_with_an_api_key() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![team()]])
         .append_query_results([vec![grant(false, true)]])
-        .append_query_results([Vec::<project_user::Model>::new()])
-        .append_query_results([vec![team_member(TeamRole::Admin)]]);
+        .append_query_results([Vec::<project_user::Model>::new()]);
     let server = make_test_server(db.into_connection());
 
     let res = server

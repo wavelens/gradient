@@ -12,8 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use arc_swap::ArcSwap;
+use gradient_db::metrics::projects_trusting_worker_credentials_with_metrics_since::load_project_ids_trusting_worker_credentials_from_derivation_metrics_since;
 use gradient_pool::estimate::{BuildEstimate, GroupKey, Model, Sample};
-use gradient_types::ids::DerivationId;
+use gradient_types::ids::{DerivationId, ProjectId};
 use sea_orm::{ConnectionTrait, DbErr};
 use tracing::warn;
 
@@ -49,9 +50,19 @@ impl BuildHistory {
 
     pub async fn refresh(&self, db: &impl ConnectionTrait) -> Result<(), DbErr> {
         let newest = self.store().newest;
-        let loaded =
-            load::load_since(db, newest, self.oldest_retained_sample_creation_time()).await?;
-        self.store().add(loaded);
+        let oldest = self.oldest_retained_sample_creation_time();
+        let loaded = load::load_since(db, newest, oldest).await?;
+        let trusted_projects_by_worker_credential =
+            load_project_ids_trusting_worker_credentials_from_derivation_metrics_since(
+                db,
+                load::read_since(None, oldest),
+            )
+            .await?;
+        {
+            let mut store = self.store();
+            store.add(loaded);
+            store.trusted_projects_by_worker_credential = trusted_projects_by_worker_credential;
+        }
         if !self.fitted.load(Ordering::Acquire) {
             self.refit().await;
         }
@@ -91,10 +102,21 @@ impl BuildHistory {
         peak_ram_mb: u64,
     ) -> Self {
         let history = Self::default();
+        let trusted_out_of_memory_worker_registration_id =
+            gradient_types::ids::WorkerRegistrationId::new(uuid::Uuid::from_u128(1));
+        history.store().trusted_projects_by_worker_credential = HashMap::from([(
+            gradient_db::metrics::projects_trusting_worker_credentials_with_metrics_since::WorkerCredentialKey::ProjectRegisteredWorker(
+                trusted_out_of_memory_worker_registration_id,
+            ),
+            std::collections::HashSet::from([gradient_fixtures::ids::project_id()]),
+        )]);
         history.store().add(vec![store::LoadedSample {
             id: uuid::Uuid::now_v7(),
             created_at: gradient_types::now(),
             oom_killed: true,
+            worker_registration_id: Some(trusted_out_of_memory_worker_registration_id),
+            reporting_team_worker_id: None,
+            project: None,
             sample: gradient_pool::estimate::Sample {
                 derivation,
                 architecture: key.architecture,
@@ -110,10 +132,15 @@ impl BuildHistory {
         history
     }
 
-    pub fn estimate(&self, key: &GroupKey, derivation: DerivationId) -> BuildEstimate {
+    pub fn estimate(
+        &self,
+        key: &GroupKey,
+        derivation: DerivationId,
+        project: ProjectId,
+    ) -> BuildEstimate {
         let store = self.store();
-        let mut estimate = self.model.load().estimate(key, &store.own(key));
-        estimate.max_cores = store.max_cores(derivation);
+        let mut estimate = self.model.load().estimate(key, &store.own(key, project));
+        estimate.max_cores = store.max_cores(derivation, project);
         estimate
     }
 
@@ -123,43 +150,45 @@ impl BuildHistory {
 
     pub fn estimate_all<K>(
         &self,
-        wanted: Vec<(K, GroupKey, DerivationId)>,
+        wanted: Vec<(K, GroupKey, DerivationId, ProjectId)>,
     ) -> Vec<(K, BuildEstimate)> {
-        let mut own: HashMap<GroupKey, Vec<(f64, Sample)>> = HashMap::new();
-        let wanted: Vec<(K, GroupKey, Option<u32>)> = {
+        let mut own: HashMap<(GroupKey, ProjectId), Vec<(f64, Sample)>> = HashMap::new();
+        let wanted: Vec<(K, (GroupKey, ProjectId), Option<u32>)> = {
             let store = self.store();
             wanted
                 .into_iter()
-                .map(|(id, key, derivation)| {
-                    if !own.contains_key(&key) {
+                .map(|(id, key, derivation, project)| {
+                    let max_cores = store.max_cores(derivation, project);
+                    let scope = (key, project);
+                    if !own.contains_key(&scope) {
                         let samples = store
-                            .own(&key)
+                            .own(&scope.0, project)
                             .into_iter()
                             .map(|(overlap, sample)| (overlap, sample.clone()))
                             .collect();
-                        own.insert(key.clone(), samples);
+                        own.insert(scope.clone(), samples);
                     }
 
-                    (id, key, store.max_cores(derivation))
+                    (id, scope, max_cores)
                 })
                 .collect()
         };
 
         let model = self.model.load();
-        let by_key: HashMap<&GroupKey, BuildEstimate> = own
+        let by_scope: HashMap<&(GroupKey, ProjectId), BuildEstimate> = own
             .iter()
-            .map(|(key, samples)| {
+            .map(|(scope, samples)| {
                 let samples: Vec<(f64, &Sample)> = samples.iter().map(|(o, s)| (*o, s)).collect();
-                (key, model.estimate(key, &samples))
+                (scope, model.estimate(&scope.0, &samples))
             })
             .collect();
 
         wanted
             .into_iter()
-            .map(|(id, key, max_cores)| {
+            .map(|(id, scope, max_cores)| {
                 let estimate = BuildEstimate {
                     max_cores,
-                    ..by_key[&key].clone()
+                    ..by_scope[&scope].clone()
                 };
                 (id, estimate)
             })

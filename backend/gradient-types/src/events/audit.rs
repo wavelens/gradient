@@ -75,6 +75,8 @@ actions! {
     GitHostConnectionCreate => "git_host_connection.create",
     GitHostConnectionUpdate => "git_host_connection.update",
     GitHostConnectionDelete => "git_host_connection.delete",
+    GitHostConnectionRepositoryGrantCreate => "git_host_connection.repository_grant.create",
+    GitHostConnectionRepositoryGrantDelete => "git_host_connection.repository_grant.delete",
     ProjectSecretCreatedOrReplaced => "project.secret.put",
     ProjectSecretDeleted => "project.secret.delete",
     ProjectSshKeyRegenerated => "project.ssh_key.regenerate",

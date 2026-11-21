@@ -22,6 +22,9 @@ use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, can};
 use axum::Json;
 use axum::extract::State;
 use gradient_core::ServerState;
+use gradient_db::git_host_connection_repository_grants::{
+    check_git_host_connection_task_repository_access_with_grants, of_connection_and_project,
+};
 use gradient_db::git_host_connections::{
     GitHostConnectionOwnerByDatabaseId as Owner, list_git_host_connections_available_to_project,
 };
@@ -34,17 +37,32 @@ pub(crate) async fn available_summaries(
     reader: &GitHostConnectionReaderScope<'_>,
     options: &SummaryOptions<'_>,
     project: &MProject,
+    task: Option<&MTask>,
     can_manage_project_connections: bool,
 ) -> WebResult<Vec<GitHostConnectionSummary>> {
-    let rows = list_git_host_connections_available_to_project(db, project)
-        .await?
-        .into_iter()
-        .map(|connection| ConnectionToSummarize {
+    let mut rows = Vec::new();
+    for connection in list_git_host_connections_available_to_project(db, project).await? {
+        if let Some(task) = task
+            && Owner::of(&connection) != Owner::Project(project.id)
+        {
+            let grants = of_connection_and_project(db, connection.id, project.id).await?;
+            if check_git_host_connection_task_repository_access_with_grants(
+                &connection,
+                project,
+                &task.repository,
+                &grants,
+            )
+            .is_err()
+            {
+                continue;
+            }
+        }
+        rows.push(ConnectionToSummarize {
             can_manage: Owner::of(&connection) == Owner::Project(project.id)
                 && can_manage_project_connections,
             connection,
-        })
-        .collect();
+        });
+    }
     super::summaries(db, reader, options, rows).await
 }
 
@@ -98,6 +116,7 @@ pub async fn list_project_git_host_connections(
                 repository: query.repository.as_deref().filter(|r| !r.trim().is_empty()),
             },
             &project,
+            None,
             can_manage,
         )
         .await?,
@@ -176,7 +195,7 @@ pub async fn get_project_git_host_connection(
     operation_id = "patchProjectGitHostConnection",
     tag = "git-host-connections",
     summary = "Update project git host connection",
-    description = "Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.",
+    description = "Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Changes to the scheme, host, or port of `base_url` remove the stored access token, its refresh token, its expiry, and the webhook secret. Changes to `git_host_type` remove those values too. Requests store `access_token` or `secret` that they carry. Connections that receive events and have no new `secret` get a new webhook secret. Responses show that secret once in `generated_secret`. Requests for GitHub App connections and for connections that declarative state manages fail.",
     params(ProjectPath, ("id" = GitHostConnectionId, Path)),
     request_body = PatchGitHostConnectionRequest,
     responses((status = OK, description = "Updated connection", body = GitHostConnectionResponse), WebError)

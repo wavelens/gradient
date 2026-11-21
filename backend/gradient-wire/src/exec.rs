@@ -8,8 +8,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::codec::Proto;
+use crate::host_resource_project_access::WorkerResourceProjectAccess;
 use crate::port_ranges::PortRanges;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
+use uuid::Uuid;
 
 #[derive(
     Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq, Default, utoipa::ToSchema,
@@ -96,6 +98,13 @@ impl GuestSize {
 
     pub fn is_unset(&self) -> bool {
         *self == GuestSize::default()
+    }
+
+    pub fn work_disk_size_mb_for_requested_disk_size_mb(disk_mb: u64) -> u64 {
+        match disk_mb {
+            0 => GuestSize::default_request().disk_mb,
+            requested => requested,
+        }
     }
 
     pub fn warm_guest_takes(&self, job: GuestSize) -> bool {
@@ -266,6 +275,31 @@ pub struct ExecInventory {
     #[proto(64, default)]
     #[serde(default)]
     pub max_server_requested_warm_guests: Option<u32>,
+    #[proto(66, default)]
+    #[serde(default)]
+    pub project_release_by_resource_name: WorkerExecInventoryResourceProjectAccess,
+}
+
+#[derive(
+    Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq, Default, utoipa::ToSchema,
+)]
+pub struct WorkerExecInventoryResourceProjectAccess {
+    #[schema(value_type = BTreeMap<String, Object>)]
+    pub released_projects_by_worker_sops_secret_name: BTreeMap<String, WorkerResourceProjectAccess>,
+    #[schema(value_type = BTreeMap<String, Object>)]
+    pub project_access_by_worker_mount: BTreeMap<String, WorkerResourceProjectAccess>,
+    #[schema(value_type = BTreeMap<String, Object>)]
+    pub released_projects_by_device_class: BTreeMap<String, WorkerResourceProjectAccess>,
+}
+
+pub fn is_resource_released_to_project(
+    resource_name_to_project_access: &BTreeMap<String, WorkerResourceProjectAccess>,
+    resource_name: &str,
+    project: &Uuid,
+) -> bool {
+    resource_name_to_project_access
+        .get(resource_name)
+        .is_none_or(|stored_project_access| stored_project_access.contains(project))
 }
 
 impl ExecInventory {
@@ -277,6 +311,22 @@ impl ExecInventory {
                 .iter()
                 .any(|warm| warm.count > 0 && warm.size.warm_guest_takes(job)),
         }
+    }
+
+    pub fn worker_sops_secret_names_released_to_project(&self, project: &Uuid) -> Vec<String> {
+        self.secrets
+            .iter()
+            .filter(|advertised_worker_secret_name| {
+                is_resource_released_to_project(
+                    &self
+                        .project_release_by_resource_name
+                        .released_projects_by_worker_sops_secret_name,
+                    advertised_worker_secret_name,
+                    project,
+                )
+            })
+            .cloned()
+            .collect()
     }
 }
 

@@ -15,10 +15,10 @@ pub mod usage;
 use gradient_entity::retired_cache_signing_key;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{Expr, Query};
+use sea_orm::sea_query::{Expr, LockBehavior, LockType, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
-    QueryOrder, Select, TransactionTrait,
+    QueryOrder, QuerySelect, Select, TransactionTrait,
 };
 
 pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MCache>, DbErr> {
@@ -28,6 +28,29 @@ pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MC
 pub async fn by_ids<C: ConnectionTrait>(db: &C, ids: &[CacheId]) -> Result<Vec<MCache>, DbErr> {
     ECache::find()
         .filter(CCache::Id.is_in(ids.iter().copied()))
+        .all(db)
+        .await
+}
+
+/// Caches missing from the result have a locked row at this moment. Key rotation, a settings
+/// edit or a delete of that cache lock that row. Callers store the signature rows for that cache
+/// unsigned. Sign sweeps later sign them with the key that is current after that change.
+pub async fn share_lock_caches_in_ascending_id_order_skipping_rows_locked_by_key_rotation_settings_edit_or_delete<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    mut caches: Vec<CacheId>,
+) -> Result<Vec<MCache>, DbErr> {
+    caches.sort_unstable();
+    caches.dedup();
+    if caches.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    ECache::find()
+        .filter(CCache::Id.is_in(caches))
+        .order_by_asc(CCache::Id)
+        .lock_with_behavior(LockType::Share, LockBehavior::SkipLocked)
         .all(db)
         .await
 }
@@ -102,6 +125,11 @@ pub async fn insert_old_cache_key_row_replace_key_pair_and_move_signatures_to_pr
     .insert(&tx)
     .await?;
 
+    let mut cache: ACache = cache.into();
+    cache.private_key = Set(private_key);
+    cache.public_key = Set(public_key);
+    let cache = cache.update(&tx).await?;
+
     ECachedPathSignature::update_many()
         .col_expr(
             CCachedPathSignature::PreviousSigningKeySignature,
@@ -114,11 +142,6 @@ pub async fn insert_old_cache_key_row_replace_key_pair_and_move_signatures_to_pr
         .filter(CCachedPathSignature::Cache.eq(cache.id))
         .exec(&tx)
         .await?;
-
-    let mut cache: ACache = cache.into();
-    cache.private_key = Set(private_key);
-    cache.public_key = Set(public_key);
-    let cache = cache.update(&tx).await?;
     tx.commit().await?;
     Ok(cache)
 }
@@ -186,20 +209,18 @@ pub fn subscribed_binary_caches_of_projects_visible_to_user(
     Condition::all().add(CCache::Id.in_subquery(subscribed))
 }
 
-pub fn binary_caches_created_by_user_or_with_direct_cache_role_for_user(user: UserId) -> Condition {
+pub fn binary_caches_with_direct_cache_role_for_user(user: UserId) -> Condition {
     let member_of = Query::select()
         .column(CCacheAccess::Cache)
         .from(gradient_entity::cache_access::Entity)
         .and_where(CCacheAccess::User.eq(user))
         .to_owned();
-    Condition::any()
-        .add(CCache::CreatedBy.eq(user))
-        .add(CCache::Id.in_subquery(member_of))
+    Condition::all().add(CCache::Id.in_subquery(member_of))
 }
 
 pub fn visible_to_user(user: UserId) -> Condition {
     Condition::any()
-        .add(binary_caches_created_by_user_or_with_direct_cache_role_for_user(user))
+        .add(binary_caches_with_direct_cache_role_for_user(user))
         .add(subscribed_binary_caches_of_projects_visible_to_user(
             user, None,
         ))

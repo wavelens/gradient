@@ -9,13 +9,14 @@ use std::sync::Arc;
 use crate::reporter::CiReporter;
 use crate::webhook::{ParsedPullRequestEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind};
 use gradient_types::GitHostType;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 
 pub trait GitHostProvider: Send + Sync + std::fmt::Debug {
     fn git_host_type(&self) -> GitHostType;
 
     fn build_reporter(
         &self,
-        http: reqwest::Client,
+        http: HttpClientForUserSuppliedUrls,
         endpoint_url: Option<&str>,
         token: Option<&str>,
     ) -> anyhow::Result<Arc<dyn CiReporter>>;

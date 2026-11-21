@@ -15,6 +15,7 @@ use crate::endpoints::worker_setup::WorkerRegistrationResponse;
 use crate::error::{WebError, WebResult};
 use crate::extractors::JsonBody;
 use crate::helpers::{OptionExt, ok_json};
+use crate::password_hashing_and_wrong_sign_in_attempts::compute_argon2_hash_for_new_password_on_blocking_pool_with_limited_semaphore_permit;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Admin, Member, TeamScope};
@@ -88,19 +89,6 @@ fn team_worker_live(live: &HashMap<String, WorkerInfo>, worker_id: &str) -> Opti
 
 pub async fn reauth_team_workers(scheduler: &Scheduler, workers: &[String]) {
     for worker_id in workers {
-        scheduler.request_reauth(worker_id).await;
-    }
-}
-
-pub async fn withdraw_team_workers(
-    scheduler: &Scheduler,
-    workers: &[String],
-    projects: &HashSet<ProjectId>,
-) {
-    for worker_id in workers {
-        scheduler
-            .abort_project_jobs_on_worker(worker_id, projects)
-            .await;
         scheduler.request_reauth(worker_id).await;
     }
 }
@@ -188,6 +176,11 @@ pub async fn post_team_worker(
         token.clone(),
     );
     let worker_id = registration.id.clone();
+    let token_hash =
+        compute_argon2_hash_for_new_password_on_blocking_pool_with_limited_semaphore_permit(
+            token.clone(),
+        )
+        .await?;
     let token_encrypted = encrypt_for_dialing(
         &state.config.secrets.crypt_file,
         body.url.as_deref(),
@@ -200,7 +193,7 @@ pub async fn post_team_worker(
             id: TeamWorkerId::now_v7(),
             team: team.id,
             worker_id: worker_id.clone(),
-            token_hash: password_auth::generate_hash(&token),
+            token_hash,
             token_encrypted,
             url: body.url,
             display_name: body.display_name.trim().to_string(),
@@ -286,17 +279,7 @@ pub async fn patch_team_worker(
     }
     gradient_db::teams::workers::update(&db.web_db, active).await?;
 
-    let workers = [worker_id.clone()];
-    if body.active == Some(false) {
-        withdraw_team_workers(
-            &scheduler,
-            &workers,
-            &granted_projects(&db.web_db, team.id).await?,
-        )
-        .await;
-    } else {
-        reauth_team_workers(&scheduler, &workers).await;
-    }
+    reauth_team_workers(&scheduler, std::slice::from_ref(&worker_id)).await;
     if let Some(draining) = body.draining {
         start_or_cancel_worker_admin_drain(&scheduler, &worker_id, draining).await;
     }
@@ -336,9 +319,8 @@ pub async fn delete_team_worker(
         return Err(SharedRefusal::WorkerManagedByState.into());
     }
 
-    let projects = granted_projects(&db.web_db, team.id).await?;
     gradient_db::teams::workers::unregister(&db.web_db, worker).await?;
-    withdraw_team_workers(&scheduler, std::slice::from_ref(&worker_id), &projects).await;
+    reauth_team_workers(&scheduler, std::slice::from_ref(&worker_id)).await;
     scheduler.connection_failures.clear(&worker_id);
 
     audit
@@ -366,7 +348,7 @@ mod tests {
             assigned_job_count: 0,
             assigned_build_count: 0,
             draining: false,
-            authorized_peers: None,
+            project_access: gradient_pool::ProjectAccess::AllProjects,
             cpu_usage_pct: None,
             ram_free_mb: None,
             ram_total_mb: 16384,

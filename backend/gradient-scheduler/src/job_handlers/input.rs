@@ -5,6 +5,7 @@
  */
 
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use gradient_entity::evaluation::EvaluationStatus;
@@ -17,7 +18,10 @@ use tracing::{debug, warn};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
-use crate::input_waits::{AssignedFetch, InputWaiter, NewInputWait, UnassignedFetch};
+use crate::exec_secrets::SecretResolutionError;
+use crate::input_waits::{
+    AssignedFetch, InputFetchProjectGitCredentials, InputWaiter, NewInputWait, UnassignedFetch,
+};
 use crate::jobs::PendingJob;
 use crate::waiting_state::announce_worker_gap;
 
@@ -71,16 +75,39 @@ impl Scheduler {
             }
         };
 
-        let fetch_key = if needs_secrets {
-            format!("{}/{}", job.project_id, parsed.fetch_key)
-        } else {
-            parsed.fetch_key
+        let allowed = job.allows_project_credentials_and_privileged_actions;
+        if parsed.needs_secrets && !allowed {
+            let message =
+                SecretResolutionError::ProjectGitCredentialsWithheldForUnapprovedForkPullRequest
+                    .to_string();
+            self.answer_inputs(vec![waiter], InputOutcome::Failed { message })
+                .await;
+            return Ok(());
+        }
+        let (project_git_credentials, fetch_key) = match (needs_secrets, allowed) {
+            (false, _) => (
+                InputFetchProjectGitCredentials::FetchWithoutProjectCredentials,
+                format!("{}/{}", job.project_id, parsed.fetch_key),
+            ),
+            (true, true) => (
+                InputFetchProjectGitCredentials::FetchWithProjectCredentials,
+                format!("{}/{}", job.project_id, parsed.fetch_key),
+            ),
+            (true, false) => (
+                InputFetchProjectGitCredentials::HttpsCredentialsWithheldForUnapprovedForkPullRequest,
+                format!(
+                    "{}/https-credentials-withheld/{}",
+                    job.project_id, parsed.fetch_key
+                ),
+            ),
         };
+
         self.input_waits.register(NewInputWait {
             fetch_key,
-            request,
+            request: parsed.canonical_input_request_json,
             project: job.project_id,
-            needs_secrets,
+            project_git_credentials,
+            content_hash_store_path: parsed.content_hash_store_path,
             waiter,
         });
         self.dispatch_input_fetches().await;
@@ -118,17 +145,53 @@ impl Scheduler {
     ) {
         self.release_input_fetch(worker_id, fetch_id).await;
         if let InputOutcome::Unplaced { message } = &outcome {
-            if self.input_waits.unplace(worker_id, fetch_id) {
+            if self.input_waits.unplace(worker_id, fetch_id).is_some() {
                 debug!(%worker_id, %fetch_id, %message, "input fetch unplaced; trying another worker");
                 self.dispatch_input_fetches().await;
             }
             return;
         }
-        let waiters = self.input_waits.take_fetched(worker_id, fetch_id);
-        if waiters.is_empty() {
+        if let InputOutcome::Fetched { response } = &outcome
+            && let Some((project, pin)) = self
+                .input_waits
+                .project_and_content_pinned_store_path_for_pinned_wait(worker_id, fetch_id)
+        {
+            let answered = read_store_path_from_worker_input_response(response);
+            if answered.as_deref() != Some(pin.as_str()) {
+                let answered = answered.unwrap_or_default();
+                warn!(%worker_id, %project, %pin, %answered, "Worker responded to a fetch of a pinned input with a different store path. Query another worker.");
+                let message = format!(
+                    "The worker answered the input fetch with store path {answered}, not with the store path {pin} that the content hash of the request names."
+                );
+                self.exclude_worker_from_input_fetch_and_reassign_or_fail_waiting_evaluations(
+                    worker_id, fetch_id, message,
+                )
+                .await;
+                return;
+            }
+        }
+        let Some((project_git_credentials, waiters)) = self
+            .input_waits
+            .take_fetched(worker_id, fetch_id)
+            .filter(|(_, waiters)| !waiters.is_empty())
+        else {
             debug!(%worker_id, %fetch_id, "input fetch answered without waiters; dropped");
             return;
-        }
+        };
+        let outcome = match outcome {
+            InputOutcome::Failed { message }
+                if project_git_credentials
+                    == InputFetchProjectGitCredentials::HttpsCredentialsWithheldForUnapprovedForkPullRequest =>
+            {
+                InputOutcome::Failed {
+                    message: format!(
+                        "{}\n{message}",
+                        SecretResolutionError::ProjectGitCredentialsWithheldForUnapprovedForkPullRequest
+                    ),
+                }
+            }
+            outcome => outcome,
+        };
 
         self.answer_inputs(waiters, outcome).await;
     }
@@ -197,8 +260,83 @@ impl Scheduler {
             .map(|e| e.id)
             .collect();
         self.input_waits.drop_evaluations(&finished);
+        let now = Instant::now();
+        self.fail_evaluations_waiting_on_inputs_without_worker_fetch_before_timeout(now)
+            .await;
+        self.move_timed_out_input_fetches_to_another_worker(now)
+            .await;
         self.dispatch_input_fetches().await;
         Ok(())
+    }
+
+    pub(crate) async fn fail_evaluations_waiting_on_inputs_without_worker_fetch_before_timeout(
+        &self,
+        now: Instant,
+    ) {
+        let seconds = self.db.config.scheduler.input_fetch_timeout_secs.get();
+        let expired = self
+            .input_waits
+            .remove_waits_without_fetch_created_at_least_timeout_before_and_return_input_requests_and_waiters(
+                Duration::from_secs(seconds),
+                now,
+            );
+        for (request, waiters) in expired {
+            let message =
+                format!("No worker accepted the fetch of input {request} within {seconds} seconds");
+            self.answer_inputs(waiters, InputOutcome::Failed { message })
+                .await;
+        }
+    }
+
+    pub(crate) async fn move_timed_out_input_fetches_to_another_worker(&self, now: Instant) {
+        let seconds = self.db.config.scheduler.input_fetch_timeout_secs.get();
+        let timed_out = self
+            .input_waits
+            .assigned_fetches_held_at_least_timeout(Duration::from_secs(seconds), now);
+        for fetch in timed_out {
+            warn!(worker = %fetch.worker, fetch_id = %fetch.fetch_id, "The input fetch received no response in time. Trying another worker.");
+            self.release_input_fetch(&fetch.worker, &fetch.fetch_id)
+                .await;
+            self.exclude_worker_from_input_fetch_and_reassign_or_fail_waiting_evaluations(
+                &fetch.worker,
+                &fetch.fetch_id,
+                format!("No worker responded to the input fetch within {seconds} seconds"),
+            )
+            .await;
+        }
+    }
+
+    async fn exclude_worker_from_input_fetch_and_reassign_or_fail_waiting_evaluations(
+        &self,
+        worker_id: &str,
+        fetch_id: &str,
+        message: String,
+    ) {
+        let Some(fetch_key) = self.input_waits.unplace(worker_id, fetch_id) else {
+            return;
+        };
+        let workers = match self.board_workers().await {
+            Ok(workers) => workers,
+            Err(e) => {
+                warn!(error = %e, "Can't read connected workers. Skip assignment of input fetches this pass.");
+                return;
+            }
+        };
+        let nobody_left = self
+            .input_waits
+            .unassigned()
+            .into_iter()
+            .find(|fetch| fetch.fetch_key == fetch_key)
+            .is_some_and(|fetch| !workers.iter().any(|w| can_ever_fetch(w, &fetch)));
+        if !nobody_left {
+            self.dispatch_input_fetches().await;
+            return;
+        }
+        let waiters = self
+            .input_waits
+            .remove_wait_without_fetch_by_key_and_return_waiters(&fetch_key);
+        self.answer_inputs(waiters, InputOutcome::Failed { message })
+            .await;
     }
 
     async fn dispatch_input_fetches(&self) {
@@ -262,6 +400,7 @@ impl Scheduler {
             let assigned = AssignedFetch {
                 fetch_id: fetch_id.clone(),
                 worker: worker.clone(),
+                input_fetch_handed_to_worker_at: Instant::now(),
             };
             if !self.input_waits.assign(&fetch.fetch_key, assigned) {
                 self.release_input_fetch(&worker, &fetch_id).await;
@@ -341,13 +480,18 @@ pub(crate) fn fetch_needs_secrets_capability(
     url_is_ssh || https_git_host.is_some_and(|host| pairs.contains(&(project, host.to_owned())))
 }
 
+fn read_store_path_from_worker_input_response(response: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(response)
+        .ok()?
+        .get("storePath")?
+        .as_str()
+        .map(str::to_owned)
+}
+
 fn can_ever_fetch(worker: &WorkerInfo, fetch: &UnassignedFetch) -> bool {
     !worker.draining
         && !fetch.excluded.contains(&worker.id)
-        && worker
-            .authorized_peers
-            .as_ref()
-            .is_none_or(|peers| peers.contains(&fetch.project))
+        && worker.project_access.contains(&fetch.project)
         && WorkerCaps {
             capabilities: worker.capabilities.clone(),
             ..WorkerCaps::default()

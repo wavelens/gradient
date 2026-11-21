@@ -5,6 +5,10 @@
  */
 
 use crate::commands::builds::BuildClass;
+use crate::logfmt::{
+    StreamingTerminalEscapeSequenceFilter, TerminalColorOrPlainText,
+    filter_complete_text_for_terminal_output,
+};
 use crate::tui::View;
 use connector::api::{BuildItem, EvaluationMessageResponse, EvaluationResponse, EvaluationStatus};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -191,6 +195,7 @@ pub struct Dashboard {
     follow: bool,
     started: Instant,
     rx: Option<UnboundedReceiver<WatchEvent>>,
+    streaming_terminal_escape_filter: StreamingTerminalEscapeSequenceFilter,
 }
 
 impl Dashboard {
@@ -214,6 +219,9 @@ impl Dashboard {
             follow: true,
             started: Instant::now(),
             rx: None,
+            streaming_terminal_escape_filter: StreamingTerminalEscapeSequenceFilter::new(
+                TerminalColorOrPlainText::KeepSgrColorSequences,
+            ),
         }
     }
 
@@ -223,7 +231,11 @@ impl Dashboard {
             WatchEvent::Builds(b) => self.builds = b,
             WatchEvent::Message(m) => {
                 if self.seen_messages.insert(m.id.to_string()) {
-                    self.push_line(format!("[eval/{}] {}", m.level, m.message));
+                    let message = filter_complete_text_for_terminal_output(
+                        &m.message,
+                        TerminalColorOrPlainText::KeepSgrColorSequences,
+                    );
+                    self.push_line(format!("[eval/{}] {message}", m.level));
                 }
             }
             WatchEvent::Log(chunk) => self.push_chunk(chunk),
@@ -231,8 +243,11 @@ impl Dashboard {
     }
 
     fn push_chunk(&mut self, chunk: String) {
-        self.pending
-            .push_str(&crate::logfmt::decode_escapes(&chunk));
+        self.pending.push_str(
+            &self
+                .streaming_terminal_escape_filter
+                .filter_text_chunk_holding_incomplete_escape(&chunk),
+        );
         while let Some(nl) = self.pending.find('\n') {
             let line: String = self.pending.drain(..=nl).collect();
             self.push_line(line.trim_end_matches('\n').to_string());

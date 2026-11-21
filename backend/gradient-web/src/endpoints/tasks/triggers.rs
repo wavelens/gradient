@@ -273,9 +273,10 @@ pub async fn create(
 pub(crate) fn validate_trigger_config_and_return_config_to_store(
     config: TriggerConfig,
 ) -> WebResult<TriggerConfig> {
-    Ok(config
-        .validate_and_convert_cron_to_six_fields()
-        .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?)
+    config
+        .validate_path_filter_pattern_limits()
+        .and_then(|()| config.validate_and_convert_cron_to_six_fields())
+        .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()).into())
 }
 
 pub(crate) fn build_task_trigger_row_from_config_and_flags(
@@ -629,6 +630,7 @@ pub(super) async fn fire(
                 author_name: Some(head.author_name),
                 manual: true,
                 honors_skip_marker: false,
+                code_trust: gradient_ci::EvaluationCodeTrust::CodeWithProjectCredentials,
                 repository_override: None,
                 wildcard_override: request.wildcard_override,
                 source_comment: None,

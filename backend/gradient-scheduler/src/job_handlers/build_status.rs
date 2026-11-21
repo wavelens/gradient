@@ -9,13 +9,14 @@ use gradient_db::lookup::by_id;
 use tracing::{info, warn};
 
 use gradient_entity::exec_job_attempt::AttemptEndReason;
-use gradient_graph::{ContinuationOutcome, Transition};
+use gradient_graph::{ContinuationOutcome, FailedBuildDispatchReport, Transition};
 use gradient_types::*;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{Failure, MemberReport};
+use crate::exec_secrets::SecretResolutionError;
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
 
 impl Scheduler {
@@ -76,36 +77,79 @@ impl Scheduler {
         .flatten()
     }
 
+    async fn request_limited_build_metrics(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+        metrics: Option<BuildMetrics>,
+        dispatched_core_count: Option<u32>,
+    ) -> Result<Option<BuildMetrics>> {
+        let Some(metrics) = metrics else {
+            return Ok(None);
+        };
+        let (worker, job_id) = (worker_id.to_owned(), job_id.to_owned());
+        let limited = self
+            .call(|reply| {
+                SchedulerMsg::LimitReportedBuildMetricsToWorkerAdvertisedRamAndCoreCount {
+                    worker,
+                    job_id,
+                    metrics,
+                    reply,
+                }
+            })
+            .await?;
+        Ok(Some(BuildMetrics {
+            build_cores: limited
+                .build_cores
+                .map(|cores| dispatched_core_count.map_or(cores, |sent| cores.min(sent))),
+            ..limited
+        }))
+    }
+
     pub async fn handle_build_output(
         &self,
+        worker_id: &str,
         job_id: &str,
-        build_id_str: &str,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
         substituted: bool,
     ) -> Result<()> {
-        let derivation_build: DerivationBuildId = build_id_str
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid derivation_build: {}", build_id_str))?;
-
-        match self.active_job(job_id).await {
-            Some(PendingJob::Build(_)) => {}
-            Some(_) => anyhow::bail!("job {} is not a build job", job_id),
-            None => {
-                warn!(%job_id, "build output for unknown job - ignoring");
-                return Ok(());
-            }
-        }
-
-        self.graph
+        let (worker, job) = (worker_id.to_owned(), job_id.to_owned());
+        let accepted = self
+            .call(|reply| SchedulerMsg::AcceptFirstActiveBuildOutputReport {
+                worker,
+                job_id: job,
+                reply,
+            })
+            .await?;
+        let Some((dispatched_job, build)) = accepted else {
+            warn!(%worker_id, %job_id, "Ignoring a second report for a dispatch, or build output when this worker has no active dispatch.");
+            return Ok(());
+        };
+        let metrics = self
+            .request_limited_build_metrics(worker_id, job_id, metrics, build.job.build.build_cores)
+            .await?;
+        let recorded = self
+            .graph
             .transition(Transition::BuildOutput {
-                shared_build: derivation_build,
+                shared_build: build.derivation_build,
+                dispatched_job,
                 outputs,
                 metrics,
                 substituted,
             })
-            .await
-            .map(|_| ())
+            .await;
+        if recorded.is_err() {
+            self.cast(
+                SchedulerMsg::UndoBuildOutputReportAcceptanceAfterBuildGraphRecordFailure {
+                    worker: worker_id.to_owned(),
+                    job_id: job_id.to_owned(),
+                    assignment_id: dispatched_job,
+                },
+            )
+            .await?;
+        }
+        recorded.map(|_| ())
     }
 
     pub async fn handle_job_completed(&self, worker_id: &str, job_id: &str) -> Result<()> {
@@ -134,6 +178,18 @@ impl Scheduler {
     }
 
     pub(crate) async fn settle_completed(&self, job: PendingJob, worker_idle: bool) -> Result<()> {
+        if let PendingJob::Eval(PendingEvalJob {
+            derivation_batch_save_failure_message: Some(error),
+            ..
+        }) = &job
+        {
+            let failure = crate::cluster::Failure {
+                error: error.clone(),
+                kind: BuildFailureKind::Permanent,
+                missing_paths: Vec::new(),
+            };
+            return self.settle_failed(job, &failure, None).await;
+        }
         match job {
             PendingJob::Eval(PendingEvalJob {
                 continuation: Some(exec_job),
@@ -261,14 +317,30 @@ impl Scheduler {
                 .await;
         }
 
-        self.settle_failed(job, &failure, metrics).await
+        let PendingJob::Build(build) = &job else {
+            return self.settle_failed(job, &failure, None).await;
+        };
+        let metrics = self
+            .request_limited_build_metrics(worker_id, job_id, metrics, build.job.build.build_cores)
+            .await?;
+        let dispatch_that_reported_failure =
+            released
+                .dispatched_job
+                .map(|dispatched_job| FailedBuildDispatchReport {
+                    dispatched_job,
+                    substitute: build.substitute,
+                    build_context: build.build_context(),
+                    metrics,
+                });
+        self.settle_failed(job, &failure, dispatch_that_reported_failure)
+            .await
     }
 
     pub(crate) async fn settle_failed(
         &self,
         job: PendingJob,
         failure: &Failure,
-        metrics: Option<BuildMetrics>,
+        dispatch_that_reported_failure: Option<FailedBuildDispatchReport>,
     ) -> Result<()> {
         match job {
             PendingJob::Eval(PendingEvalJob {
@@ -280,11 +352,22 @@ impl Scheduler {
             }
             PendingJob::Eval(j) => {
                 self.fold_eval_stats(j.evaluation_id, j.task_id).await;
+                let error = if j.flake_fetch_needs_secrets
+                    && !j.allows_project_credentials_and_privileged_actions
+                {
+                    format!(
+                        "{}\n{}",
+                        failure.error,
+                        SecretResolutionError::ProjectGitCredentialsWithheldForUnapprovedForkPullRequest
+                    )
+                } else {
+                    failure.error.clone()
+                };
                 let r = self
                     .graph
                     .transition(Transition::EvalFailed {
                         evaluation: j.evaluation_id,
-                        error: failure.error.clone(),
+                        error,
                         kind: failure.kind,
                         missing_paths: failure.missing_paths.clone(),
                     })
@@ -302,7 +385,7 @@ impl Scheduler {
                         log_banner: gradient_sources::strip_nix_log_tail(&failure.error),
                         kind: failure.kind,
                         missing_paths: failure.missing_paths.clone(),
-                        metrics,
+                        dispatch_that_reported_failure,
                     })
                     .await
                     .map(|_| ());

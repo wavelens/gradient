@@ -8,8 +8,12 @@ use crate::error::is_unique_violation;
 use anyhow::{Context, Result};
 use gradient_core::{ExternalIdentity, LoginMethods};
 use gradient_db::WebDb;
+use gradient_db::users::{
+    InsertWithAuthorisingSessionError, VerifiedFactForSessionOrCredentialCreation,
+    insert_credential_after_locking_user_row_and_rechecking_authorisation,
+};
 use gradient_types::*;
-use sea_orm::TransactionTrait;
+use sea_orm::DatabaseTransaction;
 
 pub fn can_disconnect(
     methods: &LoginMethods,
@@ -52,21 +56,39 @@ pub async fn connect_identity(
     session: SessionId,
     identity: &ExternalIdentity,
 ) -> Result<()> {
-    let tx = db
-        .inner()
-        .begin()
-        .await
-        .context("start connect transaction")?;
+    let issuer = identity.issuer.clone();
+    let subject = identity.subject.clone();
+    insert_credential_after_locking_user_row_and_rechecking_authorisation(
+        db.inner(),
+        user,
+        VerifiedFactForSessionOrCredentialCreation::ExistingSignInSession(session),
+        move |tx| {
+            Box::pin(
+                insert_identity_link_for_active_user_with_unlinked_issuer_and_subject(
+                    tx, user, issuer, subject,
+                ),
+            )
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        InsertWithAuthorisingSessionError::AuthorisationNoLongerHoldsUnderUserRowLock => {
+            ConnectRefusal::SignedOut.into()
+        }
+        InsertWithAuthorisingSessionError::Database(e) => {
+            anyhow::Error::new(e).context("lock user row and connect identity")
+        }
+        InsertWithAuthorisingSessionError::InsertClosureError(e) => e,
+    })
+}
 
-    let signed_in = gradient_db::lookup::by_id::<ESession, _>(&tx, session)
-        .await
-        .context("load connecting session")?
-        .is_some_and(|s| s.user_id == user && s.is_usable_at(gradient_types::now()));
-    if !signed_in {
-        return Err(ConnectRefusal::SignedOut.into());
-    }
-
-    let active = gradient_db::lookup::by_id::<EUser, _>(&tx, user)
+async fn insert_identity_link_for_active_user_with_unlinked_issuer_and_subject(
+    tx: &DatabaseTransaction,
+    user: UserId,
+    issuer: String,
+    subject: String,
+) -> Result<()> {
+    let active = gradient_db::lookup::by_id::<EUser, _>(tx, user)
         .await
         .context("load connecting user")?
         .is_some_and(|u| u.active);
@@ -74,26 +96,25 @@ pub async fn connect_identity(
         return Err(ConnectRefusal::UserGone.into());
     }
 
-    let linked =
-        gradient_db::user_identities::user_by_identity(&tx, &identity.issuer, &identity.subject)
-            .await
-            .context("find linked user")?;
+    let linked = gradient_db::user_identities::user_by_identity(tx, &issuer, &subject)
+        .await
+        .context("find linked user")?;
     match linked {
         Some(owner) if owner.id == user => return Ok(()),
         Some(_) => return Err(ConnectRefusal::TakenByOtherUser.into()),
         None => {}
     }
 
-    let has_issuer = gradient_db::user_identities::of_user(&tx, user)
+    let has_issuer = gradient_db::user_identities::of_user(tx, user)
         .await
         .context("load identities")?
         .iter()
-        .any(|i| i.issuer == identity.issuer);
+        .any(|i| i.issuer == issuer);
     if has_issuer {
         return Err(ConnectRefusal::AlreadyConnected.into());
     }
 
-    gradient_db::user_identities::insert(&tx, user, &identity.issuer, &identity.subject)
+    gradient_db::user_identities::insert(tx, user, &issuer, &subject)
         .await
         .map_err(|e| {
             if is_unique_violation(&e) {
@@ -102,7 +123,7 @@ pub async fn connect_identity(
                 anyhow::Error::new(e).context("insert identity")
             }
         })?;
-    tx.commit().await.context("commit connect transaction")
+    Ok(())
 }
 
 #[cfg(test)]
@@ -210,5 +231,54 @@ mod tests {
             &identities,
             PROVIDER_ISSUER
         ));
+    }
+
+    #[tokio::test]
+    async fn connect_identity_with_deleted_session_waits_for_user_row_lock_then_is_refused_without_identity_link()
+     {
+        use gradient_fixtures::{database::TestDatabase, rows};
+        use sea_orm::TransactionTrait;
+
+        let test_db = TestDatabase::create().await;
+        let db = test_db.connection();
+        let owner = gradient_db::rows::insert::<EUser, _>(&db, rows::user())
+            .await
+            .unwrap();
+        let session = rows::live_session(SessionId::now_v7());
+        gradient_db::rows::insert::<ESession, _>(&db, session.clone())
+            .await
+            .unwrap();
+        let claim = db.begin().await.unwrap();
+        gradient_db::users::lock_user_row_for_update(&claim, owner.id)
+            .await
+            .unwrap();
+
+        let web_db = WebDb::new(db.clone());
+        let identity = ExternalIdentity {
+            issuer: PROVIDER_ISSUER.into(),
+            subject: "previous-holder".into(),
+            username: "previous-holder".into(),
+            email: None,
+            name: None,
+            groups: None,
+            refresh_profile: false,
+        };
+        let connecting = connect_identity(&web_db, owner.id, session.id, &identity);
+        tokio::pin!(connecting);
+        let waiting =
+            tokio::time::timeout(std::time::Duration::from_millis(500), &mut connecting).await;
+        gradient_db::users::revoke_previous_account_holder_access(&claim, owner.id)
+            .await
+            .unwrap();
+        claim.commit().await.unwrap();
+
+        assert!(waiting.is_err());
+        let refused = connecting.await.unwrap_err();
+        assert!(matches!(
+            refused.downcast_ref::<ConnectRefusal>(),
+            Some(ConnectRefusal::SignedOut)
+        ));
+        assert!(test_db.rows::<EUserIdentity>().await.is_empty());
+        test_db.finish().await;
     }
 }

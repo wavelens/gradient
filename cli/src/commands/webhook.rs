@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand,
+    UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES,
+};
 use crate::input::{client_from_config, confirm_delete};
 use crate::output::Output;
 use clap::{Args, Subcommand};
@@ -18,11 +22,13 @@ pub struct NoWebhookOwnerArguments {}
 #[derive(Subcommand, Debug)]
 pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
     /// List webhooks with the last delivery result.
+    #[command(add = McpToolMayRunCommand)]
     List {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
     },
     /// Show a single webhook
+    #[command(add = McpToolMayRunCommand)]
     Show {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
@@ -30,6 +36,7 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         id: uuid::Uuid,
     },
     /// Create a webhook and only print its signing secret, once.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Create {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
@@ -47,6 +54,7 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         active: Option<bool>,
     },
     /// Modify a webhook. Use --event to replace the whole event list.
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
@@ -69,6 +77,7 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         active: Option<bool>,
     },
     /// Delete a webhook
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
@@ -79,6 +88,7 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         yes: bool,
     },
     /// List past deliveries for a webhook
+    #[command(add = McpToolMayRunCommand)]
     Deliveries {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
@@ -92,6 +102,7 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         offset: Option<u64>,
     },
     /// Print one delivery with its request body and response body.
+    #[command(add = McpToolMayRunCommand)]
     Delivery {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
@@ -101,6 +112,7 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         delivery_id: uuid::Uuid,
     },
     /// Replace the webhook signing secret and print the new secret once
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     RotateSecret {
         #[command(flatten)]
         owner: WebhookOwnerArgs,
@@ -108,6 +120,7 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         id: uuid::Uuid,
     },
     /// Send the `webhook.ping` event to the webhook URL.
+    #[command(add = McpToolMayRunCommand)]
     Ping {
         #[command(flatten)]
         owner: WebhookOwnerArgs,

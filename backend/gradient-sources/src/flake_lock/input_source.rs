@@ -5,7 +5,8 @@
  */
 
 use super::lock::{FlakeLock, GITHUB_HOST, GITLAB_HOST, LockedRef, SOURCEHUT_HOST};
-use gradient_util::glob::{glob_match, is_pattern};
+use gradient_util::glob::is_pattern;
+use gradient_wildcard::candidate_matches_wildcard_pattern;
 use serde_json::{Map, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +35,7 @@ pub fn tracked_input_sources(lock: &FlakeLock, tracked: &[String]) -> Vec<InputS
 fn is_tracked(name: &str, tracked: &[String]) -> bool {
     tracked
         .iter()
-        .any(|t| t == name || (is_pattern(t) && glob_match(t, name)))
+        .any(|t| t == name || (is_pattern(t) && candidate_matches_wildcard_pattern(t, name)))
 }
 
 fn repository_of(original: &Map<String, Value>) -> Option<(String, Option<String>)> {

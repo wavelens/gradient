@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::{Notify, mpsc};
 
@@ -93,6 +94,38 @@ impl ProbeRequests {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SignatureSweepWakeRequestedInsideTransaction {
+    staged: Option<Arc<AtomicBool>>,
+}
+
+impl SignatureSweepWakeRequestedInsideTransaction {
+    pub fn request(&self, sweep: &Notify) {
+        match &self.staged {
+            Some(requested) => requested.store(true, Ordering::Relaxed),
+            None => sweep.notify_one(),
+        }
+    }
+
+    pub fn staged(&self) -> Self {
+        Self {
+            staged: Some(self.staged.clone().unwrap_or_default()),
+        }
+    }
+
+    pub fn unstaged(&self) -> Self {
+        Self { staged: None }
+    }
+
+    pub fn publish(&self, sweep: &Notify) {
+        if let Some(requested) = &self.staged
+            && requested.swap(false, Ordering::Relaxed)
+        {
+            sweep.notify_one();
+        }
+    }
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
@@ -157,6 +190,7 @@ pub struct DbMemory {
     pub probe_requests: ProbeRequests,
     pub startable_set: StartableSet,
     pub held_evaluations: HeldEvaluations,
+    pub signature_sweep_wake_requested: SignatureSweepWakeRequestedInsideTransaction,
 }
 
 impl DbMemory {
@@ -164,6 +198,7 @@ impl DbMemory {
         Self {
             startable_set: self.startable_set.staged(),
             probe_requests: self.probe_requests.staged(),
+            signature_sweep_wake_requested: self.signature_sweep_wake_requested.staged(),
             ..self.clone()
         }
     }
@@ -172,6 +207,7 @@ impl DbMemory {
         Self {
             startable_set: self.startable_set.unstaged(),
             probe_requests: self.probe_requests.unstaged(),
+            signature_sweep_wake_requested: self.signature_sweep_wake_requested.unstaged(),
             ..self.clone()
         }
     }
@@ -188,6 +224,7 @@ pub struct DbContext {
     pub wake: Wakeups,
     pub memory: DbMemory,
     pub store_path_mapping: Arc<dyn StorePathMapping>,
+    pub user_supplied_url_http_client: gradient_util::http::HttpClientForUserSuppliedUrls,
 }
 
 impl DbContext {
@@ -227,6 +264,12 @@ impl DbContext {
             tracing::error!(error = %e, event = %name, "failed to record an event");
         }
         self.wake.delivery.notify_one();
+    }
+
+    pub fn request_signature_sweep_wake(&self) {
+        self.memory
+            .signature_sweep_wake_requested
+            .request(&self.wake.run_signature_sweep_now);
     }
 
     pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {

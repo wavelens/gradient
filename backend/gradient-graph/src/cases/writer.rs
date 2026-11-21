@@ -8,10 +8,10 @@ use std::collections::BTreeSet;
 use std::future::poll_fn;
 use std::ops::RangeInclusive;
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gradient_db::connection::find_sessions_with_transaction_older_than;
 use gradient_db::graph::can_start::{SWEEP_CHUNKS_PER_TRANSACTION, SWEEP_LOCK_CHUNK};
@@ -19,15 +19,20 @@ use gradient_db::{DbContext, MissingRow};
 use gradient_entity::StorePathError;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::entry_point::{License, Licenses};
-use gradient_entity::ids::{DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId};
+use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::ids::{
+    CacheId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
+};
 use gradient_entity::{derivation, derivation_build};
 use gradient_fixtures::shape::shape;
 use gradient_fixtures::test_date;
+use gradient_util::shutdown::Shutdown;
 use gradient_wire::types::{self, DiscoveredDerivation};
 use sea_orm::{
     ConnectionTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, TransactionTrait,
 };
 
+use super::signing::add_waiting_build_that_depends_on_completed_build;
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, SOURCE, Z, Z_OUT, batch, chain, drv, nar,
     walked_a_above_a_stub, with_attr, with_output, with_references,
@@ -241,7 +246,11 @@ async fn m01_a_batch_for_an_unknown_evaluation_fails_only_itself_inside_a_shared
     let gv = case.gv(e1).await;
     let of_e1 = case.tasked(e1, vec![entry_point(A, A_OUT, "pkg.a")]).await;
     let of_nobody = Batch {
-        derivations: vec![entry_point(Z, Z_OUT, "pkg.z")],
+        derivations: vec![
+            crate::messages::EvaluationBatchDerivation::test_batch_entry_from_discovered_derivation(
+                entry_point(Z, Z_OUT, "pkg.z"),
+            ),
+        ],
         task: of_e1.task,
         ..batch(unknown)
     };
@@ -332,10 +341,13 @@ async fn m04_a_batch_and_a_commit_queued_together_see_each_other_after_the_flush
     let case = Case::start(shape().evaluation(e1)).await;
     case.sql(NOTE_TRANSACTIONS).await;
     let walk = case.tasked(e1, vec![entry_point(A, A_OUT, "pkg.a")]).await;
-    let commit = with_references(nar(A_OUT, "a"), &[(A_OUT, "a")]);
+    let commit = NarCommit {
+        producer: case.make_worker_producer_for_evaluation_project(e1).await,
+        ..with_references(nar(A_OUT, "a"), &[(A_OUT, "a")])
+    };
+    crate::testing::write_commit_compressed_object_to_object_storage(&case.ctx, &commit).await;
 
-    let (walked, committed) =
-        together(case.walk_result(walk), case.commit_nar_result(commit)).await;
+    let (walked, committed) = together(case.walk_result(walk), case.graph.commit_nar(commit)).await;
 
     walked.expect("after 1: the batch is written");
     committed.expect("after 1: the NAR is committed");
@@ -390,6 +402,11 @@ async fn m05_a_transaction_past_its_budget_is_rolled_back_completely() {
     assert!(
         error.to_string().contains("graph transaction exceeded"),
         "after 1: {error:#}"
+    );
+    assert!(
+        crate::writer::derivation_save_failure_user_message(&error)
+            .contains("database transaction ran longer than the"),
+        "after 1: user message for {error:#}"
     );
     let derivations = case.db.rows::<derivation::Entity>().await;
     assert!(derivations.is_empty(), "after 1: no derivation");
@@ -1081,5 +1098,378 @@ async fn m15_two_batches_of_different_evaluations_committed_in_separate_transact
     let b = case.derivation(B).await;
     assert!(b.walked, "After 3: derivation(B) walked");
     case.zero_drift("step 3").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn call_while_graph_writer_is_down_reaches_restarted_graph_writer() {
+    let mut case = Case::start(shape().evaluation(EvaluationId::now_v7())).await;
+    case.writer
+        .kill_and_wait(None)
+        .await
+        .expect("The test killed the graph writer.");
+    let graph_writer_restart_task = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        case.graph
+            .spawn(case.ctx.clone(), None, None)
+            .await
+            .expect("Restart the graph writer.")
+    };
+    let (writer, ()) = tokio::join!(graph_writer_restart_task, async {
+        case.graph
+            .upstream_probed(Vec::new())
+            .await
+            .expect("Calls made during a restart reach the restarted graph writer.");
+    });
+
+    case.writer = writer;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn test_failed_signing_transaction_still_commits_demotion_of_completed_build_with_missing_stored_output_and_writes_no_signature()
+ {
+    let (case, c1) =
+        start_case_with_completed_dependency_without_stored_output_and_completed_dependency_with_stored_output()
+            .await;
+
+    let parent_builds =
+        crate::claims::read_page_of_parent_builds_with_dependency_outputs_to_publish(
+            &case.ctx.worker_db,
+            DerivationId::nil(),
+            DerivationId::new(uuid::Uuid::max()),
+            gradient_db::caches::demotion::MAX_PUBLISHED_PARENT_BUILDS_PER_SIGNING_PASS,
+        )
+        .await
+        .expect("Read the parent build page");
+    let signed_dependency_output_rows =
+        crate::claims::select_and_sign_dependency_outputs_of_parent_build_page(
+            &case.ctx,
+            &parent_builds,
+        )
+        .await
+        .expect("Select dependency outputs and sign them.");
+    let failed_signing = inject_error(&case, "23505", Injection::Returned, 1..=1, |scoped| {
+        let signed_dependency_output_rows = signed_dependency_output_rows.clone();
+        async move {
+            crate::transition::apply(
+                &scoped,
+                Transition::SignStoredInputsIntoReadWriteBinaryCache {
+                    signed_dependency_output_rows_to_insert: signed_dependency_output_rows,
+                },
+            )
+            .await
+        }
+    })
+    .await;
+    assert!(
+        failed_signing.result.is_err(),
+        "The signing pass returned the injected error after 1."
+    );
+
+    case.graph
+        .run_consistency_checks()
+        .await
+        .expect("the consistency check is written");
+
+    assert_ne!(
+        case.sb(B).await.status,
+        BuildStatus::Completed,
+        "After 2: the consistency check demoted build B. The demotion persisted in the committed state."
+    );
+    assert!(
+        !case
+            .signatures(D_OUT)
+            .await
+            .iter()
+            .any(|row| row.cache == c1 && row.signature.is_some()),
+        "after 2: the failed signing pass left no signature of D_OUT in the cache"
+    );
+    case.finish_with_drift().await;
+}
+
+async fn start_case_with_completed_dependency_without_stored_output_and_completed_dependency_with_stored_output()
+-> (Case, CacheId) {
+    let (stored_build_outputs_owner_evaluation_id, e1) =
+        (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let c1 = CacheId::now_v7();
+    let seed = shape()
+        .evaluation(stored_build_outputs_owner_evaluation_id)
+        .cached_path(D_OUT, "d")
+        .evaluation(e1)
+        .evaluation_status(EvaluationStatus::Building)
+        .into_cache(c1)
+        .keyed(Case::key());
+    let seed = add_waiting_build_that_depends_on_completed_build(
+        seed,
+        (A, A_OUT),
+        (B, B_OUT),
+        BuildStatus::Created,
+    );
+    let seed = add_waiting_build_that_depends_on_completed_build(
+        seed,
+        (C, C_OUT),
+        (D, D_OUT),
+        BuildStatus::Queued,
+    );
+    (Case::start_with_unstored_outputs(seed, 1).await, c1)
+}
+
+#[tokio::test]
+async fn test_first_recount_postgres_lock_timeout_still_commits_demotion_of_completed_build_without_stored_output_copy()
+ {
+    let (case, _) =
+        start_case_with_completed_dependency_without_stored_output_and_completed_dependency_with_stored_output()
+            .await;
+    let c = case.db.id_of(C).await;
+    case.sql(&format!(
+        "UPDATE derivation SET unwalked_inputs = 3 WHERE id = '{c}'"
+    ))
+    .await;
+    let holder = case
+        .ctx
+        .worker_db
+        .begin()
+        .await
+        .expect("A second transaction can open.");
+    let locked = holder
+        .execute_unprepared(&format!(
+            "SELECT 1 FROM derivation WHERE id = '{c}' FOR UPDATE"
+        ))
+        .await
+        .map(|done| done.rows_affected());
+    assert_eq!(
+        locked.as_ref().ok(),
+        Some(&1),
+        "One lock on the derivation row of C"
+    );
+
+    let report = case
+        .graph
+        .run_consistency_checks()
+        .await
+        .expect("Consistency checks skip locked steps and exit after 1.");
+
+    assert_eq!(
+        report.walk_drift, 0,
+        "after 1: the locked recount of C found no walk drift"
+    );
+    assert_ne!(
+        case.sb(B).await.status,
+        BuildStatus::Completed,
+        "After 1: B's demotion went through even though the first recheck hit a lock timeout"
+    );
+    holder
+        .rollback()
+        .await
+        .expect("The second transaction can release the lock.");
+    case.finish_with_drift().await;
+}
+
+#[tokio::test]
+async fn test_completed_build_demotion_postgres_lock_timeout_still_repairs_walk_counter_and_demotes_after_lock_release()
+ {
+    let (case, _) =
+        start_case_with_completed_dependency_without_stored_output_and_completed_dependency_with_stored_output()
+            .await;
+    let (b, c) = (case.db.id_of(B).await, case.db.id_of(C).await);
+    case.sql(&format!(
+        "UPDATE derivation SET unwalked_inputs = 3 WHERE id = '{c}'"
+    ))
+    .await;
+    let holder = case
+        .ctx
+        .worker_db
+        .begin()
+        .await
+        .expect("A second transaction can open.");
+    let locked = holder
+        .execute_unprepared(&format!(
+            "SELECT 1 FROM derivation_build WHERE derivation = '{b}' FOR UPDATE"
+        ))
+        .await
+        .map(|done| done.rows_affected());
+    assert_eq!(
+        locked.as_ref().ok(),
+        Some(&1),
+        "One lock on the derivation_build row for B."
+    );
+
+    let report = case
+        .graph
+        .run_consistency_checks()
+        .await
+        .expect("after 1: demotion reached the lock timeout. The consistency check steps still ran to the end.");
+
+    assert_eq!(
+        report.walk_drift, 1,
+        "The consistency check step repaired C's walk counter after 1."
+    );
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Completed,
+        "B is still Completed after step 1. A lock is on the `derivation_build` row of B."
+    );
+    holder
+        .rollback()
+        .await
+        .expect("The second transaction can release the lock.");
+
+    case.graph
+        .run_consistency_checks()
+        .await
+        .expect("After 2: consistency check");
+
+    assert_ne!(
+        case.sb(B).await.status,
+        BuildStatus::Completed,
+        "After 2: the next round demoted B."
+    );
+    case.finish_with_drift().await;
+}
+
+#[tokio::test]
+async fn test_completed_build_demotion_non_lock_database_error_returns_round_report_with_walk_drift_one()
+ {
+    let (case, _) =
+        start_case_with_completed_dependency_without_stored_output_and_completed_dependency_with_stored_output()
+            .await;
+    let (b, c) = (case.db.id_of(B).await, case.db.id_of(C).await);
+    case.sql(&format!(
+        "UPDATE derivation SET unwalked_inputs = 3 WHERE id = '{c}'; \
+         CREATE FUNCTION reject_derivation_build_status_change_for_build_b() \
+         RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+           RAISE EXCEPTION 'injected'; \
+         END $$; \
+         CREATE TRIGGER reject_build_b_status_change_before_derivation_build_update \
+           BEFORE UPDATE ON derivation_build FOR EACH ROW \
+           WHEN (OLD.derivation = '{b}' AND OLD.status IS DISTINCT FROM NEW.status) \
+           EXECUTE FUNCTION reject_derivation_build_status_change_for_build_b();"
+    ))
+    .await;
+
+    let error =
+        case.graph.run_consistency_checks().await.expect_err(
+            "After 1: the consistency check returned the error from the failed demotion.",
+        );
+
+    assert_eq!(
+        error
+            .downcast_ref::<crate::ConsistencyCheckDemotionFailed>()
+            .and_then(|failed| failed.consistency_report_after_failed_demotion)
+            .map(|report| report.walk_drift),
+        Some(1),
+        "After 1: demotion failed with an error other than a lock timeout. The consistency check still repaired C's walk counter and returned the demotion error with the report."
+    );
+    assert_eq!(
+        case.sb(B).await.status,
+        BuildStatus::Completed,
+        "After 1: the demotion failed. B remains Completed."
+    );
+    case.sql(
+        "DROP TRIGGER reject_build_b_status_change_before_derivation_build_update ON derivation_build",
+    )
+    .await;
+    case.finish_with_drift().await;
+}
+
+async fn test_case_with_finished_walk(evaluation: EvaluationId) -> Case {
+    let case = Case::start(shape().evaluation(evaluation).only_evaluate()).await;
+    case.walk(
+        case.tasked(evaluation, vec![with_attr(drv(A, &[]), "pkg.a")])
+            .await,
+    )
+    .await;
+    let _ = tokio::time::timeout(
+        Duration::from_millis(10),
+        case.ctx.wake.run_signature_sweep_now.notified(),
+    )
+    .await;
+    case
+}
+
+fn build_evaluation_stream_completed_transition(evaluation: EvaluationId) -> Transition {
+    Transition::EvalStreamCompleted { evaluation }
+}
+
+#[tokio::test]
+async fn finishing_evaluation_wakes_signature_sweep_after_commit_within_one_second() {
+    let e1 = EvaluationId::now_v7();
+    let case = test_case_with_finished_walk(e1).await;
+    let sweep = Arc::clone(&case.ctx.wake.run_signature_sweep_now);
+    let connection = case.db.connection();
+    let woken = Shutdown::new().spawn(async move {
+        sweep.notified().await;
+        let woken_at = Instant::now();
+        let evaluation = gradient_entity::evaluation::Entity::find_by_id(e1)
+            .one(&connection)
+            .await
+            .expect("The evaluation row is readable.")
+            .expect("The evaluation is present.");
+        (woken_at, evaluation.status)
+    });
+
+    case.transition(build_evaluation_stream_completed_transition(e1))
+        .await;
+    let returned_at = Instant::now();
+
+    let (woken_at, status_when_woken) = tokio::time::timeout(Duration::from_secs(1), woken)
+        .await
+        .expect("The signature sweep got a wake-up within 1 second after the transition returned.")
+        .expect("Task waiting for wake exited.");
+    match woken_at.checked_duration_since(returned_at) {
+        Some(delay) => println!(
+            "The wake for the signature sweep arrived {delay:?} after the transition returned."
+        ),
+        None => println!(
+            "The wake for the signature sweep arrived {:?} before the transition returned.",
+            returned_at.duration_since(woken_at)
+        ),
+    }
+    assert_eq!(
+        status_when_woken,
+        EvaluationStatus::Completed,
+        "The second connection read the evaluation as Completed after the wake arrived."
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn failed_commit_of_finished_evaluation_sends_no_signature_sweep_wake() {
+    let e1 = EvaluationId::now_v7();
+    let case = test_case_with_finished_walk(e1).await;
+    case.sql(
+        "CREATE FUNCTION fail_commit_when_evaluation_is_finished() \
+         RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+           RAISE EXCEPTION 'injected'; \
+         END $$; \
+         CREATE CONSTRAINT TRIGGER fail_commit_when_evaluation_is_finished \
+           AFTER UPDATE ON evaluation DEFERRABLE INITIALLY DEFERRED FOR EACH ROW \
+           WHEN (OLD.finished_at IS NULL AND NEW.finished_at IS NOT NULL) \
+           EXECUTE FUNCTION fail_commit_when_evaluation_is_finished();",
+    )
+    .await;
+
+    case.graph
+        .transition(build_evaluation_stream_completed_transition(e1))
+        .await
+        .expect_err("The transaction to end the evaluation failed to commit.");
+
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(200),
+            case.ctx.wake.run_signature_sweep_now.notified(),
+        )
+        .await
+        .is_err(),
+        "A transaction that failed to commit did not start the signature sweep."
+    );
+    assert_ne!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Completed,
+        "Evaluation isn't Completed after a failed commit."
+    );
+    case.sql("DROP TRIGGER fail_commit_when_evaluation_is_finished ON evaluation")
+        .await;
     case.finish().await;
 }

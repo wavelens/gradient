@@ -13,6 +13,7 @@ use axum_test::TestServer;
 use gradient_ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
 use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::mock::{all_statements, empty_db, exec_ok, mock_db};
 use gradient_fixtures::rows::worker_registration;
 use gradient_test_support::state::TestState;
@@ -25,7 +26,10 @@ use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
 use sha2::Sha256;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
+use wiremock::matchers::{method, path, query_param};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn temp_secret_file(content: &str) -> String {
     let path = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
@@ -158,6 +162,7 @@ fn test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(
         project: Some(project_id()),
         name: "my-hook".into(),
         display_name: "my-hook".into(),
+        base_url: Some("https://gitea.example.com".into()),
         secret: Some(secret_ciphertext.to_string()),
         receives_events: true,
         created_by: user_id(),
@@ -318,10 +323,50 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
     }
 }
 
+fn example_github_repository_grant_row_for_gh_org_all_repositories()
+-> gradient_entity::git_host_connection_repository_grant::Model {
+    gradient_entity::git_host_connection_repository_grant::Model {
+        id: GitHostConnectionRepositoryGrantId::now_v7(),
+        git_host_connection: fixed_gitea_git_host_connection_id_for_webhook_tests(),
+        project: project_id(),
+        repository_owner: "gh-org".into(),
+        repository_name: None,
+        created_at: fixture_date(),
+        ..Default::default()
+    }
+}
+
+trait AppendGitHostRepositoryAccessQueryResults {
+    fn append_mocked_rows_for_repository_grant_check(
+        self,
+        connection: gradient_entity::git_host_connection::Model,
+        task: gradient_entity::task::Model,
+        grants: Vec<gradient_entity::git_host_connection_repository_grant::Model>,
+    ) -> Self;
+}
+
+impl AppendGitHostRepositoryAccessQueryResults for MockDatabase {
+    fn append_mocked_rows_for_repository_grant_check(
+        self,
+        connection: gradient_entity::git_host_connection::Model,
+        task: gradient_entity::task::Model,
+        grants: Vec<gradient_entity::git_host_connection_repository_grant::Model>,
+    ) -> Self {
+        self.append_query_results([vec![connection]])
+            .append_query_results([vec![task]])
+            .append_query_results([vec![project_row("test-project")]])
+            .append_query_results([grants])
+    }
+}
+
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+    db.append_query_results([vec![task_row()]])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([vec![project_cache_row()]])
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![worker_registration_row()]])
         .append_query_results([vec![commit_row()]])
         .append_query_results([vec![eval_row(EvaluationStatus::Queued)]])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
@@ -330,9 +375,6 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        .append_query_results([vec![project_cache_row()]])
-        .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![worker_registration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -394,6 +436,11 @@ async fn git_host_webhook_push_fires_trigger() {
             test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
         ]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
+        .append_mocked_rows_for_repository_grant_check(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            task_row(),
+            vec![],
+        )
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
@@ -664,6 +711,11 @@ async fn git_host_webhook_branch_glob_no_match_skipped() {
             test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
         ]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec!["release/*"]))]])
+        .append_mocked_rows_for_repository_grant_check(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            task_row(),
+            vec![],
+        )
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]])
         .into_connection();
@@ -731,6 +783,11 @@ async fn git_host_webhook_pr_fires_trigger() {
             "opened",
             "synchronize",
         ]))]])
+        .append_mocked_rows_for_repository_grant_check(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            task_row(),
+            vec![],
+        )
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
@@ -764,6 +821,94 @@ async fn git_host_webhook_pr_fires_trigger() {
 
 const VALID_SHA: &str = "abcdef0123456789abcdef0123456789abcdef01";
 
+async fn send_gitea_fork_pull_request_webhook_and_return_evaluation_insert_sql(
+    fork_clone_url: &str,
+) -> String {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    let pr_body = serde_json::json!({
+        "action": "opened",
+        "number": 7,
+        "pull_request": {
+            "head": {
+                "sha": VALID_SHA,
+                "ref": "feature-x",
+                "label": "feature-x",
+                "repo": { "full_name": "fork-owner/repo", "clone_url": fork_clone_url }
+            },
+            "base": { "sha": VALID_SHA, "ref": "main", "repo": { "full_name": "test-org/repo" } }
+        },
+        "repository": {
+            "full_name": "test-org/repo",
+            "clone_url": "https://gitea.example.com/test-org/repo",
+            "ssh_url": "git@gitea.example.com:test-org/repo.git"
+        }
+    })
+    .to_string();
+
+    let db = mock_db()
+        .append_query_results([vec![project_row("test-project")]])
+        .append_query_results([vec![
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+        ]])
+        .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
+        .append_mocked_rows_for_repository_grant_check(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            task_row(),
+            vec![],
+        )
+        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![project_row("test-project")]]);
+    let db = apply_trigger_db_chain(db).into_connection();
+
+    let state = make_state(db.clone(), Some(crypt_path), None);
+    let server = TestServer::new(create_router(state).expect("router"));
+    let body_bytes = pr_body.into_bytes();
+    let sig = gitea_signature(plaintext_secret, &body_bytes);
+    let response = server
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
+        .add_header("X-Gitea-Event", "pull_request")
+        .add_header("X-Gitea-Signature", &sig)
+        .bytes(body_bytes.into())
+        .await;
+    response.assert_status_ok();
+    let json: Value = response.json();
+    assert_eq!(json["message"]["queued"].as_array().unwrap().len(), 1);
+
+    gradient_fixtures::mock::all_statements(db.into_transaction_log())
+        .into_iter()
+        .find(|s| s.sql.starts_with(r#"INSERT INTO "evaluation""#))
+        .map(|s| format!("{s:?}"))
+        .expect("the delivery inserts an evaluation")
+}
+
+#[tokio::test]
+async fn fork_pull_request_on_another_host_is_evaluated_from_task_repository_not_fork_clone_url() {
+    let insert = send_gitea_fork_pull_request_webhook_and_return_evaluation_insert_sql(
+        "https://other-host.example.org/fork-owner/repo",
+    )
+    .await;
+    assert!(!insert.contains("other-host.example.org"), "{insert}");
+    assert!(
+        insert.contains("gitea.example.com/test-org/repo"),
+        "{insert}"
+    );
+}
+
+#[tokio::test]
+async fn gitea_fork_pull_request_with_fork_on_task_host_uses_fork_clone_url() {
+    let insert = send_gitea_fork_pull_request_webhook_and_return_evaluation_insert_sql(
+        "https://gitea.example.com/fork-owner/repo",
+    )
+    .await;
+    assert!(
+        insert.contains("gitea.example.com/fork-owner/repo"),
+        "{insert}"
+    );
+}
+
 #[tokio::test]
 async fn git_host_webhook_pr_action_mismatch_skipped() {
     let plaintext_secret = "test-secret-plaintext";
@@ -791,6 +936,11 @@ async fn git_host_webhook_pr_action_mismatch_skipped() {
             test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
         ]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
+        .append_mocked_rows_for_repository_grant_check(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            task_row(),
+            vec![],
+        )
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]])
         .into_connection();
@@ -849,6 +999,11 @@ async fn git_host_webhook_release_fires_releases_only_trigger() {
             test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
         ]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
+        .append_mocked_rows_for_repository_grant_check(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            task_row(),
+            vec![],
+        )
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
@@ -892,6 +1047,11 @@ async fn git_host_webhook_push_does_not_fire_releases_only_trigger() {
             test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
         ]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
+        .append_mocked_rows_for_repository_grant_check(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            task_row(),
+            vec![],
+        )
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -927,6 +1087,11 @@ async fn github_app_webhook_push_fires_trigger() {
             build_instance_wide_git_host_connection_row_for_github_app_installation(),
         ]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
+        .append_mocked_rows_for_repository_grant_check(
+            build_instance_wide_git_host_connection_row_for_github_app_installation(),
+            github_task_row(),
+            vec![example_github_repository_grant_row_for_gh_org_all_repositories()],
+        )
         .append_query_results([vec![github_task_row()]])
         .append_query_results([vec![project_row("gh-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
@@ -1067,6 +1232,16 @@ async fn github_app_webhook_no_matching_repo_returns_zero() {
             build_instance_wide_git_host_connection_row_for_github_app_installation(),
         ]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
+        .append_mocked_rows_for_repository_grant_check(
+            build_instance_wide_git_host_connection_row_for_github_app_installation(),
+            unrelated.clone(),
+            vec![
+                gradient_entity::git_host_connection_repository_grant::Model {
+                    repository_owner: "somewhere".into(),
+                    ..example_github_repository_grant_row_for_gh_org_all_repositories()
+                },
+            ],
+        )
         .append_query_results([vec![unrelated]])
         .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .into_connection();
@@ -1260,4 +1435,548 @@ async fn valid_bearer_post_enqueues_one_trigger_fire_delivery_with_row_last_fire
         let values = format!("{:?}", insert.values);
         assert!(values.contains(&expected_key), "{values}");
     }
+}
+
+const GITEA_WEBHOOK_PLAINTEXT_SECRET_FOR_FORK_PULL_REQUEST_APPROVAL_TESTS: &str =
+    "gitea-webhook-secret";
+const FORK_PULL_REQUEST_APPROVAL_TEST_GITHUB_APP_WEBHOOK_SECRET: &str = "github-webhook-secret";
+const PENDING_FORK_PULL_REQUEST_APPROVAL_CHECK_RUN_ID: i64 = 4242;
+const FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const OTHER_FORK_COMMIT_HASH_WITH_NO_PENDING_APPROVAL: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const TEST_REVIEWER_USER_ID: i64 = 42;
+const TEST_REVIEW_WEBHOOK_SENDER_WITHOUT_PUSH_PERMISSION_USER_ID: i64 = 43;
+
+struct ForkPullRequestApprovalTestFixture {
+    db: TestDatabase,
+    server: TestServer,
+    git_host: MockServer,
+    connection: GitHostConnectionId,
+    pending_approval: PullRequestApprovalId,
+}
+
+async fn create_test_database_with_pending_fork_pull_request_approval_and_mock_gitea_web_server()
+-> ForkPullRequestApprovalTestFixture {
+    let git_host = MockServer::start().await;
+    let db = TestDatabase::create().await;
+    let conn = db.connection();
+    let crypt = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let github_app_webhook_secret_file =
+        temp_secret_file(FORK_PULL_REQUEST_APPROVAL_TEST_GITHUB_APP_WEBHOOK_SECRET);
+    gradient_db::rows::insert::<gradient_entity::user::Entity, _>(
+        &conn,
+        gradient_fixtures::rows::user(),
+    )
+    .await
+    .unwrap();
+    gradient_db::rows::insert::<gradient_entity::project::Entity, _>(
+        &conn,
+        gradient_fixtures::rows::project(),
+    )
+    .await
+    .unwrap();
+    let connection = gradient_db::rows::insert::<gradient_entity::git_host_connection::Entity, _>(
+        &conn,
+        gradient_entity::git_host_connection::Model {
+            id: GitHostConnectionId::now_v7(),
+            project: Some(gradient_fixtures::ids::project_id()),
+            name: "gitea".into(),
+            display_name: "Gitea".into(),
+            git_host_type: GitHostType::Gitea,
+            base_url: Some(git_host.uri()),
+            secret: Some(
+                encrypt_webhook_secret(
+                    &crypt,
+                    GITEA_WEBHOOK_PLAINTEXT_SECRET_FOR_FORK_PULL_REQUEST_APPROVAL_TESTS,
+                )
+                .unwrap(),
+            ),
+            access_token: Some(encrypt_webhook_secret(&crypt, "token").unwrap()),
+            receives_events: true,
+            reports_status: true,
+            created_by: gradient_fixtures::ids::user_id(),
+            created_at: gradient_fixtures::test_date(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    gradient_db::rows::insert::<gradient_entity::task::Entity, _>(
+        &conn,
+        gradient_entity::task::Model {
+            repository: format!("{}/test-org/repo", git_host.uri()),
+            git_host_connection: Some(connection.id),
+            report_status: true,
+            ..gradient_fixtures::rows::task()
+        },
+    )
+    .await
+    .unwrap();
+    let pull_request = TriggerConfig::ReporterPullRequest {
+        branches: vec![],
+        actions: vec![],
+        require_approval: true,
+        path_filter: ChangedFilePathFilter::default(),
+    };
+    let trigger = gradient_db::triggers::insert(
+        &conn,
+        gradient_entity::task_trigger::Model {
+            id: TaskTriggerId::now_v7(),
+            task: gradient_fixtures::ids::task_id(),
+            trigger_type: pull_request.trigger_type(),
+            config: pull_request.to_db_json(),
+            active: true,
+            created_at: gradient_fixtures::test_date(),
+            updated_at: gradient_fixtures::test_date(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let pending_approval =
+        gradient_db::rows::insert::<gradient_entity::fork_pull_request_approval::Entity, _>(
+            &conn,
+            gradient_entity::fork_pull_request_approval::Model {
+                id: PullRequestApprovalId::now_v7(),
+                task: gradient_fixtures::ids::task_id(),
+                trigger: trigger.id,
+                pr_number: 7,
+                pr_author: "external".into(),
+                commit_hash: hex::decode(
+                    FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+                )
+                .unwrap(),
+                check_run_id: Some(PENDING_FORK_PULL_REQUEST_APPROVAL_CHECK_RUN_ID),
+                head_repo_clone_url: Some(format!("{}/external/repo", git_host.uri())),
+                created_at: gradient_fixtures::test_date(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let server = TestState::new()
+        .web_db(conn.clone())
+        .worker_db(conn)
+        .cli(|cli| {
+            cli.secrets.crypt_file = crypt;
+            cli.github_app.id = std::num::NonZeroU64::new(1234);
+            cli.github_app.private_key_file = Some("/dev/null".into());
+            cli.github_app.webhook_secret_file = Some(github_app_webhook_secret_file);
+        })
+        .server();
+    ForkPullRequestApprovalTestFixture {
+        db,
+        server,
+        git_host,
+        connection: connection.id,
+        pending_approval: pending_approval.id,
+    }
+}
+
+async fn mount_collaborator_permission_endpoint_mock(
+    git_host: &MockServer,
+    repository_full_name: &str,
+    login: &str,
+    permission: &str,
+    expected_calls: u64,
+) {
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/api/v1/repos/{repository_full_name}/collaborators/{login}/permission"
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "permission": permission })),
+        )
+        .expect(expected_calls)
+        .mount(git_host)
+        .await;
+}
+
+async fn mount_gitea_pull_request_reviews_list_mock_with_expected_call_count(
+    git_host: &MockServer,
+    reviews: Value,
+    expected_calls: u64,
+) {
+    for (page, body) in [("1", reviews), ("2", serde_json::json!([]))] {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/test-org/repo/pulls/7/reviews"))
+            .and(query_param("page", page))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(expected_calls)
+            .mount(git_host)
+            .await;
+    }
+}
+
+fn build_undismissed_approved_pull_request_review_json(
+    user_id: i64,
+    login: &str,
+    commit_hash: &str,
+) -> Value {
+    serde_json::json!({
+        "id": 1,
+        "user": { "id": user_id, "login": login },
+        "state": "APPROVED",
+        "commit_id": commit_hash,
+        "dismissed": false
+    })
+}
+
+fn build_gitea_approved_pull_request_review_webhook_body(
+    reviewer: &str,
+    sender_user_id: i64,
+    commit_hash: &str,
+) -> Vec<u8> {
+    serde_json::json!({
+        "action": "reviewed",
+        "review": { "type": "pull_request_review_approved", "content": "" },
+        "commit_id": commit_hash,
+        "pull_request": { "number": 7 },
+        "repository": { "clone_url": "x", "full_name": "test-org/repo" },
+        "sender": { "id": sender_user_id, "username": reviewer }
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn build_check_run_requested_action_webhook_body(
+    repository_full_name: &str,
+    sender: &str,
+) -> Vec<u8> {
+    serde_json::json!({
+        "action": "requested_action",
+        "requested_action": { "identifier": gradient_ci::APPROVAL_ACTION_ID },
+        "check_run": { "id": PENDING_FORK_PULL_REQUEST_APPROVAL_CHECK_RUN_ID },
+        "repository": { "full_name": repository_full_name },
+        "sender": { "login": sender }
+    })
+    .to_string()
+    .into_bytes()
+}
+
+async fn post_signed_gitea_pull_request_review_webhook_to_connection_url_and_assert_http_200(
+    fixture: &ForkPullRequestApprovalTestFixture,
+    body: Vec<u8>,
+) {
+    fixture
+        .server
+        .post(&format!("/api/v1/hooks/{}", fixture.connection))
+        .add_header("X-Gitea-Event", "pull_request_review")
+        .add_header(
+            "X-Gitea-Signature",
+            gitea_signature(
+                GITEA_WEBHOOK_PLAINTEXT_SECRET_FOR_FORK_PULL_REQUEST_APPROVAL_TESTS,
+                &body,
+            ),
+        )
+        .bytes(body.into())
+        .await
+        .assert_status_ok();
+}
+
+async fn post_signed_github_app_check_run_webhook_and_assert_http_200(
+    fixture: &ForkPullRequestApprovalTestFixture,
+    body: Vec<u8>,
+) {
+    fixture
+        .server
+        .post("/api/v1/hooks/github")
+        .add_header("X-GitHub-Event", "check_run")
+        .add_header(
+            "X-Hub-Signature-256",
+            github_signature(
+                FORK_PULL_REQUEST_APPROVAL_TEST_GITHUB_APP_WEBHOOK_SECRET,
+                &body,
+            ),
+        )
+        .bytes(body.into())
+        .await
+        .assert_status_ok();
+}
+
+async fn assert_no_evaluation_row_and_fork_pull_request_approval_is_unapproved(
+    fixture: ForkPullRequestApprovalTestFixture,
+) {
+    assert!(
+        fixture
+            .db
+            .rows::<gradient_entity::evaluation::Entity>()
+            .await
+            .is_empty()
+    );
+    let approval = fixture
+        .db
+        .find::<gradient_entity::fork_pull_request_approval::Entity>(fixture.pending_approval)
+        .await
+        .unwrap();
+    assert_eq!(
+        (approval.approved_at, approval.approving_maintainer_login),
+        (None, None)
+    );
+    fixture.git_host.verify().await;
+    fixture.db.finish().await;
+}
+
+#[tokio::test]
+async fn gitea_review_webhook_without_commit_approves_pending_fork_commit_named_by_maintainer_newest_approving_review()
+ {
+    let fixture =
+        create_test_database_with_pending_fork_pull_request_approval_and_mock_gitea_web_server()
+            .await;
+    mount_collaborator_permission_endpoint_mock(
+        &fixture.git_host,
+        "test-org/repo",
+        "maintainer",
+        "write",
+        1,
+    )
+    .await;
+    mount_gitea_pull_request_reviews_list_mock_with_expected_call_count(
+        &fixture.git_host,
+        serde_json::json!([build_undismissed_approved_pull_request_review_json(
+            TEST_REVIEWER_USER_ID,
+            "maintainer",
+            FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+        )]),
+        1,
+    )
+    .await;
+
+    post_signed_gitea_pull_request_review_webhook_to_connection_url_and_assert_http_200(
+        &fixture,
+        build_gitea_approved_pull_request_review_webhook_body(
+            "maintainer",
+            TEST_REVIEWER_USER_ID,
+            "",
+        ),
+    )
+    .await;
+
+    let approval = fixture
+        .db
+        .find::<gradient_entity::fork_pull_request_approval::Entity>(fixture.pending_approval)
+        .await
+        .unwrap();
+    assert!(approval.approved_at.is_some());
+    assert_eq!(
+        approval.approving_maintainer_login.as_deref(),
+        Some("maintainer")
+    );
+    fixture.git_host.verify().await;
+    fixture.db.finish().await;
+}
+
+#[tokio::test]
+async fn test_gitea_review_webhook_for_pending_commit_b_approves_nothing_when_api_says_maintainer_approving_review_is_for_commit_a()
+ {
+    let fixture =
+        create_test_database_with_pending_fork_pull_request_approval_and_mock_gitea_web_server()
+            .await;
+    mount_collaborator_permission_endpoint_mock(
+        &fixture.git_host,
+        "test-org/repo",
+        "maintainer",
+        "write",
+        1,
+    )
+    .await;
+    mount_gitea_pull_request_reviews_list_mock_with_expected_call_count(
+        &fixture.git_host,
+        serde_json::json!([build_undismissed_approved_pull_request_review_json(
+            TEST_REVIEWER_USER_ID,
+            "maintainer",
+            OTHER_FORK_COMMIT_HASH_WITH_NO_PENDING_APPROVAL,
+        )]),
+        1,
+    )
+    .await;
+
+    post_signed_gitea_pull_request_review_webhook_to_connection_url_and_assert_http_200(
+        &fixture,
+        build_gitea_approved_pull_request_review_webhook_body(
+            "maintainer",
+            TEST_REVIEWER_USER_ID,
+            FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+        ),
+    )
+    .await;
+
+    assert_no_evaluation_row_and_fork_pull_request_approval_is_unapproved(fixture).await;
+}
+
+#[tokio::test]
+async fn gitea_review_webhook_reviews_api_500_keeps_fork_pull_request_approval_pending() {
+    let fixture =
+        create_test_database_with_pending_fork_pull_request_approval_and_mock_gitea_web_server()
+            .await;
+    mount_collaborator_permission_endpoint_mock(
+        &fixture.git_host,
+        "test-org/repo",
+        "maintainer",
+        "write",
+        1,
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/test-org/repo/pulls/7/reviews"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&fixture.git_host)
+        .await;
+
+    post_signed_gitea_pull_request_review_webhook_to_connection_url_and_assert_http_200(
+        &fixture,
+        build_gitea_approved_pull_request_review_webhook_body(
+            "maintainer",
+            TEST_REVIEWER_USER_ID,
+            FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+        ),
+    )
+    .await;
+
+    assert_no_evaluation_row_and_fork_pull_request_approval_is_unapproved(fixture).await;
+}
+
+async fn assert_delayed_permission_and_reviews_answers_create_no_evaluation_and_keep_fork_pull_request_unapproved(
+    permission_answer_delay: Duration,
+    reviews_answer_delay: Duration,
+) {
+    let fixture =
+        create_test_database_with_pending_fork_pull_request_approval_and_mock_gitea_web_server()
+            .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/repos/test-org/repo/collaborators/maintainer/permission",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "permission": "write" }))
+                .set_delay(permission_answer_delay),
+        )
+        .expect(1)
+        .mount(&fixture.git_host)
+        .await;
+    for (page, body) in [
+        (
+            "1",
+            serde_json::json!([build_undismissed_approved_pull_request_review_json(
+                TEST_REVIEWER_USER_ID,
+                "maintainer",
+                FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+            )]),
+        ),
+        ("2", serde_json::json!([])),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/test-org/repo/pulls/7/reviews"))
+            .and(query_param("page", page))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(body)
+                    .set_delay(reviews_answer_delay),
+            )
+            .mount(&fixture.git_host)
+            .await;
+    }
+
+    post_signed_gitea_pull_request_review_webhook_to_connection_url_and_assert_http_200(
+        &fixture,
+        build_gitea_approved_pull_request_review_webhook_body(
+            "maintainer",
+            TEST_REVIEWER_USER_ID,
+            FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+        ),
+    )
+    .await;
+
+    assert_no_evaluation_row_and_fork_pull_request_approval_is_unapproved(fixture).await;
+}
+
+#[tokio::test]
+async fn gitea_review_webhook_reviews_api_5_second_delay_keeps_fork_pull_request_approval_pending_without_starting_evaluation()
+ {
+    assert_delayed_permission_and_reviews_answers_create_no_evaluation_and_keep_fork_pull_request_unapproved(
+        Duration::ZERO,
+        Duration::from_secs(5),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn gitea_review_webhook_collaborator_permission_check_timeout_keeps_fork_pull_request_approval_pending()
+ {
+    assert_delayed_permission_and_reviews_answers_create_no_evaluation_and_keep_fork_pull_request_unapproved(
+        Duration::from_secs(5),
+        Duration::ZERO,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn approvals_from_user_without_push_permission_stay_pending() {
+    let fixture =
+        create_test_database_with_pending_fork_pull_request_approval_and_mock_gitea_web_server()
+            .await;
+    mount_collaborator_permission_endpoint_mock(
+        &fixture.git_host,
+        "test-org/repo",
+        "outsider",
+        "read",
+        2,
+    )
+    .await;
+    mount_gitea_pull_request_reviews_list_mock_with_expected_call_count(
+        &fixture.git_host,
+        serde_json::json!([build_undismissed_approved_pull_request_review_json(
+            TEST_REVIEW_WEBHOOK_SENDER_WITHOUT_PUSH_PERMISSION_USER_ID,
+            "outsider",
+            FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+        )]),
+        0,
+    )
+    .await;
+
+    post_signed_gitea_pull_request_review_webhook_to_connection_url_and_assert_http_200(
+        &fixture,
+        build_gitea_approved_pull_request_review_webhook_body(
+            "outsider",
+            TEST_REVIEW_WEBHOOK_SENDER_WITHOUT_PUSH_PERMISSION_USER_ID,
+            FORK_PULL_REQUEST_COMMIT_HASH_WITH_PENDING_MAINTAINER_APPROVAL,
+        ),
+    )
+    .await;
+    post_signed_github_app_check_run_webhook_and_assert_http_200(
+        &fixture,
+        build_check_run_requested_action_webhook_body("test-org/repo", "outsider"),
+    )
+    .await;
+
+    assert_no_evaluation_row_and_fork_pull_request_approval_is_unapproved(fixture).await;
+}
+
+#[tokio::test]
+async fn check_run_approval_click_from_writer_of_other_repository_keeps_approval_pending_and_starts_no_evaluation()
+ {
+    let fixture =
+        create_test_database_with_pending_fork_pull_request_approval_and_mock_gitea_web_server()
+            .await;
+    mount_collaborator_permission_endpoint_mock(
+        &fixture.git_host,
+        "other-org/repo",
+        "maintainer",
+        "write",
+        0,
+    )
+    .await;
+
+    post_signed_github_app_check_run_webhook_and_assert_http_200(
+        &fixture,
+        build_check_run_requested_action_webhook_body("other-org/repo", "maintainer"),
+    )
+    .await;
+
+    assert_no_evaluation_row_and_fork_pull_request_approval_is_unapproved(fixture).await;
 }

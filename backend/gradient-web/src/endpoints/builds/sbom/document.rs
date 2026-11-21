@@ -219,7 +219,7 @@ fn properties(component: &Component<'_>) -> Vec<Value> {
         "nix:store_path",
         format!("/nix/store/{}", component.bom_ref()),
     )];
-    if let Some(size) = component.cached.and_then(|c| c.nar_size) {
+    if let Some(size) = component.cached.map(|c| c.nar_size) {
         properties.push(property("nix:nar_size", size.to_string()));
     }
     properties.extend(
@@ -232,7 +232,7 @@ fn properties(component: &Component<'_>) -> Vec<Value> {
 }
 
 fn nar_hash_hex(path: &MCachedPath) -> Option<String> {
-    let normalized = normalize_nar_hash(path.nar_hash.as_deref()?);
+    let normalized = normalize_nar_hash(&path.nar_hash);
     if !normalized.starts_with("sha256:") {
         return None;
     }
@@ -289,9 +289,10 @@ mod tests {
     fn cached(hash: &str, package: &str, references: &[String]) -> MCachedPath {
         MCachedPath {
             hash: hash.into(),
+            nar_object_storage_key: hash.into(),
             package: package.into(),
-            nar_hash: Some(format!("sha256:{}", "0".repeat(52))),
-            nar_size: Some(4096),
+            nar_hash: format!("sha256:{}", "0".repeat(52)),
+            nar_size: 4096,
             references: Some(references.join(" ")),
             ..Default::default()
         }

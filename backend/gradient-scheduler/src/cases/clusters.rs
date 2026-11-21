@@ -37,7 +37,7 @@ const SEEDED_MEMBERS: [&str; 2] = ["member-0", "member-1"];
 async fn k01_members_join_the_book_and_are_not_handed_out_as_single_jobs() {
     let (c, e1, e2) = cluster_ids();
     let case = SchedulerCase::start(shape().cl2(c, e1, e2, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let (eval, build) = (eval_key(e1), case.key(A).await);
 
     case.assign_queued_evals().await;
@@ -93,8 +93,8 @@ async fn k02_a_planning_pass_claims_the_attempt_and_both_member_rows() {
         config.scheduler.cluster_prepare_timeout_secs = seconds(30);
     })
     .await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let (eval, build) = (eval_key(e1), case.key(A).await);
 
     case.assign_queued_evals().await;
@@ -374,8 +374,8 @@ async fn k05_a_prepare_that_times_out_is_closed_by_the_next_planning_pass() {
         config.scheduler.cluster_prepare_timeout_secs = seconds(1);
     })
     .await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let (eval, build) = (eval_key(e1), case.key(A).await);
 
     case.assign_queued_evals().await;
@@ -450,8 +450,8 @@ async fn k05_a_prepare_that_times_out_is_closed_by_the_next_planning_pass() {
 async fn k07_a_member_open_as_a_single_assignment_makes_the_whole_claim_lose() {
     let (c, e1, e2) = cluster_ids();
     let case = SchedulerCase::start(shape().cl2(c, e1, e2, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let (eval, build) = (eval_key(e1), case.key(A).await);
 
     case.assign_queued_evals().await;
@@ -501,10 +501,10 @@ async fn k08_an_attempt_of_a_second_instance_makes_the_local_claim_insert_nothin
     let (c, e1, e2) = cluster_ids();
     let case = SchedulerCase::start(shape().cl2(c, e1, e2, A, A_OUT)).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
-    second.connect(W3, w_all(), &[]).await;
-    second.connect(W4, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
+    second.connect(W3, w_all()).await;
+    second.connect(W4, w_all()).await;
     let (eval, build) = (eval_key(e1), case.key(A).await);
 
     case.assign_queued_evals().await;
@@ -999,8 +999,8 @@ async fn k27_a_cluster_created_long_ago_but_only_now_able_to_start_is_not_aged_a
         config.scheduler.cluster_reserve_after_secs = seconds(600);
     })
     .await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let d = case.key(D).await;
 
     case.assign_queued_evals().await;
@@ -1127,8 +1127,8 @@ async fn k29_startup_recovery_closes_an_unstarted_attempt_as_prepare_failed() {
 async fn k30_a_split_cluster_shrinks_to_the_free_seats() {
     let (c, e1, _) = cluster_ids();
     let case = SchedulerCase::start(split_of_three(c, e1)).await;
-    case.connect(W1, w_network_eval(), &[]).await;
-    case.connect(W2, w_eval(), &[]).await;
+    case.connect(W1, w_network_eval()).await;
+    case.connect(W2, w_eval()).await;
     case.assign_queued_evals().await;
     assert_eq!(
         present_members(&case, c).await.len(),
@@ -1161,7 +1161,7 @@ async fn k30_a_split_cluster_shrinks_to_the_free_seats() {
 async fn k31_a_split_cluster_with_one_free_seat_dissolves_at_once() {
     let (c, e1, _) = cluster_ids();
     let case = SchedulerCase::start(split_of_three(c, e1)).await;
-    case.connect(W1, w_eval(), &[]).await;
+    case.connect(W1, w_eval()).await;
     case.assign_queued_evals().await;
     case.idle(W1, JobKind::Flake).await;
     case.check("step 1").await;
@@ -1214,8 +1214,8 @@ async fn k32_an_oldest_cluster_pinned_to_an_offline_worker_lets_a_younger_one_re
         config.scheduler.cluster_reserve_after_secs = seconds(1);
     })
     .await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
 
     case.assign_queued_evals().await;
     case.admit_startable_moves().await;
@@ -1292,8 +1292,8 @@ async fn k33_a_resolve_retried_after_its_write_committed_still_requeues_the_clus
 async fn k34_a_split_cluster_retried_after_its_place_deadline_is_not_dissolved() {
     let (c, e1, _) = cluster_ids();
     let case = SchedulerCase::start(split_of_three(c, e1)).await;
-    case.connect(W1, w_network_eval(), &[]).await;
-    case.connect(W2, w_eval(), &[]).await;
+    case.connect(W1, w_network_eval()).await;
+    case.connect(W2, w_eval()).await;
     case.assign_queued_evals().await;
     case.idle(W1, JobKind::Flake).await;
     case.idle(W2, JobKind::Flake).await;
@@ -1393,8 +1393,8 @@ fn seconds(secs: u64) -> NonZeroU64 {
 }
 
 async fn claim(case: &SchedulerCase, cluster: ClusterJobId, e1: EvaluationId) -> Claimed {
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     case.assign_queued_evals().await;
     case.admit_startable_moves().await;
     case.idle(W1, JobKind::Flake).await;

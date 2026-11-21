@@ -36,6 +36,7 @@ use super::refusal::ProjectRefusal;
 use crate::endpoints::worker_setup::WorkerRegistrationResponse;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::password_hashing_and_wrong_sign_in_attempts::compute_argon2_hash_for_new_password_on_blocking_pool_with_limited_semaphore_permit;
 use crate::refusal::SharedRefusal;
 use crate::scope::{Member, ProjectScope, Requires, can};
 
@@ -279,7 +280,11 @@ pub async fn post_project_worker(
     );
     let worker_id_str = registration.id.clone();
 
-    let token_hash = password_auth::generate_hash(&token);
+    let token_hash =
+        compute_argon2_hash_for_new_password_on_blocking_pool_with_limited_semaphore_permit(
+            token.clone(),
+        )
+        .await?;
     let token_encrypted = encrypt_for_dialing(
         &state.config.secrets.crypt_file,
         body.url.as_deref(),
@@ -330,12 +335,8 @@ pub async fn post_project_worker(
     Ok(ok_json(registration))
 }
 
-/// Open-mode workers (`authorized_peers == None`) are matching any project. Restricted workers are
-/// matching only the projects whose token they presented in the handshake.
 fn worker_live_for_project(info: &WorkerInfo, project: ProjectId) -> bool {
-    info.authorized_peers
-        .as_ref()
-        .is_none_or(|peers| peers.contains(&project))
+    info.project_access.contains(&project)
 }
 
 pub(crate) fn live_workers(
@@ -662,13 +663,6 @@ pub async fn patch_project_worker(
     }
     gradient_db::rows::update::<EWorkerRegistration, _>(&db.web_db, active_model).await?;
 
-    if let Some(false) = body.active {
-        let project_set = std::collections::HashSet::from([project.id]);
-        scheduler
-            .abort_project_jobs_on_worker(&worker_id, &project_set)
-            .await;
-    }
-
     if body.active.is_some() || caps_changed {
         scheduler.request_reauth(&worker_id).await;
     }
@@ -734,11 +728,6 @@ pub async fn delete_project_worker(
     )
     .await?;
 
-    let project_set = std::collections::HashSet::from([project.id]);
-    scheduler
-        .abort_project_jobs_on_worker(&worker_id, &project_set)
-        .await;
-
     scheduler.request_reauth(&worker_id).await;
     scheduler.connection_failures.clear(&worker_id);
 
@@ -755,6 +744,7 @@ pub async fn delete_project_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_pool::ProjectAccess;
     use gradient_scheduler::connection_failures::ConnectionDirection;
     use std::collections::HashSet;
 
@@ -768,7 +758,9 @@ mod tests {
             assigned_job_count: 0,
             assigned_build_count: 0,
             draining: false,
-            authorized_peers: authorized.map(|v| v.into_iter().collect::<HashSet<_>>()),
+            project_access: authorized.map_or(ProjectAccess::AllProjects, |projects| {
+                ProjectAccess::OnlyListedProjects(projects.into_iter().collect::<HashSet<_>>())
+            }),
             cpu_usage_pct: None,
             ram_free_mb: None,
             ram_total_mb: 0,

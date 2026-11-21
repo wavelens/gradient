@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use gradient_pool::WorkerCaps;
 use gradient_pool::score::{InstanceContext, policy_for};
+use gradient_pool::{ProjectAccess, WorkerCaps};
 use gradient_scheduler::jobs::{JobTracker, PendingBuildJob, PendingJob, build_job_key};
 use gradient_scheduler::pending_job_input_store_paths::PendingJobInputStorePath;
 use gradient_types::ids::{DerivationBuildId, DerivationId, EvaluationId, ProjectId};
@@ -248,7 +248,7 @@ fn run_request_rounds_for_workers_and_return_elapsed_time_peak_allocation_growth
         for worker in 0..worker_count {
             let assignment = tracker.take_best_of_kind(
                 &worker_ids[worker],
-                None,
+                &ProjectAccess::AllProjects,
                 Some(&caps[worker]),
                 Some(&filters[worker]),
                 &JobKind::Build,

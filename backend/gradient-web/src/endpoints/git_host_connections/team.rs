@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::repository_grant_list_create_delete::{
+    self, CreateRepositoryGrantRequest, RepositoryGrantResponse,
+};
 use super::{
     CreateGitHostConnectionRequest, GitHostConnectionReaderScope, GitHostConnectionResponse,
     GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
@@ -129,7 +132,7 @@ pub async fn get_team_git_host_connection(
     operation_id = "patchTeamGitHostConnection",
     tag = "git-host-connections",
     summary = "Update team git host connection",
-    description = "Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Requests for GitHub App connections and for connections that declarative state manages fail.",
+    description = "Update a connection to a Git host. Omitted fields keep their value. Use an empty `access_token` or `base_url` to clear that field. Changes to the scheme, host, or port of `base_url` remove the stored access token, its refresh token, its expiry, and the webhook secret. Changes to `git_host_type` remove those values too. Requests store `access_token` or `secret` that they carry. Connections that receive events and have no new `secret` get a new webhook secret. Responses show that secret once in `generated_secret`. Requests for GitHub App connections and for connections that declarative state manages fail.",
     params(TeamPath, ("id" = GitHostConnectionId, Path)),
     request_body = PatchGitHostConnectionRequest,
     responses((status = OK, description = "Updated Connection", body = GitHostConnectionResponse), WebError)
@@ -179,6 +182,93 @@ pub async fn delete_team_git_host_connection(
         &db.web_db,
         Owner::Team(team.id),
         params.param("id")?,
+        &audit,
+    )
+    .await?;
+    Ok(ok_json(true))
+}
+
+#[utoipa::path(
+    get,
+    path = "/teams/{team}/git-host-connections/{id}/repository-grants",
+    operation_id = "listTeamGitHostConnectionRepositoryGrants",
+    tag = "git-host-connections",
+    summary = "List repository grants of a team git host connection",
+    description = "List the repositories where each team project can use this team connection. Grants without `repository_name` apply to all repositories in `repository_owner`. Only a team Admin can see the list.",
+    params(TeamPath, ("id" = GitHostConnectionId, Path)),
+    responses((status = OK, description = "Repository Grants", body = Vec<RepositoryGrantResponse>), WebError)
+)]
+pub async fn list_team_git_host_connection_repository_grants(
+    TeamScope {
+        team, db, params, ..
+    }: TeamScope<Admin>,
+) -> WebResult<Json<BaseResponse<Vec<RepositoryGrantResponse>>>> {
+    Ok(ok_json(
+        repository_grant_list_create_delete::list(
+            &db.web_db,
+            Owner::Team(team.id),
+            params.param("id")?,
+        )
+        .await?,
+    ))
+}
+
+#[utoipa::path(
+    put,
+    path = "/teams/{team}/git-host-connections/{id}/repository-grants",
+    operation_id = "createTeamGitHostConnectionRepositoryGrant",
+    tag = "git-host-connections",
+    summary = "Create repository grant for a team git host connection",
+    description = "Tasks of `project` can use this team connection for repository `repository_owner/repository_name`. The `project` must belong to the team. Omit `repository_name` to grant all repositories of the owner. Both parts stay lowercase in Gradient. Existing grants get a 409 response.",
+    params(TeamPath, ("id" = GitHostConnectionId, Path)),
+    request_body = CreateRepositoryGrantRequest,
+    responses((status = OK, description = "Created a repository grant.", body = RepositoryGrantResponse), WebError)
+)]
+pub async fn create_team_git_host_connection_repository_grant_for_project(
+    TeamScope {
+        team,
+        user,
+        db,
+        params,
+        ..
+    }: TeamScope<AdminUnmanaged>,
+    audit: Audit,
+    JsonBody(body): JsonBody<CreateRepositoryGrantRequest>,
+) -> WebResult<Json<BaseResponse<RepositoryGrantResponse>>> {
+    Ok(ok_json(
+        repository_grant_list_create_delete::create(
+            &db.web_db,
+            Owner::Team(team.id),
+            params.param("id")?,
+            user.id,
+            body,
+            &audit,
+        )
+        .await?,
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/teams/{team}/git-host-connections/{id}/repository-grants/{grant}",
+    operation_id = "deleteTeamGitHostConnectionRepositoryGrant",
+    tag = "git-host-connections",
+    summary = "Delete repository grant of a team git host connection",
+    description = "Delete repository permissions. Project tasks can no longer use connections to that repository.",
+    params(TeamPath, ("id" = GitHostConnectionId, Path), ("grant" = GitHostConnectionRepositoryGrantId, Path)),
+    responses((status = OK, description = "Deleted", body = bool, content_type = "application/json"), WebError)
+)]
+pub async fn delete_team_git_host_connection_repository_grant(
+    TeamScope {
+        team, db, params, ..
+    }: TeamScope<AdminUnmanaged>,
+    audit: Audit,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    repository_grant_list_create_delete::delete(
+        &db.web_db,
+        Owner::Team(team.id),
+        params.param("id")?,
+        params.param("grant")?,
         &audit,
     )
     .await?;

@@ -110,7 +110,7 @@ async fn follow_again(
             inbox.channels,
             inbox.channel_read_totals_watch,
             mux,
-            guest.dir().to_owned(),
+            gradient_vm::guest_supervisor_directory_path(guest.id()),
         ),
         uploads: GuestUploads::new(
             guest.dir().join("outputs"),
@@ -118,7 +118,7 @@ async fn follow_again(
         ),
         keep_vm_running: KeepVmRunning::resumed(inbox.keep_vm_running, guest.dir()),
         kernel_out_of_memory_kill_log_scanner: GuestKernelOutOfMemoryKillLogScanner::new(
-            guest.dir(),
+            &gradient_vm::guest_supervisor_directory_path(guest.id()),
             guest.state().size.memory_mb,
         ),
     };

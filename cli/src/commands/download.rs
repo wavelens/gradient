@@ -5,23 +5,27 @@
  */
 
 use crate::commands::attr_spec;
+use crate::download_file_path_and_write::{
+    DownloadDestination, checked_file_path_in_directory_from_server_file_name,
+    create_download_directory_or_verify_existing_directory,
+    write_downloaded_byte_chunks_to_destination,
+};
 use crate::error::{CliError, FileAction};
 use crate::input::{
     client_from_config, evaluation_uuid_from_reference, flush_stdout, selected_task,
 };
 use crate::output::{ExitKind, Output};
-use connector::ConnectorError;
 use connector::api::{ArtefactTree, ProductArtefact};
 use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
-use futures::{Stream, StreamExt, pin_mut};
-use std::io::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub async fn handle_download(
     flake_ref: Option<String>,
     evaluation: Option<TaskOrEvaluationReference>,
     products: Option<String>,
-    out_dir_arg: Option<String>,
+    out_dir_arg: Option<PathBuf>,
+    replace_existing: bool,
     out: Output,
 ) {
     if out.is_json() && flake_ref.is_none() && products.is_none() {
@@ -69,21 +73,21 @@ pub async fn handle_download(
         return;
     }
 
-    let out_dir = out_dir_arg
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().expect("read current directory"));
+    let out_dir =
+        out_dir_arg.unwrap_or_else(|| std::env::current_dir().expect("read current directory"));
 
     if !out_dir.exists() {
         std::fs::create_dir_all(&out_dir)
             .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Create, &out_dir, e)));
     }
 
-    let destinations =
-        build_product_download_destination_path_with_collision_subdirectory(&flat, &selection);
+    let destinations = build_product_download_destination_path_with_collision_subdirectory(
+        &flat, &selection, &out_dir,
+    )
+    .unwrap_or_else(|e| out.fail(e));
     let mut downloaded: Vec<String> = Vec::new();
 
-    for (idx, relative_dest) in selection.into_iter().zip(destinations) {
+    for (idx, dest) in selection.into_iter().zip(destinations) {
         let p = &flat[idx];
         let display_name = product_filename(p.product);
         out.human(format!("Downloading {}...", display_name));
@@ -98,18 +102,21 @@ pub async fn handle_download(
                 format!("Failed to download {}: {}", display_name, e),
             ),
         };
-        let dest = out_dir.join(relative_dest);
         if let Some(parent) = dest.parent()
-            && !parent.as_os_str().is_empty()
+            && parent != out_dir
         {
-            std::fs::create_dir_all(parent)
-                .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Create, parent, e)));
+            create_download_directory_or_verify_existing_directory(parent)
+                .unwrap_or_else(|e| out.fail(e));
         }
-        write_downloaded_byte_chunks_to_file(chunks, &dest)
+        let destination = DownloadDestination::FileInServerNamedDirectory {
+            path: dest,
+            replace_existing,
+        };
+        write_downloaded_byte_chunks_to_destination(chunks, &destination)
             .await
             .unwrap_or_else(|e| out.fail(e));
-        out.human(format!("  wrote {}", dest.display()));
-        downloaded.push(dest.display().to_string());
+        out.human(format!("  wrote {}", destination.path().display()));
+        downloaded.push(destination.path().display().to_string());
     }
 
     out.ok(&downloaded);
@@ -139,27 +146,6 @@ fn flatten_products(tree: &ArtefactTree) -> Vec<FlatProduct<'_>> {
     out
 }
 
-pub(crate) async fn write_downloaded_byte_chunks_to_file(
-    chunks: impl Stream<Item = Result<impl AsRef<[u8]>, ConnectorError>>,
-    dest: &Path,
-) -> Result<(), CliError> {
-    let mut file =
-        std::fs::File::create(dest).map_err(|e| CliError::file(FileAction::Write, dest, e))?;
-    pin_mut!(chunks);
-    let written = async {
-        while let Some(chunk) = chunks.next().await {
-            file.write_all(chunk?.as_ref())
-                .map_err(|e| CliError::file(FileAction::Write, dest, e))?;
-        }
-        Ok(())
-    }
-    .await;
-    if written.is_err() {
-        let _ = std::fs::remove_file(dest);
-    }
-    written
-}
-
 pub(crate) fn product_filename(p: &ProductArtefact) -> String {
     Path::new(&p.path)
         .file_name()
@@ -171,43 +157,34 @@ pub(crate) fn product_filename(p: &ProductArtefact) -> String {
 fn build_product_download_destination_path_with_collision_subdirectory(
     flat: &[FlatProduct<'_>],
     selection: &[usize],
-) -> Vec<PathBuf> {
-    let names: Vec<PathBuf> = selection
+    out_dir: &Path,
+) -> Result<Vec<PathBuf>, CliError> {
+    let names: Vec<String> = selection
         .iter()
-        .map(|&idx| safe_relative_name(&product_filename(flat[idx].product)))
+        .map(|&idx| product_filename(flat[idx].product))
         .collect();
     names
         .iter()
         .zip(selection)
         .map(|(name, &idx)| {
-            if names.iter().filter(|other| *other == name).count() > 1 {
-                safe_relative_name(flat[idx].attr).join(name)
+            let directory = if names.iter().filter(|other| *other == name).count() > 1 {
+                checked_file_path_in_directory_from_server_file_name(out_dir, flat[idx].attr)?
             } else {
-                name.clone()
-            }
+                out_dir.to_path_buf()
+            };
+            checked_file_path_in_directory_from_server_file_name(&directory, name)
         })
         .collect()
 }
 
-pub(crate) fn safe_relative_name(name: &str) -> PathBuf {
-    let buf: PathBuf = Path::new(name)
-        .components()
-        .filter_map(|comp| match comp {
-            std::path::Component::Normal(c) => Some(c),
-            _ => None,
-        })
-        .collect();
-    if buf.as_os_str().is_empty() {
-        PathBuf::from("download")
-    } else {
-        buf
-    }
-}
-
+#[expect(
+    clippy::disallowed_macros,
+    reason = "selection prompt has no server data"
+)]
 fn interactive_select(flat: &[FlatProduct<'_>], out: Output) -> Vec<usize> {
-    println!("\nAvailable artefacts:");
+    out.human("\nAvailable artefacts:");
     for (i, p) in flat.iter().enumerate() {
-        println!(
+        out.human(format!(
             "  {:>3}. {} / {} / {}{}",
             i + 1,
             p.attr,
@@ -217,7 +194,7 @@ fn interactive_select(flat: &[FlatProduct<'_>], out: Output) -> Vec<usize> {
                 .size
                 .map(|s| format!(" ({})", human_size(s)))
                 .unwrap_or_default(),
-        );
+        ));
     }
     print!(
         "\nSelect products (comma-separated 1-{}, ranges like 1-3, or 'all'): ",
@@ -426,36 +403,32 @@ mod tests {
     }
 
     #[test]
-    fn safe_relative_name_stays_inside_the_target_directory() {
-        assert_eq!(safe_relative_name("a.tgz"), PathBuf::from("a.tgz"));
-        assert_eq!(
-            safe_relative_name("/etc/passwd"),
-            PathBuf::from("etc/passwd")
-        );
-        assert_eq!(
-            safe_relative_name("../../.bashrc"),
-            PathBuf::from(".bashrc")
-        );
-        assert_eq!(safe_relative_name("a/./../b"), PathBuf::from("a/b"));
-        assert_eq!(safe_relative_name(".."), PathBuf::from("download"));
-    }
-
-    #[test]
     fn products_with_the_same_file_name_go_to_their_entry_point_directory() {
         let mut tree = make_tree();
         tree.entry_points[1].outputs[0].products[0].path = "/p/my-app-1.0.tar.gz".into();
         let flat = flatten_products(&tree);
 
+        let out_dir = Path::new("out");
         assert_eq!(
-            build_product_download_destination_path_with_collision_subdirectory(&flat, &[0, 1]),
+            build_product_download_destination_path_with_collision_subdirectory(
+                &flat,
+                &[0, 1],
+                out_dir
+            )
+            .unwrap(),
             vec![
-                PathBuf::from("packages.x86_64-linux.my-app/my-app-1.0.tar.gz"),
-                PathBuf::from("packages.x86_64-linux.cli/my-app-1.0.tar.gz"),
+                PathBuf::from("out/packages.x86_64-linux.my-app/my-app-1.0.tar.gz"),
+                PathBuf::from("out/packages.x86_64-linux.cli/my-app-1.0.tar.gz"),
             ]
         );
         assert_eq!(
-            build_product_download_destination_path_with_collision_subdirectory(&flat, &[1]),
-            vec![PathBuf::from("my-app-1.0.tar.gz")]
+            build_product_download_destination_path_with_collision_subdirectory(
+                &flat,
+                &[1],
+                out_dir
+            )
+            .unwrap(),
+            vec![PathBuf::from("out/my-app-1.0.tar.gz")]
         );
     }
 }

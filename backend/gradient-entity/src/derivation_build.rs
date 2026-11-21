@@ -37,8 +37,6 @@ pub struct Model {
     pub wanted: bool,
     pub prioritized: bool,
     pub attempt: i32,
-    pub timeout_secs: Option<i64>,
-    pub max_silent_secs: Option<i64>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub queued_at: Option<NaiveDateTime>,

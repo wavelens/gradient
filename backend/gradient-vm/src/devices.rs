@@ -235,6 +235,7 @@ mod tests {
     fn gpus(unbound: Vec<&'static str>) -> DeviceInventory {
         let devices = [DeviceConfig {
             name: "gpu:h100".into(),
+            projects: gradient_wire::host_resource_project_access::WorkerResourceProjectAccess::EveryProject,
             vfio: vec!["0000:17:00.0".into(), "0000:18:00.0".into()],
             dev: None,
             usb: None,

@@ -376,8 +376,14 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.ok(&sessions);
                         for session in &sessions.items {
                             let current = if session.current { " (current)" } else { "" };
+                            let cli_browser_sign_in_session_suffix =
+                                if session.is_cli_device_sign_in_session {
+                                    " (CLI Sign-In)"
+                                } else {
+                                    ""
+                                };
                             out.human(format!(
-                                "{}: {} {}{current}",
+                                "{}: {} {}{current}{cli_browser_sign_in_session_suffix}",
                                 session.id,
                                 session.last_used_at,
                                 session.user_agent.as_deref().unwrap_or("-"),

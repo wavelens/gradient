@@ -17,20 +17,18 @@ use crate::ids::CachedPathId;
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: CachedPathId,
-    #[sea_orm(unique)]
     pub hash: String,
+    pub nar_object_storage_key: String,
     pub package: String,
-    pub file_hash: Option<String>,
+    pub file_hash: String,
     pub file_size: Option<i64>,
-    pub nar_size: Option<i64>,
-    pub nar_hash: Option<String>,
+    pub nar_size: i64,
+    pub nar_hash: String,
     pub ca: Option<String>,
     pub references: Option<String>,
     pub deriver: Option<String>,
     pub debug_info_indexed: bool,
-    /// Every commit is writing `true`. A `false` row is older than upload admission and is healed
-    /// once served.
-    pub confirmed: bool,
+    pub server_computed_hashes_and_sizes: bool,
     pub created_at: NaiveDateTime,
 }
 
@@ -41,18 +39,32 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Model {
     pub fn as_store_path(&self) -> crate::StorePath {
-        crate::StorePath::from_stored(self.hash.clone(), self.package.clone())
+        crate::StorePath::from_hash_and_name_without_validation(
+            self.hash.clone(),
+            self.package.clone(),
+        )
     }
 
     pub fn store_path(&self) -> String {
         self.as_store_path().full()
     }
 
-    pub fn is_fully_cached(&self) -> bool {
-        self.file_hash.is_some()
+    pub fn is_server_verified_and_matches_nar_hash_references_text_and_content_address(
+        &self,
+        nar_hash: &str,
+        references_text: &str,
+        ca: Option<&str>,
+    ) -> bool {
+        self.server_computed_hashes_and_sizes
+            && self.nar_hash == nar_hash
+            && self.references.as_deref().unwrap_or_default() == references_text
+            && self.ca.as_deref() == ca
     }
+}
 
-    pub fn is_stored(&self) -> bool {
-        self.confirmed && self.is_fully_cached()
-    }
+pub fn join_sorted_deduplicated_references_with_spaces(references: &[String]) -> String {
+    let mut sorted: Vec<&str> = references.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    sorted.dedup();
+    sorted.join(" ")
 }

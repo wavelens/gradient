@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use gradient_db::WorkerDb;
 use gradient_db::evaluations::watchdog::LostCompletion;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_graph::{Graph, RequeueScope, Transition};
+use gradient_graph::{ConsistencyCheckDemotionFailed, Graph, RequeueScope, Transition};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::{DerivationBuildId, EvaluationId, RuntimeConfig};
 use gradient_util::supervision::{Pass, PassError};
@@ -62,8 +62,23 @@ impl Pass for GraphConsistency {
     }
 }
 
-async fn consistency_check_pass(graph: &Graph) -> anyhow::Result<()> {
-    let report = graph.run_consistency_checks().await?;
+pub(crate) async fn consistency_check_pass(graph: &Graph) -> anyhow::Result<()> {
+    let consistency = graph.run_consistency_checks().await;
+    let consistency_report = match &consistency {
+        Ok(report) => Some(*report),
+        Err(e) => e
+            .downcast_ref::<ConsistencyCheckDemotionFailed>()
+            .and_then(|failed| failed.consistency_report_after_failed_demotion),
+    };
+    if let Some(report) = &consistency_report {
+        log_periodic_graph_consistency_report(report);
+    }
+    consistency.map(drop)
+}
+
+fn log_periodic_graph_consistency_report(
+    report: &gradient_db::graph::consistency::ConsistencyReport,
+) {
     if report.total() > 0 {
         warn!(
             counter_drift = report.counter_drift,
@@ -82,8 +97,6 @@ async fn consistency_check_pass(graph: &Graph) -> anyhow::Result<()> {
     } else {
         info!(scope = report.repair_scope, "graph consistency check clean");
     }
-
-    Ok(())
 }
 
 pub(crate) struct TransientRetryRequeue {
@@ -498,46 +511,6 @@ pub(crate) async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyh
     if repaired > 0 {
         scheduler.build_kick.kick();
     }
-    Ok(())
-}
-
-pub(crate) struct RamShortageSweep {
-    pub(crate) scheduler: Arc<Scheduler>,
-}
-
-impl Pass for RamShortageSweep {
-    const NAME: &'static str = "ram-shortage-sweep";
-    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
-
-    fn period(&self) -> Duration {
-        super::EVAL_WATCHDOG_TICK
-    }
-
-    async fn run(&self) -> Result<(), PassError> {
-        ram_shortage_pass(&self.scheduler).await.map_err(Into::into)
-    }
-}
-
-async fn ram_shortage_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    if scheduler.draining.is_draining().await {
-        return Ok(());
-    }
-
-    let shortages = scheduler.lasting_ram_shortages().await;
-    if shortages.is_empty() {
-        return Ok(());
-    }
-
-    warn!(
-        shared_builds = shortages.len(),
-        grace_secs = crate::ram_shortage::RAM_SHORTAGE_GRACE.as_secs(),
-        "queued builds need more RAM than any connected worker has free - failing them"
-    );
-    scheduler
-        .graph
-        .transition(Transition::NotEnoughResources { shortages })
-        .await?;
-    scheduler.build_kick.kick();
     Ok(())
 }
 

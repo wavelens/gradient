@@ -5,7 +5,7 @@
  */
 
 use super::refusal::TeamRefusal;
-use super::workers::withdraw_team_workers;
+use super::workers::reauth_team_workers;
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
@@ -27,7 +27,7 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -112,7 +112,7 @@ pub fn builtin_role_name(id: RoleId) -> Option<&'static str> {
         .find(|name| builtin_role_id(name) == Some(id))
 }
 
-pub(crate) async fn lookup_owner_team_id_and_check_user_is_member_or_admin(
+pub(crate) async fn lookup_team_id_by_name_if_user_is_team_admin_or_superuser(
     db: &gradient_db::WebDb,
     user: &MUser,
     name: &str,
@@ -121,11 +121,9 @@ pub(crate) async fn lookup_owner_team_id_and_check_user_is_member_or_admin(
         .await?
         .ok_or_else(|| WebError::not_found(Resource::Team))?;
     if !user.superuser
-        && gradient_db::teams::team_role_of(db, team.id, user.id)
-            .await?
-            .is_none()
+        && gradient_db::teams::team_role_of(db, team.id, user.id).await? != Some(TeamRole::Admin)
     {
-        return Err(crate::refusal::SharedRefusal::NotMemberOfOwnerTeam.into());
+        return Err(crate::refusal::SharedRefusal::NotAllowedToSetOwnerTeam.into());
     }
     Ok(team.id)
 }
@@ -389,14 +387,9 @@ pub async fn delete_team(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let workers = gradient_db::teams::team_worker_ids(&db.web_db, team.id).await?;
-    let projects: HashSet<ProjectId> =
-        gradient_db::teams::workers::projects_granted_with_workers(&db.web_db, team.id)
-            .await?
-            .into_iter()
-            .collect();
     let team_id = team.id;
     gradient_db::teams::delete(&db.web_db, team).await?;
-    withdraw_team_workers(&scheduler, &workers, &projects).await;
+    reauth_team_workers(&scheduler, &workers).await;
 
     audit
         .write(

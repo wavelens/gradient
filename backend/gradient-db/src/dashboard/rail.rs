@@ -74,15 +74,11 @@ crate::sql_fn! {
 }
 
 crate::sql! {
-    RAIL_CACHES = "SELECT c.name, c.display_name, \
+    RAIL_CACHES = concat!("SELECT c.name, c.display_name, \
             EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id) AS starred, \
             (SELECT count(*) FROM cached_path_signature cs WHERE cs.cache = c.id)::bigint AS nar_count \
-        FROM cache c WHERE c.created_by = $1 \
-            OR EXISTS (SELECT 1 FROM cache_access cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
-            OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_access pu ON pu.project = pc.project \
-                WHERE pc.cache = c.id AND pu.\"user\" = $1) \
-            OR EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id AND c.public) \
-        ORDER BY starred DESC, lower(c.display_name), c.name",
+        FROM cache c WHERE ", cache_readable!("false"), " \
+        ORDER BY starred DESC, lower(c.display_name), c.name"),
         params = [UserId],
         tier = Bulk;
 }

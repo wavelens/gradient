@@ -261,7 +261,7 @@ pub(super) async fn run_primary(
     let thunks = make_thunk_count_since_call(context.evaluator);
     let sink = updater.eval_progress_sink();
     let server = updater.concurrent();
-    let eval_target = build_job_eval_target(context.job, Some(source_path));
+    let eval_target = build_job_eval_target(context.job, Some(source_path)).await?;
     let fingerprint = eval_cache_fingerprint(context.evaluator, &eval_target).await;
     let announced = fingerprint.clone().unwrap_or_default();
     let announce = async {
@@ -562,7 +562,7 @@ mod tests {
             vec![
                 EvalShardOutcome::Wait { retry_after_ms: 0 },
                 EvalShardOutcome::Source {
-                    store_path: "/nix/store/[hash150]-source".into(),
+                    store_path: "/nix/store/himfybay343xmx49rfli3pbkjqvdfnzx-source".into(),
                     fingerprint: "fp".into(),
                 },
             ],
@@ -573,7 +573,10 @@ mod tests {
 
         assert_eq!(
             source,
-            Some(("/nix/store/[hash150]-source".into(), "fp".into()))
+            Some((
+                "/nix/store/himfybay343xmx49rfli3pbkjqvdfnzx-source".into(),
+                "fp".into()
+            ))
         );
         let requests = server.requests.lock();
         assert_eq!(requests.len(), 2);

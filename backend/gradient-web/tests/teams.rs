@@ -136,7 +136,7 @@ async fn granting_users_on_every_new_project_needs_a_role() {
 }
 
 #[tokio::test]
-async fn deleting_a_team_withdraws_its_workers_from_the_granted_projects() {
+async fn deleting_a_team_reads_its_workers_before_the_delete_statement() {
     let session_id = SessionId::now_v7();
     let conn = with_auth(mock_db(), session_id)
         .append_query_results([vec![team()]])
@@ -154,12 +154,17 @@ async fn deleting_a_team_withdraws_its_workers_from_the_granted_projects() {
 
     res.assert_status_ok();
     drop(server);
-    let looked_up_projects = all_statements(conn.into_transaction_log())
-        .into_iter()
-        .any(|s| s.sql.contains("FROM \"team_project\""));
+    let statements = all_statements(conn.into_transaction_log());
+    let team_worker_read_statement_index = statements
+        .iter()
+        .position(|s| s.sql.contains("FROM \"team_worker\""));
+    let first_delete_statement_index = statements.iter().position(|s| s.sql.starts_with("DELETE"));
     assert!(
-        looked_up_projects,
-        "deleting a team must find the projects whose jobs its workers lose"
+        matches!(
+            (team_worker_read_statement_index, first_delete_statement_index),
+            (Some(read), Some(delete)) if read < delete
+        ),
+        "Read the workers of the team before the first DELETE, so the workers can receive a signal."
     );
 }
 

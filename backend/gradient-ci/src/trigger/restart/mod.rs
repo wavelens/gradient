@@ -18,8 +18,10 @@ use sea_orm::{
     IntoActiveModel, QueryFilter, TransactionTrait,
 };
 
-/// A restart never walks. The new evaluation is taking over the previous one's names because the
-/// graph heal is seeding its thaw from them.
+/// Retries of an evaluation that completed the walk don't run the walk again. They copy the entry
+/// points and inherit the names from the previous evaluation. Those entry points are the start of
+/// graph repair. Retries of an evaluation that did not complete the walk start in Queued and
+/// evaluate again from the beginning. Partial entry points stay in the previous evaluation.
 pub async fn trigger_evaluation_retry<C>(
     db: &C,
     task: &MTask,
@@ -31,16 +33,23 @@ where
 {
     ensure_no_active_evaluation(db, task.id, &prev_eval.branch).await?;
 
-    let prev_entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(prev_eval.id))
-        .all(db)
-        .await?;
+    let retry_must_walk_again = !previous_evaluation_entry_points_are_complete(prev_eval);
+    let entry_points_from_previous_evaluation = if retry_must_walk_again {
+        Vec::new()
+    } else {
+        EEntryPoint::find()
+            .filter(CEntryPoint::Evaluation.eq(prev_eval.id))
+            .all(db)
+            .await?
+    };
 
     let now = gradient_types::now();
-    let initial_status = if prev_eval.only_evaluate {
+    let initial_status = if retry_must_walk_again {
+        EvaluationStatus::Queued
+    } else if prev_eval.only_evaluate {
         EvaluationStatus::Completed
     } else {
-        restart_initial_status(db, &prev_entry_points).await?
+        restart_initial_status(db, &entry_points_from_previous_evaluation).await?
     };
 
     let new_eval_id = EvaluationId::now_v7();
@@ -56,10 +65,15 @@ where
         previous: Some(prev_eval.id),
         created_at: now,
         updated_at: now,
-        flake_source: prev_eval.flake_source.clone(),
+        flake_source: (!retry_must_walk_again)
+            .then(|| prev_eval.flake_source.clone())
+            .flatten(),
         only_evaluate: prev_eval.only_evaluate,
+        allows_project_credentials_and_privileged_actions: prev_eval
+            .allows_project_credentials_and_privileged_actions,
         started_by: Some(started_by),
-        building_started_at: Some(now),
+        walk_mode: prev_eval.walk_mode,
+        building_started_at: (!retry_must_walk_again).then_some(now),
         finished_at: (initial_status == EvaluationStatus::Completed).then_some(now),
         ..Default::default()
     }
@@ -70,8 +84,16 @@ where
 
     snapshot_flake_input_overrides(db, task.id, new_eval.id).await?;
 
-    entry_points::copy_entry_points(db, &prev_entry_points, new_eval_id, now).await?;
-    if has_exec_entry_points(&prev_entry_points) {
+    if !retry_must_walk_again {
+        entry_points::copy_entry_points(
+            db,
+            &entry_points_from_previous_evaluation,
+            new_eval_id,
+            now,
+        )
+        .await?;
+    }
+    if has_exec_entry_points(&entry_points_from_previous_evaluation) {
         gradient_db::exec_jobs::create::for_evaluation(db, new_eval_id).await?;
     }
     if initial_status == EvaluationStatus::Building {
@@ -123,4 +145,9 @@ async fn restart_initial_status<C: ConnectionTrait>(
 
 fn has_exec_entry_points(entry_points: &[MEntryPoint]) -> bool {
     entry_points.iter().any(|ep| ep.exec.is_some())
+}
+
+fn previous_evaluation_entry_points_are_complete(prev_eval: &MEvaluation) -> bool {
+    prev_eval.walk_finished()
+        || (prev_eval.only_evaluate && prev_eval.status == EvaluationStatus::Completed)
 }

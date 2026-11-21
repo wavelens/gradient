@@ -35,3 +35,6 @@ pub async fn names<C: ConnectionTrait>(
     })
     .await
 }
+
+#[cfg(test)]
+mod copy_build_limits_to_derivation_migration_tests;

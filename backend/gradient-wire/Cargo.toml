@@ -27,7 +27,10 @@ axum              = { workspace = true, features = ["ws", "tokio"] }
 base64            = { workspace = true }
 bytes            = { workspace = true }
 futures           = { workspace = true }
-hex               = { workspace = true }
+harmonia-store-content-address = { workspace = true }
+harmonia-store-path            = { workspace = true }
+harmonia-utils-hash            = { workspace = true }
+hex            = { workspace = true }
 password-auth     = { workspace = true }
 serde             = { workspace = true }
 sha2              = { workspace = true }
@@ -38,9 +41,9 @@ tokio-tungstenite = { workspace = true }
 tokio-util        = { workspace = true, features = ["codec"] }
 tracing           = { workspace = true }
 utoipa            = { workspace = true }
+uuid              = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "test-util", "io-util"] }
 proptest = { workspace = true }
 serde_json = { workspace = true }
-uuid  = { workspace = true }

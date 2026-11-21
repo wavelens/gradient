@@ -8,9 +8,12 @@ use super::context::{TaskGitContext, save_observed_project_ssh_host_keys};
 use super::git_credentials::{
     GitOperationCredentials, run_blocking_libgit2_operation_with_git_credentials,
 };
-use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
-use super::url::git_transport_url;
+use super::git_network_limits::{
+    BlockingGitFetchOperationLimits,
+    build_fetch_options_with_time_and_size_limits_and_optional_shallow,
+};
 use crate::SourceError;
+use gradient_types::RepositoryUrl;
 use gradient_types::input::vec_to_hex;
 use tracing::{debug, instrument};
 
@@ -23,13 +26,15 @@ pub struct HeadCommit {
 }
 
 pub(crate) fn fetch_commit(
-    url: &str,
+    url: &RepositoryUrl,
     credentials: &GitOperationCredentials,
     refspec: &str,
 ) -> Result<HeadCommit, SourceError> {
-    run_blocking_libgit2_operation_with_git_credentials(credentials, || {
-        fetch_commit_into_temp_repo(url, refspec)
-    })
+    run_blocking_libgit2_operation_with_git_credentials(
+        credentials,
+        BlockingGitFetchOperationLimits::ordinary_fetch_operation_limits(),
+        || fetch_commit_into_temp_repo(url.git_connection_url(), refspec),
+    )
 }
 
 fn fetch_commit_into_temp_repo(url: &str, refspec: &str) -> Result<HeadCommit, SourceError> {
@@ -75,14 +80,14 @@ impl TaskGitContext<'_> {
         Ok((head.branch, commit))
     }
 
-    #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name, commit_hash = %vec_to_hex(commit_hash)))]
+    #[instrument(skip_all, fields(task_id = %self.task.id, task_name = %self.task.name, commit_hash = %vec_to_hex(commit_hash)))]
     pub(super) async fn commit_info(&self, commit_hash: &[u8]) -> Result<HeadCommit, SourceError> {
         debug!("Fetching commit info");
         self.fetch_commit(vec_to_hex(commit_hash)).await
     }
 
     async fn fetch_commit(&self, refspec: String) -> Result<HeadCommit, SourceError> {
-        let url = git_transport_url(&self.task.repository).to_string();
+        let url = self.repository.clone();
         let credentials = self.credentials.clone();
 
         let fetched =

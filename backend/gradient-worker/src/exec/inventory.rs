@@ -4,8 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::BTreeMap;
+
 use gradient_vm::DeviceInventory;
-use gradient_wire::types::{DeviceClass, DeviceRequest, ExecInventory, GuestCapacity, WarmGuests};
+use gradient_wire::host_resource_project_access::WorkerResourceProjectAccess;
+use gradient_wire::types::{
+    DeviceClass, DeviceRequest, ExecInventory, GuestCapacity, WarmGuests,
+    WorkerExecInventoryResourceProjectAccess,
+};
 
 use crate::config::ExecArgs;
 
@@ -14,9 +20,11 @@ pub fn advertised(
     config: &ExecArgs,
     worker_id: &str,
     warm_guest_sizes: Vec<WarmGuests>,
-    secrets: Vec<String>,
+    secrets: BTreeMap<String, WorkerResourceProjectAccess>,
     guest_capacity: GuestCapacity,
 ) -> ExecInventory {
+    let project_release_by_resource_name =
+        build_exec_inventory_resource_project_access(config, &secrets);
     let mut labels = config.labels.clone();
     if !labels.iter().any(|label| label == worker_id) {
         labels.push(worker_id.to_owned());
@@ -37,7 +45,7 @@ pub fn advertised(
             .iter()
             .map(|mount| mount.name.clone())
             .collect(),
-        secrets,
+        secrets: secrets.into_keys().collect(),
         allow: config.allow(),
         defaults: config.defaults(),
         warm_guests: warm_guest_sizes.iter().map(|warm| warm.count).sum(),
@@ -49,6 +57,33 @@ pub fn advertised(
             .unwrap_or_default(),
         warm_guest_sizes,
         max_server_requested_warm_guests: Some(config.max_pre_warm.saturating_sub(config.pre_warm)),
+        project_release_by_resource_name,
+    }
+}
+
+fn build_exec_inventory_resource_project_access(
+    config: &ExecArgs,
+    secrets: &BTreeMap<String, WorkerResourceProjectAccess>,
+) -> WorkerExecInventoryResourceProjectAccess {
+    let mut project_access_by_device_class: BTreeMap<String, WorkerResourceProjectAccess> =
+        BTreeMap::new();
+    for worker_device_config in &config.devices {
+        project_access_by_device_class
+            .entry(worker_device_config.name.clone())
+            .and_modify(|accumulated_access| {
+                *accumulated_access =
+                    accumulated_access.intersect_released_projects(&worker_device_config.projects);
+            })
+            .or_insert_with(|| worker_device_config.projects.clone());
+    }
+    WorkerExecInventoryResourceProjectAccess {
+        released_projects_by_worker_sops_secret_name: secrets.clone(),
+        project_access_by_worker_mount: config
+            .mounts
+            .iter()
+            .map(|mount| (mount.name.clone(), mount.projects.clone()))
+            .collect(),
+        released_projects_by_device_class: project_access_by_device_class,
     }
 }
 
@@ -93,7 +128,7 @@ mod tests {
             &config,
             "worker-7",
             sizes.clone(),
-            Vec::new(),
+            BTreeMap::new(),
             GuestCapacity::default(),
         );
         assert_eq!(inventory.labels, ["gpu", "worker-7"]);

@@ -7,6 +7,7 @@
 pub mod abort;
 pub mod build;
 mod build_metrics;
+mod capped_regular_file_below_trusted_root_reader;
 pub mod compress;
 mod dependencies;
 mod download;

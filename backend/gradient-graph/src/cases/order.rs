@@ -233,7 +233,7 @@ async fn o03_a_replay_of_every_mutating_operation_changes_nothing_the_second_tim
     case.zero_drift("pair 2").await;
 
     let commit = NarCommit {
-        targets: case.project_caches(e1).await,
+        producer: case.make_worker_producer_for_evaluation_project(e1).await,
         ..with_references(nar(A_OUT, "a"), &[(A_OUT, "a")])
     };
     let started = state(&case, e1).await;
@@ -260,7 +260,15 @@ async fn o03_a_replay_of_every_mutating_operation_changes_nothing_the_second_tim
     assert_eq!(verdict, EvaluationStatus::Completed, "4: the second time");
     case.zero_drift("pair 4").await;
 
-    let missing = Demotion::MissingNar { hash: A_OUT.into() };
+    case.ctx
+        .storage
+        .nar_storage
+        .delete(&first.nar_object_storage_key)
+        .await
+        .expect("The NAR object is gone");
+    let missing = Demotion::MissingNarOfContentVariant {
+        content_variant: first.cached_path,
+    };
     case.demote(missing.clone()).await;
     let once = state(&case, e1).await;
     let reset = case.sb(A).await.status;

@@ -9,6 +9,7 @@
 //! column affinity is converting each value back on insert.
 
 use crate::redact::Redactor;
+use gradient_util::http_base_url::upstream_cache_url_for_display_without_username_password_query_and_fragment;
 
 pub type Row = Vec<Option<String>>;
 
@@ -48,10 +49,11 @@ pub fn redact_value(
         | ("worker_registration", "worker_id") => r.identity(&v, "worker"),
         ("worker_registration", "display_name") => r.identity(&v, "worker"),
         ("team_worker", "worker_id") | ("team_worker", "display_name") => r.identity(&v, "worker"),
-        ("worker_registration", "url") | ("cache_upstream", "url") | ("team_worker", "url") => {
-            r.identity(&v, "url")
-        }
-        ("upstream_metric", "upstream_url") => r.identity(&v, "url"),
+        ("worker_registration", "url") | ("team_worker", "url") => r.identity(&v, "url"),
+        ("cache_upstream", "url") | ("upstream_metric", "upstream_url") => r.identity(
+            &upstream_cache_url_for_display_without_username_password_query_and_fragment(&v)?.url,
+            "url",
+        ),
         ("cluster_member", "pin") | ("exec_job_attempt", "worker") => r.identity(&v, "worker"),
         ("exec_job_attempt", "guest_address") | ("exec_job_pull_request", "url") => {
             r.identity(&v, "url")
@@ -257,7 +259,7 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
             "derivation_build",
             "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, cache_available INTEGER, probed INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, blocking_deps INTEGER, wanted INTEGER, missing_runtime_deps INTEGER)",
             concat!(
-                "SELECT db.id::text, db.derivation::text, db.status::text, db.cache_available::int::text, db.probed::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.blocking_deps::text, db.wanted::int::text, db.missing_runtime_deps::text FROM derivation_build db WHERE db.derivation IN (",
+                "SELECT db.id::text, db.derivation::text, db.status::text, db.cache_available::int::text, db.probed::int::text, db.substituted::int::text, db.attempt::text, drv.timeout_secs::text, drv.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.blocking_deps::text, db.wanted::int::text, db.missing_runtime_deps::text FROM derivation_build db JOIN derivation drv ON drv.id = db.derivation WHERE db.derivation IN (",
                 derivation_scope!(),
                 ")"
             ),
@@ -1146,6 +1148,37 @@ mod tests {
         assert_ne!(pin, Some("gpu-1".into()));
         assert_eq!(pin, fleet, "a pin has to join against the fleet tables");
         assert_eq!(attempt, fleet);
+    }
+
+    #[test]
+    fn report_export_removes_user_password_and_query_from_upstream_cache_urls_in_both_columns_with_and_without_anonymized_identities()
+     {
+        let stored = "https://user:secret@cache.example/path?token=x";
+        for anonymize_identities in [false, true] {
+            let r = redactor(anonymize_identities, false);
+            for (table, column) in [
+                ("cache_upstream", "url"),
+                ("upstream_metric", "upstream_url"),
+            ] {
+                let exported =
+                    redact_value(&r, table, column, Some(stored.into())).unwrap_or_default();
+                for secret in ["secret", "user", "token"] {
+                    assert!(
+                        !exported.contains(secret),
+                        "{table}.{column} with anonymize_identities={anonymize_identities} exported {exported}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            redact_value(
+                &redactor(false, false),
+                "cache_upstream",
+                "url",
+                Some(stored.into())
+            ),
+            Some("https://cache.example/path".into())
+        );
     }
 
     #[test]

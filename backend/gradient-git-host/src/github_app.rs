@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::client::{GITHUB_API_URL, HostClient};
+use crate::client::{HostClient, validated_public_github_api_base_url};
 use anyhow::{Context, Result};
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use hmac::{Hmac, KeyInit, Mac};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ struct InstallationTokenResponse {
 }
 
 pub async fn get_installation_token(
-    client: &reqwest::Client,
+    client: &HttpClientForUserSuppliedUrls,
     app_id: u64,
     private_key_pem: &str,
     installation_id: i64,
@@ -56,7 +57,7 @@ pub async fn get_installation_token(
     debug!(installation_id, "requesting GitHub App installation token");
 
     let token_resp: InstallationTokenResponse =
-        HostClient::github(client.clone(), GITHUB_API_URL, jwt)
+        HostClient::github(client.clone(), validated_public_github_api_base_url(), jwt)
             .post_json_empty(&format!(
                 "/app/installations/{installation_id}/access_tokens"
             ))
@@ -81,7 +82,7 @@ struct AppResponse {
 }
 
 pub async fn get_installation(
-    client: &reqwest::Client,
+    client: &HttpClientForUserSuppliedUrls,
     app_id: u64,
     private_key_pem: &str,
     installation_id: i64,
@@ -104,14 +105,14 @@ struct RepositoryInstallation {
 
 /// The installation id and account login of the App on `owner/repo`, or `None` when the App has no access to it.
 pub async fn get_repository_installation(
-    client: &reqwest::Client,
+    client: &HttpClientForUserSuppliedUrls,
     app_id: u64,
     private_key_pem: &str,
     full_name: &str,
 ) -> Result<Option<(i64, String)>> {
     let jwt = generate_jwt(app_id, private_key_pem)?;
     let installation: Option<RepositoryInstallation> =
-        HostClient::github(client.clone(), GITHUB_API_URL, jwt)
+        HostClient::github(client.clone(), validated_public_github_api_base_url(), jwt)
             .with_user_agent("gradient")
             .get_json_optional(&format!("/repos/{full_name}/installation"))
             .await?;
@@ -119,7 +120,7 @@ pub async fn get_repository_installation(
 }
 
 pub async fn get_app_page_url(
-    client: &reqwest::Client,
+    client: &HttpClientForUserSuppliedUrls,
     app_id: u64,
     private_key_pem: &str,
 ) -> Result<String> {
@@ -202,17 +203,19 @@ impl Drop for PageUrlLookupFinishOnDrop {
 }
 
 async fn app_get<T: serde::de::DeserializeOwned>(
-    client: &reqwest::Client,
+    client: &HttpClientForUserSuppliedUrls,
     app_id: u64,
     private_key_pem: &str,
     path: &str,
 ) -> Result<T> {
     let jwt = generate_jwt(app_id, private_key_pem)?;
 
-    Ok(HostClient::github(client.clone(), GITHUB_API_URL, jwt)
-        .with_user_agent("gradient")
-        .get_json(&format!("/{path}"))
-        .await?)
+    Ok(
+        HostClient::github(client.clone(), validated_public_github_api_base_url(), jwt)
+            .with_user_agent("gradient")
+            .get_json(&format!("/{path}"))
+            .await?,
+    )
 }
 
 pub fn verify_github_signature(secret: &str, signature_header: &str, body: &[u8]) -> bool {

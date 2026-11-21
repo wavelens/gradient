@@ -20,6 +20,7 @@ pub struct Model {
     pub pr_author: String,
     pub commit_hash: Vec<u8>,
     pub head_repo_clone_url: Option<String>,
+    pub pr_base_branch_name: Option<String>,
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
     pub check_run_id: Option<i64>,

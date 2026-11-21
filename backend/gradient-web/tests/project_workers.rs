@@ -14,18 +14,19 @@ use gradient_fixtures::rows::{
 };
 use gradient_test_support::web::{make_test_server, signed_in_as};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
+use gradient_types::permissions::Permission;
 use serde_json::json;
 use uuid::Uuid;
 
 const WORKERS: &str = "/api/v1/projects/test-project/workers";
 const WORKER: &str = "550e8400-e29b-41d4-a716-446655440001";
 
-fn role_without_permissions() -> role::Model {
+fn custom_project_role_with_only_view_project_permission() -> role::Model {
     role::Model {
         id: RoleId::new(Uuid::from_u128(0x0e)),
-        name: "nothing".into(),
+        name: "view-project-only".into(),
         project: Some(project_id()),
-        permission: 0,
+        permission: Permission::ViewProject.bit(),
         managed: false,
     }
 }
@@ -68,7 +69,7 @@ async fn assert_worker_changes_forbidden(role: role::Model) {
 
 #[tokio::test]
 async fn a_member_without_manage_workers_cannot_change_project_workers() {
-    assert_worker_changes_forbidden(role_without_permissions()).await;
+    assert_worker_changes_forbidden(custom_project_role_with_only_view_project_permission()).await;
 }
 
 #[tokio::test]

@@ -113,11 +113,45 @@ impl StorePathMapper {
         self.mapping.inbound(self.context, hash)
     }
 
-    pub fn inbound_text(&self, text: &str) -> Result<String, StorePathError> {
-        let parts = TextParts::split(text);
-        let hash =
-            StoreHash::parse(parts.hash).map_err(|_| StorePathError::Malformed(text.to_owned()))?;
-        Ok(parts.join(&self.mapping.inbound(self.context, hash)))
+    pub fn inbound_text_if_exact_store_path(&self, text: &str) -> Result<String, StorePathError> {
+        let path = OriginalStorePath::parse(text)?;
+        Ok(TextParts::split(text).join(&self.mapping.inbound(self.context, path.hash().clone())))
+    }
+
+    pub fn stored_hash_text_from_inbound_hash_text(
+        &self,
+        text: &str,
+    ) -> Result<String, StorePathError> {
+        Ok(self.inbound_hash(StoreHash::parse(text)?).to_string())
+    }
+
+    pub fn map_and_validate_build_product_path(
+        &self,
+        text: &str,
+    ) -> Result<String, StorePathError> {
+        let malformed = || StorePathError::Malformed(text.to_owned());
+        let base_and_sub_path = text
+            .strip_prefix(STORE_DIR)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .ok_or_else(malformed)?;
+        let (base_name, sub_path) = match base_and_sub_path.split_once('/') {
+            Some((base_name, sub_path)) => (base_name, Some(sub_path)),
+            None => (base_and_sub_path, None),
+        };
+        if !sub_path.is_none_or(|sub_path| sub_path.split('/').all(is_acceptable_sub_path_segment))
+        {
+            return Err(malformed());
+        }
+        let stored = self
+            .inbound(
+                &OriginalStorePath::parse_store_path_base_name(base_name)
+                    .map_err(|_| malformed())?,
+            )
+            .full();
+        Ok(match sub_path {
+            Some(sub_path) => format!("{stored}/{sub_path}"),
+            None => stored,
+        })
     }
 
     pub fn outbound_text(&self, text: &str) -> Result<String, StorePathError> {
@@ -129,28 +163,29 @@ impl StorePathMapper {
         Ok(parts.join(&self.mapping.outbound(self.context, hash)))
     }
 
-    pub fn inbound_if_store_path(&self, text: &str) -> String {
-        self.if_store_path(text, Self::inbound_text)
+    pub fn inbound_if_store_path(&self, text: &str) -> Result<String, StorePathError> {
+        match text.starts_with(STORE_DIR) {
+            true => self.map_and_validate_build_product_path(text),
+            false => Ok(text.to_owned()),
+        }
     }
 
     pub fn outbound_if_store_path(&self, text: &str) -> String {
-        self.if_store_path(text, Self::outbound_text)
-    }
-
-    fn if_store_path(
-        &self,
-        text: &str,
-        map: fn(&Self, &str) -> Result<String, StorePathError>,
-    ) -> String {
-        match text.strip_prefix(STORE_DIR) {
-            Some(_) => map(self, text).unwrap_or_else(|_| text.to_owned()),
-            None => text.to_owned(),
+        match text.starts_with(STORE_DIR) {
+            true => self.outbound_text(text).unwrap_or_else(|_| text.to_owned()),
+            false => text.to_owned(),
         }
     }
 
     pub fn inbound_prefix(&self, prefix: &str) -> Option<String> {
         self.mapping.inbound_prefix(self.context, prefix)
     }
+}
+
+fn is_acceptable_sub_path_segment(segment: &str) -> bool {
+    !segment.is_empty()
+        && !matches!(segment, "." | "..")
+        && !segment.chars().any(|c| c == '\\' || c.is_control())
 }
 
 struct TextParts<'a> {
@@ -339,22 +374,137 @@ mod tests {
         let mapper = rotated();
         assert_eq!(
             mapper
-                .inbound_text(&format!("/nix/store/{o}-hello/share/doc"))
+                .map_and_validate_build_product_path(&format!("/nix/store/{o}-hello/share/doc"))
                 .unwrap(),
             format!("/nix/store/{s}-hello/share/doc")
         );
         assert_eq!(
-            mapper.inbound_text(&format!("{o}-hello.drv")).unwrap(),
+            mapper
+                .inbound_text_if_exact_store_path(&format!("{o}-hello.drv"))
+                .unwrap(),
             format!("{s}-hello.drv")
         );
-        assert_eq!(mapper.inbound_text(o).unwrap(), s);
+        assert_eq!(
+            mapper.stored_hash_text_from_inbound_hash_text(o).unwrap(),
+            s
+        );
         assert_eq!(
             mapper
                 .outbound_text(&format!("/nix/store/{s}-hello"))
                 .unwrap(),
             format!("/nix/store/{o}-hello")
         );
-        assert!(mapper.inbound_text("abc-hello").is_err());
+        assert!(
+            mapper
+                .inbound_text_if_exact_store_path("abc-hello")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn inbound_text_rejects_invalid_store_path_names_and_maps_hash_and_sub_path() {
+        let o = EXAMPLE_ORIGINAL_HASH;
+        let mapper = rotated();
+        for refused in [
+            format!("{o}-{}", "a".repeat(212)),
+            format!("{o}-hello~world"),
+            format!("/nix/store/{o}-hello world/share"),
+            format!("{o}-"),
+        ] {
+            assert!(
+                mapper.inbound_text_if_exact_store_path(&refused).is_err(),
+                "{refused}"
+            );
+            assert!(
+                mapper
+                    .map_and_validate_build_product_path(&refused)
+                    .is_err(),
+                "{refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn maps_exactly_one_store_path_only_for_full_path_or_base_name() {
+        let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let mapper = rotated();
+        for refused in [
+            format!("/nix/store/{o}-hello/bin/hello"),
+            format!("/nix/store/{o}-hello/../x"),
+            format!("{o}-hello/../x"),
+            o.to_owned(),
+        ] {
+            assert!(
+                mapper.inbound_text_if_exact_store_path(&refused).is_err(),
+                "{refused}"
+            );
+        }
+        assert_eq!(
+            mapper
+                .inbound_text_if_exact_store_path(&format!("/nix/store/{o}-hello"))
+                .unwrap(),
+            format!("/nix/store/{s}-hello")
+        );
+        assert_eq!(
+            mapper
+                .inbound_text_if_exact_store_path(&format!("{o}-hello.drv"))
+                .unwrap(),
+            format!("{s}-hello.drv")
+        );
+        assert_eq!(
+            mapper.stored_hash_text_from_inbound_hash_text(o).unwrap(),
+            s
+        );
+        assert!(
+            mapper
+                .stored_hash_text_from_inbound_hash_text(&format!("{o}-hello"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_bad_build_product_sub_path_segments() {
+        let (o, s) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let mapper = rotated();
+        for refused in [
+            format!("/nix/store/{o}-hello//bin"),
+            format!("/nix/store/{o}-hello/bin/"),
+            format!("/nix/store/{o}-hello/./bin"),
+            format!("/nix/store/{o}-hello/../x"),
+            format!("/nix/store/{o}-hello/bin\\tool"),
+            format!("/nix/store/{o}-hello/bin\0tool"),
+            format!("/nix/store/{o}-hello/bin\ntool"),
+            format!("/nix/store/{o}-hello~/bin"),
+            o.to_owned(),
+        ] {
+            assert!(
+                mapper
+                    .map_and_validate_build_product_path(&refused)
+                    .is_err(),
+                "{refused:?}"
+            );
+        }
+        for (original, stored) in [
+            (
+                format!("/nix/store/{o}-hello"),
+                format!("/nix/store/{s}-hello"),
+            ),
+            (
+                format!("/nix/store/{o}-hello/bin/tool"),
+                format!("/nix/store/{s}-hello/bin/tool"),
+            ),
+            (
+                format!("/nix/store/{o}-hello/share/doc/a b.txt"),
+                format!("/nix/store/{s}-hello/share/doc/a b.txt"),
+            ),
+        ] {
+            assert_eq!(
+                mapper
+                    .map_and_validate_build_product_path(&original)
+                    .unwrap(),
+                stored
+            );
+        }
     }
 
     #[test]

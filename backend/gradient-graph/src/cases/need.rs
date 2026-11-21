@@ -22,7 +22,7 @@ use super::{
     X, X_OUT, assert_only_unstored_outputs, chain, drv, nar, narinfo, pass, with_attr, with_output,
     with_references,
 };
-use crate::messages::{Demotion, Transition};
+use crate::messages::Transition;
 
 #[tokio::test]
 async fn d01_any_wanted_build_passes_runtime_edges_and_only_a_builder_passes_build_edges() {
@@ -484,7 +484,7 @@ async fn d07_a_completed_evaluation_still_wants_the_rebuild_of_its_entry_point_o
     .await;
     let frozen = case.counters(e1).await;
 
-    case.demote(Demotion::MissingNar { hash: A_OUT.into() })
+    case.report_missing_nar_of_every_content_variant(A_OUT)
         .await;
 
     let a = case.sb(A).await;
@@ -919,6 +919,11 @@ async fn d14_an_abort_for_all_evaluations_sticks_once_no_running_evaluation_want
     );
     case.zero_drift("step 2").await;
 
+    super::signing::run_publish_round_and_assert_success(
+        &case,
+        gradient_db::caches::demotion::MAX_PUBLISHED_PARENT_BUILDS_PER_SIGNING_PASS,
+    )
+    .await;
     case.graph
         .run_consistency_checks()
         .await

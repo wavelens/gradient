@@ -133,7 +133,8 @@ async fn requested_derivations(
         .map(|p| stored(mapper, p).map(|s| s.hash().to_owned()))
         .collect::<anyhow::Result<_>>()
         .map_err(err)?;
-    let served = served_hashes(&session.handles.db.web_db, &session.caches, &hashes)
+    let caches = session.readable_cache_ids_or_closed_error().map_err(err)?;
+    let served = served_hashes(&session.handles.db.web_db, caches, &hashes)
         .await
         .map_err(err)?;
     if let Some((missing, _)) = opaque

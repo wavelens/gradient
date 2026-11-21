@@ -4,17 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::{LiveStreamAuthToken, MaybeApiKey};
-use crate::endpoints::live::revoked_session_or_api_key_close_message;
+use crate::access::{Caller, ProjectItemAccessRequirement};
+use crate::authorization::{
+    MaybeApiKey, WebSocketAuthorizationRecheck, WebSocketUpgradeCredentialRecheckRequestExtractor,
+};
+use crate::endpoints::live::{
+    STREAM_ACCESS_ENDED_CLOSE_REASON, send_websocket_message_to_browser_with_timeout,
+    stream_access_lost_close_frame,
+};
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
+use crate::permissions::Permission;
 use axum::Extension;
 use axum::extract::State;
-use axum::extract::ws::rejection::WebSocketUpgradeRejection;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::{IntoResponse, Response};
-use futures::{Sink, SinkExt, Stream, StreamExt};
+use axum::extract::ws::{Message, WebSocket};
+use axum::http::Method;
+use axum::response::Response;
+use futures::{Sink, Stream, StreamExt};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_pool::guest_channels::{GuestChannelEvent, GuestChannelHandle};
 use gradient_scheduler::{GuestChannelOpened, Scheduler};
 use gradient_types::*;
@@ -75,16 +83,12 @@ struct TerminalRequest {
     operation_id = "execJobConsole",
     tag = "exec-jobs",
     summary = "Exec job serial console (WebSocket)",
-    description = "Upgrades to a WebSocket joined to the serial console of the job's guest. Opens while the job is `starting` or `running`, also with `ssh = false`.\n\n**Frames**\n- Binary frames carry raw terminal bytes both ways; every viewer first receives the last 64 KiB of console output.\n- The oldest open console holds the input; every further viewer is read-only.\n- Text frames ``{\"type\":\"resize\",\"cols\":120,\"rows\":40}`` from the viewer in control of input resize the console. Read-only viewers can't resize the console.\n- The last server frame is the text frame `{\"type\":\"closed\",\"exit_code\":null,\"message\":\"...\"}`, also when the channel is refused after the upgrade.\n\n`node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `TriggerEvaluation` permission on the project.",
+    description = "Upgrades to a WebSocket joined to the serial console of the job's guest. Opens while the job is `starting` or `running`, also with `ssh = false`.\n\n**Frames**\n- Binary frames carry raw terminal bytes both ways; every viewer first receives the last 64 KiB of console output.\n- The oldest open console holds the input; every further viewer is read-only.\n- Text frames ``{\"type\":\"resize\",\"cols\":120,\"rows\":40}`` from the viewer in control of input resize the console. Read-only viewers can't resize the console.\n- The last server frame is the text frame `{\"type\":\"closed\",\"exit_code\":null,\"message\":\"...\"}`, also when the channel is refused after the upgrade.\n\n`node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `OpenJobTerminal` permission on the project.",
     params(("job" = ExecJobId, Path), ConsoleQuery),
     responses(
         (status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"),
         WebError
     )
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Axum extractors: each argument is one part of the request."
 )]
 pub async fn get_exec_job_console(
     state: State<Arc<ServerState>>,
@@ -93,10 +97,16 @@ pub async fn get_exec_job_console(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(job): Path<ExecJobId>,
     Query(query): Query<ConsoleQuery>,
-    credentials: LiveStreamAuthToken,
-    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
-    ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
+    ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::IncludesPermission(Permission::OpenJobTerminal),
+    )
+    .await?;
     let request = TerminalRequest {
         job,
         node: query.node.unwrap_or(0),
@@ -104,8 +114,8 @@ pub async fn get_exec_job_console(
     };
     Ok(upgrade(
         &state.shutdown,
+        &state.web_db,
         scheduler,
-        ws,
         request,
         credentials,
     ))
@@ -117,16 +127,12 @@ pub async fn get_exec_job_console(
     operation_id = "execJobShell",
     tag = "exec-jobs",
     summary = "Exec job shell (WebSocket)",
-    description = "Upgrades to a WebSocket joined to a terminal in the job's guest. With `attach=true` it joins the program's terminal (the job needs `ssh = true`); without it a new shell starts as `gradient` in `/work` with the job's environment. Opens while the job is `running` and was not started with `ssh = false`.\n\n**Frames**\n- Binary frames carry raw terminal bytes both ways.\n- A text frame `{\"type\":\"resize\",\"cols\":120,\"rows\":40}` from the client resizes the terminal.\n- The last server frame is the text frame `{\"type\":\"closed\",\"exit_code\":0,\"message\":null}`, also when the channel is refused after the upgrade.\n\nClosing an attached terminal leaves the program running. `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `TriggerEvaluation` permission on the project.",
+    description = "Upgrades to a WebSocket joined to a terminal in the job's guest. With `attach=true` it joins the program's terminal (the job needs `ssh = true`); without it a new shell starts as `gradient` in `/work` with the job's environment. Opens while the job is `running` and was not started with `ssh = false`.\n\n**Frames**\n- Binary frames carry raw terminal bytes both ways.\n- A text frame `{\"type\":\"resize\",\"cols\":120,\"rows\":40}` from the client resizes the terminal.\n- The last server frame is the text frame `{\"type\":\"closed\",\"exit_code\":0,\"message\":null}`, also when the channel is refused after the upgrade.\n\nClosing an attached terminal leaves the program running. `node` picks the node of a multi-node job by its index, node 0 by default; an unknown index closes with `no node <n> in this job`. Requires the `OpenJobTerminal` permission on the project.",
     params(("job" = ExecJobId, Path), TerminalQuery),
     responses(
         (status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"),
         WebError
     )
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Axum extractors: each argument is one part of the request."
 )]
 pub async fn get_exec_job_shell(
     state: State<Arc<ServerState>>,
@@ -135,10 +141,16 @@ pub async fn get_exec_job_shell(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(job): Path<ExecJobId>,
     Query(query): Query<TerminalQuery>,
-    credentials: LiveStreamAuthToken,
-    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
-    ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
+    ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::IncludesPermission(Permission::OpenJobTerminal),
+    )
+    .await?;
     let request = TerminalRequest {
         job,
         node: query.node.unwrap_or(0),
@@ -149,8 +161,8 @@ pub async fn get_exec_job_shell(
     };
     Ok(upgrade(
         &state.shutdown,
+        &state.web_db,
         scheduler,
-        ws,
         request,
         credentials,
     ))
@@ -162,16 +174,12 @@ pub async fn get_exec_job_shell(
     operation_id = "execJobForward",
     tag = "exec-jobs",
     summary = "Exec job port forward (WebSocket)",
-    description = "Upgrade to a WebSocket bound to one TCP connection to `port` inside the job guest. Sockets open while the job is `running`, was not started with `ssh = false` and lists `port` in `ports`.\n\n**Frames**\n- Binary frames carry the raw TCP bytes both ways.\n- The last server frame is the text frame `{\"type\":\"closed\",\"exit_code\":null,\"message\":\"...\"}`, also when the channel is refused after the upgrade.\n\nTCP connections each need their own WebSocket. Multi-node jobs use `node` to select a node by index (default node 0). Requests need `TriggerEvaluation` permission on the project.",
+    description = "Upgrade to a WebSocket bound to one TCP connection to `port` inside the job guest. Sockets open while the job is `running`, was not started with `ssh = false` and lists `port` in `ports`.\n\n**Frames**\n- Binary frames carry the raw TCP bytes both ways.\n- The last server frame is the text frame `{\"type\":\"closed\",\"exit_code\":null,\"message\":\"...\"}`, also when the channel is refused after the upgrade.\n\nTCP connections each need their own WebSocket. Multi-node jobs use `node` to select a node by index (default node 0). Requests need the `OpenJobTerminal` permission on the project.",
     params(("job" = ExecJobId, Path), ForwardQuery),
     responses(
         (status = SWITCHING_PROTOCOLS, description = "Protocol switch - successful WebSocket upgrade"),
         WebError
     )
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Axum extractors: each argument is one part of the request."
 )]
 pub async fn get_exec_job_forward(
     state: State<Arc<ServerState>>,
@@ -180,10 +188,16 @@ pub async fn get_exec_job_forward(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(job): Path<ExecJobId>,
     Query(query): Query<ForwardQuery>,
-    credentials: LiveStreamAuthToken,
-    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
-    ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
+    ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::IncludesPermission(Permission::OpenJobTerminal),
+    )
+    .await?;
     let request = TerminalRequest {
         job,
         node: query.node.unwrap_or(0),
@@ -191,8 +205,8 @@ pub async fn get_exec_job_forward(
     };
     Ok(upgrade(
         &state.shutdown,
+        &state.web_db,
         scheduler,
-        ws,
         request,
         credentials,
     ))
@@ -200,26 +214,32 @@ pub async fn get_exec_job_forward(
 
 fn upgrade(
     shutdown: &Shutdown,
+    web_db: &WebDb,
     scheduler: Arc<Scheduler>,
-    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     request: TerminalRequest,
-    credentials: LiveStreamAuthToken,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> Response {
-    let ws = match ws {
-        Ok(ws) => ws,
-        Err(rejection) => return rejection.into_response(),
-    };
+    let (db, job) = (web_db.clone(), request.job);
+    let guard = credentials.watch_caller_access_with_recheck(Method::POST, move |user, api_key| {
+        let db = db.clone();
+        async move {
+            let user = user.ok_or_else(WebError::invalid_credentials)?;
+            ExecJobAccessContext::load(
+                &db,
+                job,
+                Caller::User(&user),
+                api_key.as_ref(),
+                ProjectItemAccessRequirement::IncludesPermission(Permission::OpenJobTerminal),
+            )
+            .await
+            .map(drop)
+        }
+    });
     let cancel = shutdown.token();
     let shutdown = shutdown.clone();
-    ws.on_upgrade(move |socket| async move {
+    guard.on_upgrade(move |socket, guard| async move {
         let _ = shutdown
-            .spawn(serve_terminal(
-                socket,
-                scheduler,
-                request,
-                credentials,
-                cancel,
-            ))
+            .spawn(serve_terminal(socket, scheduler, request, guard, cancel))
             .await;
     })
 }
@@ -228,7 +248,7 @@ async fn serve_terminal(
     socket: WebSocket,
     scheduler: Arc<Scheduler>,
     request: TerminalRequest,
-    credentials: LiveStreamAuthToken,
+    guard: WebSocketAuthorizationRecheck,
     cancel: CancellationToken,
 ) {
     let opened = scheduler
@@ -237,8 +257,7 @@ async fn serve_terminal(
     match opened {
         Ok(Ok(opened)) => {
             let (sink, stream) = socket.split();
-            let revoked = credentials.wait_until_session_or_api_key_is_revoked();
-            pipe_terminal(sink, stream, opened, revoked, cancel).await;
+            pipe_terminal(sink, stream, opened, guard.wait_until_access_lost(), cancel).await;
         }
         Ok(Err(refusal)) => refuse(socket, refusal.to_string()).await,
         Err(e) => {
@@ -254,27 +273,52 @@ async fn refuse(socket: WebSocket, message: String) {
         exit_code: None,
         message: Some(message),
     };
-    let _ = sink.send(closed_frame(&closed)).await;
-    let _ = sink.send(Message::Close(None)).await;
+    send_terminal_closed_message_then_websocket_close_frame(
+        &mut sink,
+        &closed,
+        Message::Close(None),
+    )
+    .await;
+}
+
+async fn send_terminal_closed_message_then_websocket_close_frame<S>(
+    sink: &mut S,
+    closed: &TerminalEvent,
+    close: Message,
+) where
+    S: Sink<Message> + Unpin,
+{
+    if send_websocket_message_to_browser_with_timeout(sink, closed_frame(closed)).await {
+        send_websocket_message_to_browser_with_timeout(sink, close).await;
+    }
 }
 
 async fn pipe_terminal<Si, St, E>(
     mut sink: Si,
     mut stream: St,
     opened: GuestChannelOpened,
-    revoked: impl Future<Output = ()>,
+    access_lost: impl Future<Output = ()>,
     cancel: CancellationToken,
 ) where
     Si: Sink<Message> + Unpin,
     St: Stream<Item = Result<Message, E>> + Unpin,
 {
     let GuestChannelOpened { handle, mut events } = opened;
-    tokio::pin!(revoked);
+    tokio::pin!(access_lost);
     let closed = loop {
         tokio::select! {
             _ = cancel.cancelled() => return,
-            _ = &mut revoked => {
-                let _ = sink.send(revoked_session_or_api_key_close_message()).await;
+            _ = &mut access_lost => {
+                let closed = TerminalEvent::Closed {
+                    exit_code: None,
+                    message: Some(STREAM_ACCESS_ENDED_CLOSE_REASON.into()),
+                };
+                send_terminal_closed_message_then_websocket_close_frame(
+                    &mut sink,
+                    &closed,
+                    stream_access_lost_close_frame(),
+                )
+                .await;
                 return;
             }
             incoming = stream.next() => match incoming {
@@ -283,7 +327,12 @@ async fn pipe_terminal<Si, St, E>(
             },
             event = events.recv() => match event {
                 Some(GuestChannelEvent::Data(data)) => {
-                    if sink.send(Message::Binary(data.into())).await.is_err() {
+                    if !send_websocket_message_to_browser_with_timeout(
+                        &mut sink,
+                        Message::Binary(data.into()),
+                    )
+                    .await
+                    {
                         return;
                     }
                 }
@@ -294,8 +343,12 @@ async fn pipe_terminal<Si, St, E>(
             },
         }
     };
-    let _ = sink.send(closed_frame(&closed)).await;
-    let _ = sink.send(Message::Close(None)).await;
+    send_terminal_closed_message_then_websocket_close_frame(
+        &mut sink,
+        &closed,
+        Message::Close(None),
+    )
+    .await;
 }
 
 fn forward_client_message(handle: &GuestChannelHandle, message: Message) {
@@ -340,6 +393,7 @@ pub(super) fn ssh_host(serve_url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::endpoints::live::LIVE_STREAM_OR_JOB_TERMINAL_BROWSER_MESSAGE_SEND_TIMEOUT;
     use axum::http::Uri;
     use uuid::Uuid;
 
@@ -418,9 +472,47 @@ mod tests {
         .await
         .expect("the terminal closes once the credentials are revoked");
 
-        assert_eq!(
-            sent.next().await,
-            Some(revoked_session_or_api_key_close_message())
+        let closed = TerminalEvent::Closed {
+            exit_code: None,
+            message: Some(STREAM_ACCESS_ENDED_CLOSE_REASON.into()),
+        };
+        assert_eq!(sent.next().await, Some(closed_frame(&closed)));
+        assert_eq!(sent.next().await, Some(stream_access_lost_close_frame()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn job_terminal_closes_within_send_timeout_when_browser_stops_reading() {
+        let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
+        let channels = gradient_pool::guest_channels::GuestChannels::new();
+        let (handle, events) = channels.open(
+            "worker",
+            Arc::new(port),
+            "job".into(),
+            GuestChannelKind::Console,
         );
+        let channel_id = handle.id();
+        let (sink, _unread) = futures::channel::mpsc::channel::<Message>(0);
+        let client = futures::stream::pending::<Result<Message, axum::Error>>();
+        Shutdown::new().spawn(async move {
+            for _ in 0..3 {
+                channels.deliver("worker", channel_id, b"output".to_vec());
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            std::future::pending::<()>().await;
+        });
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3)
+                + LIVE_STREAM_OR_JOB_TERMINAL_BROWSER_MESSAGE_SEND_TIMEOUT,
+            pipe_terminal(
+                sink,
+                client,
+                GuestChannelOpened { handle, events },
+                std::future::pending::<()>(),
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .expect("A terminal that the browser stopped reading closes at the send timeout.");
     }
 }

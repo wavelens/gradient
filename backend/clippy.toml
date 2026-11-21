@@ -5,7 +5,7 @@ allow-unwrap-in-tests = true
 
 disallowed-methods = [
     { path = "tokio::task::spawn", reason = "use Shutdown::spawn for a tracked task or Shutdown::supervise for a loop" },
-    { path = "reqwest::Client::new", reason = "use gradient_util::http::build_client, build_download_client or the process-wide download_client; a client built by hand leaks a pool and panics without a CA bundle" },
+    { path = "reqwest::Client::new", reason = "Use `gradient_util::http::build_client` for endpoints that the admin configured. Use `HttpClientForUserSuppliedUrls` for URLs that project members set. Use `gradient_worker_client::http::download_client` on workers. Hand-built clients leak the pool and panic without a CA bundle." },
     { path = "sea_orm::Statement::from_sql_and_values", reason = "declare the query with gradient_db::sql! and run it through Query::bind or bind_built, so the query plan check sees it" },
     { path = "sea_orm::Statement::from_string", reason = "declare the query with gradient_db::sql!, or use execute_unprepared for DDL and SET" },
     { path = "uuid::Uuid::new_v4", reason = "use Uuid::now_v7 or the id type's now_v7; a deliberate v4 carries #[expect(clippy::disallowed_methods, reason = ...)]", allow-invalid = true },
@@ -14,4 +14,10 @@ disallowed-methods = [
     { path = "std::env::var_os", reason = "declare the value as an option in a config_group struct, so it is in options.json, the NixOS module and the docs; a variable of another program carries #[expect(clippy::disallowed_methods, reason = ...)]" },
     { path = "std::env::set_var", reason = "pass the variable to the child process with Command::env; a change of the own environment carries #[expect(clippy::disallowed_methods, reason = ...)]" },
     { path = "std::env::remove_var", reason = "pass the variable to the child process with Command::env; a change of the own environment carries #[expect(clippy::disallowed_methods, reason = ...)]" },
+    { path = "password_auth::generate_hash", reason = "Hash passwords and secrets through the `password` module in gradient-web (`password_hashing_and_wrong_sign_in_attempts`). Password and secret hashing use Argon2 on a blocking thread pool under a shared limit. Call sites outside gradient-web have `#[expect(clippy::disallowed_methods, reason = ...)]`." },
+    { path = "password_auth::verify_password", reason = "Password checks go through the password module of gradient-web (`password_hashing_and_wrong_sign_in_attempts`). Code paths in the module run Argon2 on a blocking thread pool under a shared limit. They count failed attempts per account. Code outside gradient-web can hold `#[expect(clippy::disallowed_methods, reason = ...)]`." },
+]
+
+disallowed-types = [
+    { path = "axum::extract::ws::WebSocketUpgrade", reason = "Adopt `WebSocketUpgradeCredentialRecheckRequestExtractor`. Origin checks for cookie requests happen in this extractor. Access checks repeat in this extractor while the socket is open. Routes with a separate sign-in have `#[expect(clippy::disallowed_types, reason = ...)]`." },
 ]

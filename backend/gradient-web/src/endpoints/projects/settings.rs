@@ -32,8 +32,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const SIGNATURE_INSERT_CHUNK: usize = 1_000;
-
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct SubscribeCacheRequest {
     pub mode: Option<CacheSubscriptionMode>,
@@ -48,7 +46,9 @@ pub enum SubscriptionStatus {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateCacheSubscriptionRequest {
-    pub sign_outputs: bool,
+    /// Left out: on for a subscription that writes to the cache, off for a read-only one.
+    #[serde(default)]
+    pub sign_outputs: Option<bool>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -181,10 +181,10 @@ pub(crate) async fn cache_subscription_items(
             id: cache.id,
             name: cache.name.clone(),
             display_name: cache.display_name.clone(),
+            sign_outputs: request.mode.writes_build_outputs_to_cache(),
             mode: request.mode,
             status: SubscriptionStatus::Pending,
             managed: false,
-            sign_outputs: true,
             approvers: subscription_approvers(db, cache.id).await?,
         });
     }
@@ -296,6 +296,7 @@ pub async fn post_project_subscribe_cache(
         MProjectCache {
             project: project.id,
             cache: cache.id,
+            sign_outputs: writes_to_cache,
             mode,
             ..Default::default()
         },
@@ -381,63 +382,12 @@ pub fn mode_label(mode: &CacheSubscriptionMode) -> &'static str {
 }
 
 async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id: CacheId) {
-    let drv_ids = match gradient_db::projects::derivations::derivation_ids_for_project(
-        db, project_id,
+    if let Err(e) = gradient_db::store_path_content_variant_trust::insert_unsigned_signature_placeholders_for_trusted_store_path_content_variants(
+        db, project_id, cache_id,
     )
     .await
     {
-        Ok(ids) => ids,
-        Err(e) => {
-            tracing::warn!(%project_id, error = %e, "backfill: failed to load derivations");
-            return;
-        }
-    };
-
-    if drv_ids.is_empty() {
-        return;
-    }
-
-    let outputs = match gradient_db::derivation_outputs::of_derivations(db, &drv_ids).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(%project_id, error = %e, "backfill: failed to load derivation_outputs");
-            return;
-        }
-    };
-    let hashes: Vec<String> = outputs.into_iter().filter_map(|o| o.hash).collect();
-    let stored = match gradient_db::cached_paths::stored_by_hash(db, &hashes).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(%project_id, error = %e, "backfill: failed to load cached paths");
-            return;
-        }
-    };
-    let cp_ids: std::collections::HashSet<CachedPathId> = stored.into_values().collect();
-
-    // The (cached_path, cache) uniqueness is doing the de-duplication. The whole backfill is one
-    // batched insert instead of a check and an insert per path.
-    let now = gradient_types::now();
-    let rows: Vec<_> = cp_ids
-        .into_iter()
-        .map(|cp_id| {
-            MCachedPathSignature {
-                id: CachedPathSignatureId::now_v7(),
-                cached_path: cp_id,
-                cache: cache_id,
-                created_at: now,
-                ..Default::default()
-            }
-            .into_active_model()
-        })
-        .collect();
-
-    for chunk in rows.chunks(SIGNATURE_INSERT_CHUNK) {
-        let res = gradient_db::cached_paths::add_missing_signatures(db, chunk.to_vec()).await;
-        if let Err(e) = res
-            && !matches!(e, sea_orm::DbErr::RecordNotInserted)
-        {
-            tracing::warn!(cache = %cache_id, error = %e, "backfill: placeholder insert failed");
-        }
+        tracing::warn!(%project_id, cache = %cache_id, error = %e, "backfill: placeholder insert failed");
     }
 }
 
@@ -552,9 +502,16 @@ pub async fn patch_project_subscribe_cache(
         return Err(ProjectRefusal::DeclaredInServerStateConfiguration.into());
     }
 
-    let starts_signing = body.sign_outputs && !subscription.sign_outputs;
+    let subscription_mode_writes_build_outputs = subscription.mode.writes_build_outputs_to_cache();
+    let cache_signs_outputs = body
+        .sign_outputs
+        .unwrap_or(subscription_mode_writes_build_outputs);
+    if cache_signs_outputs && !subscription_mode_writes_build_outputs {
+        return Err(ProjectRefusal::SignOutputsRequestedForReadOnlyCacheSubscription.into());
+    }
+    let starts_signing = cache_signs_outputs && !subscription.sign_outputs;
     let mut active = subscription.into_active_model();
-    active.sign_outputs = sea_orm::Set(body.sign_outputs);
+    active.sign_outputs = sea_orm::Set(cache_signs_outputs);
     gradient_db::rows::update::<EProjectCache, _>(&db.web_db, active).await?;
     if starts_signing {
         enqueue_backfill_signatures(&db.web_db, project.id, cache.id).await;

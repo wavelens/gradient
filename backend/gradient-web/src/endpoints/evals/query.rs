@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
@@ -46,8 +47,14 @@ pub async fn get_evaluation(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<EvaluationResponse>>> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let evaluation = ctx.evaluation;
 
     let commit_hash = by_id::<ECommit, _>(&state.web_db, evaluation.commit)
@@ -228,8 +235,14 @@ pub async fn get_evaluation_builds(
     Path(evaluation_id): Path<EvaluationId>,
     Query(query): Query<BuildsQuery>,
 ) -> WebResult<Json<BaseResponse<PaginatedBuilds>>> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let evaluation = ctx.evaluation;
     let mapper = state.project_mapper(ctx.project_id).await?;
 
@@ -422,8 +435,14 @@ pub async fn get_evaluation_messages(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationMessageResponse>>>> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let evaluation = ctx.evaluation;
 
     let messages = gradient_db::evaluations::messages::of_evaluation_oldest_first(

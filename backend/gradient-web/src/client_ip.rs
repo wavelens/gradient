@@ -13,7 +13,7 @@ use axum::http::request::Parts;
 use axum::http::{Extensions, HeaderMap};
 use ipnet::IpNet;
 use std::convert::Infallible;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 pub struct OptionalPeer(pub Option<SocketAddr>);
 
@@ -75,6 +75,13 @@ fn normalize(ip: IpAddr) -> IpAddr {
             None => IpAddr::V6(v6),
         },
         v => v,
+    }
+}
+
+pub fn rate_limit_key_for_client_ip(ip: IpAddr) -> IpAddr {
+    match normalize(ip) {
+        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from_bits(v6.to_bits() & !u128::from(u64::MAX))),
+        v4 => v4,
     }
 }
 
@@ -214,6 +221,31 @@ mod tests {
         assert_eq!(
             resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
             ip("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn rate_limit_key_for_client_ip_uses_ipv4_address_ipv6_64_prefix_and_ipv4_mapped_ipv4_address()
+    {
+        assert_eq!(
+            rate_limit_key_for_client_ip(ip("203.0.113.9")),
+            ip("203.0.113.9")
+        );
+        assert_eq!(
+            rate_limit_key_for_client_ip(ip("2001:db8:1:2:ffff:ffff:ffff:ffff")),
+            ip("2001:db8:1:2::")
+        );
+        assert_eq!(
+            rate_limit_key_for_client_ip(ip("2001:db8:1:2::1")),
+            ip("2001:db8:1:2::")
+        );
+        assert_eq!(
+            rate_limit_key_for_client_ip(ip("2001:db8:1:3::")),
+            ip("2001:db8:1:3::")
+        );
+        assert_eq!(
+            rate_limit_key_for_client_ip(ip("::ffff:203.0.113.9")),
+            ip("203.0.113.9")
         );
     }
 }

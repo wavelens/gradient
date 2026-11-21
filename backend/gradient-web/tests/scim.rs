@@ -6,12 +6,16 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
+use gradient_db::users::{ValidatedNewUser, insert_user_account};
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::{team, team_user, user};
+use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::mock::{all_statements, empty_db, mock_db};
 use gradient_test_support::state::TestState;
-use gradient_types::{TeamId, TeamUserId, UserId};
-use sea_orm::{DatabaseConnection, MockExecResult};
+use gradient_types::{AccountOrigin, TeamId, TeamUserId, UserId};
+use sea_orm::{
+    ActiveModelTrait, ConnectionTrait, DatabaseConnection, IntoActiveModel, MockExecResult,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -82,9 +86,17 @@ fn scim_user(username: &str, active: bool) -> user::Model {
         name: username.to_string(),
         email: username.to_string(),
         managed: true,
+        account_origin: AccountOrigin::ScimProvisionedByIdentityProvider,
         email_verified: true,
         active,
         ..Default::default()
+    }
+}
+
+fn scim_user_with_id(id: UserId) -> user::Model {
+    user::Model {
+        id,
+        ..scim_user("member", true)
     }
 }
 
@@ -121,7 +133,10 @@ async fn scim_list_users_starts_at_the_requested_index() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_create_user_returns_201() {
-    let created = scim_user("alice@example.com", true);
+    let created = user::Model {
+        email: "alice@example.com".into(),
+        ..scim_user("alice", true)
+    };
     let db = mock_db()
         .append_query_results([Vec::<user::Model>::new()])
         .append_query_results([vec![created.clone()]])
@@ -132,7 +147,7 @@ async fn scim_create_user_returns_201() {
         .add_header("Authorization", auth_header())
         .json(&json!({
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
-            "userName": "alice@example.com",
+            "userName": "alice",
             "emails": [{"value": "alice@example.com", "primary": true}],
             "active": true
         }))
@@ -140,9 +155,77 @@ async fn scim_create_user_returns_201() {
 
     res.assert_status(StatusCode::CREATED);
     let body: Value = res.json();
-    assert_eq!(body["userName"], "alice@example.com");
+    assert_eq!(body["userName"], "alice");
     assert_eq!(body["id"], created.id.to_string());
     assert_eq!(body["active"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_create_user_with_at_sign_in_username_returns_invalid_value_and_writes_nothing() {
+    let db = mock_db()
+        .append_query_results([Vec::<user::Model>::new()])
+        .into_connection();
+    let s = scim_server(db.clone());
+    let res = s
+        .post("/scim/v2/Users")
+        .add_header("Authorization", auth_header())
+        .json(&json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "a@b",
+            "emails": [{"value": "a@b.io", "primary": true}],
+            "active": true
+        }))
+        .await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: Value = res.json();
+    assert_eq!(body["scimType"], "invalidValue");
+    drop(s);
+    let statements = all_statements(db.into_transaction_log());
+    assert!(statements.iter().all(|s| !s.sql.starts_with("INSERT")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_get_patch_delete_non_scim_user_returns_404_and_lookup_sql_filters_account_origin() {
+    let id = UserId::now_v7();
+    let db = mock_db()
+        .append_query_results([Vec::<user::Model>::new()])
+        .append_query_results([Vec::<user::Model>::new()])
+        .append_query_results([Vec::<user::Model>::new()])
+        .into_connection();
+    let s = scim_server(db.clone());
+    let path = format!("/scim/v2/Users/{id}");
+
+    s.get(&path)
+        .add_header("Authorization", auth_header())
+        .await
+        .assert_status_not_found();
+    s.patch(&path)
+        .add_header("Authorization", auth_header())
+        .json(&json!({
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{"op": "replace", "path": "active", "value": false}]
+        }))
+        .await
+        .assert_status_not_found();
+    s.delete(&path)
+        .add_header("Authorization", auth_header())
+        .await
+        .assert_status_not_found();
+    drop(s);
+
+    let statements = all_statements(db.into_transaction_log());
+    assert_eq!(statements.len(), 3, "{statements:?}");
+    for statement in statements {
+        assert!(statement.sql.starts_with("SELECT"), "{}", statement.sql);
+        assert!(
+            statement.sql.contains("\"account_origin\" = "),
+            "{}",
+            statement.sql
+        );
+        let values = format!("{:?}", statement.values);
+        assert!(values.contains("SmallInt(Some(2))"), "{values}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -310,7 +393,7 @@ fn team_member(team: TeamId, user: UserId) -> team_user::Model {
         team,
         user,
         role: TeamRole::Member,
-        source: TeamMemberSource::Group,
+        source: TeamMemberSource::ScimGroup,
     }
 }
 
@@ -349,8 +432,7 @@ async fn scim_patch_group_add_member_joins_the_team() {
     let member = UserId::now_v7();
     let db = mock_db()
         .append_query_results([vec![team.clone()]])
-        .append_query_results([Vec::<team_user::Model>::new()])
-        .append_query_results([vec![team_member(team.id, member)]])
+        .append_query_results([vec![scim_user_with_id(member)]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -381,7 +463,11 @@ async fn scim_patch_group_replace_members_removes_absent_group_members() {
     };
     let db = mock_db()
         .append_query_results([vec![team.clone()]])
-        .append_query_results([vec![team_member(team.id, kept)]])
+        .append_query_results([vec![scim_user_with_id(kept)]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }])
         .append_query_results([vec![
             team_member(team.id, kept),
             team_member(team.id, dropped),
@@ -422,6 +508,7 @@ async fn scim_patch_group_remove_member_leaves_the_team() {
     let member = UserId::now_v7();
     let db = mock_db()
         .append_query_results([vec![team.clone()]])
+        .append_query_results([vec![scim_user_with_id(member)]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -464,6 +551,7 @@ async fn inactive_user_session_returns_403() {
         user_agent: None,
         ip: None,
         remember_me: false,
+        is_cli_device_sign_in_session: false,
     };
     let db = mock_db()
         .append_query_results([vec![session.clone()]])
@@ -491,4 +579,391 @@ async fn inactive_user_session_returns_403() {
         .add_header("Authorization", format!("Bearer {token}"))
         .await;
     res.assert_status_forbidden();
+}
+
+async fn insert_account(
+    db: &DatabaseConnection,
+    origin: AccountOrigin,
+    username: &str,
+    email: &str,
+) -> user::Model {
+    insert_user_account(
+        db,
+        ValidatedNewUser::new(origin, username, username, Some(email)).expect("valid account"),
+    )
+    .await
+    .expect("insert account")
+}
+
+async fn insert_scim_team(db: &DatabaseConnection) -> team::Model {
+    team::Model {
+        created_at: chrono::Utc::now().naive_utc(),
+        ..scim_team()
+    }
+    .into_active_model()
+    .insert(db)
+    .await
+    .expect("insert team")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_group_add_or_replace_with_member_of_other_origin_is_refused_and_writes_nothing() {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let bob = insert_account(&db, AccountOrigin::PublicRegistration, "bob", "bob@self.io").await;
+    insert_scim_team(&db).await;
+    let server = scim_server(db.clone());
+
+    for operation in [
+        json!({"op": "add", "path": "members", "value": [{"value": bob.id.to_string()}]}),
+        json!({"op": "replace", "path": "members", "value": [{"value": bob.id.to_string()}]}),
+    ] {
+        let res = server
+            .patch("/scim/v2/Groups/acme-eng")
+            .add_header("Authorization", auth_header())
+            .json(&json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [operation]
+            }))
+            .await;
+        res.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    drop(server);
+    assert!(test_db.rows::<team_user::Entity>().await.is_empty());
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_group_reply_leaves_out_members_of_other_origin() {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let bob = insert_account(&db, AccountOrigin::PublicRegistration, "bob", "bob@self.io").await;
+    let carol = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "carol",
+        "carol@idp.io",
+    )
+    .await;
+    let team = insert_scim_team(&db).await;
+    for member in [
+        team_user::Model {
+            source: TeamMemberSource::Api,
+            ..team_member(team.id, bob.id)
+        },
+        team_member(team.id, carol.id),
+    ] {
+        member
+            .into_active_model()
+            .insert(&db)
+            .await
+            .expect("insert member");
+    }
+    let server = scim_server(db.clone());
+
+    let res = server
+        .get("/scim/v2/Groups/acme-eng")
+        .add_header("Authorization", auth_header())
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["members"], json!([{"value": carol.id.to_string()}]));
+    drop(server);
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_put_and_list_filter_do_not_reach_account_of_other_origin() {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let bob = insert_account(&db, AccountOrigin::PublicRegistration, "bob", "bob@self.io").await;
+    let server = scim_server(db.clone());
+
+    let put = server
+        .put(&format!("/scim/v2/Users/{}", bob.id))
+        .add_header("Authorization", auth_header())
+        .json(&json!({"userName": "bob", "emails": [{"value": "evil@idp.io"}], "active": false}))
+        .await;
+    let list = server
+        .get("/scim/v2/Users")
+        .add_query_param("filter", r#"userName eq "bob""#)
+        .add_header("Authorization", auth_header())
+        .await;
+
+    put.assert_status(StatusCode::NOT_FOUND);
+    list.assert_status_ok();
+    assert_eq!(list.json::<Value>()["totalResults"], 0);
+    drop(server);
+    assert_eq!(test_db.find::<user::Entity>(bob.id).await, Some(bob));
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_list_username_filter_ignores_letter_case() {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "Carol",
+        "carol@idp.io",
+    )
+    .await;
+    let server = scim_server(db.clone());
+
+    let res = server
+        .get("/scim/v2/Users")
+        .add_query_param("filter", r#"userName eq "carol""#)
+        .add_header("Authorization", auth_header())
+        .await;
+
+    res.assert_status_ok();
+    assert_eq!(res.json::<Value>()["totalResults"], 1);
+    drop(server);
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_put_with_email_of_another_account_returns_409() {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    insert_account(&db, AccountOrigin::PublicRegistration, "bob", "bob@self.io").await;
+    let carol = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "carol",
+        "carol@idp.io",
+    )
+    .await;
+    let server = scim_server(db.clone());
+
+    let res = server
+        .put(&format!("/scim/v2/Users/{}", carol.id))
+        .add_header("Authorization", auth_header())
+        .json(&json!({"userName": "carol", "emails": [{"value": "bob@self.io"}]}))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+    drop(server);
+    test_db.finish().await;
+}
+
+fn group_patch_body(operations: Value) -> Value {
+    json!({
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": operations
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_group_patch_remove_unknown_or_non_scim_account_changes_nothing_and_add_non_scim_account_fails()
+ {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let bob = insert_account(&db, AccountOrigin::PublicRegistration, "bob", "bob@self.io").await;
+    let carol = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "carol",
+        "carol@idp.io",
+    )
+    .await;
+    let team = insert_scim_team(&db).await;
+    team_member(team.id, carol.id)
+        .into_active_model()
+        .insert(&db)
+        .await
+        .expect("insert member");
+    let members_before = test_db.rows::<team_user::Entity>().await;
+    let server = scim_server(db.clone());
+
+    let mut answers = Vec::new();
+    for id in [UserId::now_v7(), bob.id] {
+        let res = server
+            .patch("/scim/v2/Groups/acme-eng")
+            .add_header("Authorization", auth_header())
+            .json(&group_patch_body(json!([
+                {"op": "remove", "path": format!("members[value eq \"{id}\"]")}
+            ])))
+            .await;
+        answers.push((res.status_code(), res.json::<Value>()));
+    }
+    let add = server
+        .patch("/scim/v2/Groups/acme-eng")
+        .add_header("Authorization", auth_header())
+        .json(&group_patch_body(json!([
+            {"op": "add", "path": "members", "value": [{"value": bob.id.to_string()}]}
+        ])))
+        .await;
+
+    assert_eq!(answers[0].0, StatusCode::OK);
+    assert_eq!(answers[0], answers[1]);
+    add.assert_status(StatusCode::BAD_REQUEST);
+    drop(server);
+    assert_eq!(test_db.rows::<team_user::Entity>().await, members_before);
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_group_patch_with_valid_add_then_other_origin_account_returns_400_and_writes_no_team_member()
+ {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let bob = insert_account(&db, AccountOrigin::PublicRegistration, "bob", "bob@self.io").await;
+    let carol = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "carol",
+        "carol@idp.io",
+    )
+    .await;
+    insert_scim_team(&db).await;
+    let server = scim_server(db.clone());
+
+    let res = server
+        .patch("/scim/v2/Groups/acme-eng")
+        .add_header("Authorization", auth_header())
+        .json(&group_patch_body(json!([
+            {"op": "add", "path": "members", "value": [{"value": carol.id.to_string()}]},
+            {"op": "add", "path": "members", "value": [{"value": bob.id.to_string()}]}
+        ])))
+        .await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+    drop(server);
+    assert!(test_db.rows::<team_user::Entity>().await.is_empty());
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_group_patch_with_valid_add_then_database_write_failure_returns_error_and_writes_no_team_member()
+ {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let carol = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "carol",
+        "carol@idp.io",
+    )
+    .await;
+    let dave = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "dave",
+        "dave@idp.io",
+    )
+    .await;
+    insert_scim_team(&db).await;
+    db.execute_unprepared(&format!(
+        r#"CREATE FUNCTION raise_exception_on_team_membership_insert_for_test_user() RETURNS trigger
+           LANGUAGE plpgsql AS $$ BEGIN
+               IF NEW."user" = '{}' THEN RAISE division_by_zero; END IF;
+               RETURN NEW;
+           END $$"#,
+        dave.id
+    ))
+    .await
+    .expect("create trigger function");
+    db.execute_unprepared(
+        "CREATE TRIGGER raise_exception_on_team_membership_insert_for_test_user BEFORE INSERT ON team_user \
+         FOR EACH ROW EXECUTE FUNCTION raise_exception_on_team_membership_insert_for_test_user()",
+    )
+    .await
+    .expect("create trigger");
+    let server = scim_server(db.clone());
+
+    let res = server
+        .patch("/scim/v2/Groups/acme-eng")
+        .add_header("Authorization", auth_header())
+        .json(&group_patch_body(json!([
+            {"op": "add", "path": "members", "value": [{"value": carol.id.to_string()}]},
+            {"op": "add", "path": "members", "value": [{"value": dave.id.to_string()}]}
+        ])))
+        .await;
+
+    res.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    drop(server);
+    assert!(test_db.rows::<team_user::Entity>().await.is_empty());
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_group_patch_single_add_with_mixed_origin_members_returns_400_and_writes_no_team_member()
+ {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let bob = insert_account(&db, AccountOrigin::PublicRegistration, "bob", "bob@self.io").await;
+    let carol = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "carol",
+        "carol@idp.io",
+    )
+    .await;
+    insert_scim_team(&db).await;
+    let server = scim_server(db.clone());
+
+    for members in [[carol.id, bob.id], [bob.id, carol.id]] {
+        let res = server
+            .patch("/scim/v2/Groups/acme-eng")
+            .add_header("Authorization", auth_header())
+            .json(&group_patch_body(json!([{
+                "op": "add",
+                "path": "members",
+                "value": members.map(|id| json!({"value": id.to_string()}))
+            }])))
+            .await;
+        res.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    drop(server);
+    assert!(test_db.rows::<team_user::Entity>().await.is_empty());
+    test_db.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn patch_invalid_display_name_matches_put_and_is_not_stored() {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let invalid = "<script>alert(1)</script>";
+    let mut answers = Vec::new();
+    for username in ["carol", "dave"] {
+        let account = insert_account(
+            &db,
+            AccountOrigin::ScimProvisionedByIdentityProvider,
+            username,
+            &format!("{username}@idp.io"),
+        )
+        .await;
+        let server = scim_server(db.clone());
+        let path = format!("/scim/v2/Users/{}", account.id);
+        let res = if username == "carol" {
+            server
+                .put(&path)
+                .add_header("Authorization", auth_header())
+                .json(&json!({"userName": username, "displayName": invalid}))
+                .await
+        } else {
+            server
+                .patch(&path)
+                .add_header("Authorization", auth_header())
+                .json(&group_patch_body(json!([
+                    {"op": "replace", "path": "displayName", "value": invalid}
+                ])))
+                .await
+        };
+        drop(server);
+        let stored = test_db
+            .find::<user::Entity>(account.id)
+            .await
+            .expect("account exists");
+        assert_eq!(stored.name, username);
+        answers.push(res.status_code());
+    }
+
+    assert_eq!(answers[0], answers[1]);
+    test_db.finish().await;
 }

@@ -24,6 +24,8 @@ pub mod lookup;
 pub mod metrics_scope;
 pub mod names;
 pub mod otlp;
+pub(crate) mod password_hashing_and_wrong_sign_in_attempts;
+mod per_key_open_slot_limit;
 pub mod permissions;
 pub mod refusal;
 pub mod resource;
@@ -36,10 +38,15 @@ use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, FromRef, MatchedPath};
 use axum::{Router, middleware};
 use bytes::Bytes;
-use governor::middleware::NoOpMiddleware;
+use governor::RateLimiter;
+use governor::clock::Clock;
+use governor::middleware::{NoOpMiddleware, RateLimitingMiddleware};
+use governor::state::keyed::ShrinkableKeyedStateStore;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue, Request, Response};
 use ipnet::IpNet;
+use std::cell::RefCell;
+use std::hash::Hash;
 use std::net::IpAddr;
 use std::time::Duration;
 use tower_governor::GovernorLayer;
@@ -75,12 +82,16 @@ impl KeyExtractor for ClientIpKey {
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
-        let peer = client_ip::read_tcp_peer_ip_from_extensions(req.extensions());
-        Ok(client_ip::resolve_client_ip(
-            req.headers(),
-            peer,
-            &self.trusted_proxies,
+        Ok(client_ip::rate_limit_key_for_client_ip(
+            self.exact_client_ip_address(req),
         ))
+    }
+}
+
+impl ClientIpKey {
+    fn exact_client_ip_address<T>(&self, req: &Request<T>) -> IpAddr {
+        let peer = client_ip::read_tcp_peer_ip_from_extensions(req.extensions());
+        client_ip::resolve_client_ip(req.headers(), peer, &self.trusted_proxies)
     }
 }
 
@@ -91,11 +102,7 @@ async fn acquire_worker_websocket_connection_slot(
 ) -> axum::response::Response {
     use axum::response::IntoResponse as _;
 
-    let slot = key
-        .extract(&req)
-        .ok()
-        .and_then(|ip| limiter.try_acquire(ip));
-    let Some(slot) = slot else {
+    let Some(slot) = limiter.try_acquire(key.exact_client_ip_address(&req)) else {
         return (
             http::StatusCode::SERVICE_UNAVAILABLE,
             [(http::header::RETRY_AFTER, "10")],
@@ -140,17 +147,86 @@ impl KeyExtractor for RateLimitBucketOwnerOrClientIpKey {
     }
 }
 
-fn rate_limit<K: KeyExtractor>(
+fn remove_fresh_rate_limiter_keys_and_shrink<K, S, C, M>(limiter: &RateLimiter<K, S, C, M>)
+where
+    K: Hash,
+    S: ShrinkableKeyedStateStore<K>,
+    C: Clock,
+    M: RateLimitingMiddleware<C::Instant>,
+{
+    limiter.retain_recent();
+    limiter.shrink_to_fit();
+}
+
+#[derive(Default)]
+struct RateLimiterKeyCleanupList {
+    rate_limiter_cleanup_closures: RefCell<Vec<Box<dyn Fn() + Send>>>,
+}
+
+impl RateLimiterKeyCleanupList {
+    fn record_rate_limiter_key_cleanup<K>(&self, config: &GovernorConfig<K, NoOpMiddleware>)
+    where
+        K: KeyExtractor,
+        K::Key: Send + Sync + 'static,
+    {
+        let limiter = Arc::clone(config.limiter());
+        self.rate_limiter_cleanup_closures
+            .borrow_mut()
+            .push(Box::new(move || {
+                remove_fresh_rate_limiter_keys_and_shrink(&limiter)
+            }));
+    }
+
+    fn add_minute_cleanup_closure(&self, cleanup: impl Fn() + Send + 'static) {
+        self.rate_limiter_cleanup_closures
+            .borrow_mut()
+            .push(Box::new(cleanup));
+    }
+
+    fn run_all_cleanup_functions(&self) {
+        for cleanup in self.rate_limiter_cleanup_closures.borrow().iter() {
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
+                tracing::error!(
+                    "A panic happened in a cleanup closure for the rate limiter. The other cleanup closures still run."
+                );
+            }
+        }
+    }
+}
+
+fn start_task_that_removes_expired_rate_limit_keys_each_minute_until_server_shutdown(
+    shutdown: &gradient_util::shutdown::Shutdown,
+    rate_limiter_cleanup_functions: RateLimiterKeyCleanupList,
+) {
+    let server_shutdown_cancellation_token = shutdown.token();
+    shutdown.spawn(async move {
+        let mut minute_interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            tokio::select! {
+                () = server_shutdown_cancellation_token.cancelled() => break,
+                _ = minute_interval.tick() => rate_limiter_cleanup_functions.run_all_cleanup_functions(),
+            }
+        }
+    });
+}
+
+fn rate_limit<K>(
     key: &K,
     refill: Duration,
     burst: u32,
-) -> Result<Arc<GovernorConfig<K, NoOpMiddleware>>, InitError> {
+    rate_limiter_cleanup_functions: &RateLimiterKeyCleanupList,
+) -> Result<Arc<GovernorConfig<K, NoOpMiddleware>>, InitError>
+where
+    K: KeyExtractor,
+    K::Key: Send + Sync + 'static,
+{
     let config = GovernorConfigBuilder::default()
         .period(refill)
         .burst_size(burst)
         .key_extractor(key.clone())
         .finish()
         .ok_or_else(|| InitError::NetworkConfig("invalid rate-limit configuration".into()))?;
+    rate_limiter_cleanup_functions.record_rate_limiter_key_cleanup(&config);
 
     Ok(Arc::new(config))
 }
@@ -177,20 +253,19 @@ pub fn create_router_with_scheduler(
     scheduler: Arc<Scheduler>,
     sessions: Arc<gradient_proto::SessionsHandle>,
 ) -> Result<Router, InitError> {
-    let serve_url: http::HeaderValue =
-        state
-            .config
-            .server
-            .serve_url
-            .clone()
-            .try_into()
-            .map_err(|_| {
-                InitError::NetworkConfig(format!(
-                    "invalid serve_url: {}",
-                    state.config.server.serve_url
-                ))
-            })?;
-    let cors_allow_origin = AllowOrigin::exact(serve_url);
+    let build_invalid_serve_url_startup_error = || {
+        InitError::NetworkConfig(format!(
+            "invalid serve_url: {}",
+            state.config.server.serve_url
+        ))
+    };
+    let server_public_url_origin =
+        authorization::ServeUrlOrigin::parse(&state.config.server.serve_url)
+            .ok_or_else(build_invalid_serve_url_startup_error)?;
+    let cors_allow_origin = AllowOrigin::exact(
+        http::HeaderValue::try_from(server_public_url_origin.ascii_serialization())
+            .map_err(|_| build_invalid_serve_url_startup_error())?,
+    );
 
     let cors = CorsLayer::new()
         .allow_origin(cors_allow_origin)
@@ -247,14 +322,27 @@ pub fn create_router_with_scheduler(
     let key = ClientIpKey {
         trusted_proxies: state.config.network.trusted_proxies.clone().into(),
     };
+    let rate_limiter_cleanup_functions = RateLimiterKeyCleanupList::default();
     let caller_limit = rate_limit(
         &RateLimitBucketOwnerOrClientIpKey {
             client_ip: key.clone(),
         },
         Duration::from_millis(200),
         150,
+        &rate_limiter_cleanup_functions,
     )?;
-    let rate_limit = |refill, burst| rate_limit(&key, refill, burst);
+    let rate_limit =
+        |refill, burst| rate_limit(&key, refill, burst, &rate_limiter_cleanup_functions);
+    let wrong_password_counts_by_account = Arc::new(
+        password_hashing_and_wrong_sign_in_attempts::WrongPasswordAttemptCountsAndLastAttemptTimesByUserId::default(),
+    );
+    rate_limiter_cleanup_functions.add_minute_cleanup_closure({
+        let wrong_password_counts_by_account = Arc::clone(&wrong_password_counts_by_account);
+        move || {
+            wrong_password_counts_by_account
+                .remove_wrong_attempt_entries_older_than_24_hours(std::time::Instant::now())
+        }
+    });
 
     let limits = routes::BodyLimits::from_config(&state.config);
     let (auth_api, _) = routes::auth_api(&limits).split_for_parts();
@@ -274,7 +362,27 @@ pub fn create_router_with_scheduler(
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize,
-        ));
+        ))
+        .layer(axum::Extension(Arc::clone(
+            &wrong_password_counts_by_account,
+        )));
+
+    let (browser_session_account_api, _) = routes::browser_session_account_api().split_for_parts();
+    let browser_session_account_api = browser_session_account_api
+        .route_layer(middleware::from_fn(
+            authorization::require_browser_session_authentication,
+        ))
+        .route_layer(middleware::from_fn(
+            authorization::require_session_authentication,
+        ))
+        .route_layer(GovernorLayer::new(Arc::clone(&caller_limit)))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize,
+        ))
+        .layer(axum::Extension(Arc::clone(
+            &wrong_password_counts_by_account,
+        )));
 
     let (optional_api, _) = routes::optional_api().split_for_parts();
     let optional_api = optional_api
@@ -284,9 +392,24 @@ pub fn create_router_with_scheduler(
             authorization::authorize_optional,
         ));
 
+    let (token_query_api, _) =
+        routes::router_of_routes_accepting_token_query_credential().split_for_parts();
+    let token_query_api = token_query_api
+        .route_layer(GovernorLayer::new(Arc::clone(&caller_limit)))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize_optional,
+        ))
+        .route_layer(middleware::from_fn(
+            authorization::move_token_query_parameter_into_authorization_header,
+        ));
+
     let (auth_sensitive, _) = routes::auth_sensitive().split_for_parts();
-    let auth_sensitive =
-        auth_sensitive.route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?));
+    let auth_sensitive = auth_sensitive
+        .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?))
+        .layer(axum::Extension(Arc::clone(
+            &wrong_password_counts_by_account,
+        )));
 
     let (cli_device_poll_routes, _) = routes::cli_device_poll_routes().split_for_parts();
     let cli_device_poll_routes = cli_device_poll_routes
@@ -306,7 +429,9 @@ pub fn create_router_with_scheduler(
     let mut api = Router::new()
         .merge(auth_api)
         .merge(account_api)
+        .merge(browser_session_account_api)
         .merge(optional_api)
+        .merge(token_query_api)
         .merge(auth_sensitive)
         .merge(cli_device_poll_routes)
         .merge(username_availability_api)
@@ -464,20 +589,36 @@ pub fn create_router_with_scheduler(
 
     if state.config.ssh.enable {
         let authenticator = authenticated_nix_grpc_store_routes::GrpcCallerAuthenticator {
-            web_db: state.web_db.clone(),
-            jwt_secret: state.jwt_secret.clone(),
-            last_used_stamps: Arc::clone(&state.memory.last_used_stamps),
+            credential_recheck_dependencies: WebSocketCredentialRecheckDependencies::from_ref(
+                &state,
+            ),
             trusted_proxies: state.config.network.trusted_proxies.clone(),
             handles: gradient_ssh::SshHandles::from_state(&state, scheduler),
+            concurrent_open_grpc_call_limiter_per_credential: Default::default(),
         };
         app = authenticated_nix_grpc_store_routes::add_grpc_nix_store_service_routes_to_router(
             app,
             authenticator,
+            Arc::clone(&caller_limit),
         );
     }
+    start_task_that_removes_expired_rate_limit_keys_each_minute_until_server_shutdown(
+        &state.shutdown,
+        rate_limiter_cleanup_functions,
+    );
 
     Ok(app
         .fallback(handle_404)
+        .layer(axum::Extension(server_public_url_origin))
+        .layer(axum::Extension(Arc::new(
+            authorization::AnonymousWebSocketOpenLimitByIpAddress::new(
+                state
+                    .config
+                    .http
+                    .anonymous_websocket_max_connections_per_ip
+                    .get(),
+            ),
+        )))
         .layer(cors)
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(trace)
@@ -614,7 +755,7 @@ pub async fn serve_web(
 
     endpoints::github_app_page_url_from_cache_or_refresh_in_background(
         state.config.github_app.as_ref(),
-        &state.http,
+        &state.user_supplied_url_http_client,
         &state.memory.github_app_page_url,
         &state.shutdown,
     );
@@ -677,8 +818,55 @@ fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
 #[cfg(test)]
 mod tests {
     use super::tuned_listener;
+
+    #[test]
+    fn drops_rate_limiter_key_after_period_with_fake_clock() {
+        use super::remove_fresh_rate_limiter_keys_and_shrink;
+        use governor::clock::FakeRelativeClock;
+        use governor::{Quota, RateLimiter};
+        use std::net::{IpAddr, Ipv4Addr};
+        use std::time::Duration;
+
+        let period = Duration::from_secs(6);
+        let clock = FakeRelativeClock::default();
+        let limiter = RateLimiter::hashmap_with_clock(
+            Quota::with_period(period).expect("a non-zero period"),
+            clock.clone(),
+        );
+        let client = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        assert!(limiter.check_key(&client).is_ok());
+        remove_fresh_rate_limiter_keys_and_shrink(&limiter);
+        assert_eq!(limiter.len(), 1);
+
+        clock.advance(2 * period);
+        remove_fresh_rate_limiter_keys_and_shrink(&limiter);
+        assert!(limiter.is_empty());
+    }
     use axum::serve::Listener as _;
     use tokio::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn one_panicking_cleanup_closure_does_not_stop_other_closures_and_next_round_runs_all_again() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let cleanup_closures_under_test = super::RateLimiterKeyCleanupList {
+            rate_limiter_cleanup_closures: Default::default(),
+        };
+        let non_panicking_cleanup_run_count = Arc::new(AtomicUsize::new(0));
+        cleanup_closures_under_test
+            .add_minute_cleanup_closure(|| panic!("deliberate panic in test cleanup closure"));
+        let cleanup_run_count = Arc::clone(&non_panicking_cleanup_run_count);
+        cleanup_closures_under_test.add_minute_cleanup_closure(move || {
+            cleanup_run_count.fetch_add(1, Ordering::SeqCst);
+        });
+
+        cleanup_closures_under_test.run_all_cleanup_functions();
+        cleanup_closures_under_test.run_all_cleanup_functions();
+
+        assert_eq!(non_panicking_cleanup_run_count.load(Ordering::SeqCst), 2);
+    }
 
     #[tokio::test]
     async fn accepted_connections_have_nagle_disabled() {

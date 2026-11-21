@@ -10,6 +10,10 @@ const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 const DEFINITION_REF_PREFIX: &str = "#/definitions/";
 const TEXT_FORMATS: [&str; 2] = ["date", "date-time"];
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "Cargo can read build script instructions from stdout."
+)]
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let spec_path = manifest_dir.join(SPEC);

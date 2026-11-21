@@ -122,7 +122,7 @@ mod tests {
     use super::*;
     use gradient_fixtures::shape::shape;
 
-    const LIB: &str = "[hash4720]-lib.drv";
+    const LIB: &str = "b5c0yypb27mfgrhnbhwfq75n9mpmn5ir-lib.drv";
     const LIB_OUT: &str = "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c";
     const APP: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-app.drv";
     const APP_OUT: &str = "3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e";
@@ -178,6 +178,93 @@ mod tests {
             .find(|row| row.cache == cache)
             .expect("the cache");
         assert_eq!((signed.packages, signed.bytes), (1, 1 << 30));
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn counts_packages_and_bytes_for_each_variant_once_per_task_and_project_and_zero_bytes_for_tasks_without_evaluations()
+     {
+        const FOREIGN_PLACEHOLDER: &str = "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f";
+        let (owner, owner_again, foreign) = (
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+        );
+        let second_task_evaluation_id = EvaluationId::now_v7();
+        let other_project_task_evaluation_id = EvaluationId::now_v7();
+        let evaluation_id_that_will_be_deleted = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(owner)
+            .evaluation_status(gradient_entity::evaluation::EvaluationStatus::Completed)
+            .derivation(LIB)
+            .output(LIB_OUT)
+            .cached_output(LIB)
+            .job()
+            .evaluation(owner_again)
+            .same_task_as(owner)
+            .derivation(LIB)
+            .job()
+            .evaluation(second_task_evaluation_id)
+            .derivation(LIB)
+            .job()
+            .evaluation(other_project_task_evaluation_id)
+            .derivation(LIB)
+            .job()
+            .evaluation(foreign)
+            .cached_path(FOREIGN_PLACEHOLDER, "lib")
+            .evaluation(evaluation_id_that_will_be_deleted)
+            .into_database()
+            .await;
+        let project = db.project_of(owner).await;
+        let other_project = db.project_of(other_project_task_evaluation_id).await;
+        let task_ids = [
+            db.task_of(owner).await,
+            db.task_of(second_task_evaluation_id).await,
+            db.task_of(other_project_task_evaluation_id).await,
+            db.task_of(evaluation_id_that_will_be_deleted).await,
+        ];
+        db.execute(&format!(
+            "UPDATE cached_path SET hash = '{LIB_OUT}', nar_hash = 'sha256:foreign', file_size = 100 \
+             WHERE hash = '{FOREIGN_PLACEHOLDER}'"
+        ))
+        .await;
+        db.execute(&format!(
+            "UPDATE task SET project = '{project}' WHERE id = '{}'",
+            task_ids[1]
+        ))
+        .await;
+        db.execute(&format!(
+            "DELETE FROM evaluation WHERE id = '{evaluation_id_that_will_be_deleted}'"
+        ))
+        .await;
+        let conn = db.connection();
+
+        let tasks = task_stored_bytes(&conn).await.expect("tasks read");
+        let task_usage = task_ids.map(|id| {
+            let row = tasks.iter().find(|row| row.task == id).expect("the task");
+            (row.bytes, row.packages, row.evaluations)
+        });
+        assert_eq!(
+            task_usage,
+            [(105, 2, 2), (105, 2, 1), (105, 2, 1), (0, 0, 0)],
+            "Tasks count both stored variants of the output once each. Tasks without evaluation have 0 bytes."
+        );
+
+        let projects = get_project_storage_usage_rows(&conn)
+            .await
+            .expect("projects read");
+        let project_usage = [project, other_project].map(|id| {
+            let row = projects
+                .iter()
+                .find(|row| row.project == id)
+                .expect("the project");
+            (row.bytes, row.packages)
+        });
+        assert_eq!(
+            project_usage,
+            [(105, 2), (105, 2)],
+            "All projects count each of the two stored variants of an output once, even if two tasks in the same project build that output."
+        );
         db.finish().await;
     }
 }

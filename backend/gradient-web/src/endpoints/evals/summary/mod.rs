@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 mod analysis;
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -106,8 +107,14 @@ pub async fn get_evaluation_summary(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<EvaluationFailureSummary>>> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let db = &state.web_db;
     let loaded = LoadedEvaluation::load(db, &ctx.evaluation).await?;
     let compared = compared_evaluation(db, ctx.evaluation.previous).await?;

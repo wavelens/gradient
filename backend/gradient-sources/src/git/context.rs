@@ -20,58 +20,44 @@ use sea_orm::{ConnectionTrait, EntityTrait};
 pub(super) struct TaskGitContext<'a> {
     pub(super) ctx: &'a DbContext,
     pub(super) task: &'a MTask,
+    pub(super) repository: RepositoryUrl,
     pub(super) credentials: GitOperationCredentials,
 }
 
 impl<'a> TaskGitContext<'a> {
     pub(super) async fn new(ctx: &'a DbContext, task: &'a MTask) -> Result<Self, SourceError> {
-        Self::new_with_credentials_for_repository_urls(ctx, task, &[&task.repository]).await
-    }
-
-    pub(super) async fn new_with_credentials_for_repository_urls(
-        ctx: &'a DbContext,
-        task: &'a MTask,
-        urls: &[&str],
-    ) -> Result<Self, SourceError> {
-        let mut credentials = GitOperationCredentials::default();
-        let urls: Vec<&str> = urls
-            .iter()
-            .copied()
-            .filter(|url| repository_url_may_need_stored_credentials(url))
-            .collect();
-        if !urls.is_empty() {
+        let repository = task
+            .repository
+            .parse::<RepositoryUrl>()
+            .map_err(|_| SourceError::InvalidUrl)?;
+        let credentials = if repository_url_may_need_stored_credentials(&repository) {
             let project = EProject::find_by_id(task.project)
                 .one(&ctx.worker_db)
                 .await
                 .map_err(database_error)?
                 .ok_or(SourceError::ProjectNotFound { id: task.project })?;
-            for url in urls {
-                let loaded =
-                    load_project_git_credentials_for_repository_url(ctx, &project, url).await?;
-                credentials.ssh_git_private_key_and_known_hosts = credentials
-                    .ssh_git_private_key_and_known_hosts
-                    .or(loaded.ssh_git_private_key_and_known_hosts);
-                credentials
-                    .https_git_credentials
-                    .extend(loaded.https_git_credentials);
-            }
-        }
+            load_project_git_credentials_for_repository_url(ctx, &project, &repository).await?
+        } else {
+            GitOperationCredentials::default()
+        };
         Ok(Self {
             ctx,
             task,
+            repository,
             credentials,
         })
     }
 }
 
-pub fn repository_url_may_need_stored_credentials(url: &str) -> bool {
-    check_repository_url_is_ssh(url) || https_host_from_repository_url(url).is_some()
+pub fn repository_url_may_need_stored_credentials(url: &RepositoryUrl) -> bool {
+    check_repository_url_is_ssh(url.git_connection_url())
+        || https_host_from_repository_url(url.git_connection_url()).is_some()
 }
 
 pub async fn load_project_git_credentials_for_repository_url(
     ctx: &DbContext,
     project: &MProject,
-    url: &str,
+    url: &RepositoryUrl,
 ) -> Result<GitOperationCredentials, SourceError> {
     Ok(GitOperationCredentials {
         ssh_git_private_key_and_known_hosts: load_ssh_private_key_and_known_hosts(
@@ -88,9 +74,9 @@ pub async fn load_project_git_credentials_for_repository_url(
 async fn load_ssh_private_key_and_known_hosts(
     ctx: &DbContext,
     project: &MProject,
-    url: &str,
+    url: &RepositoryUrl,
 ) -> Result<Option<SshGitPrivateKeyKnownHostsAndObservations>, SourceError> {
-    if !check_repository_url_is_ssh(url) {
+    if !check_repository_url_is_ssh(url.git_connection_url()) {
         return Ok(None);
     }
     let (private_key, _) = crate::ssh_key::decrypt_ssh_private_key(
@@ -110,9 +96,9 @@ async fn load_ssh_private_key_and_known_hosts(
 async fn load_decrypted_project_https_credentials_for_repository_url_host(
     ctx: &DbContext,
     project: &MProject,
-    url: &str,
+    url: &RepositoryUrl,
 ) -> Result<Vec<HttpsGitCredential>, SourceError> {
-    let Some(host) = https_host_from_repository_url(url) else {
+    let Some(host) = https_host_from_repository_url(url.git_connection_url()) else {
         return Ok(Vec::new());
     };
     Ok(

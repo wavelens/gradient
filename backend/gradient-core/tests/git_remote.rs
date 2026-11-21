@@ -6,7 +6,7 @@
 
 use gradient_entity::task;
 use gradient_fixtures::mock::empty_db;
-use gradient_sources::check_task_updates;
+use gradient_sources::{SourceError, check_task_updates};
 use gradient_test_support::state::test_state;
 
 /// `git://` URLs are using the pure-Rust pkt-line path. Connecting to an unbound loopback port is
@@ -33,5 +33,25 @@ fn check_task_updates_propagates_unreachable_remote_error() {
             "expected Err for unreachable git:// URL, got {:?}",
             result
         );
+    });
+}
+
+#[test]
+fn check_task_updates_refuses_stored_repository_url_with_disallowed_scheme() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = test_state(empty_db());
+        let task = task::Model {
+            repository: "path:/x".into(),
+            force_evaluation: true,
+            ..Default::default()
+        };
+
+        let result = check_task_updates(&state.db(), &task, None).await;
+
+        assert!(matches!(result, Err(SourceError::InvalidUrl)), "{result:?}");
     });
 }

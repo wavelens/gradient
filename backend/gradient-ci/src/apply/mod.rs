@@ -13,13 +13,16 @@ mod skip_marker;
 use super::trigger::{TriggerError, trigger_evaluation};
 use gradient_entity::evaluation::WalkMode;
 use gradient_types::*;
-use sea_orm::ConnectionTrait;
+use sea_orm::{
+    ConnectionTrait, EntityTrait, QuerySelect, TransactionSession, TransactionTrait,
+    sea_query::LockType,
+};
 
 pub use changed_paths::{
     PathFilterBaseCommit, PathFilterCommitComparison, changed_paths_match_trigger_path_filter,
     should_fire_trigger_for_path_filter,
 };
-pub use gates::{park_if_no_cache, park_if_no_workers, park_storage_full};
+pub use gates::park_storage_full;
 
 #[derive(Debug)]
 #[allow(
@@ -55,14 +58,31 @@ pub struct ApplyInput {
     pub author_name: Option<String>,
     pub manual: bool,
     pub honors_skip_marker: bool,
-    pub repository_override: Option<String>,
+    pub code_trust: EvaluationCodeTrust,
+    pub repository_override: Option<RepositoryUrl>,
     pub wildcard_override: Option<String>,
     pub source_comment: Option<serde_json::Value>,
     pub started_by: Option<UserId>,
     pub walk_mode: WalkMode,
 }
 
-pub async fn apply_trigger<C: ConnectionTrait>(
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvaluationCodeTrust {
+    CodeWithProjectCredentials,
+    ForkPullRequestCodeApprovedForHeadCommit,
+    UntrustedForkPullRequestCodeWithoutApproval,
+}
+
+impl EvaluationCodeTrust {
+    pub fn allows_project_credentials_and_privileged_actions(&self) -> bool {
+        matches!(
+            self,
+            Self::CodeWithProjectCredentials | Self::ForkPullRequestCodeApprovedForHeadCommit
+        )
+    }
+}
+
+pub async fn apply_trigger<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     task: &MTask,
     input: ApplyInput,
@@ -70,6 +90,19 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     if head_commit_asks_to_skip(&input) {
         return Ok(ApplyOutcome::SkippedByCommitMessage);
     }
+
+    let txn = db.begin().await?;
+    let outcome = apply_trigger_in_transaction(&txn, task, input).await?;
+    txn.commit().await?;
+    Ok(outcome)
+}
+
+async fn apply_trigger_in_transaction<C: ConnectionTrait>(
+    db: &C,
+    task: &MTask,
+    input: ApplyInput,
+) -> Result<ApplyOutcome, ApplyError> {
+    lock_task_row_for_trigger_apply(db, task.id).await?;
 
     let mut in_flight =
         gradient_db::evaluations::branch::in_flight_on_branch(db, task.id, &input.branch).await?;
@@ -116,6 +149,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.source_comment,
         input.started_by,
         input.walk_mode,
+        &input.code_trust,
     )
     .await
     {
@@ -127,12 +161,23 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     let aborted: Vec<EvaluationId> = aborted_evaluations.iter().map(|(id, _)| *id).collect();
     gradient_db::status::stamp_superseded_by_on_aborted_evaluations(db, &aborted, eval.id).await?;
 
-    let eval = gates::run_gates(db, eval, task.project).await?;
-
     Ok(ApplyOutcome::Created {
         evaluation: eval,
         aborted_evaluations,
     })
+}
+
+/// Lock the task row first. Two triggers for the same task then apply one after the other. The
+/// duplicate check and the concurrency check see the evaluation that the other trigger created.
+async fn lock_task_row_for_trigger_apply<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+) -> Result<(), sea_orm::DbErr> {
+    ETask::find_by_id(task)
+        .lock(LockType::NoKeyUpdate)
+        .one(db)
+        .await?;
+    Ok(())
 }
 
 fn head_commit_asks_to_skip(input: &ApplyInput) -> bool {
@@ -144,4 +189,4 @@ fn head_commit_asks_to_skip(input: &ApplyInput) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

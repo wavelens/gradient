@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_ci::ApplyInput;
+use gradient_ci::{ApplyInput, EvaluationCodeTrust};
 use gradient_db::WorkerDb;
 use gradient_entity::evaluation::WalkMode;
 use gradient_entity::ids::DispatchedJobId;
@@ -50,6 +50,7 @@ pub(super) fn trigger_input(
     trigger_type: TriggerType,
     branch: &str,
     commit: &[u8],
+    code_trust: EvaluationCodeTrust,
 ) -> ApplyInput {
     ApplyInput {
         trigger_id: Some(trigger),
@@ -60,6 +61,7 @@ pub(super) fn trigger_input(
         author_name: None,
         manual: false,
         honors_skip_marker: true,
+        code_trust,
         repository_override: None,
         wildcard_override: None,
         source_comment: None,

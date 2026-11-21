@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand,
+    UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES,
+};
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
 use crate::commands::worker::print_worker_registration_result_text;
 use crate::input::{CommandLineFormField, client_from_config, confirm_delete, handle_input};
@@ -19,13 +23,16 @@ use connector::webhooks::WebhookResource;
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// List the teams for a user and the role in each.
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Display the team settings and the role of the current user in them.
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Team name
         team: String,
     },
     /// Create a team and become its administrator. Empty fields open in $EDITOR.
+    #[command(add = McpToolMayRunCommand)]
     Create {
         /// A unique team name for URLs and commands
         #[arg(short, long)]
@@ -35,6 +42,7 @@ pub enum Commands {
         display_name: Option<String>,
     },
     /// Edit settings for a team. Only superusers can change OIDC groups, SCIM groups and new project settings.
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Team name
         team: String,
@@ -58,6 +66,7 @@ pub enum Commands {
         scim_group: Option<String>,
     },
     /// Delete a team along with its grants, grant requests, invitations and workers
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Team name
         team: String,
@@ -81,6 +90,7 @@ pub enum Commands {
         cmd: TeamGrantRequestsCommand,
     },
     /// List the projects and caches that grant access to the team.
+    #[command(add = McpToolMayRunCommand)]
     ProjectsAndCaches {
         /// Team name
         team: String,
@@ -106,11 +116,13 @@ pub struct TeamWebhookTeamNameArguments {
 #[derive(Subcommand, Debug)]
 pub enum TeamMembersCommands {
     /// List the members of a team with their role
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Team name
         team: String,
     },
     /// Invite a user to a team. The user can join after acceptance, while superusers add users immediately.
+    #[command(add = McpToolMayRunCommand)]
     Add {
         /// Team name
         team: String,
@@ -121,6 +133,7 @@ pub enum TeamMembersCommands {
         role: TeamRole,
     },
     /// Change the role of a team member
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Team name
         team: String,
@@ -131,6 +144,7 @@ pub enum TeamMembersCommands {
         role: TeamRole,
     },
     /// Remove a member from a team
+    #[command(add = McpToolMayRunCommand)]
     Remove {
         /// Team name
         team: String,
@@ -142,11 +156,13 @@ pub enum TeamMembersCommands {
 #[derive(Subcommand, Debug)]
 pub enum TeamPendingInvitationsCommand {
     /// List the team invitations that await a response from invited users.
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Team name
         team: String,
     },
     /// Withdraw the pending invitation for a user
+    #[command(add = McpToolMayRunCommand)]
     Withdraw {
         /// Team name
         team: String,
@@ -158,11 +174,13 @@ pub enum TeamPendingInvitationsCommand {
 #[derive(Subcommand, Debug)]
 pub enum TeamGrantRequestsCommand {
     /// List a team's grant requests, newest first.
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Team name
         team: String,
     },
     /// Approve a grant request and enable the grant
+    #[command(add = McpToolMayRunCommand)]
     Approve {
         /// Team name
         team: String,
@@ -170,6 +188,7 @@ pub enum TeamGrantRequestsCommand {
         request_id: uuid::Uuid,
     },
     /// Reject grant request
+    #[command(add = McpToolMayRunCommand)]
     Reject {
         /// Team name
         team: String,
@@ -218,11 +237,13 @@ impl WorkerCapabilityToggles {
 #[derive(Subcommand, Debug)]
 pub enum TeamWorkerSubcommand {
     /// List the workers of a team and show their connection status.
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// Team name
         team: String,
     },
     /// Register a worker with a team. The worker can answer the challenge from the server with `<team id>:<token>` from the peers file.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Register {
         /// Team name
         team: String,
@@ -236,6 +257,7 @@ pub enum TeamWorkerSubcommand {
         capabilities: WorkerCapabilityToggles,
     },
     /// Modify the settings for a team worker. Disabling a worker can abort running jobs.
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Team name
         team: String,
@@ -254,6 +276,7 @@ pub enum TeamWorkerSubcommand {
         capabilities: WorkerCapabilityToggles,
     },
     /// Delete a worker from a team
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Team name
         team: String,
@@ -264,6 +287,7 @@ pub enum TeamWorkerSubcommand {
         yes: bool,
     },
     /// Show what pending evaluations need but no connected worker can provide: build systems and features, network access, secrets, evaluations.
+    #[command(add = McpToolMayRunCommand)]
     MissingWorkerCapabilities {
         /// Team name
         team: String,

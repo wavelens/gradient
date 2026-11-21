@@ -5,10 +5,14 @@
  */
 
 use gradient_entity::entry_point::Licenses;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter};
+use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::graph::runtime_closure::parse_reference_hash;
+use crate::store_path_content_variant_reader_choice::{
+    StorePathContentVariantReader,
+    get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache,
+};
 use gradient_types::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
@@ -60,6 +64,7 @@ pub async fn build_outputs<C: ConnectionTrait>(
 
 pub async fn with_referenced_paths<C: ConnectionTrait>(
     db: &C,
+    reader: StorePathContentVariantReader,
     mut reached: HashMap<String, MCachedPath>,
 ) -> Result<HashMap<String, MCachedPath>, DbErr> {
     let mut absent: HashSet<String> = HashSet::new();
@@ -72,17 +77,16 @@ pub async fn with_referenced_paths<C: ConnectionTrait>(
             return Ok(reached);
         }
 
-        let found = crate::fetch_in_chunks(&missing, |chunk| async move {
-            ECachedPath::find()
-                .filter(CCachedPath::Hash.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await?;
+        let found =
+            get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
+                db,
+                reader.clone(),
+                &missing,
+            )
+            .await?;
         let found: HashSet<String> = found
             .into_iter()
-            .map(|path| {
-                let hash = path.hash.clone();
+            .map(|(hash, path)| {
                 reached.insert(hash.clone(), path);
                 hash
             })
@@ -182,6 +186,7 @@ mod tests {
     fn path(hash: &str, references: &str) -> MCachedPath {
         MCachedPath {
             hash: hash.into(),
+            nar_object_storage_key: hash.into(),
             package: format!("{hash}-pkg"),
             references: Some(references.into()),
             ..Default::default()

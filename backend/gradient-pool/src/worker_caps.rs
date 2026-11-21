@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_types::ids::ProjectId;
+
 use gradient_wire::types::{
     BuildJob, BuildSpecKind, DeviceClass, ExecInventory, ExecRequirement, FlakeJob, FlakeStep,
     JobKind, ResourceAmount,
@@ -78,12 +80,17 @@ impl WorkerCaps {
         self.takes_jobs_of(&JobKind::Build) && self.runs_architecture(architecture) && features_ok
     }
 
-    pub fn can_run_exec(&self, req: &ExecRequirement) -> bool {
-        self.fits_exec(req, DeviceCount::Free)
+    pub fn can_run_exec(&self, req: &ExecRequirement, project_id: ProjectId) -> bool {
+        self.fits_exec(req, DeviceCount::Free, project_id)
     }
 
-    pub fn fits_exec(&self, req: &ExecRequirement, devices: DeviceCount) -> bool {
-        ExecFit::of(self, devices).is_some_and(|fit| fit.fits(req))
+    pub fn fits_exec(
+        &self,
+        req: &ExecRequirement,
+        devices: DeviceCount,
+        project_id: ProjectId,
+    ) -> bool {
+        ExecFit::of(self, devices).is_some_and(|fit| fit.fits(req, project_id))
     }
 
     pub fn can_run_build(&self, job: &BuildJob) -> bool {
@@ -275,17 +282,29 @@ mod tests {
     fn worker_sops_names_must_be_advertised() {
         let mut w = exec_worker();
         w.exec.as_mut().unwrap().secrets = vec!["lab-key".into()];
-        assert!(w.can_run_exec(&req(|r| r.secrets = vec!["lab-key".into()])));
-        assert!(!w.can_run_exec(&req(|r| r.secrets = vec!["hf-token".into()])));
+        assert!(w.can_run_exec(
+            &req(|r| r.secrets = vec!["lab-key".into()]),
+            ProjectId::nil()
+        ));
+        assert!(!w.can_run_exec(
+            &req(|r| r.secrets = vec!["hf-token".into()]),
+            ProjectId::nil()
+        ));
     }
 
     #[test]
     fn server_held_secrets_need_the_secrets_capability() {
         let mut w = exec_worker();
         w.capabilities.secrets = false;
-        assert!(!w.can_run_exec(&req(|r| r.server_secrets = vec!["wandb-token".into()])));
+        assert!(!w.can_run_exec(
+            &req(|r| r.server_secrets = vec!["wandb-token".into()]),
+            ProjectId::nil()
+        ));
         w.capabilities.secrets = true;
-        assert!(w.can_run_exec(&req(|r| r.server_secrets = vec!["wandb-token".into()])));
+        assert!(w.can_run_exec(
+            &req(|r| r.server_secrets = vec!["wandb-token".into()]),
+            ProjectId::nil()
+        ));
     }
 
     #[test]
@@ -293,28 +312,40 @@ mod tests {
         let mut w = exec_worker();
         w.capabilities.secrets = true;
         w.exec.as_mut().unwrap().secrets = vec!["wandb-token".into()];
-        assert!(!w.can_run_exec(&req(|r| r.server_secrets = vec!["wandb-token".into()])));
+        assert!(!w.can_run_exec(
+            &req(|r| r.server_secrets = vec!["wandb-token".into()]),
+            ProjectId::nil()
+        ));
     }
 
     #[test]
     fn every_label_must_be_present_and_the_worker_id_is_one() {
         let w = exec_worker();
-        assert!(w.can_run_exec(&req(|r| r.labels = vec!["w1".into()])));
-        assert!(w.can_run_exec(&req(|r| r.labels = vec!["lab-a".into(), "w1".into()])));
-        assert!(!w.can_run_exec(&req(|r| r.labels = vec!["3d-printer".into()])));
+        assert!(w.can_run_exec(&req(|r| r.labels = vec!["w1".into()]), ProjectId::nil()));
+        assert!(w.can_run_exec(
+            &req(|r| r.labels = vec!["lab-a".into(), "w1".into()]),
+            ProjectId::nil()
+        ));
+        assert!(!w.can_run_exec(
+            &req(|r| r.labels = vec!["3d-printer".into()]),
+            ProjectId::nil()
+        ));
     }
 
     #[test]
     fn devices_need_enough_free_units_and_an_allowed_name() {
         let w = exec_worker();
-        assert!(w.can_run_exec(&req(|r| r.devices = gpus(8))));
-        assert!(!w.can_run_exec(&req(|r| r.devices = gpus(9))));
-        assert!(!w.can_run_exec(&req(|r| r.devices = [gpus(4), gpus(5)].concat())));
+        assert!(w.can_run_exec(&req(|r| r.devices = gpus(8)), ProjectId::nil()));
+        assert!(!w.can_run_exec(&req(|r| r.devices = gpus(9)), ProjectId::nil()));
+        assert!(!w.can_run_exec(
+            &req(|r| r.devices = [gpus(4), gpus(5)].concat()),
+            ProjectId::nil()
+        ));
         let camera = vec![DeviceRequest {
             name: "camera".into(),
             count: 1,
         }];
-        assert!(!w.can_run_exec(&req(|r| r.devices = camera)));
+        assert!(!w.can_run_exec(&req(|r| r.devices = camera), ProjectId::nil()));
     }
 
     #[test]
@@ -323,8 +354,16 @@ mod tests {
         if let Some(inventory) = w.exec.as_mut() {
             inventory.devices[0].free = 0;
         }
-        assert!(!w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Free));
-        assert!(w.fits_exec(&req(|r| r.devices = gpus(8)), DeviceCount::Total));
+        assert!(!w.fits_exec(
+            &req(|r| r.devices = gpus(8)),
+            DeviceCount::Free,
+            ProjectId::nil()
+        ));
+        assert!(w.fits_exec(
+            &req(|r| r.devices = gpus(8)),
+            DeviceCount::Total,
+            ProjectId::nil()
+        ));
     }
 
     fn budget(total: u64, free: u64) -> ResourceAmount {
@@ -342,8 +381,8 @@ mod tests {
             };
         }
         let two_cpus = req(|r| r.guest = GuestSize::default_request());
-        assert!(!w.fits_exec(&two_cpus, DeviceCount::Free));
-        assert!(w.fits_exec(&two_cpus, DeviceCount::Total));
+        assert!(!w.fits_exec(&two_cpus, DeviceCount::Free, ProjectId::nil()));
+        assert!(w.fits_exec(&two_cpus, DeviceCount::Total, ProjectId::nil()));
     }
 
     #[test]
@@ -356,7 +395,7 @@ mod tests {
                 disk_mb: 1 << 40,
             }
         });
-        assert!(w.fits_exec(&huge, DeviceCount::Free));
+        assert!(w.fits_exec(&huge, DeviceCount::Free, ProjectId::nil()));
     }
 
     #[test]
@@ -365,22 +404,28 @@ mod tests {
         if let Some(inventory) = w.exec.as_mut() {
             inventory.allow.nodes = 1;
         }
-        assert!(!w.can_run_exec(&req(|r| r.nodes = 2)));
-        assert!(w.can_run_exec(&req(|r| r.nodes = 1)));
+        assert!(!w.can_run_exec(&req(|r| r.nodes = 2), ProjectId::nil()));
+        assert!(w.can_run_exec(&req(|r| r.nodes = 1), ProjectId::nil()));
     }
 
     #[test]
     fn mounts_network_ssh_and_ports_stay_inside_allow() {
         let w = exec_worker();
-        assert!(w.can_run_exec(&req(|r| r.mounts = vec!["datasets".into()])));
-        assert!(!w.can_run_exec(&req(|r| r.mounts = vec!["checkpoints".into()])));
-        assert!(w.can_run_exec(&req(|r| r.network = true)));
+        assert!(w.can_run_exec(
+            &req(|r| r.mounts = vec!["datasets".into()]),
+            ProjectId::nil()
+        ));
+        assert!(!w.can_run_exec(
+            &req(|r| r.mounts = vec!["checkpoints".into()]),
+            ProjectId::nil()
+        ));
+        assert!(w.can_run_exec(&req(|r| r.network = true), ProjectId::nil()));
         assert!(
-            !w.can_run_exec(&req(|r| r.ssh = true)),
+            !w.can_run_exec(&req(|r| r.ssh = true), ProjectId::nil()),
             "allow beats the request"
         );
-        assert!(!w.can_run_exec(&req(|r| r.ports = vec![80])));
-        assert!(w.can_run_exec(&req(|r| r.ports = vec![6006])));
+        assert!(!w.can_run_exec(&req(|r| r.ports = vec![80]), ProjectId::nil()));
+        assert!(w.can_run_exec(&req(|r| r.ports = vec![6006]), ProjectId::nil()));
     }
 
     #[test]
@@ -394,25 +439,25 @@ mod tests {
                 range(6006, 6006),
             ]);
         }
-        assert!(w.can_run_exec(&req(|r| r.ports = vec![22, 8080, 6006])));
-        assert!(!w.can_run_exec(&req(|r| r.ports = vec![22, 8101])));
+        assert!(w.can_run_exec(&req(|r| r.ports = vec![22, 8080, 6006]), ProjectId::nil()));
+        assert!(!w.can_run_exec(&req(|r| r.ports = vec![22, 8101]), ProjectId::nil()));
     }
 
     #[test]
     fn a_custom_image_needs_custom_images_and_a_worker_without_exec_runs_nothing() {
-        assert!(!exec_worker().can_run_exec(&req(|r| r.custom_image = true)));
+        assert!(!exec_worker().can_run_exec(&req(|r| r.custom_image = true), ProjectId::nil()));
         let mut custom_images = exec_worker();
         if let Some(inventory) = custom_images.exec.as_mut() {
             inventory.allow.custom_images = true;
         }
-        assert!(custom_images.can_run_exec(&req(|r| r.custom_image = true)));
+        assert!(custom_images.can_run_exec(&req(|r| r.custom_image = true), ProjectId::nil()));
         let mut no_exec = exec_worker();
         no_exec.capabilities.exec = false;
-        assert!(!no_exec.can_run_exec(&req(|_| {})));
+        assert!(!no_exec.can_run_exec(&req(|_| {}), ProjectId::nil()));
         let no_inventory = WorkerCaps {
             exec: None,
             ..exec_worker()
         };
-        assert!(!no_inventory.can_run_exec(&req(|_| {})));
+        assert!(!no_inventory.can_run_exec(&req(|_| {}), ProjectId::nil()));
     }
 }

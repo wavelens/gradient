@@ -65,6 +65,12 @@ impl<'a> NarImporter<'a> {
     }
 
     async fn verify_and_import(&self, nar: &Arc<FetchedNar>) -> Result<()> {
+        let claimed_nar_hash = self.meta.nar_hash.as_deref().with_context(|| {
+            format!(
+                "cache response for {} has no NAR hash, so there's no way to check the NAR before import",
+                self.store_path
+            )
+        })?;
         let store_path = self.store_path.to_owned();
         let digesting = Arc::clone(nar);
         let digest = tokio::task::spawn_blocking(move || {
@@ -78,10 +84,9 @@ impl<'a> NarImporter<'a> {
             self.store_path,
             &digest,
             self.meta.nar_size,
-            self.meta.nar_hash.as_deref(),
+            claimed_nar_hash,
         )?;
-        let meta = with_nar_hash(self.meta, &digest);
-        let valid_info = self.build_path_info(&meta, digest.size)?;
+        let valid_info = self.build_path_info(self.meta, digest.size)?;
 
         let (reader, writer) = tokio::io::duplex(PIPE_BYTES);
         let source = Arc::clone(nar);
@@ -235,19 +240,13 @@ impl NarDigest {
     }
 }
 
-fn with_nar_hash(meta: &CachedPath, nar: &NarDigest) -> CachedPath {
-    let mut meta = meta.clone();
-    meta.nar_hash.get_or_insert_with(|| nar.nix32());
-    meta
-}
-
 /// A mismatch is a typed [`CorruptCachedNar`]. The executor is routing it into demote-and-refetch
 /// instead of a retry loop.
 fn verify_nar(
     store_path: &str,
     nar: &NarDigest,
     expected_size: Option<u64>,
-    claimed_nar_hash: Option<&str>,
+    claimed_nar_hash: &str,
 ) -> Result<()> {
     if let Some(expected) = expected_size
         && nar.size != expected
@@ -260,20 +259,18 @@ fn verify_nar(
         );
     }
 
-    if let Some(claimed_nar_hash) = claimed_nar_hash {
-        let claimed = parse_nar_hash_to_bytes(claimed_nar_hash)
-            .with_context(|| format!("invalid nar_hash for {store_path}"))?;
+    let claimed = parse_nar_hash_to_bytes(claimed_nar_hash)
+        .with_context(|| format!("invalid nar_hash for {store_path}"))?;
 
-        if nar.sha256 != claimed {
-            return Err(
-                anyhow::Error::new(CorruptCachedNar(store_path.to_owned())).context(format!(
-                    "NAR hash mismatch for {}: server said {}, computed {}",
-                    store_path,
-                    claimed_nar_hash,
-                    nar.nix32()
-                )),
-            );
-        }
+    if nar.sha256 != claimed {
+        return Err(
+            anyhow::Error::new(CorruptCachedNar(store_path.to_owned())).context(format!(
+                "NAR hash mismatch for {}: server said {}, computed {}",
+                store_path,
+                claimed_nar_hash,
+                nar.nix32()
+            )),
+        );
     }
 
     Ok(())
@@ -294,31 +291,36 @@ pub async fn import_received_nar(
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_nar_without_a_claimed_hash_is_registered_under_the_hash_of_its_bytes() {
+    const RAW_NAR: &[u8] = b"nix-archive-1 body";
+
+    async fn import_into_unreachable_store(nar_hash: Option<String>) -> anyhow::Error {
+        let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
         let meta = CachedPath {
-            path: "/nix/store/aaaa-hello".into(),
+            path: "/nix/store/0mdqa9w1p6cmli6976v4wi0sw9r4p5pr-hello".into(),
+            nar_size: Some(RAW_NAR.len() as u64),
+            nar_hash,
             ..CachedPath::default()
         };
-        let filled = with_nar_hash(&meta, &NarDigest::of(&b"nar bytes"[..]).unwrap());
-        assert_eq!(
-            filled.nar_hash.as_deref(),
-            Some(gradient_worker_client::nar::sha256_nix32(b"nar bytes").as_str())
+        let payload = NarPayload::from(zstd::encode_all(RAW_NAR, 0).unwrap());
+        import_received_nar(&store, &meta.path, payload, &meta)
+            .await
+            .unwrap_err()
+    }
+
+    #[tokio::test]
+    async fn import_nar_without_nar_hash_is_refused_before_nix_daemon_contact() {
+        let refused = import_into_unreachable_store(None).await;
+        assert!(
+            format!("{refused:#}").contains("has no NAR hash"),
+            "{refused:#}"
         );
     }
 
-    #[test]
-    fn a_claimed_hash_is_kept() {
-        let meta = CachedPath {
-            nar_hash: Some("sha256:claimed".into()),
-            ..CachedPath::default()
-        };
-        assert_eq!(
-            with_nar_hash(&meta, &NarDigest::of(&b"nar bytes"[..]).unwrap())
-                .nar_hash
-                .as_deref(),
-            Some("sha256:claimed")
-        );
+    #[tokio::test]
+    async fn import_with_mismatched_nar_hash_is_refused_as_corrupt_cached_nar() {
+        let other = gradient_worker_client::nar::sha256_nix32(b"other");
+        let refused = import_into_unreachable_store(Some(other)).await;
+        assert!(refused.is::<CorruptCachedNar>(), "{refused:#}");
     }
 
     fn fetched(raw: &[u8]) -> (FetchedNar, NarDigest) {
@@ -378,15 +380,15 @@ mod tests {
             "/nix/store/aaaa-hello",
             &digest,
             Some(raw.len() as u64),
-            Some(&claimed),
+            &claimed,
         )
         .unwrap();
 
-        let short = verify_nar("/nix/store/aaaa-hello", &digest, Some(1), Some(&claimed));
+        let short = verify_nar("/nix/store/aaaa-hello", &digest, Some(1), &claimed);
         assert!(short.unwrap_err().is::<CorruptCachedNar>());
 
         let other = gradient_worker_client::nar::sha256_nix32(b"other");
-        let swapped = verify_nar("/nix/store/aaaa-hello", &digest, None, Some(&other));
+        let swapped = verify_nar("/nix/store/aaaa-hello", &digest, None, &other);
         assert!(swapped.unwrap_err().is::<CorruptCachedNar>());
     }
 

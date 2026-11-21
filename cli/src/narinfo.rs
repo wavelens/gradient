@@ -8,6 +8,7 @@
 pub struct Narinfo {
     pub store_path: String,
     pub url: Option<String>,
+    pub compression: Option<String>,
     pub file_hash: String,
     pub file_size: i64,
     pub nar_hash: String,
@@ -20,6 +21,7 @@ impl Narinfo {
     pub fn parse(text: &str) -> Result<Narinfo, String> {
         let mut store_path = None;
         let mut url = None;
+        let mut compression = None;
         let mut file_hash = None;
         let mut file_size = None;
         let mut nar_hash = None;
@@ -35,6 +37,7 @@ impl Narinfo {
             match key.trim() {
                 "StorePath" => store_path = Some(value.to_string()),
                 "URL" => url = Some(value.to_string()),
+                "Compression" => compression = Some(value.to_string()),
                 "FileHash" => file_hash = Some(value.to_string()),
                 "FileSize" => file_size = Some(value.parse::<i64>().map_err(|_| "bad FileSize")?),
                 "NarHash" => nar_hash = Some(value.to_string()),
@@ -52,6 +55,7 @@ impl Narinfo {
         Ok(Narinfo {
             store_path: store_path.ok_or("missing StorePath")?,
             url,
+            compression,
             file_hash: file_hash.ok_or("missing FileHash")?,
             file_size: file_size.ok_or("missing FileSize")?,
             nar_hash: nar_hash.ok_or("missing NarHash")?,
@@ -83,6 +87,7 @@ Deriver: dddddddddddddddddddddddddddddddd-hello-2.12.drv\n";
             ni.store_path,
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12"
         );
+        assert_eq!(ni.compression.as_deref(), Some("xz"));
         assert_eq!(ni.file_size, 42);
         assert_eq!(ni.nar_size, 99);
         assert_eq!(ni.references.len(), 2);

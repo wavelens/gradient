@@ -7,31 +7,22 @@
 mod credentials;
 mod entities;
 mod lookups;
-mod pending;
 mod reconciliation;
 
 use crate::config::StateConfiguration;
-use gradient_entity::*;
-use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    IntoActiveModel, QueryFilter, Set,
-};
+use sea_orm::{DatabaseConnection, DatabaseTransaction, TransactionTrait};
 use std::path::Path;
 
 pub(crate) use credentials::{
     derive_public_key, parse_api_key_hash, parse_password_phc, read_credential,
 };
 pub(crate) use entities::build_trigger_config;
-pub(crate) use lookups::{load_git_host_connections_usable_by_project_by_name, lookup_id};
-
-pub use pending::{PendingProjectMembership, PendingProjectMemberships};
+pub(crate) use lookups::{
+    StateFileManagedUserIdsByUsername, load_git_host_connections_usable_by_project_by_name,
+    lookup_id,
+};
 
 pub(crate) type DynError = Box<dyn std::error::Error>;
-
-pub struct StateApplyResult {
-    pub pending: PendingProjectMemberships,
-}
 
 pub(super) async fn apply_state_to_database(
     db: &DatabaseConnection,
@@ -40,17 +31,18 @@ pub(super) async fn apply_state_to_database(
     credentials_dir: &Path,
     delete_state: bool,
     email_enabled: bool,
-) -> Result<StateApplyResult, DynError> {
+    user_url_destination_allowlist: &gradient_util::http_validation::UserUrlDestinationAllowlist,
+) -> Result<(), DynError> {
     tracing::info!("Applying state to database");
 
+    let transaction = db.begin().await?;
     let app = StateApplicator {
-        db,
+        db: &transaction,
         crypt_secret_file,
         credentials_dir,
         email_enabled,
+        user_url_destination_allowlist,
     };
-
-    let pending = PendingProjectMemberships::default();
 
     app.apply_users(&config.users).await?;
     // Teams must exist before projects, for their new-project grants (the local worker's `server`).
@@ -61,8 +53,7 @@ pub(super) async fn apply_state_to_database(
     app.apply_project_git_https_credentials(&config.projects)
         .await?;
     app.apply_roles(&config.roles).await?;
-    app.apply_project_members(&config.projects, &pending)
-        .await?;
+    app.apply_project_members(&config.projects).await?;
     // Create connections to Git hosts before tasks. Tasks and `open_pr` actions look up a connection by name when they apply state (#332).
     app.apply_git_host_connections(&config.git_host_connections, &team_ids)
         .await?;
@@ -73,59 +64,16 @@ pub(super) async fn apply_state_to_database(
     app.apply_api_keys(&config.api_keys).await?;
     app.apply_workers(&config.workers, &team_ids).await?;
     app.unmark_removed_entities(config, delete_state).await?;
+    transaction.commit().await?;
 
     tracing::info!("State applied successfully");
-    Ok(StateApplyResult { pending })
+    Ok(())
 }
 
 struct StateApplicator<'a> {
-    db: &'a DatabaseConnection,
+    db: &'a DatabaseTransaction,
     crypt_secret_file: &'a str,
     credentials_dir: &'a Path,
     email_enabled: bool,
-}
-
-pub async fn apply_pending_project_memberships<C: ConnectionTrait>(
-    db: &C,
-    pending: &PendingProjectMemberships,
-    username: &str,
-    user_id: UserId,
-) -> Result<usize, sea_orm::DbErr> {
-    let mut applied = 0usize;
-    for entry in pending.of_user(username).await {
-        let existing = project_user::Entity::find()
-            .filter(project_user::Column::Project.eq(entry.project))
-            .filter(project_user::Column::User.eq(user_id))
-            .one(db)
-            .await?;
-        match existing {
-            Some(row) if row.role == entry.role => {}
-            Some(row) => {
-                let mut active: project_user::ActiveModel = row.into();
-                active.role = Set(entry.role);
-                active.update(db).await?;
-                applied += 1;
-            }
-            None => {
-                project_user::Model {
-                    id: ProjectUserId::now_v7(),
-                    project: entry.project,
-                    user: user_id,
-                    role: entry.role,
-                }
-                .into_active_model()
-                .insert(db)
-                .await?;
-                applied += 1;
-            }
-        }
-    }
-    if applied > 0 {
-        tracing::info!(
-            username,
-            count = applied,
-            "Applied pending state-managed project memberships for newly-registered user"
-        );
-    }
-    Ok(applied)
+    user_url_destination_allowlist: &'a gradient_util::http_validation::UserUrlDestinationAllowlist,
 }

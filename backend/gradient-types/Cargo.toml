@@ -18,11 +18,17 @@ doctest = false
 workspace = true
 
 [dependencies]
+gradient-wildcard = { workspace = true }
 gradient-derive = { workspace = true }
 gradient-entity = { workspace = true }
 gradient-secret = { workspace = true }
+gradient-util = { workspace = true }
 gradient-wire = { workspace = true }
 anyhow     = { workspace = true }
+email_address = { workspace = true }
+harmonia-store-content-address = { workspace = true }
+harmonia-store-path            = { workspace = true }
+harmonia-utils-hash            = { workspace = true }
 base64     = { workspace = true }
 chrono     = { workspace = true }
 clap       = { workspace = true }
@@ -34,13 +40,16 @@ serde      = { workspace = true }
 serde_json = { workspace = true }
 sha2       = { workspace = true }
 thiserror  = { workspace = true }
-tokio      = { workspace = true, features = ["macros", "sync"] }
+tokio      = { workspace = true, features = ["macros", "sync", "time"] }
 tracing    = { workspace = true }
 utoipa     = { workspace = true }
 url        = { workspace = true }
 uuid       = { workspace = true }
 
 cron       = { workspace = true }
+
+[features]
+test-functions = []
 
 [dev-dependencies]
 proptest = { workspace = true }

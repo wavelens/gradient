@@ -8,6 +8,8 @@ use super::helpers::{EntityLookup, ErrorCollector};
 use gradient_types::git_host::{
     GitHostConnectionOwner, GitHostType, MissingGitHostConnectionSetting,
 };
+use gradient_types::input::check_index_name;
+use gradient_util::http_base_url::ValidatedHttpBaseUrl;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
@@ -15,6 +17,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let mut ids_seen: HashSet<uuid::Uuid> = HashSet::new();
     for (label, connection) in &lookup.config.git_host_connections {
         let field = |key: &str| format!("git_host_connections.{label}.{key}");
+        errors.record_input_error_at_field(field("name"), check_index_name(&connection.name));
 
         if let Some(id) = &connection.id {
             match id.trim().parse::<uuid::Uuid>() {
@@ -55,7 +58,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        if !lookup.user_exists(&connection.created_by) {
+        if !lookup.creator_is_blank_or_user_exists(&connection.created_by) {
             errors.push(
                 field("created_by"),
                 format!("User '{}' does not exist", connection.created_by),
@@ -74,6 +77,20 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
         }
 
         let is_github = git_host_type == Some(GitHostType::GitHub);
+        match connection.address().map(|address| address.base_url) {
+            Some(Some(base_url)) => {
+                if let Err(e) = base_url.parse::<ValidatedHttpBaseUrl>() {
+                    errors.push(field("base_url"), format!("Invalid base_url: {e}"));
+                }
+            }
+            Some(None) if !is_github => {
+                errors.push(
+                    field("base_url"),
+                    "Connections to Gitea or Forgejo need a base_url, the http or https address of the Git host.",
+                );
+            }
+            _ => {}
+        }
         if is_github && connection.installation_id.is_none_or(|id| id <= 0) {
             errors.push(
                 field("installation_id"),

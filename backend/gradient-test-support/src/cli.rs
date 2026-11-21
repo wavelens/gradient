@@ -38,6 +38,9 @@ pub fn test_cli() -> Cli {
             discoverable: false,
             ..Default::default()
         },
+        outbound: OutboundConnectionArgs {
+            allowed_non_public_network_targets: vec!["127.0.0.0/8".into(), "::1/128".into()],
+        },
         email: EmailArgs {
             from_name: "Gradient Test".into(),
             smtp_use_tls: false,

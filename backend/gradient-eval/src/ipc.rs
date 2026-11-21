@@ -57,33 +57,39 @@ impl From<crate::wildcard_walk::Shard> for DiscoveryShard {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+    Serialize,
+    Deserialize,
 )]
 #[rkyv(derive(Debug))]
-#[serde(rename_all = "snake_case")]
-pub enum NixEvaluationFetchUrlAccess {
-    UnrestrictedEvaluation,
-    LockedInputsPlusExtraUrlPrefixes {
-        extra_allowed_uri_prefixes: Vec<String>,
-    },
+pub struct NixEvaluationFetchUrlAccess {
+    #[serde(default)]
+    pub allowed_uri_prefixes: Vec<String>,
+    #[serde(default)]
+    pub extra_allowed_uri_prefixes: Vec<String>,
 }
 
 impl NixEvaluationFetchUrlAccess {
-    pub fn extra_allowed_uri_prefixes(&self) -> Option<&[String]> {
-        match self {
-            Self::UnrestrictedEvaluation => None,
-            Self::LockedInputsPlusExtraUrlPrefixes {
-                extra_allowed_uri_prefixes,
-            } => Some(extra_allowed_uri_prefixes),
-        }
-    }
-}
-
-impl Default for NixEvaluationFetchUrlAccess {
-    fn default() -> Self {
-        Self::LockedInputsPlusExtraUrlPrefixes {
-            extra_allowed_uri_prefixes: Vec::new(),
-        }
+    pub fn nix_allowed_uris_from_locked_flake_input_fetch_urls_and_extra_prefixes(
+        &self,
+        locked_input_fetch_urls: Vec<String>,
+    ) -> Vec<String> {
+        locked_input_fetch_urls
+            .into_iter()
+            .filter(|url| {
+                self.allowed_uri_prefixes
+                    .iter()
+                    .any(|prefix| url.starts_with(prefix.as_str()))
+            })
+            .chain(self.extra_allowed_uri_prefixes.iter().cloned())
+            .collect()
     }
 }
 
@@ -134,6 +140,7 @@ pub enum EvalRequest {
         request: String,
         #[serde(default)]
         git_subprocess_environment: Vec<(String, String)>,
+        allowed_fetch_uri_prefixes: Vec<String>,
     },
     BuildDone {
         #[serde(default)]
@@ -301,11 +308,33 @@ mod tests {
             FlakeEvalTarget {
                 repository: "path:/r".into(),
                 input_overrides: vec![],
-                nix_evaluation_fetch_url_access:
-                    NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
-                        extra_allowed_uri_prefixes: vec![],
-                    },
+                nix_evaluation_fetch_url_access: NixEvaluationFetchUrlAccess::default(),
             }
+        );
+    }
+
+    #[test]
+    fn locked_input_fetch_urls_filter_allowed_uris() {
+        let access = NixEvaluationFetchUrlAccess {
+            allowed_uri_prefixes: vec!["github:".into(), "git+https:".into()],
+            extra_allowed_uri_prefixes: vec!["https://example.com/".into()],
+        };
+
+        let allowed = access
+            .nix_allowed_uris_from_locked_flake_input_fetch_urls_and_extra_prefixes(vec![
+                "github:o/r/rev".into(),
+                "path:/run/x".into(),
+                "git+file:///srv/repo".into(),
+                "git+https://example.com/r".into(),
+            ]);
+
+        assert_eq!(
+            allowed,
+            vec![
+                "github:o/r/rev".to_owned(),
+                "git+https://example.com/r".to_owned(),
+                "https://example.com/".to_owned(),
+            ]
         );
     }
 
@@ -348,11 +377,13 @@ mod tests {
                 ("GIT_SSH_COMMAND".into(), "ssh -i key".into()),
                 ("GIT_CONFIG_VALUE_0".into(), String::new()),
             ],
+            allowed_fetch_uri_prefixes: vec!["github:".into()],
         };
         let back = decode_request(&encode_request(&req).unwrap()).unwrap();
         let EvalRequest::FetchInput {
             request,
             git_subprocess_environment,
+            allowed_fetch_uri_prefixes,
         } = back
         else {
             panic!("not a fetch request: {back:?}");
@@ -365,6 +396,7 @@ mod tests {
                 ("GIT_CONFIG_VALUE_0".to_owned(), String::new()),
             ]
         );
+        assert_eq!(allowed_fetch_uri_prefixes, ["github:".to_owned()]);
 
         let stats = EvalResponse::Stats {
             delta: StatsDelta {

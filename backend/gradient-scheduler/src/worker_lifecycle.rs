@@ -24,13 +24,14 @@ use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 use crate::Scheduler;
 use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, WorkerMetrics};
 use crate::build;
-use crate::jobs::{AwaitingReclaim, reclaim_grace};
+use crate::jobs::{AwaitingReclaim, PendingJob, reclaim_grace};
 use crate::waiting_state::WaitingRefresh;
-use crate::worker_memory::WorkerReports;
+use crate::worker_memory::{WorkerProjectAccessAndCapabilities, WorkerReports};
 use gradient_db::scheduling::assignment_record::{
     abandon_open_assignments, keys_with_open_assignment,
 };
 use gradient_entity::ids::DispatchedJobId;
+use gradient_pool::ProjectAccess;
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 
 pub(crate) async fn record_worker_sample(
@@ -104,17 +105,20 @@ impl Scheduler {
         &self,
         worker_id: &str,
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<ProjectId>,
+        project_access: ProjectAccess,
         session: Arc<dyn SessionPort>,
         reclaims_jobs: bool,
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
-        let projects = authorized_peers.iter().copied().collect();
+        let projects = match &project_access {
+            ProjectAccess::AllProjects => Vec::new(),
+            ProjectAccess::OnlyListedProjects(projects) => projects.iter().copied().collect(),
+        };
         let port = Arc::clone(&session);
         let registration = Registration {
             worker: worker_id.to_owned(),
             capabilities,
-            authorized_peers,
+            project_access,
             session,
             active: Vec::new(),
             reclaims_jobs,
@@ -171,16 +175,24 @@ impl Scheduler {
         &self,
         worker_id: &str,
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<ProjectId>,
+        project_access: ProjectAccess,
         session: Arc<dyn SessionPort>,
         active: Vec<crate::jobs::Reattached>,
         reclaims_jobs: bool,
     ) -> Result<Registered> {
         let reports = self.workers.reports(worker_id);
+        let authorization =
+            reports
+                .authorization
+                .clone()
+                .unwrap_or(WorkerProjectAccessAndCapabilities {
+                    project_access,
+                    capabilities,
+                });
         let registration = Registration {
             worker: worker_id.to_owned(),
-            capabilities,
-            authorized_peers: reports.authorized_peers.clone().unwrap_or(authorized_peers),
+            capabilities: authorization.capabilities,
+            project_access: authorization.project_access,
             session,
             active,
             reclaims_jobs,
@@ -201,13 +213,18 @@ impl Scheduler {
         reports: WorkerReports,
     ) -> Result<Registered> {
         let worker_id = registration.worker.clone();
-        let registered = self
+        let mut registered = self
             .call(|reply| SchedulerMsg::Register(registration, reply))
             .await?
             .ok_or_else(|| {
                 anyhow::anyhow!("Worker {worker_id} already connected to this scheduler")
             })?;
         let worker_id = worker_id.as_str();
+        let revoked: Vec<PendingJob> = std::mem::take(&mut registered.revoked)
+            .into_iter()
+            .map(|(_, job)| job)
+            .collect();
+        self.requeue_revoked_jobs(worker_id, &revoked).await;
         if let Some(caps) = reports.capabilities {
             self.update_worker_capabilities(worker_id, caps).await;
         }
@@ -252,51 +269,41 @@ impl Scheduler {
         }
     }
 
-    pub async fn update_authorized_peers(
+    pub async fn replace_worker_authorization(
         &self,
         worker_id: &str,
-        authorized_peers: HashSet<ProjectId>,
+        project_access: ProjectAccess,
+        capabilities: GradientCapabilities,
     ) {
         self.workers.update(worker_id, |r| {
-            r.authorized_peers = Some(authorized_peers.clone())
+            r.authorization = Some(WorkerProjectAccessAndCapabilities {
+                project_access: project_access.clone(),
+                capabilities: capabilities.clone(),
+            })
         });
         let worker = worker_id.to_owned();
-        let _ = self
-            .call(|reply| SchedulerMsg::UpdatePeers {
-                worker,
-                peers: authorized_peers,
-                reply,
-            })
-            .await;
-        debug!(%worker_id, "authorized peers updated");
-    }
-
-    pub async fn abort_project_jobs_on_worker(
-        &self,
-        worker_id: &str,
-        revoked_peers: &HashSet<ProjectId>,
-    ) {
-        if revoked_peers.is_empty() {
-            return;
-        }
-        let worker = worker_id.to_owned();
-        let revoked = revoked_peers.clone();
         let revoked_jobs = self
-            .call(|reply| SchedulerMsg::RevokePeers {
+            .call(|reply| SchedulerMsg::ReplaceWorkerAuthorization {
                 worker,
-                revoked,
+                project_access,
+                capabilities,
                 reply,
             })
             .await
             .unwrap_or_default();
+        debug!(%worker_id, "replaced worker authorization");
+        self.requeue_revoked_jobs(worker_id, &revoked_jobs).await;
+    }
+
+    pub(crate) async fn requeue_revoked_jobs(&self, worker_id: &str, revoked_jobs: &[PendingJob]) {
         if revoked_jobs.is_empty() {
             return;
         }
-        info!(%worker_id, aborted = revoked_jobs.len(), "aborted jobs for revoked project(s) on worker");
+        info!(%worker_id, aborted = revoked_jobs.len(), "aborted jobs that the worker can no longer run");
         build::requeue_orphaned_jobs(
             &self.db,
             &self.graph,
-            &revoked_jobs,
+            revoked_jobs,
             &Default::default(),
             gradient_graph::OrphanCause::AccessRevoked,
         )
@@ -537,9 +544,10 @@ impl Scheduler {
         let workers = self.board_workers().await?;
         let draining = self.draining.is_draining().await;
         let unbuildables = WaitingRefresh {
-            db: &self.db,
+            db: &self.waiting_refresh_database_pool,
             graph: &self.graph,
             memo: &self.scoring.assessments,
+            progress: &self.waiting_refresh_state_between_passes,
         }
         .run(&workers, draining)
         .await?;

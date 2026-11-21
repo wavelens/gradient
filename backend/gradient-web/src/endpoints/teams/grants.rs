@@ -6,12 +6,15 @@
 
 use super::refusal::TeamRefusal;
 use crate::access::{
-    AccessRefusal, Caller, ProjectAccess, has_cache_permission, has_permission, load_project,
+    AccessRefusal, Caller, ProjectAccess,
+    ensure_cache_permissions_are_subset_of_caller_permissions, has_cache_permission,
+    has_permission, load_caller_project_permissions_and_require_can_grant, load_project,
 };
 use crate::api_spec::{CachePath, ProjectPath};
 use crate::audit::Audit;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
-use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_workers};
+use crate::endpoints::membership::load_permission_mask_by_role_id;
+use crate::endpoints::teams::workers::reauth_team_workers;
 use crate::error::{WebError, WebResult};
 use crate::extractors::{JsonBody, Path};
 use crate::helpers::{OptionExt, ok_json};
@@ -31,7 +34,7 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -114,6 +117,29 @@ fn required_permissions_for_team_project_grant_patch(
     permissions
 }
 
+pub(crate) async fn ensure_caller_can_remove_grant_removed_by_project_owner_team_change(
+    db: &WebDb,
+    user: &MUser,
+    api_key: Option<&ApiKeyContext>,
+    project: ProjectId,
+    grant: &MTeamProject,
+) -> WebResult<()> {
+    let Some(role) = grant.role else {
+        return Ok(());
+    };
+    if caller_has_team_admin_authority_without_api_key(db, user, api_key, grant.team).await? {
+        return Ok(());
+    }
+    load_caller_project_permissions_and_require_can_grant(
+        db,
+        Caller::User(user),
+        project,
+        api_key,
+        load_permission_mask_by_role_id::<ERole>(db, role).await?,
+    )
+    .await
+}
+
 async fn caller_has_team_admin_authority_without_api_key(
     db: &WebDb,
     user: &MUser,
@@ -163,14 +189,9 @@ pub(crate) async fn grant_workers(
     Ok(())
 }
 
-async fn take_workers(
-    db: &WebDb,
-    scheduler: &Scheduler,
-    team: TeamId,
-    project: ProjectId,
-) -> WebResult<()> {
+async fn take_workers(db: &WebDb, scheduler: &Scheduler, team: TeamId) -> WebResult<()> {
     let workers = gradient_db::teams::team_worker_ids(db, team).await?;
-    withdraw_team_workers(scheduler, &workers, &HashSet::from([project])).await;
+    reauth_team_workers(scheduler, &workers).await;
     Ok(())
 }
 
@@ -181,7 +202,7 @@ pub(crate) async fn apply_owner_team_grant_change_to_workers(
     change: gradient_db::teams::grants::OwnerTeamGrantChange,
 ) -> WebResult<()> {
     for grant in change.removed.iter().filter(|grant| grant.includes_workers) {
-        take_workers(db, scheduler, grant.team, project).await?;
+        take_workers(db, scheduler, grant.team).await?;
     }
     if let Some(grant) = change.added.filter(|grant| grant.includes_workers) {
         grant_workers(db, scheduler, grant.team, project).await?;
@@ -253,7 +274,7 @@ pub async fn get_project_teams(
     operation_id = "grantProjectTeam",
     tag = "teams",
     summary = "Grant a team on a project",
-    description = "Needs `manageMembers` when the grant includes users and `manageWorkers` when it includes workers.\nA grant is active at once when the caller is Admin in the team (or a superuser).\nOtherwise a request waits for a team Admin and the answer is `Request sent`.",
+    description = "Needs `manageMembers` when the grant includes users and `manageWorkers` when it includes workers.\nA grant is active at once when the caller is Admin in the team (or a superuser).\nOtherwise a request waits for a team Admin and the answer is `Request sent`.\nA role in a grant can include only the caller's permissions in that project.",
     params(("project" = String, Path)),
     request_body = GrantProjectRequest,
     responses((status = OK, description = "`Team granted` or `Request sent`", body = String, content_type = "application/json"), WebError)
@@ -305,6 +326,16 @@ pub async fn post_project_team(
         }
         (false, _) => None,
     };
+    if let Some(role) = role {
+        load_caller_project_permissions_and_require_can_grant(
+            &state.web_db,
+            Caller::User(&user),
+            project.id,
+            api_key.as_ref(),
+            load_permission_mask_by_role_id::<ERole>(&state.web_db, role).await?,
+        )
+        .await?;
+    }
     if gradient_db::teams::grants::project_grant(&state.web_db, team.id, project.id)
         .await?
         .is_some()
@@ -374,7 +405,7 @@ pub async fn post_project_team(
     operation_id = "patchProjectTeam",
     tag = "teams",
     summary = "Change a project team grant",
-    description = "Needs the project permission of the changed part. Turning workers on also needs Admin in the team.",
+    description = "Needs the project permission of the changed part. Turning workers on also needs Admin in the team.\nRole changes require the caller to have every permission of both the current role and the new role.",
     params(("project" = String, Path), ("team" = String, Path)),
     request_body = PatchProjectGrantRequest,
     responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
@@ -447,6 +478,21 @@ pub async fn patch_project_team(
             .map(Some)?,
         (false, _) => None,
     };
+    if body.role.is_some() || body.users.is_some() {
+        let mut changed_permissions = 0;
+        for role in grant.role.into_iter().chain(role) {
+            changed_permissions |=
+                load_permission_mask_by_role_id::<ERole>(&state.web_db, role).await?;
+        }
+        load_caller_project_permissions_and_require_can_grant(
+            &state.web_db,
+            Caller::User(&user),
+            project.id,
+            api_key.as_ref(),
+            changed_permissions,
+        )
+        .await?;
+    }
 
     let had_workers = grant.includes_workers;
     let read = grant.clone();
@@ -460,7 +506,7 @@ pub async fn patch_project_team(
 
     match (had_workers, workers) {
         (false, true) => grant_workers(&state.web_db, &scheduler, team.id, project.id).await?,
-        (true, false) => take_workers(&state.web_db, &scheduler, team.id, project.id).await?,
+        (true, false) => take_workers(&state.web_db, &scheduler, team.id).await?,
         _ => {}
     }
 
@@ -475,7 +521,7 @@ pub async fn patch_project_team(
     operation_id = "removeProjectTeam",
     tag = "teams",
     summary = "Remove a project team grant",
-    description = "Allowed for Admin in the team, or on the project for `manageWorkers` when the grant includes only workers and `manageMembers` otherwise. Removing workers aborts their running jobs of the project.\nWithout a grant, the pending request is withdrawn instead.",
+    description = "Allowed for Admin in the team, or on the project for `manageWorkers` when the grant includes only workers and `manageMembers` otherwise. Removing workers aborts their running jobs of the project.\nWithout a grant, the pending request is withdrawn instead.\nCallers without team Admin also need all permissions of the grant role.",
     params(("project" = String, Path), ("team" = String, Path)),
     responses((status = OK, description = "`Team grant removed` or `Request withdrawn`", body = String, content_type = "application/json"), WebError)
 )]
@@ -508,22 +554,23 @@ pub async fn delete_project_team(
         }
     };
 
-    let allowed = has_permission(
+    let team_admin = caller_has_team_admin_authority_without_api_key(
         &state.web_db,
-        user.id,
-        project.id,
-        grant_permission(includes_users),
+        &user,
         api_key.as_ref(),
+        team.id,
     )
-    .await?
-        || caller_has_team_admin_authority_without_api_key(
+    .await?;
+    if !team_admin
+        && !has_permission(
             &state.web_db,
-            &user,
+            user.id,
+            project.id,
+            grant_permission(includes_users),
             api_key.as_ref(),
-            team.id,
         )
-        .await?;
-    if !allowed {
+        .await?
+    {
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if project.managed {
@@ -534,6 +581,16 @@ pub async fn delete_project_team(
         .is_some_and(|grant| grant.grant_source == TeamGrantSource::State)
     {
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::TeamGrant).into());
+    }
+    if !team_admin && let Some(role) = grant.as_ref().and_then(|grant| grant.role) {
+        load_caller_project_permissions_and_require_can_grant(
+            &state.web_db,
+            Caller::User(&user),
+            project.id,
+            api_key.as_ref(),
+            load_permission_mask_by_role_id::<ERole>(&state.web_db, role).await?,
+        )
+        .await?;
     }
 
     let payload =
@@ -554,7 +611,7 @@ pub async fn delete_project_team(
     let had_workers = grant.includes_workers;
     gradient_db::teams::grants::revoke_project_grant(&state.web_db, grant).await?;
     if had_workers {
-        take_workers(&state.web_db, &scheduler, team.id, project.id).await?;
+        take_workers(&state.web_db, &scheduler, team.id).await?;
     }
 
     audit
@@ -624,7 +681,7 @@ pub async fn get_cache_teams(
     operation_id = "grantCacheTeam",
     tag = "teams",
     summary = "Grant a team on a cache",
-    description = "Needs `manageCacheMembers`.\nA grant is active at once when the caller is Admin in the team (or a superuser).\nOtherwise a request waits for a team Admin and the answer is `Request sent`.",
+    description = "Needs `manageCacheMembers`.\nA grant is active at once when the caller is Admin in the team (or a superuser).\nOtherwise a request waits for a team Admin and the answer is `Request sent`.\nThe grant role can only inherit the caller's permissions on the cache.",
     params(CachePath),
     request_body = GrantCacheRequest,
     responses((status = OK, description = "`Team granted` or `Request sent`", body = String, content_type = "application/json"), WebError)
@@ -642,6 +699,14 @@ pub async fn post_cache_team(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let team = find_team(&db.web_db, &body.team).await?;
     let role = cache_role(&db.web_db, cache.id, &body.role).await?;
+    ensure_cache_permissions_are_subset_of_caller_permissions(
+        &db.web_db,
+        Caller::User(&user),
+        cache.id,
+        api_key.as_ref(),
+        load_permission_mask_by_role_id::<ECacheRole>(&db.web_db, role).await?,
+    )
+    .await?;
     if gradient_db::teams::grants::cache_grant(&db.web_db, team.id, cache.id)
         .await?
         .is_some()
@@ -704,14 +769,19 @@ pub async fn post_cache_team(
     operation_id = "patchCacheTeam",
     tag = "teams",
     summary = "Change a cache team grant",
-    description = "Needs `manageCacheMembers`.",
+    description = "Needs `manageCacheMembers`.\nRole changes require the caller to have every permission of both the current role and the new role.",
     params(CachePath, ("team" = String, Path)),
     request_body = PatchCacheGrantRequest,
     responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn patch_cache_team(
     CacheScope {
-        cache, db, params, ..
+        cache,
+        user,
+        api_key,
+        db,
+        params,
+        ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     audit: Audit,
     JsonBody(body): JsonBody<PatchCacheGrantRequest>,
@@ -726,6 +796,15 @@ pub async fn patch_cache_team(
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::TeamGrant).into());
     }
     let role = cache_role(&db.web_db, cache.id, &body.role).await?;
+    ensure_cache_permissions_are_subset_of_caller_permissions(
+        &db.web_db,
+        Caller::User(&user),
+        cache.id,
+        api_key.as_ref(),
+        load_permission_mask_by_role_id::<ECacheRole>(&db.web_db, grant.role).await?
+            | load_permission_mask_by_role_id::<ECacheRole>(&db.web_db, role).await?,
+    )
+    .await?;
 
     let mut active: ATeamCache = grant.into();
     active.role = Set(role);
@@ -747,7 +826,7 @@ pub async fn patch_cache_team(
     operation_id = "removeCacheTeam",
     tag = "teams",
     summary = "Remove a cache team grant",
-    description = "Allowed for `manageCacheMembers` on the cache or Admin in the team.\nWithout a grant, the pending request is withdrawn instead.",
+    description = "Allowed for `manageCacheMembers` on the cache or Admin in the team.\nWithout a grant, the pending request is withdrawn instead.\nCallers without team Admin also need all permissions of the grant role.",
     params(("cache" = String, Path), ("team" = String, Path)),
     responses((status = OK, description = "`Team grant removed` or `Request withdrawn`", body = String, content_type = "application/json"), WebError)
 )]
@@ -775,22 +854,23 @@ pub async fn delete_cache_team(
         ),
     };
 
-    let allowed = has_cache_permission(
+    let team_admin = caller_has_team_admin_authority_without_api_key(
         &state.web_db,
-        user.id,
-        cache.id,
-        CachePermission::ManageCacheMembers,
+        &user,
         api_key.as_ref(),
+        team.id,
     )
-    .await?
-        || caller_has_team_admin_authority_without_api_key(
+    .await?;
+    if !team_admin
+        && !has_cache_permission(
             &state.web_db,
-            &user,
+            user.id,
+            cache.id,
+            CachePermission::ManageCacheMembers,
             api_key.as_ref(),
-            team.id,
         )
-        .await?;
-    if !allowed {
+        .await?
+    {
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if cache.managed {
@@ -801,6 +881,16 @@ pub async fn delete_cache_team(
         .is_some_and(|grant| grant.grant_source == TeamGrantSource::State)
     {
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::TeamGrant).into());
+    }
+    if !team_admin && let Some(grant) = &grant {
+        ensure_cache_permissions_are_subset_of_caller_permissions(
+            &state.web_db,
+            Caller::User(&user),
+            cache.id,
+            api_key.as_ref(),
+            load_permission_mask_by_role_id::<ECacheRole>(&state.web_db, grant.role).await?,
+        )
+        .await?;
     }
 
     let payload =

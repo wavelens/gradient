@@ -85,16 +85,24 @@ pub async fn realised_output<C: ConnectionTrait>(
         .await
 }
 
-pub async fn cached_anywhere<C: ConnectionTrait>(
+pub async fn output_ids_skipping_build_or_probe_for_external_url_or_cached_variant_trusted_by_shared_build<
+    C: ConnectionTrait,
+>(
     db: &C,
     outputs: &[MDerivationOutput],
 ) -> Result<HashSet<DerivationOutputId>, DbErr> {
-    let hashes: Vec<String> = outputs.iter().filter_map(|o| o.hash.clone()).collect();
-    let stored = crate::cached_paths::stored_by_hash(db, &hashes).await?;
+    let wanted: Vec<(DerivationId, String)> = outputs
+        .iter()
+        .filter_map(|o| Some((o.derivation, o.hash.clone()?)))
+        .collect();
+    let stored = crate::store_path_content_variant_reader_choice::highest_ranked_trusted_content_variant_by_derivation_id_and_store_path_hash_for_shared_build_own_outputs(db, &wanted).await?;
     Ok(outputs
         .iter()
         .filter(|o| {
-            o.external_url.is_some() || o.hash.as_ref().is_some_and(|h| stored.contains_key(h))
+            o.external_url.is_some()
+                || o.hash
+                    .as_ref()
+                    .is_some_and(|h| stored.contains_key(&(o.derivation, h.clone())))
         })
         .map(|o| o.id)
         .collect())

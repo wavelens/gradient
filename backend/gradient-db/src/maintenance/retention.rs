@@ -17,6 +17,9 @@ use sea_orm::{ConnectionTrait, DbErr};
 use tracing::{debug, warn};
 
 use crate::DbContext;
+use crate::cli_device_authorizations::{
+    CLEAR_EXPIRED_CLI_DEVICE_AUTHORIZATION_TOKENS, clear_expired_cli_device_authorization_tokens,
+};
 use crate::sql::Query;
 
 const RETENTION_INTERVAL_SECS: u64 = 3600;
@@ -193,6 +196,11 @@ async fn run_retention(ctx: &DbContext, now: NaiveDateTime) {
         (metrics.retention_rollup_days, ROLLUPS),
     ];
 
+    if let Err(e) = clear_expired_cli_device_authorization_tokens(&ctx.worker_db, now).await {
+        let query = CLEAR_EXPIRED_CLI_DEVICE_AUTHORIZATION_TOKENS.name;
+        warn!(error = %e, query, "retention failed");
+    }
+
     for (days, prunes) in groups {
         if days > 0 {
             prune_all(
@@ -262,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn each_history_is_pruned_past_its_own_setting() {
         let db = mock_db()
-            .append_exec_results(affected(&[0; 16]))
+            .append_exec_results(affected(&[0; 17]))
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         let now = gradient_types::now();
@@ -299,6 +307,14 @@ mod tests {
             let stmt = deleting(&log, table).unwrap_or_else(|| panic!("{table}: {log:?}"));
             assert_eq!(cutoff(stmt), raw, "{table}");
         }
+        let token_sweep = log
+            .iter()
+            .find(|s| {
+                s.sql
+                    .starts_with("UPDATE cli_device_authorization SET token = NULL")
+            })
+            .unwrap_or_else(|| panic!("token sweep: {log:?}"));
+        assert_eq!(cutoff(token_sweep), Value::from(now));
     }
 
     #[tokio::test]

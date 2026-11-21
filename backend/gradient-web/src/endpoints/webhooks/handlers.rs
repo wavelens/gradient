@@ -26,7 +26,7 @@ use gradient_types::events::{Envelope, EventFilter, webhook};
 use gradient_types::ids::PendingDeliveryId;
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
-use gradient_util::http_validation::validate_webhook_url;
+use gradient_util::http_validation::parse_and_check_allowed_outbound_url;
 use sea_orm::ActiveValue::Set;
 use sea_orm::IntoActiveModel;
 use serde::Deserialize;
@@ -71,8 +71,12 @@ fn check_events(events: &[String]) -> WebResult<()> {
     Ok(())
 }
 
-fn check_url(url: &str) -> WebResult<()> {
-    validate_webhook_url(url).map_err(|e| WebhookRefusal::InvalidUrl(e.to_string()))?;
+fn check_url(
+    url: &str,
+    allowlist: &gradient_util::http_validation::UserUrlDestinationAllowlist,
+) -> WebResult<()> {
+    parse_and_check_allowed_outbound_url(url, allowlist)
+        .map_err(|e| WebhookRefusal::InvalidUrl(e.to_string()))?;
     Ok(())
 }
 
@@ -150,7 +154,7 @@ pub async fn create_webhook(
     owner: WebhookOwner,
     JsonBody(body): JsonBody<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<CreateWebhookResponse>>> {
-    check_url(&body.url)?;
+    check_url(&body.url, state.user_supplied_url_http_client.allowlist())?;
     check_events(&body.events)?;
     let existing =
         gradient_db::webhooks::by_name_of_owner(&state.web_db, (&owner).into(), &body.name).await?;
@@ -241,7 +245,7 @@ pub async fn update_webhook(
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let row = owned_webhook(&state.web_db, &owner).await?;
     if let Some(url) = &body.url {
-        check_url(url)?;
+        check_url(url, state.user_supplied_url_http_client.allowlist())?;
     }
     if let Some(events) = &body.events {
         check_events(events)?;

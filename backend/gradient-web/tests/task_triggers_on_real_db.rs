@@ -446,6 +446,36 @@ async fn duplicating_task_copies_post_request_trigger_with_new_id_and_without_se
 }
 
 #[tokio::test]
+async fn create_task_trigger_over_http_with_65_path_filter_patterns_returns_bad_request_and_stores_no_trigger()
+ {
+    let s = seeded(BASE_ROLE_ADMIN_ID).await;
+    let conn = s.db.connection();
+    gradient_db::rows::insert::<task::Entity, _>(&conn, rows::task())
+        .await
+        .unwrap();
+    let include_paths: Vec<String> = (0..65).map(|i| format!("src/{i}/*")).collect();
+
+    let res = s
+        .server
+        .post("/api/v1/tasks/test-project/test-task/triggers")
+        .add_header("authorization", &s.auth)
+        .json(&json!({
+            "config": { "type": "polling", "interval_secs": 60, "include_paths": include_paths }
+        }))
+        .await;
+
+    res.assert_status_bad_request();
+    assert!(res.text().contains("at most 64 patterns"), "{}", res.text());
+    assert!(
+        gradient_db::triggers::of_task(&conn, task_id())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn the_repository_check_refuses_invalid_urls_and_view_members() {
     let admin = seeded(BASE_ROLE_ADMIN_ID).await;
     admin

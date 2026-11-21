@@ -306,6 +306,7 @@ pub async fn post_approve_subscription_request(
         MProjectCache {
             project: project.id,
             cache: cache.id,
+            sign_outputs: mode.writes_build_outputs_to_cache(),
             mode: mode.clone(),
             ..Default::default()
         },

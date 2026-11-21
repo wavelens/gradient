@@ -6,40 +6,34 @@
 
 use gradient_entity::{StorePath, StorePathError};
 use gradient_graph::Graph;
+use gradient_storage::ServerComputedNarAndCompressedFileHashesAndSizes;
 use gradient_storage::nar::NarStore;
 use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tokio::io::AsyncRead;
-use tracing::debug;
 
-pub use gradient_graph::{NarCommit, NarCommitted, SignTargets};
+pub use gradient_graph::{NarCommit, NarCommitContent, NarCommitted, StoredContentProducer};
 
 pub struct ImportInput<'a> {
     pub store_path: &'a str,
-    pub file_hash: &'a str,
-    pub file_size: i64,
-    pub nar_size: i64,
-    pub nar_hash: &'a str,
+    pub verified: &'a ServerComputedNarAndCompressedFileHashesAndSizes,
     pub references: &'a [String],
     pub deriver: Option<&'a str>,
     pub ca: Option<&'a str>,
 }
 
 impl ImportInput<'_> {
-    pub fn to_commit(&self, targets: SignTargets) -> NarCommit {
+    pub fn to_commit(&self, producer: StoredContentProducer) -> NarCommit {
         NarCommit {
             store_path: self.store_path.to_owned(),
-            file_hash: self.file_hash.to_owned(),
-            file_size: self.file_size,
-            nar_size: self.nar_size,
-            nar_hash: self.nar_hash.to_owned(),
+            content: NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(
+                self.verified.clone(),
+            ),
             references: self.references.to_vec(),
             deriver: self.deriver.map(str::to_owned),
             ca: self.ca.map(str::to_owned),
-            targets,
-            confirmed: true,
-            built_by_worker: false,
+            producer,
         }
     }
 }
@@ -53,86 +47,66 @@ fn parse_store_path(store_path: &str) -> anyhow::Result<StorePath> {
     Ok(sp)
 }
 
-pub async fn import_nar_reader<C, R>(
-    db: &C,
+pub async fn import_nar_reader<R>(
     nar_storage: &NarStore,
     graph: &Graph,
     reader: R,
     input: ImportInput<'_>,
-    targets: SignTargets,
+    producer: StoredContentProducer,
 ) -> anyhow::Result<NarCommitted>
 where
-    C: ConnectionTrait,
     R: AsyncRead + Unpin + Send,
 {
     let sp = parse_store_path(input.store_path)?;
-    put_nar_idempotent_reader(db, nar_storage, sp.hash(), input.file_hash, reader).await?;
-    graph.commit_nar(input.to_commit(targets)).await
+    let key = input
+        .verified
+        .object_storage_key_for_store_path_hash_and_compressed_file_sha256(sp.hash());
+    put_nar_idempotent_reader(nar_storage, &key, reader).await?;
+    graph.commit_nar(input.to_commit(producer)).await
 }
 
-pub async fn put_nar_idempotent_reader<C, R>(
-    db: &C,
+pub async fn put_nar_idempotent_reader<R>(
     nar_storage: &NarStore,
-    hash: &str,
-    file_hash: &str,
+    key: &str,
     reader: R,
 ) -> anyhow::Result<bool>
 where
-    C: ConnectionTrait,
     R: AsyncRead + Unpin + Send,
 {
-    if nar_write_needed(db, nar_storage, hash, file_hash).await? != WriteNeeded::Write {
+    if nar_storage.exists(key).await? {
         return Ok(false);
     }
 
-    nar_storage.put_reader(hash, reader).await?;
+    nar_storage.put_reader(key, reader).await?;
     Ok(true)
 }
 
-pub async fn stored_path<C: ConnectionTrait>(
+pub async fn find_verified_cached_path_by_store_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
+    nar_hash: &str,
+    references_text: &str,
+    ca: Option<&str>,
 ) -> Result<Option<MCachedPath>, DbErr> {
+    let nar_hash = normalize_nar_hash(nar_hash);
     Ok(ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
-        .one(db)
+        .all(db)
         .await?
-        .filter(MCachedPath::is_stored))
-}
-
-pub async fn nar_write_needed<C: ConnectionTrait>(
-    db: &C,
-    nar_storage: &NarStore,
-    hash: &str,
-    file_hash: &str,
-) -> anyhow::Result<WriteNeeded> {
-    let Some(row) = stored_path(db, hash).await? else {
-        return Ok(WriteNeeded::Write);
-    };
-
-    if row.file_hash.as_deref().map(normalize_nar_hash) != Some(normalize_nar_hash(file_hash)) {
-        debug!(%hash, "other content is stored for this path; keeping it");
-        return Ok(WriteNeeded::OtherContentStored);
-    }
-
-    if nar_storage.exists(hash).await? {
-        return Ok(WriteNeeded::Stored);
-    }
-
-    Ok(WriteNeeded::Write)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WriteNeeded {
-    Write,
-    Stored,
-    OtherContentStored,
+        .into_iter()
+        .find(|row| {
+            row.is_server_verified_and_matches_nar_hash_references_text_and_content_address(
+                &nar_hash,
+                references_text,
+                ca,
+            )
+        }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::ids::{CacheId, CachedPathId};
     use uuid::Uuid;
 
@@ -143,44 +117,46 @@ mod tests {
     fn cache_id() -> CacheId {
         CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
     }
-    fn input(store_path: &str) -> ImportInput<'_> {
-        ImportInput {
-            store_path,
-            file_hash: "sha256:abc",
-            file_size: 5,
-            nar_size: 5,
-            nar_hash: "sha256:def",
-            references: &[],
-            deriver: None,
-            ca: None,
-        }
+    fn verified(nar: &[u8]) -> ServerComputedNarAndCompressedFileHashesAndSizes {
+        gradient_storage::compress_nar_bytes_and_verify_stream(nar)
     }
     fn returned_cached_path(hash: &str) -> gradient_entity::cached_path::Model {
         gradient_entity::cached_path::Model {
             id: CachedPathId::new(Uuid::now_v7()),
             hash: hash.to_string(),
+            nar_object_storage_key: hash.to_string(),
             package: "hello-2.12".to_string(),
-            file_hash: Some("sha256:abc".to_string()),
+            file_hash: "sha256:abc".to_string(),
             file_size: Some(5),
-            nar_size: Some(5),
-            nar_hash: Some("sha256:def".to_string()),
+            nar_size: 5,
+            nar_hash: verified(b"nar").nar_hash().to_owned(),
+            references: Some(String::new()),
             created_at: now(),
-            confirmed: true,
             ..Default::default()
         }
     }
 
     #[tokio::test]
     async fn malformed_store_path_bails_before_any_io() {
-        let db = empty_db();
         let store = temp_store();
+        let facts = verified(b"x");
         let err = import_nar_reader(
-            &db,
             &store,
             &Graph::stub(),
             &b"x"[..],
-            input("not-a-store-path"),
-            SignTargets::Cache(cache_id()),
+            ImportInput {
+                store_path: "not-a-store-path",
+                verified: &facts,
+                references: &[],
+                deriver: None,
+                ca: None,
+            },
+            StoredContentProducer::Upload {
+                caches: vec![cache_id()],
+                user: None,
+                api_key: None,
+                channel: gradient_entity::store_path_content_producer::CacheUploadChannel::RestHttpApiUpload,
+            },
         )
         .await;
         assert!(err.is_err());
@@ -188,74 +164,97 @@ mod tests {
 
     const IDEM_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-    fn row_with_file_hash(file_hash: &str) -> gradient_entity::cached_path::Model {
-        let mut row = returned_cached_path(IDEM_HASH);
-        row.file_hash = Some(normalize_nar_hash(file_hash));
-        row
-    }
-
-    async fn put(db: &sea_orm::DatabaseConnection, store: &NarStore) -> anyhow::Result<bool> {
-        put_nar_idempotent_reader(db, store, IDEM_HASH, "sha256:abc", &b"NEW"[..]).await
+    fn key_of(nar: &[u8]) -> String {
+        verified(nar).object_storage_key_for_store_path_hash_and_compressed_file_sha256(IDEM_HASH)
     }
 
     #[tokio::test]
     async fn an_identical_stored_nar_is_not_written_again() {
         let store = temp_store();
-        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
-        let db = mock_db()
-            .append_query_results([vec![row_with_file_hash("sha256:abc")]])
-            .into_connection();
+        let key = key_of(b"NEW");
+        store.put(&key, b"OLD".to_vec()).await.unwrap();
 
-        assert!(!put(&db, &store).await.unwrap());
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
+        assert!(
+            !put_nar_idempotent_reader(&store, &key, &b"NEW"[..])
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.get(&key).await.unwrap().unwrap(), b"OLD");
     }
 
     #[tokio::test]
-    async fn a_path_without_a_row_is_written() {
+    async fn writes_nar_bytes_to_content_variant_object_storage_key_when_no_object_exists() {
         let store = temp_store();
-        let db = mock_db()
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .into_connection();
+        let key = key_of(b"NEW");
 
-        assert!(put(&db, &store).await.unwrap());
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+        assert!(
+            put_nar_idempotent_reader(&store, &key, &b"NEW"[..])
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.get(&key).await.unwrap().unwrap(), b"NEW");
+        assert!(store.get(IDEM_HASH).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn a_stored_path_with_other_content_is_never_overwritten() {
         let store = temp_store();
-        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
-        let db = mock_db()
-            .append_query_results([vec![row_with_file_hash("sha256:different")]])
-            .into_connection();
+        let first = key_of(b"OLD");
+        store.put(&first, b"OLD".to_vec()).await.unwrap();
 
-        assert!(!put(&db, &store).await.unwrap());
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
+        let second = key_of(b"NEW");
+        assert!(
+            put_nar_idempotent_reader(&store, &second, &b"NEW"[..])
+                .await
+                .unwrap()
+        );
+        assert_ne!(first, second);
+        assert_eq!(store.get(&first).await.unwrap().unwrap(), b"OLD");
     }
 
     #[tokio::test]
-    async fn an_identical_row_whose_object_is_gone_is_written_again() {
-        let store = temp_store();
+    async fn find_verified_cached_path_by_store_hash_skips_unverified_row_with_same_hash() {
+        let legacy = returned_cached_path(IDEM_HASH);
+        let server_verified = gradient_entity::cached_path::Model {
+            server_computed_hashes_and_sizes: true,
+            ..returned_cached_path(IDEM_HASH)
+        };
         let db = mock_db()
-            .append_query_results([vec![row_with_file_hash("sha256:abc")]])
+            .append_query_results([vec![legacy, server_verified.clone()]])
             .into_connection();
 
-        assert!(put(&db, &store).await.unwrap());
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+        let found = find_verified_cached_path_by_store_hash(
+            &db,
+            IDEM_HASH,
+            verified(b"nar").nar_hash(),
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(found.map(|row| row.id), Some(server_verified.id));
     }
 
     #[tokio::test]
-    async fn a_failed_lookup_writes_nothing() {
-        use sea_orm::{DbErr, RuntimeErr};
-        let store = temp_store();
-        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
+    async fn find_verified_cached_path_by_store_hash_returns_none_when_verified_row_references_differ()
+     {
+        let server_verified = gradient_entity::cached_path::Model {
+            server_computed_hashes_and_sizes: true,
+            ..returned_cached_path(IDEM_HASH)
+        };
         let db = mock_db()
-            .append_query_errors(vec![DbErr::Conn(RuntimeErr::Internal(
-                "Connection pool timed out".to_string(),
-            ))])
+            .append_query_results([vec![server_verified]])
             .into_connection();
 
-        assert!(put(&db, &store).await.is_err());
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
+        let found = find_verified_cached_path_by_store_hash(
+            &db,
+            IDEM_HASH,
+            verified(b"nar").nar_hash(),
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep",
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(found.is_none());
     }
 }

@@ -19,12 +19,17 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::access::{Caller, ProjectAccess, TeamAccess, load_project, load_team};
+use crate::audit::Audit;
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::workers::encrypt_token;
 use crate::error::{WebError, WebResult, unique_violation};
 use crate::helpers::ok_json;
+use crate::password_hashing_and_wrong_sign_in_attempts::compute_argon2_hash_for_new_password_on_blocking_pool_with_limited_semaphore_permit;
 use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
+use gradient_types::permissions::Permission;
 
 #[derive(Debug, thiserror::Error)]
 enum GradientCiConnectionRefusal {
@@ -123,9 +128,13 @@ impl ConnectionToken {
 }
 
 impl StoredToken {
-    fn new(crypt_file: &str, secret: &str) -> WebResult<Self> {
+    async fn new(crypt_file: &str, secret: &str) -> WebResult<Self> {
         Ok(Self {
-            hash: password_auth::generate_hash(secret),
+            hash:
+                compute_argon2_hash_for_new_password_on_blocking_pool_with_limited_semaphore_permit(
+                    secret.to_owned(),
+                )
+                .await?,
             encrypted: encrypt_token(crypt_file, secret)?,
         })
     }
@@ -145,6 +154,7 @@ pub async fn post_connection(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    audit: Audit,
     JsonBody(body): JsonBody<ConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<ConnectionResponse>>> {
     if !state.config.gradient_ci.enable {
@@ -156,13 +166,27 @@ pub async fn post_connection(
         .map_err(|e| GradientCiConnectionRefusal::InvalidConnectionToken(e.to_string()))?;
     let url = gradient_types::consts::GRADIENT_CI_PROTO_URL.to_owned();
     ensure_unclaimed(&state.web_db, &target, &token.worker_id).await?;
-    let stored = StoredToken::new(&state.config.secrets.crypt_file, &token.secret)?;
+    let stored = StoredToken::new(&state.config.secrets.crypt_file, &token.secret).await?;
     match target {
         Target::Team(team) => {
-            insert_team_worker(&state.web_db, &user, &team, &token, url, stored).await?
+            insert_team_worker(&state.web_db, &user, &team, &token, url, stored).await?;
+            audit
+                .write(
+                    Action::TeamWorkerCreate,
+                    EventOwner::team(team.id),
+                    serde_json::json!({ "team_id": team.id.to_string(), "worker_id": token.worker_id, "gradient_ci": true }),
+                )
+                .await;
         }
         Target::Project(project) => {
-            insert_registration(&state.web_db, &user, &project, &token, url, stored).await?
+            insert_registration(&state.web_db, &user, &project, &token, url, stored).await?;
+            audit
+                .write(
+                    Action::ProjectWorkerRegister,
+                    EventOwner::project(project.id),
+                    serde_json::json!({ "worker_id": token.worker_id, "display_name": DISPLAY_NAME, "gradient_ci": true }),
+                )
+                .await;
         }
     }
 
@@ -205,7 +229,8 @@ async fn authorize_target(
                 Caller::User(user),
                 api_key.as_ref(),
                 name,
-                ProjectAccess::Member {
+                ProjectAccess::Require {
+                    permission: Permission::ManageWorkers,
                     reject_managed: false,
                 },
             )

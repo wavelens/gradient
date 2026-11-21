@@ -6,13 +6,15 @@
 
 use super::{
     CiReport, CiReporter, CiStatus, CreatedComment, GitHostCommentPayload, PullRequestSnapshot,
-    ReactionKind, ReactionTarget, author_or_bot, comment_exists, validate_safe_outbound_url,
+    ReactionKind, ReactionTarget, author_or_bot, comment_exists,
+    parse_user_git_host_base_url_and_check_allowlist,
 };
 use crate::client::HostClient;
 use crate::pr::gitlab::project_path;
 use crate::pr::{BranchCommit, PrRef};
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use serde::{Deserialize, Serialize};
 
 const MEMBERS_PER_PAGE: usize = 100;
@@ -25,15 +27,14 @@ pub struct GitlabReporter {
 
 impl GitlabReporter {
     pub fn new(
-        client: reqwest::Client,
+        client: HttpClientForUserSuppliedUrls,
         base_url: impl Into<String>,
         token: impl Into<String>,
     ) -> Result<Self> {
-        let raw = base_url.into();
-        validate_safe_outbound_url(&raw)
+        let base_url = parse_user_git_host_base_url_and_check_allowlist(&client, &base_url.into())
             .map_err(|e| anyhow::anyhow!("Rejected GitLab base_url: {}", e))?;
         Ok(Self {
-            client: HostClient::gitlab(client, raw.trim_end_matches('/'), token),
+            client: HostClient::gitlab(client, base_url, token),
         })
     }
 }
@@ -94,15 +95,15 @@ struct MrResponse {
 
 impl From<MrResponse> for PullRequestSnapshot {
     fn from(mr: MrResponse) -> Self {
-        let is_fork = matches!(
-            (mr.source_project_id, mr.target_project_id),
-            (Some(s), Some(t)) if s != t
-        );
+        let is_fork = match (mr.source_project_id, mr.target_project_id) {
+            (Some(s), Some(t)) => Some(s != t),
+            _ => None,
+        };
         Self {
             head_sha: mr.sha,
             head_branch: mr.source_branch,
             head_clone_url: None,
-            is_fork: Some(is_fork),
+            is_fork,
             title: mr.title,
         }
     }
@@ -317,6 +318,44 @@ mod tests {
         assert_eq!(
             path,
             "/projects/group%2Fsubgroup%2Fdemo/merge_requests/7/notes"
+        );
+    }
+
+    fn is_fork_of_merge_request_with_optional_source_and_target_project_ids(
+        source_project_id: Option<u64>,
+        target_project_id: Option<u64>,
+    ) -> Option<bool> {
+        PullRequestSnapshot::from(MrResponse {
+            sha: "a".into(),
+            source_branch: "patch-1".into(),
+            source_project_id,
+            target_project_id,
+            title: None,
+        })
+        .is_fork
+    }
+
+    #[test]
+    fn merge_request_without_project_id_has_unknown_is_fork() {
+        assert_eq!(
+            is_fork_of_merge_request_with_optional_source_and_target_project_ids(None, Some(1)),
+            None
+        );
+        assert_eq!(
+            is_fork_of_merge_request_with_optional_source_and_target_project_ids(Some(2), None),
+            None
+        );
+        assert_eq!(
+            is_fork_of_merge_request_with_optional_source_and_target_project_ids(None, None),
+            None
+        );
+        assert_eq!(
+            is_fork_of_merge_request_with_optional_source_and_target_project_ids(Some(1), Some(1)),
+            Some(false)
+        );
+        assert_eq!(
+            is_fork_of_merge_request_with_optional_source_and_target_project_ids(Some(2), Some(1)),
+            Some(true)
         );
     }
 }

@@ -18,10 +18,14 @@ doctest = false
 workspace = true
 
 [dependencies]
+gradient-wildcard = { workspace = true }
 prometheus         = { workspace = true }
 tracing-subscriber = { workspace = true }
 base64              = { workspace = true }
 futures             = { workspace = true }
+gradient-secret     = { workspace = true }
+ipnet               = { workspace = true }
+nix                 = { workspace = true, features = ["net"] }
 ractor              = { workspace = true }
 reqwest             = { workspace = true }
 serde_json          = { workspace = true }
@@ -34,6 +38,9 @@ tokio               = { workspace = true, features = ["sync", "rt", "macros", "t
 tokio-util          = { workspace = true, features = ["rt", "io"] }
 tracing             = { workspace = true }
 url                 = { workspace = true }
+
+[features]
+test-functions = []
 
 [dev-dependencies]
 tempfile = { workspace = true }

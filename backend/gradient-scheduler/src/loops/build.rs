@@ -235,7 +235,7 @@ struct BuildAssignMaps {
     output_nar_sizes: HashMap<DerivationId, Option<u64>>,
     closure_sizes: HashMap<DerivationId, Option<i64>>,
     computed_sizes: HashMap<DerivationId, i64>,
-    estimates: HashMap<DerivationId, (GroupKey, BuildEstimate)>,
+    estimates: HashMap<(DerivationId, ProjectId), (GroupKey, BuildEstimate)>,
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
     prioritized_by_eval: HashSet<DerivationBuildId>,
     build_request_by_eval: HashSet<DerivationBuildId>,
@@ -423,34 +423,35 @@ impl BuildAssignMaps {
                 map
             };
 
-        let output_hashes: Vec<String> = outputs_by_drv
-            .values()
-            .flat_map(|v| v.iter().filter_map(|o| o.hash.clone()))
-            .collect::<HashSet<String>>()
+        let consuming_derivation_dependency_output_hash_pairs_for_content_variant_size_lookup: Vec<
+            (DerivationId, String),
+        > = deps_by_drv
+            .iter()
+            .flat_map(|(drv_id, dep_drvs)| {
+                dep_drvs
+                    .iter()
+                    .filter_map(|dep_id| outputs_by_drv.get(dep_id))
+                    .flatten()
+                    .filter_map(move |o| Some((*drv_id, o.hash.clone()?)))
+            })
+            .collect::<HashSet<_>>()
             .into_iter()
             .collect();
 
-        let cache_info_by_hash: HashMap<String, CacheInfo> =
-            gradient_db::fetch_in_chunks(&output_hashes, |chunk| async move {
-                ECachedPath::find()
-                    .filter(CCachedPath::Hash.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?
-            .into_iter()
-            .filter_map(|cp| {
-                let nar_size = cp.nar_size? as u64;
-                let file_size = cp.file_size.unwrap_or(0) as u64;
-                Some((
-                    cp.hash,
-                    CacheInfo {
-                        file_size,
-                        nar_size,
-                    },
-                ))
-            })
-            .collect();
+        let trusted_cache_info_by_consuming_derivation_and_dependency_output_hash: HashMap<(DerivationId, String), CacheInfo> =
+            gradient_db::store_path_content_variant_reader_choice::find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash(db, &consuming_derivation_dependency_output_hash_pairs_for_content_variant_size_lookup)
+                .await?
+                .into_iter()
+                .map(|(consumer, cp)| {
+                    (
+                        consumer,
+                        CacheInfo {
+                            file_size: cp.file_size.unwrap_or(0) as u64,
+                            nar_size: cp.nar_size as u64,
+                        },
+                    )
+                })
+                .collect();
 
         let mut direct_inputs: HashMap<DerivationId, Vec<RequiredPath>> = HashMap::new();
         for (drv_id, dep_drvs) in &deps_by_drv {
@@ -470,7 +471,10 @@ impl BuildAssignMaps {
                     let cache_info = o
                         .hash
                         .as_ref()
-                        .and_then(|h| cache_info_by_hash.get(h))
+                        .and_then(|h| {
+                            trusted_cache_info_by_consuming_derivation_and_dependency_output_hash
+                                .get(&(*drv_id, h.clone()))
+                        })
                         .cloned();
                     paths.push(RequiredPath {
                         path: path.full(),
@@ -516,7 +520,23 @@ impl BuildAssignMaps {
             load_closure_sizes(db, &derivations, history.is_some()).await;
         let estimates = match history {
             Some(history) => {
-                estimates_for(db, history, &derivations, &deps_by_drv, &dep_drv_ids).await?
+                let driving_project_by_derivation: HashMap<DerivationId, ProjectId> = shared_builds
+                    .iter()
+                    .filter_map(|shared_build| {
+                        let eval = evaluations.get(driving_eval.get(&shared_build.id)?)?;
+                        let project = tasks.get(&eval.task?)?;
+                        Some((shared_build.derivation, *project))
+                    })
+                    .collect();
+                estimates_for(
+                    db,
+                    history,
+                    &derivations,
+                    &driving_project_by_derivation,
+                    &deps_by_drv,
+                    &dep_drv_ids,
+                )
+                .await?
             }
             None => HashMap::new(),
         };
@@ -549,10 +569,10 @@ impl BuildAssignMaps {
         eval.task.and_then(|pid| self.tasks.get(&pid).copied())
     }
 
-    fn estimate_of(&self, derivation: DerivationId) -> BuildEstimate {
+    fn estimate_of(&self, derivation: DerivationId, project: ProjectId) -> BuildEstimate {
         let mut estimate = self
             .estimates
-            .get(&derivation)
+            .get(&(derivation, project))
             .map(|(_, estimate)| estimate.clone())
             .unwrap_or_default();
         if let Some(Some(size)) = self.output_nar_sizes.get(&derivation) {
@@ -660,11 +680,11 @@ impl BuildAssignMaps {
                 is_fixed_output: derivation.is_fixed_output,
                 outputs: self.outputs_to_produce(shared_build, substitute),
                 timeout_secs: resolve_limit(
-                    shared_build.timeout_secs,
+                    derivation.timeout_secs,
                     self.config.default_timeout_secs,
                 ),
                 max_silent_secs: resolve_limit(
-                    shared_build.max_silent_secs,
+                    derivation.max_silent_secs,
                     self.config.default_max_silent_secs,
                 ),
                 build_cores: None,
@@ -729,10 +749,10 @@ impl BuildAssignMaps {
                 .flatten(),
             prefer_local_build: derivation.prefer_local_build,
             is_fixed_output: derivation.is_fixed_output,
-            estimate: self.estimate_of(shared_build.derivation),
+            estimate: self.estimate_of(shared_build.derivation, project_id),
             history_key: self
                 .estimates
-                .get(&shared_build.derivation)
+                .get(&(shared_build.derivation, project_id))
                 .map(|(key, _)| key.clone()),
             queued_at: shared_build.updated_at,
             ready_at: now(),
@@ -758,8 +778,11 @@ async fn verifying_keys_of_missing_outputs(
     db: &WorkerDb,
     outputs: &[&MDerivationOutput],
 ) -> anyhow::Result<HashMap<DerivationId, HashMap<String, Option<String>>>> {
-    let hashes: Vec<String> = outputs.iter().filter_map(|o| o.hash.clone()).collect();
-    let stored = gradient_db::cached_paths::stored_by_hash(db, &hashes).await?;
+    let wanted: Vec<(DerivationId, String)> = outputs
+        .iter()
+        .filter_map(|o| Some((o.derivation, o.hash.clone()?)))
+        .collect();
+    let stored = gradient_db::store_path_content_variant_reader_choice::highest_ranked_trusted_content_variant_by_derivation_id_and_store_path_hash_for_shared_build_own_outputs(db, &wanted).await?;
     let upstream_ids: Vec<CacheUpstreamId> = outputs
         .iter()
         .filter_map(|o| o.verified_by_upstream)
@@ -767,10 +790,11 @@ async fn verifying_keys_of_missing_outputs(
     let upstreams = by_ids::<ECacheUpstream, _>(db, &upstream_ids).await?;
 
     let mut keys: HashMap<DerivationId, HashMap<String, Option<String>>> = HashMap::new();
-    for o in outputs
-        .iter()
-        .filter(|o| !o.hash.as_ref().is_some_and(|h| stored.contains_key(h)))
-    {
+    for o in outputs.iter().filter(|o| {
+        !o.hash
+            .as_ref()
+            .is_some_and(|h| stored.contains_key(&(o.derivation, h.clone())))
+    }) {
         let key = o
             .verified_by_upstream
             .and_then(|id| upstreams.get(&id))
@@ -838,9 +862,10 @@ async fn estimates_for(
     db: &WorkerDb,
     history: &BuildHistory,
     derivations: &HashMap<DerivationId, MDerivation>,
+    driving_project_by_derivation: &HashMap<DerivationId, ProjectId>,
     deps_by_drv: &HashMap<DerivationId, Vec<DerivationId>>,
     dep_drv_ids: &[DerivationId],
-) -> anyhow::Result<HashMap<DerivationId, (GroupKey, BuildEstimate)>> {
+) -> anyhow::Result<HashMap<(DerivationId, ProjectId), (GroupKey, BuildEstimate)>> {
     if let Err(e) = history.refresh(db).await {
         warn!(error = %e, "build history refresh failed; estimating from the samples read before");
     }
@@ -848,7 +873,8 @@ async fn estimates_for(
 
     Ok(derivations
         .iter()
-        .map(|(id, drv)| {
+        .filter_map(|(id, drv)| Some((id, drv, *driving_project_by_derivation.get(id)?)))
+        .map(|(id, drv, project)| {
             let mut input_pnames: Vec<String> = deps_by_drv
                 .get(id)
                 .into_iter()
@@ -863,8 +889,8 @@ async fn estimates_for(
                 pname: drv.history_name().to_owned(),
                 input_pnames,
             };
-            let estimate = history.estimate(&key, *id);
-            (*id, (key, estimate))
+            let estimate = history.estimate(&key, *id, project);
+            ((*id, project), (key, estimate))
         })
         .collect())
 }

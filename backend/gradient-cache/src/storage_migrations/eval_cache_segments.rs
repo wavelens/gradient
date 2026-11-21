@@ -53,8 +53,10 @@ async fn drop_whole_blobs(store: &NarStore, db: &impl ConnectionTrait) -> Result
 mod tests {
     use super::*;
     use gradient_fixtures::mock::{exec_ok, mock_db, raw_statements};
-    use gradient_storage::eval_cache_segment::eval_cache_segment_key;
-    use gradient_types::ids::CacheId;
+    use gradient_storage::eval_cache_segment::{
+        CheckedEvalCacheFingerprint, eval_cache_segment_key,
+    };
+    use gradient_types::ids::{CacheId, ProjectId};
 
     #[tokio::test]
     async fn old_blobs_and_their_rows_go_segments_stay() {
@@ -62,7 +64,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = NarStore::local(tmp.path()).unwrap();
         let blob = format!("eval-cache/{cache}/fp");
-        let segment = eval_cache_segment_key(cache, "fp", uuid::Uuid::now_v7());
+        let fingerprint = CheckedEvalCacheFingerprint::parse(&"a".repeat(64)).unwrap();
+        let segment = eval_cache_segment_key(
+            cache,
+            ProjectId::now_v7(),
+            &fingerprint,
+            uuid::Uuid::now_v7(),
+        );
         store
             .put_eval_cache(&blob, b"whole".to_vec())
             .await

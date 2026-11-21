@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::api_spec::Binary;
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::{attachment_name, untrusted_content_headers};
@@ -168,7 +169,14 @@ pub async fn list_exec_job_outputs(
     Path(job): Path<ExecJobId>,
     Query(query): Query<ExecJobNodeQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<ExecJobOutputView>>>> {
-    let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let node = ctx.node(query.node)?.job.id;
     let rows = outputs::of_job(&state.web_db, node).await?;
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
@@ -197,7 +205,14 @@ pub async fn get_exec_job_output(
     Query(query): Query<ExecJobNodeQuery>,
     headers: HeaderMap,
 ) -> WebResult<Response> {
-    let ctx = ExecJobAccessContext::load(&state.web_db, job, &maybe_user, api_key.as_ref()).await?;
+    let ctx = ExecJobAccessContext::load(
+        &state.web_db,
+        job,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let job = ctx.node(query.node)?.job.id;
     let row = outputs::one(&state.web_db, job, &path)
         .await?

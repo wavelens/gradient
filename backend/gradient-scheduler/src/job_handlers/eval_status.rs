@@ -4,17 +4,43 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use anyhow::Result;
+use futures::{StreamExt as _, TryStreamExt as _};
 use gradient_db::lookup::by_id;
+use gradient_db::status::{EvaluationFailure, update_evaluation_status_with_error};
+use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
-use gradient_graph::RecordBatch;
+use gradient_graph::derivation_closure_input_addressed_output_verification::{
+    DrvSource, load_stored_derivation_hash_modulo_text_by_store_path_for_chunk,
+    read_transitive_input_derivations_checking_input_addressed_output_paths,
+};
+use gradient_graph::read_derivation_from_trusted_nar::{
+    StorePathVerifiedDerivationRecord, load_verified_trusted_derivation_record,
+    map_verified_derivation_records_by_store_path,
+};
+use gradient_graph::writer::derivation_save_failure_user_message;
+use gradient_graph::{EvaluationBatchDerivation, RecordBatch};
 use gradient_types::*;
 use gradient_wire::types::DiscoveredDerivation;
 
+const MAX_CONCURRENT_VERIFIED_DERIVATION_FILE_READS: usize = 16;
+
 use crate::Scheduler;
+use crate::actor::SchedulerMsg;
 use crate::jobs::{PendingEvalJob, PendingJob};
+
+#[derive(Debug, thiserror::Error)]
+#[error("The graph writer did not save the report batch for evaluation {evaluation_id}.")]
+pub struct GraphWriterDidNotSaveReportBatchError {
+    pub evaluation_id: EvaluationId,
+    #[source]
+    pub graph_writer_error: anyhow::Error,
+}
 
 impl Scheduler {
     pub async fn handle_eval_status_update(
@@ -185,7 +211,7 @@ impl Scheduler {
     pub async fn handle_eval_result(
         &self,
         job_id: &str,
-        mut derivations: Vec<DiscoveredDerivation>,
+        derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
         errors: Vec<String>,
     ) -> Result<()> {
@@ -198,16 +224,75 @@ impl Scheduler {
             }
         };
 
-        // Store paths are canonicalised to the bare `<hash>-<name>` form before reaching the graph
-        // writer. The `/nix/store/` prefix is added back only at the worker and API boundary.
-        for d in &mut derivations {
-            d.drv_path = StorePath::parse_stored(&d.drv_path)?.base();
-            for dep in &mut d.dependencies {
-                *dep = StorePath::parse_stored(dep)?.base();
+        let project = job.project_id;
+        let verified = futures::stream::iter(derivations)
+            .map(|reported| self.load_trusted_evaluation_batch_derivation(project, reported))
+            .buffered(MAX_CONCURRENT_VERIFIED_DERIVATION_FILE_READS)
+            .try_collect::<Vec<_>>()
+            .await;
+        let mut derivations = match verified {
+            Ok(derivations) => derivations,
+            Err(drv_path) => {
+                self.mark_evaluation_failed_with_message(
+                    job.evaluation_id,
+                    &format!(
+                        "derivation file {drv_path} was not uploaded or does not match its path"
+                    ),
+                )
+                .await;
+                return Ok(());
             }
+        };
+
+        let reported = match map_verified_derivation_records_by_store_path(
+            derivations
+                .iter()
+                .map(|batch_entry| &batch_entry.store_path_verified_derivation_record),
+        ) {
+            Ok(reported) => reported,
+            Err(error) => {
+                self.mark_evaluation_failed_with_message(job.evaluation_id, &format!("{error:#}"))
+                    .await;
+                return Ok(());
+            }
+        };
+        let source = ReportedInputDerivationFileAndHashModuloSource {
+            db: &self.db,
+            reported,
+        };
+        let roots: Vec<String> = source.reported.keys().cloned().collect();
+        let derivation_closure_check_read_derivations_and_verified_hash_modulos_for_equal_client_and_stored_paths = match read_transitive_input_derivations_checking_input_addressed_output_paths(
+            &source, &roots,
+        )
+        .await
+        {
+            Ok(derivation_closure_check_read_derivations_and_verified_hash_modulos_for_equal_client_and_stored_paths) => derivation_closure_check_read_derivations_and_verified_hash_modulos_for_equal_client_and_stored_paths,
+            Err(error) => {
+                warn!(%project, error = %error, "The closure check failed for the derivation files that were reported.");
+                self.mark_evaluation_failed_with_message(
+                    job.evaluation_id,
+                    &format!("The server rejected the derivation file that was reported: {error:#}"),
+                )
+                .await;
+                return Ok(());
+            }
+        };
+        for batch_entry in &mut derivations {
+            batch_entry.closure_checked_hash_modulo = StorePath::parse_stored(
+                batch_entry
+                    .store_path_verified_derivation_record
+                    .derivation_file_store_path(),
+            )
+            .ok()
+            .and_then(|path| {
+                derivation_closure_check_read_derivations_and_verified_hash_modulos_for_equal_client_and_stored_paths
+                    .verified_hash_modulo_by_stored_derivation_path_for_equal_client_and_stored_paths
+                    .get(&path.full())
+                    .cloned()
+            });
         }
 
-        let report = self
+        let report = match self
             .graph
             .record(RecordBatch {
                 evaluation: job.evaluation_id,
@@ -217,12 +302,115 @@ impl Scheduler {
                 errors,
                 continuation: job.continuation,
             })
-            .await?;
+            .await
+        {
+            Ok(report) => report,
+            Err(graph_writer_error) => {
+                self.record_report_batch_save_failure_and_mark_evaluation_failed(
+                    job_id,
+                    job.evaluation_id,
+                    &graph_writer_error,
+                )
+                .await;
+                return Err(GraphWriterDidNotSaveReportBatchError {
+                    evaluation_id: job.evaluation_id,
+                    graph_writer_error,
+                }
+                .into());
+            }
+        };
         if report.exec_entry_points > 0 {
             self.refresh_pre_warm().await;
         }
 
         Ok(())
+    }
+
+    async fn load_trusted_evaluation_batch_derivation(
+        &self,
+        project: ProjectId,
+        reported: DiscoveredDerivation,
+    ) -> Result<EvaluationBatchDerivation, String> {
+        let drv_path = reported.drv_path;
+        let base = StorePath::parse_stored(&drv_path)
+            .map(|path| path.base())
+            .map_err(|_| drv_path.clone())?;
+        let record = match load_verified_trusted_derivation_record(
+            &self.db.worker_db,
+            &self.db.storage.nar_storage,
+            Arc::clone(&self.db.store_path_mapping),
+            project,
+            &base,
+        )
+        .await
+        {
+            Ok(Some(record)) => record,
+            Ok(None) => return Err(base),
+            Err(error) => {
+                warn!(%project, drv_path = %base, error = %error, "Failed to read the derivation file from storage or validate it");
+                return Err(base);
+            }
+        };
+
+        Ok(EvaluationBatchDerivation {
+            store_path_verified_derivation_record: record,
+            attr: reported.attr,
+            ifd: reported.ifd,
+            licenses: reported.licenses,
+            exec: reported.exec,
+            closure_checked_hash_modulo: None,
+        })
+    }
+
+    async fn record_report_batch_save_failure_and_mark_evaluation_failed(
+        &self,
+        job_id: &str,
+        evaluation_id: EvaluationId,
+        graph_writer_error: &anyhow::Error,
+    ) {
+        let report_batch_not_saved_failure_message =
+            derivation_save_failure_user_message(graph_writer_error);
+        let job_id = job_id.to_owned();
+        let store_lost_report_batch_on_active_job_result = self
+            .call(|reply| SchedulerMsg::MarkEvaluationJobReportBatchLost {
+                job_id,
+                message: report_batch_not_saved_failure_message.clone(),
+                reply,
+            })
+            .await;
+        if let Err(error) = store_lost_report_batch_on_active_job_result {
+            warn!(%evaluation_id, error = %error, "failed to record on the evaluation job that the scheduler did not save a report batch");
+        }
+        self.mark_evaluation_failed_with_message(
+            evaluation_id,
+            &report_batch_not_saved_failure_message,
+        )
+        .await;
+    }
+
+    async fn mark_evaluation_failed_with_message(
+        &self,
+        evaluation_id: EvaluationId,
+        message: &str,
+    ) {
+        match by_id::<EEvaluation, _>(&self.db.worker_db, evaluation_id).await {
+            Ok(Some(eval)) => {
+                if let Err(e) = update_evaluation_status_with_error(
+                    &self.db,
+                    eval,
+                    EvaluationStatus::Failed,
+                    &EvaluationFailure::GraphInsert(message),
+                )
+                .await
+                {
+                    warn!(error = %e, %evaluation_id, "failed to fail the evaluation");
+                }
+            }
+            Ok(None) => warn!(%evaluation_id, "evaluation not found for status update"),
+            Err(e) => {
+                warn!(error = %e, %evaluation_id, "failed to fetch evaluation for status update")
+            }
+        }
     }
 
     pub async fn record_eval_message(
@@ -258,5 +446,39 @@ impl Scheduler {
         )
         .await
         .map_err(Into::into)
+    }
+}
+
+struct ReportedInputDerivationFileAndHashModuloSource<'a> {
+    db: &'a gradient_db::DbContext,
+    reported: HashMap<String, StorePathVerifiedDerivationRecord>,
+}
+
+impl DrvSource for ReportedInputDerivationFileAndHashModuloSource<'_> {
+    type Drv = StorePathVerifiedDerivationRecord;
+
+    async fn read(&self, drv_path: &str) -> anyhow::Result<Option<Self::Drv>> {
+        Ok(self.reported.get(drv_path).cloned())
+    }
+
+    async fn read_stored_derivation_hash_modulo_text_for_drv_paths(
+        &self,
+        drv_paths: &[String],
+    ) -> anyhow::Result<HashMap<String, String>> {
+        load_stored_derivation_hash_modulo_text_by_store_path_for_chunk(
+            &self.db.worker_db,
+            drv_paths,
+        )
+        .await
+    }
+
+    fn error_for_input_derivation_without_readable_drv_or_stored_verified_hash(
+        &self,
+        input: &str,
+        dependent: &str,
+    ) -> anyhow::Error {
+        anyhow::anyhow!(
+            "{input} is an input derivation of {dependent}. The evaluation worker has not reported the `.drv` file for {input}. The database does not hold a verified hash modulo for {input}. Two causes are possible.\n\nEvaluation workers older than the server report dependent derivations first. Upgrade the evaluation worker together with the server.\n\nThe cleanup of old unreferenced derivation rows deleted the row for {input} during this evaluation. Run the evaluation again."
+        )
     }
 }

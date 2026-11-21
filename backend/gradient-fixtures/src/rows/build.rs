@@ -57,6 +57,7 @@ pub fn queued_evaluation(task: TaskId, commit: CommitId) -> evaluation::Model {
         commit,
         wildcard: "*".into(),
         status: evaluation::EvaluationStatus::Queued,
+        allows_project_credentials_and_privileged_actions: true,
         created_at: now,
         updated_at: now,
         ..Default::default()

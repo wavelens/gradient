@@ -4,7 +4,7 @@
  */
 
 use gradient_storage::admission::UploadAdmission;
-use gradient_storage::admission::{Admission, HeldPermit, ObjectKey};
+use gradient_storage::admission::{HeldPermit, ObjectKey};
 use gradient_types::RuntimeConfig;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +24,7 @@ pub(super) async fn admit_nar(
     upload_admission: &Arc<UploadAdmission>,
     hash: &str,
     size: u64,
-) -> WebResult<Option<HeldPermit>> {
+) -> WebResult<HeldPermit> {
     admit_nar_within(upload_admission, hash, size, rest_wait(config)).await
 }
 
@@ -38,10 +38,7 @@ async fn admit_within(
     wait: Duration,
 ) -> WebResult<HeldPermit> {
     let object = ObjectKey::Rest(uuid::Uuid::now_v7().to_string());
-    match admit_object(upload_admission, object, size, wait).await? {
-        Admission::Granted(permit) => Ok(permit),
-        Admission::AlreadyCommitted => Err(WebError::UploadBusy { retry_after: wait }),
-    }
+    admit_object(upload_admission, object, size, wait).await
 }
 
 async fn admit_nar_within(
@@ -49,18 +46,14 @@ async fn admit_nar_within(
     hash: &str,
     size: u64,
     wait: Duration,
-) -> WebResult<Option<HeldPermit>> {
-    match admit_object(
+) -> WebResult<HeldPermit> {
+    admit_object(
         upload_admission,
         ObjectKey::Nar(hash.to_owned()),
         size,
         wait,
     )
-    .await?
-    {
-        Admission::Granted(permit) => Ok(Some(permit)),
-        Admission::AlreadyCommitted => Ok(None),
-    }
+    .await
 }
 
 async fn admit_object(
@@ -68,7 +61,7 @@ async fn admit_object(
     object: ObjectKey,
     size: u64,
     wait: Duration,
-) -> WebResult<Admission> {
+) -> WebResult<HeldPermit> {
     upload_admission
         .admit("rest", object, size, wait)
         .await
@@ -107,7 +100,7 @@ mod tests {
         let hash = "a".repeat(32);
         let (holder, mut admitted) = state.memory.upload_admission.open_session("holder");
         holder.request(1, ObjectKey::Nar(hash.clone()), 1, false);
-        let Some(Admitted::Granted { permit, .. }) = admitted.recv().await else {
+        let Some(Admitted { permit, .. }) = admitted.recv().await else {
             panic!("the holder leads the path");
         };
 
@@ -124,10 +117,10 @@ mod tests {
                 .is_err(),
             "the upload waits while another upload holds the path"
         );
-        permit.committed();
+        drop(permit);
         assert!(
-            matches!(waiting.await, Ok(None)),
-            "the other upload stored the path"
+            waiting.await.is_ok(),
+            "This upload can gain admission at the end of the other upload."
         );
     }
 }

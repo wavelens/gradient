@@ -16,6 +16,11 @@ use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
 };
 use gradient_types::*;
+use gradient_util::http_base_url::ValidatedHttpBaseUrl;
+use gradient_util::upstream_cache_credential::{
+    upstream_cache_credential_plaintext_from_bearer_token,
+    validate_basic_auth_and_make_upstream_cache_credential,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
 
@@ -25,7 +30,7 @@ impl<'a> StateApplicator<'a> {
         state_caches: &HashMap<String, StateCache>,
         team_ids: &HashMap<String, TeamId>,
     ) -> Result<(), DynError> {
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
         let project_map = self.project_lookup().await?;
 
         for state_cache in state_caches.values() {
@@ -65,12 +70,15 @@ impl<'a> StateApplicator<'a> {
                 &format!("signing key for cache '{}'", state_cache.name),
             )?;
 
-            let created_by_id = lookup_id(&user_map, &state_cache.created_by, "User")?;
-
             let existing_cache = cache::Entity::find()
                 .filter(cache::Column::Name.eq(&state_cache.name))
                 .one(self.db)
                 .await?;
+            let created_by_id = state_users.resolve_creator_username_to_state_account_id(
+                &state_cache.created_by,
+                &format!("cache '{}'", state_cache.name),
+                existing_cache.as_ref().map(|cache| cache.created_by),
+            )?;
 
             let now = now();
 
@@ -142,6 +150,9 @@ impl<'a> StateApplicator<'a> {
             // The `created_by` user must always hold the Admin cache role. `PUT /caches` is
             // inserting this row at creation. An empty `members` list otherwise left the cache
             // without any admin.
+            if state_cache.created_by.is_empty() {
+                continue;
+            }
             self.ensure_cache_creator_admin(cache_id, created_by_id, &state_cache.name)
                 .await
                 .map_err(|e| {
@@ -181,17 +192,18 @@ impl<'a> StateApplicator<'a> {
                     )
                 })?;
             declared.insert(project_id);
+            let cache_signs_outputs = subscription.signs_project_outputs();
 
             match existing.get(&project_id) {
                 Some(row)
                     if row.managed
                         && row.mode == subscription.mode
-                        && row.sign_outputs == subscription.sign_outputs => {}
+                        && row.sign_outputs == cache_signs_outputs => {}
                 Some(row) => {
                     let mut active = row.clone().into_active_model();
                     active.managed = Set(true);
                     active.mode = Set(subscription.mode.clone());
-                    active.sign_outputs = Set(subscription.sign_outputs);
+                    active.sign_outputs = Set(cache_signs_outputs);
                     active.update(self.db).await?;
                 }
                 None => {
@@ -200,7 +212,7 @@ impl<'a> StateApplicator<'a> {
                         cache: cache_id,
                         mode: subscription.mode.clone(),
                         managed: true,
-                        sign_outputs: subscription.sign_outputs,
+                        sign_outputs: cache_signs_outputs,
                         ..Default::default()
                     }
                     .into_active_model()
@@ -281,7 +293,7 @@ impl<'a> StateApplicator<'a> {
             .map(|c| (c.name, c.id))
             .collect();
 
-        for upstream in upstream_caches {
+        for (index, upstream) in upstream_caches.iter().enumerate() {
             let record = match upstream {
                 StateUpstream::Internal {
                     cache_name: upstream_cache_name,
@@ -316,19 +328,40 @@ impl<'a> StateApplicator<'a> {
                     public_key,
                     http1_only,
                     active,
-                } => MCacheUpstream {
-                    id: CacheUpstreamId::now_v7(),
-                    cache: cache_id,
-                    display_name: display_name.clone(),
-                    mode: CacheSubscriptionMode::ReadOnly,
-                    kind: cache_upstream::CacheUpstreamKind::Http,
-                    url: Some(url.clone()),
-                    public_key: Some(public_key.clone()),
-                    http1_only: *http1_only,
-                    active: *active,
-                    ..Default::default()
+                    basic_auth_user,
+                    basic_auth_password_file,
+                    bearer_token_file,
+                } => {
+                    let url = url.parse::<ValidatedHttpBaseUrl>().map_err(|error| {
+                        format!(
+                            "Invalid URL for upstream cache '{display_name}' in cache '{cache_name}': {error}"
+                        )
+                    })?;
+                    let credential = self.read_upstream_cache_credential(
+                        cache_name,
+                        index,
+                        &url,
+                        basic_auth_user.as_deref(),
+                        basic_auth_password_file.is_some(),
+                        bearer_token_file.is_some(),
+                    )?;
+                    let (credential_scheme, encrypted_credential) = credential.unzip();
+                    MCacheUpstream {
+                        id: CacheUpstreamId::now_v7(),
+                        cache: cache_id,
+                        display_name: display_name.clone(),
+                        mode: CacheSubscriptionMode::ReadOnly,
+                        kind: cache_upstream::CacheUpstreamKind::Http,
+                        url: Some(url.to_string()),
+                        public_key: Some(public_key.clone()),
+                        encrypted_credential,
+                        credential_scheme,
+                        http1_only: *http1_only,
+                        active: *active,
+                        ..Default::default()
+                    }
+                    .into_active_model()
                 }
-                .into_active_model(),
             };
 
             record.insert(self.db).await?;
@@ -340,6 +373,73 @@ impl<'a> StateApplicator<'a> {
             "Applied upstream caches to cache"
         );
         Ok(())
+    }
+
+    fn read_upstream_cache_credential(
+        &self,
+        cache_name: &str,
+        index: usize,
+        url: &ValidatedHttpBaseUrl,
+        basic_auth_user: Option<&str>,
+        upstream_cache_has_basic_auth_password_file: bool,
+        sets_bearer_token_file: bool,
+    ) -> Result<Option<(cache_upstream::UpstreamCredentialScheme, String)>, DynError> {
+        let upstream = format!("upstream cache {index} of cache '{cache_name}'");
+        let upstream_cache_credential_name_part = format!("{cache_name}_{index}");
+        let read = |suffix: &str, label: &str| -> Result<String, DynError> {
+            let (contents, path) = read_credential(
+                self.credentials_dir,
+                "cache_upstream",
+                &upstream_cache_credential_name_part,
+                suffix,
+                label,
+            )?;
+            let contents = contents.trim();
+            if contents.is_empty() {
+                return Err(format!("The {label} {path} is empty.").into());
+            }
+            Ok(contents.to_owned())
+        };
+        let error_when_upstream_cache_url_is_plain_http = || -> Result<(), DynError> {
+            if url.as_str().starts_with("http://") {
+                return Err(format!("Credentials for {upstream} require an https URL.").into());
+            }
+            Ok(())
+        };
+
+        let (scheme, payload) = match (
+            basic_auth_user,
+            upstream_cache_has_basic_auth_password_file,
+            sets_bearer_token_file,
+        ) {
+            (None, false, false) => return Ok(None),
+            (Some(user), true, false) => {
+                error_when_upstream_cache_url_is_plain_http()?;
+                let password = read("password", "password file of the upstream cache")?;
+                (
+                    cache_upstream::UpstreamCredentialScheme::Basic,
+                    validate_basic_auth_and_make_upstream_cache_credential(user, &password)
+                        .map_err(|refusal| format!("{upstream}: {refusal}"))?,
+                )
+            }
+            (None, false, true) => {
+                error_when_upstream_cache_url_is_plain_http()?;
+                let token = read("bearer_token", "upstream cache bearer token file")?;
+                (
+                    cache_upstream::UpstreamCredentialScheme::Bearer,
+                    upstream_cache_credential_plaintext_from_bearer_token(&token)
+                        .map_err(|refusal| format!("{upstream}: {refusal}"))?,
+                )
+            }
+            _ => {
+                return Err(format!(
+                    "The credential fields of {upstream} conflict. {EXTERNAL_HTTP_UPSTREAM_CACHE_CREDENTIAL_FIELD_COMBINATION_ERROR_MESSAGE}"
+                )
+                .into());
+            }
+        };
+        let encrypted = self.encrypt_to_b64(&payload, &format!("{upstream} credentials"))?;
+        Ok(Some((scheme, encrypted)))
     }
 
     pub(crate) async fn apply_cache_roles_and_members(
@@ -403,12 +503,14 @@ impl<'a> StateApplicator<'a> {
             declared_role_names.insert(entry.name.clone());
         }
 
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
         let mut declared_members: HashSet<UserId> = HashSet::new();
         for entry in members {
-            let user_id = user_map.get(&entry.user).copied().ok_or_else(|| {
-                format!("Cache '{}' member '{}' not found", cache_name, entry.user)
-            })?;
+            let Some(user_id) = state_users
+                .resolve_username_to_user_id(&entry.user, &format!("cache '{cache_name}' member"))
+            else {
+                continue;
+            };
 
             let role_id = match entry.role.as_str() {
                 "Admin" => BASE_CACHE_ROLE_ADMIN_ID,
@@ -524,11 +626,13 @@ mod tests {
             .insert(&connection)
             .await
             .unwrap();
+        let transaction = sea_orm::TransactionTrait::begin(&connection).await.unwrap();
         let app = StateApplicator {
-            db: &connection,
+            db: &transaction,
             crypt_secret_file: "",
             credentials_dir: Path::new(""),
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
 
         app.apply_cache_roles_and_members(
@@ -542,6 +646,7 @@ mod tests {
         )
         .await
         .unwrap();
+        transaction.commit().await.unwrap();
 
         let role = db
             .rows::<ECacheRole>()
@@ -612,16 +717,19 @@ mod tests {
             ]
         }))
         .unwrap();
+        let transaction = sea_orm::TransactionTrait::begin(&connection).await.unwrap();
         let app = StateApplicator {
-            db: &connection,
+            db: &transaction,
             crypt_secret_file: "",
             credentials_dir: Path::new(""),
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
 
         app.apply_cache_subscriptions(cache.id, &state_cache, &project_map)
             .await
             .unwrap();
+        transaction.commit().await.unwrap();
 
         let rows: HashMap<ProjectId, project_cache::Model> = db
             .rows::<EProjectCache>()
@@ -640,5 +748,276 @@ mod tests {
         assert!(added.sign_outputs);
         assert!(!rows[&project_map["hand-made"]].managed);
         db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn upstream_url_with_trailing_slash_is_normalised_for_project_lookup() {
+        let db = TestDatabase::create().await;
+        let connection = db.connection();
+        rows::user()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let cache = rows::cache()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let project = rows::project_with_id(ProjectId::now_v7(), "subscriber")
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        project_cache::Model {
+            project: project.id,
+            cache: cache.id,
+            ..Default::default()
+        }
+        .into_active_model()
+        .insert(&connection)
+        .await
+        .unwrap();
+        let transaction = sea_orm::TransactionTrait::begin(&connection).await.unwrap();
+        let app = StateApplicator {
+            db: &transaction,
+            crypt_secret_file: "",
+            credentials_dir: Path::new(""),
+            email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
+        };
+
+        app.apply_upstream_caches(
+            cache.id,
+            &cache.name,
+            &[StateUpstream::External {
+                display_name: "Attic".into(),
+                url: "https://Attic.example/".into(),
+                public_key: "attic:key".into(),
+                http1_only: false,
+                active: true,
+                basic_auth_user: None,
+                basic_auth_password_file: None,
+                bearer_token_file: None,
+            }],
+        )
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+
+        let found = gradient_db::caches::upstream::upstream_urls_for_projects(
+            &connection,
+            &format!("'{}'", project.id),
+        )
+        .await
+        .unwrap();
+        assert_eq!(found, HashSet::from(["https://attic.example".to_owned()]));
+        db.finish().await;
+    }
+
+    const TEST_UPSTREAM_CREDENTIALS_ENCRYPTION_KEY_SECRET: &str =
+        "0123456789abcdef0123456789abcdef";
+
+    fn create_temp_credentials_directory_with_encryption_key_and_files(
+        files: &[(&str, &str)],
+    ) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("gradient-state-test-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("crypt"),
+            TEST_UPSTREAM_CREDENTIALS_ENCRYPTION_KEY_SECRET,
+        )
+        .unwrap();
+        for (name, contents) in files {
+            std::fs::write(dir.join(name), contents).unwrap();
+        }
+        dir
+    }
+
+    fn external_upstream(
+        url: &str,
+        basic_auth_user: Option<&str>,
+        basic_auth_password_file: Option<&str>,
+        bearer_token_file: Option<&str>,
+    ) -> StateUpstream {
+        StateUpstream::External {
+            display_name: "Private".into(),
+            url: url.into(),
+            public_key: "private:key".into(),
+            http1_only: false,
+            active: true,
+            basic_auth_user: basic_auth_user.map(str::to_owned),
+            basic_auth_password_file: basic_auth_password_file.map(str::to_owned),
+            bearer_token_file: bearer_token_file.map(str::to_owned),
+        }
+    }
+
+    async fn create_test_database_and_apply_upstream_caches(
+        credentials_dir: &Path,
+        upstreams: &[StateUpstream],
+    ) -> (TestDatabase, Result<(), DynError>) {
+        let db = TestDatabase::create().await;
+        let connection = db.connection();
+        rows::user()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let cache = rows::cache()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let crypt_file = credentials_dir.join("crypt");
+        let transaction = sea_orm::TransactionTrait::begin(&connection).await.unwrap();
+        let app = StateApplicator {
+            db: &transaction,
+            crypt_secret_file: crypt_file.to_str().unwrap(),
+            credentials_dir,
+            email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
+        };
+        let result = app
+            .apply_upstream_caches(cache.id, &cache.name, upstreams)
+            .await;
+        if result.is_ok() {
+            transaction.commit().await.unwrap();
+        }
+        (db, result)
+    }
+
+    fn decrypt(stored: &str) -> String {
+        let bytes = general_purpose::STANDARD.decode(stored).unwrap();
+        String::from_utf8(
+            crypter::decrypt_with_password(
+                TEST_UPSTREAM_CREDENTIALS_ENCRYPTION_KEY_SECRET.as_bytes(),
+                bytes,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn state_apply_stores_encrypted_upstream_cache_credentials_read_from_password_and_token_files()
+     {
+        let dir = create_temp_credentials_directory_with_encryption_key_and_files(&[
+            (
+                "gradient_cache_upstream_test-cache_0_password",
+                "s3cret-pw\n",
+            ),
+            (
+                "gradient_cache_upstream_test-cache_1_bearer_token",
+                "t0ken\n",
+            ),
+        ]);
+        let (db, result) = create_test_database_and_apply_upstream_caches(
+            &dir,
+            &[
+                external_upstream(
+                    "https://basic.example",
+                    Some("alice"),
+                    Some("/run/secrets/pw"),
+                    None,
+                ),
+                external_upstream("https://bearer.example", None, None, Some("/run/secrets/t")),
+            ],
+        )
+        .await;
+        result.unwrap();
+
+        let rows: HashMap<String, cache_upstream::Model> = db
+            .rows::<ECacheUpstream>()
+            .await
+            .into_iter()
+            .map(|row| (row.url.clone().unwrap(), row))
+            .collect();
+        let basic = &rows["https://basic.example"];
+        assert_eq!(
+            basic.credential_scheme,
+            Some(cache_upstream::UpstreamCredentialScheme::Basic)
+        );
+        assert_eq!(
+            decrypt(basic.encrypted_credential.as_deref().unwrap()),
+            "alice:s3cret-pw"
+        );
+        let bearer = &rows["https://bearer.example"];
+        assert_eq!(
+            bearer.credential_scheme,
+            Some(cache_upstream::UpstreamCredentialScheme::Bearer)
+        );
+        assert_eq!(
+            decrypt(bearer.encrypted_credential.as_deref().unwrap()),
+            "t0ken"
+        );
+        db.finish().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_state_apply_fails_with_credential_file_path_when_upstream_cache_credential_is_missing()
+     {
+        let dir = create_temp_credentials_directory_with_encryption_key_and_files(&[]);
+        let (db, result) = create_test_database_and_apply_upstream_caches(
+            &dir,
+            &[external_upstream(
+                "https://basic.example",
+                Some("alice"),
+                Some("/run/secrets/pw"),
+                None,
+            )],
+        )
+        .await;
+
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("gradient_cache_upstream_test-cache_0_password"),
+            "got: {error}"
+        );
+        db.finish().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn state_apply_rejects_http_upstream_cache_with_credential_and_error_omits_secret_and_no_row_stored()
+     {
+        let dir = create_temp_credentials_directory_with_encryption_key_and_files(&[(
+            "gradient_cache_upstream_test-cache_0_bearer_token",
+            "t0ken",
+        )]);
+        let (db, result) = create_test_database_and_apply_upstream_caches(
+            &dir,
+            &[external_upstream(
+                "http://plain.example",
+                None,
+                None,
+                Some("/run/secrets/t"),
+            )],
+        )
+        .await;
+
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("https"), "got: {error}");
+        assert!(!error.contains("t0ken"), "got: {error}");
+        assert!(db.rows::<ECacheUpstream>().await.is_empty());
+        db.finish().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn refuses_upstream_cache_url_with_userinfo_or_query() {
+        for url in [
+            "https://alice:pw@private.example",
+            "https://private.example?token=abc",
+        ] {
+            let (db, result) = create_test_database_and_apply_upstream_caches(
+                Path::new(""),
+                &[external_upstream(url, None, None, None)],
+            )
+            .await;
+            assert!(result.is_err(), "{url} was accepted");
+            db.finish().await;
+        }
     }
 }

@@ -8,6 +8,9 @@ use crate::commands::builds::{
     print_closure_size_graph, print_server_action_message_or_exit, save_downloaded_file,
 };
 use crate::commands::live_events::print_live_events_until_finished;
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand, NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES,
+};
 use crate::commands::poll_evaluation_until_finished::print_status_changes_and_exit;
 use crate::input::{client_from_config, evaluation_uuid_from_reference};
 use crate::output::Output;
@@ -22,27 +25,35 @@ use std::time::Duration;
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Start a new evaluation of the same commit, build the failed builds again and print the evaluation UUID.
+    #[command(add = McpToolMayRunCommand)]
     Retry {
         evaluation: TaskOrEvaluationReference,
     },
     /// Abort the running evaluation
+    #[command(add = McpToolMayRunCommand)]
     Abort {
         evaluation: TaskOrEvaluationReference,
     },
     /// Assign all builds of the running evaluation ahead of other work. Superuser access only.
+    #[command(add = McpToolMayRunCommand)]
     Prioritize {
         evaluation: TaskOrEvaluationReference,
     },
     /// Show failed builds, attributes that failed to evaluate and packages fixed since the previous evaluation.
+    #[command(add = McpToolMayRunCommand)]
     Summary {
         evaluation: TaskOrEvaluationReference,
     },
     /// Save a SQLite diagnostic report of the evaluation so the file can go into a bug report. Default settings anonymize identifying information and include failed build logs.
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Report {
         evaluation: TaskOrEvaluationReference,
         /// Write the file to this path. Default: the server's proposed file name (in the current directory).
         #[arg(long)]
         output_file: Option<PathBuf>,
+        /// Replace an existing file at the server-proposed filename
+        #[arg(long)]
+        replace_existing: bool,
         /// Keep usernames, email addresses and repository URLs. Do not replace them with anonymous tokens.
         #[arg(long)]
         keep_real_identities: bool,
@@ -60,6 +71,7 @@ pub enum Commands {
         include_exec_jobs: bool,
     },
     /// Show the dependency closure for every entry point of an evaluation and the size of each store path.
+    #[command(add = McpToolMayRunCommand)]
     Closure {
         evaluation: TaskOrEvaluationReference,
         /// Show store paths for runtime use by the built output, not build-time dependencies.
@@ -67,10 +79,12 @@ pub enum Commands {
         runtime_closure: bool,
     },
     /// Show the flake outputs that the evaluation scanned, with type and derivation path.
+    #[command(add = McpToolMayRunCommand)]
     ShowFlakeGraph {
         evaluation: TaskOrEvaluationReference,
     },
     /// Print live events for an evaluation until the evaluation is complete. Pass `--json` to print one line of JSON per event.
+    #[command(add = McpToolMayRunCommand)]
     Follow {
         evaluation: TaskOrEvaluationReference,
         /// Exit with the evaluation result. 0 on completion, 1 on failure, 4 on abort.
@@ -78,6 +92,7 @@ pub enum Commands {
         exit_code: bool,
     },
     /// Wait for evaluation to complete. Print one line on each status change. Exit with 0 on completion, 1 on failure, 4 on abort and 5 after the time limit set by `--timeout`.
+    #[command(add = McpToolMayRunCommand)]
     Wait {
         evaluation: TaskOrEvaluationReference,
         /// Stop waiting after this number of seconds and exit with code 5.
@@ -119,6 +134,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::Report {
             evaluation,
             output_file,
+            replace_existing,
             keep_real_identities,
             anonymize_package_names,
             exclude_failed_build_logs,
@@ -137,7 +153,13 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .report(&evaluation, &parameters)
                 .await
                 .unwrap_or_else(|e| out.fail(e));
-            save_downloaded_file(file, output_file, &format!("{evaluation}.db"), out);
+            save_downloaded_file(
+                file,
+                output_file,
+                &format!("{evaluation}.db"),
+                replace_existing,
+                out,
+            );
         }
         Commands::Closure {
             evaluation,

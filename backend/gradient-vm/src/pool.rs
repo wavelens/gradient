@@ -597,9 +597,13 @@ fn load_image(image: &Path) -> Result<GuestImage, GuestBootError> {
 }
 
 fn job_size(size: GuestSize, image: &GuestImage) -> GuestSize {
-    match size.is_unset() {
+    let resolved = match size.is_unset() {
         true => image.size(),
         false => size,
+    };
+    GuestSize {
+        disk_mb: GuestSize::work_disk_size_mb_for_requested_disk_size_mb(size.disk_mb),
+        ..resolved
     }
 }
 
@@ -819,6 +823,38 @@ mod tests {
         assert!(!check(capacity, wanted(4, 1024), GuestSize::default()));
         assert!(check(capacity, wanted(4, 2048), wanted(2, 1024)));
         assert!(!check(capacity, wanted(16, 1024), wanted(8, 0)));
+    }
+
+    #[test]
+    fn job_without_disk_size_holds_default_work_disk_size_and_second_job_is_refused_when_disk_budget_is_full()
+     {
+        let image = GuestImage {
+            kernel: "kernel".into(),
+            initrd: "initrd".into(),
+            store: "store.img".into(),
+            cmdline: String::new(),
+            cpus: 2,
+            memory_mb: 1024,
+        };
+        let default_disk_mb = GuestSize::default_request().disk_mb;
+        let guest_size_of_unsized_job_after_image_resolution =
+            job_size(GuestSize::default(), &image);
+        assert_eq!(
+            guest_size_of_unsized_job_after_image_resolution.disk_mb,
+            default_disk_mb
+        );
+        assert_eq!(job_size(size(4, 2048, 0), &image).disk_mb, default_disk_mb);
+
+        let guest_budget_fitting_one_default_work_disk_only =
+            GuestBudget::new(size(16, 16_384, default_disk_mb + default_disk_mb / 2));
+        let first = guest_budget_fitting_one_default_work_disk_only
+            .hold(guest_size_of_unsized_job_after_image_resolution);
+        assert!(first.is_some());
+        assert!(
+            guest_budget_fitting_one_default_work_disk_only
+                .hold(guest_size_of_unsized_job_after_image_resolution)
+                .is_none()
+        );
     }
 
     fn size(cpus: u32, memory_mb: u64, disk_mb: u64) -> GuestSize {

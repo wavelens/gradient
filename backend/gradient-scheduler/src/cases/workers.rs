@@ -12,16 +12,21 @@ use gradient_entity::derivation_build;
 use gradient_entity::dispatched_job::{self, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
+use gradient_entity::exec_job::{self, ExecJobStatus};
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_entity::worker_sample::WorkerSampleState;
 use gradient_fixtures::shape::{Shape, shape};
+use gradient_pool::ProjectAccess;
 use gradient_pool::session_port::SessionSignal;
+use gradient_types::exec::ExecInventory;
 use gradient_types::waiting_reason::{EvalCapability, WaitingReason};
 use gradient_wire::types::{BuildFailureKind, FlakeStep, Job, JobKind};
 
+use super::exec::{inventory, spec, with_queued_job};
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, D, D_OUT, SchedulerCase, SlotKind, Totals, ago, eval_key,
-    failure, is_recent, jobs_available_signal_for_one_kind, output_nar, w_all, w_build, w_eval,
+    failure, is_recent, jobs_available_signal_for_one_kind, output_nar,
+    remove_jobs_available_for_requested_kinds_signals, w_all, w_build, w_eval, w_exec,
     w_network_build, w_network_eval,
 };
 use crate::jobs::PendingJob;
@@ -33,13 +38,18 @@ const W3: &str = "w3";
 const W9: &str = "w9";
 
 const DEACTIVATED: &str = "project deactivated worker";
+const CAPABILITY_LOST: &str = "worker lost a capability needed by this job";
+
+fn only(projects: &[ProjectId]) -> ProjectAccess {
+    ProjectAccess::OnlyListedProjects(projects.iter().copied().collect())
+}
 
 #[tokio::test]
 async fn w01_connect_and_disconnect_open_and_close_connection_rows() {
     let case = SchedulerCase::start(shape()).await;
     let caps = serde_json::to_value(&w_all().caps).expect("the handshake flags as JSON");
 
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let rows = case.connections(W1).await;
     let [row] = rows.as_slice() else {
         panic!("after 1: worker_connection(W1) has a single row, got {rows:?}");
@@ -77,7 +87,7 @@ async fn w01_connect_and_disconnect_open_and_close_connection_rows() {
     assert_eq!(case.signals(W1), vec![], "after 3: signals(W1)");
     case.check("step 3").await;
 
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let rows = case.connections(W1).await;
     assert!(
         matches!(rows.as_slice(), [first, second]
@@ -101,7 +111,7 @@ async fn w01_connect_and_disconnect_open_and_close_connection_rows() {
 #[tokio::test]
 async fn w02_a_worker_without_a_profile_is_offered_nothing_until_it_arrives() {
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
-    case.connect(W1, w_build().without_profile(), &[]).await;
+    case.connect(W1, w_build().without_profile()).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -167,8 +177,8 @@ async fn w03_capabilities_of_an_unknown_worker_have_no_effect() {
 async fn w04_a_disconnect_while_building_requeues_the_build_for_another_worker() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -269,8 +279,8 @@ async fn w04_a_disconnect_while_building_requeues_the_build_for_another_worker()
 #[tokio::test]
 async fn w05_a_disconnect_before_the_building_report_leaves_no_attempt() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -334,7 +344,7 @@ async fn w05_a_disconnect_before_the_building_report_leaves_no_attempt() {
 async fn w06_the_tenth_lost_worker_in_a_row_fails_the_build_and_the_evaluation() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(lost_workers(shape().chain(e1), 9)).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let b = case.key(B).await;
 
     case.admit_startable_moves().await;
@@ -397,7 +407,7 @@ async fn w07_an_attempt_closed_for_another_reason_restarts_the_lost_worker_strea
     let seed = lost_workers(shape().one(e1, A, A_OUT), 9)
         .attempt(AttemptOutcome::Failed, Some(AttemptFailureReason::Oom));
     let case = SchedulerCase::start(seed).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -468,7 +478,7 @@ async fn w08_a_lost_eval_worker_sends_the_evaluation_to_waiting_until_an_eval_wo
     assert_eq!(waiting_of(&case, e1).await, waiting, "after 2: unchanged");
     case.check("step 2").await;
 
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W2, w_all()).await;
     case.check("step 3").await;
 
     case.refresh_waiting_state().await;
@@ -514,7 +524,7 @@ async fn w09_ten_eval_dispatches_fail_the_evaluation_and_nine_wait_for_eval_work
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let seed = closed_eval_rows(shape().evalq(e1), 4).evalq(e2);
     let case = SchedulerCase::start(closed_eval_rows(seed, 3)).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     let (k1, k2) = (eval_key(e1), eval_key(e2));
 
     case.assign_queued_evals().await;
@@ -596,7 +606,7 @@ async fn w09_ten_eval_dispatches_fail_the_evaluation_and_nine_wait_for_eval_work
 #[tokio::test]
 async fn w10_a_worker_without_build_gets_no_substitute_job() {
     let case = SchedulerCase::start(shape().passthrough(EvaluationId::now_v7())).await;
-    case.connect(W1, w_eval(), &[]).await;
+    case.connect(W1, w_eval()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -619,7 +629,7 @@ async fn w11_a_network_worker_without_build_gets_the_download_job() {
         .system("builtin")
         .fixed_output();
     let case = SchedulerCase::start(seed).await;
-    case.connect(W1, w_network_eval(), &[]).await;
+    case.connect(W1, w_network_eval()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -636,7 +646,7 @@ async fn w11_a_network_worker_without_build_gets_the_download_job() {
 #[tokio::test]
 async fn w12_a_draining_worker_keeps_its_job_and_gets_no_offers_and_no_new_job() {
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -747,8 +757,8 @@ async fn w12_a_draining_worker_keeps_its_job_and_gets_no_offers_and_no_new_job()
 async fn w13_the_liveness_pass_drops_a_silent_worker_like_a_disconnect() {
     let seed = shape().one(EvaluationId::now_v7(), A, A_OUT);
     let case = SchedulerCase::start_with(seed, |c| c.proto.worker_heartbeat_timeout_secs = 2).await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -810,7 +820,7 @@ async fn w13_the_liveness_pass_drops_a_silent_worker_like_a_disconnect() {
 async fn w14_a_worker_silent_below_the_timeout_stays_connected() {
     let case =
         SchedulerCase::start_with(shape(), |c| c.proto.worker_heartbeat_timeout_secs = 2).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
 
     tokio::time::sleep(Duration::from_secs_f64(1.0)).await;
     case.worker_liveness().await;
@@ -825,7 +835,7 @@ async fn w14_a_worker_silent_below_the_timeout_stays_connected() {
 async fn w39_a_zero_heartbeat_timeout_disables_the_liveness_pass() {
     let case =
         SchedulerCase::start_with(shape(), |c| c.proto.worker_heartbeat_timeout_secs = 0).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
 
     assert_eq!(
         case.liveness_period(),
@@ -854,8 +864,8 @@ async fn w15_reattached_jobs_are_active_again_after_a_core_respawn() {
             .evalq(e2),
     )
     .await;
-    case.connect(W1, w_all(), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
+    case.connect(W2, w_all()).await;
     let (a, b, eval) = (case.key(A).await, case.key(B).await, eval_key(e2));
 
     case.admit_startable_moves().await;
@@ -960,7 +970,7 @@ async fn w16_reattaching_a_job_of_a_closed_row_does_not_reopen_the_row() {
         .dispatched_at(ago(3600));
     let case = SchedulerCase::start(seed).await;
     let a = case.key(A).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
     let rows = case.assignments(&a).await;
     let [row] = rows.as_slice() else {
         panic!("after 0: dj(build:A) has a single row, got {rows:?}");
@@ -1005,8 +1015,8 @@ async fn w16_reattaching_a_job_of_a_closed_row_does_not_reopen_the_row() {
 #[tokio::test]
 async fn w17_each_sampling_pass_writes_a_row_per_connected_worker() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
+    case.connect(W2, w_all()).await;
     let caps = serde_json::to_value(&w_all().caps).expect("the handshake flags as JSON");
 
     case.admit_startable_moves().await;
@@ -1080,8 +1090,9 @@ async fn w18_revoking_a_project_aborts_its_active_job_and_closes_the_row() {
     )
     .await;
     let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
-    case.connect(W1, w_all().slots(1), &[p1, p2]).await;
-    case.connect(W2, w_all(), &[p2]).await;
+    case.connect_for_projects(W1, w_all().slots(1), &[p1, p2])
+        .await;
+    case.connect_for_projects(W2, w_all(), &[p2]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -1151,7 +1162,8 @@ async fn w19_a_revoke_without_active_jobs_only_narrows_the_offers() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT).one(e2, B, B_OUT)).await;
     let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
-    case.connect(W1, w_all().slots(2), &[p1, p2]).await;
+    case.connect_for_projects(W1, w_all().slots(2), &[p1, p2])
+        .await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
     case.admit_startable_moves().await;
@@ -1183,7 +1195,7 @@ async fn w19_a_revoke_without_active_jobs_only_narrows_the_offers() {
 #[tokio::test]
 async fn w20_a_reauth_request_goes_only_to_a_connected_worker() {
     let case = SchedulerCase::start(shape()).await;
-    case.connect(W1, w_all(), &[]).await;
+    case.connect(W1, w_all()).await;
 
     case.request_reauth(W1).await;
     assert_eq!(
@@ -1215,7 +1227,7 @@ async fn w21_a_reauth_result_replaces_the_granted_projects() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT).one(e2, B, B_OUT)).await;
     let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
-    case.connect(W1, w_all().slots(2), &[p1]).await;
+    case.connect_for_projects(W1, w_all().slots(2), &[p1]).await;
     let b = case.key(B).await;
 
     case.admit_startable_moves().await;
@@ -1246,11 +1258,11 @@ async fn w21_a_reauth_result_replaces_the_granted_projects() {
 }
 
 #[tokio::test]
-async fn w22_a_reauth_result_without_a_granted_project_aborts_no_running_job() {
+async fn w22_a_reauth_result_without_a_granted_project_aborts_its_running_job() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
     let p1 = case.db.project_of(e1).await;
-    case.connect(W1, w_all(), &[p1]).await;
+    case.connect_for_projects(W1, w_all(), &[p1]).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1263,27 +1275,369 @@ async fn w22_a_reauth_result_without_a_granted_project_aborts_no_running_job() {
     drain_signals(&case, &[W1]);
     case.check("step 1").await;
 
-    let open = case.open_assignment(&a).await;
     case.reauth_result(W1, &[ProjectId::now_v7()]).await;
     assert_eq!(
         case.open_assignment(&a).await,
-        open,
-        "after 2: open(build:A) unchanged"
+        None,
+        "after 2: open(build:A)"
+    );
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
+        "after 2: dj(build:A)"
+    );
+    assert_eq!(case.active(&a).await, None, "after 2: active(build:A)");
+    assert!(case.pending(&a).await, "after 2: pending(build:A)");
+    let signals = remove_jobs_available_for_requested_kinds_signals(case.signals(W1));
+    assert!(
+        matches!(signals.as_slice(), [
+            SessionSignal::Abort { job_id, reason },
+        ] if *job_id == a && reason == DEACTIVATED),
+        "after 2: signals(W1) == [Abort{{build:A, {DEACTIVATED:?}}}], got {signals:?}"
+    );
+    case.check("step 2").await;
+
+    case.reauth_result(W1, &[p1]).await;
+    let a2 = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 3: W1 gets build:A again")
+        .assignment_id();
+    case.report_building(W1, &a).await;
+    case.commit_nar(output_nar(A, A_OUT)).await;
+    case.complete(W1, &a, a2, Vec::new(), 5).await;
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Completed,
+        "after 3: sb(A).status"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w43_a_narrowing_replace_never_offers_the_aborted_job_back_to_the_worker() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = SchedulerCase::start(
+        shape()
+            .one(e1, A, A_OUT)
+            .one(e2, B, B_OUT)
+            .add_missing_cached_build_input(A, D, D_OUT),
+    )
+    .await;
+    let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
+    case.connect_for_projects(W1, w_all().slots(2), &[p1, p2])
+        .await;
+    let (a, b) = (case.key(A).await, case.key(B).await);
+
+    case.admit_startable_moves().await;
+    let assignment = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets a job");
+    assert_eq!(assignment.job_id(), b, "after 1: W1 takes B");
+    case.report_building(W1, &b).await;
+    drain_signals(&case, &[W1]);
+    case.check("step 1").await;
+
+    case.replace_authorization(W1, only(&[p1]), w_all().caps)
+        .await;
+    assert!(case.pending(&b).await, "after 2: pending(build:B)");
+    assert_eq!(case.active(&b).await, None, "after 2: active(build:B)");
+    case.check("step 2").await;
+
+    let first = case.request_job(W1, JobKind::Build).await;
+    let second = case.request_job(W1, JobKind::Build).await;
+    assert_eq!(
+        first.as_ref().map(|j| j.job_id().to_owned()),
+        Some(a),
+        "after 3: W1 gets only A"
+    );
+    assert!(second.is_none(), "after 3: W1 never gets B back");
+    case.check("step 3").await;
+
+    case.connect_for_projects(W2, w_all(), &[p2]).await;
+    let taken = case.request_job(W2, JobKind::Build).await;
+    assert_eq!(
+        taken.as_ref().map(|j| j.job_id().to_owned()),
+        Some(b.clone()),
+        "after 4: W2 takes B"
+    );
+    assert_eq!(
+        case.active(&b).await.as_deref(),
+        Some(W2),
+        "after 4: active(build:B)"
+    );
+    case.check("step 4").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w45_a_narrowing_replace_inside_the_abort_grace_never_runs_the_aborted_job_again() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
+    let p1 = case.db.project_of(e1).await;
+    case.connect_for_projects(W1, w_all(), &[p1]).await;
+    let a = case.key(A).await;
+
+    case.admit_startable_moves().await;
+    case.request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets build:A");
+    case.report_building(W1, &a).await;
+    drain_signals(&case, &[W1]);
+    case.check("step 1").await;
+
+    case.abort_evaluation(e1).await;
+    drain_signals(&case, &[W1]);
+    case.check("step 2").await;
+
+    case.replace_authorization(W1, only(&[]), w_all().caps)
+        .await;
+    assert!(!case.pending(&a).await, "after 3: pending(build:A)");
+    assert_eq!(
+        case.active(&a).await.as_deref(),
+        Some(W1),
+        "after 3: active(build:A) waits for the abort confirmation"
+    );
+    case.check("step 3").await;
+
+    case.connect_for_projects(W2, w_all(), &[p1]).await;
+    assert!(
+        case.request_job(W2, JobKind::Build).await.is_none(),
+        "after 4: W2 never gets build:A of the aborted evaluation"
+    );
+    case.check("step 4").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w44_switching_exec_off_aborts_the_running_exec_job_and_offers_no_more() {
+    let case = with_queued_job(EvaluationId::now_v7(), spec()).await;
+    case.connect(W1, w_exec(inventory())).await;
+    case.assign_exec_jobs().await;
+    let job = case
+        .request_job(W1, JobKind::Exec)
+        .await
+        .expect("after 1: W1 gets the exec job")
+        .job_id()
+        .to_owned();
+    drain_signals(&case, &[W1]);
+    case.check("step 1").await;
+
+    let mut without_exec = w_exec(inventory()).caps;
+    without_exec.exec = false;
+    case.replace_authorization(W1, ProjectAccess::AllProjects, without_exec)
+        .await;
+    let signals = case.signals(W1);
+    assert!(
+        signals.iter().any(|s| matches!(s,
+            SessionSignal::Abort { job_id, reason }
+                if *job_id == job && reason == CAPABILITY_LOST)),
+        "after 2: signals(W1) contains Abort{{{job}, {CAPABILITY_LOST:?}}}, got {signals:?}"
+    );
+    assert_eq!(case.active(&job).await, None, "after 2: active(exec job)");
+    case.check("step 2").await;
+
+    let statuses: Vec<ExecJobStatus> = case
+        .db
+        .rows::<exec_job::Entity>()
+        .await
+        .into_iter()
+        .map(|row| row.status)
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![ExecJobStatus::Queued],
+        "after 3: exec_job.status"
+    );
+    case.assign_exec_jobs().await;
+    assert!(
+        case.request_job(W1, JobKind::Exec).await.is_none(),
+        "after 3: W1 gets no further exec job"
+    );
+    case.check("step 3").await;
+
+    let w2_inventory = ExecInventory {
+        labels: vec![W2.into()],
+        ..inventory()
+    };
+    case.connect(W2, w_exec(w2_inventory)).await;
+    case.assign_exec_jobs().await;
+    assert!(
+        case.request_job(W1, JobKind::Exec).await.is_none(),
+        "after 4: W1 still gets no exec job"
+    );
+    assert_eq!(
+        case.request_job(W2, JobKind::Exec)
+            .await
+            .map(|j| j.job_id().to_owned()),
+        Some(job),
+        "after 4: W2 takes the requeued exec job"
+    );
+    case.check("step 4").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w46_a_reconnect_without_the_project_inside_the_reclaim_grace_requeues_the_held_job() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
+    let p1 = case.db.project_of(e1).await;
+    case.connect_reclaiming_for_projects(W1, w_all(), &[p1])
+        .await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+    case.check("step 2").await;
+
+    case.connect_reclaiming_for_projects(W1, w_all(), &[]).await;
+    let reclaimed = case.reclaim(W1, &[a1]).await;
+    assert!(
+        reclaimed.reattached.is_empty(),
+        "after 3: reclaimed.reattached"
+    );
+    assert!(
+        case.signals(W1)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::Abort { job_id, .. } if *job_id == a)),
+        "after 3: W1 gets an abort for build:A"
+    );
+    assert!(case.pending(&a).await, "after 3: pending(build:A)");
+    assert_eq!(case.active(&a).await, None, "after 3: active(build:A)");
+    case.check("step 3").await;
+
+    assert!(
+        case.request_job(W1, JobKind::Build).await.is_none(),
+        "after 4: W1 never gets build:A back"
+    );
+    case.connect_for_projects(W2, w_all(), &[p1]).await;
+    let taken = case.request_job(W2, JobKind::Build).await;
+    assert_eq!(
+        taken.as_ref().map(|j| j.job_id().to_owned()),
+        Some(a.clone()),
+        "after 4: W2 takes build:A"
+    );
+    case.check("step 4").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w47_a_reconnect_that_keeps_the_project_restores_the_held_job() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
+    let p1 = case.db.project_of(e1).await;
+    case.connect_reclaiming_for_projects(W1, w_all(), &[p1])
+        .await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+
+    case.connect_reclaiming_for_projects(W1, w_all(), &[p1])
+        .await;
+    let reclaimed = case.reclaim(W1, &[a1]).await;
+    assert_eq!(
+        reattached_keys(&reclaimed),
+        vec![(a.clone(), a1)],
+        "after 2: reclaimed.reattached"
+    );
+    assert!(
+        !case
+            .signals(W1)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::Abort { .. })),
+        "after 2: W1 gets no abort"
     );
     assert_eq!(
         case.active(&a).await.as_deref(),
         Some(W1),
         "after 2: active(build:A)"
     );
-    assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
     case.check("step 2").await;
 
-    case.commit_nar(output_nar(A, A_OUT)).await;
-    case.complete(W1, &a, a1, Vec::new(), 5).await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w48_same_project_access_aborts_nothing_then_revoking_one_project_requeues_only_its_build()
+{
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = SchedulerCase::start(shape().one(e1, A, A_OUT).one(e2, B, B_OUT)).await;
+    let (p1, p2) = (case.db.project_of(e1).await, case.db.project_of(e2).await);
+    case.connect_for_projects(W1, w_all().slots(2), &[p1, p2])
+        .await;
+    let (a, b) = (case.key(A).await, case.key(B).await);
+
+    case.admit_startable_moves().await;
+    let first = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("After 1: W1 gets the first build");
+    let second = case
+        .request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 received the second build");
     assert_eq!(
-        case.sb(A).await.status,
-        BuildStatus::Completed,
-        "after 3: sb(A).status"
+        sorted(vec![first.job_id().to_owned(), second.job_id().to_owned()]),
+        sorted(vec![a.clone(), b.clone()]),
+        "after 1: W1 took build:A and build:B"
+    );
+    let b1 = if first.job_id() == b {
+        first.assignment_id()
+    } else {
+        second.assignment_id()
+    };
+    case.report_building(W1, &a).await;
+    case.report_building(W1, &b).await;
+    drain_signals(&case, &[W1]);
+    case.check("step 1").await;
+
+    case.replace_authorization(W1, only(&[p1, p2]), w_all().caps)
+        .await;
+    assert_eq!(
+        case.active(&a).await.as_deref(),
+        Some(W1),
+        "after 2: active(build:A)"
+    );
+    assert_eq!(
+        case.active(&b).await.as_deref(),
+        Some(W1),
+        "after 2: active(build:B)"
+    );
+    let signals = remove_jobs_available_for_requested_kinds_signals(case.signals(W1));
+    assert!(
+        !signals
+            .iter()
+            .any(|s| matches!(s, SessionSignal::Abort { .. })),
+        "Abort does not appear in signals(W1) after 2. Actual value: {signals:?}"
+    );
+    case.check("step 2").await;
+
+    case.revoke(W1, &[p2]).await;
+    assert_eq!(
+        case.active(&a).await.as_deref(),
+        Some(W1),
+        "After 3: active(build:A)"
+    );
+    assert!(
+        case.pending(&b).await,
+        "The state after 3 is pending(build:B)."
+    );
+    assert_eq!(case.active(&b).await, None, "After 3: active(build:B)");
+    let signals = remove_jobs_available_for_requested_kinds_signals(case.signals(W1));
+    assert!(
+        matches!(signals.as_slice(), [
+            SessionSignal::Abort { job_id, reason },
+        ] if *job_id == b && reason == DEACTIVATED),
+        "After 3 rounds, signals(W1) == [Abort{{build:B, {DEACTIVATED:?}}}], actual {signals:?}"
+    );
+    assert_eq!(
+        closes(&case.assignments(&b).await),
+        vec![(b1, Some(DispatchedJobOutcome::Abandoned))],
+        "After 3: dj(build:B)"
     );
     case.check("step 3").await;
 
@@ -1314,7 +1668,7 @@ async fn w25_a_download_needs_network() {
 #[tokio::test]
 async fn w26_a_reclaiming_worker_keeps_its_build_building_across_a_disconnect() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
 
     case.disconnect(W1).await;
@@ -1347,7 +1701,7 @@ async fn w26_a_reclaiming_worker_keeps_its_build_building_across_a_disconnect() 
 #[tokio::test]
 async fn w27_an_unreclaimed_build_is_requeued_with_worker_lost_after_the_grace() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
 
@@ -1389,11 +1743,11 @@ async fn w27_an_unreclaimed_build_is_requeued_with_worker_lost_after_the_grace()
 #[tokio::test]
 async fn w29_running_jobs_restores_a_held_build() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
 
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let reclaimed = case.reclaim(W1, &[a1]).await;
     assert_eq!(
         reattached_keys(&reclaimed),
@@ -1433,14 +1787,14 @@ async fn w29_running_jobs_restores_a_held_build() {
 #[tokio::test]
 async fn w30_a_reconnect_after_the_grace_aborts_the_listed_assignment() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
     case.requeue_unreclaimed_after(Duration::from_secs(600))
         .await;
     case.check("step 2").await;
 
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let reclaimed = case.reclaim(W1, &[a1]).await;
     assert_eq!(
         reclaimed.unknown,
@@ -1473,8 +1827,8 @@ async fn w30_a_reconnect_after_the_grace_aborts_the_listed_assignment() {
 #[tokio::test]
 async fn w31_running_jobs_never_reclaim_another_workers_assignment() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
-    case.connect_reclaiming(W2, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
+    case.connect_reclaiming(W2, w_all()).await;
     let a = case.key(A).await;
     case.admit_startable_moves().await;
     let a2 = case
@@ -1520,11 +1874,11 @@ async fn w31_running_jobs_never_reclaim_another_workers_assignment() {
 #[tokio::test]
 async fn w32_an_unlisted_held_build_is_requeued_at_once() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
 
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let reclaimed = case.reclaim(W1, &[]).await;
     assert!(
         reclaimed.reattached.is_empty() && reclaimed.unknown.is_empty(),
@@ -1556,7 +1910,7 @@ async fn w32_an_unlisted_held_build_is_requeued_at_once() {
 #[tokio::test]
 async fn w33_a_server_restart_keeps_a_running_build_for_its_worker() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     let before = state_of(&case, A).await;
 
@@ -1568,7 +1922,7 @@ async fn w33_a_server_restart_keeps_a_running_build_for_its_worker() {
     );
     case.check("step 2").await;
 
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let reclaimed = case.reclaim(W1, &[a1]).await;
     assert_eq!(
         reattached_keys(&reclaimed),
@@ -1608,7 +1962,7 @@ async fn w33_a_server_restart_keeps_a_running_build_for_its_worker() {
 #[tokio::test]
 async fn w34_a_restart_requeues_what_nobody_reclaims_after_the_grace() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
 
     case.restart_server().await;
@@ -1641,11 +1995,11 @@ async fn w34_a_restart_requeues_what_nobody_reclaims_after_the_grace() {
 async fn w35_a_held_build_of_a_worker_back_on_another_instance_outlives_the_grace() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     let second = case.second_instance().await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
 
-    second.connect_reclaiming(W1, w_all(), &[]).await;
+    second.connect_reclaiming(W1, w_all()).await;
     case.requeue_unreclaimed_after(Duration::from_secs(600))
         .await;
     assert_eq!(
@@ -1690,7 +2044,7 @@ async fn w36_an_open_row_the_reconnecting_worker_does_not_list_is_requeued() {
     let case = SchedulerCase::start(seed).await;
     let a = case.key(A).await;
 
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let reclaimed = case.reclaim(W1, &[]).await;
     assert!(
         reclaimed.reattached.is_empty() && reclaimed.unknown.is_empty(),
@@ -1724,14 +2078,14 @@ async fn w36_an_open_row_the_reconnecting_worker_does_not_list_is_requeued() {
 async fn w37_the_grace_end_keeps_a_row_another_instance_opened_since() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     let second = case.second_instance().await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
 
-    second.connect_reclaiming(W1, w_all(), &[]).await;
+    second.connect_reclaiming(W1, w_all()).await;
     second.reclaim(W1, &[]).await;
     second.disconnect(W1).await;
-    second.connect_reclaiming(W2, w_all(), &[]).await;
+    second.connect_reclaiming(W2, w_all()).await;
     second.admit_startable_moves().await;
     let a2 = second
         .request_job(W2, JobKind::Build)
@@ -1769,7 +2123,7 @@ async fn w37_the_grace_end_keeps_a_row_another_instance_opened_since() {
 #[tokio::test]
 async fn w38_a_restarted_core_still_requeues_a_held_build_after_the_grace() {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
 
@@ -1795,10 +2149,10 @@ async fn w38_a_restarted_core_still_requeues_a_held_build_after_the_grace() {
 async fn w42_a_reconnected_worker_that_never_lists_running_jobs_has_its_build_requeued_after_the_grace_period()
  {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
 
     case.requeue_unreclaimed_after(Duration::from_secs(599))
         .await;
@@ -1822,7 +2176,7 @@ async fn w42_a_reconnected_worker_that_never_lists_running_jobs_has_its_build_re
 async fn w40_second_connection_for_live_worker_id_is_refused_and_first_session_keeps_running_build()
 {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, _) = building_on_w1(&case).await;
 
     let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
@@ -1831,7 +2185,7 @@ async fn w40_second_connection_for_live_worker_id_is_refused_and_first_session_k
         .register_worker(
             W1,
             w_all().caps,
-            Default::default(),
+            gradient_pool::ProjectAccess::AllProjects,
             std::sync::Arc::new(port),
             true,
         )
@@ -1860,7 +2214,7 @@ async fn w41_held_build_stays_held_when_closing_dispatch_rows_fails_and_next_swe
     use sea_orm::ConnectionTrait;
 
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect_reclaiming(W1, w_all(), &[]).await;
+    case.connect_reclaiming(W1, w_all()).await;
     let (a, a1) = building_on_w1(&case).await;
     case.disconnect(W1).await;
 
@@ -1918,8 +2272,8 @@ async fn building_on_w1(case: &SchedulerCase) -> (String, DispatchedJobId) {
 
 async fn only_a_network_worker_gets(seed: Shape) {
     let case = SchedulerCase::start(seed).await;
-    case.connect(W1, w_build(), &[]).await;
-    case.connect(W2, w_network_build(), &[]).await;
+    case.connect(W1, w_build()).await;
+    case.connect(W2, w_network_build()).await;
     let a = case.key(A).await;
 
     case.admit_startable_moves().await;
@@ -1943,7 +2297,7 @@ async fn only_a_network_worker_gets(seed: Shape) {
 #[tokio::test]
 async fn an_admin_drain_reaches_the_worker_outlives_a_reconnect_and_can_be_cancelled() {
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     case.admit_startable_moves().await;
     drain_signals(&case, &[W1]);
 
@@ -1952,7 +2306,7 @@ async fn an_admin_drain_reaches_the_worker_outlives_a_reconnect_and_can_be_cance
     assert!(case.request_job(W1, JobKind::Build).await.is_none());
 
     case.disconnect(W1).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     assert!(case.signals(W1).contains(&SessionSignal::Draining));
     assert!(case.request_job(W1, JobKind::Build).await.is_none());
 
@@ -1961,7 +2315,7 @@ async fn an_admin_drain_reaches_the_worker_outlives_a_reconnect_and_can_be_cance
     assert!(case.request_job(W1, JobKind::Build).await.is_some());
 
     case.disconnect(W1).await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     assert!(!case.signals(W1).contains(&SessionSignal::Draining));
     case.finish().await;
 }
@@ -1971,7 +2325,7 @@ async fn w43_a_worker_that_found_no_job_gets_a_later_build_without_asking_again_
  {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     for worker in [W1, W2, W3] {
-        case.connect(worker, w_build(), &[]).await;
+        case.connect(worker, w_build()).await;
     }
     let a = case.key(A).await;
 
@@ -2018,7 +2372,7 @@ async fn w43_a_worker_that_found_no_job_gets_a_later_build_without_asking_again_
 async fn w44_worker_with_two_build_slots_gets_two_jobs_available_for_requested_kinds_signals_for_two_queued_builds_but_answering_both_hands_out_one_build_and_its_next_request_job_takes_the_other()
  {
     let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
-    case.connect(W1, w_build().slots(2), &[]).await;
+    case.connect(W1, w_build().slots(2)).await;
     case.idle(W1, JobKind::Build).await;
 
     case.admit_startable_moves().await;

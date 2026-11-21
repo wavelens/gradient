@@ -12,6 +12,8 @@ pub(crate) enum ProjectRefusal {
     DeclaredInServerStateConfiguration,
     #[error("Project not subscribed to Cache")]
     NotSubscribedToCache,
+    #[error("A ReadOnly subscription can't sign outputs. Change the mode to ReadWrite first.")]
+    SignOutputsRequestedForReadOnlyCacheSubscription,
     #[error("team workers are managed on the team page")]
     TeamWorkerManagedOnTeamPage,
     #[error("A project can't drain a worker. Drain it in the team or admin area.")]
@@ -46,6 +48,7 @@ impl Refusal for ProjectRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::NotSubscribedToCache
+            | Self::SignOutputsRequestedForReadOnlyCacheSubscription
             | Self::InvalidSecretName { .. }
             | Self::EmptySecretValue
             | Self::SecretValueTooLarge

@@ -41,6 +41,42 @@ pub(crate) fn nar_of_commit(repo_path: &str, commit: &str) -> Result<Vec<u8>> {
     Ok(nar)
 }
 
+pub(crate) fn read_regular_flake_lock_blob_from_commit_tree(
+    fetched: &gradient_sources::FetchedCommitInTemporaryBareRepository,
+    commit: &str,
+    flake_dir: Option<&str>,
+    max_bytes: u64,
+) -> Result<Option<Vec<u8>>> {
+    let repo = fetched.repository();
+    let tree = fetched.fetched_commit_tree()?;
+    let path = std::path::Path::new(flake_dir.unwrap_or("")).join("flake.lock");
+    let entry = match tree.get_path(&path) {
+        Ok(entry) => entry,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("look up {}", path.display())),
+    };
+    if !matches!(entry.filemode(), 0o100644 | 0o100755) {
+        anyhow::bail!(
+            "{} is not a regular file in commit {commit}",
+            path.display()
+        );
+    }
+    let (size, _) = repo
+        .odb()
+        .and_then(|odb| odb.read_header(entry.id()))
+        .with_context(|| format!("look up {}", path.display()))?;
+    if size as u64 > max_bytes {
+        anyhow::bail!(
+            "{} in commit {commit} is larger than {max_bytes} bytes",
+            path.display()
+        );
+    }
+    let blob = repo
+        .find_blob(entry.id())
+        .with_context(|| format!("read {}", path.display()))?;
+    Ok(Some(blob.content().to_vec()))
+}
+
 /// NAR entries are in byte order of their names. Git is ordering a subtree as if its
 /// name ended in `/`. A submodule is an empty directory, matching nix without
 /// `submodules=true`.

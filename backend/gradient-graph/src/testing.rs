@@ -52,6 +52,10 @@ pub async fn ctx_with_crypt_file(db: DatabaseConnection, crypt_file: &str) -> Db
         wake: Default::default(),
         memory: Default::default(),
         store_path_mapping: Arc::new(gradient_entity::IdentityMapping),
+        user_supplied_url_http_client: gradient_util::http::HttpClientForUserSuppliedUrls::new(
+            Default::default(),
+        )
+        .expect("build test HTTP client for user-supplied URLs"),
     }
 }
 
@@ -90,6 +94,28 @@ pub async fn drift(ctx: &DbContext) -> ConsistencyReport {
 pub async fn zero_drift(ctx: &DbContext, after: &str) {
     let report = drift(ctx).await;
     assert_eq!(report.total(), 0, "drift after {after}: {report:?}");
+}
+
+pub async fn write_commit_compressed_object_to_object_storage(
+    ctx: &DbContext,
+    commit: &crate::NarCommit,
+) {
+    let crate::NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(facts) =
+        &commit.content
+    else {
+        return;
+    };
+    let Ok(sp) = gradient_entity::StorePath::parse_stored(&commit.store_path) else {
+        return;
+    };
+    let key = facts.object_storage_key_for_store_path_hash_and_compressed_file_sha256(sp.hash());
+    let nar_storage = &ctx.storage.nar_storage;
+    if !nar_storage.exists(&key).await.unwrap_or(false) {
+        nar_storage
+            .put(&key, vec![0])
+            .await
+            .expect("the NAR object is written");
+    }
 }
 
 pub fn assert_only_unstored_outputs(report: ConsistencyReport, unstored: i64, after: &str) {

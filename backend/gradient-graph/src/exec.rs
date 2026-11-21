@@ -178,14 +178,28 @@ pub(crate) async fn attempt_ended(
     };
 
     let losses = match reason {
-        AttemptEndReason::Lost => attempts::losses_in_a_row(&ctx.worker_db, job.id).await?,
-        _ => 0,
+        AttemptEndReason::Lost => {
+            attempts::get_latest_consecutive_attempts_that_lost_worker_count_and_shared_failure_text_for_exec_job(
+                &ctx.worker_db,
+                job.id,
+            )
+            .await?
+        }
+        _ => attempts::ConsecutiveLostWorkerAttemptsWithSharedFailureText {
+            losses: 0,
+            shared_loss_failure_text: None,
+        },
     };
-    match after_attempt(reason, job.retries_left, losses) {
+    match after_attempt(reason, job.retries_left, losses.losses) {
         AfterAttempt::Requeue { consume_retry } => requeue(ctx, &job, &closed, consume_retry).await,
         AfterAttempt::End(status) => {
             let message = match (status, reason) {
-                (ExecJobStatus::Failed, AttemptEndReason::Lost) => Some(TOO_MANY_LOSSES.to_owned()),
+                (ExecJobStatus::Failed, AttemptEndReason::Lost) => {
+                    Some(match losses.shared_loss_failure_text {
+                        Some(shared) => format!("{TOO_MANY_LOSSES}: {shared}"),
+                        None => TOO_MANY_LOSSES.to_owned(),
+                    })
+                }
                 (ExecJobStatus::Completed, _) => None,
                 _ => message,
             };

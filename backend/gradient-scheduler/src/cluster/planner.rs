@@ -141,7 +141,7 @@ fn candidates(
             group.iter().any(|s| {
                 s.worker == **w
                     && s.kind == kind
-                    && visible_to(job, s.authorized.as_ref(), Some(&s.caps))
+                    && visible_to(job, &s.authorized, Some(&s.caps))
                     && seats_split_member(member, s)
             })
         })
@@ -224,7 +224,7 @@ mod tests {
                 },
                 ..WorkerCaps::default()
             },
-            authorized: None,
+            authorized: gradient_pool::ProjectAccess::AllProjects,
         }
     }
 

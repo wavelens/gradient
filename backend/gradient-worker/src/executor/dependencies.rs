@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use futures::future::{BoxFuture, FutureExt as _, Shared, join_all};
 use gradient_derivation::{Derivation, ProducedDrv, parse_drv};
 use gradient_sources::EvalDependencies;
+use gradient_types::fetch_source_allowlist_and_request_validation::AllowedFetchRequest;
 use gradient_util::store_path::strip_store_prefix;
 use gradient_util::sync::Mutex;
 use gradient_wire::traits::InputProgressSink;
@@ -176,7 +177,9 @@ impl<'a> InputSource<'a> {
         request: String,
         progress: Arc<dyn InputProgressSink>,
     ) -> Result<String, String> {
-        let store_path = store_path_of(&request)?;
+        let allowed = AllowedFetchRequest::parse(&request).map_err(|e| e.to_string())?;
+        let request = allowed.get_canonical_fetch_request_json();
+        let store_path = allowed.store_path().map(str::to_owned);
         let key = store_path.clone().unwrap_or_else(|| request.clone());
         let fetch = self
             .in_flight
@@ -532,6 +535,22 @@ mod tests {
         assert_eq!(answer, Ok(format!(r#"{{"storePath":"{INPUT}"}}"#)));
         assert_eq!(pulled(&reporter), vec![vec![INPUT.to_owned()]]);
         assert!(reporter.input_requests().is_empty(), "no InputRequest");
+    }
+
+    #[tokio::test]
+    async fn a_hook_request_for_a_host_file_is_refused_without_an_input_request() {
+        let reporter = RecordingJobReporter::new();
+        let reader = reader();
+        let source =
+            EvalDependencySource::new(Imports::new(&reporter, &reader, AbortSignal::never()));
+
+        let answer = source
+            .fetch_input(r#"{"builtin":"fetchurl","args":{"url":"file:///etc/passwd"}}"#.into())
+            .await;
+
+        assert!(answer.is_err(), "{answer:?}");
+        assert!(reporter.input_requests().is_empty(), "no InputRequest");
+        assert!(pulled(&reporter).is_empty());
     }
 
     #[tokio::test]

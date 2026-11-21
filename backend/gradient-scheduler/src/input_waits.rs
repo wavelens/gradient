@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use gradient_types::ids::{EvaluationId, ProjectId};
 use gradient_util::sync::Mutex;
@@ -22,6 +23,7 @@ pub struct InputWaiter {
 pub struct AssignedFetch {
     pub fetch_id: String,
     pub worker: String,
+    pub input_fetch_handed_to_worker_at: Instant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,15 +35,24 @@ pub struct UnassignedFetch {
     pub excluded: HashSet<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputFetchProjectGitCredentials {
+    FetchWithoutProjectCredentials,
+    FetchWithProjectCredentials,
+    HttpsCredentialsWithheldForUnapprovedForkPullRequest,
+}
+
 #[derive(Debug)]
 struct InputWait {
     request: String,
     project: ProjectId,
-    needs_secrets: bool,
+    project_git_credentials: InputFetchProjectGitCredentials,
+    content_hash_store_path: Option<String>,
     waiters: Vec<InputWaiter>,
     fetch: Option<AssignedFetch>,
     excluded: HashSet<String>,
     announced: HashSet<EvaluationId>,
+    input_wait_created_at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +60,8 @@ pub struct NewInputWait {
     pub fetch_key: String,
     pub request: String,
     pub project: ProjectId,
-    pub needs_secrets: bool,
+    pub project_git_credentials: InputFetchProjectGitCredentials,
+    pub content_hash_store_path: Option<String>,
     pub waiter: InputWaiter,
 }
 
@@ -69,11 +81,13 @@ impl InputWaits {
             .or_insert_with(|| InputWait {
                 request: new.request,
                 project: new.project,
-                needs_secrets: new.needs_secrets,
+                project_git_credentials: new.project_git_credentials,
+                content_hash_store_path: new.content_hash_store_path,
                 waiters: Vec::new(),
                 fetch: None,
                 excluded: HashSet::new(),
                 announced: HashSet::new(),
+                input_wait_created_at: Instant::now(),
             })
             .waiters
             .push(new.waiter);
@@ -89,7 +103,8 @@ impl InputWaits {
                 fetch_key: key.clone(),
                 project: wait.project,
                 request: wait.request.clone(),
-                needs_secrets: wait.needs_secrets,
+                needs_secrets: wait.project_git_credentials
+                    == InputFetchProjectGitCredentials::FetchWithProjectCredentials,
                 excluded: wait.excluded.clone(),
             })
             .collect();
@@ -115,25 +130,83 @@ impl InputWaits {
         }
     }
 
-    pub fn take_fetched(&self, worker: &str, fetch_id: &str) -> Vec<InputWaiter> {
+    pub fn take_fetched(
+        &self,
+        worker: &str,
+        fetch_id: &str,
+    ) -> Option<(InputFetchProjectGitCredentials, Vec<InputWaiter>)> {
         let mut waits = self.0.lock();
-        let Some(key) = key_of_fetch(&waits, worker, fetch_id) else {
-            return Vec::new();
-        };
-        waits.remove(&key).map(|w| w.waiters).unwrap_or_default()
+        let key = key_of_fetch(&waits, worker, fetch_id)?;
+        waits
+            .remove(&key)
+            .map(|w| (w.project_git_credentials, w.waiters))
     }
 
-    pub fn unplace(&self, worker: &str, fetch_id: &str) -> bool {
+    pub fn unplace(&self, worker: &str, fetch_id: &str) -> Option<String> {
         let mut waits = self.0.lock();
-        let Some(key) = key_of_fetch(&waits, worker, fetch_id) else {
-            return false;
-        };
-        let Some(wait) = waits.get_mut(&key) else {
-            return false;
-        };
+        let key = key_of_fetch(&waits, worker, fetch_id)?;
+        let wait = waits.get_mut(&key)?;
         wait.fetch = None;
         wait.excluded.insert(worker.to_owned());
-        true
+        Some(key)
+    }
+
+    pub fn project_and_content_pinned_store_path_for_pinned_wait(
+        &self,
+        worker: &str,
+        fetch_id: &str,
+    ) -> Option<(ProjectId, String)> {
+        let waits = self.0.lock();
+        let wait = waits.get(&key_of_fetch(&waits, worker, fetch_id)?)?;
+        Some((wait.project, wait.content_hash_store_path.clone()?))
+    }
+
+    pub fn assigned_fetches_held_at_least_timeout(
+        &self,
+        timeout: Duration,
+        now: Instant,
+    ) -> Vec<AssignedFetch> {
+        self.0
+            .lock()
+            .values()
+            .filter_map(|w| w.fetch.clone())
+            .filter(|f| now.saturating_duration_since(f.input_fetch_handed_to_worker_at) >= timeout)
+            .collect()
+    }
+
+    pub fn remove_waits_without_fetch_created_at_least_timeout_before_and_return_input_requests_and_waiters(
+        &self,
+        timeout: Duration,
+        now: Instant,
+    ) -> Vec<(String, Vec<InputWaiter>)> {
+        let mut waits = self.0.lock();
+        let expired: Vec<String> = waits
+            .iter()
+            .filter(|(_, w)| {
+                w.fetch.is_none()
+                    && now.saturating_duration_since(w.input_wait_created_at) >= timeout
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        expired
+            .into_iter()
+            .filter_map(|key| waits.remove(&key))
+            .map(|w| (w.request, w.waiters))
+            .collect()
+    }
+
+    pub fn remove_wait_without_fetch_by_key_and_return_waiters(
+        &self,
+        fetch_key: &str,
+    ) -> Vec<InputWaiter> {
+        let mut waits = self.0.lock();
+        if waits.get(fetch_key).is_none_or(|w| w.fetch.is_some()) {
+            return Vec::new();
+        }
+        waits
+            .remove(fetch_key)
+            .map(|w| w.waiters)
+            .unwrap_or_default()
     }
 
     pub fn waiters_of_fetch(&self, worker: &str, fetch_id: &str) -> Vec<InputWaiter> {

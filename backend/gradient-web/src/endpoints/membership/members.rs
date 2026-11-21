@@ -7,8 +7,8 @@
 use super::invitations::find_invitation;
 use super::{
     ActingScope, InvitationTable, MemberFields, MemberTable, NewInvitation, Owner, OwnerScope,
-    RoleFields, RoleTable, delete_row, find_user_by_username, insert_unique_row, role_names,
-    update_row,
+    RoleFields, RoleTable, delete_row, find_user_by_username, insert_unique_row,
+    load_permission_mask_by_role_id, role_names, update_row,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -183,6 +183,9 @@ pub async fn add<O: Owner>(
     }
 
     let role = find_role::<O::Roles>(&state.web_db, owner, &body.role).await?;
+    scope
+        .ensure_user_holds_all_permissions(role.permission)
+        .await?;
 
     if body.add_as_member_immediately {
         if !can_add_user_as_member_without_invitation::<O>(&state.web_db, &scope, &target_user)
@@ -267,6 +270,12 @@ pub async fn change_role<O: Owner>(
 
     let previous_role_id = <O::Members as MemberTable>::fields(&membership).role;
     let role = find_role::<O::Roles>(&tx, owner, &body.role).await?;
+    scope
+        .ensure_user_holds_all_permissions(
+            load_permission_mask_by_role_id::<O::Roles>(&tx, previous_role_id).await?
+                | role.permission,
+        )
+        .await?;
 
     if role.id != previous_role_id {
         O::ensure_member_removable(&tx, owner, &membership).await?;
@@ -300,6 +309,12 @@ pub async fn remove<O: Owner>(
         .await?
         .ok_or(SharedRefusal::NotAMember(O::RESOURCE))?;
 
+    let member_role = <O::Members as MemberTable>::fields(&membership).role;
+    scope
+        .ensure_user_holds_all_permissions(
+            load_permission_mask_by_role_id::<O::Roles>(&tx, member_role).await?,
+        )
+        .await?;
     O::ensure_member_removable(&tx, owner, &membership).await?;
 
     delete_row::<O::Members>(&tx, membership).await?;

@@ -6,10 +6,11 @@
 
 use std::collections::BTreeMap;
 
+use gradient_types::ids::ProjectId;
 use gradient_types::waiting_reason::ExecUnmet;
 use gradient_wire::types::{
     DeviceRequest, ExecInventory, ExecRequirement, GuestCapacity, GuestSize, JobKind,
-    ResourceAmount,
+    ResourceAmount, is_resource_released_to_project,
 };
 
 use crate::worker_caps::{DeviceCount, WorkerCaps};
@@ -30,19 +31,21 @@ impl<'a> ExecFit<'a> {
         })
     }
 
-    pub(crate) fn fits(&self, req: &ExecRequirement) -> bool {
+    pub(crate) fn fits(&self, req: &ExecRequirement, project_id: ProjectId) -> bool {
         self.architecture(&req.architecture)
             && req.labels.iter().all(|label| self.label(label))
-            && wanted_devices(req).iter().all(|device| self.device(device))
+            && wanted_devices(req)
+                .iter()
+                .all(|device| self.device(device, project_id))
             && self.guest(&req.guest)
-            && req.mounts.iter().all(|mount| self.mount(mount))
+            && req.mounts.iter().all(|mount| self.mount(mount, project_id))
             && self.network(req.network)
             && self.ssh(req.ssh)
             && req.ports.iter().all(|&port| self.port(port))
             && self.custom_image(req.custom_image)
             && self.nodes(req.nodes)
-            && req.secrets.iter().all(|name| self.secret(name))
-            && self.server_secrets(&req.server_secrets)
+            && req.secrets.iter().all(|name| self.secret(name, project_id))
+            && self.server_secrets(&req.server_secrets, project_id)
     }
 
     fn architecture(&self, architecture: &str) -> bool {
@@ -53,8 +56,16 @@ impl<'a> ExecFit<'a> {
         has(&self.inventory.labels, label)
     }
 
-    fn device(&self, device: &DeviceRequest) -> bool {
+    fn device(&self, device: &DeviceRequest, project_id: ProjectId) -> bool {
         self.inventory.allow.devices.contains(&device.name)
+            && is_resource_released_to_project(
+                &self
+                    .inventory
+                    .project_release_by_resource_name
+                    .released_projects_by_device_class,
+                &device.name,
+                &project_id.into_inner(),
+            )
             && self
                 .inventory
                 .devices
@@ -83,8 +94,17 @@ impl<'a> ExecFit<'a> {
         capacity.is_unset() || asked <= self.count.amount(amount(capacity))
     }
 
-    fn mount(&self, mount: &str) -> bool {
-        has(&self.inventory.mounts, mount) && has(&self.inventory.allow.mounts, mount)
+    fn mount(&self, mount: &str, project_id: ProjectId) -> bool {
+        has(&self.inventory.mounts, mount)
+            && has(&self.inventory.allow.mounts, mount)
+            && is_resource_released_to_project(
+                &self
+                    .inventory
+                    .project_release_by_resource_name
+                    .project_access_by_worker_mount,
+                mount,
+                &project_id.into_inner(),
+            )
     }
 
     fn network(&self, wanted: bool) -> bool {
@@ -107,16 +127,22 @@ impl<'a> ExecFit<'a> {
         self.inventory.allow.nodes >= nodes.max(1)
     }
 
-    fn secret(&self, name: &str) -> bool {
+    fn secret(&self, name: &str, project_id: ProjectId) -> bool {
         has(&self.inventory.secrets, name)
+            && is_resource_released_to_project(
+                &self
+                    .inventory
+                    .project_release_by_resource_name
+                    .released_projects_by_worker_sops_secret_name,
+                name,
+                &project_id.into_inner(),
+            )
     }
 
-    fn server_secrets(&self, names: &[String]) -> bool {
+    fn server_secrets(&self, names: &[String], project_id: ProjectId) -> bool {
         names.is_empty()
             || (self.worker.capabilities.secrets
-                && !names
-                    .iter()
-                    .any(|name| self.inventory.secrets.contains(name)))
+                && !names.iter().any(|name| self.secret(name, project_id)))
     }
 }
 
@@ -140,7 +166,11 @@ fn wanted_devices(req: &ExecRequirement) -> Vec<DeviceRequest> {
 
 type Candidate<'a> = (ExecFit<'a>, &'a ExecRequirement);
 
-pub fn exec_unmet(architecture: &str, candidates: &[(&WorkerCaps, ExecRequirement)]) -> ExecUnmet {
+pub fn exec_unmet(
+    architecture: &str,
+    candidates: &[(&WorkerCaps, ExecRequirement)],
+    project_id: ProjectId,
+) -> ExecUnmet {
     let fits: Vec<Candidate<'_>> = candidates
         .iter()
         .filter_map(|(worker, req)| {
@@ -166,11 +196,13 @@ pub fn exec_unmet(architecture: &str, candidates: &[(&WorkerCaps, ExecRequiremen
             |req| req.labels.clone(),
             |fit, label| fit.label(label),
         ),
-        devices: unmet_items(&fits, wanted_devices, |fit, device| fit.device(device)),
+        devices: unmet_items(&fits, wanted_devices, |fit, device| {
+            fit.device(device, project_id)
+        }),
         mounts: unmet_items(
             &fits,
             |req| req.mounts.clone(),
-            |fit, mount| fit.mount(mount),
+            |fit, mount| fit.mount(mount, project_id),
         ),
         nodes: if none(&|fit, req| fit.nodes(req.nodes)) {
             first.nodes.max(1)
@@ -181,7 +213,7 @@ pub fn exec_unmet(architecture: &str, candidates: &[(&WorkerCaps, ExecRequiremen
         secrets: unmet_items(
             &fits,
             |req| req.secrets.clone(),
-            |fit, name| fit.secret(name),
+            |fit, name| fit.secret(name, project_id),
         ),
         guest: GuestSize {
             cpus: unmet_amount(first.guest.cpus, none(&|fit, req| fit.cpus(&req.guest))),
@@ -222,7 +254,11 @@ fn unmet_amount<T: Default>(asked: T, unmet: bool) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_wire::types::{ExecAllow, GradientCapabilities, PortRange, PortRanges};
+    use gradient_wire::host_resource_project_access::WorkerResourceProjectAccess;
+    use gradient_wire::types::{
+        DeviceClass, ExecAllow, GradientCapabilities, PortRange, PortRanges,
+        WorkerExecInventoryResourceProjectAccess,
+    };
 
     fn worker(allow: ExecAllow) -> WorkerCaps {
         WorkerCaps {
@@ -256,7 +292,86 @@ mod tests {
     fn unmet_on(workers: &[WorkerCaps], req: &ExecRequirement) -> ExecUnmet {
         let candidates: Vec<(&WorkerCaps, ExecRequirement)> =
             workers.iter().map(|w| (w, req.clone())).collect();
-        exec_unmet("x86_64-linux", &candidates)
+        exec_unmet("x86_64-linux", &candidates, ProjectId::nil())
+    }
+
+    fn build_exec_worker_with_hf_token_datasets_gpu_and_release_data(
+        project_release_by_resource_name: WorkerExecInventoryResourceProjectAccess,
+    ) -> WorkerCaps {
+        let mut worker_capabilities = worker(ExecAllow {
+            nodes: 1,
+            devices: vec!["gpu".into()],
+            mounts: vec!["datasets".into()],
+            ..Default::default()
+        });
+        if let Some(worker_exec_inventory) = worker_capabilities.exec.as_mut() {
+            worker_exec_inventory.secrets = vec!["hf-token".into()];
+            worker_exec_inventory.mounts = vec!["datasets".into()];
+            worker_exec_inventory.devices = vec![DeviceClass {
+                name: "gpu".into(),
+                total: 1,
+                free: 1,
+            }];
+            worker_exec_inventory.project_release_by_resource_name =
+                project_release_by_resource_name;
+        }
+        worker_capabilities
+    }
+
+    #[test]
+    fn sops_secret_mount_and_device_class_release_fits_only_release_project_and_old_worker_fits_both()
+     {
+        let release_target_project_id = ProjectId::now_v7();
+        let other_project_without_release = ProjectId::now_v7();
+        let only_release_target_project_access = WorkerResourceProjectAccess::OnlyProjects(
+            [release_target_project_id.into_inner()].into(),
+        );
+        let release_all_to_p1_worker =
+            build_exec_worker_with_hf_token_datasets_gpu_and_release_data(
+                WorkerExecInventoryResourceProjectAccess {
+                    released_projects_by_worker_sops_secret_name: [(
+                        "hf-token".into(),
+                        only_release_target_project_access.clone(),
+                    )]
+                    .into(),
+                    project_access_by_worker_mount: [(
+                        "datasets".into(),
+                        only_release_target_project_access.clone(),
+                    )]
+                    .into(),
+                    released_projects_by_device_class: [(
+                        "gpu".into(),
+                        only_release_target_project_access,
+                    )]
+                    .into(),
+                },
+            );
+        let worker_without_release_data =
+            build_exec_worker_with_hf_token_datasets_gpu_and_release_data(Default::default());
+        let three_exec_requirements = [
+            requirement(|r| r.secrets = vec!["hf-token".into()]),
+            requirement(|r| r.mounts = vec!["datasets".into()]),
+            requirement(|r| {
+                r.devices = vec![DeviceRequest {
+                    name: "gpu".into(),
+                    count: 1,
+                }]
+            }),
+        ];
+        for requirement in &three_exec_requirements {
+            assert!(release_all_to_p1_worker.can_run_exec(requirement, release_target_project_id));
+            assert!(
+                !release_all_to_p1_worker.can_run_exec(requirement, other_project_without_release),
+                "{requirement:?}"
+            );
+            assert!(
+                worker_without_release_data.can_run_exec(requirement, release_target_project_id)
+            );
+            assert!(
+                worker_without_release_data
+                    .can_run_exec(requirement, other_project_without_release)
+            );
+        }
     }
 
     #[test]
@@ -266,7 +381,7 @@ mod tests {
             ..Default::default()
         });
         let req = requirement(|r| r.ssh = true);
-        assert!(!w.can_run_exec(&req));
+        assert!(!w.can_run_exec(&req, ProjectId::nil()));
         assert_eq!(
             unmet_on(&[w], &req),
             ExecUnmet {
@@ -316,8 +431,8 @@ mod tests {
             (&plain, wants_network.clone()),
             (&with_network, requirement(|_| {})),
         ];
-        assert!(exec_unmet("x86_64-linux", &candidates[..1]).network);
-        assert!(!exec_unmet("x86_64-linux", &candidates).network);
+        assert!(exec_unmet("x86_64-linux", &candidates[..1], ProjectId::nil()).network);
+        assert!(!exec_unmet("x86_64-linux", &candidates, ProjectId::nil()).network);
     }
 
     #[test]
@@ -334,7 +449,7 @@ mod tests {
             r.ssh = true;
             r.ports = vec![6006];
         });
-        assert!(w.can_run_exec(&req));
+        assert!(w.can_run_exec(&req, ProjectId::nil()));
         assert_eq!(unmet_on(&[w], &req), ExecUnmet::default());
     }
 }

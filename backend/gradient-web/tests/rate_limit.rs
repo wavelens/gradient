@@ -206,6 +206,44 @@ async fn signed_in_users_do_not_share_the_budget_of_their_ip() {
 }
 
 #[tokio::test]
+async fn sign_in_attempts_from_different_addresses_in_one_ipv6_slash_64_share_one_budget() {
+    let peer: SocketAddr = "127.0.0.1:0".parse().expect("a peer address");
+    let router = gradient_web::create_router(TestState::new().build())
+        .expect("router")
+        .layer(MockConnectInfo(peer));
+    let server = axum_test::TestServer::new(router);
+    let build_basic_sign_in_post_request_with_forwarded_client_ip = |address: String| {
+        server
+            .post("/api/v1/auth/basic/login")
+            .add_header("x-forwarded-for", address)
+            .json(&serde_json::json!({"loginname": "x", "password": "x"}))
+    };
+
+    for i in 1..=5 {
+        let status = build_basic_sign_in_post_request_with_forwarded_client_ip(format!(
+            "2001:db8:1:2::{i:x}"
+        ))
+        .await
+        .status_code();
+        assert_ne!(status, 429, "attempt {i} unexpectedly throttled");
+    }
+    assert_eq!(
+        build_basic_sign_in_post_request_with_forwarded_client_ip(
+            "2001:db8:1:2:ffff::6".to_owned()
+        )
+        .await
+        .status_code(),
+        429
+    );
+    assert_ne!(
+        build_basic_sign_in_post_request_with_forwarded_client_ip("2001:db8:1:3::1".to_owned())
+            .await
+            .status_code(),
+        429
+    );
+}
+
+#[tokio::test]
 async fn an_untrusted_peer_cannot_dodge_the_cache_budget_with_a_forwarded_header() {
     let server = cache_server_with_burst(1, "198.51.100.7");
 

@@ -8,17 +8,27 @@ mod changed_paths;
 pub(crate) mod fixtures;
 mod https_credentials_for_operation_host;
 
-use super::checkout::{checkout_commit, checkout_commit_into};
+use super::checkout::Origin;
+use super::checkout::{
+    checkout_commit, checkout_commit_into, fetch_commit_into_new_bare_temporary_repository,
+};
 use super::commit_info::{fetch_commit, head_refspec};
-use super::git_credentials::GitOperationCredentials;
+use super::git_credentials::{
+    GitOperationCredentials, run_blocking_libgit2_operation_with_git_credentials,
+};
+use super::git_network_limits::{
+    BlockingGitFetchOperationLimits, CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS,
+    current_thread_blocking_libgit2_fetch_time_and_byte_limits_or_ordinary_fetch_limits,
+};
 use super::pktline::{MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT, read_advertised_refs};
 use super::remote::{
     AdvertisedRef, BranchHead, branch_head, list_remote_refs, ls_remote_head, ref_commit,
     tag_commit,
 };
-use super::url::{git_transport_url, parse_git_protocol_url};
+use super::url::parse_git_protocol_url;
 use crate::SourceError;
 use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
+use gradient_types::RepositoryUrl;
 use gradient_types::branch_key::NO_BRANCH;
 
 fn default_head(reader: &mut dyn std::io::Read) -> Result<BranchHead, SourceError> {
@@ -169,78 +179,44 @@ fn the_symref_capability_names_the_default_branch_of_a_git_daemon() {
 }
 
 #[test]
-fn git_transport_url_strips_git_plus_https() {
-    assert_eq!(
-        git_transport_url("git+https://git.example.com/org/repo..git"),
-        "https://git.example.com/org/repo..git"
-    );
-}
-
-#[test]
-fn git_transport_url_strips_git_plus_http_and_ssh() {
-    assert_eq!(git_transport_url("git+http://h/r"), "http://h/r");
-    assert_eq!(git_transport_url("git+ssh://git@h/r"), "ssh://git@h/r");
-}
-
-#[test]
-fn git_transport_url_passes_through_bare_schemes_and_scp() {
-    assert_eq!(git_transport_url("https://h/r"), "https://h/r");
-    assert_eq!(git_transport_url("git://h/r"), "git://h/r");
-    assert_eq!(
-        git_transport_url("git@github.com:u/r.git"),
-        "git@github.com:u/r.git"
-    );
-}
-
-#[test]
-fn git_transport_url_drops_the_flake_directory() {
-    assert_eq!(
-        git_transport_url("git+https://h/o/r?dir=sub"),
-        "https://h/o/r"
-    );
-    assert_eq!(git_transport_url("git@h:o/r.git?dir=a/b"), "git@h:o/r.git");
-}
-
-#[test]
 fn parse_git_protocol_url_default_port() {
-    let (host, port, path) = parse_git_protocol_url("git://server.example.com/repo.git").unwrap();
-    assert_eq!(host, "server.example.com");
-    assert_eq!(port, 9418);
-    assert_eq!(path, "repo.git");
+    let url = parse_git_protocol_url("git://server.example.com/repo.git").unwrap();
+    assert_eq!(
+        (
+            url.git_server_host_name(),
+            url.git_server_port(),
+            url.repository_path(),
+        ),
+        ("server.example.com", None, "repo.git")
+    );
 }
 
 #[test]
 fn parse_git_protocol_url_explicit_port() {
-    let (host, port, path) =
-        parse_git_protocol_url("git://server.example.com:9419/foo/bar.git").unwrap();
-    assert_eq!(host, "server.example.com");
-    assert_eq!(port, 9419);
-    assert_eq!(path, "foo/bar.git");
+    let url = parse_git_protocol_url("git://server.example.com:9419/foo/bar.git").unwrap();
+    assert_eq!(
+        (
+            url.git_server_host_name(),
+            url.git_server_port(),
+            url.repository_path(),
+        ),
+        ("server.example.com", Some(9419), "foo/bar.git")
+    );
 }
 
 #[test]
-fn parse_git_protocol_url_unparseable_port_falls_back_to_default() {
-    let (host, port, path) =
-        parse_git_protocol_url("git://server.example.com:not-a-port/repo").unwrap();
-    assert_eq!(host, "server.example.com");
-    assert_eq!(port, 9418);
-    assert_eq!(path, "repo");
-}
-
-#[test]
-fn parse_git_protocol_url_wrong_scheme_rejected() {
-    assert!(matches!(
-        parse_git_protocol_url("https://server/repo"),
-        Err(SourceError::InvalidUrl)
-    ));
-}
-
-#[test]
-fn parse_git_protocol_url_missing_path_rejected() {
-    assert!(matches!(
-        parse_git_protocol_url("git://server.example.com"),
-        Err(SourceError::InvalidUrl)
-    ));
+fn parse_git_protocol_url_rejects_non_numeric_port_https_url_no_path_and_line_break() {
+    for url in [
+        "git://server.example.com:not-a-port/repo",
+        "https://server/repo",
+        "git://server.example.com",
+        "git://server.example.com/repo\r\nx",
+    ] {
+        assert!(
+            matches!(parse_git_protocol_url(url), Err(SourceError::InvalidUrl)),
+            "{url:?}"
+        );
+    }
 }
 
 #[test]
@@ -367,7 +343,7 @@ fn the_head_commit_is_the_tip_of_the_ref_asked_for() {
     commit_on(&repo, "main", "first");
     let main = commit_on(&repo, "main", "second\n\nbody");
     let feature = commit_on(&repo, "feature", "on feature");
-    let url = format!("file://{}", dir.path().display());
+    let url = RepositoryUrl::local_test_repository(dir.path());
 
     let head = fetch_commit(
         &url,
@@ -397,7 +373,7 @@ fn the_default_branch_of_a_local_remote_follows_head() {
     repo.reference("refs/heads/develop", main, true, "same commit")
         .unwrap();
     repo.set_head("refs/heads/main").unwrap();
-    let url = format!("file://{}", dir.path().display());
+    let url = RepositoryUrl::local_test_repository(dir.path());
 
     let head = ls_remote_head(&url, &GitOperationCredentials::default(), None).unwrap();
     assert_eq!(head.branch, "refs/heads/main");
@@ -414,7 +390,7 @@ fn an_annotated_tag_on_a_local_remote_resolves_to_the_tagged_commit() {
     let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
     let target = repo.find_object(tagged, None).unwrap();
     repo.tag("v1.0", &target, &sig, "v1.0", false).unwrap();
-    let url = format!("file://{}", dir.path().display());
+    let url = RepositoryUrl::local_test_repository(dir.path());
 
     let refs = list_remote_refs(&url, &GitOperationCredentials::default()).unwrap();
     assert_eq!(tag_commit(&refs, "v1.0").unwrap(), tagged.as_bytes());
@@ -427,7 +403,7 @@ fn a_pinned_commit_below_the_tip_is_fetched_by_its_hash() {
     repo.set_head("refs/heads/main").unwrap();
     let pinned = commit_on(&repo, "main", "pinned\n\nbody");
     commit_on(&repo, "main", "tip");
-    let url = format!("file://{}", dir.path().display());
+    let url = RepositoryUrl::local_test_repository(dir.path());
 
     let commit = fetch_commit(
         &url,
@@ -454,7 +430,7 @@ fn commit_file(repo: &git2::Repository, refname: &str, contents: &str) -> git2::
         .unwrap()
 }
 
-fn checked_out_file(url: &str, commit: git2::Oid) -> String {
+fn checked_out_file(url: &RepositoryUrl, commit: git2::Oid) -> String {
     let checkout = checkout_commit(
         url,
         &commit.to_string(),
@@ -470,9 +446,32 @@ fn a_commit_below_the_tip_is_checked_out_at_its_own_tree() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     let pinned = commit_file(&repo, "refs/heads/main", "pinned");
     commit_file(&repo, "refs/heads/main", "tip");
-    let url = format!("file://{}", dir.path().display());
+    let url = RepositoryUrl::local_test_repository(dir.path());
 
     assert_eq!(checked_out_file(&url, pinned), "pinned");
+}
+
+#[test]
+fn a_commit_is_fetched_into_a_bare_repository_without_a_working_tree() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let pinned = commit_file(&repo, "refs/heads/main", "pinned");
+    commit_file(&repo, "refs/heads/main", "tip");
+    let url = RepositoryUrl::local_test_repository(dir.path());
+
+    let fetched = fetch_commit_into_new_bare_temporary_repository(
+        &url,
+        &pinned.to_string(),
+        &GitOperationCredentials::default(),
+    )
+    .unwrap();
+
+    assert!(fetched.repository().is_bare());
+    assert!(fetched.repository().workdir().is_none());
+    let tree = fetched.fetched_commit_tree().unwrap();
+    let entry = tree.get(0).unwrap();
+    let blob = fetched.repository().find_blob(entry.id()).unwrap();
+    assert_eq!(blob.content(), b"pinned");
 }
 
 #[test]
@@ -481,7 +480,7 @@ fn a_commit_only_on_a_pull_request_ref_is_checked_out() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit_file(&repo, "refs/heads/main", "main");
     let pull = commit_file(&repo, "refs/pull/1/head", "fork");
-    let url = format!("file://{}", dir.path().display());
+    let url = RepositoryUrl::local_test_repository(dir.path());
 
     assert_eq!(checked_out_file(&url, pull), "fork");
 }
@@ -499,7 +498,7 @@ fn a_commit_lands_in_the_given_directory() {
         .commit(Some("refs/heads/main"), &sig, &sig, "flake", &tree, &[])
         .unwrap();
     let work = tempfile::TempDir::new().unwrap();
-    let url = format!("file://{}", origin.path().display());
+    let url = RepositoryUrl::local_test_repository(origin.path());
 
     checkout_commit_into(
         work.path(),
@@ -526,7 +525,7 @@ impl Drop for GitDaemon {
     }
 }
 
-fn start_git_daemon(base: &std::path::Path) -> (GitDaemon, String) {
+fn start_git_daemon(base: &std::path::Path) -> (GitDaemon, RepositoryUrl) {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -553,7 +552,10 @@ fn start_git_daemon(base: &std::path::Path) -> (GitDaemon, String) {
         );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    (daemon, format!("git://127.0.0.1:{port}/repo"))
+    (
+        daemon,
+        format!("git://127.0.0.1:{port}/repo").parse().unwrap(),
+    )
 }
 
 #[test]
@@ -588,6 +590,77 @@ fn a_commit_below_the_tip_is_checked_out_from_a_server_refusing_fetches_by_hash(
     assert_eq!(checked_out_file(&url, pinned), "pinned");
 }
 
+#[test]
+fn fetch_commit_by_hash_fails_after_operation_deadline_and_fetch_all_branches_fallback_also_fails()
+{
+    let base = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(base.path().join("repo")).unwrap();
+    let pinned = commit_file(&repo, "refs/heads/main", "pinned");
+    commit_file(&repo, "refs/heads/main", "tip");
+    let (_daemon, url) = start_git_daemon(base.path());
+    let target = tempfile::TempDir::new().unwrap();
+    let expired = BlockingGitFetchOperationLimits {
+        deadline: std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap(),
+        byte_limit: usize::MAX,
+        finished_fetch_bytes: 0,
+    };
+
+    let fetched = run_blocking_libgit2_operation_with_git_credentials(
+        &GitOperationCredentials::default(),
+        expired,
+        || {
+            let target = git2::Repository::init_bare(target.path())?;
+            Origin::new(&target, url.git_connection_url())?.fetch_commit(pinned)
+        },
+    );
+
+    assert!(fetched.is_err(), "{fetched:?}");
+}
+
+#[test]
+fn fetch_outside_thread_local_limit_wrapper_uses_16_gib_byte_limit_and_30_minute_deadline() {
+    let limits =
+        current_thread_blocking_libgit2_fetch_time_and_byte_limits_or_ordinary_fetch_limits();
+
+    assert_eq!(limits.byte_limit, 16 * 1024 * 1024 * 1024);
+    let remaining_time_until_fetch_deadline = limits.deadline - std::time::Instant::now();
+    assert!(
+        remaining_time_until_fetch_deadline > std::time::Duration::from_secs(29 * 60)
+            && remaining_time_until_fetch_deadline <= std::time::Duration::from_secs(30 * 60),
+        "{remaining_time_until_fetch_deadline:?}"
+    );
+}
+
+#[test]
+fn test_byte_limit_counts_bytes_across_all_fetches_of_one_operation() {
+    let base = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(base.path().join("repo")).unwrap();
+    let first = commit_file(&repo, "refs/heads/main", "first");
+    let (_daemon, url) = start_git_daemon(base.path());
+    let target = tempfile::TempDir::new().unwrap();
+
+    let second_fetch = run_blocking_libgit2_operation_with_git_credentials(
+        &GitOperationCredentials::default(),
+        BlockingGitFetchOperationLimits::ordinary_fetch_operation_limits(),
+        || {
+            let target = git2::Repository::init_bare(target.path()).unwrap();
+            let mut origin = Origin::new(&target, url.git_connection_url()).unwrap();
+            origin.fetch_commit(first).unwrap();
+            CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS.with_borrow_mut(|limits| {
+                let limits = limits.as_mut().unwrap();
+                assert!(limits.finished_fetch_bytes > 0);
+                limits.byte_limit = limits.finished_fetch_bytes + 1;
+            });
+            let second = commit_file(&repo, "refs/heads/main", "second");
+            origin.fetch_commit(second)
+        },
+    );
+
+    assert!(second_fetch.is_err(), "{second_fetch:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn resolve_remote_ref_saves_the_key_of_an_unknown_host() {
     use super::ssh::SshGitPrivateKeyKnownHostsAndObservations;
@@ -605,7 +678,10 @@ async fn resolve_remote_ref_saves_the_key_of_an_unknown_host() {
         )],
     )
     .await;
-    let url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let url: gradient_types::RepositoryUrl =
+        format!("ssh://git@127.0.0.1:{port}{}", dir.path().display())
+            .parse()
+            .unwrap();
     let db = gradient_fixtures::mock::mock_db()
         .append_exec_results([gradient_fixtures::mock::exec_ok()])
         .into_connection();

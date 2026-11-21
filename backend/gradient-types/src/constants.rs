@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub const MAX_BUILD_REQUEST_SIZE: usize = 20 * 1024 * 1024;
 pub const UPLOAD_SESSION_TTL: Duration = Duration::from_secs(3600);
+pub const OPEN_CONNECTION_ACCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 pub const TAR_ZSTD_LEVEL: i32 = 1;
 /// Level 0 is selecting the zstd default.

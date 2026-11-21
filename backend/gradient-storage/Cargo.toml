@@ -14,6 +14,9 @@ name = "gradient_storage"
 path = "src/lib.rs"
 doctest = false
 
+[features]
+testing = []
+
 [lints]
 workspace = true
 

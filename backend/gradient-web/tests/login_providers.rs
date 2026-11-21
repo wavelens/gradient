@@ -12,7 +12,7 @@
 use axum::http::{HeaderValue, StatusCode, header};
 use axum_test::{TestResponse, TestServer};
 use gradient_core::{
-    AuthorizeRequest, CodeExchange, ExternalIdentity, LoginProvider, LoginRefusal, MatchRule,
+    AuthorizeRequest, CodeExchange, ExternalIdentity, LoginProvider, LoginRefusal,
 };
 use gradient_entity::api;
 use gradient_entity::ids::{ApiId, SessionId};
@@ -80,7 +80,6 @@ impl LoginProvider for FakeProvider {
                 email: Some("octo@example.com".into()),
                 name: None,
                 groups: None,
-                match_rule: MatchRule::VerifiedEmail,
                 refresh_profile: false,
             }),
         }
@@ -306,6 +305,7 @@ async fn connect_after_sign_out_refused() {
     let server = state(Answer::Identity)
         .web_db(
             mock_db()
+                .append_query_results([vec![user()]])
                 .append_query_results([vec![revoked]])
                 .into_connection(),
         )

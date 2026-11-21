@@ -5,7 +5,7 @@
  */
 
 use gradient_types::ids::TaskId;
-use gradient_util::http_validation::WebhookUrlError;
+use gradient_util::http_validation::DestinationUrlRejectedError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -17,7 +17,7 @@ pub enum ActionError {
     #[error("could not parse owner/repo from {repository}")]
     RepositoryUnparsable { repository: String },
     #[error("URL rejected: {cause}")]
-    UrlRejected { cause: WebhookUrlError },
+    UrlRejected { cause: DestinationUrlRejectedError },
     #[error("loading crypt key: {cause}")]
     CryptKeyUnreadable { cause: anyhow::Error },
 }

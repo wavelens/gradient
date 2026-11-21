@@ -6,13 +6,17 @@
 
 use crate::HotNarCache;
 use crate::admission::ObjectKey;
-use crate::eval_cache_segment::eval_cache_segment_prefix;
+use crate::digest::{
+    ClientClaimedNarUploadHashesAndSizes, ServerComputedNarAndCompressedFileHashesAndSizes,
+    VerifyError, verify_zstd_nar_stream_sha256_and_sizes_against_claims,
+};
+use crate::eval_cache_segment::{CheckedEvalCacheFingerprint, eval_cache_segment_prefix};
 use crate::timed::{OpGuard, TimedStore, watch_stream};
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
-use gradient_types::ids::CacheId;
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_util::telemetry::{GAUGES, STATS};
 use gradient_wire::constants::{BULK_CHUNK_SIZE, MULTIPART_NAR_BYTES, PRESIGN_TTL};
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
@@ -40,7 +44,19 @@ impl Default for S3Timeouts {
 }
 
 const TEMPORARY_NAR_UPLOADS: &str = "nar-uploads";
+const S3_COPY_OBJECT_MAX_SIZE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A temporary NAR object that only the server can write. Clients never get a link to that key.
+/// The server verifies the bytes there. Those bytes then move to the final key.
+#[derive(Debug)]
+pub struct ServerWrittenTemporaryNarKey(Path);
+
+impl ServerWrittenTemporaryNarKey {
+    pub fn as_str(&self) -> &str {
+        self.0.as_ref()
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct SharedHttpConnector {
@@ -363,51 +379,24 @@ impl NarStore {
             .map(|meta| meta.size))
     }
 
-    pub async fn verify(
+    pub async fn read_uploaded_nar_at_temporary_key_and_check_client_hash_and_sizes(
         &self,
-        hash: &str,
-        expected_file_hash: &str,
-        expected_size: u64,
-        rehash: bool,
-    ) -> std::result::Result<(), crate::digest::VerifyError> {
-        self.verify_object(
-            &self.object_path(hash),
-            expected_file_hash,
-            expected_size,
-            rehash,
-        )
-        .await
-    }
-
-    async fn verify_object(
-        &self,
-        path: &Path,
-        expected_file_hash: &str,
-        expected_size: u64,
-        rehash: bool,
-    ) -> std::result::Result<(), crate::digest::VerifyError> {
-        match self.head_object(path).await?.map(|meta| meta.size) {
-            Some(size) if size == expected_size => {}
-            Some(size) => {
-                return Err(crate::digest::VerifyError::Size {
-                    expected: expected_size,
-                    actual: size,
-                });
-            }
-            None => return Err(crate::digest::VerifyError::Missing),
+        temporary: &ServerWrittenTemporaryNarKey,
+        claimed: &ClientClaimedNarUploadHashesAndSizes<'_>,
+    ) -> std::result::Result<ServerComputedNarAndCompressedFileHashesAndSizes, VerifyError> {
+        let (size, stream) = self
+            .get_stream_object(&temporary.0, None)
+            .await?
+            .ok_or(VerifyError::Missing)?;
+        if size > claimed.file_size {
+            return Err(VerifyError::CompressedUploadExceedsClaimedFileSize {
+                limit: claimed.file_size,
+            });
         }
-        if rehash {
-            let (_, stream) = self
-                .get_stream_object(path, None)
-                .await?
-                .ok_or(crate::digest::VerifyError::Missing)?;
-            let reader = tokio_util::io::StreamReader::new(
-                stream.map(|chunk| chunk.map_err(std::io::Error::other)),
-            );
-            crate::digest::verify_nar_reader(reader, expected_file_hash, expected_size).await?;
-        }
-
-        Ok(())
+        let reader = tokio_util::io::StreamReader::new(
+            stream.map(|chunk| chunk.map_err(std::io::Error::other)),
+        );
+        verify_zstd_nar_stream_sha256_and_sizes_against_claims(reader, claimed).await
     }
 
     pub async fn put_reader<R: AsyncRead + Unpin + Send>(
@@ -551,12 +540,73 @@ impl NarStore {
             .await
     }
 
-    async fn presigned_temporary_nar_upload(&self, hash: &str) -> Result<Option<StorageTarget>> {
-        let upload = Path::from(format!(
+    fn temporary_upload_object_path_for_store_path_hash(&self, hash: &str) -> Path {
+        Path::from(format!(
             "{}{TEMPORARY_NAR_UPLOADS}/{hash}-{}.nar.zst",
             self.prefix,
             uuid::Uuid::now_v7()
-        ));
+        ))
+    }
+
+    pub async fn stream_reader_to_temporary_upload<R: AsyncRead + Unpin + Send>(
+        &self,
+        hash: &str,
+        reader: R,
+    ) -> Result<ServerWrittenTemporaryNarKey> {
+        let upload = self.temporary_upload_object_path_for_store_path_hash(hash);
+        self.put_reader_at(upload.clone(), reader).await?;
+        Ok(ServerWrittenTemporaryNarKey(upload))
+    }
+
+    pub async fn move_client_upload_to_server_temporary_key(
+        &self,
+        hash: &str,
+        client_temporary_nar_storage_key: &str,
+        claimed_file_size: u64,
+    ) -> std::result::Result<ServerWrittenTemporaryNarKey, VerifyError> {
+        let client_upload = Path::from(client_temporary_nar_storage_key);
+        let size = self
+            .head_object(&client_upload)
+            .await?
+            .ok_or(VerifyError::Missing)?
+            .size;
+        if size > claimed_file_size {
+            return Err(VerifyError::CompressedUploadExceedsClaimedFileSize {
+                limit: claimed_file_size,
+            });
+        }
+        let upload = self.temporary_upload_object_path_for_store_path_hash(hash);
+        self.move_storage_object_to_key(&client_upload, &upload, size)
+            .await
+            .map_err(|e| match e.downcast_ref::<object_store::Error>() {
+                Some(object_store::Error::NotFound { .. }) => VerifyError::Missing,
+                _ => VerifyError::from(e),
+            })?;
+        Ok(ServerWrittenTemporaryNarKey(upload))
+    }
+
+    async fn move_storage_object_to_key(&self, from: &Path, to: &Path, size: u64) -> Result<()> {
+        // An S3 copy request can copy objects up to 5 GiB. Larger objects move through a stream.
+        if self.s3_signer.is_some() && size > S3_COPY_OBJECT_MAX_SIZE_BYTES {
+            let (_, stream) = self
+                .get_stream_object(from, None)
+                .await?
+                .context("Move object in storage")?;
+            let reader = tokio_util::io::StreamReader::new(
+                stream.map(|chunk| chunk.map_err(std::io::Error::other)),
+            );
+            self.put_reader_at(to.clone(), reader).await?;
+            self.delete_object(from).await
+        } else {
+            self.inner
+                .rename(from, to)
+                .await
+                .context("Move object in storage")
+        }
+    }
+
+    async fn presigned_temporary_nar_upload(&self, hash: &str) -> Result<Option<StorageTarget>> {
+        let upload = self.temporary_upload_object_path_for_store_path_hash(hash);
         Ok(self
             .presign_object(reqwest::Method::PUT, &upload, PRESIGN_TTL)
             .await?
@@ -566,34 +616,22 @@ impl NarStore {
             }))
     }
 
-    pub async fn check_temporary_nar_upload_size_and_sha256(
-        &self,
-        temporary_nar_storage_key: &str,
-        expected_file_hash: &str,
-        expected_size: u64,
-        rehash: bool,
-    ) -> std::result::Result<(), crate::digest::VerifyError> {
-        self.verify_object(
-            &Path::from(temporary_nar_storage_key),
-            expected_file_hash,
-            expected_size,
-            rehash,
-        )
-        .await
-    }
-
-    pub async fn copy_staged_upload_to_nar_for_hash_and_delete_staged(
+    pub async fn move_verified_upload_to_final_storage_key(
         &self,
         hash: &str,
-        temporary_nar_storage_key: &str,
+        temporary: &ServerWrittenTemporaryNarKey,
+        verified: &ServerComputedNarAndCompressedFileHashesAndSizes,
     ) -> Result<()> {
-        let staged = Path::from(temporary_nar_storage_key);
-        self.inner
-            .copy(&staged, &self.object_path(hash))
-            .await
-            .context("Copy of Uploaded NAR to Final Location")?;
-        self.hot.invalidate(hash);
-        self.delete_object(&staged).await
+        let key = verified.object_storage_key_for_store_path_hash_and_compressed_file_sha256(hash);
+        self.move_storage_object_to_key(
+            &temporary.0,
+            &self.object_path(&key),
+            verified.file_size(),
+        )
+        .await
+        .context("Move the verified upload to the final storage key")?;
+        self.hot.invalidate(&key);
+        Ok(())
     }
 
     pub async fn delete_temporary_nar_upload(&self, temporary_nar_storage_key: &str) -> Result<()> {
@@ -620,34 +658,38 @@ impl NarStore {
         Ok(removed)
     }
 
-    pub async fn presigned_multipart(
+    async fn presigned_multipart(
         &self,
         hash: &str,
         nar_size: u64,
-    ) -> Result<Option<gradient_wire::types::PresignedMultipart>> {
+    ) -> Result<Option<StorageTarget>> {
         let Some(s3) = &self.s3_signer else {
             return Ok(None);
         };
-        crate::multipart::presign(s3, &STATS, &self.object_path(hash), nar_size)
-            .await
-            .map(Some)
+        let upload = self.temporary_upload_object_path_for_store_path_hash(hash);
+        let grant = crate::multipart::presign(s3, &STATS, &upload, nar_size).await?;
+        Ok(Some(StorageTarget::Multipart {
+            grant,
+            temporary_nar_storage_key: upload.to_string(),
+        }))
     }
 
     pub async fn complete_multipart(
         &self,
-        hash: &str,
+        temporary_nar_storage_key: &str,
         receipt: &gradient_wire::types::CompletedMultipart,
     ) -> Result<()> {
         let s3 = self
             .s3_signer
             .as_ref()
             .context("multipart upload reported to a store without S3")?;
-        crate::multipart::complete(s3, &STATS, &self.object_path(hash), receipt).await
+        crate::multipart::complete(s3, &STATS, &Path::from(temporary_nar_storage_key), receipt)
+            .await
     }
 
-    pub async fn abort_multipart(&self, hash: &str, upload_id: &str) {
+    pub async fn abort_multipart(&self, temporary_nar_storage_key: &str, upload_id: &str) {
         if let Some(s3) = &self.s3_signer {
-            crate::multipart::abort(s3, &self.object_path(hash), upload_id).await;
+            crate::multipart::abort(s3, &Path::from(temporary_nar_storage_key), upload_id).await;
         }
     }
 
@@ -846,9 +888,22 @@ impl NarStore {
     pub async fn list_eval_cache_segments(
         &self,
         cache: CacheId,
-        fingerprint: &str,
+        project: ProjectId,
+        fingerprint: &CheckedEvalCacheFingerprint,
     ) -> Result<Vec<(String, u64)>> {
-        let listed = self.eval_cache_path(&eval_cache_segment_prefix(cache, fingerprint));
+        self.list_eval_cache_segment_object_keys_and_sizes_under_prefix(&eval_cache_segment_prefix(
+            cache,
+            project,
+            fingerprint,
+        ))
+        .await
+    }
+
+    async fn list_eval_cache_segment_object_keys_and_sizes_under_prefix(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(String, u64)>> {
+        let listed = self.eval_cache_path(prefix);
         let mut stream = self.inner.list(Some(&listed));
         let mut segments = Vec::new();
         while let Some(item) = stream.next().await {
@@ -863,12 +918,34 @@ impl NarStore {
         Ok(segments)
     }
 
+    pub async fn list_eval_cache_segment_keys_with_last_modified_unix_seconds(
+        &self,
+    ) -> Result<Vec<(String, i64)>> {
+        let listed = self.eval_cache_path("eval-cache-segments");
+        let mut stream = self.inner.list(Some(&listed));
+        let mut segments = Vec::new();
+        while let Some(item) = stream.next().await {
+            let meta = item.context("list eval cache segments")?;
+            let location = meta.location.to_string();
+            if let Some(key) = location.strip_prefix(self.prefix.as_str()) {
+                segments.push((key.to_owned(), meta.last_modified.timestamp()));
+            }
+        }
+
+        Ok(segments)
+    }
+
     pub async fn delete_eval_cache_segments(
         &self,
         cache: CacheId,
-        fingerprint: &str,
+        project: ProjectId,
+        fingerprint: &CheckedEvalCacheFingerprint,
     ) -> Result<()> {
-        for (key, _) in self.list_eval_cache_segments(cache, fingerprint).await? {
+        let prefix = eval_cache_segment_prefix(cache, project, fingerprint);
+        for (key, _) in self
+            .list_eval_cache_segment_object_keys_and_sizes_under_prefix(&prefix)
+            .await?
+        {
             self.delete_eval_cache(&key).await?;
         }
 
@@ -1006,7 +1083,10 @@ pub enum StorageTarget {
         url: String,
         temporary_nar_storage_key: String,
     },
-    Multipart(gradient_wire::types::PresignedMultipart),
+    Multipart {
+        grant: gradient_wire::types::PresignedMultipart,
+        temporary_nar_storage_key: String,
+    },
 }
 
 pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Duration> {
@@ -1015,7 +1095,7 @@ pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Dura
         StorageTarget::Put { .. } | StorageTarget::PresignedPutToTemporaryUploadObject { .. } => {
             Some(PRESIGN_TTL)
         }
-        StorageTarget::Multipart(_) => Some(crate::multipart::part_ttl(size)),
+        StorageTarget::Multipart { .. } => Some(crate::multipart::part_ttl(size)),
     }
 }
 
@@ -1030,7 +1110,6 @@ impl NarStore {
             ObjectKey::Nar(hash) if size > MULTIPART_NAR_BYTES => self
                 .presigned_multipart(hash, size)
                 .await?
-                .map(StorageTarget::Multipart)
                 .ok_or_else(missing),
             ObjectKey::Nar(hash) => self
                 .presigned_temporary_nar_upload(hash)
@@ -1061,7 +1140,7 @@ impl NarStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eval_cache_segment::eval_cache_segment_key;
+    use crate::eval_cache_segment::{eval_cache_segment_key, parse_new_layout_cache_segment_key};
     use futures::TryStreamExt as _;
     use tempfile::TempDir;
 
@@ -1118,6 +1197,52 @@ mod tests {
                 StorageTarget::Passthrough
             );
         }
+    }
+
+    #[tokio::test]
+    async fn presigned_multipart_upload_is_created_at_temporary_upload_key_not_final_store_path_key()
+     {
+        use wiremock::matchers::{method, path_regex, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(query_param("uploads", ""))
+            .and(path_regex(format!(
+                "^/bucket/{TEMPORARY_NAR_UPLOADS}/{}-[^/]+\\.nar\\.zst$",
+                "a".repeat(32)
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "<InitiateMultipartUploadResult><UploadId>up-1</UploadId></InitiateMultipartUploadResult>",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let store = NarStore::s3(
+            "bucket",
+            "us-east-1",
+            Some(&server.uri()),
+            Some("key"),
+            Some("secret"),
+            "",
+            false,
+            S3Timeouts::default(),
+        )
+        .unwrap();
+
+        let target = store
+            .upload_target(&ObjectKey::Nar("a".repeat(32)), MULTIPART_NAR_BYTES + 1)
+            .await
+            .unwrap_or_else(|e| panic!("{e:#}"));
+
+        let StorageTarget::Multipart { grant, .. } = target else {
+            panic!("{target:?}")
+        };
+        assert!(
+            grant.part_urls.iter().all(|url| !url.contains("/nars/")),
+            "{:?}",
+            grant.part_urls.first()
+        );
     }
 
     #[tokio::test]
@@ -1308,15 +1433,37 @@ mod tests {
         );
     }
 
+    fn fingerprint(digit: char) -> CheckedEvalCacheFingerprint {
+        CheckedEvalCacheFingerprint::parse(&digit.to_string().repeat(64))
+            .expect("a valid fingerprint")
+    }
+
     async fn put_segment(
         store: &NarStore,
         cache: CacheId,
-        fingerprint: &str,
+        project: ProjectId,
+        fingerprint: &CheckedEvalCacheFingerprint,
         len: usize,
     ) -> String {
-        let key = eval_cache_segment_key(cache, fingerprint, uuid::Uuid::now_v7());
+        let key = eval_cache_segment_key(cache, project, fingerprint, uuid::Uuid::now_v7());
         store
             .put_eval_cache(&key, vec![0; len])
+            .await
+            .expect("put segment");
+        key
+    }
+
+    async fn write_eval_cache_segment_without_project_in_key(
+        store: &NarStore,
+        cache: CacheId,
+        fingerprint: &str,
+    ) -> String {
+        let key = format!(
+            "eval-cache-segments/{cache}/{fingerprint}/{}",
+            uuid::Uuid::now_v7()
+        );
+        store
+            .put_eval_cache(&key, vec![0; 4])
             .await
             .expect("put segment");
         key
@@ -1325,11 +1472,11 @@ mod tests {
     #[tokio::test]
     async fn segments_list_in_key_order_with_sizes() {
         let (_d, store) = local_store();
-        let cache = CacheId::now_v7();
+        let (cache, project, fp) = (CacheId::now_v7(), ProjectId::now_v7(), fingerprint('a'));
         let keys = [
-            eval_cache_segment_key(cache, "fp", uuid::Uuid::now_v7()),
-            eval_cache_segment_key(cache, "fp", uuid::Uuid::now_v7()),
-            eval_cache_segment_key(cache, "fp", uuid::Uuid::now_v7()),
+            eval_cache_segment_key(cache, project, &fp, uuid::Uuid::now_v7()),
+            eval_cache_segment_key(cache, project, &fp, uuid::Uuid::now_v7()),
+            eval_cache_segment_key(cache, project, &fp, uuid::Uuid::now_v7()),
         ];
         for (index, len) in [(2, 30), (0, 10), (1, 20)] {
             store
@@ -1340,7 +1487,7 @@ mod tests {
 
         assert_eq!(
             store
-                .list_eval_cache_segments(cache, "fp")
+                .list_eval_cache_segments(cache, project, &fp)
                 .await
                 .expect("list"),
             vec![
@@ -1352,16 +1499,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn segments_of_other_fingerprints_and_caches_are_not_listed() {
+    async fn segments_of_other_fingerprints_caches_and_projects_are_not_listed() {
         let (_d, store) = local_store();
-        let cache = CacheId::now_v7();
-        let mine = put_segment(&store, cache, "fp", 4).await;
-        put_segment(&store, cache, "fp2", 4).await;
-        put_segment(&store, CacheId::now_v7(), "fp", 4).await;
+        let (cache, project, fp) = (CacheId::now_v7(), ProjectId::now_v7(), fingerprint('a'));
+        let mine = put_segment(&store, cache, project, &fp, 4).await;
+        put_segment(&store, cache, project, &fingerprint('b'), 4).await;
+        put_segment(&store, CacheId::now_v7(), project, &fp, 4).await;
+        put_segment(&store, cache, ProjectId::now_v7(), &fp, 4).await;
+        write_eval_cache_segment_without_project_in_key(&store, cache, fp.as_str()).await;
 
         assert_eq!(
             store
-                .list_eval_cache_segments(cache, "fp")
+                .list_eval_cache_segments(cache, project, &fp)
                 .await
                 .expect("list"),
             vec![(mine, 4)]
@@ -1369,31 +1518,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deleting_segments_removes_only_that_fingerprint() {
+    async fn deleting_segments_removes_only_that_cache_project_and_fingerprint() {
         let (_d, store) = local_store();
-        let cache = CacheId::now_v7();
-        put_segment(&store, cache, "fp", 4).await;
-        put_segment(&store, cache, "fp", 4).await;
-        let kept = put_segment(&store, cache, "fp2", 4).await;
+        let (cache, project, fp) = (CacheId::now_v7(), ProjectId::now_v7(), fingerprint('a'));
+        let deleted = [
+            put_segment(&store, cache, project, &fp, 4).await,
+            put_segment(&store, cache, project, &fp, 4).await,
+        ];
+        let kept = [
+            put_segment(&store, cache, project, &fingerprint('b'), 4).await,
+            put_segment(&store, cache, ProjectId::now_v7(), &fp, 4).await,
+            put_segment(&store, CacheId::now_v7(), project, &fp, 4).await,
+            write_eval_cache_segment_without_project_in_key(&store, cache, fp.as_str()).await,
+        ];
 
         store
-            .delete_eval_cache_segments(cache, "fp")
+            .delete_eval_cache_segments(cache, project, &fp)
             .await
             .expect("delete");
 
-        assert!(
-            store
-                .list_eval_cache_segments(cache, "fp")
-                .await
-                .expect("list")
-                .is_empty()
-        );
+        for key in &deleted {
+            assert!(store.get_eval_cache(key).await.expect("read").is_none());
+        }
+        for key in &kept {
+            assert!(
+                store.get_eval_cache(key).await.expect("read").is_some(),
+                "{key}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_segment_is_listed_and_only_new_layout_keys_parse() {
+        let (_d, store) = local_store();
+        let (cache, project, fp) = (CacheId::now_v7(), ProjectId::now_v7(), fingerprint('a'));
+        let new_layout = put_segment(&store, cache, project, &fp, 4).await;
+        let old_layout =
+            write_eval_cache_segment_without_project_in_key(&store, cache, fp.as_str()).await;
+
+        let mut listed: Vec<String> = store
+            .list_eval_cache_segment_keys_with_last_modified_unix_seconds()
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        listed.sort_unstable();
+        let mut expected = vec![new_layout.clone(), old_layout.clone()];
+        expected.sort_unstable();
+        assert_eq!(listed, expected);
+
         assert_eq!(
-            store
-                .list_eval_cache_segments(cache, "fp2")
-                .await
-                .expect("list"),
-            vec![(kept, 4)]
+            parse_new_layout_cache_segment_key(&new_layout),
+            Some((cache, project, fp))
+        );
+        assert_eq!(parse_new_layout_cache_segment_key(&old_layout), None);
+        assert_eq!(
+            parse_new_layout_cache_segment_key(&format!("{new_layout}/extra")),
+            None
         );
     }
 
@@ -1451,67 +1633,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verify_ok_on_size_match_without_rehash() {
-        let (_d, store) = local_store();
-        let bytes = b"verify me".to_vec();
-        let file_hash = crate::digest::file_hash_sri(&bytes);
-        store.put("ab12cd", bytes.clone()).await.expect("put");
-        assert!(
-            store
-                .verify("ab12cd", &file_hash, bytes.len() as u64, false)
-                .await
-                .is_ok()
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_size_mismatch_is_size_error() {
-        let (_d, store) = local_store();
-        store.put("ab12cd", vec![7u8; 100]).await.expect("put");
-        let err = store
-            .verify("ab12cd", "sha256-", 99, false)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, crate::digest::VerifyError::Size { .. }));
-    }
-
-    #[tokio::test]
-    async fn verify_missing_object_is_missing_error() {
+    async fn reading_missing_temporary_upload_returns_missing_error() {
         let (_d, store) = local_store();
         let err = store
-            .verify("ab12cd", "sha256-", 10, false)
+            .move_client_upload_to_server_temporary_key("ab12cd", "nar-uploads/absent.nar.zst", 10)
             .await
             .unwrap_err();
-        assert!(matches!(err, crate::digest::VerifyError::Missing));
+        assert!(matches!(err, VerifyError::Missing));
     }
 
     #[tokio::test]
-    async fn verify_rehash_ok_on_content_match() {
+    async fn temporary_upload_is_read_back_verified_moved_to_store_key_and_removed() {
         let (_d, store) = local_store();
-        let bytes = b"rehash content".to_vec();
-        let file_hash = crate::digest::file_hash_sri(&bytes);
-        store.put("ab12cd", bytes.clone()).await.expect("put");
-        assert!(
-            store
-                .verify("ab12cd", &file_hash, bytes.len() as u64, true)
-                .await
-                .is_ok()
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_rehash_tampered_bytes_is_hash_error() {
-        let (_d, store) = local_store();
-        let good = b"rehash content".to_vec();
-        let file_hash = crate::digest::file_hash_sri(&good);
-        let mut stored = good.clone();
-        *stored.last_mut().unwrap() ^= 0xff;
-        store.put("ab12cd", stored.clone()).await.expect("put");
-        let err = store
-            .verify("ab12cd", &file_hash, stored.len() as u64, true)
+        let nar = b"read back me".to_vec();
+        let compressed = zstd::encode_all(&nar[..], 3).unwrap();
+        let client_upload = store.temporary_upload_object_path_for_store_path_hash("ab12cd");
+        store
+            .put_object(client_upload.clone(), compressed.clone())
             .await
-            .unwrap_err();
-        assert!(matches!(err, crate::digest::VerifyError::Hash { .. }));
+            .unwrap();
+        let file_hash = crate::digest::file_hash_sri(&compressed);
+        let nar_hash = crate::digest::file_hash_sri(&nar);
+
+        let temporary = store
+            .move_client_upload_to_server_temporary_key(
+                "ab12cd",
+                client_upload.as_ref(),
+                compressed.len() as u64,
+            )
+            .await
+            .unwrap();
+        assert!(store.get_object(&client_upload).await.unwrap().is_none());
+        let verified = store
+            .read_uploaded_nar_at_temporary_key_and_check_client_hash_and_sizes(
+                &temporary,
+                &ClientClaimedNarUploadHashesAndSizes {
+                    file_hash: &file_hash,
+                    file_size: compressed.len() as u64,
+                    nar_hash: &nar_hash,
+                    nar_size: nar.len() as u64,
+                    claimed_store_path_references: &[],
+                    uploaded_nar_with_stated_content_address_to_check: None,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .move_verified_upload_to_final_storage_key("ab12cd", &temporary, &verified)
+            .await
+            .unwrap();
+
+        let key =
+            verified.object_storage_key_for_store_path_hash_and_compressed_file_sha256("ab12cd");
+        assert!(key.starts_with("ab12cd-") && !key.contains(':'), "{key}");
+        assert_eq!(store.get(&key).await.unwrap().unwrap(), compressed);
+        assert!(store.get("ab12cd").await.unwrap().is_none());
+        assert!(store.get_object(&temporary.0).await.unwrap().is_none());
     }
 
     #[tokio::test]

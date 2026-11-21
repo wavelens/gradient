@@ -344,4 +344,95 @@ mod tests {
         assert_eq!(found.map(|row| row.id), Some(pending.id));
         db.finish().await;
     }
+
+    #[tokio::test]
+    async fn get_pending_pull_request_approval_for_task_commit_returns_row_for_named_commit_and_none_for_unknown_commit_or_other_pull_request_number()
+     {
+        let (db, task, trigger) = create_test_database_with_task_and_pull_request_trigger().await;
+        let conn = db.connection();
+        let mut inserted = Vec::new();
+        for (commit_hash, minutes) in [(1, 0), (2, 1)] {
+            inserted.push(
+                crate::rows::insert::<EForkPullRequestApproval, _>(
+                    &conn,
+                    build_pending_fork_pull_request_approval(task, trigger, commit_hash, minutes),
+                )
+                .await
+                .expect("the pending approval is written"),
+            );
+        }
+
+        let mut found = Vec::new();
+        for (pr_number, commit_hash) in [
+            (APPROVAL_TEST_PULL_REQUEST_NUMBER, [1; 20]),
+            (APPROVAL_TEST_PULL_REQUEST_NUMBER, [2; 20]),
+            (APPROVAL_TEST_PULL_REQUEST_NUMBER, [3; 20]),
+            (APPROVAL_TEST_PULL_REQUEST_NUMBER + 1, [1; 20]),
+        ] {
+            found.push(
+                get_pending_pull_request_approval_for_task_commit(
+                    &conn,
+                    task,
+                    pr_number,
+                    &commit_hash,
+                )
+                .await
+                .expect("the pending approval of the commit loads")
+                .map(|row| row.id),
+            );
+        }
+
+        assert_eq!(
+            found,
+            vec![Some(inserted[0].id), Some(inserted[1].id), None, None]
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_webhook_events_for_same_fork_pull_request_commit_store_exactly_one_pending_approval_and_return_same_row_id()
+     {
+        use sea_orm::TransactionTrait;
+
+        let (db, task, trigger) = create_test_database_with_task_and_pull_request_trigger().await;
+        let first = db.connection().begin().await.unwrap();
+        let stored_first =
+            add_pending_approval_for_pull_request_commit_and_remove_older_pending_approvals(
+                &first,
+                build_pending_fork_pull_request_approval(task, trigger, 1, 0),
+            )
+            .await
+            .expect("the first event stores the commit");
+        let lock_waits = format!(
+            "SELECT wait_event_type FROM pg_stat_activity WHERE datname = '{}' AND wait_event_type = 'Lock'",
+            db.name()
+        );
+        let commit_first_once_second_waits = async {
+            let mut polls = 0;
+            while db.texts(&lock_waits).await.is_empty() {
+                polls += 1;
+                assert!(
+                    polls < 200,
+                    "The second event did not wait for the lock that the first uncommitted event held."
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            first.commit().await.unwrap();
+        };
+        let connection = db.connection();
+        let (stored_second, ()) = tokio::join!(
+            add_pending_approval_for_pull_request_commit_and_remove_older_pending_approvals(
+                &connection,
+                build_pending_fork_pull_request_approval(task, trigger, 1, 1),
+            ),
+            commit_first_once_second_waits
+        );
+
+        let stored_second = stored_second.expect("the second event stores the commit");
+        assert_eq!(stored_second.id, stored_first.id);
+        let rows = db.rows::<EForkPullRequestApproval>().await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].approved_at.is_none());
+        db.finish().await;
+    }
 }

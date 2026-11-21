@@ -8,19 +8,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::NaiveDateTime;
-use gradient_ci::ApplyOutcome;
+use gradient_ci::{ApplyOutcome, EvaluationCodeTrust};
 use gradient_db::deliveries::pending::{self, Outcome, PendingDeliveryKind};
 use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
 use gradient_db::status::BuildRefusal;
 use gradient_entity::StorePathMapping;
-use gradient_entity::ids::{DerivationId, DispatchedJobId, EvaluationId, TaskTriggerId};
+use gradient_entity::ids::{DerivationId, DispatchedJobId, EvaluationId, ProjectId, TaskTriggerId};
 use gradient_entity::{dispatched_job, evaluation, pending_delivery, task};
 use gradient_fixtures::shape::build_assignment;
+use gradient_graph::read_derivation_from_trusted_nar::load_verified_trusted_derivation_record;
 use gradient_graph::{
-    Demotion, NarCommit, NarCommitted, RecordBatch, RequeueScope, SignTargets, Transition,
-    TransitionReport, UpstreamHit,
+    Demotion, EvaluationBatchDerivation, NarCommit, NarCommitted, RecordBatch, RequeueScope,
+    StoredContentProducer, Transition, TransitionReport, UpstreamHit,
 };
 use gradient_pool::score::InstanceContext;
+use gradient_test_support::cache_fixture::zstd_compressed_nar_of_bytes;
+use gradient_test_support::derivation_file_from_reported_facts::DerivationFileFromReportedFacts;
 use gradient_wire::types::DiscoveredDerivation;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
@@ -299,13 +302,29 @@ impl SchedulerCase {
         branch: &str,
         commit: &[u8],
     ) -> ApplyOutcome {
+        self.apply_trigger_to_task_at_branch_and_commit_with_code_trust(
+            trigger,
+            branch,
+            commit,
+            EvaluationCodeTrust::CodeWithProjectCredentials,
+        )
+        .await
+    }
+
+    pub async fn apply_trigger_to_task_at_branch_and_commit_with_code_trust(
+        &self,
+        trigger: TaskTriggerId,
+        branch: &str,
+        commit: &[u8],
+        code_trust: EvaluationCodeTrust,
+    ) -> ApplyOutcome {
         let row = self.trigger(trigger).await;
         let task = self
             .db
             .find::<task::Entity>(row.task)
             .await
             .expect("the task of the trigger");
-        let input = aliases::trigger_input(trigger, row.trigger_type, branch, commit);
+        let input = aliases::trigger_input(trigger, row.trigger_type, branch, commit, code_trust);
         let outcome = gradient_ci::apply_trigger(&self.scheduler.db.worker_db, &task, input)
             .await
             .expect("the trigger applies");
@@ -406,6 +425,13 @@ impl SchedulerCase {
     }
 
     pub async fn commit_nar(&self, commit: NarCommit) -> NarCommitted {
+        let commit = self
+            .replace_nar_commit_placeholder_producer_with_first_project_worker_producer(commit)
+            .await;
+        gradient_graph::testing::write_commit_compressed_object_to_object_storage(
+            &self.ctx, &commit,
+        )
+        .await;
         let committed = self
             .graph
             .commit_nar(commit)
@@ -415,11 +441,170 @@ impl SchedulerCase {
         committed
     }
 
+    async fn replace_nar_commit_placeholder_producer_with_first_project_worker_producer(
+        &self,
+        mut commit: NarCommit,
+    ) -> NarCommit {
+        if commit.producer != super::shapes::test_stand_in_nar_upload_commit_producer() {
+            return commit;
+        }
+        let first_project = self
+            .db
+            .rows::<gradient_entity::project::Entity>()
+            .await
+            .into_iter()
+            .map(|project| project.id)
+            .min();
+        if let Some(project) = first_project {
+            commit.producer = self
+                .build_worker_stored_content_producer_for_project_or_insert_inactive_registration(
+                    project,
+                )
+                .await;
+        }
+        commit
+    }
+
+    pub async fn make_worker_producer_for_evaluation_project(
+        &self,
+        evaluation: EvaluationId,
+    ) -> StoredContentProducer {
+        self.build_worker_stored_content_producer_for_project_or_insert_inactive_registration(
+            self.db.project_of(evaluation).await,
+        )
+        .await
+    }
+
+    async fn build_worker_stored_content_producer_for_project_or_insert_inactive_registration(
+        &self,
+        project: ProjectId,
+    ) -> StoredContentProducer {
+        StoredContentProducer::Worker {
+            project,
+            credentials: gradient_db::store_path_content_variant_trust::ProvenWorkerCredentialIds {
+                worker_registrations: self
+                    .db
+                    .worker_registration_ids_for_project_or_insert_inactive(project)
+                    .await,
+                team_worker: None,
+            },
+            dispatched_job: None,
+        }
+    }
+
+    pub async fn upload_reported_derivation_as_evaluation_project_worker(
+        &self,
+        project: ProjectId,
+        reported: &DiscoveredDerivation,
+    ) -> DiscoveredDerivation {
+        self.upload_derivation_file_as_project_worker_content_variant(
+            project,
+            DerivationFileFromReportedFacts::from_reported_derivation_facts(reported),
+        )
+        .await
+    }
+
+    pub async fn upload_derivation_file_as_project_worker_content_variant(
+        &self,
+        project: ProjectId,
+        file: DerivationFileFromReportedFacts,
+    ) -> DiscoveredDerivation {
+        let facts = gradient_storage::compress_nar_bytes_and_verify_stream(
+            &file.uncompressed_nar_archive_bytes(),
+        );
+        let stored = gradient_entity::StorePath::parse_stored(&file.derivation.drv_path)
+            .expect("a stored derivation path");
+        self.ctx
+            .storage
+            .nar_storage
+            .put(
+                &facts.object_storage_key_for_store_path_hash_and_compressed_file_sha256(
+                    stored.hash(),
+                ),
+                zstd_compressed_nar_of_bytes(&file.text).await,
+            )
+            .await
+            .expect("the derivation file NAR is stored");
+        let references = file
+            .derivation
+            .dependencies
+            .iter()
+            .chain(&file.derivation.input_sources)
+            .map(|path| path.trim_start_matches("/nix/store/").to_owned())
+            .collect();
+        self.commit_nar(NarCommit {
+            store_path: file.derivation.drv_path.clone(),
+            content:
+                gradient_graph::NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(
+                    facts,
+                ),
+            references,
+            deriver: None,
+            ca: None,
+            producer: self
+                .build_worker_stored_content_producer_for_project_or_insert_inactive_registration(
+                    project,
+                )
+                .await,
+        })
+        .await;
+        file.derivation
+    }
+
+    pub async fn write_drv_nar_to_seeded_content_variant_object_key(
+        &self,
+        reported: &DiscoveredDerivation,
+    ) {
+        let file = DerivationFileFromReportedFacts::from_reported_derivation_facts(reported);
+        let stored = gradient_entity::StorePath::parse_stored(&file.derivation.drv_path)
+            .expect("a stored derivation path");
+        let seeded = self
+            .db
+            .cached_path(stored.hash())
+            .await
+            .unwrap_or_else(|| panic!("the seed stores {}", file.derivation.drv_path));
+        self.ctx
+            .storage
+            .nar_storage
+            .put(
+                &seeded.nar_object_storage_key,
+                zstd_compressed_nar_of_bytes(&file.text).await,
+            )
+            .await
+            .expect("the derivation file NAR is stored");
+    }
+
     pub async fn walk_evaluation_derivations_and_wait(
         &self,
         evaluation: EvaluationId,
         derivations: Vec<DiscoveredDerivation>,
     ) {
+        let project = self.db.project_of(evaluation).await;
+        let mut verified = Vec::new();
+        for reported in derivations {
+            let uploaded = self
+                .upload_reported_derivation_as_evaluation_project_worker(project, &reported)
+                .await;
+            let record = load_verified_trusted_derivation_record(
+                &self.scheduler.db.worker_db,
+                &self.ctx.storage.nar_storage,
+                Arc::clone(&self.scheduler.db.store_path_mapping),
+                project,
+                &uploaded.drv_path,
+            )
+            .await
+            .expect("the uploaded derivation file is read")
+            .expect("the project trusts the uploaded derivation file");
+            verified.push(EvaluationBatchDerivation {
+                store_path_verified_derivation_record: record,
+                attr: uploaded.attr,
+                ifd: uploaded.ifd,
+                licenses: uploaded.licenses,
+                exec: uploaded.exec,
+                closure_checked_hash_modulo: None,
+            });
+        }
+        let derivations = verified;
         self.graph
             .record(RecordBatch {
                 evaluation,
@@ -430,10 +615,6 @@ impl SchedulerCase {
             .await
             .expect("the batch is written");
         self.settled().await;
-    }
-
-    pub async fn project_caches(&self, evaluation: EvaluationId) -> SignTargets {
-        SignTargets::ProjectCaches(self.db.project_of(evaluation).await)
     }
 
     pub async fn upstream_hits(&self, hits: &[(&str, UpstreamHit)]) {
@@ -459,7 +640,18 @@ impl SchedulerCase {
 
     pub async fn demote_path(&self, path: &str) {
         let hash = path.split_once('-').map_or(path, |(hash, _)| hash);
-        self.demote(Demotion::Path { hash: hash.into() }).await;
+        let variants = gradient_db::store_path_content_variant_reader_choice::list_all_content_variant_rows_for_store_path_hashes(
+            &self.ctx.worker_db,
+            &[hash.to_owned()],
+        )
+        .await
+        .expect("the content variants are listed");
+        for variant in variants {
+            self.demote(Demotion::MissingNarOfContentVariant {
+                content_variant: variant.id,
+            })
+            .await;
+        }
     }
 
     pub async fn demote(&self, demotion: Demotion) {

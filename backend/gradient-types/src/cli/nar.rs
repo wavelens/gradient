@@ -26,12 +26,6 @@ pub struct NarArgs {
     #[arg(default_value_t = 512 * 1024 * 1024)]
     pub hot_cache_bytes: u64,
 
-    /// Whether to download NARs committed through presigned S3 uploads and verify their hash,
-    /// catching same-length corruption at the cost of a full object read. Size checks run
-    /// either way. Passthrough and REST uploads always go through verification.
-    #[arg(default_value_t = false)]
-    pub verify_digest: bool,
-
     /// Seconds to wait for a NAR object stream from storage (for example an S3 GET) before
     /// answering the worker with `NarAbort`. Workers retry after a `NarAbort`.
     #[arg(default_value = "60")]

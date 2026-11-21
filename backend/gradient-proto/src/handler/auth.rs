@@ -6,13 +6,15 @@
 
 use anyhow::Context as _;
 use gradient_db::WorkerDb;
+use gradient_entity::{team_worker, worker_registration};
+use gradient_scheduler::connection_failures::ConnectionDirection;
 use gradient_types::ids::ProjectId;
 use gradient_types::{RuntimeConfig, SecretString};
-use sea_orm::DbErr;
+use sea_orm::sea_query::SimpleExpr;
+use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::Semaphore;
-use tracing::warn;
 use uuid::Uuid;
 
 use gradient_wire::auth::validate_tokens;
@@ -77,28 +79,52 @@ pub(super) async fn filter_project_peers_without_cache(
     Ok((authorized_out, demoted))
 }
 
-pub(super) async fn lookup_registered_peers(
+fn dial_url_sql_condition_for_connection_direction(
+    url: impl ColumnTrait,
+    direction: ConnectionDirection,
+) -> SimpleExpr {
+    match direction {
+        ConnectionDirection::Inbound => url.is_null(),
+        ConnectionDirection::Outbound => url.is_not_null(),
+    }
+}
+
+async fn load_active_team_worker_by_worker_id_and_connection_direction(
     db: &WorkerDb,
     worker_id: &str,
-) -> Vec<(String, String)> {
-    use gradient_entity::worker_registration::{Column, Entity};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    direction: ConnectionDirection,
+) -> Result<Option<team_worker::Model>, DbErr> {
+    use team_worker::{Column, Entity};
 
-    match Entity::find()
+    Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
         .filter(Column::Active.eq(true))
-        .all(db)
+        .filter(dial_url_sql_condition_for_connection_direction(
+            Column::Url,
+            direction,
+        ))
+        .one(db)
         .await
-    {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|r| (r.peer_id.to_string(), r.token_hash))
-            .collect(),
-        Err(e) => {
-            warn!(error = %e, %worker_id, "failed to look up registered peers");
-            vec![]
-        }
-    }
+}
+
+async fn lookup_registered_peers(
+    db: &WorkerDb,
+    worker_id: &str,
+) -> Result<Vec<(String, String)>, DbErr> {
+    use worker_registration::{Column, Entity};
+
+    Ok(Entity::find()
+        .filter(Column::WorkerId.eq(worker_id))
+        .filter(Column::Active.eq(true))
+        .filter(dial_url_sql_condition_for_connection_direction(
+            Column::Url,
+            ConnectionDirection::Inbound,
+        ))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|r| (r.peer_id.to_string(), r.token_hash))
+        .collect())
 }
 
 pub(super) struct TeamWorkerChallenge {
@@ -107,39 +133,43 @@ pub(super) struct TeamWorkerChallenge {
     pub granted_projects: Vec<String>,
 }
 
-pub(super) async fn lookup_team_worker_challenge(
+async fn lookup_team_worker_challenge(
     db: &WorkerDb,
     worker_id: &str,
-) -> Option<TeamWorkerChallenge> {
-    let worker = gradient_db::teams::workers::active_team_worker(db, worker_id)
-        .await
-        .ok()
-        .flatten()?;
+) -> Result<Option<TeamWorkerChallenge>, DbErr> {
+    let Some(worker) = load_active_team_worker_by_worker_id_and_connection_direction(
+        db,
+        worker_id,
+        ConnectionDirection::Inbound,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
     let granted_projects =
         gradient_db::teams::workers::projects_granted_with_workers(db, worker.team)
-            .await
-            .unwrap_or_default()
+            .await?
             .into_iter()
             .map(|project| project.to_string())
             .collect();
 
-    Some(TeamWorkerChallenge {
+    Ok(Some(TeamWorkerChallenge {
         team: worker.team.to_string(),
         token_hash: worker.token_hash,
         granted_projects,
-    })
+    }))
 }
 
-pub(super) async fn challenge_for(
+pub(super) async fn load_inbound_worker_challenge(
     db: &WorkerDb,
     worker_id: &str,
-) -> (Option<TeamWorkerChallenge>, Vec<(String, String)>) {
-    match lookup_team_worker_challenge(db, worker_id).await {
+) -> Result<(Option<TeamWorkerChallenge>, Vec<(String, String)>), DbErr> {
+    match lookup_team_worker_challenge(db, worker_id).await? {
         Some(team) => {
             let peers = vec![(team.team.clone(), team.token_hash.clone())];
-            (Some(team), peers)
+            Ok((Some(team), peers))
         }
-        None => (None, lookup_registered_peers(db, worker_id).await),
+        None => Ok((None, lookup_registered_peers(db, worker_id).await?)),
     }
 }
 
@@ -154,11 +184,9 @@ pub(super) fn expand_team_authorized(
     }
 }
 
-pub(super) struct Resolved {
-    pub authorized: Vec<String>,
-    pub failed: Vec<FailedPeer>,
-    pub proven: bool,
-    pub emptied_by_missing_cache: bool,
+pub(super) struct CheckedWorkerTokens {
+    pub proven_peer_token_hashes: Vec<(String, String)>,
+    pub failed_peers: Vec<FailedPeer>,
 }
 
 static WORKER_TOKEN_CHECK_SEMAPHORE: LazyLock<Arc<Semaphore>> = LazyLock::new(|| {
@@ -171,35 +199,32 @@ async fn validate_tokens_on_limited_blocking_pool(
     registered: &[(String, String)],
     tokens: &[(String, SecretString)],
 ) -> anyhow::Result<(Vec<String>, Vec<FailedPeer>)> {
-    let _permit = Arc::clone(&WORKER_TOKEN_CHECK_SEMAPHORE)
+    let permit = Arc::clone(&WORKER_TOKEN_CHECK_SEMAPHORE)
         .acquire_owned()
         .await?;
     let (registered, tokens) = (registered.to_vec(), tokens.to_vec());
-    tokio::task::spawn_blocking(move || validate_tokens(&registered, &tokens))
-        .await
-        .context("token verification task failed")
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        validate_tokens(&registered, &tokens)
+    })
+    .await
+    .context("token verification task failed")
 }
 
-pub(super) async fn resolve_authorized(
-    db: &WorkerDb,
-    team: &Option<TeamWorkerChallenge>,
+pub(super) async fn check_worker_tokens(
     registered: &[(String, String)],
     tokens: &[(String, SecretString)],
-) -> anyhow::Result<Resolved> {
-    let (token_authorized, mut failed) =
+) -> anyhow::Result<CheckedWorkerTokens> {
+    let (token_authorized, failed_peers) =
         validate_tokens_on_limited_blocking_pool(registered, tokens).await?;
-    let proven = !token_authorized.is_empty();
-    let expanded = expand_team_authorized(team, token_authorized);
-    let had_any = !expanded.is_empty();
-    let (authorized, demoted) = filter_project_peers_without_cache(db, expanded).await?;
-    let emptied_by_missing_cache = authorized.is_empty() && had_any && !demoted.is_empty();
-    failed.extend(demoted);
-
-    Ok(Resolved {
-        authorized,
-        failed,
-        proven,
-        emptied_by_missing_cache,
+    let proven_peer_token_hashes = registered
+        .iter()
+        .filter(|(peer_id, _)| token_authorized.contains(peer_id))
+        .cloned()
+        .collect();
+    Ok(CheckedWorkerTokens {
+        proven_peer_token_hashes,
+        failed_peers,
     })
 }
 
@@ -230,18 +255,24 @@ impl EnabledCapsAggregate {
 pub(super) async fn aggregate_enabled_caps(
     db: &WorkerDb,
     worker_id: &str,
+    direction: ConnectionDirection,
 ) -> Result<EnabledCapsAggregate, DbErr> {
-    use gradient_entity::worker_registration::{Column, Entity};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use worker_registration::{Column, Entity};
 
     let rows = Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
         .filter(Column::Active.eq(true))
+        .filter(dial_url_sql_condition_for_connection_direction(
+            Column::Url,
+            direction,
+        ))
         .all(db)
         .await?;
 
     if rows.is_empty() {
-        let Some(worker) = gradient_db::teams::workers::active_team_worker(db, worker_id).await?
+        let Some(worker) =
+            load_active_team_worker_by_worker_id_and_connection_direction(db, worker_id, direction)
+                .await?
         else {
             return Ok(EnabledCapsAggregate::default());
         };
@@ -261,23 +292,6 @@ pub(super) async fn aggregate_enabled_caps(
         enable_eval: rows.iter().all(|r| r.enable_eval),
         enable_build: rows.iter().all(|r| r.enable_build),
     })
-}
-
-pub(super) async fn has_any_registrations(db: &WorkerDb, worker_id: &str) -> bool {
-    use gradient_entity::worker_registration::{Column, Entity};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
-    match Entity::find()
-        .filter(Column::WorkerId.eq(worker_id))
-        .one(db)
-        .await
-    {
-        Ok(row) => row.is_some(),
-        Err(e) => {
-            warn!(error = %e, %worker_id, "failed to check worker registrations");
-            false
-        }
-    }
 }
 
 pub(super) fn negotiate_capabilities(
@@ -301,7 +315,7 @@ pub(super) fn negotiate_capabilities(
 mod tests {
     use super::*;
     use gradient_core::ServerState;
-    use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_fixtures::mock::mock_db;
     use gradient_test_support::state::TestState;
     use std::sync::Arc;
 
@@ -521,7 +535,12 @@ mod tests {
             vec![ProjectId::now_v7().to_string()],
         )
         .await;
-        let caps = aggregate_enabled_caps(&state_with_db(failing()).worker_db, "w1").await;
+        let caps = aggregate_enabled_caps(
+            &state_with_db(failing()).worker_db,
+            "w1",
+            ConnectionDirection::Inbound,
+        )
+        .await;
 
         assert!(filtered.is_err());
         assert!(caps.is_err());
@@ -534,11 +553,58 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::team_worker::Model>::new()])
             .into_connection();
 
-        let caps = aggregate_enabled_caps(&state_with_db(db).worker_db, "w1")
-            .await
-            .expect("caps");
+        let caps = aggregate_enabled_caps(
+            &state_with_db(db).worker_db,
+            "w1",
+            ConnectionDirection::Inbound,
+        )
+        .await
+        .expect("caps");
 
         assert_eq!(caps, EnabledCapsAggregate::default());
+    }
+
+    #[tokio::test]
+    async fn test_aggregate_enabled_caps_reads_only_session_direction_rows() {
+        use gradient_fixtures::rows;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        let registration = worker_registration::Model {
+            peer_id: rows::project().id,
+            url: Some("wss://servers.gradient.ci/proto".into()),
+            created_by: None,
+            ..rows::worker_registration(true, true)
+        };
+        gradient_db::rows::insert::<gradient_types::EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        gradient_db::rows::insert::<gradient_types::EProject, _>(&conn, rows::project())
+            .await
+            .expect("the project is written");
+        gradient_db::rows::insert::<worker_registration::Entity, _>(&conn, registration.clone())
+            .await
+            .expect("the registration is written");
+        let state = state_with_db(db.connection());
+
+        let dialed = aggregate_enabled_caps(
+            &state.worker_db,
+            &registration.worker_id,
+            ConnectionDirection::Outbound,
+        )
+        .await
+        .expect("caps");
+        let inbound = aggregate_enabled_caps(
+            &state.worker_db,
+            &registration.worker_id,
+            ConnectionDirection::Inbound,
+        )
+        .await
+        .expect("caps");
+
+        assert_eq!(dialed, EnabledCapsAggregate::all());
+        assert_eq!(inbound, EnabledCapsAggregate::default());
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -602,50 +668,5 @@ mod tests {
             expand_team_authorized(&None, vec![project.clone()]),
             vec![project]
         );
-    }
-
-    #[tokio::test]
-    async fn a_team_without_projects_granted_with_workers_resolves_to_nothing() {
-        let state = state_with_db(empty_db());
-        let team = team_challenge(&[]);
-        let registered = vec![(TEAM.to_string(), SHA256_OF_T1.to_string())];
-
-        let resolved = resolve_authorized(
-            &state.worker_db,
-            &team,
-            &registered,
-            &[(TEAM.into(), "t1".into())],
-        )
-        .await
-        .expect("resolved");
-
-        assert!(resolved.proven);
-        assert!(resolved.authorized.is_empty());
-        assert!(!resolved.emptied_by_missing_cache);
-    }
-
-    #[tokio::test]
-    async fn granted_projects_without_a_cache_are_demoted() {
-        let project = ProjectId::now_v7();
-        let state = state_with_db(
-            mock_db()
-                .append_query_results([vec![project_row(project)]])
-                .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-                .into_connection(),
-        );
-        let team = team_challenge(&[project]);
-        let registered = vec![(TEAM.to_string(), SHA256_OF_T1.to_string())];
-
-        let resolved = resolve_authorized(
-            &state.worker_db,
-            &team,
-            &registered,
-            &[(TEAM.into(), "t1".into())],
-        )
-        .await
-        .expect("resolved");
-
-        assert!(resolved.authorized.is_empty());
-        assert!(resolved.emptied_by_missing_cache);
     }
 }

@@ -4,54 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::require_project_permission;
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
-use crate::resource::Resource;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::WebDb;
 use gradient_types::*;
 use std::sync::Arc;
 
 use super::BuildAccessContext;
-
-async fn load_triggerable_build(
-    db: &WebDb,
-    user: &MUser,
-    api_key: &MaybeApiKey,
-    build_id: BuildJobId,
-) -> WebResult<BuildAccessContext> {
-    let api_key_ref = api_key.as_ref();
-    let ctx = BuildAccessContext::load(db, build_id, &Some(user.clone()), api_key_ref).await?;
-    require_project_permission(
-        db,
-        user.id,
-        ctx.project.id,
-        Permission::TriggerEvaluation,
-        Resource::Build,
-        api_key_ref,
-    )
-    .await?;
-    Ok(ctx)
-}
-
-async fn load_abortable_build(
-    db: &WebDb,
-    user: &MUser,
-    api_key: &MaybeApiKey,
-    build_id: BuildJobId,
-) -> WebResult<BuildAccessContext> {
-    if user.superuser {
-        return BuildAccessContext::load_unguarded(db, build_id).await;
-    }
-
-    load_triggerable_build(db, user, api_key, build_id).await
-}
 
 #[utoipa::path(
     post,
@@ -70,7 +35,14 @@ pub async fn post_build_abort(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_abortable_build(&state.web_db, &user, &api_key, build_id).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::CanAbortRunningWork,
+    )
+    .await?;
 
     scheduler
         .abort_build(ctx.build_job.evaluation, ctx.shared_build.id)
@@ -96,7 +68,14 @@ pub async fn post_build_retry(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_triggerable_build(&state.web_db, &user, &api_key, build_id).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::IncludesPermission(Permission::TriggerEvaluation),
+    )
+    .await?;
 
     scheduler
         .retry_build(ctx.build_job.evaluation, ctx.shared_build.id)

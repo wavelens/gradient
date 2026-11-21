@@ -9,12 +9,14 @@ pub mod actions;
 extern crate self as gradient_types;
 
 pub mod branch_key;
+pub mod checked_uploader_stated_store_path_metadata;
 pub mod cli;
 pub mod config;
 pub mod constants;
 pub mod consts;
 pub mod events;
 pub mod exec;
+pub mod fetch_source_allowlist_and_request_validation;
 pub mod flake_url;
 pub mod frontend_page_urls;
 pub mod git_host;
@@ -36,9 +38,10 @@ pub use self::actions::{ActionConfig, ActionType, PatchGeneratorKind, PrGranular
 pub use self::cli::{
     BuildArgs, CacheArgs, CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs,
     ExecArgs, GcArgs, GitHostSoftwareChoice, GitHubAppArgs, GiteaOAuth2ApplicationArgs,
-    GradientCiArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs, PermissionsArgs, ProtoArgs,
-    PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs, ScimArgs, ScoringPolicy,
-    SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs, in_any, parse_cidr_list,
+    GradientCiArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs, OutboundConnectionArgs,
+    PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs,
+    ScimArgs, ScoringPolicy, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs,
+    in_any, parse_cidr_list,
 };
 pub use self::config::{
     ConfigError, EmailConfig, GitHubAppConfig, GiteaOAuthConfig, MetricsConfig, NetworkConfig,
@@ -49,7 +52,10 @@ pub use self::entity_aliases::*;
 pub use self::events::build::{BuildProgress, BuildProgressPhase};
 pub use self::events::evaluation::EvaluationProgress;
 pub use self::events::{Envelope, Event, EventBus, EventRx};
-pub use self::flake_url::{NixFlakeUrl, RepositoryLocation, RepositoryUrl, check_flake_dir};
+pub use self::flake_url::{
+    NixFlakeUrl, RepositoryLocation, RepositoryUrl, check_flake_dir, is_plain_name_segment,
+    parse_owner_repo,
+};
 pub use self::git_host::GitHostType;
 pub use self::https_git_url_host::{https_host_from_repository_url, normalize_bare_https_git_host};
 pub use self::ids::*;
@@ -103,6 +109,8 @@ pub struct Cli {
     pub http: HttpArgs,
     #[command(flatten)]
     pub proto: ProtoArgs,
+    #[command(flatten)]
+    pub outbound: OutboundConnectionArgs,
     #[command(flatten)]
     pub upload: UploadArgs,
     #[command(flatten)]

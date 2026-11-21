@@ -5,10 +5,18 @@
  */
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 
-/// Hostnames are passing validation unresolved. [`PublicResolver`] is checking them at connect time.
+use futures::future::BoxFuture;
+use ipnet::IpNet;
+
+use crate::http_base_url::ValidatedHttpBaseUrl;
+
+pub type HostNameAndPortToSocketAddressesLookupFunction =
+    fn(String, u16) -> BoxFuture<'static, std::io::Result<Vec<SocketAddr>>>;
+
 #[derive(Debug, thiserror::Error)]
-pub enum WebhookUrlError {
+pub enum DestinationUrlRejectedError {
     #[error("Invalid URL: {0}")]
     Parse(#[from] url::ParseError),
     #[error("URL scheme must be http or https, got '{0}'")]
@@ -16,42 +24,290 @@ pub enum WebhookUrlError {
     #[error("URL must include a host")]
     MissingHost,
     #[error(
-        "URL points to a disallowed address ({0}); private/loopback/link-local/cloud-metadata addresses are blocked"
+        "The URL points to a private address ({0}) that the server administrator didn't allow."
     )]
     UnsafeAddress(std::net::IpAddr),
     #[error("URL host is empty")]
     EmptyHost,
-    #[error("URL host 'localhost' is not allowed")]
+    #[error(
+        "The URL host `localhost` is unavailable without approval from the server administrator."
+    )]
     Localhost,
+    #[error("Stopped after {0} redirect responses")]
+    TooManyRedirects(usize),
+    #[error("Rejected redirect from https to http")]
+    HttpsToHttpRedirect,
+    #[error(transparent)]
+    HostHasNoAllowedAddress(#[from] HostHasNoAllowedAddressError),
 }
 
-pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, WebhookUrlError> {
+#[derive(Debug, thiserror::Error)]
+pub enum RefusedDestinationIpAddressReason {
+    #[error("{0} is not a public address, so the server administrator doesn't allow it.")]
+    NonPublicAddressNotAllowed(IpAddr),
+    #[error(
+        "{0} is an address of the server itself. The server administrator doesn't allow this address."
+    )]
+    ServerHostInterfaceAddressNotAllowed(IpAddr),
+    #[error(
+        "The server rejected {address} because it failed to read the addresses of its network interfaces: {source}"
+    )]
+    NetworkInterfaceAddressesReadFailed {
+        address: IpAddr,
+        source: nix::errno::Errno,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid entry `{0}`: specify a CIDR range, IP address, or hostname")]
+pub struct InvalidAdminAllowListEntryError(String);
+
+/// Error messages use the same wording for a name that DNS lookup can't resolve and for a name with refused addresses. Users then can't tell which internal names exist, or which addresses belong to the server. Debug-level logs record the cause.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "The server cannot connect to {host}. The name does not resolve, or the server administrator does not allow that address."
+)]
+pub struct HostHasNoAllowedAddressError {
+    host: String,
+}
+
+impl HostHasNoAllowedAddressError {
+    fn from_failed_host_lookup(host: &str, error: &std::io::Error) -> Self {
+        tracing::debug!(host, %error, "Lookup of the host name failed.");
+        Self {
+            host: host.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UserUrlDestinationAllowlist {
+    networks: Vec<IpNet>,
+    host_names: Vec<String>,
+    read_network_interface_ip_addresses: fn() -> nix::Result<Vec<IpAddr>>,
+    lookup_host_socket_addresses: HostNameAndPortToSocketAddressesLookupFunction,
+}
+
+impl Default for UserUrlDestinationAllowlist {
+    fn default() -> Self {
+        Self {
+            networks: Vec::new(),
+            host_names: Vec::new(),
+            read_network_interface_ip_addresses: get_local_network_interface_addresses,
+            lookup_host_socket_addresses: resolve_host_name_and_port_to_socket_addresses,
+        }
+    }
+}
+
+fn resolve_host_name_and_port_to_socket_addresses(
+    host: String,
+    port: u16,
+) -> BoxFuture<'static, std::io::Result<Vec<SocketAddr>>> {
+    Box::pin(async move { Ok(tokio::net::lookup_host((host, port)).await?.collect()) })
+}
+
+impl UserUrlDestinationAllowlist {
+    pub fn parse(entries: &[String]) -> Result<Self, InvalidAdminAllowListEntryError> {
+        let mut allowlist = Self::default();
+        for entry in entries
+            .iter()
+            .map(|raw| raw.trim())
+            .filter(|e| !e.is_empty())
+        {
+            if let Ok(network) = entry.parse::<IpNet>() {
+                allowlist.networks.push(network);
+                continue;
+            }
+            if let Ok(ip) = entry.parse::<IpAddr>() {
+                allowlist.networks.push(ip.into());
+                continue;
+            }
+            match url::Host::parse(entry) {
+                Ok(url::Host::Domain(name)) if !name.contains(['%', '[', ']']) => {
+                    allowlist
+                        .host_names
+                        .push(name.trim_end_matches('.').to_ascii_lowercase());
+                }
+                _ => return Err(InvalidAdminAllowListEntryError(entry.to_owned())),
+            }
+        }
+        Ok(allowlist)
+    }
+
+    pub fn with_added_allowed_host_or_ip(mut self, host: &str) -> Self {
+        match host.trim_matches(['[', ']']).parse::<IpAddr>() {
+            Ok(ip) => self.networks.push(ip.into()),
+            Err(_) => self
+                .host_names
+                .push(host.trim_end_matches('.').to_ascii_lowercase()),
+        }
+        self
+    }
+
+    #[cfg(test)]
+    fn with_network_interface_address_reader(
+        mut self,
+        reader: fn() -> nix::Result<Vec<IpAddr>>,
+    ) -> Self {
+        self.read_network_interface_ip_addresses = reader;
+        self
+    }
+
+    #[cfg(any(test, feature = "test-functions"))]
+    pub fn with_dns_lookup_function(
+        mut self,
+        lookup: HostNameAndPortToSocketAddressesLookupFunction,
+    ) -> Self {
+        self.lookup_host_socket_addresses = lookup;
+        self
+    }
+
+    fn check_outbound_destination_ip_address_is_allowed(
+        &self,
+        ip: IpAddr,
+    ) -> Result<(), RefusedDestinationIpAddressReason> {
+        self.filter_allowed_socket_addrs_for_host_reading_host_interface_addresses_once(
+            &ip.to_string(),
+            std::iter::once(SocketAddr::new(ip, 0)),
+            self.read_network_interface_ip_addresses,
+        )
+        .map(drop)
+    }
+
+    fn filter_allowed_socket_addrs_for_host_reading_host_interface_addresses_once(
+        &self,
+        host: &str,
+        addrs: impl Iterator<Item = SocketAddr>,
+        read_interface_addresses: impl FnOnce() -> nix::Result<Vec<IpAddr>>,
+    ) -> Result<Vec<SocketAddr>, RefusedDestinationIpAddressReason> {
+        use RefusedDestinationIpAddressReason::*;
+        let host_allowed = self.is_host_name_on_admin_allow_list(host);
+        let interface_addresses = std::cell::LazyCell::new(read_interface_addresses);
+        let mut allowed = Vec::new();
+        let mut refusal = None;
+        for addr in addrs {
+            let ip = addr.ip().to_canonical();
+            let verdict = if host_allowed || self.networks.iter().any(|n| n.contains(&ip)) {
+                Ok(())
+            } else if is_unsafe_ip(ip) {
+                Err(NonPublicAddressNotAllowed(ip))
+            } else {
+                match &*interface_addresses {
+                    Ok(own) if own.iter().any(|own| own.to_canonical() == ip) => {
+                        Err(ServerHostInterfaceAddressNotAllowed(ip))
+                    }
+                    Ok(_) => Ok(()),
+                    Err(source) => Err(NetworkInterfaceAddressesReadFailed {
+                        address: ip,
+                        source: *source,
+                    }),
+                }
+            };
+            match verdict {
+                Ok(()) => allowed.push(addr),
+                Err(reason)
+                    if refusal.is_none() || !matches!(reason, NonPublicAddressNotAllowed(_)) =>
+                {
+                    refusal = Some(reason)
+                }
+                Err(_) => {}
+            }
+        }
+        match refusal {
+            Some(reason) if allowed.is_empty() => Err(reason),
+            _ => Ok(allowed),
+        }
+    }
+
+    pub fn is_host_name_on_admin_allow_list(&self, host: &str) -> bool {
+        let host = host.trim_end_matches('.');
+        self.host_names
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(host))
+    }
+
+    pub fn check_destination_url_is_allowed(
+        &self,
+        url: &reqwest::Url,
+    ) -> Result<(), DestinationUrlRejectedError> {
+        match url.scheme() {
+            "http" | "https" => {}
+            s => return Err(DestinationUrlRejectedError::Scheme(s.to_owned())),
+        }
+        let literal_ip_check = |ip: IpAddr| {
+            self.check_outbound_destination_ip_address_is_allowed(ip)
+                .map_err(|reason| {
+                    tracing::debug!(%reason, "The server rejected an IP address in the URL.");
+                    DestinationUrlRejectedError::UnsafeAddress(ip)
+                })
+        };
+        match url.host().ok_or(DestinationUrlRejectedError::MissingHost)? {
+            url::Host::Ipv4(ip) => literal_ip_check(ip.into()),
+            url::Host::Ipv6(ip) => literal_ip_check(ip.into()),
+            url::Host::Domain("") => Err(DestinationUrlRejectedError::EmptyHost),
+            url::Host::Domain(d)
+                if d.eq_ignore_ascii_case("localhost")
+                    && !self.is_host_name_on_admin_allow_list(d) =>
+            {
+                Err(DestinationUrlRejectedError::Localhost)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn allowed_socket_addrs_for_host(
+        &self,
+        host: &str,
+        addrs: impl Iterator<Item = SocketAddr>,
+    ) -> Result<Vec<SocketAddr>, HostHasNoAllowedAddressError> {
+        match self.filter_allowed_socket_addrs_for_host_reading_host_interface_addresses_once(
+            host,
+            addrs,
+            self.read_network_interface_ip_addresses,
+        ) {
+            Ok(allowed) if !allowed.is_empty() => return Ok(allowed),
+            Ok(_) => tracing::debug!(host, "The host name did not resolve to any address."),
+            Err(reason) => tracing::debug!(
+                host,
+                %reason,
+                "The server rejected every address that the hostname resolved to."
+            ),
+        }
+        Err(HostHasNoAllowedAddressError {
+            host: host.to_owned(),
+        })
+    }
+
+    pub async fn allowed_socket_addresses_for_url(
+        &self,
+        base_url: &ValidatedHttpBaseUrl,
+    ) -> Result<Vec<SocketAddr>, DestinationUrlRejectedError> {
+        let url = reqwest::Url::parse(base_url.as_str())?;
+        self.check_destination_url_is_allowed(&url)?;
+        let port = url
+            .port_or_known_default()
+            .ok_or(DestinationUrlRejectedError::MissingHost)?;
+        match url.host().ok_or(DestinationUrlRejectedError::MissingHost)? {
+            url::Host::Ipv4(ip) => Ok(vec![SocketAddr::new(ip.into(), port)]),
+            url::Host::Ipv6(ip) => Ok(vec![SocketAddr::new(ip.into(), port)]),
+            url::Host::Domain(host) => {
+                let resolved = (self.lookup_host_socket_addresses)(host.to_owned(), port)
+                    .await
+                    .map_err(|error| {
+                        HostHasNoAllowedAddressError::from_failed_host_lookup(host, &error)
+                    })?;
+                Ok(self.allowed_socket_addrs_for_host(host, resolved.into_iter())?)
+            }
+        }
+    }
+}
+
+pub fn parse_and_check_allowed_outbound_url(
+    url: &str,
+    allowlist: &UserUrlDestinationAllowlist,
+) -> Result<reqwest::Url, DestinationUrlRejectedError> {
     let parsed = reqwest::Url::parse(url)?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        s => return Err(WebhookUrlError::Scheme(s.to_string())),
-    }
-    let host = parsed.host().ok_or(WebhookUrlError::MissingHost)?;
-    match host {
-        url::Host::Ipv4(ip) => {
-            if is_unsafe_ipv4(&ip) {
-                return Err(WebhookUrlError::UnsafeAddress(ip.into()));
-            }
-        }
-        url::Host::Ipv6(ip) => {
-            if is_unsafe_ipv6(&ip) {
-                return Err(WebhookUrlError::UnsafeAddress(ip.into()));
-            }
-        }
-        url::Host::Domain(d) => {
-            if d.is_empty() {
-                return Err(WebhookUrlError::EmptyHost);
-            }
-            if d.eq_ignore_ascii_case("localhost") {
-                return Err(WebhookUrlError::Localhost);
-            }
-        }
-    }
+    allowlist.check_destination_url_is_allowed(&parsed)?;
     Ok(parsed)
 }
 
@@ -73,10 +329,8 @@ pub enum WorkerConnectionUrlError {
         "The URL host \"localhost\" is internal. Allow worker URLs on private networks in the admin settings."
     )]
     Localhost,
-    #[error("Failed to resolve worker host: {0}")]
-    Resolve(#[source] std::io::Error),
     #[error(transparent)]
-    InternalOnly(#[from] InternalOnly),
+    HostHasNoAllowedAddress(#[from] HostHasNoAllowedAddressError),
 }
 
 pub fn validate_worker_websocket_url(
@@ -121,37 +375,55 @@ pub async fn check_worker_url_and_resolve_allowed_socket_addresses(
     let port = parsed
         .port_or_known_default()
         .ok_or(WorkerConnectionUrlError::MissingHost)?;
-    let resolved: Vec<SocketAddr> = match parsed.host() {
-        Some(url::Host::Ipv4(ip)) => vec![SocketAddr::new(ip.into(), port)],
-        Some(url::Host::Ipv6(ip)) => vec![SocketAddr::new(ip.into(), port)],
-        Some(url::Host::Domain(domain)) => tokio::net::lookup_host((domain, port))
-            .await
-            .map_err(WorkerConnectionUrlError::Resolve)?
-            .collect(),
-        None => return Err(WorkerConnectionUrlError::MissingHost),
+    let allowlist = UserUrlDestinationAllowlist::default();
+    let literal = |ip: IpAddr| {
+        if !private_networks_allowed {
+            allowlist
+                .check_outbound_destination_ip_address_is_allowed(ip)
+                .map_err(|reason| {
+                    tracing::debug!(%reason, "The server rejected the IP address in the worker URL.");
+                    WorkerConnectionUrlError::InternalAddress(ip)
+                })?;
+        }
+        Ok(vec![SocketAddr::new(ip, port)])
     };
-    if private_networks_allowed {
-        return Ok(resolved);
+    match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => literal(ip.into()),
+        Some(url::Host::Ipv6(ip)) => literal(ip.into()),
+        Some(url::Host::Domain(domain)) => {
+            let resolved = tokio::net::lookup_host((domain, port))
+                .await
+                .map_err(|error| {
+                    HostHasNoAllowedAddressError::from_failed_host_lookup(domain, &error)
+                })?;
+            if private_networks_allowed {
+                return Ok(resolved.collect());
+            }
+            Ok(allowlist.allowed_socket_addrs_for_host(domain, resolved)?)
+        }
+        None => Err(WorkerConnectionUrlError::MissingHost),
     }
-    Ok(public_addrs(
-        parsed.host_str().unwrap_or_default(),
-        resolved.into_iter(),
-    )?)
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("{0} resolves only to private/loopback/link-local/cloud-metadata addresses")]
-pub struct InternalOnly(String);
-
-fn public_addrs(
-    host: &str,
-    addrs: impl Iterator<Item = SocketAddr>,
-) -> Result<Vec<SocketAddr>, InternalOnly> {
-    let public: Vec<SocketAddr> = addrs.filter(|addr| !is_unsafe_ip(addr.ip())).collect();
-    if public.is_empty() {
-        return Err(InternalOnly(host.to_owned()));
+pub fn read_network_interface_addresses_and_log_error_on_failure() {
+    if let Err(error) = get_local_network_interface_addresses() {
+        tracing::error!(
+            %error,
+            "The server can't read the addresses of its network interfaces. The server rejects all outgoing requests to addresses that the server administrator did not allow. This rejection continues until the server can read those addresses. Allow the AF_NETLINK address family for the server process."
+        );
     }
-    Ok(public)
+}
+
+fn get_local_network_interface_addresses() -> nix::Result<Vec<IpAddr>> {
+    Ok(nix::ifaddrs::getifaddrs()?
+        .filter_map(|interface| interface.address)
+        .filter_map(|address| {
+            address
+                .as_sockaddr_in()
+                .map(|v4| IpAddr::V4(v4.ip()))
+                .or_else(|| address.as_sockaddr_in6().map(|v6| IpAddr::V6(v6.ip())))
+        })
+        .collect())
 }
 
 fn is_unsafe_ip(ip: IpAddr) -> bool {
@@ -161,15 +433,20 @@ fn is_unsafe_ip(ip: IpAddr) -> bool {
     }
 }
 
-pub(crate) struct PublicResolver;
+pub(crate) struct DestinationRuleDnsResolver(pub(crate) Arc<UserUrlDestinationAllowlist>);
 
-impl reqwest::dns::Resolve for PublicResolver {
+impl reqwest::dns::Resolve for DestinationRuleDnsResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let host = name.as_str().to_owned();
+        let allowlist = Arc::clone(&self.0);
         Box::pin(async move {
-            let resolved = tokio::net::lookup_host((host.as_str(), 0)).await?;
-            let public = public_addrs(&host, resolved)?;
-            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+            let resolved = (allowlist.lookup_host_socket_addresses)(host.clone(), 0)
+                .await
+                .map_err(|error| {
+                    HostHasNoAllowedAddressError::from_failed_host_lookup(&host, &error)
+                })?;
+            let allowed = allowlist.allowed_socket_addrs_for_host(&host, resolved.into_iter())?;
+            Ok(Box::new(allowed.into_iter()) as reqwest::dns::Addrs)
         })
     }
 }
@@ -211,32 +488,39 @@ fn is_unsafe_ipv6(ip: &Ipv6Addr) -> bool {
     if (segs[0] & 0xffc0) == 0xfe80 {
         return true;
     }
-    if segs[0] == 0
-        && segs[1] == 0
-        && segs[2] == 0
-        && segs[3] == 0
-        && segs[4] == 0
-        && segs[5] == 0xffff
-    {
-        let v4 = Ipv4Addr::new(
-            (segs[6] >> 8) as u8,
-            (segs[6] & 0xff) as u8,
-            (segs[7] >> 8) as u8,
-            (segs[7] & 0xff) as u8,
-        );
-        if is_unsafe_ipv4(&v4) {
-            return true;
-        }
+    if matches!(segs, [0x2001, 0, ..] | [0x64, 0xff9b, 1, ..]) {
+        return true;
     }
-    false
+    let ipv4_from = |high: u16, low: u16| {
+        let [a, b] = high.to_be_bytes();
+        let [c, d] = low.to_be_bytes();
+        Ipv4Addr::new(a, b, c, d)
+    };
+    let embedded = match segs {
+        [0, 0, 0, 0, 0, 0xffff, high, low]
+        | [0, 0, 0, 0, 0xffff, 0, high, low]
+        | [0, 0, 0, 0, 0, 0, high, low] => Some(ipv4_from(high, low)),
+        [0x64, 0xff9b, 0, 0, 0, 0, high, low] => Some(ipv4_from(high, low)),
+        [0x2002, high, low, ..] => Some(ipv4_from(high, low)),
+        _ => None,
+    };
+    embedded.is_some_and(|v4| is_unsafe_ipv4(&v4))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn public_only() -> UserUrlDestinationAllowlist {
+        UserUrlDestinationAllowlist::default()
+    }
+
+    fn entries(list: &str) -> Vec<String> {
+        list.split(',').map(str::to_owned).collect()
+    }
+
     #[test]
-    fn validate_webhook_url_accepts_public_targets() {
+    fn parse_and_check_allowed_outbound_url_accepts_public_targets() {
         for url in [
             "https://example.com/hook",
             "http://example.com:8080/hook",
@@ -245,13 +529,18 @@ mod tests {
             "http://100.63.255.255/",
             "http://8.8.8.8/",
             "http://[2001:4860:4860::8888]/",
+            "http://[2002:808:808::1]/",
+            "http://[64:ff9b::808:808]/",
         ] {
-            assert!(validate_webhook_url(url).is_ok(), "{url}");
+            assert!(
+                parse_and_check_allowed_outbound_url(url, &public_only()).is_ok(),
+                "{url}"
+            );
         }
     }
 
     #[test]
-    fn validate_webhook_url_rejects_every_internal_or_bad_target() {
+    fn parse_and_check_allowed_outbound_url_rejects_every_internal_or_bad_target() {
         for url in [
             "file:///etc/passwd",
             "ftp://example.com/",
@@ -289,9 +578,186 @@ mod tests {
             "http://[ff02::1]/",
             "http://[::ffff:7f00:1]/",
             "http://[::ffff:a9fe:a9fe]/",
+            "http://[64:ff9b::7f00:1]/",
+            "http://[64:ff9b::a9fe:a9fe]/",
+            "http://[2002:a00:1::1]/",
+            "http://[2002:c0a8:101::]/",
         ] {
-            assert!(validate_webhook_url(url).is_err(), "{url}");
+            assert!(
+                parse_and_check_allowed_outbound_url(url, &public_only()).is_err(),
+                "{url}"
+            );
         }
+    }
+
+    #[test]
+    fn the_admin_allow_list_reads_cidrs_addresses_and_host_names() {
+        let allowlist = UserUrlDestinationAllowlist::parse(&entries(
+            " 10.0.0.0/8 , ::1 ,192.168.1.7,Git.Internal.Example,,",
+        ))
+        .expect("valid entries");
+
+        for url in [
+            "http://10.1.2.3/",
+            "http://[::ffff:10.1.2.3]/",
+            "http://[::1]/",
+            "http://192.168.1.7/",
+        ] {
+            assert!(
+                parse_and_check_allowed_outbound_url(url, &allowlist).is_ok(),
+                "{url}"
+            );
+        }
+        for url in ["http://192.168.1.8/", "http://127.0.0.1/"] {
+            assert!(
+                parse_and_check_allowed_outbound_url(url, &allowlist).is_err(),
+                "{url}"
+            );
+        }
+        assert!(allowlist.is_host_name_on_admin_allow_list("git.internal.example"));
+        assert!(allowlist.is_host_name_on_admin_allow_list("GIT.internal.example."));
+        assert!(!allowlist.is_host_name_on_admin_allow_list("other.internal.example"));
+        assert!(
+            parse_and_check_allowed_outbound_url("http://10.0.0.5:3000/api", &allowlist).is_ok()
+        );
+        assert!(parse_and_check_allowed_outbound_url("http://[::1]/", &allowlist).is_ok());
+        assert!(parse_and_check_allowed_outbound_url("http://172.16.0.1/", &allowlist).is_err());
+    }
+
+    #[test]
+    fn localhost_passes_only_when_the_admin_names_it() {
+        let allowlist =
+            UserUrlDestinationAllowlist::parse(&entries("localhost")).expect("valid entry");
+
+        assert!(parse_and_check_allowed_outbound_url("http://localhost:8080/", &allowlist).is_ok());
+        assert!(
+            parse_and_check_allowed_outbound_url("http://localhost:8080/", &public_only()).is_err()
+        );
+    }
+
+    #[test]
+    fn an_invalid_allow_list_entry_is_named() {
+        for list in ["10.0.0.0/33", "10.0.0.0/8,not a host", "http://x/", "a/b"] {
+            let err = UserUrlDestinationAllowlist::parse(&entries(list)).expect_err(list);
+            assert!(err.to_string().contains('`'), "{err}");
+        }
+    }
+
+    #[test]
+    fn an_allowed_host_name_keeps_its_internal_addresses() {
+        let allowlist = public_only().with_added_allowed_host_or_ip("Gitea.Lan");
+        let internal: SocketAddr = "10.0.0.5:443".parse().unwrap();
+
+        let kept = allowlist
+            .allowed_socket_addrs_for_host("gitea.lan", [internal].into_iter())
+            .expect("allowed host");
+        let refused = allowlist.allowed_socket_addrs_for_host("other.lan", [internal].into_iter());
+
+        assert_eq!(kept, vec![internal]);
+        assert!(refused.is_err());
+    }
+
+    #[test]
+    fn host_name_resolving_to_private_address_is_refused_and_error_text_contains_no_ip_address() {
+        let resolved: SocketAddr = "10.20.0.7:443".parse().unwrap();
+
+        let refused = public_only()
+            .allowed_socket_addrs_for_host("db.corp.internal", [resolved].into_iter())
+            .expect_err("private address");
+
+        for text in [refused.to_string(), format!("{refused:?}")] {
+            assert!(text.contains("db.corp.internal"), "{text}");
+            assert!(!text.contains("10.20"), "{text}");
+        }
+    }
+
+    #[test]
+    fn refuses_public_url_and_resolved_public_host_when_network_interface_address_read_fails() {
+        let allowlist = public_only()
+            .with_network_interface_address_reader(|| Err(nix::errno::Errno::EAFNOSUPPORT));
+        let url = reqwest::Url::parse("http://203.0.113.8/").unwrap();
+
+        let literal = allowlist.check_destination_url_is_allowed(&url);
+        let resolved = allowlist.allowed_socket_addrs_for_host(
+            "example.com",
+            ["203.0.113.8:443".parse().unwrap()].into_iter(),
+        );
+
+        let literal = literal.expect_err("failed interface read").to_string();
+        let resolved = resolved.expect_err("failed interface read").to_string();
+        for text in [&literal, &resolved] {
+            assert!(!text.contains("EAFNOSUPPORT"), "{text}");
+            assert!(!text.contains("network interfaces"), "{text}");
+        }
+        assert!(literal.contains("203.0.113.8"), "{literal}");
+    }
+
+    #[test]
+    fn url_with_ip_address_on_server_network_interface_gets_same_refusal_message_as_private_ip_url()
+    {
+        let own_interface = public_only()
+            .with_network_interface_address_reader(|| Ok(vec!["203.0.113.7".parse().unwrap()]));
+        let expect_refusal_message_for_url =
+            |url: &str, allowlist: &UserUrlDestinationAllowlist| {
+                parse_and_check_allowed_outbound_url(url, allowlist)
+                    .expect_err(url)
+                    .to_string()
+            };
+
+        let private = expect_refusal_message_for_url("http://10.0.0.5/", &public_only());
+        let own = expect_refusal_message_for_url("http://203.0.113.7/", &own_interface);
+
+        assert!(
+            private.contains("10.0.0.5") && private.contains("private address"),
+            "{private}"
+        );
+        assert_eq!(own, private.replace("10.0.0.5", "203.0.113.7"));
+    }
+
+    #[tokio::test]
+    async fn dns_lookup_failure_private_address_and_no_address_produce_one_refusal_message_naming_host()
+     {
+        fn always_failing_dns_lookup(
+            _: String,
+            _: u16,
+        ) -> BoxFuture<'static, std::io::Result<Vec<SocketAddr>>> {
+            Box::pin(async { Err(std::io::Error::other("Name or service not known")) })
+        }
+        fn resolve_every_host_to_private_address(
+            _: String,
+            port: u16,
+        ) -> BoxFuture<'static, std::io::Result<Vec<SocketAddr>>> {
+            Box::pin(async move { Ok(vec![SocketAddr::new([10, 20, 0, 7].into(), port)]) })
+        }
+        fn lookup_returns_empty_address_list(
+            _: String,
+            _: u16,
+        ) -> BoxFuture<'static, std::io::Result<Vec<SocketAddr>>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        let url: ValidatedHttpBaseUrl = "https://db.corp.internal/".parse().unwrap();
+
+        let mut texts = Vec::new();
+        for lookup in [
+            always_failing_dns_lookup,
+            resolve_every_host_to_private_address,
+            lookup_returns_empty_address_list,
+        ] {
+            let refused = public_only()
+                .with_dns_lookup_function(lookup)
+                .allowed_socket_addresses_for_url(&url)
+                .await
+                .expect_err("no allowed address");
+            texts.push(refused.to_string());
+        }
+
+        assert!(texts[0].contains("db.corp.internal"), "{}", texts[0]);
+        assert!(texts.iter().all(|text| text == &texts[0]), "{texts:?}");
+        assert!(
+            public_only()
+                .allowed_socket_addrs_for_host("example.com", std::iter::empty())
+                .is_err()
+        );
     }
 
     #[test]
@@ -345,17 +811,146 @@ mod tests {
     }
 
     #[test]
-    fn public_addrs_drops_internal_addresses_of_a_mixed_resolution() {
+    fn public_only_drops_internal_addresses_of_a_mixed_resolution() {
         let public: SocketAddr = "93.184.216.34:443".parse().unwrap();
         let resolved = [
             "10.0.0.5:443".parse().unwrap(),
             public,
             "[::1]:443".parse().unwrap(),
             "169.254.169.254:443".parse().unwrap(),
+            "[64:ff9b::a9fe:a9fe]:443".parse().unwrap(),
         ];
 
-        let kept = public_addrs("example.com", resolved.into_iter()).expect("one public address");
+        let kept = public_only()
+            .allowed_socket_addrs_for_host("example.com", resolved.into_iter())
+            .expect("one public address");
 
         assert_eq!(kept, vec![public]);
+    }
+
+    #[test]
+    fn an_address_of_a_host_interface_is_refused_unless_the_admin_allows_it() {
+        let interface: IpAddr = "203.0.113.7".parse().unwrap();
+        let other_public: IpAddr = "203.0.113.8".parse().unwrap();
+        let allowed_by_admin =
+            UserUrlDestinationAllowlist::parse(&entries("203.0.113.7/32")).unwrap();
+        let allows = |allowlist: &UserUrlDestinationAllowlist, ip: IpAddr| {
+            allowlist
+                .filter_allowed_socket_addrs_for_host_reading_host_interface_addresses_once(
+                    &ip.to_string(),
+                    [SocketAddr::new(ip, 443)].into_iter(),
+                    || Ok(vec![interface, "127.0.0.1".parse().unwrap()]),
+                )
+                .is_ok()
+        };
+
+        assert!(!allows(&public_only(), interface));
+        assert!(!allows(
+            &public_only(),
+            "::ffff:203.0.113.7".parse().unwrap()
+        ));
+        assert!(allows(&public_only(), other_public));
+        assert!(allows(&allowed_by_admin, interface));
+    }
+
+    #[test]
+    fn when_the_interface_address_reader_fails_a_public_address_is_refused_and_an_allow_listed_address_is_allowed()
+     {
+        let failing_reader = || Err(nix::errno::Errno::EAFNOSUPPORT);
+        let public: SocketAddr = "203.0.113.8:443".parse().unwrap();
+        let allowed_by_address =
+            UserUrlDestinationAllowlist::parse(&entries("203.0.113.8/32")).unwrap();
+        let allowed_by_name = public_only().with_added_allowed_host_or_ip("git.example");
+
+        let refused = public_only()
+            .filter_allowed_socket_addrs_for_host_reading_host_interface_addresses_once(
+                "203.0.113.8",
+                [public].into_iter(),
+                failing_reader,
+            );
+
+        assert!(matches!(
+            refused,
+            Err(RefusedDestinationIpAddressReason::NetworkInterfaceAddressesReadFailed { .. })
+        ));
+        for (allowlist, host) in [
+            (allowed_by_address, "203.0.113.8"),
+            (allowed_by_name, "git.example"),
+        ] {
+            let kept = allowlist
+                .filter_allowed_socket_addrs_for_host_reading_host_interface_addresses_once(
+                    host,
+                    [public].into_iter(),
+                    failing_reader,
+                )
+                .expect("allow-listed destination");
+            assert_eq!(kept, vec![public], "{host}");
+        }
+    }
+
+    #[test]
+    fn interface_address_list_is_read_once_for_host_name_with_several_addresses() {
+        let reads = std::cell::Cell::new(0);
+        let resolved: [SocketAddr; 3] = [
+            "203.0.113.8:443".parse().unwrap(),
+            "203.0.113.9:443".parse().unwrap(),
+            "[2001:db8::8]:443".parse().unwrap(),
+        ];
+
+        let kept = public_only()
+            .filter_allowed_socket_addrs_for_host_reading_host_interface_addresses_once(
+                "example.com",
+                resolved.into_iter(),
+                || {
+                    reads.set(reads.get() + 1);
+                    Ok(vec!["203.0.113.9".parse().unwrap()])
+                },
+            )
+            .expect("public addresses");
+
+        assert_eq!(reads.get(), 1);
+        assert_eq!(kept, vec![resolved[0], resolved[2]]);
+    }
+
+    #[test]
+    fn odd_spellings_of_internal_addresses_are_refused() {
+        for url in [
+            "http://2130706433/",
+            "http://0x7f.1/",
+            "http://127.1/",
+            "http://127.0.0.1./",
+            "http://[::7f00:1]/",
+            "http://[::ffff:0:7f00:1]/",
+            "http://[::a9fe:a9fe]/",
+            "http://[64:ff9b:1::a00:1]/",
+            "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/",
+        ] {
+            let parsed = reqwest::Url::parse(url).expect("url");
+            assert!(
+                matches!(
+                    public_only().check_destination_url_is_allowed(&parsed),
+                    Err(DestinationUrlRejectedError::UnsafeAddress(_))
+                ),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_allow_list_host_name_with_a_trailing_dot_matches() {
+        let allowlist = UserUrlDestinationAllowlist::parse(&entries("Git.Lan.")).unwrap();
+        assert!(allowlist.is_host_name_on_admin_allow_list("git.lan"));
+        assert!(allowlist.is_host_name_on_admin_allow_list("git.lan."));
+        let added = public_only().with_added_allowed_host_or_ip("git.lan.");
+        assert!(added.is_host_name_on_admin_allow_list("git.lan"));
+    }
+
+    #[test]
+    fn the_interface_addresses_of_the_host_include_loopback() {
+        assert!(
+            get_local_network_interface_addresses()
+                .expect("interface list")
+                .contains(&IpAddr::V4(Ipv4Addr::LOCALHOST))
+        );
     }
 }

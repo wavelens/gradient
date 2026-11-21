@@ -15,7 +15,7 @@ use crate::extractors::Path;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use crate::permissions::PermissionMask;
-use crate::scope::{CacheScope, ProjectScope, Readable, Requires, can};
+use crate::scope::{CacheScope, Member, ProjectScope, Requires, can};
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -381,7 +381,7 @@ async fn user_access_summary(db: &WebDb, user: &MUser) -> WebResult<UserAccessSu
     responses((status = OK, description = "One row per person", body = Vec<PersonWithAccessToProjectOrCache>), WebError)
 )]
 pub async fn get_project_access(
-    scope: ProjectScope<Readable>,
+    scope: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<PersonWithAccessToProjectOrCache>>>> {
     Ok(ok_json(
         people_with_access::<ProjectOwner>(&scope.db().web_db, scope.id(), scope.managed()).await?,

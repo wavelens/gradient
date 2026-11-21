@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# This manifest is self-contained and doesn't inherit from a workspace. The standalone gradient-eval crate and the separate gradient-cli workspace can use this crate as a path dependency.
+[package]
+name = "gradient-wildcard"
+version = "2.0.1"
+edition = "2024"
+license = "AGPL-3.0-only"
+authors = ["Wavelens GmbH <info@wavelens.io>"]
+repository = "https://github.com/wavelens/gradient"
+publish = false
+
+[lib]
+name = "gradient_wildcard"
+path = "src/lib.rs"
+doctest = false

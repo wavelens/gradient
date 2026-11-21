@@ -190,15 +190,18 @@ mod tests {
 
     async fn apply(db: &DatabaseConnection, dir: &Path, project: StateProject) {
         let crypt_file = dir.join("crypt");
+        let transaction = sea_orm::TransactionTrait::begin(db).await.unwrap();
         let app = StateApplicator {
-            db,
+            db: &transaction,
             crypt_secret_file: crypt_file.to_str().unwrap(),
             credentials_dir: dir,
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
         app.apply_project_git_https_credentials(&HashMap::from([(project.name.clone(), project)]))
             .await
             .unwrap();
+        transaction.commit().await.unwrap();
     }
 
     #[tokio::test]

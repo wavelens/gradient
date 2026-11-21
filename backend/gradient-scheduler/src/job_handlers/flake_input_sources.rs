@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDateTime;
 use gradient_types::*;
-use gradient_util::glob::{glob_match, is_pattern};
+use gradient_util::glob::is_pattern;
+use gradient_wildcard::candidate_matches_wildcard_pattern;
 use gradient_wire::types::FlakeInputSourceWire;
 use tracing::warn;
 
@@ -84,7 +85,7 @@ fn merge_input_sources(
 fn is_tracked(name: &str, tracked: &[String]) -> bool {
     tracked
         .iter()
-        .any(|t| t == name || (is_pattern(t) && glob_match(t, name)))
+        .any(|t| t == name || (is_pattern(t) && candidate_matches_wildcard_pattern(t, name)))
 }
 
 #[cfg(test)]

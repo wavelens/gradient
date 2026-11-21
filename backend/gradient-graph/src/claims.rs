@@ -5,18 +5,29 @@
  */
 
 use anyhow::Context as _;
-use gradient_db::DbContext;
+use gradient_db::store_path_content_variant_trust::{
+    SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING,
+    build_sql_for_content_variants_needing_signature_from_store_hash_project_seeds,
+    content_variant_is_readable_by_project_sql,
+    project_cache_row_has_active_read_write_subscription_that_signs_outputs_and_cache_has_private_signing_key,
+};
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::StorePath;
 use gradient_sources::CacheSigner;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId};
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
 use sea_orm::{
-    ColumnTrait, EntityTrait, FromQueryResult, IntoActiveModel, QueryFilter, Statement, Value,
+    AccessMode, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, FromQueryResult,
+    IntoActiveModel, QueryFilter, Statement, TransactionTrait, Value,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
-use crate::nar::{insert_signatures, signer_for};
+use crate::nar::{
+    insert_signatures, share_lock_caches_for_signing_and_read_signatures_of_unlocked_caches,
+    signer_for,
+};
 
 const INSERT_CHUNK: usize = 1000;
 
@@ -39,44 +50,21 @@ fn claims_of_paths_sql() -> String {
 }
 
 fn claims_sql(jobs: &str) -> String {
+    let claimable =
+        build_sql_for_content_variants_needing_signature_from_store_hash_project_seeds(&format!(
+            "SELECT DISTINCT dout.hash, t.project \
+             FROM build_job bj \
+             JOIN derivation_output dout ON dout.derivation = bj.derivation \
+             JOIN evaluation e           ON e.id = bj.evaluation \
+             JOIN task t                 ON t.id = e.task \
+             WHERE {jobs}"
+        ));
     format!(
         r#"
-WITH RECURSIVE claim(hash, cache) AS (
-    SELECT dout.hash, pc.cache
-    FROM build_job bj
-    JOIN derivation_output dout ON dout.derivation = bj.derivation
-    JOIN evaluation e           ON e.id = bj.evaluation
-    JOIN task t                 ON t.id = e.task
-    JOIN project_cache pc       ON pc.project = t.project
-    WHERE {jobs} AND pc.sign_outputs
-    UNION
-    SELECT split_part(regexp_replace(r.token, '^/nix/store/', ''), '-', 1), claim.cache
-    FROM claim
-    JOIN cached_path cp ON cp.hash = claim.hash AND cp.file_hash IS NOT NULL
-    CROSS JOIN LATERAL unnest(string_to_array(cp."references", ' ')) r(token)
-    WHERE r.token <> ''
-      AND NOT EXISTS (
-          SELECT 1 FROM cached_path_signature s
-          WHERE s.cached_path = cp.id AND s.cache = claim.cache AND s.references_are_claimed)
-)
-SELECT cp.id AS cached_path, cp.hash, cp.package, cp.nar_hash, cp.nar_size, cp."references",
-       claim.cache,
-       coalesce(s.signature IS NOT NULL, false) AS cached_path_has_signature,
-       NOT EXISTS (
-           SELECT 1
-           FROM unnest(string_to_array(cp."references", ' ')) r(token)
-           LEFT JOIN cached_path referenced_cached_path
-             ON referenced_cached_path.hash
-                = split_part(regexp_replace(r.token, '^/nix/store/', ''), '-', 1)
-            AND referenced_cached_path.file_hash IS NOT NULL
-           WHERE r.token <> '' AND referenced_cached_path.id IS NULL)
-           AS all_referenced_paths_are_stored
-FROM claim
-JOIN cached_path cp ON cp.hash = claim.hash
-JOIN cache c        ON c.id = claim.cache
-LEFT JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = claim.cache
-WHERE cp.file_hash IS NOT NULL AND c.private_key <> ''
-  AND (s.signature IS NULL OR NOT s.references_are_claimed)
+SELECT claimable.*
+FROM ({claimable}) claimable
+JOIN cache c ON c.id = claimable.cache
+WHERE c.private_key <> ''
 "#
     )
 }
@@ -86,8 +74,8 @@ struct Claim {
     cached_path: CachedPathId,
     hash: String,
     package: String,
-    nar_hash: Option<String>,
-    nar_size: Option<i64>,
+    nar_hash: String,
+    nar_size: i64,
     references: Option<String>,
     cache: CacheId,
     cached_path_has_signature: bool,
@@ -95,8 +83,7 @@ struct Claim {
 }
 
 impl Claim {
-    fn signature(&self, signer: &CacheSigner, mapper: &StorePathMapper) -> Option<Vec<u8>> {
-        let (nar_hash, nar_size) = (self.nar_hash.as_deref()?, self.nar_size?);
+    fn signature(&self, signer: &CacheSigner, mapper: &StorePathMapper) -> Vec<u8> {
         let references: Vec<String> = self
             .references
             .as_deref()
@@ -105,13 +92,13 @@ impl Claim {
             .map(str::to_owned)
             .collect();
 
-        Some(signer.sign_stored_narinfo(
+        signer.sign_stored_narinfo(
             mapper,
-            &StorePath::from_stored(&self.hash, &self.package).full(),
-            &normalize_nar_hash(nar_hash),
-            nar_size as u64,
+            &StorePath::from_hash_and_name_without_validation(&self.hash, &self.package).full(),
+            &normalize_nar_hash(&self.nar_hash),
+            self.nar_size as u64,
             &references,
-        ))
+        )
     }
 }
 
@@ -130,6 +117,7 @@ pub(crate) async fn claim_reused_outputs(
         CLAIMS_OF_EVALUATION.bind([Value::Uuid(Some(evaluation.into_inner())), ids.into()]),
     )
     .await
+    .map(drop)
 }
 
 pub(crate) async fn claim_committed_paths(
@@ -140,64 +128,407 @@ pub(crate) async fn claim_committed_paths(
         return Ok(());
     }
 
-    sign_claims(ctx, CLAIMS_OF_PATHS.bind([hashes.to_vec().into()])).await
+    sign_claims(ctx, CLAIMS_OF_PATHS.bind([hashes.to_vec().into()]))
+        .await
+        .map(drop)
 }
 
-async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<()> {
-    let db = &ctx.worker_db;
-    let claims = Claim::find_by_statement(claims)
-        .all(db)
-        .await
-        .context("read the cached outputs left to claim")?;
+pub const PARENT_BUILD_PAGE_READ_STATEMENT_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEPENDENCY_OUTPUT_SIGNING_SELECT_STATEMENT_TIMEOUT: Duration = Duration::from_secs(60);
 
-    if claims.is_empty() {
-        return Ok(());
+/// A row with a signature from outside the graph writer, for later insertion by the graph writer.
+/// The row can store the public key of the cache at signing time. Private key material can never
+/// enter the row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureRowForGraphWriterInsert {
+    pub cached_path: CachedPathId,
+    pub cache: CacheId,
+    pub signature: Option<Vec<u8>>,
+    pub references_are_claimed: bool,
+    pub cache_public_key_at_signing: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct DependencyOutputPublishRoundResult {
+    pub last_handled_parent_build_id: Option<DerivationId>,
+    pub stopped_at_deadline_with_parent_builds_remaining: bool,
+    pub insert_messages_sent_to_graph_writer: usize,
+    pub failed_page_count: usize,
+    pub parent_build_ids_set_aside_in_publish_round: Vec<DerivationId>,
+    pub failure: Option<anyhow::Error>,
+}
+
+pub const PARENT_BUILD_SKIP_DURATION_AFTER_ONLY_PARENT_PAGE_PUBLISH_FAILURE: Duration =
+    Duration::from_secs(600);
+
+#[derive(Debug, Default)]
+pub(crate) struct PublishFailurePageSizeAndWaitingParentBuilds {
+    pub(crate) parent_builds_per_page: Option<usize>,
+    pub(crate) set_aside_end_by_parent_build: HashMap<DerivationId, Instant>,
+}
+
+impl PublishFailurePageSizeAndWaitingParentBuilds {
+    pub(crate) fn next_page_size_after_failures(
+        &self,
+        maximum_parent_builds_per_page: usize,
+    ) -> usize {
+        let maximum = maximum_parent_builds_per_page.max(1);
+        self.parent_builds_per_page
+            .unwrap_or(maximum)
+            .clamp(1, maximum)
     }
 
-    let signers = claim_signers(ctx, &claims).await?;
-    let created_at = now();
-    let rows: Vec<ACachedPathSignature> = claims
-        .iter()
-        .filter(|claim| !claim.cached_path_has_signature || claim.all_referenced_paths_are_stored)
-        .map(|claim| {
-            MCachedPathSignature {
-                id: CachedPathSignatureId::now_v7(),
-                cached_path: claim.cached_path,
-                cache: claim.cache,
-                signature: signers
-                    .get(&claim.cache)
-                    .and_then(Option::as_ref)
-                    .filter(|_| !claim.cached_path_has_signature)
-                    .and_then(|signer| claim.signature(signer, &ctx.cache_mapper(claim.cache))),
-                references_are_claimed: claim.all_referenced_paths_are_stored,
-                created_at,
-                ..Default::default()
-            }
-            .into_active_model()
+    pub(crate) fn drop_expired_set_asides_and_return_page_parent_builds_not_set_aside(
+        &mut self,
+        page: &[DerivationId],
+        now: Instant,
+    ) -> Vec<DerivationId> {
+        self.set_aside_end_by_parent_build
+            .retain(|_, set_aside_until| *set_aside_until > now);
+        page.iter()
+            .copied()
+            .filter(|parent_build| {
+                !self
+                    .set_aside_end_by_parent_build
+                    .contains_key(parent_build)
+            })
+            .collect()
+    }
+}
+
+pub(crate) async fn begin_read_only_transaction_and_set_statement_timeout(
+    db: &WorkerDb,
+    statement_timeout: Duration,
+) -> anyhow::Result<DatabaseTransaction> {
+    let transaction = db
+        .begin_with_config(None, Some(AccessMode::ReadOnly))
+        .await?;
+    transaction
+        .execute_unprepared(&format!(
+            "SET LOCAL statement_timeout = {}",
+            statement_timeout.as_millis()
+        ))
+        .await?;
+    Ok(transaction)
+}
+
+pub(crate) async fn read_page_of_parent_builds_with_dependency_outputs_to_publish(
+    db: &WorkerDb,
+    after: DerivationId,
+    upto: DerivationId,
+    parent_builds_per_page: usize,
+) -> anyhow::Result<Vec<DerivationId>> {
+    let transaction = begin_read_only_transaction_and_set_statement_timeout(
+        db,
+        PARENT_BUILD_PAGE_READ_STATEMENT_TIMEOUT,
+    )
+    .await?;
+    if !gradient_db::store_path_content_variant_trust::has_project_cache_subscription_for_stored_input_signing(
+        &transaction,
+    )
+    .await?
+    {
+        return Ok(Vec::new());
+    }
+    let page =
+        gradient_db::store_path_content_variant_trust::list_parent_build_derivation_ids_with_dependency_outputs_to_sign_page(
+            &transaction,
+            after,
+            upto,
+            parent_builds_per_page,
+        )
+        .await?;
+    transaction.commit().await?;
+    Ok(page)
+}
+
+pub(crate) async fn select_and_sign_dependency_outputs_of_parent_build_page(
+    ctx: &DbContext,
+    parents: &[DerivationId],
+) -> anyhow::Result<Vec<SignatureRowForGraphWriterInsert>> {
+    if parents.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let transaction = begin_read_only_transaction_and_set_statement_timeout(
+        &ctx.worker_db,
+        DEPENDENCY_OUTPUT_SIGNING_SELECT_STATEMENT_TIMEOUT,
+    )
+    .await?;
+    let ids: Vec<uuid::Uuid> = parents.iter().map(|d| d.into_inner()).collect();
+    let claims = query_claims(
+        &transaction,
+        SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING
+            .bind([ids.into()]),
+    )
+    .await?;
+    let signers = claim_signers(ctx, &transaction, &claims).await?;
+    transaction.commit().await?;
+    let claims_with_usable_signing_key_in_target_cache: Vec<Claim> = claims
+        .into_iter()
+        .filter(|claim| {
+            signers
+                .get(&claim.cache)
+                .is_some_and(|signer| signer.signer.is_some())
         })
         .collect();
+    Ok(build_cache_signature_rows_for_claims_with_public_keys(
+        ctx,
+        &claims_with_usable_signing_key_in_target_cache,
+        &signers,
+    )
+    .into_iter()
+    .map(
+        |(row, cache_public_key_at_signing)| SignatureRowForGraphWriterInsert {
+            cached_path: row.cached_path,
+            cache: row.cache,
+            signature: row.signature,
+            references_are_claimed: row.references_are_claimed,
+            cache_public_key_at_signing,
+        },
+    )
+    .collect())
+}
 
+pub(crate) async fn insert_signed_dependency_output_rows_in_graph_writer_transaction_after_allowed_recheck(
+    ctx: &DbContext,
+    rows: Vec<SignatureRowForGraphWriterInsert>,
+) -> anyhow::Result<()> {
+    let created_at = now();
     for chunk in rows.chunks(INSERT_CHUNK) {
-        insert_signatures(db, chunk.to_vec()).await?;
+        let still_publishable = recheck_signed_rows_still_publishable_and_share_lock_target_caches(
+            &ctx.worker_db,
+            chunk,
+        )
+        .await?;
+        insert_signatures(
+            &ctx.worker_db,
+            still_publishable
+                .iter()
+                .map(|row| {
+                    MCachedPathSignature {
+                        id: CachedPathSignatureId::now_v7(),
+                        cached_path: row.cached_path,
+                        cache: row.cache,
+                        signature: row.signature.clone(),
+                        references_are_claimed: row.references_are_claimed,
+                        created_at,
+                        ..Default::default()
+                    }
+                    .into_active_model()
+                })
+                .collect(),
+        )
+        .await?;
     }
-
     Ok(())
 }
 
-async fn claim_signers(
+gradient_db::sql_fn! {
+    SIGNED_ROWS_STILL_PUBLISHABLE_POSITIONS_SQL = signed_dependency_output_rows_still_publishable_sql,
+        params = [CachedPathIds(64), CacheIds(64), Texts("", 64), Bools(true, 64)],
+        tier = Bulk;
+}
+
+fn signed_dependency_output_rows_still_publishable_sql() -> String {
+    format!(
+        "SELECT signed_row_to_insert.position \
+         FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::bool[]) WITH ORDINALITY \
+              AS signed_row_to_insert(cached_path, cache, cache_public_key_at_signing, has_signature, position) \
+         JOIN cache cache_row_for_signed_claim ON cache_row_for_signed_claim.id = signed_row_to_insert.cache \
+         WHERE (NOT signed_row_to_insert.has_signature \
+                OR cache_row_for_signed_claim.public_key = signed_row_to_insert.cache_public_key_at_signing) \
+           AND EXISTS (SELECT 1 FROM project_cache signing_project_cache \
+                       WHERE signing_project_cache.cache = signed_row_to_insert.cache \
+                         AND {signing} AND {readable})",
+        signing = project_cache_row_has_active_read_write_subscription_that_signs_outputs_and_cache_has_private_signing_key(
+            "signing_project_cache"
+        ),
+        readable = content_variant_is_readable_by_project_sql(
+            "signed_row_to_insert.cached_path",
+            "signing_project_cache.project",
+            "signed_row_to_insert.cache",
+        ),
+    )
+}
+
+async fn recheck_signed_rows_still_publishable_and_share_lock_target_caches(
+    db: &WorkerDb,
+    rows: &[SignatureRowForGraphWriterInsert],
+) -> anyhow::Result<Vec<SignatureRowForGraphWriterInsert>> {
+    let caches_locked_by_share_lock_call =
+        gradient_db::caches::share_lock_caches_in_ascending_id_order_skipping_rows_locked_by_key_rotation_settings_edit_or_delete(
+            db,
+            rows.iter().map(|row| row.cache).collect(),
+        )
+        .await
+        .context("Lock the target caches for the signed rows of dependency outputs.")?;
+    let rows: Vec<&SignatureRowForGraphWriterInsert> = rows
+        .iter()
+        .filter(|row| {
+            caches_locked_by_share_lock_call
+                .iter()
+                .any(|cache| cache.id == row.cache)
+        })
+        .collect();
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let cached_paths: Vec<uuid::Uuid> = rows
+        .iter()
+        .map(|row| row.cached_path.into_inner())
+        .collect();
+    let caches: Vec<uuid::Uuid> = rows.iter().map(|row| row.cache.into_inner()).collect();
+    let signing_public_keys: Vec<String> = rows
+        .iter()
+        .map(|row| row.cache_public_key_at_signing.clone().unwrap_or_default())
+        .collect();
+    let has_signature: Vec<bool> = rows.iter().map(|row| row.signature.is_some()).collect();
+    let still_publishable_positions = db
+        .query_all_raw(SIGNED_ROWS_STILL_PUBLISHABLE_POSITIONS_SQL.bind([
+            cached_paths.into(),
+            caches.into(),
+            signing_public_keys.into(),
+            has_signature.into(),
+        ]))
+        .await
+        .context("Re-check signed rows for dependency outputs before insert.")?
+        .iter()
+        .map(|row| row.try_get::<i64>("", "position"))
+        .collect::<Result<HashSet<i64>, _>>()?;
+    Ok(rows
+        .into_iter()
+        .zip(1_i64..)
+        .filter(|(_, position)| still_publishable_positions.contains(position))
+        .map(|(row, _)| row.clone())
+        .collect())
+}
+
+async fn sign_claims(ctx: &DbContext, claims: Statement) -> anyhow::Result<usize> {
+    let mut claims = query_claims(&ctx.worker_db, claims).await?;
+    let caches = share_lock_caches_for_signing_and_read_signatures_of_unlocked_caches(
+        ctx,
+        sorted_distinct_cache_ids_of_claims(&claims),
+        claims.iter().map(|claim| claim.hash.clone()).collect(),
+    )
+    .await?;
+    claims.retain(|claim| !caches.signature_row_exists_in_unlocked_cache(claim.cache, &claim.hash));
+    let signers = build_signing_keys_by_cache_id(ctx, &caches.locked);
+    insert_cached_path_signature_rows_for_claims_and_return_new_signature_count(
+        ctx, &claims, &signers,
+    )
+    .await
+}
+
+async fn query_claims<C: ConnectionTrait>(db: &C, claims: Statement) -> anyhow::Result<Vec<Claim>> {
+    Claim::find_by_statement(claims)
+        .all(db)
+        .await
+        .context("read the cached outputs left to claim")
+}
+
+struct BinaryCacheClaimSigningKeys {
+    signer: Option<CacheSigner>,
+    public_key: String,
+}
+
+fn build_cache_signature_rows_for_claims_with_public_keys(
     ctx: &DbContext,
     claims: &[Claim],
-) -> anyhow::Result<HashMap<CacheId, Option<CacheSigner>>> {
+    signers: &HashMap<CacheId, BinaryCacheClaimSigningKeys>,
+) -> Vec<(MCachedPathSignature, Option<String>)> {
+    let created_at = now();
+    claims
+        .iter()
+        .filter(|claim| !claim.cached_path_has_signature || claim.all_referenced_paths_are_stored)
+        .map(|claim| {
+            let signer = signers
+                .get(&claim.cache)
+                .filter(|_| !claim.cached_path_has_signature)
+                .and_then(|signer| signer.signer.as_ref().map(|key| (key, &signer.public_key)));
+            let row = MCachedPathSignature {
+                id: CachedPathSignatureId::now_v7(),
+                cached_path: claim.cached_path,
+                cache: claim.cache,
+                signature: signer
+                    .map(|(key, _)| claim.signature(key, &ctx.cache_mapper(claim.cache))),
+                references_are_claimed: claim.all_referenced_paths_are_stored,
+                created_at,
+                ..Default::default()
+            };
+            (row, signer.map(|(_, public_key)| public_key.clone()))
+        })
+        .collect()
+}
+
+async fn insert_cached_path_signature_rows_for_claims_and_return_new_signature_count(
+    ctx: &DbContext,
+    claims: &[Claim],
+    signers: &HashMap<CacheId, BinaryCacheClaimSigningKeys>,
+) -> anyhow::Result<usize> {
+    let db = &ctx.worker_db;
+    let rows: Vec<MCachedPathSignature> =
+        build_cache_signature_rows_for_claims_with_public_keys(ctx, claims, signers)
+            .into_iter()
+            .map(|(row, _)| row)
+            .collect();
+
+    let newly_signed_cache_signature_row_count =
+        rows.iter().filter(|row| row.signature.is_some()).count();
+    for chunk in rows.chunks(INSERT_CHUNK) {
+        insert_signatures(
+            db,
+            chunk
+                .iter()
+                .cloned()
+                .map(IntoActiveModel::into_active_model)
+                .collect(),
+        )
+        .await?;
+    }
+
+    Ok(newly_signed_cache_signature_row_count)
+}
+
+async fn claim_signers<C: ConnectionTrait>(
+    ctx: &DbContext,
+    db: &C,
+    claims: &[Claim],
+) -> anyhow::Result<HashMap<CacheId, BinaryCacheClaimSigningKeys>> {
+    if claims.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let caches = ECache::find()
+        .filter(CCache::Id.is_in(sorted_distinct_cache_ids_of_claims(claims)))
+        .all(db)
+        .await
+        .context("load the caches a claim signs into")?;
+    Ok(build_signing_keys_by_cache_id(ctx, &caches))
+}
+
+fn sorted_distinct_cache_ids_of_claims(claims: &[Claim]) -> Vec<CacheId> {
     let mut ids: Vec<CacheId> = claims.iter().map(|c| c.cache).collect();
     ids.sort_unstable();
     ids.dedup();
+    ids
+}
 
-    Ok(ECache::find()
-        .filter(CCache::Id.is_in(ids))
-        .all(&ctx.worker_db)
-        .await
-        .context("load the caches a claim signs into")?
+fn build_signing_keys_by_cache_id(
+    ctx: &DbContext,
+    caches: &[MCache],
+) -> HashMap<CacheId, BinaryCacheClaimSigningKeys> {
+    caches
         .iter()
-        .map(|cache| (cache.id, signer_for(ctx, cache)))
-        .collect())
+        .map(|cache| {
+            (
+                cache.id,
+                BinaryCacheClaimSigningKeys {
+                    signer: signer_for(ctx, cache),
+                    public_key: cache.public_key.clone(),
+                },
+            )
+        })
+        .collect()
 }

@@ -13,7 +13,7 @@ use super::triggers::{
     build_task_trigger_row_from_config_and_flags,
     validate_trigger_config_and_return_config_to_store,
 };
-use crate::access::{Caller, ProjectAccess, caller_project_mask, has_permission, load_project};
+use crate::access::{Caller, ProjectAccess, caller_project_mask, load_project};
 use crate::api_spec::{ProjectPath, TaskPath};
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
@@ -29,18 +29,20 @@ use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, 
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_db::WebDb;
+use gradient_db::git_host_connection_repository_grants::load_task_project_and_grants_and_check_given_git_host_connection_for_task_repository_access;
 use gradient_types::actions::ActionConfig;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
 use gradient_db::DbContext;
-use gradient_sources::resolve_remote_ref;
+use gradient_sources::{SourceError, resolve_remote_ref};
 use gradient_types::consts::*;
-use gradient_types::input::{check_nix_restricted_evaluation_url_prefix, vec_to_hex};
+use gradient_types::input::{check_allowed_uri_prefix_has_remote_nix_scheme, vec_to_hex};
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
+use gradient_util::http_base_url::remove_user_name_and_password_from_urls_in_error_text;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
@@ -98,28 +100,43 @@ pub struct DuplicateTaskRequest {
 async fn fetch_remote_repository_head_commit_with_project_ssh_key(
     db: &DbContext,
     project: &MProject,
-    repository: &str,
+    repository: &RepositoryUrl,
 ) -> Result<Vec<u8>, String> {
     resolve_remote_ref(db, project, repository, None)
         .await
         .map_err(|e| {
-            tracing::warn!(error = %e, %repository, "Repository check failed");
+            warn_repository_check_failed_without_username_and_password(&e, repository);
             e.short_reason_for_user()
         })
 }
 
-fn validated_repository(repository: String) -> WebResult<String> {
-    let repository = repository.trim();
-    repository
+fn warn_repository_check_failed_without_username_and_password(
+    error: &SourceError,
+    repository: &RepositoryUrl,
+) {
+    tracing::warn!(
+        error = remove_user_name_and_password_from_urls_in_error_text(&error.to_string()),
+        repository = repository.git_connection_url_for_log_without_username_password_and_query(),
+        "Repository check failed"
+    );
+}
+
+fn parse_task_repository_url(repository: &str) -> WebResult<RepositoryUrl> {
+    Ok(repository
+        .trim()
         .parse::<RepositoryUrl>()
-        .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
-    Ok(repository.to_owned())
+        .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?)
+}
+
+fn validated_repository(repository: String) -> WebResult<String> {
+    parse_task_repository_url(&repository)?;
+    Ok(repository.trim().to_owned())
 }
 
 fn validate_extra_allowed_uri_prefixes(prefixes: Vec<String>) -> WebResult<Vec<String>> {
     Ok(prefixes
         .iter()
-        .map(|prefix| check_nix_restricted_evaluation_url_prefix(prefix.trim()))
+        .map(|prefix| check_allowed_uri_prefix_has_remote_nix_scheme(prefix.trim()))
         .collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -242,7 +259,7 @@ pub async fn get(
     operation_id = "createTask",
     tag = "tasks",
     summary = "Create task",
-    description = "Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. `git_host_connection` selects the connection to the Git host. Without it, the task gets the one connection that fits the repository, if exactly one fits. `report_status` defaults to whether that connection reports commit status.",
+    description = "Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. `git_host_connection` selects the connection to the Git host. Without it, the task gets the one connection that fits the repository, if exactly one fits. Team or instance connections fit only projects with a repository grant for that connection and repository, for explicit selection through `git_host_connection` and for automatic selection. `report_status` defaults to whether that connection reports commit status.",
     params(("project" = String, Path)),
     request_body = MakeTaskRequest,
     responses((status = OK, description = "Created a task.", body = CreatedEntityResponse), WebError)
@@ -465,7 +482,11 @@ pub async fn patch_task(
         body.repository.as_deref(),
         task.git_host_connection,
     ) {
-        check_git_host_connection_fits_task(&db.web_db, &project, repository.trim(), connection)
+        let task_with_new_repository_url = MTask {
+            repository: repository.trim().to_owned(),
+            ..task.clone()
+        };
+        check_git_host_connection_fits_task(&db.web_db, &task_with_new_repository_url, connection)
             .await?;
     }
     let evaluation_inputs_changed = repository_changed
@@ -715,7 +736,7 @@ pub async fn post_task_check_repository(
     let checks_saved_url = requested
         .as_deref()
         .is_none_or(|url| url.trim() == task.repository);
-    let repository = validated_repository(requested.unwrap_or_else(|| task.repository.clone()))?;
+    let repository = parse_task_repository_url(requested.as_deref().unwrap_or(&task.repository))?;
     let result =
         fetch_remote_repository_head_commit_with_project_ssh_key(&db, &project, &repository).await;
     if checks_saved_url {
@@ -752,7 +773,7 @@ pub async fn check_project_repository_can_be_cloned(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::CreateTask>>,
     JsonBody(body): JsonBody<RepositoryAccessCheckRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let repository = validated_repository(body.repository.trim().to_owned())?;
+    let repository = parse_task_repository_url(&body.repository)?;
     let head = fetch_remote_repository_head_commit_with_project_ssh_key(&db, &project, &repository)
         .await
         .map_err(|reason| TaskRefusal::RepositoryCheckFailed { reason })?;
@@ -872,7 +893,7 @@ pub async fn duplicate_task(
     operation_id = "transferTask",
     tag = "tasks",
     summary = "Move task to another project",
-    description = "Move the task to the project in the request body. The task owner can move the task. A member with edit-task permission can also move the task, but that member must also have create-task permission in the target project. Reject tasks and target projects under state management. A task can use a connection to a Git host in repository settings or in an action to open a pull request. Reject that task if the connection is unavailable to the target project. Return `409` for a name already present in the target project.",
+    description = "Move the task to the project in the request body. The caller needs edit-task permission in the current project and create-task permission in the target project. Reject tasks and target projects under state management. Return `409` while the task has running evaluations or exec jobs. A task can use a connection to a Git host in repository settings or in an action to open a pull request. Reject that task if the connection is unavailable to the target project. A connection of the instance or of a team also needs a grant for the task repository in the target project. Return `409` for a name already present in the target project. Both projects receive the audit event.",
     params(TaskPath),
     request_body = TransferOwnershipRequest,
     responses((status = OK, description = "Task moved", body = String, content_type = "application/json"), WebError)
@@ -885,28 +906,11 @@ pub async fn post_task_transfer(
         api_key,
         db,
         ..
-    }: TaskScope<Member>,
+    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     audit: Audit,
     JsonBody(body): JsonBody<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
-
-    let is_admin = has_permission(
-        &db.web_db,
-        user.id,
-        project.id,
-        Permission::EditTask,
-        api_key_ref,
-    )
-    .await?;
-    let is_owner = task.created_by == user.id;
-    if !is_admin && !is_owner {
-        return Err(TaskRefusal::TransferNotPermitted.into());
-    }
-
-    if task.managed {
-        return Err(SharedRefusal::StateManaged(Change::TransferOwnership, Resource::Task).into());
-    }
 
     let new_project = load_project(
         &db,
@@ -928,6 +932,11 @@ pub async fn post_task_transfer(
     {
         return Err(TaskRefusal::TaskUsesGitHostConnectionTargetProjectCannotUse.into());
     }
+    if gradient_db::tasks::task_has_active_evaluation_or_unfinished_exec_job(&db.web_db, task.id)
+        .await?
+    {
+        return Err(TaskRefusal::TaskCannotMoveProjectWhileRunningEvaluationsOrExecJobs.into());
+    }
 
     let moved = gradient_db::tasks::move_to_project(&db.web_db, task, new_project.id)
         .await
@@ -935,9 +944,12 @@ pub async fn post_task_transfer(
         .or_not_found(Resource::Task)?;
 
     audit
-        .write(
+        .write_for_each_owner(
             Action::TaskMoveToProject,
-            EventOwner::task(new_project.id, moved.id),
+            &[
+                EventOwner::task(project.id, moved.id),
+                EventOwner::task(new_project.id, moved.id),
+            ],
             serde_json::json!({
                 "task": moved.name,
                 "from_project_id": project.id.to_string(),
@@ -973,12 +985,54 @@ async fn task_uses_git_host_connection_unusable_by_target_project(
             }
         }))
         .collect();
-    if used.is_empty() {
-        return Ok(false);
+    let task_with_target_project = MTask {
+        project: target.id,
+        ..task.clone()
+    };
+    for connection in used {
+        if load_task_project_and_grants_and_check_given_git_host_connection_for_task_repository_access(
+            db,
+            &task_with_target_project,
+            connection,
+        )
+        .await?
+        .is_err()
+        {
+            return Ok(true);
+        }
     }
-    let usable = gradient_db::git_host_connections::list_git_host_connections_available_to_project(
-        db, target,
-    )
-    .await?;
-    Ok(used.iter().any(|id| !usable.iter().any(|c| c.id == *id)))
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repository_check_failed_log_hides_user_name_and_password_from_url_and_error_text() {
+        let log_output_temp_file = tempfile::NamedTempFile::new().unwrap();
+        let captured_log_format_subscriber = tracing_subscriber::fmt()
+            .with_writer(Arc::new(log_output_temp_file.reopen().unwrap()))
+            .with_ansi(false)
+            .finish();
+        let git_error_with_user_name_and_password_in_repository_url = SourceError::GitCommand(
+            "failed to fetch 'https://alice:s3cret@git.example.com/o/r': 401".to_owned(),
+        );
+
+        tracing::subscriber::with_default(captured_log_format_subscriber, || {
+            warn_repository_check_failed_without_username_and_password(
+                &git_error_with_user_name_and_password_in_repository_url,
+                &"https://alice:s3cret@git.example.com/o/r".parse().unwrap(),
+            )
+        });
+
+        let captured_log_output_text =
+            std::fs::read_to_string(log_output_temp_file.path()).unwrap();
+        assert!(
+            captured_log_output_text.contains("Repository check failed")
+                && !captured_log_output_text.contains("alice")
+                && !captured_log_output_text.contains("s3cret"),
+            "The warning from the repository check does show the user name or password: {captured_log_output_text}"
+        );
+    }
 }

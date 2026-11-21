@@ -63,6 +63,7 @@ pub async fn substitute_log(
                     id: e.id,
                     url: e.url,
                     http1_only: e.http1_only,
+                    credential: None,
                 })
                 .collect::<Vec<_>>()
         }
@@ -89,7 +90,7 @@ pub async fn substitute_log(
         return Ok(());
     };
 
-    match fetch_upstream_log(&sources, drv_basename).await {
+    match fetch_upstream_log(&db.user_supplied_url_http_client, &sources, drv_basename).await {
         Some(body) => {
             if let Err(e) = db.storage.log_storage.append(attempt_id, &body).await {
                 warn!(error = %e, "substitute_log: log_storage.append failed");

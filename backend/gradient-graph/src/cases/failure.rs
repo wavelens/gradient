@@ -15,6 +15,7 @@ use gradient_wire::types::BuildFailureKind;
 use super::{
     A, A_OUT, A1, A1_OUT, A2, A2_OUT, B, B_OUT, B_OUT2, BUILDER_EXIT, C, C_OUT, Case, D, D_OUT, G,
     G_OUT, H, H_OUT, P, P_OUT, Q, Q_OUT, R, R_OUT, S, S_OUT, X, X_OUT, Y, Y_OUT, chain, diamond,
+    nar, with_references,
 };
 
 #[tokio::test]
@@ -841,6 +842,8 @@ async fn f11_a_dependency_failure_leaves_a_dispatched_substitution_to_its_report
 
     case.build_started(A).await;
     case.build_output(A, true).await;
+    case.commit_nar(with_references(nar(A_OUT, "a"), &[(A_OUT, "a")]))
+        .await;
     case.build_completed(A).await;
 
     assert_eq!(

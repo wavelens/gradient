@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::delete_nar_from_cache;
+use super::helpers::{content_variant_served_by_cache, delete_nar_from_cache};
 use super::refusal::CacheRefusal;
 use crate::api_spec::CachePath;
 use crate::audit::Audit;
@@ -87,10 +87,10 @@ impl NarDetail {
             store_path: original_text(mapper, path.as_store_path().base()),
             hash: original_text(mapper, path.hash),
             package: path.package,
-            nar_size: path.nar_size,
+            nar_size: Some(path.nar_size),
             file_size: path.file_size,
-            file_hash: path.file_hash,
-            nar_hash: path.nar_hash,
+            file_hash: Some(path.file_hash),
+            nar_hash: Some(path.nar_hash),
             references: references
                 .into_iter()
                 .map(|reference| original_text(mapper, reference))
@@ -228,14 +228,19 @@ pub async fn show(
     let mapper = db.cache_mapper(cache.id);
     let hash = stored_hash(&mapper, &hash)?;
 
-    let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash)
+    let cp = content_variant_served_by_cache(&db.web_db, cache.id, &hash)
         .await?
         .or_not_found(Resource::Path)?;
     let sig = gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
         .await?
         .or_not_found(Resource::Signature)?;
-    let references =
-        gradient_db::graph::runtime_closure::references_for_hash(&db.web_db, &hash).await?;
+    let references = cp
+        .references
+        .as_deref()
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
     let pinned_by_username = match sig.pinned_by_user_id {
         Some(user) => by_id::<EUser, _>(&db.web_db, user)
             .await?
@@ -258,23 +263,21 @@ async fn get_cache_nar_store_path_and_hashes_to_pin_or_unpin(
     include_referenced_paths: bool,
 ) -> WebResult<(String, Vec<String>)> {
     let stored = stored_hash(&db.cache_mapper(cache.id), hash)?;
-    let cp = gradient_db::cached_paths::by_hash(&db.web_db, &stored)
-        .await?
-        .or_not_found(Resource::Path)?;
-    gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
-        .await?
-        .or_not_found(Resource::Signature)?;
+    let cp = gradient_db::cached_paths::find_cached_path_for_cache_and_store_path_hash_ignoring_signature_and_active(
+        &db.web_db, cache.id, &stored,
+    )
+    .await?
+    .or_not_found(Resource::Path)?;
     let store_path = cp.store_path();
     if !include_referenced_paths {
         return Ok((store_path, vec![stored]));
     }
 
-    let closure = gradient_db::graph::sbom::with_referenced_paths(
-        &db.web_db,
-        std::collections::HashMap::from([(stored, cp)]),
+    let closure = gradient_db::cached_paths::collect_store_path_hashes_held_by_cache_for_closure(
+        &db.web_db, cache.id, &stored,
     )
     .await?;
-    Ok((store_path, closure.into_keys().collect()))
+    Ok((store_path, closure))
 }
 
 #[utoipa::path(
@@ -396,15 +399,10 @@ pub async fn available(
         return Err(CacheRefusal::MissingHashQuery.into());
     }
     let hash = stored_hash(&db.cache_mapper(cache.id), &hash)?;
-    let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash).await?;
-    let exists = if let Some(cp) = cp {
-        gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
-            .await?
-            .is_some()
-    } else {
-        false
-    };
-    Ok(ok_json(NarAvailable { available: exists }))
+    let available = content_variant_served_by_cache(&db.web_db, cache.id, &hash)
+        .await?
+        .is_some();
+    Ok(ok_json(NarAvailable { available }))
 }
 
 #[utoipa::path(
@@ -433,4 +431,371 @@ pub async fn delete(
     audit.write(Action::CacheNarDelete, EventOwner::cache(cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "cache_name": cache.name, "hash": hash, "store_path": original_text(&mapper, cp.store_path()), "ref_counted_others": outcome.ref_counted_others, }))
     .await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod pinning_cached_paths_tests {
+    use super::*;
+    use gradient_fixtures::store_path_content_variants::{
+        FIRST_KEY, SHARED, UNTRUSTED, two_variants_of_one_hash_and_one_untrusted_hash,
+    };
+    use gradient_test_support::state::TestState;
+
+    #[tokio::test]
+    async fn pinning_store_path_with_references_pins_all_claims_of_cache_c1_on_closure_and_leaves_cache_c2_claim_on_same_hash_unpinned()
+     {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET \"references\" = '{UNTRUSTED}-untrusted' \
+                 WHERE nar_object_storage_key = '{FIRST_KEY}'"
+            ))
+            .await;
+        let state = TestState::new()
+            .web_db(readers.db.connection())
+            .worker_db(readers.db.connection())
+            .build();
+        let db = state.db();
+        let cache = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, readers.cache_one)
+            .await
+            .expect("Cache Loading")
+            .expect("Cache present");
+
+        let (_, mut hashes) =
+            get_cache_nar_store_path_and_hashes_to_pin_or_unpin(&db, &cache, SHARED, true)
+                .await
+                .expect("Closure load");
+        hashes.sort();
+        let pinned_by_user_id: UserId = readers
+            .db
+            .texts("SELECT id::text FROM \"user\" LIMIT 1")
+            .await[0]
+            .parse::<uuid::Uuid>()
+            .expect("User ID")
+            .into();
+        let pinned_claim_row_count =
+            gradient_db::cached_paths::set_claim_pin_timestamp_and_user_for_cached_path_hashes(
+                &db.web_db,
+                cache.id,
+                pinned_by_user_id,
+                &hashes,
+            )
+            .await
+            .expect("Test performed pinning");
+        let pinned_cached_path_nar_object_storage_keys = readers
+            .db
+            .texts(
+                "SELECT cp.nar_object_storage_key FROM cached_path_signature s \
+                 JOIN cached_path cp ON cp.id = s.cached_path WHERE s.pinned_at IS NOT NULL \
+                 ORDER BY cp.hash",
+            )
+            .await;
+        let untrusted_nar_object_storage_key = readers
+            .db
+            .texts(&format!(
+                "SELECT nar_object_storage_key FROM cached_path WHERE hash = '{UNTRUSTED}'"
+            ))
+            .await
+            .remove(0);
+
+        assert_eq!(
+            (
+                hashes,
+                pinned_claim_row_count,
+                pinned_cached_path_nar_object_storage_keys
+            ),
+            (
+                vec![SHARED.to_owned(), UNTRUSTED.to_owned()],
+                2,
+                vec![FIRST_KEY.to_owned(), untrusted_nar_object_storage_key]
+            ),
+            "Cache C1 can pin its claim to the shared hash and its claim to the referenced hash. No pin exists for the claim of cache C2 to the other copy of the shared hash."
+        );
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn pin_store_path_with_references_pins_referenced_path_with_unsigned_placeholder_claim_and_garbage_collection_scan_does_not_list_it_as_deletable()
+     {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET \"references\" = '{UNTRUSTED}-untrusted' \
+                 WHERE nar_object_storage_key = '{FIRST_KEY}'; \
+                 UPDATE cached_path_signature s SET signature = NULL \
+                 FROM cached_path cp WHERE cp.id = s.cached_path \
+                   AND cp.hash = '{UNTRUSTED}' AND s.cache = '{}'",
+                readers.cache_one
+            ))
+            .await;
+        let state = TestState::new()
+            .web_db(readers.db.connection())
+            .worker_db(readers.db.connection())
+            .build();
+        let db = state.db();
+        let cache = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, readers.cache_one)
+            .await
+            .expect("Cache Loading")
+            .expect("Cache present");
+        let pinned_by_user_id: UserId = readers
+            .db
+            .texts("SELECT id::text FROM \"user\" LIMIT 1")
+            .await[0]
+            .parse::<uuid::Uuid>()
+            .expect("User ID")
+            .into();
+
+        let (_, hashes) =
+            get_cache_nar_store_path_and_hashes_to_pin_or_unpin(&db, &cache, SHARED, true)
+                .await
+                .expect("Closure load");
+        gradient_db::cached_paths::set_claim_pin_timestamp_and_user_for_cached_path_hashes(
+            &db.web_db,
+            cache.id,
+            pinned_by_user_id,
+            &hashes,
+        )
+        .await
+        .expect("Test performed pinning");
+        let referenced_claim_is_pinned = readers
+            .db
+            .texts(&format!(
+                "SELECT (s.pinned_at IS NOT NULL)::text FROM cached_path_signature s \
+                 JOIN cached_path cp ON cp.id = s.cached_path \
+                 WHERE cp.hash = '{UNTRUSTED}' AND s.cache = '{}'",
+                readers.cache_one
+            ))
+            .await;
+        let deletable = gradient_db::maintenance::gc::scan_deletable_path_hashes(
+            &db.worker_db,
+            gradient_types::now() + chrono::Duration::days(1),
+        )
+        .await
+        .expect("Garbage collection scan");
+
+        assert_eq!(
+            (
+                referenced_claim_is_pinned,
+                deletable.contains(&UNTRUSTED.to_owned())
+            ),
+            (vec!["true".to_owned()], false),
+            "Cache C1 can pin its own unsigned placeholder claim for the referenced hash. The garbage collection scan based on elapsed time does not list that hash as removable."
+        );
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn pin_store_path_with_only_unsigned_claim_pins_claim_and_stored_closure() {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET \"references\" = '{UNTRUSTED}-untrusted' \
+                 WHERE nar_object_storage_key = '{FIRST_KEY}'; \
+                 UPDATE cached_path_signature SET signature = NULL WHERE cache = '{}'",
+                readers.cache_one
+            ))
+            .await;
+        let state = TestState::new()
+            .web_db(readers.db.connection())
+            .worker_db(readers.db.connection())
+            .build();
+        let db = state.db();
+        let cache = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, readers.cache_one)
+            .await
+            .expect("Cache Loading")
+            .expect("Cache present");
+        let pinned_by_user_id: UserId = readers
+            .db
+            .texts("SELECT id::text FROM \"user\" LIMIT 1")
+            .await[0]
+            .parse::<uuid::Uuid>()
+            .expect("User ID")
+            .into();
+
+        let (_, hashes) =
+            get_cache_nar_store_path_and_hashes_to_pin_or_unpin(&db, &cache, SHARED, true)
+                .await
+                .expect("Closure load");
+        let pinned_claim_row_count =
+            gradient_db::cached_paths::set_claim_pin_timestamp_and_user_for_cached_path_hashes(
+                &db.web_db,
+                cache.id,
+                pinned_by_user_id,
+                &hashes,
+            )
+            .await
+            .expect("Test performed pinning");
+        let pinned_hashes = readers
+            .db
+            .texts(&format!(
+                "SELECT cp.hash FROM cached_path_signature s \
+                 JOIN cached_path cp ON cp.id = s.cached_path \
+                 WHERE s.pinned_at IS NOT NULL AND s.cache = '{}' ORDER BY cp.hash",
+                readers.cache_one
+            ))
+            .await;
+
+        assert_eq!(
+            (pinned_claim_row_count, pinned_hashes),
+            (2, vec![SHARED.to_owned(), UNTRUSTED.to_owned()]),
+            "Cache C1 can pin the claim for the shared hash without a signature. Claims on referenced hashes also fall under that pin."
+        );
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn unpin_after_deactivated_cache_removes_pin_and_gc_scan_lists_path_deletable_again() {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET \"references\" = '{UNTRUSTED}-untrusted' \
+                 WHERE nar_object_storage_key = '{FIRST_KEY}'"
+            ))
+            .await;
+        let state = TestState::new()
+            .web_db(readers.db.connection())
+            .worker_db(readers.db.connection())
+            .build();
+        let db = state.db();
+        let cache = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, readers.cache_one)
+            .await
+            .expect("Cache Loading")
+            .expect("Cache present");
+        let pinned_by_user_id: UserId = readers
+            .db
+            .texts("SELECT id::text FROM \"user\" LIMIT 1")
+            .await[0]
+            .parse::<uuid::Uuid>()
+            .expect("User ID")
+            .into();
+        let (_, hashes) =
+            get_cache_nar_store_path_and_hashes_to_pin_or_unpin(&db, &cache, SHARED, true)
+                .await
+                .expect("Closure load");
+        gradient_db::cached_paths::set_claim_pin_timestamp_and_user_for_cached_path_hashes(
+            &db.web_db,
+            cache.id,
+            pinned_by_user_id,
+            &hashes,
+        )
+        .await
+        .expect("Test performed pinning");
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cache SET active = false WHERE id = '{}'",
+                readers.cache_one
+            ))
+            .await;
+
+        let (_, hashes) =
+            get_cache_nar_store_path_and_hashes_to_pin_or_unpin(&db, &cache, SHARED, true)
+                .await
+                .expect("Closure load after deactivation");
+        let unpinned_claim_row_count =
+            gradient_db::cached_paths::clear_cache_claim_pin_for_cached_path_hashes(
+                &db.web_db, cache.id, &hashes,
+            )
+            .await
+            .expect("Test removed pin");
+        let deletable = gradient_db::maintenance::gc::scan_deletable_path_hashes(
+            &db.worker_db,
+            gradient_types::now() + chrono::Duration::days(1),
+        )
+        .await
+        .expect("Garbage collection scan");
+
+        assert_eq!(
+            (
+                unpinned_claim_row_count,
+                deletable.contains(&UNTRUSTED.to_owned())
+            ),
+            (2, true),
+            "Cache C1 can release its pin once the cache is inactive. The scan for garbage collection can then list the referenced hash as deletable again."
+        );
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_pin_path_on_inactive_cache_pins_claim() {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cache SET active = false WHERE id = '{}'",
+                readers.cache_one
+            ))
+            .await;
+        let state = TestState::new()
+            .web_db(readers.db.connection())
+            .worker_db(readers.db.connection())
+            .build();
+        let db = state.db();
+        let cache = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, readers.cache_one)
+            .await
+            .expect("Cache Loading")
+            .expect("Cache present");
+        let pinned_by_user_id: UserId = readers
+            .db
+            .texts("SELECT id::text FROM \"user\" LIMIT 1")
+            .await[0]
+            .parse::<uuid::Uuid>()
+            .expect("User ID")
+            .into();
+
+        let (_, hashes) =
+            get_cache_nar_store_path_and_hashes_to_pin_or_unpin(&db, &cache, UNTRUSTED, false)
+                .await
+                .expect("Path lookup");
+        let pinned_claim_row_count =
+            gradient_db::cached_paths::set_claim_pin_timestamp_and_user_for_cached_path_hashes(
+                &db.web_db,
+                cache.id,
+                pinned_by_user_id,
+                &hashes,
+            )
+            .await
+            .expect("Test performed pinning");
+
+        assert_eq!(
+            pinned_claim_row_count, 1,
+            "Inactive cache C1 can pin the paths that the cache stores."
+        );
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn pinning_path_stored_only_in_other_cache_returns_same_not_found_status_and_message_as_path_no_cache_stores()
+     {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        let state = TestState::new()
+            .web_db(readers.db.connection())
+            .worker_db(readers.db.connection())
+            .build();
+        let db = state.db();
+        let cache = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, readers.cache_two)
+            .await
+            .expect("Cache Loading")
+            .expect("Cache present");
+
+        let mut refusals = Vec::new();
+        for hash in [UNTRUSTED, "44444444444444444444444444444444"] {
+            let refusal =
+                get_cache_nar_store_path_and_hashes_to_pin_or_unpin(&db, &cache, hash, false)
+                    .await
+                    .expect_err("Path lookup refused");
+            refusals.push((refusal.status(), refusal.code(), refusal.public_message()));
+        }
+
+        assert_eq!(
+            (refusals[0].0, &refusals[0]),
+            (StatusCode::NOT_FOUND, &refusals[1]),
+            "Pins by cache C2 to a path that only cache C1 can store get the same not found status and message as a path that no cache can store."
+        );
+        readers.db.finish().await;
+    }
 }

@@ -663,13 +663,19 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_connection_without_host_url_works_but_is_never_suggested() {
+    fn selected_connection_without_base_url_fails_and_is_not_suggested() {
+        let fit = RepositoryFit::of(
+            GITEA_REPOSITORY,
+            &gradient_types::MGitHostConnection {
+                git_host_type: gradient_types::GitHostType::Gitea,
+                base_url: None,
+                ..Default::default()
+            },
+        );
+        assert!(!fit.fits && !fit.can_be_selected, "{fit:?}");
         let mut without_host_url = connection(false);
-        without_host_url.repository_fit = Some(RepositoryFit {
-            fits: false,
-            can_be_selected: true,
-            reason: Some("No host URL".to_owned()),
-        });
+        without_host_url.base_url = None;
+        without_host_url.repository_fit = Some(fit.clone());
         let selected = check_task_repository_readable_git_host_webhook_and_commit_status(&input(
             GITEA_REPOSITORY,
             Some(&without_host_url),
@@ -681,7 +687,8 @@ mod tests {
             None,
             &available,
         ));
-        assert_eq!(selected.connection.state, Ok);
+        assert_eq!(selected.connection.state, Failing);
+        assert_eq!(Some(selected.connection.detail), fit.reason);
         assert!(
             !suggested.connection.detail.contains("fits"),
             "{}",

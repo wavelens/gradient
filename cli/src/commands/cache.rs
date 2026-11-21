@@ -9,6 +9,9 @@ use crate::commands::cache_sharing;
 use crate::commands::cache_upload;
 use crate::commands::cache_upstream;
 use crate::commands::completion;
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand, NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES,
+};
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
 use crate::error::CliError;
 use crate::input::{
@@ -23,6 +26,7 @@ use connector::webhooks::WebhookResource;
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Create a cache with missing fields opened in $EDITOR
+    #[command(add = McpToolMayRunCommand)]
     Create {
         /// Name
         #[arg(short, long)]
@@ -41,8 +45,10 @@ pub enum Commands {
         max_storage_gb: i64,
     },
     /// List the caches of the current user
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Edit a cache
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -64,6 +70,7 @@ pub enum Commands {
         pull_through: Option<bool>,
     },
     /// Delete a cache
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -73,12 +80,14 @@ pub enum Commands {
         yes: bool,
     },
     /// Print the public key of a cache
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
     /// Generate a new signing key for the cache. Store paths keep old signatures. Nix clients with old public keys can still verify them. Update ``trusted-public-keys`` with the new key.
+    #[command(add = McpToolMayRunCommand)]
     RotateKey {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -88,6 +97,7 @@ pub enum Commands {
     /// No request is sent to the server - bring your own API key (issued via the
     /// frontend or `gradient` UI). Intended to be run as root (e.g. sudo) to
     /// install into /etc/nix/netrc.
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     InstallNetrc {
         /// Gradient server URL (e.g. https://gradient.example.com)
         #[arg(short, long)]
@@ -100,7 +110,7 @@ pub enum Commands {
         cache: String,
         /// Path to the netrc file to update (default: /etc/nix/netrc)
         #[arg(short = 'f', long, default_value = "/etc/nix/netrc")]
-        netrc_file: String,
+        netrc_file: std::path::PathBuf,
     },
     /// Manage individual NARs in a cache
     Nar {
@@ -108,32 +118,38 @@ pub enum Commands {
         cmd: cache_nar::Commands,
     },
     /// Upload NAR(s) to a cache
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Upload(crate::commands::cache_upload::UploadArgs),
     /// Re-enable a Disabled Cache
+    #[command(add = McpToolMayRunCommand)]
     Enable {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
     /// Disable the cache. Nix clients and builds no longer use that cache until a later command can turn that cache back on.
+    #[command(add = McpToolMayRunCommand)]
     Disable {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
     /// Allow anyone to read the cache without login
+    #[command(add = McpToolMayRunCommand)]
     Publish {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
     /// Make a public cache private again.
+    #[command(add = McpToolMayRunCommand)]
     Unpublish {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
     /// List projects that subscribe to caches
+    #[command(add = McpToolMayRunCommand)]
     Subscribers {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -373,12 +389,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                 out.err(ExitKind::Usage, format!("Invalid server URL: '{}'", server));
             }
 
-            crate::netrc::replace_entry_for_host_atomically(
-                std::path::Path::new(&netrc_file),
-                &machine_host,
-                &token,
-            )
-            .unwrap_or_else(|e| out.fail(e));
+            crate::netrc::replace_entry_for_host_atomically(&netrc_file, &machine_host, &token)
+                .unwrap_or_else(|e| out.fail(e));
 
             out.ok(&serde_json::json!({
                 "installed": true,
@@ -388,7 +400,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             }));
             out.human(format!(
                 "netrc credentials for cache '{}' (machine '{}') installed into '{}'.",
-                cache, machine_host, netrc_file
+                cache,
+                machine_host,
+                netrc_file.display()
             ));
         }
 

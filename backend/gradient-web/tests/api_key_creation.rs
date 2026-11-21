@@ -5,10 +5,11 @@
  */
 
 use axum::http::StatusCode;
-use gradient_entity::{api, ids::*};
+use gradient_entity::{api, ids::*, session};
 use gradient_fixtures::mock::{all_statements, exec_ok, mock_db};
 use gradient_fixtures::rows::{
-    cache, cache_member, cache_view_role, project, project_member, superuser, view_role,
+    cache, cache_member, cache_view_role, live_session, project, project_member, superuser, user,
+    view_role,
 };
 use gradient_test_support::web::{bearer, make_test_server, with_auth, with_auth_as};
 use gradient_types::consts::{BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_VIEW_ID};
@@ -75,6 +76,8 @@ async fn unpinned_key_always_gets_view_project() {
     let (db, session_id) = signed_in_owner_without_key_named_like_request();
     let expected = mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]);
     let conn = db
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![live_session(session_id)]])
         .append_query_results([vec![api::Model {
             permission: expected,
             ..Default::default()
@@ -101,6 +104,29 @@ async fn unpinned_key_always_gets_view_project() {
 }
 
 #[tokio::test]
+async fn post_user_keys_returns_401_and_inserts_no_api_key_row_when_session_deleted_after_authentication()
+ {
+    let (db, session_id) = signed_in_owner_without_key_named_like_request();
+    let conn = db
+        .append_query_results([vec![user()]])
+        .append_query_results([Vec::<session::Model>::new()])
+        .into_connection();
+
+    let res = make_test_server(conn.clone())
+        .post("/api/v1/user/keys")
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "name": "deploy", "permissions": ["triggerEvaluation"] }))
+        .await;
+
+    res.assert_status(StatusCode::UNAUTHORIZED);
+    assert!(
+        all_statements(conn.into_transaction_log())
+            .iter()
+            .all(|statement| !statement.sql.starts_with("INSERT INTO \"api\""))
+    );
+}
+
+#[tokio::test]
 async fn create_unpinned_api_key_with_project_and_cache_permissions_stores_both_and_shows_both_in_list()
  {
     let (db, session_id) = signed_in_owner_without_key_named_like_request();
@@ -115,6 +141,8 @@ async fn create_unpinned_api_key_with_project_and_cache_permissions_stores_both_
         ..Default::default()
     };
     let conn = db
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![live_session(session_id)]])
         .append_query_results([vec![row.clone()]])
         .append_exec_results([exec_ok()])
         .into_connection();
@@ -305,6 +333,8 @@ async fn superuser_creates_unpinned_api_key_with_use_superuser_rights_and_view_p
     let expected = mask_from(&[Permission::ViewProject, Permission::ReadSuperuser]);
     let conn = with_auth_as(mock_db(), session_id, superuser())
         .append_query_results([Vec::<api::Model>::new()])
+        .append_query_results([vec![superuser()]])
+        .append_query_results([vec![live_session(session_id)]])
         .append_query_results([vec![api::Model {
             permission: expected,
             ..Default::default()

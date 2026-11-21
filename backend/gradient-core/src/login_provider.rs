@@ -13,17 +13,11 @@ pub struct ExternalIdentity {
     pub issuer: String,
     pub subject: String,
     pub username: String,
+    /// Only a provider-verified address. A verified email address can claim an existing unlinked account. Use None for an unverified address.
     pub email: Option<String>,
     pub name: Option<String>,
     pub groups: Option<Vec<String>>,
-    pub match_rule: MatchRule,
     pub refresh_profile: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MatchRule {
-    UsernameOrEmail,
-    VerifiedEmail,
 }
 
 #[derive(Debug, thiserror::Error)]

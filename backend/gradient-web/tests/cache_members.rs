@@ -166,6 +166,8 @@ async fn add_member_admin_creates_a_pending_invitation() {
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([Vec::<cache_invitation::Model>::new()])
         .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![pending_invitation()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -207,6 +209,8 @@ async fn add_member_superuser_skips_the_invitation() {
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([Vec::<cache_invitation::Model>::new()])
         .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![new_member]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -238,6 +242,8 @@ async fn add_member_superuser_without_add_as_member_immediately_creates_a_pendin
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([Vec::<cache_invitation::Model>::new()])
         .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![pending_invitation()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -269,6 +275,8 @@ fn admin_adding_other_user_immediately(
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([Vec::<cache_invitation::Model>::new()])
         .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([team_grants])
         .append_query_results([team_members]);
     (db, auth)
@@ -353,6 +361,9 @@ async fn update_member_changes_role() {
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![target_member]])
         .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![updated_member]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -381,6 +392,9 @@ async fn update_member_blocks_demoting_last_admin() {
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![count_row(1)]]);
 
     let server = make_test_server(db.into_connection());
@@ -404,6 +418,9 @@ async fn remove_member_blocks_last_admin() {
         .append_query_results([vec![user()]])
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![count_row(1)]]);
 
     let server = make_test_server(db.into_connection());
@@ -434,6 +451,9 @@ async fn remove_member_view_role_succeeds() {
         .append_query_results([vec![other_user_row()]])
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![target_member]])
+        .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,

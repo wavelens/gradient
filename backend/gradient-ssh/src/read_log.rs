@@ -18,9 +18,13 @@ pub async fn read_log(
     };
 
     let db = &session.handles.db;
-    let caches = gradient_db::caches::by_ids(&db.web_db, &session.caches).await?;
+    let caches =
+        gradient_db::caches::by_ids(&db.web_db, session.readable_cache_ids_or_closed_error()?)
+            .await?;
     let found = find_build_log(
         &db.web_db,
+        &db.user_supplied_url_http_client,
+        &db.config.secrets.crypt_file,
         db.storage.log_storage.as_ref(),
         &caches,
         &session.mapper,
@@ -40,7 +44,12 @@ async fn derivation_of(
     }
 
     let stored = session.mapper.inbound(&path);
-    let served = served_path(&session.handles.db.web_db, &session.caches, stored.hash()).await?;
+    let served = served_path(
+        &session.handles.db.web_db,
+        session.readable_cache_ids_or_closed_error()?,
+        stored.hash(),
+    )
+    .await?;
     let Some(deriver) = served.and_then(|served| served.deriver) else {
         return Ok(None);
     };

@@ -110,7 +110,12 @@ impl MockConn {
         let nar = import::read_with_delays(source, self.timing_for(&key), &key).await?;
         if let Some(ca) = &info.info.ca {
             let name = info.path.name().to_string();
-            let computed = ca_path::path_for(&name, ca, &info.info.references)?;
+            let computed =
+                gradient_wire::content_addressed_store_path_from_name_address_references::path_for(
+                    &name,
+                    ca,
+                    &info.info.references,
+                )?;
             if computed != info.path {
                 self.state
                     .journal

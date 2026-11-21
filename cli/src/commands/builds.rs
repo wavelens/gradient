@@ -6,7 +6,14 @@
 
 use crate::commands::download::human_size;
 use crate::commands::live_events::print_live_events_until_finished;
-use crate::error::{CliError, FileAction};
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand, NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES,
+};
+use crate::download_file_path_and_write::{
+    DownloadDestination, checked_file_path_in_directory_from_server_file_name,
+    write_bytes_to_download_destination,
+};
+use crate::error::CliError;
 use crate::input::{client_from_config, parse_build_uuid_or_web_ui_log_page_url};
 use crate::output::Output;
 use clap::Subcommand;
@@ -17,6 +24,7 @@ use std::path::{Path, PathBuf};
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Show a build's dependency graph
+    #[command(add = McpToolMayRunCommand)]
     Graph {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
@@ -24,6 +32,7 @@ pub enum Commands {
         interactive: bool,
     },
     /// View a build's log
+    #[command(add = McpToolMayRunCommand)]
     Log {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
@@ -43,21 +52,25 @@ pub enum Commands {
         attempt: Option<u32>,
     },
     /// Re-queue builds in a running evaluation that failed, timed out, were canceled, or failed because of a dependency. Also re-queue builds that failed only because of those builds. Use `gradient evaluation retry` to start a new evaluation when an evaluation is complete.
+    #[command(add = McpToolMayRunCommand)]
     Retry {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
     },
     /// Abort a build of an active evaluation, whether created, queued, or running.
+    #[command(add = McpToolMayRunCommand)]
     Abort {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
     },
     /// Assign this build and its unresolved dependencies before other work. Only a superuser can run this command.
+    #[command(add = McpToolMayRunCommand)]
     Prioritize {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
     },
     /// Show the dependency closure of the build with the size of each store path.
+    #[command(add = McpToolMayRunCommand)]
     Closure {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
@@ -66,14 +79,19 @@ pub enum Commands {
         runtime_closure: bool,
     },
     /// Save the CycloneDX SBOM of the runtime closure of a build
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Sbom {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
         /// Write the file to this path. Default: the server's proposed file name (in the current directory).
         #[arg(long)]
         output_file: Option<PathBuf>,
+        /// Replace an existing file at the server-proposed filename
+        #[arg(long)]
+        replace_existing: bool,
     },
     /// Print the live status and progress events of a build until the build finishes. Use `--json` to print one JSON line per event.
+    #[command(add = McpToolMayRunCommand)]
     Follow {
         #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
@@ -136,13 +154,23 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
             print_closure_size_graph(&graph.unwrap_or_else(|e| out.fail(e)), out);
         }
-        Commands::Sbom { id, output_file } => {
+        Commands::Sbom {
+            id,
+            output_file,
+            replace_existing,
+        } => {
             let file = client
                 .builds()
                 .sbom(&id)
                 .await
                 .unwrap_or_else(|e| out.fail(e));
-            save_downloaded_file(file, output_file, &format!("{id}.cdx.json"), out);
+            save_downloaded_file(
+                file,
+                output_file,
+                &format!("{id}.cdx.json"),
+                replace_existing,
+                out,
+            );
         }
         Commands::Follow { id } => {
             let events = client
@@ -235,21 +263,32 @@ pub fn save_downloaded_file(
     file: DownloadedBinaryFile,
     output_file: Option<PathBuf>,
     fallback_filename: &str,
+    replace_existing: bool,
     out: Output,
 ) {
-    let path = output_file.unwrap_or_else(|| {
-        let suggested = file
-            .suggested_filename
-            .as_deref()
-            .unwrap_or(fallback_filename);
-        PathBuf::from(
-            Path::new(suggested)
-                .file_name()
-                .unwrap_or(fallback_filename.as_ref()),
-        )
-    });
-    std::fs::write(&path, &file.bytes)
-        .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &path, e)));
+    let destination = match output_file {
+        Some(path) => DownloadDestination::CommandLinePath(path),
+        None => {
+            let current_directory = Path::new("");
+            let path = file
+                .suggested_filename
+                .as_deref()
+                .and_then(|suggested| {
+                    checked_file_path_in_directory_from_server_file_name(
+                        current_directory,
+                        suggested,
+                    )
+                    .ok()
+                })
+                .unwrap_or_else(|| current_directory.join(fallback_filename));
+            DownloadDestination::FileInServerNamedDirectory {
+                path,
+                replace_existing,
+            }
+        }
+    };
+    write_bytes_to_download_destination(&file.bytes, &destination).unwrap_or_else(|e| out.fail(e));
+    let path = destination.path();
     let size = file.bytes.len();
     out.ok(&serde_json::json!({ "path": path, "bytes": size }));
     out.human(format!(

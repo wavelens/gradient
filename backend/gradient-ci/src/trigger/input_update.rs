@@ -151,6 +151,7 @@ pub async fn create_input_update_eval<C: ConnectionTrait>(
         branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
         trigger,
         only_evaluate: task.only_evaluate,
+        allows_project_credentials_and_privileged_actions: true,
         created_at: now,
         updated_at: now,
         ..Default::default()

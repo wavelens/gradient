@@ -424,7 +424,8 @@ mod tests {
         MEvalSplit {
             evaluation,
             cluster_job: ClusterJobId::now_v7(),
-            source_store_path: source.then(|| "/nix/store/[hash140]-source".into()),
+            source_store_path: source
+                .then(|| "/nix/store/y1ik7kq0aix92zgaf988pnjwxxsfax4n-source".into()),
             fingerprint: source.then(|| "fp".into()),
             planned_at: planned.then(gradient_types::now),
         }

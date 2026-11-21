@@ -69,31 +69,6 @@ pub async fn open_attempt<C: ConnectionTrait>(
     .await
 }
 
-pub async fn open_failed_attempt<C: ConnectionTrait>(
-    db: &C,
-    build_job: BuildJobId,
-    derivation_build: DerivationBuildId,
-    reason: AttemptFailureReason,
-    failure_message: String,
-) -> Result<Model, DbErr> {
-    let now = gradient_types::now();
-    Model {
-        id: BuildAttemptId::now_v7(),
-        build_job: Some(build_job),
-        derivation_build,
-        outcome: AttemptOutcome::Failed,
-        reason: Some(reason),
-        failure_message: Some(failure_message),
-        build_context: serde_json::json!({}),
-        build_finished_at: Some(now),
-        created_at: now,
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(db)
-    .await
-}
-
 /// The miss budget is scoped to the driving evaluation, not the shared build's history.
 /// A new evaluation is retrying substitution from zero instead of escalating to a build.
 pub async fn substitute_miss_counts<C: ConnectionTrait>(
@@ -405,7 +380,7 @@ mod tests {
     use super::*;
     use gradient_fixtures::shape::shape;
 
-    const BUILT: &str = "/nix/store/aaaa-built.drv";
+    const BUILT: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-built.drv";
 
     #[tokio::test]
     async fn late_failure_does_not_rewrite_build_attempt_closed_as_built() {

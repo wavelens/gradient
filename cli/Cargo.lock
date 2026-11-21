@@ -1263,6 +1263,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
+ "gradient-wildcard",
  "libc",
  "nix 0.31.3",
  "nix-bindings",
@@ -1273,6 +1274,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "gradient-wildcard"
+version = "2.0.1"
 
 [[package]]
 name = "h2"

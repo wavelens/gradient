@@ -63,7 +63,11 @@ pub enum TeamMemberSource {
     #[sea_orm(num_value = 1)]
     State,
     #[sea_orm(num_value = 2)]
-    Group,
+    #[serde(rename = "group")]
+    ScimGroup,
+    #[sea_orm(num_value = 3)]
+    #[serde(rename = "sign_in_group")]
+    SignInGroupSync,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

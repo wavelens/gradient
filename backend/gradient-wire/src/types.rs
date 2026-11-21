@@ -112,6 +112,7 @@ pub struct FlakeJob {
 
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub enum NixEvaluationFetchUrlAccess {
+    /// Scheduler messages no longer carry this variant. Those messages carry a list of remote schemes instead. The wire tag of each variant is the position of that variant. Keep this variant.
     UnrestrictedEvaluation,
     LockedInputsPlusExtraUrlPrefixes {
         extra_allowed_uri_prefixes: Vec<String>,
@@ -724,21 +725,8 @@ pub struct JobPhaseSpan {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum CredentialKind {
-    SshKey,
     #[proto(45)]
-    JobSecret {
-        job_id: String,
-        name: String,
-    },
-    #[proto(63)]
-    SshHostKeys {
-        keys: Vec<GitServerSshHostKey>,
-    },
-    #[proto(65)]
-    GitHttpsCredential {
-        host: String,
-        username: String,
-    },
+    JobSecret { job_id: String, name: String },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]

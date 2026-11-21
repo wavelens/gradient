@@ -10,8 +10,9 @@ use gradient_entity::{
     derivation_dependency, derivation_feature, derivation_input_source, derivation_metric,
     derivation_output, dispatched_job, dispatched_job_phase, entry_point, eval_cache_store,
     eval_split, evaluation, evaluation_flake_input_override, evaluation_input_update,
-    evaluation_metric, feature, project, project_cache, task, task_action,
-    task_flake_input_override, task_trigger, user, worker_registration,
+    evaluation_metric, feature, project, project_cache, store_path_content_producer, task,
+    task_action, task_flake_input_override, task_trigger, team, team_project, team_worker, user,
+    worker_registration,
 };
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter};
@@ -39,6 +40,10 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
             .unwrap_or_else(|error| panic!("user::Entity: {error}"));
     }
     insert!(db, project::Entity, shape.projects);
+    insert!(db, worker_registration::Entity, shape.registrations);
+    insert!(db, team::Entity, shape.team_rows);
+    insert!(db, team_worker::Entity, shape.team_worker_rows);
+    insert!(db, team_project::Entity, shape.team_project_rows);
     insert!(db, task::Entity, shape.tasks);
     insert!(db, task_trigger::Entity, shape.triggers);
     insert!(db, task_action::Entity, shape.actions);
@@ -53,6 +58,15 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
         derivation_input_source::Entity,
         shape.derivation_input_sources
     );
+    let producers: Vec<_> = shape
+        .cached_paths
+        .iter()
+        .zip(shape.cached_path_producer_rows)
+        .map(|(path, producer)| store_path_content_producer::Model {
+            created_at: path.created_at,
+            ..producer
+        })
+        .collect();
     insert!(db, cached_path::Entity, shape.cached_paths);
     let verified: Vec<_> = shape
         .outputs
@@ -77,6 +91,7 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, entry_point::Entity, shape.entry_points);
     insert!(db, cache::Entity, shape.caches);
     insert!(db, project_cache::Entity, shape.project_caches);
+    insert!(db, store_path_content_producer::Entity, producers);
     insert!(db, cached_path_signature::Entity, shape.signatures);
     insert!(db, cache_upstream::Entity, shape.upstreams);
     for (output, upstream) in verified {
@@ -106,5 +121,4 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, derivation_metric::Entity, shape.derivation_metrics);
     insert!(db, evaluation_metric::Entity, shape.evaluation_metrics);
     insert!(db, eval_cache_store::Entity, shape.eval_caches);
-    insert!(db, worker_registration::Entity, shape.registrations);
 }

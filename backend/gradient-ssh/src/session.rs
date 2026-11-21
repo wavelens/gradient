@@ -44,10 +44,11 @@ pub struct Session {
     pub user: MUser,
     pub project: MProject,
     pub permissions: PermissionMask,
-    pub caches: Vec<CacheId>,
+    caches: Vec<CacheId>,
     pub mapper: StorePathMapper,
     pub closed: CancellationToken,
     pub target: Option<GatewayTarget>,
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 impl Session {
@@ -57,6 +58,7 @@ impl Session {
         project: MProject,
         permissions: PermissionMask,
         caches: Vec<CacheId>,
+        allows_project_credentials_and_privileged_actions: bool,
     ) -> Result<Self, MappingError> {
         let mapper = handles.db.project_mapper(project.id).await?;
         Ok(Self {
@@ -68,7 +70,34 @@ impl Session {
             caches,
             mapper,
             target: None,
+            allows_project_credentials_and_privileged_actions,
         })
+    }
+
+    pub fn with_gateway_target(self, target: Option<GatewayTarget>) -> Self {
+        Self { target, ..self }
+    }
+
+    pub fn readable_cache_ids_or_closed_error(&self) -> anyhow::Result<&[CacheId]> {
+        if self.closed.is_cancelled() {
+            anyhow::bail!("SSH session is closed. The cache list is no longer available.");
+        }
+        Ok(&self.caches)
+    }
+
+    pub fn matches_user_project_permissions_and_readable_cache_ids_if_not_closed(
+        &self,
+        user: UserId,
+        project: ProjectId,
+        permissions: PermissionMask,
+        caches: &[CacheId],
+    ) -> bool {
+        user == self.user.id
+            && project == self.project.id
+            && permissions == self.permissions
+            && self
+                .readable_cache_ids_or_closed_error()
+                .is_ok_and(|readable| readable == caches)
     }
 
     pub fn may(&self, permission: Permission) -> bool {

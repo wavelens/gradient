@@ -15,8 +15,41 @@ use gradient_wire::types::{UploadMetadata, UploadObject};
 pub(in crate::handler) enum Transfer {
     Passthrough(Box<PartialWriter>),
     Put,
-    PutToTemporaryUploadObject { temporary_nar_storage_key: String },
-    Multipart { upload_id: String },
+    PutToTemporaryUploadObject {
+        temporary_nar_storage_key: String,
+    },
+    Multipart {
+        upload_id: String,
+        temporary_nar_storage_key: String,
+    },
+}
+
+pub(in crate::handler) struct TemporaryNarUploadObject {
+    pub temporary_nar_storage_key: String,
+    pub multipart_upload_id: Option<String>,
+}
+
+impl Transfer {
+    pub(in crate::handler) fn to_temporary_nar_upload_object(
+        &self,
+    ) -> Option<TemporaryNarUploadObject> {
+        match self {
+            Transfer::Multipart {
+                upload_id,
+                temporary_nar_storage_key,
+            } => Some(TemporaryNarUploadObject {
+                temporary_nar_storage_key: temporary_nar_storage_key.clone(),
+                multipart_upload_id: Some(upload_id.clone()),
+            }),
+            Transfer::PutToTemporaryUploadObject {
+                temporary_nar_storage_key,
+            } => Some(TemporaryNarUploadObject {
+                temporary_nar_storage_key: temporary_nar_storage_key.clone(),
+                multipart_upload_id: None,
+            }),
+            Transfer::Passthrough(_) | Transfer::Put => None,
+        }
+    }
 }
 
 pub(in crate::handler) enum Lease {
@@ -37,6 +70,13 @@ impl Lease {
             *last = now;
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::handler) enum UploadedStorePathDeriverChoice {
+    DispatchedBuildJobOutputDerivation { dispatched_deriver_path: String },
+    NoRecordedDeriver,
+    UseWorkerStatedDeriver,
 }
 
 pub(in crate::handler) struct Queued {
@@ -82,28 +122,11 @@ pub(in crate::handler) struct UploadTable {
 }
 
 impl UploadTable {
-    pub(in crate::handler) fn queue(
-        &mut self,
-        id: u64,
-        job_id: String,
-        project: ProjectId,
-        object: UploadObject,
-        segment_cache: Option<CacheId>,
-        size: u64,
-    ) -> bool {
+    pub(in crate::handler) fn queue(&mut self, id: u64, queued: Queued) -> bool {
         if self.entries.contains_key(&id) {
             return false;
         }
-        self.entries.insert(
-            id,
-            Entry::Queued(Queued {
-                job_id,
-                project,
-                object,
-                segment_cache,
-                size,
-            }),
-        );
+        self.entries.insert(id, Entry::Queued(queued));
         true
     }
 
@@ -208,13 +231,23 @@ mod tests {
         }
     }
 
+    fn build_queued_worker_upload_entry(job_id: &str, object: UploadObject, size: u64) -> Queued {
+        Queued {
+            job_id: job_id.into(),
+            project: ProjectId::nil(),
+            object,
+            segment_cache: None,
+            size,
+        }
+    }
+
     async fn permit(
         admission: &Arc<UploadAdmission>,
         id: u64,
     ) -> (gradient_storage::admission::AdmissionSession, UploadPermit) {
         let (session, mut rx) = admission.open_session("test");
         session.request(id, ObjectKey::Nar(id.to_string()), 1, false);
-        let Some(Admitted::Granted { permit, .. }) = rx.recv().await else {
+        let Some(Admitted { permit, .. }) = rx.recv().await else {
             panic!("granted")
         };
         (session, permit)
@@ -232,7 +265,7 @@ mod tests {
         let (_session, permit) = permit(&admission, 1).await;
         let mut table = UploadTable::default();
         let start = Instant::now();
-        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 10));
+        assert!(table.queue(1, build_queued_worker_upload_entry("build:1", nar(0), 10)));
         table.grant(
             1,
             Granted {
@@ -276,7 +309,7 @@ mod tests {
         let (_session, permit) = permit(&admission, 1).await;
         let mut table = UploadTable::default();
         let start = Instant::now();
-        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 10);
+        table.queue(1, build_queued_worker_upload_entry("build:1", nar(0), 10));
         table.grant(
             1,
             Granted {
@@ -307,16 +340,16 @@ mod tests {
     #[test]
     fn a_duplicate_request_id_is_refused() {
         let mut table = UploadTable::default();
-        assert!(table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 1));
-        assert!(!table.queue(1, "build:1".into(), ProjectId::nil(), nar(1), None, 1));
+        assert!(table.queue(1, build_queued_worker_upload_entry("build:1", nar(0), 1)));
+        assert!(!table.queue(1, build_queued_worker_upload_entry("build:1", nar(1), 1)));
     }
 
     #[test]
     fn forgetting_a_job_returns_only_its_requests() {
         let mut table = UploadTable::default();
-        table.queue(1, "build:1".into(), ProjectId::nil(), nar(0), None, 1);
-        table.queue(2, "build:2".into(), ProjectId::nil(), nar(1), None, 1);
-        table.queue(3, "build:1".into(), ProjectId::nil(), nar(2), None, 1);
+        table.queue(1, build_queued_worker_upload_entry("build:1", nar(0), 1));
+        table.queue(2, build_queued_worker_upload_entry("build:2", nar(1), 1));
+        table.queue(3, build_queued_worker_upload_entry("build:1", nar(2), 1));
         let mut ids: Vec<u64> = table
             .forget_job("build:1")
             .into_iter()

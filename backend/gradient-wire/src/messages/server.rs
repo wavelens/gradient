@@ -22,7 +22,7 @@ pub struct FailedPeer {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 65)]
+#[proto(oldest = 66)]
 pub enum ServerMessage {
     AuthChallenge {
         peers: Vec<String>,
@@ -56,6 +56,9 @@ pub enum ServerMessage {
         assignment_id: String,
         job: Job,
         cluster: Option<Box<ClusterMembership>>,
+        ssh_key: Option<SecretString>,
+        ssh_host_keys: Vec<GitServerSshHostKey>,
+        https_git_credentials: Vec<HttpsGitCredential>,
     },
 
     AbortJob {
@@ -310,7 +313,12 @@ impl ServerMessage {
             ServerMessage::Authenticate { .. }
             | ServerMessage::Credential { .. }
             | ServerMessage::GuestChannelData { .. } => true,
-            ServerMessage::FetchInput {
+            ServerMessage::AssignJob {
+                ssh_key,
+                https_git_credentials,
+                ..
+            }
+            | ServerMessage::FetchInput {
                 ssh_key,
                 https_git_credentials,
                 ..

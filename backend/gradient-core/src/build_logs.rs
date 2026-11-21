@@ -9,6 +9,7 @@ use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_storage::LogStorage;
 use gradient_types::{CacheId, MCache, OriginalStorePath, StorePath, StorePathMapper};
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use sea_orm::DbErr;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -27,6 +28,8 @@ impl BuildLog {
 
 pub async fn find_build_log(
     db: &WebDb,
+    http: &HttpClientForUserSuppliedUrls,
+    crypt_file: &str,
     log_storage: &dyn LogStorage,
     caches: &[MCache],
     mapper: &StorePathMapper,
@@ -39,11 +42,11 @@ pub async fn find_build_log(
         }
     }
 
-    Ok(upstream_log(db, caches, drv).await?.map(BuildLog::Upstream))
+    Ok(upstream_log(db, http, crypt_file, caches, drv)
+        .await?
+        .map(BuildLog::Upstream))
 }
 
-// Failed builds are not excluded on purpose: a rebuild that failed after the first success still
-// carries the most recent log.
 async fn stored_log(
     db: &WebDb,
     log_storage: &dyn LogStorage,
@@ -58,20 +61,14 @@ async fn stored_log(
         return Ok(None);
     };
 
-    let Some(derivation) =
-        gradient_db::cached_paths::derivation_signed_in_cache(db, cache, drv.hash(), drv_name)
-            .await?
-    else {
-        return Ok(None);
-    };
-
-    let Some(shared_build) = gradient_db::derivation_builds::by_derivation(db, derivation).await?
-    else {
-        return Ok(None);
-    };
-
     let Some(attempt) =
-        gradient_db::scheduling::build_attempt::latest_attempt_id(db, shared_build.id).await?
+        gradient_db::cached_paths::build_attempt_that_produced_derivation_output_served_by_cache(
+            db,
+            cache,
+            drv.hash(),
+            drv_name,
+        )
+        .await?
     else {
         return Ok(None);
     };
@@ -85,13 +82,15 @@ async fn stored_log(
 
 async fn upstream_log(
     db: &WebDb,
+    http: &HttpClientForUserSuppliedUrls,
+    crypt_file: &str,
     caches: &[MCache],
     drv: &OriginalStorePath,
 ) -> Result<Option<String>, DbErr> {
     for cache in caches {
         let upstream_caches = pull_through_upstream_caches(db, cache).await?;
-        let sources = substitution_sources(&upstream_caches);
-        if let Some(text) = fetch_upstream_log(&sources, &drv.base()).await {
+        let sources = substitution_sources(&upstream_caches, crypt_file).await;
+        if let Some(text) = fetch_upstream_log(http, &sources, &drv.base()).await {
             return Ok(Some(text));
         }
     }

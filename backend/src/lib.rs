@@ -97,6 +97,7 @@ pub async fn run(
         scheduler_log_level = state.config.log.level_scheduler.as_deref().unwrap_or("(default)"),
         "Starting Gradient server"
     );
+    gradient_util::http_validation::read_network_interface_addresses_and_log_error_on_failure();
 
     let listener = gradient_web::bind_http_server_tcp_listener(&state).await?;
     state

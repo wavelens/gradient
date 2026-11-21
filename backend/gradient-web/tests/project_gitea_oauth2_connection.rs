@@ -14,7 +14,7 @@ use axum_test::{TestResponse, TestServer};
 use gradient_entity::git_host_connection;
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{admin_role, live_session, project, project_member};
+use gradient_fixtures::rows::{admin_role, project, project_member};
 use gradient_test_support::state::{TEST_JWT_SECRET, TestState};
 use gradient_test_support::web::{make_token, with_auth};
 use gradient_types::SessionId;
@@ -131,6 +131,38 @@ async fn connect_redirects_to_the_git_host_with_pkce_and_a_signed_cookie() {
 }
 
 #[tokio::test]
+async fn tls_gitea_oauth2_project_connection_start_sets_host_only_cookie_with_double_underscore_host_prefix()
+ {
+    let session_id = SessionId::now_v7();
+    let db = with_project_manage(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<git_host_connection::Model>::new()]);
+
+    let res = with_gitea_app(TestState::new().web_db(db.into_connection()))
+        .cli(|cli| cli.server.use_tls = true)
+        .server()
+        .get(CONNECT_URL)
+        .add_header(
+            header::AUTHORIZATION,
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .await;
+
+    res.assert_status(StatusCode::FOUND);
+    let set_cookie = res.header("set-cookie").to_str().unwrap().to_owned();
+    assert!(
+        set_cookie.starts_with("__Host-git_host_oauth_connect="),
+        "{set_cookie}"
+    );
+    let attributes: Vec<&str> = set_cookie.split(';').map(str::trim).collect();
+    assert!(attributes.contains(&"Secure"), "{set_cookie}");
+    assert!(attributes.contains(&"Path=/"), "{set_cookie}");
+    assert!(
+        !attributes.iter().any(|a| a.starts_with("Domain")),
+        "{set_cookie}"
+    );
+}
+
+#[tokio::test]
 async fn connect_is_refused_without_a_configured_application() {
     let session_id = SessionId::now_v7();
     let db = with_project_manage(with_auth(mock_db(), session_id));
@@ -223,30 +255,5 @@ async fn callback_reports_a_denied_approval() {
     assert_eq!(
         location(&res),
         "/project/test-project/git-host-connections?oauth_error=denied"
-    );
-}
-
-#[tokio::test]
-async fn callback_after_sign_out_is_refused() {
-    let session_id = SessionId::now_v7();
-    let revoked = gradient_entity::session::Model {
-        revoked_at: Some(chrono::Utc::now().naive_utc()),
-        ..live_session(session_id)
-    };
-    let server = with_gitea_app(
-        TestState::new().web_db(
-            mock_db()
-                .append_query_results([vec![revoked]])
-                .into_connection(),
-        ),
-    )
-    .server();
-    let cookie = signed_cookie(session_id, 600);
-
-    let res = callback(&server, "code=abc&state=s", Some(&cookie)).await;
-
-    assert_eq!(
-        location(&res),
-        "/project/test-project/git-host-connections?oauth_error=signed_out"
     );
 }

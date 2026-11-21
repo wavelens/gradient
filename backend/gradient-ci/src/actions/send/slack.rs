@@ -11,7 +11,7 @@ use crate::actions::crypto::decrypt_with_server_key;
 use crate::actions::summary::EventSummary;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
-use gradient_util::http_validation::validate_webhook_url;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use serde_json::{Value as JsonValue, json};
 
 pub(crate) async fn execute_send_slack_message(
@@ -24,19 +24,18 @@ pub(crate) async fn execute_send_slack_message(
         ctx,
         webhook_url.ok_or_else(|| anyhow!("Slack action has no webhook URL"))?,
     )?;
-    let webhook =
-        validate_webhook_url(&plain).map_err(|cause| ActionError::UrlRejected { cause })?;
     let summary = EventSummary::resolve(ctx, event, envelope).await?;
-    post_slack_message(gradient_util::http::public_client(), webhook, &summary).await
+    post_slack_message(&ctx.db.user_supplied_url_http_client, &plain, &summary).await
 }
 
 pub(crate) async fn post_slack_message(
-    http: &reqwest::Client,
-    webhook: reqwest::Url,
+    http: &HttpClientForUserSuppliedUrls,
+    webhook: &str,
     summary: &EventSummary,
 ) -> Result<ExecutorOk> {
     let resp = http
-        .post(webhook)
+        .request_builder_for_checked_url(reqwest::Method::POST, webhook)
+        .map_err(|cause| ActionError::UrlRejected { cause })?
         .json(&json!({ "text": summary.slack() }))
         .send()
         .await

@@ -120,8 +120,11 @@ mod tests {
             )]),
         };
 
-        let discovered =
-            discovered_derivation(None, "/nix/store/[hash114]-hello-2.12.3.drv".into(), &drv);
+        let discovered = discovered_derivation(
+            None,
+            "/nix/store/d3sfhlp1vwbl2bfwz5cb28k5a050gbzy-hello-2.12.3.drv".into(),
+            &drv,
+        );
 
         assert_eq!(discovered.pname.as_deref(), Some("hello"));
     }

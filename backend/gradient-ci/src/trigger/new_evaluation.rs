@@ -6,9 +6,13 @@
 
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
+use crate::apply::EvaluationCodeTrust;
 use gradient_db::lookup::by_id;
+use gradient_db::projects::caches::project_has_writable_cache;
+use gradient_db::projects::workers::project_has_eval_capable_worker_registration;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_types::consts::NULL_TIME;
+use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
@@ -49,6 +53,31 @@ pub(super) async fn link_to_previous<C: ConnectionTrait>(
     Ok(())
 }
 
+pub(super) fn fork_repository_url_if_same_host_and_port(
+    task: &MTask,
+    fork: Option<RepositoryUrl>,
+) -> Option<String> {
+    let fork = fork?;
+    let on_task_host = task
+        .repository
+        .parse::<RepositoryUrl>()
+        .is_ok_and(|repository| {
+            repository
+                .git_server_host_name()
+                .eq_ignore_ascii_case(fork.git_server_host_name())
+                && repository.git_server_port() == fork.git_server_port()
+        });
+    if on_task_host {
+        return Some(fork.git_connection_url().to_owned());
+    }
+    tracing::warn!(
+        task_id = %task.id,
+        fork_host = fork.git_server_host_name(),
+        "Ignore the clone URL of a fork on a different host than the task repository."
+    );
+    None
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -63,15 +92,19 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     trigger: Option<gradient_types::ids::TaskTriggerId>,
     concurrent: bool,
     branch: String,
-    repository_override: Option<String>,
+    repository_override: Option<RepositoryUrl>,
     wildcard_override: Option<String>,
     source_comment: Option<serde_json::Value>,
     started_by: Option<gradient_types::ids::UserId>,
     walk_mode: WalkMode,
+    code_trust: &EvaluationCodeTrust,
 ) -> Result<MEvaluation, TriggerError> {
     if !concurrent {
         ensure_no_active_evaluation(db, task.id, &branch).await?;
     }
+
+    let (status, waiting_reason) =
+        compute_new_evaluation_initial_status_and_waiting_reason(db, task.project).await?;
 
     // A dangling `task.last_evaluation` must resolve to `None` before the insert. The
     // `fk-evaluation-previous` foreign key would trip otherwise.
@@ -101,10 +134,14 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     let aevaluation = MEvaluation {
         id: EvaluationId::now_v7(),
         task: Some(task.id),
-        repository: repository_override.unwrap_or_else(|| task.repository.clone()),
+        repository: fork_repository_url_if_same_host_and_port(task, repository_override)
+            .unwrap_or_else(|| task.repository.clone()),
         commit: commit.id,
         wildcard: wildcard_override.unwrap_or_else(|| task.wildcard.clone()),
-        status: EvaluationStatus::Queued,
+        status,
+        waiting_reason: waiting_reason.map(|reason| reason.to_json()),
+        allows_project_credentials_and_privileged_actions: code_trust
+            .allows_project_credentials_and_privileged_actions(),
         previous,
         created_at: now,
         updated_at: now,
@@ -133,6 +170,24 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     atask.update(db).await?;
 
     Ok(evaluation)
+}
+
+async fn compute_new_evaluation_initial_status_and_waiting_reason<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<(EvaluationStatus, Option<WaitingReason>), DbErr> {
+    let waiting_reason = if !project_has_writable_cache(db, project).await? {
+        Some(WaitingReason::NoCache)
+    } else if !project_has_eval_capable_worker_registration(db, project).await? {
+        Some(WaitingReason::workers(Vec::new(), 0, Vec::new()))
+    } else {
+        None
+    };
+    let status = match waiting_reason {
+        Some(_) => EvaluationStatus::Waiting,
+        None => EvaluationStatus::Queued,
+    };
+    Ok((status, waiting_reason))
 }
 
 const ONE_ACTIVE_PER_BRANCH: &str = "uq_evaluation_one_active_per_branch";

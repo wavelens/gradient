@@ -49,18 +49,27 @@ pub struct OwnerTeamGrantChange {
     pub removed: Vec<MTeamProject>,
 }
 
-pub async fn upsert_project_owner_team_grant<C: ConnectionTrait>(
+pub async fn load_project_owned_team_grants_to_remove_on_owner_change<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
     owner: Option<TeamId>,
-) -> Result<OwnerTeamGrantChange, DbErr> {
+) -> Result<Vec<MTeamProject>, DbErr> {
     let mut stale = ETeamProject::find()
         .filter(CTeamProject::Project.eq(project))
         .filter(CTeamProject::GrantSource.eq(TeamGrantSource::Owner));
     if let Some(owner) = owner {
         stale = stale.filter(CTeamProject::Team.ne(owner));
     }
-    let removed = stale.all(db).await?;
+    stale.all(db).await
+}
+
+pub async fn upsert_project_owner_team_grant<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    owner: Option<TeamId>,
+) -> Result<OwnerTeamGrantChange, DbErr> {
+    let removed =
+        load_project_owned_team_grants_to_remove_on_owner_change(db, project, owner).await?;
     if !removed.is_empty() {
         ETeamProject::delete_many()
             .filter(CTeamProject::Id.is_in(removed.iter().map(|grant| grant.id)))

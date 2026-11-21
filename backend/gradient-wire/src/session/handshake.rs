@@ -82,6 +82,7 @@ pub fn on_auth_response(
 #[derive(Debug, Clone)]
 pub struct HandshakeResult {
     pub peer_id: String,
+    pub advertised: GradientCapabilities,
     pub negotiated: GradientCapabilities,
     pub authorized_peers: Vec<String>,
     pub failed_peers: Vec<FailedPeer>,
@@ -140,6 +141,7 @@ where
 
     Ok(HandshakeResult {
         peer_id: identity.peer_id(),
+        advertised: caps,
         negotiated,
         authorized_peers,
         failed_peers,
@@ -248,24 +250,22 @@ where
         return Err(reject_peer(socket, Rejection::ExpectedAuthResponse, claimed).await);
     };
     let tokens = tokens.clone();
-    let (authorized_peers, failed_peers) = match authority
-        .authorize(&greeted.peer_id, challenge, &tokens)
+    let advertised = greeted.client_capabilities.clone();
+    let (authorized_peers, failed_peers, negotiated) = match authority
+        .authorize(&greeted.peer_id, challenge, &tokens, advertised.clone())
         .await
         .context("authorize")?
     {
         AuthOutcome::Accept {
             authorized_peers,
             failed_peers,
-        } => (authorized_peers, failed_peers),
+            granted_capabilities,
+        } => (authorized_peers, failed_peers, granted_capabilities),
         AuthOutcome::Reject(rejection) => {
             return Err(reject_peer(socket, rejection, Some(greeted.peer_id.clone())).await);
         }
     };
 
-    let negotiated = authority
-        .negotiate(&greeted.peer_id, greeted.client_capabilities.clone())
-        .await
-        .context("negotiate")?;
     let claimed = Some(greeted.peer_id.clone());
     let authenticated = match on_auth_response(greeted, auth_response, negotiated.clone()) {
         Ok(a) => a,
@@ -287,6 +287,7 @@ where
     let registered = Registered::from(authenticated);
     Ok(HandshakeResult {
         peer_id: registered.peer_id,
+        advertised,
         negotiated: registered.negotiated,
         authorized_peers,
         failed_peers,
@@ -314,24 +315,22 @@ where
         })?;
 
     let greeted = greet_dialed_worker(socket, &credentials.worker_id).await?;
-    let (authorized_peers, failed_peers) = match authority
-        .admit(&credentials.worker_id)
+    let advertised = greeted.client_capabilities;
+    let (authorized_peers, failed_peers, negotiated) = match authority
+        .admit(&credentials.worker_id, advertised.clone())
         .await
         .context("admit")?
     {
         AuthOutcome::Accept {
             authorized_peers,
             failed_peers,
-        } => (authorized_peers, failed_peers),
+            granted_capabilities,
+        } => (authorized_peers, failed_peers, granted_capabilities),
         AuthOutcome::Reject(rejection) => {
             return Err(reject_peer(socket, rejection, None).await);
         }
     };
 
-    let negotiated = authority
-        .negotiate(&credentials.worker_id, greeted.client_capabilities)
-        .await
-        .context("negotiate")?;
     socket
         .send_msg(&ServerMessage::InitAck {
             capabilities: negotiated.clone(),
@@ -343,6 +342,7 @@ where
 
     Ok(HandshakeResult {
         peer_id: credentials.worker_id.clone(),
+        advertised,
         negotiated,
         authorized_peers,
         failed_peers,
@@ -426,10 +426,11 @@ where
     I: PeerIdentity + ?Sized,
     C: CapabilitiesProvider + ?Sized,
 {
+    let advertised = capabilities.capabilities().await;
     send_client_msg(
         socket,
         &ClientMessage::InitConnection {
-            capabilities: capabilities.capabilities().await,
+            capabilities: advertised.clone(),
             id: identity.peer_id(),
         },
     )
@@ -442,6 +443,7 @@ where
             failed_peers,
         } => Ok(HandshakeResult {
             peer_id: identity.peer_id(),
+            advertised,
             negotiated,
             authorized_peers,
             failed_peers,
@@ -531,19 +533,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl DialerAuthority for Admits {
-        async fn admit(&self, _: &str) -> anyhow::Result<AuthOutcome> {
+        async fn admit(
+            &self,
+            _: &str,
+            advertised: GradientCapabilities,
+        ) -> anyhow::Result<AuthOutcome> {
             Ok(AuthOutcome::Accept {
                 authorized_peers: self.0.clone(),
                 failed_peers: vec![],
+                granted_capabilities: advertised,
             })
-        }
-
-        async fn negotiate(
-            &self,
-            _: &str,
-            client: GradientCapabilities,
-        ) -> anyhow::Result<GradientCapabilities> {
-            Ok(client)
         }
     }
 

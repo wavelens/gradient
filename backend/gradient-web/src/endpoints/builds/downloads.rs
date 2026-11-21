@@ -5,6 +5,7 @@
  */
 
 use super::refusal::BuildReadRefusal;
+use crate::access::{Caller, ProjectItemAccessRequirement};
 use crate::api_spec::Binary;
 use crate::authorization::{MaybeApiKey, MaybeUser, decode_download_token, encode_download_token};
 use crate::error::{WebError, WebResult};
@@ -52,6 +53,7 @@ async fn collect_build_products(
 async fn find_and_serve_file(
     db: &WebDb,
     nar_storage: &NarStore,
+    project: ProjectId,
     build_id: BuildJobId,
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
@@ -62,6 +64,17 @@ async fn find_and_serve_file(
     }
 
     let rows = gradient_db::build_products::of_outputs(db, &output_ids).await?;
+    let output_hashes: Vec<String> = build_outputs
+        .iter()
+        .filter_map(|o| o.hash.clone())
+        .collect();
+    let highest_ranked_trusted_content_variant_by_store_path_hash =
+        gradient_db::store_path_content_variant_reader_choice::highest_ranked_trusted_content_variant_by_store_path_hash_for_project(
+            db,
+            project,
+            &output_hashes,
+        )
+        .await?;
 
     for product in rows
         .into_iter()
@@ -74,8 +87,24 @@ async fn find_and_serve_file(
             tracing::warn!(%build_id, %filename, "build_product references unknown output");
             continue;
         };
+        let Some(variant) = output
+            .hash
+            .as_ref()
+            .and_then(|h| highest_ranked_trusted_content_variant_by_store_path_hash.get(h))
+        else {
+            tracing::debug!(%build_id, %filename, "The project doesn't trust any content variant of this output.");
+            continue;
+        };
 
-        let response = product_response(nar_storage, build_id, &product, output, filename).await?;
+        let response = product_response(
+            nar_storage,
+            build_id,
+            &product,
+            output,
+            &variant.nar_object_storage_key,
+            filename,
+        )
+        .await?;
         if response.is_some() {
             return Ok(response);
         }
@@ -98,6 +127,7 @@ async fn product_response(
     build_id: BuildJobId,
     product: &MBuildProduct,
     output: &MDerivationOutput,
+    nar_object_storage_key: &str,
     filename: &str,
 ) -> WebResult<Option<Response>> {
     tracing::debug!(%build_id, %filename, product_path = %product.path, "Found matching build_product, fetching from NAR");
@@ -105,18 +135,17 @@ async fn product_response(
     let Some(output_path) = output.store_path() else {
         return Ok(None);
     };
-    let hash = output_path.hash();
     let output_root = output_path.full();
     let rel = relative_in_output(&product.path, &output_root);
 
-    let stream = match nar_storage.get_stream(hash).await {
+    let stream = match nar_storage.get_stream(nar_object_storage_key).await {
         Ok(Some((_size, stream))) => stream,
         Ok(None) => {
-            tracing::warn!(%build_id, %filename, hash, "NAR not found in nar_storage");
+            tracing::warn!(%build_id, %filename, nar_object_storage_key, "NAR not found in nar_storage");
             return Ok(None);
         }
         Err(e) => {
-            tracing::error!(%build_id, %filename, hash, error = %e, "Failed to fetch NAR");
+            tracing::error!(%build_id, %filename, nar_object_storage_key, error = %e, "Failed to fetch NAR");
             return Err(anyhow::anyhow!("Failed to fetch NAR").into());
         }
     };
@@ -188,8 +217,14 @@ pub async fn get_build_downloads(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<Vec<BuildProduct>>>> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
 
     let build_outputs =
         gradient_db::derivation_outputs::of_derivation(&state.web_db, ctx.build_job.derivation)
@@ -224,8 +259,14 @@ pub async fn get_build_download_token(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &Some(user), api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::User(&user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
 
     let token = encode_download_token(
         &state.jwt_secret,
@@ -247,7 +288,9 @@ async fn load_with_download_token(
     let claims = decode_download_token(jwt_secret, token)
         .await
         .map_err(|_| BuildReadRefusal::InvalidDownloadToken)?;
-    if claims.derivation != ctx.build_job.derivation {
+    if claims.derivation != ctx.build_job.derivation
+        || claims.evaluation != ctx.build_job.evaluation
+    {
         return Err(WebError::not_found(Resource::Build));
     }
     Ok(ctx)
@@ -275,7 +318,14 @@ pub async fn get_build_download(
             load_with_download_token(&state.web_db, &state.jwt_secret, build_id, token).await?
         }
         None => {
-            BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?
+            BuildAccessContext::load(
+                &state.web_db,
+                build_id,
+                Caller::from(&maybe_user),
+                api_key.as_ref(),
+                ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+            )
+            .await?
         }
     };
 
@@ -292,6 +342,7 @@ pub async fn get_build_download(
     match find_and_serve_file(
         &state.web_db,
         &state.nar_storage,
+        ctx.project.id,
         build_id,
         build_outputs,
         &filename,

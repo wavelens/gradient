@@ -5,8 +5,10 @@
  */
 
 mod chat;
-mod fixtures;
+mod ci_actions_do_not_contact_git_host_before_project_repository_grant;
+pub(crate) mod fixtures;
 mod summary;
+mod webhook_and_send_request_refuse_loopback_and_record_refusal;
 
 use super::matchers::matches_event;
 use super::matching_actions;
@@ -419,7 +421,7 @@ fn build_check_for_two_entry_points_sharing_one_derivation_reports_check_for_eac
         let db = shape()
             .evaluation(evaluation)
             .task_option(|task| task.name = "pr".into())
-            .derivation("/nix/store/[hash1]-gradient.drv")
+            .derivation("/nix/store/1bnnhb0pfx49mg15fmk3jx34wj8j24yg-gradient.drv")
             .build_status(BuildStatus::Completed)
             .job()
             .entry_point("packages.x86_64-linux.gradient")
@@ -463,7 +465,7 @@ fn an_input_update_reaches_open_pr() {
         open_pr(gradient_types::VerifyGate::Build),
         action_with(ActionType::SendMail, vec!["evaluation.completed"]),
     ];
-    let payload = json!({"evaluation_kind": "input_update"});
+    let payload = json!({"evaluation_kind": "input_update", "allows_project_credentials_and_privileged_actions": true});
 
     let matched = matching_actions(actions, "evaluation.completed", &payload);
 
@@ -494,6 +496,45 @@ fn an_action_that_does_not_subscribe_is_not_matched() {
     let actions = vec![action_with(ActionType::SendMail, vec!["build.failed"])];
 
     assert!(matching_actions(actions, "build.completed", &json!({})).is_empty());
+}
+
+#[test]
+fn open_pr_and_start_evaluation_are_dropped_for_unapproved_fork_pull_request() {
+    let actions = || {
+        vec![
+            open_pr(gradient_types::VerifyGate::Build),
+            action_with(ActionType::StartEvaluation, vec!["evaluation.completed"]),
+            action_with(ActionType::SendMail, vec!["evaluation.completed"]),
+        ]
+    };
+    let kinds = |payload: serde_json::Value| {
+        matching_actions(actions(), "evaluation.completed", &payload)
+            .iter()
+            .map(|a| a.action_type)
+            .collect::<Vec<_>>()
+    };
+
+    for payload in [
+        json!({"evaluation_kind": "input_update"}),
+        json!({"evaluation_kind": "input_update", "allows_project_credentials_and_privileged_actions": false}),
+        json!({"evaluation_kind": "input_update", "allows_project_credentials_and_privileged_actions": "true"}),
+    ] {
+        assert_eq!(
+            kinds(payload.clone()),
+            vec![ActionType::SendMail],
+            "{payload}"
+        );
+    }
+    assert_eq!(
+        kinds(
+            json!({"evaluation_kind": "input_update", "allows_project_credentials_and_privileged_actions": true})
+        ),
+        vec![
+            ActionType::OpenPr,
+            ActionType::StartEvaluation,
+            ActionType::SendMail
+        ],
+    );
 }
 
 fn exec_tree() -> gradient_types::MTaskAction {
@@ -528,7 +569,10 @@ fn exec_tree_fires_on_exec_job_completed_only() {
     };
 
     assert_eq!(
-        kinds("exec_job.completed", json!({})),
+        kinds(
+            "exec_job.completed",
+            json!({"allows_project_credentials_and_privileged_actions": true})
+        ),
         vec!["exec_job.completed"]
     );
     assert!(kinds("exec_job.failed", json!({})).is_empty());
@@ -536,7 +580,7 @@ fn exec_tree_fires_on_exec_job_completed_only() {
     assert_eq!(
         kinds(
             "evaluation.completed",
-            json!({"evaluation_kind": "input_update"})
+            json!({"evaluation_kind": "input_update", "allows_project_credentials_and_privileged_actions": true})
         ),
         vec!["evaluation.completed"]
     );
@@ -580,6 +624,7 @@ fn an_exec_tree_action_without_a_tree_patch_opens_nothing() {
 
 #[test]
 fn start_evaluation_queues_with_the_parent_job() {
+    use crate::apply::tests::fixtures::{with_eval_worker, with_writable_cache};
     use gradient_entity::commit;
     use gradient_fixtures::mock::{exec_ok, raw_statements};
     use gradient_sources::HeadCommit;
@@ -591,7 +636,7 @@ fn start_evaluation_queues_with_the_parent_job() {
             ..Default::default()
         };
         let job = ExecJobId::now_v7();
-        let db = mock_db()
+        let db = with_eval_worker(with_writable_cache(mock_db()))
             .append_query_results([vec![commit::Model::default()]])
             .append_query_results([vec![MEvaluation {
                 id: EvaluationId::now_v7(),
@@ -691,7 +736,12 @@ fn a_failed_connectivity_test_lands_in_the_delivery_history() {
         let ctx = make_ctx_with(db);
         let action = action_with(ActionType::OpenPr, vec![]);
 
-        let result = super::test_git_host_action(&ctx, &action, "https://example.com/a/b").await;
+        let task = gradient_types::MTask {
+            repository: "https://example.com/a/b".into(),
+            ..Default::default()
+        };
+
+        let result = super::test_git_host_action(&ctx, &action, &task).await;
 
         assert!(result.is_err());
         let log = raw_statements(ctx.db.worker_db.into_transaction_log());
@@ -717,7 +767,7 @@ fn a_failed_delivery_does_not_move_the_last_fired_time() {
         let ctx = make_ctx_with(db);
         let action = gradient_types::MTaskAction {
             config: serde_json::to_value(ActionConfig::SendWebRequest {
-                url: "http://127.0.0.1/hook".into(),
+                url: "http://10.0.0.1/hook".into(),
                 token: None,
             })
             .unwrap(),

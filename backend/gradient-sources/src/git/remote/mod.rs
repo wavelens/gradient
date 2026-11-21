@@ -9,12 +9,12 @@ mod git_protocol;
 use super::git_credentials::{
     GitOperationCredentials, run_blocking_libgit2_operation_with_git_credentials,
 };
+use super::git_network_limits::BlockingGitFetchOperationLimits;
 use super::https_credentials_for_operation_host::remote_callbacks_for_url_with_thread_https_credentials;
-use super::url::git_transport_url;
 use crate::SourceError;
 use git_protocol::list_refs_git_protocol;
 use git2::Direction;
-use gradient_types::branch_key;
+use gradient_types::{RepositoryUrl, branch_key};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchHead {
@@ -29,7 +29,7 @@ pub(in crate::git) struct AdvertisedRef {
 }
 
 pub(in crate::git) fn ls_remote_head(
-    url: &str,
+    url: &RepositoryUrl,
     credentials: &GitOperationCredentials,
     branch: Option<&str>,
 ) -> Result<BranchHead, SourceError> {
@@ -37,15 +37,19 @@ pub(in crate::git) fn ls_remote_head(
 }
 
 pub(in crate::git) fn list_remote_refs(
-    url: &str,
+    url: &RepositoryUrl,
     credentials: &GitOperationCredentials,
 ) -> Result<Vec<AdvertisedRef>, SourceError> {
-    let url = git_transport_url(url);
+    let url = url.git_connection_url();
     if url.starts_with("git://") && credentials.ssh_git_private_key_and_known_hosts.is_none() {
         return list_refs_git_protocol(url);
     }
 
-    run_blocking_libgit2_operation_with_git_credentials(credentials, || list_refs_libgit2(url))
+    run_blocking_libgit2_operation_with_git_credentials(
+        credentials,
+        BlockingGitFetchOperationLimits::ordinary_fetch_operation_limits(),
+        || list_refs_libgit2(url),
+    )
 }
 
 fn list_refs_libgit2(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {

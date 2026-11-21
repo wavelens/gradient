@@ -4,48 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::eviction::MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION;
+use super::expiry::MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION;
 use anyhow::{Context, Result};
 use gradient_db::{DbContext, WorkerDb};
-use gradient_entity::build::BuildStatus;
 use gradient_graph::{GcRequest, Graph};
 use gradient_storage::NarStore;
 use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::collections::HashSet;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct CleanupReport {
     pub orphan_nars_scanned: u64,
     pub orphan_nars_removed: u64,
     pub zombie_cached_paths_purged: u64,
-}
-
-gradient_db::sql! {
-    UNREFERENCED_HASHES = r#"
-    SELECT h.hash AS hash
-    FROM unnest($1::text[]) AS h(hash)
-    WHERE NOT EXISTS (
-        SELECT 1 FROM cached_path cp
-        WHERE cp.hash = h.hash AND cp.file_hash IS NOT NULL)
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation_output dout
-        JOIN derivation_build b ON b.derivation = dout.derivation
-        WHERE dout.hash = h.hash AND b.status NOT IN ($2, $3, $4, $5))
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation_input_source s
-        JOIN derivation_build b ON b.derivation = s.derivation
-        WHERE s.hash = h.hash)
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation d
-        JOIN derivation_build b ON b.derivation = d.id
-        WHERE d.hash = h.hash)
-"#,
-        params = [CachedPathHashes(UNREFERENCED_PROBE_BATCH), Int(4), Int(5), Int(6), Int(9)],
-        tier = Sweep;
 }
 
 pub async fn repair_nar_shard(db: &DbContext, graph: &Graph, shard: &str) -> Result<CleanupReport> {
@@ -62,12 +37,8 @@ pub async fn repair_nar_shard(db: &DbContext, graph: &Graph, shard: &str) -> Res
         ..Default::default()
     };
     let candidates = past_upload_grace(&db.config, &on_disk);
-    for chunk in candidates.chunks(UNREFERENCED_PROBE_BATCH) {
-        for hash in unreferenced_hashes(&db.worker_db, chunk).await? {
-            if remove_orphan_nar(&db.storage.nar_storage, &hash).await {
-                report.orphan_nars_removed += 1;
-            }
-        }
+    for chunk in candidates.chunks(ORPHAN_CANDIDATE_BATCH) {
+        report.orphan_nars_removed += delete_orphan_objects(graph, chunk).await?;
     }
 
     if report.orphan_nars_removed > 0 {
@@ -95,21 +66,18 @@ pub async fn repair_nar_shard(db: &DbContext, graph: &Graph, shard: &str) -> Res
 
 fn zombie_candidates(shard: &str) -> sea_orm::Select<ECachedPath> {
     let last = format!("{shard}{}", "z".repeat(32usize.saturating_sub(shard.len())));
-    ECachedPath::find()
-        .filter(CCachedPath::Hash.between(shard.to_owned(), last))
-        .filter(CCachedPath::FileHash.is_not_null())
-        .filter(CCachedPath::Confirmed.eq(true))
+    ECachedPath::find().filter(CCachedPath::Hash.between(shard.to_owned(), last))
 }
 
 /// The listing was taken before these rows were read. A NAR committed in between is absent from the
 /// listing yet present in storage. Dropping its row would leave the producer `Completed` with no
 /// backing output. Storage is the judge, and a probe error is preserving the row.
-async fn zombie_hashes(
+async fn load_shard_zombie_cached_path_row_ids(
     db: &WorkerDb,
     nar_storage: &NarStore,
     shard: &str,
     on_disk: &HashSet<String>,
-) -> Result<Vec<String>> {
+) -> Result<Vec<CachedPathId>> {
     let rows = zombie_candidates(shard)
         .all(db)
         .await
@@ -117,17 +85,18 @@ async fn zombie_hashes(
 
     let mut zombies = Vec::new();
     for row in rows {
-        if on_disk.contains(&row.hash) {
+        let key = &row.nar_object_storage_key;
+        if on_disk.contains(key) {
             continue;
         }
 
-        match nar_storage.exists(&row.hash).await {
-            Ok(false) => zombies.push(row.hash),
+        match nar_storage.exists(key).await {
+            Ok(false) => zombies.push(row.id),
             Ok(true) => {
-                debug!(hash = %row.hash, "zombie purge: the object landed after the listing")
+                debug!(%key, "zombie purge: the object landed after the listing")
             }
             Err(e) => {
-                warn!(hash = %row.hash, error = %e, "zombie purge: could not probe the object")
+                warn!(%key, error = %e, "zombie purge: could not probe the object")
             }
         }
     }
@@ -142,7 +111,7 @@ async fn purge_zombie_cached_paths(
     shard: &str,
     on_disk: &HashSet<String>,
 ) -> Result<u64> {
-    let zombies = zombie_hashes(db, nar_storage, shard, on_disk).await?;
+    let zombies = load_shard_zombie_cached_path_row_ids(db, nar_storage, shard, on_disk).await?;
     if zombies.is_empty() {
         return Ok(0);
     }
@@ -150,12 +119,14 @@ async fn purge_zombie_cached_paths(
     let mut purged = 0u64;
     for chunk in zombies.chunks(MAX_CACHED_PATH_HASHES_PER_RETIRE_TRANSACTION) {
         match graph
-            .gc(GcRequest::MissingNarFileCachedPathHashes {
-                hashes: chunk.to_vec(),
+            .gc(GcRequest::RetireCachedPathsWithMissingNarFiles {
+                ids: chunk.to_vec(),
             })
             .await
         {
-            Ok(report) => purged += report.retired.len() as u64,
+            Ok(report) => {
+                purged += report.unreferenced_cached_path_object_storage_keys.len() as u64
+            }
             Err(e) => {
                 warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch")
             }
@@ -172,7 +143,7 @@ async fn purge_zombie_cached_paths(
     Ok(purged)
 }
 
-const UNREFERENCED_PROBE_BATCH: usize = 5000;
+const ORPHAN_CANDIDATE_BATCH: usize = 5000;
 
 /// A fresh NAR is on disk before the evaluation committed its `derivation` and `cached_path` rows.
 /// Reclaiming it would strand a zombie `cached_path` that the dispatch gate is trusting. A grace of
@@ -195,34 +166,14 @@ pub(crate) fn orphan_delete_cutoff_timestamp(config: &RuntimeConfig) -> i64 {
     }
 }
 
-async fn unreferenced_hashes(db: &WorkerDb, candidates: &[String]) -> Result<Vec<String>> {
-    let rows = db
-        .query_all_raw(UNREFERENCED_HASHES.bind([
-            candidates.to_vec().into(),
-            sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
-            sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
-            sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
-            sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
-        ]))
+async fn delete_orphan_objects(graph: &Graph, candidates: &[String]) -> Result<u64> {
+    let report = graph
+        .gc(GcRequest::OrphanObjects {
+            object_storage_keys: candidates.to_vec(),
+        })
         .await
-        .context("probe NAR hashes for references")?;
-
-    rows.iter()
-        .map(|row| row.try_get::<String>("", "hash").map_err(Into::into))
-        .collect()
-}
-
-async fn remove_orphan_nar(nar_storage: &NarStore, hash: &str) -> bool {
-    match nar_storage.delete(hash).await {
-        Ok(()) => {
-            debug!(hash, "Removed orphaned NAR");
-            true
-        }
-        Err(e) => {
-            error!(hash, error = %e, "Failed to remove orphaned NAR");
-            false
-        }
-    }
+        .context("delete orphaned NAR objects")?;
+    Ok(report.unreferenced_orphan_object_storage_keys.len() as u64)
 }
 
 #[cfg(test)]
@@ -232,8 +183,6 @@ mod tests {
     use gradient_core::ServerState;
     use gradient_fixtures::mock::mock_db;
     use gradient_storage::NarStore;
-    use sea_orm::{DatabaseBackend, Value};
-    use std::collections::BTreeMap;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -250,16 +199,9 @@ mod tests {
             .exists()
     }
 
-    fn hash_row(h: &str) -> BTreeMap<String, Value> {
-        let mut m = BTreeMap::new();
-        m.insert("hash".to_string(), Value::String(Some(h.into())));
-        m
-    }
-
-    fn make_state(base: &Path, unreferenced: Vec<&str>) -> Arc<ServerState> {
+    fn make_state(base: &Path) -> Arc<ServerState> {
         let nar_storage = NarStore::local(base).unwrap();
         let db = mock_db()
-            .append_query_results([unreferenced.into_iter().map(hash_row).collect::<Vec<_>>()])
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         test_server_state(nar_storage, db, |config| {
@@ -268,91 +210,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn removes_only_what_the_probe_names_unreferenced() {
+    async fn every_unreferenced_candidate_is_removed_and_a_referenced_one_survives() {
         let tmp = tempfile::tempdir().unwrap();
-        let active = "aabbccdd11111111111111111111111111";
-        let orphan = "aaff001122222222222222222222222222";
-        write_nar_file(tmp.path(), active);
-        write_nar_file(tmp.path(), orphan);
+        let active_hash = "aabbccdd111111111111111111111111";
+        let active = &format!("{active_hash}-abc");
+        let h1 = "aaff0011222222222222222222222222";
+        let h2 = "aa22bbbb555555555555555555555555";
+        for key in [active, h1, h2] {
+            write_nar_file(tmp.path(), key);
+        }
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .cached_path(active_hash, "pkg")
+            .into_database()
+            .await;
+        let state = crate::test_support::build_test_server_state_with_running_graph_writer(
+            NarStore::local(tmp.path()).unwrap(),
+            db.connection(),
+            |config| config.gc.nar_upload_grace_hours = 0,
+        )
+        .await;
 
-        let state = make_state(tmp.path(), vec![orphan]);
         let report = repair_nar_shard(&state.db(), &state.graph, "aa")
             .await
             .unwrap();
 
         assert!(nar_file_exists(tmp.path(), active));
-        assert!(!nar_file_exists(tmp.path(), orphan));
-        assert_eq!(report.orphan_nars_scanned, 2);
-        assert_eq!(report.orphan_nars_removed, 1);
-    }
-
-    #[test]
-    fn keep_clauses_protect_drv_and_sources_for_any_shared_build() {
-        let sql = UNREFERENCED_HASHES
-            .text()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert_eq!(
-            sql.matches("b.status NOT IN").count(),
-            1,
-            "only the outputs clause may gate on build status: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "JOIN derivation_build b ON b.derivation = s.derivation WHERE s.hash = h.hash)"
-            ),
-            "input sources kept for any shared build (no status gate): {sql}"
-        );
-        assert!(
-            sql.contains("JOIN derivation_build b ON b.derivation = d.id WHERE d.hash = h.hash)"),
-            "drv kept for any shared build (no status gate): {sql}"
-        );
-    }
-
-    #[test]
-    fn the_probe_is_driven_by_the_listed_candidates() {
-        let sql = UNREFERENCED_HASHES.text();
-        assert!(sql.contains("FROM unnest($1::text[]) AS h(hash)"), "{sql}");
-        assert_eq!(sql.matches("NOT EXISTS").count(), 4, "{sql}");
-        assert!(!sql.contains("UNION"), "{sql}");
-    }
-
-    #[tokio::test]
-    async fn a_referenced_nar_survives() {
-        let tmp = tempfile::tempdir().unwrap();
-        let drv = "ddeeffaa33333333333333333333333333";
-        write_nar_file(tmp.path(), drv);
-
-        let state = make_state(tmp.path(), vec![]);
-        repair_nar_shard(&state.db(), &state.graph, "dd")
-            .await
-            .unwrap();
-
-        assert!(nar_file_exists(tmp.path(), drv));
-    }
-
-    #[tokio::test]
-    async fn every_unreferenced_candidate_is_removed() {
-        let tmp = tempfile::tempdir().unwrap();
-        let h1 = "1111aaaa44444444444444444444444444";
-        let h2 = "1122bbbb55555555555555555555555555";
-        write_nar_file(tmp.path(), h1);
-        write_nar_file(tmp.path(), h2);
-
-        let state = make_state(tmp.path(), vec![h1, h2]);
-        repair_nar_shard(&state.db(), &state.graph, "11")
-            .await
-            .unwrap();
-
         assert!(!nar_file_exists(tmp.path(), h1));
         assert!(!nar_file_exists(tmp.path(), h2));
+        assert_eq!(report.orphan_nars_scanned, 3);
+        assert_eq!(report.orphan_nars_removed, 2);
+        db.finish().await;
     }
 
     #[test]
     fn only_nars_past_the_upload_grace_are_candidates() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut state = make_state(tmp.path(), vec![]);
+        let mut state = make_state(tmp.path());
         Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config)
             .gc
             .nar_upload_grace_hours = 24;
@@ -400,8 +294,9 @@ mod tests {
         let row = gradient_entity::cached_path::Model {
             id: CachedPathId::now_v7(),
             hash: fresh.into(),
+            nar_object_storage_key: fresh.into(),
             package: "fresh".into(),
-            file_hash: Some("sha256:beef".into()),
+            file_hash: "sha256:beef".into(),
             ..Default::default()
         };
         let db = mock_db()
@@ -411,9 +306,14 @@ mod tests {
         let nar_storage = NarStore::local(tmp.path()).unwrap();
         let state = test_server_state(nar_storage, db, |_| {});
 
-        let zombies = zombie_hashes(&state.worker_db, &state.nar_storage, "cc", &HashSet::new())
-            .await
-            .unwrap();
+        let zombies = load_shard_zombie_cached_path_row_ids(
+            &state.worker_db,
+            &state.nar_storage,
+            "cc",
+            &HashSet::new(),
+        )
+        .await
+        .unwrap();
 
         assert!(zombies.is_empty(), "storage decides, not the stale listing");
         assert!(nar_file_exists(tmp.path(), fresh));
@@ -428,19 +328,22 @@ mod tests {
         write_nar_file(tmp.path(), live);
 
         let nar_storage = NarStore::local(tmp.path()).unwrap();
+        let zombie_id = CachedPathId::now_v7();
         let rows = vec![
             gradient_entity::cached_path::Model {
                 id: CachedPathId::now_v7(),
                 hash: live.into(),
+                nar_object_storage_key: live.into(),
                 package: "live".into(),
-                file_hash: Some("sha256:live".into()),
+                file_hash: "sha256:live".into(),
                 ..Default::default()
             },
             gradient_entity::cached_path::Model {
-                id: CachedPathId::now_v7(),
+                id: zombie_id,
                 hash: zombie_hash.into(),
+                nar_object_storage_key: zombie_hash.into(),
                 package: "zombie".into(),
-                file_hash: Some("sha256:zombie".into()),
+                file_hash: "sha256:zombie".into(),
                 ..Default::default()
             },
         ];
@@ -448,25 +351,198 @@ mod tests {
 
         let state = test_server_state(nar_storage, db, |_| {});
 
-        let zombies = zombie_hashes(&state.worker_db, &state.nar_storage, "", &HashSet::new())
-            .await
-            .unwrap();
+        let zombies = load_shard_zombie_cached_path_row_ids(
+            &state.worker_db,
+            &state.nar_storage,
+            "",
+            &HashSet::new(),
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(zombies, vec![zombie_hash.to_owned()]);
+        assert_eq!(zombies, vec![zombie_id]);
         assert!(nar_file_exists(tmp.path(), live), "live NAR must survive");
     }
 
-    #[test]
-    fn the_zombie_purge_never_reads_an_unconfirmed_row() {
-        use sea_orm::QueryTrait;
-        let sql = zombie_candidates("0a")
-            .build(DatabaseBackend::Postgres)
-            .to_string()
-            .to_uppercase();
-        assert!(sql.contains(r#""CACHED_PATH"."CONFIRMED" = TRUE"#), "{sql}");
+    async fn object_keys_of_cached_paths(
+        db: &gradient_fixtures::database::TestDatabase,
+    ) -> Vec<String> {
+        use sea_orm::QueryOrder;
+        ECachedPath::find()
+            .order_by_asc(CCachedPath::NarObjectStorageKey)
+            .all(&db.connection())
+            .await
+            .expect("the cached paths are read")
+            .into_iter()
+            .map(|row| row.nar_object_storage_key)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn an_object_under_a_per_content_key_survives_the_orphan_pass_while_its_row_refers_to_it()
+    {
+        let hash = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+        let key = format!("{hash}-c0ntentfi1ehash");
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .cached_path(hash, "pkg")
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE cached_path SET nar_object_storage_key = '{key}' WHERE hash = '{hash}'"
+        ))
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        write_nar_file(tmp.path(), &key);
+        let state = crate::test_support::build_test_server_state_with_running_graph_writer(
+            NarStore::local(tmp.path()).unwrap(),
+            db.connection(),
+            |config| config.gc.nar_upload_grace_hours = 0,
+        )
+        .await;
+
+        repair_nar_shard(&state.db(), &state.graph, "cd")
+            .await
+            .unwrap();
+
         assert!(
-            sql.contains(r#""CACHED_PATH"."FILE_HASH" IS NOT NULL"#),
-            "{sql}"
+            nar_file_exists(tmp.path(), &key),
+            "Objects stored under a per-content key remain for as long as cached path rows reference them."
         );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn an_orphan_that_an_upload_commits_on_after_the_listing_keeps_its_object() {
+        let hash = "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1";
+        let tmp = tempfile::tempdir().unwrap();
+        write_nar_file(tmp.path(), hash);
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .into_database()
+            .await;
+        let state = crate::test_support::build_test_server_state_with_running_graph_writer(
+            NarStore::local(tmp.path()).unwrap(),
+            db.connection(),
+            |config| config.gc.nar_upload_grace_hours = 0,
+        )
+        .await;
+        let listed = past_upload_grace(&state.config, &[(hash.to_owned(), 0)]);
+        assert_eq!(listed, vec![hash.to_owned()]);
+
+        db.execute(&format!(
+            "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, \
+                 file_size, nar_size, nar_hash, debug_info_indexed, \
+                 server_computed_hashes_and_sizes, created_at) \
+             VALUES (uuidv7(), '{hash}', '{hash}', 'pkg', 'sha256:file', 1, 1, \
+                 'sha256:nar', false, false, now())"
+        ))
+        .await;
+        delete_orphan_objects(&state.graph, &listed).await.unwrap();
+
+        assert_eq!(
+            object_keys_of_cached_paths(&db).await,
+            vec![hash.to_owned()]
+        );
+        assert!(
+            nar_file_exists(tmp.path(), hash),
+            "An upload that commits on a listed orphan keeps the object its row serves."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn an_upload_that_skipped_its_write_is_refused_when_it_commits_after_the_orphan_delete() {
+        use gradient_entity::store_path_content_producer::CacheUploadChannel;
+        use gradient_graph::{NarCommit, NarCommitContent, StoredContentProducer};
+
+        let hash = "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2";
+        let cache = CacheId::now_v7();
+        let facts = gradient_storage::compress_nar_bytes_and_verify_stream(b"nar");
+        let key = facts.object_storage_key_for_store_path_hash_and_compressed_file_sha256(hash);
+        let tmp = tempfile::tempdir().unwrap();
+        write_nar_file(tmp.path(), &key);
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .into_cache(cache)
+            .into_database()
+            .await;
+        let state = crate::test_support::build_test_server_state_with_running_graph_writer(
+            NarStore::local(tmp.path()).unwrap(),
+            db.connection(),
+            |config| config.gc.nar_upload_grace_hours = 0,
+        )
+        .await;
+        let listed = past_upload_grace(&state.config, &[(key.clone(), 0)]);
+
+        delete_orphan_objects(&state.graph, &listed).await.unwrap();
+        let skipped_write = state
+            .graph
+            .commit_nar(NarCommit {
+                store_path: format!("/nix/store/{hash}-pkg"),
+                content: NarCommitContent::ServerComputedNarAndCompressedFileHashesAndSizes(facts),
+                references: Vec::new(),
+                deriver: None,
+                ca: None,
+                producer: StoredContentProducer::Upload {
+                    caches: vec![cache],
+                    user: None,
+                    api_key: None,
+                    channel: CacheUploadChannel::RestHttpApiUpload,
+                },
+            })
+            .await;
+
+        assert!(
+            !nar_file_exists(tmp.path(), &key),
+            "The orphan delete removes the listed object."
+        );
+        assert!(
+            skipped_write.is_err() && object_keys_of_cached_paths(&db).await.is_empty(),
+            "An upload queued behind the orphan delete is refused, so no row names the deleted object: {skipped_write:?}"
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn the_zombie_purge_retires_only_the_content_whose_object_is_missing() {
+        let hash = "cececececececececececececececece";
+        let present = format!("{hash}-presentc0ntent");
+        let missing = format!("{hash}-missingc0ntent");
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .cached_path(hash, "pkg")
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE cached_path SET nar_object_storage_key = '{present}' WHERE hash = '{hash}'; \
+             INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, \
+                 file_size, nar_size, nar_hash, debug_info_indexed, \
+                 server_computed_hashes_and_sizes, created_at) \
+             SELECT uuidv7(), hash, '{missing}', package, 'sha256:other', file_size, nar_size, \
+                 'sha256:othernar', false, false, created_at \
+             FROM cached_path WHERE hash = '{hash}';"
+        ))
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        write_nar_file(tmp.path(), &present);
+        let state = crate::test_support::build_test_server_state_with_running_graph_writer(
+            NarStore::local(tmp.path()).unwrap(),
+            db.connection(),
+            |config| config.gc.nar_upload_grace_hours = 24,
+        )
+        .await;
+
+        repair_nar_shard(&state.db(), &state.graph, "ce")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            object_keys_of_cached_paths(&db).await,
+            vec![present.clone()],
+            "Only the content whose object is missing can lose its row."
+        );
+        assert!(nar_file_exists(tmp.path(), &present));
+        db.finish().await;
     }
 }

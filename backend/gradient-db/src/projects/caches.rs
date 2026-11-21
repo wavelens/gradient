@@ -6,7 +6,9 @@
 
 use gradient_types::ids::{CacheId, ProjectId};
 use gradient_types::{CProjectCache, EProjectCache, MProjectCache};
-use sea_orm::{ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect,
+};
 
 pub async fn project_has_writable_cache<C: ConnectionTrait>(
     db: &C,
@@ -48,6 +50,19 @@ pub async fn subscriptions_to<C: ConnectionTrait>(
 ) -> Result<Vec<MProjectCache>, DbErr> {
     EProjectCache::find()
         .filter(CProjectCache::Cache.eq(cache))
+        .all(db)
+        .await
+}
+
+pub async fn project_ids_with_read_access_to_cache<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Vec<ProjectId>, DbErr> {
+    crate::cache_paths::project_cache_read_subscription_rows_select()
+        .select_only()
+        .column(CProjectCache::Project)
+        .filter(CProjectCache::Cache.eq(cache))
+        .into_tuple()
         .all(db)
         .await
 }
@@ -165,6 +180,87 @@ mod tests {
         assert!(signs(mixed.id).await);
         assert!(!signs(opted_out.id).await);
         assert!(signs(without_tasks.id).await);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn project_write_caches_include_write_only_active_cache_and_read_access_requires_active_read_subscription()
+     {
+        use gradient_entity::project_cache::CacheSubscriptionMode::{
+            ReadOnly, ReadWrite, WriteOnly,
+        };
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let owner = crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        let active_cache_row = rows::cache_with_id(CacheId::now_v7(), "active", owner.id);
+        let deactivated_cache_row = gradient_types::MCache {
+            active: false,
+            ..rows::cache_with_id(CacheId::now_v7(), "inactive", owner.id)
+        };
+        for cache in [&active_cache_row, &deactivated_cache_row] {
+            crate::rows::insert::<ECache, _>(&conn, cache.clone())
+                .await
+                .expect("the cache is written");
+        }
+        let mut project_ids_by_subscription_mode = Vec::new();
+        for (slug, cache, mode) in [
+            ("write-only", &active_cache_row, WriteOnly),
+            ("read-only", &active_cache_row, ReadOnly),
+            ("read-write", &active_cache_row, ReadWrite),
+            ("read-write-inactive", &deactivated_cache_row, ReadWrite),
+        ] {
+            let project = crate::rows::insert::<EProject, _>(
+                &conn,
+                rows::project_with_id(ProjectId::now_v7(), slug),
+            )
+            .await
+            .expect("the project is written");
+            crate::rows::insert::<EProjectCache, _>(
+                &conn,
+                rows::project_cache_link(ProjectCacheId::now_v7(), project.id, cache.id, mode),
+            )
+            .await
+            .expect("the subscription is written");
+            project_ids_by_subscription_mode.push(project.id);
+        }
+        let [write_only, read_only, read_write, read_write_inactive] =
+            project_ids_by_subscription_mode[..]
+        else {
+            unreachable!()
+        };
+
+        let mut project_ids_reported_as_reading_cache =
+            project_ids_with_read_access_to_cache(&conn, active_cache_row.id)
+                .await
+                .expect("the project_ids_reported_as_reading_cache are read");
+        project_ids_reported_as_reading_cache.sort();
+        let mut project_ids_expected_to_read_active_cache = vec![read_only, read_write];
+        project_ids_expected_to_read_active_cache.sort();
+
+        assert_eq!(
+            project_ids_reported_as_reading_cache,
+            project_ids_expected_to_read_active_cache
+        );
+        assert!(
+            project_ids_with_read_access_to_cache(&conn, deactivated_cache_row.id)
+                .await
+                .expect("the project_ids_reported_as_reading_cache are read")
+                .is_empty()
+        );
+        assert_eq!(
+            crate::cache_paths::project_write_caches(&conn, write_only)
+                .await
+                .expect("Read the write caches."),
+            vec![active_cache_row.id]
+        );
+        assert!(
+            crate::cache_paths::project_write_caches(&conn, read_write_inactive)
+                .await
+                .expect("Read the write caches.")
+                .is_empty()
+        );
         db.finish().await;
     }
 }

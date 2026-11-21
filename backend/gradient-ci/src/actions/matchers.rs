@@ -49,7 +49,7 @@ pub(super) fn requested_actions_for(status: CiStatus) -> Vec<RequestedAction> {
         CiStatus::ActionRequired => vec![RequestedAction {
             identifier: APPROVAL_ACTION_ID.to_string(),
             label: "Approve and run".to_string(),
-            description: "Run CI for external contributor PR.".to_string(),
+            description: "Run this commit with project secrets".to_string(),
         }],
         _ => Vec::new(),
     }

@@ -36,7 +36,6 @@ mod count;
 mod eval_metrics;
 mod full_caches;
 mod job_handlers;
-mod ram_shortage;
 mod realisations;
 mod scoring;
 mod supersede;
@@ -78,6 +77,9 @@ mod test_jobs;
 #[derive(Clone)]
 pub struct Scheduler {
     pub db: DbContext,
+    pub(crate) waiting_refresh_database_pool: DbContext,
+    pub(crate) waiting_refresh_state_between_passes:
+        Arc<gradient_util::sync::Mutex<waiting_state::WaitingRefreshStateBetweenPasses>>,
     pub graph: Arc<Graph>,
     pub started_at: DateTime<Utc>,
     pub(crate) upstream_query: Arc<Semaphore>,
@@ -111,8 +113,11 @@ impl std::fmt::Debug for Scheduler {
 impl Scheduler {
     pub fn new(state: Arc<ServerState>) -> Self {
         let policy = gradient_pool::score::policy_for(state.config.scheduler.scoring_policy);
+        let db = state.db();
         Self {
-            db: state.db(),
+            waiting_refresh_database_pool: waiting_state::waiting_refresh_database_pool(&db),
+            waiting_refresh_state_between_passes: Arc::default(),
+            db,
             graph: Arc::clone(&state.graph),
             started_at: state.started_at,
             upstream_query: Arc::clone(&state.memory.upstream_query),
@@ -328,12 +333,6 @@ impl Scheduler {
         }
 
         unowned
-    }
-
-    pub(crate) async fn lasting_ram_shortages(&self) -> Vec<gradient_graph::RamShortage> {
-        self.call(|reply| SchedulerMsg::LastingRamShortages { reply })
-            .await
-            .unwrap_or_default()
     }
 
     pub(crate) async fn prune_pending_builds(

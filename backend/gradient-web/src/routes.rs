@@ -192,8 +192,8 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 ))
                 .routes(routes!(
                     git_host_connections::project::list_project_git_host_connection_deliveries
-                    ))
-                    .routes(routes!(
+                ))
+                .routes(routes!(
                     git_host_connections::project::list_project_git_host_connection_tasks
                 ))
                 .routes(routes!(
@@ -201,6 +201,9 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 ))
                 .routes(routes!(
                     git_host_connections::project_gitea_oauth2_connection::redirect_signed_in_browser_to_git_host_for_project_oauth_approval
+                ))
+                .routes(routes!(
+                    git_host_connections::project_gitea_oauth2_connection::complete_project_git_host_oauth_connection_and_clear_connect_cookie
                 ))
                 .routes(routes!(
                     git_host_connections::team::list_team_git_host_connections,
@@ -213,12 +216,19 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 ))
                 .routes(routes!(
                     git_host_connections::team::list_team_git_host_connection_deliveries
-                    ))
-                    .routes(routes!(
+                ))
+                .routes(routes!(
                     git_host_connections::team::list_team_git_host_connection_tasks
                 ))
                 .routes(routes!(
                     git_host_connections::team::test_team_git_host_connection
+                ))
+                .routes(routes!(
+                    git_host_connections::team::list_team_git_host_connection_repository_grants,
+                    git_host_connections::team::create_team_git_host_connection_repository_grant_for_project
+                ))
+                .routes(routes!(
+                    git_host_connections::team::delete_team_git_host_connection_repository_grant
                 ))
                 .routes(routes!(
                     tasks::repository::get_task_repository,
@@ -349,6 +359,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(access::get_user_access))
                 .routes(routes!(access::post_revoke_user_access))
                 .routes(routes!(access::get_cache_access))
+                .routes(routes!(access::get_project_access))
                 .routes(routes!(dashboard::tasks::get_tasks))
                 .routes(routes!(dashboard::stats::get_stats))
                 .routes(routes!(dashboard::activity::get_activity))
@@ -397,18 +408,11 @@ pub(crate) fn account_api() -> OpenApiRouter<Arc<ServerState>> {
     secured(
         enveloped(
             OpenApiRouter::new()
-                .routes(routes!(user::delete))
-                .routes(routes!(user::get_keys, user::post_keys, user::delete_keys))
-                .routes(routes!(user::patch_key))
-                .routes(routes!(user::post_key_revoke))
+                .routes(routes!(user::get_keys))
                 .routes(routes!(
                     user::get_key_visible_projects_and_caches_with_permissions
                 ))
-                .routes(routes!(
-                    user_ssh_keys::get_ssh_keys,
-                    user_ssh_keys::post_ssh_key
-                ))
-                .routes(routes!(user_ssh_keys::delete_ssh_key))
+                .routes(routes!(user_ssh_keys::get_ssh_keys))
                 .routes(routes!(invites::get_user_requests))
                 .routes(routes!(invites::post_accept_invite))
                 .routes(routes!(invites::post_decline_invite))
@@ -416,7 +420,23 @@ pub(crate) fn account_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(user::delete_session))
                 .routes(routes!(auth::post_session_renew))
                 .routes(routes!(user::get_audit_log))
-                .routes(routes!(user::get_settings, user::patch_settings))
+                .routes(routes!(user::get_settings)),
+        ),
+        BEARER,
+    )
+}
+
+pub(crate) fn browser_session_account_api() -> OpenApiRouter<Arc<ServerState>> {
+    secured(
+        enveloped(
+            OpenApiRouter::new()
+                .routes(routes!(user::delete))
+                .routes(routes!(user::post_keys, user::delete_keys))
+                .routes(routes!(user::patch_key))
+                .routes(routes!(user::post_key_revoke))
+                .routes(routes!(user_ssh_keys::post_ssh_key))
+                .routes(routes!(user_ssh_keys::delete_ssh_key))
+                .routes(routes!(user::patch_settings))
                 .routes(routes!(login_providers::get_provider_connect))
                 .routes(routes!(login_providers::delete_provider_identity))
                 .routes(routes!(auth::get_cli_device_info))
@@ -434,7 +454,6 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(user::get))
                 .routes(routes!(projects::management::get_project))
                 .routes(routes!(membership::endpoints::project::list_members))
-                .routes(routes!(access::get_project_access))
                 .routes(routes!(tasks::management::get))
                 .routes(routes!(tasks::management::get_task))
                 .routes(routes!(tasks::evaluations::get_task_evaluations))
@@ -442,8 +461,6 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(tasks::evaluations::get_task_entry_points))
                 .routes(routes!(tasks::metrics::get_task_metrics))
                 .routes(routes!(tasks::metrics::get_entry_point_metrics))
-                .routes(routes!(tasks::evaluations::get_entry_point_download))
-                .routes(routes!(badges::get_task_badge))
                 .routes(routes!(evals::query::get_evaluation))
                 .routes(routes!(evals::query::get_evaluation_messages))
                 .routes(routes!(evals::query::get_evaluation_builds))
@@ -515,6 +532,18 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(live::build_live_ws)),
             routes!(exec_jobs::outputs::get_exec_job_output),
         )),
+        BEARER,
+    )
+}
+
+pub(crate) fn router_of_routes_accepting_token_query_credential() -> OpenApiRouter<Arc<ServerState>>
+{
+    optionally_secured(
+        enveloped(
+            OpenApiRouter::new()
+                .routes(routes!(tasks::evaluations::get_entry_point_download))
+                .routes(routes!(badges::get_task_badge)),
+        ),
         BEARER,
     )
 }

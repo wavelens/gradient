@@ -4,54 +4,139 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, ProjectItemAccessRequirement, TaskAccess, load_task};
 use crate::api_spec::TaskPath;
-use crate::authorization::{LiveStreamAuthToken, MaybeApiKey, MaybeUser};
+use crate::authorization::{
+    MaybeApiKey, MaybeUser, WebSocketUpgradeCredentialRecheckRequestExtractor,
+};
 use crate::error::{WebError, WebResult};
 use crate::extractors::Path;
 use crate::scope::{Readable, TaskScope};
 use axum::Extension;
 use axum::extract::State;
-use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
+use axum::extract::ws::{CloseFrame, Message, close_code};
+use axum::http::Method;
 use axum::response::Response;
+use bytes::Bytes;
+use futures::{Sink, Stream};
 use gradient_core::ServerState;
 use gradient_types::events::{Envelope, Event, EventRx, evaluation};
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::{Instant, Interval, MissedTickBehavior};
 
 use super::builds::BuildAccessContext;
 use super::evals::EvalAccessContext;
 
-/// The inbound half is polled only to notice the client leaving. A write-only loop would hold a
-/// quiet channel's task and socket open indefinitely.
-pub async fn live_stream<F, L>(
-    socket: WebSocket,
+pub const LIVE_STREAM_PING_INTERVAL: Duration = Duration::from_secs(30);
+pub const LIVE_STREAM_CLIENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(60);
+/// 30 seconds. This is the default timeout for sending each chunk of the cache protocol
+/// (`nar send_chunk_timeout_secs`). One limit is the bound for every send to a peer that stopped
+/// reading.
+pub const LIVE_STREAM_OR_JOB_TERMINAL_BROWSER_MESSAGE_SEND_TIMEOUT: Duration =
+    Duration::from_secs(30);
+
+pub(crate) async fn send_websocket_message_to_browser_with_timeout<S>(
+    sink: &mut S,
+    message: Message,
+) -> bool
+where
+    S: Sink<Message> + Unpin,
+{
+    use futures::SinkExt;
+
+    matches!(
+        tokio::time::timeout(
+            LIVE_STREAM_OR_JOB_TERMINAL_BROWSER_MESSAGE_SEND_TIMEOUT,
+            sink.send(message),
+        )
+        .await,
+        Ok(Ok(()))
+    )
+}
+
+pub(crate) struct ClientPingTimerAndLastReceivedTime {
+    ping: Interval,
+    last_received: Instant,
+}
+
+impl ClientPingTimerAndLastReceivedTime {
+    pub(crate) fn new() -> Self {
+        let now = Instant::now();
+        let mut ping =
+            tokio::time::interval_at(now + LIVE_STREAM_PING_INTERVAL, LIVE_STREAM_PING_INTERVAL);
+        ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        Self {
+            ping,
+            last_received: now,
+        }
+    }
+
+    pub(crate) fn reset_silence_timer_after_client_frame(&mut self) {
+        self.last_received = Instant::now();
+    }
+
+    pub(crate) async fn wait_for_next_ping_or_silence_deadline(&mut self) -> Option<Message> {
+        let deadline = self.last_received + LIVE_STREAM_CLIENT_RECEIVE_TIMEOUT;
+        tokio::select! {
+            biased;
+            () = tokio::time::sleep_until(deadline) => None,
+            _ = self.ping.tick() => Some(Message::Ping(Bytes::new())),
+        }
+    }
+}
+
+/// The receive side reads the socket to notice that the client left and to take the Pong. The loop
+/// sends a Ping every 30 seconds. The stream ends after 60 seconds without anything from the
+/// client, which frees the socket of a client that vanished without closing it.
+pub async fn live_stream<S, E, F, L>(
+    socket: S,
     mut rx: EventRx,
     mut select: F,
     lagged: L,
-    credentials: LiveStreamAuthToken,
+    access_lost: impl Future<Output = ()> + Send,
     cancel: CancellationToken,
 ) where
+    S: Stream<Item = Result<Message, E>> + Sink<Message> + Send,
+    E: Send,
     F: FnMut(&Envelope) -> Option<String> + Send + 'static,
     L: Fn(u64) -> Option<String> + Send + 'static,
 {
-    use futures::{SinkExt, StreamExt};
+    use futures::StreamExt;
     use tokio::sync::broadcast::error::RecvError;
 
     let (mut sink, mut stream) = socket.split();
-    let revoked = credentials.wait_until_session_or_api_key_is_revoked();
-    tokio::pin!(revoked);
+    let mut liveness = ClientPingTimerAndLastReceivedTime::new();
+    tokio::pin!(access_lost);
     loop {
         let text = tokio::select! {
             _ = cancel.cancelled() => break,
-            _ = &mut revoked => {
-                let _ = sink.send(revoked_session_or_api_key_close_message()).await;
+            _ = &mut access_lost => {
+                send_websocket_message_to_browser_with_timeout(
+                    &mut sink,
+                    stream_access_lost_close_frame(),
+                )
+                .await;
                 break;
             }
             incoming = stream.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
-                Some(Ok(_)) => continue,
+                Some(Ok(_)) => {
+                    liveness.reset_silence_timer_after_client_frame();
+                    continue;
+                }
+            },
+            ping = liveness.wait_for_next_ping_or_silence_deadline() => match ping {
+                Some(ping) => {
+                    if !send_websocket_message_to_browser_with_timeout(&mut sink, ping).await {
+                        break;
+                    }
+                    continue;
+                }
+                None => break,
             },
             event = rx.recv() => match event {
                 Ok(env) => select(&env),
@@ -60,17 +145,23 @@ pub async fn live_stream<F, L>(
             },
         };
         if let Some(text) = text
-            && sink.send(Message::Text(text.into())).await.is_err()
+            && !send_websocket_message_to_browser_with_timeout(
+                &mut sink,
+                Message::Text(text.into()),
+            )
+            .await
         {
             break;
         }
     }
 }
 
-pub fn revoked_session_or_api_key_close_message() -> Message {
+pub const STREAM_ACCESS_ENDED_CLOSE_REASON: &str = "Access to this stream ended.";
+
+pub fn stream_access_lost_close_frame() -> Message {
     Message::Close(Some(CloseFrame {
         code: close_code::POLICY,
-        reason: "Session or API key no longer valid".into(),
+        reason: STREAM_ACCESS_ENDED_CLOSE_REASON.into(),
     }))
 }
 
@@ -93,12 +184,28 @@ fn frame(env: &Envelope) -> Option<String> {
     responses((status = SWITCHING_PROTOCOLS, description = "Switching Protocols - WebSocket upgrade successful"), WebError)
 )]
 pub async fn task_live_ws(
-    TaskScope { task, .. }: TaskScope<Readable>,
+    TaskScope { project, task, .. }: TaskScope<Readable>,
     State(state): State<Arc<ServerState>>,
-    credentials: LiveStreamAuthToken,
-    ws: WebSocketUpgrade,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
     let task_id = task.id;
+    let db = state.db();
+    let (project_name, task_name) = (project.name, task.name.clone());
+    let guard = credentials.watch_caller_access_with_recheck(Method::GET, move |user, api_key| {
+        let (db, project_name, task_name) = (db.clone(), project_name.clone(), task_name.clone());
+        async move {
+            load_task(
+                &db,
+                Caller::from(&user),
+                api_key.as_ref(),
+                project_name,
+                task_name,
+                TaskAccess::Readable,
+            )
+            .await
+            .map(drop)
+        }
+    });
     // The task's recent evaluations are seeded first. Build events must fire while the evaluation
     // itself is still in `Building`.
     let mut known: HashSet<EvaluationId> = gradient_db::evaluations::latest_of_task(
@@ -113,14 +220,14 @@ pub async fn task_live_ws(
     let rx = state.events.subscribe();
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
-    Ok(ws.on_upgrade(move |socket| async move {
+    Ok(guard.on_upgrade(move |socket, guard| async move {
         let _ = shutdown
             .spawn(live_stream(
                 socket,
                 rx,
                 move |env| task_frame(env, task_id, &mut known),
                 skip_lag,
-                credentials,
+                guard.wait_until_access_lost(),
                 cancel,
             ))
             .await;
@@ -170,23 +277,43 @@ pub async fn evaluation_live_ws(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
-    credentials: LiveStreamAuthToken,
-    ws: WebSocketUpgrade,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
-    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
-        .await?;
+    let ctx = EvalAccessContext::load(
+        &state.web_db,
+        evaluation_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
     let eval_id = ctx.evaluation.id;
+    let db = state.web_db.clone();
+    let guard = credentials.watch_caller_access_with_recheck(Method::GET, move |user, api_key| {
+        let db = db.clone();
+        async move {
+            EvalAccessContext::load(
+                &db,
+                eval_id,
+                Caller::from(&user),
+                api_key.as_ref(),
+                ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+            )
+            .await
+            .map(drop)
+        }
+    });
     let rx = state.events.subscribe();
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
-    Ok(ws.on_upgrade(move |socket| async move {
+    Ok(guard.on_upgrade(move |socket, guard| async move {
         let _ = shutdown
             .spawn(live_stream(
                 socket,
                 rx,
                 move |env| eval_frame(env, eval_id),
                 skip_lag,
-                credentials,
+                guard.wait_until_access_lost(),
                 cancel,
             ))
             .await;
@@ -208,24 +335,44 @@ pub async fn build_live_ws(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
-    credentials: LiveStreamAuthToken,
-    ws: WebSocketUpgrade,
+    credentials: WebSocketUpgradeCredentialRecheckRequestExtractor,
 ) -> WebResult<Response> {
-    let ctx =
-        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
+    let db = state.web_db.clone();
+    let guard = credentials.watch_caller_access_with_recheck(Method::GET, move |user, api_key| {
+        let db = db.clone();
+        async move {
+            BuildAccessContext::load(
+                &db,
+                build_id,
+                Caller::from(&user),
+                api_key.as_ref(),
+                ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+            )
+            .await
+            .map(drop)
+        }
+    });
     let eval_id = ctx.build_job.evaluation;
     let shared_build = ctx.shared_build.id;
     let rx = state.events.subscribe();
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
-    Ok(ws.on_upgrade(move |socket| async move {
+    Ok(guard.on_upgrade(move |socket, guard| async move {
         let _ = shutdown
             .spawn(live_stream(
                 socket,
                 rx,
                 move |env| build_frame(env, eval_id, shared_build),
                 skip_lag,
-                credentials,
+                guard.wait_until_access_lost(),
                 cancel,
             ))
             .await;
@@ -258,9 +405,19 @@ fn eval_frame(env: &Envelope, eval_id: EvaluationId) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::per_key_open_slot_limit::OpenSlotLimitPerKey;
+    use futures::StreamExt;
+    use futures::channel::mpsc::{self, SendError, UnboundedReceiver, UnboundedSender};
     use gradient_types::EvaluationProgress;
+    use gradient_types::EventBus;
     use gradient_types::events::evaluation::{InputFetch, InputFetchState};
     use gradient_types::events::{build, cache};
+    use gradient_util::shutdown::Shutdown;
+    use std::convert::Infallible;
+    use std::net::IpAddr;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::task::JoinHandle;
     use uuid::Uuid;
 
     fn env(event: impl Into<Event>) -> Envelope {
@@ -444,5 +601,197 @@ mod tests {
                 "paths_total": 3
             })
         );
+    }
+
+    struct InMemoryWebSocket {
+        from_client: UnboundedReceiver<Result<Message, Infallible>>,
+        to_client: UnboundedSender<Message>,
+    }
+
+    impl Stream for InMemoryWebSocket {
+        type Item = Result<Message, Infallible>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.get_mut().from_client.poll_next_unpin(cx)
+        }
+    }
+
+    impl Sink<Message> for InMemoryWebSocket {
+        type Error = SendError;
+
+        fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), SendError>> {
+            Pin::new(&mut self.get_mut().to_client).poll_ready(cx)
+        }
+
+        fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), SendError> {
+            Pin::new(&mut self.get_mut().to_client).start_send(item)
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), SendError>> {
+            Pin::new(&mut self.get_mut().to_client).poll_flush(cx)
+        }
+
+        fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), SendError>> {
+            Pin::new(&mut self.get_mut().to_client).poll_close(cx)
+        }
+    }
+
+    fn spawn_live_loop_with_fake_socket_and_held_access_lost<T: Send + 'static>(
+        held: T,
+    ) -> (
+        JoinHandle<()>,
+        UnboundedSender<Result<Message, Infallible>>,
+        UnboundedReceiver<Message>,
+    ) {
+        let (client_tx, from_client) = mpsc::unbounded();
+        let (to_client, client_rx) = mpsc::unbounded();
+        let bus = EventBus::new(16);
+        let rx = bus.subscribe();
+        let stream = Shutdown::new().spawn(live_stream(
+            InMemoryWebSocket {
+                from_client,
+                to_client,
+            },
+            rx,
+            |_| None,
+            skip_lag,
+            async move {
+                let _held = (held, bus);
+                std::future::pending::<()>().await;
+            },
+            CancellationToken::new(),
+        ));
+        (stream, client_tx, client_rx)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fake_pong_client_keeps_stream_open_past_ping_intervals() {
+        let (stream, client_tx, mut client_rx) =
+            spawn_live_loop_with_fake_socket_and_held_access_lost(());
+        Shutdown::new().spawn(async move {
+            while let Some(message) = client_rx.next().await {
+                if let Message::Ping(payload) = message {
+                    let _ = client_tx.unbounded_send(Ok(Message::Pong(payload)));
+                }
+            }
+        });
+
+        tokio::time::sleep(LIVE_STREAM_PING_INTERVAL * 5).await;
+
+        assert!(
+            !stream.is_finished(),
+            "Clients that respond to every Ping keep the stream open."
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_peer_disconnect_after_silence_deadline_frees_anonymous_websocket_address_slot()
+    {
+        let limit = OpenSlotLimitPerKey::<IpAddr>::new(1);
+        let address: IpAddr = "192.0.2.1".parse().unwrap();
+        let permit = limit.try_acquire_open_slot_for_key(address).unwrap();
+        assert!(limit.try_acquire_open_slot_for_key(address).is_none());
+        let (stream, _client_tx, _client_rx) =
+            spawn_live_loop_with_fake_socket_and_held_access_lost(permit);
+
+        tokio::time::sleep(LIVE_STREAM_CLIENT_RECEIVE_TIMEOUT - Duration::from_secs(1)).await;
+        assert!(
+            !stream.is_finished(),
+            "The stream is open until the silence deadline."
+        );
+
+        tokio::time::timeout(Duration::from_secs(2), stream)
+            .await
+            .expect("Streams end after the silence deadline.")
+            .unwrap();
+        assert!(
+            limit.try_acquire_open_slot_for_key(address).is_some(),
+            "The slot for the closed stream is free again."
+        );
+    }
+
+    struct WebSocketPeerThatStopsReadingAfterConnect {
+        from_client: UnboundedReceiver<Result<Message, Infallible>>,
+    }
+
+    impl Stream for WebSocketPeerThatStopsReadingAfterConnect {
+        type Item = Result<Message, Infallible>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.get_mut().from_client.poll_next_unpin(cx)
+        }
+    }
+
+    impl Sink<Message> for WebSocketPeerThatStopsReadingAfterConnect {
+        type Error = SendError;
+
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), SendError>> {
+            Poll::Pending
+        }
+
+        fn start_send(self: Pin<&mut Self>, _: Message) -> Result<(), SendError> {
+            Ok(())
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), SendError>> {
+            Poll::Pending
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), SendError>> {
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn live_stream_to_client_that_stopped_reading_ends_within_send_timeout_and_frees_address_slot()
+     {
+        let limit = OpenSlotLimitPerKey::<IpAddr>::new(1);
+        let address: IpAddr = "192.0.2.1".parse().unwrap();
+        let permit = limit.try_acquire_open_slot_for_key(address).unwrap();
+        let (client_tx, from_client) = mpsc::unbounded();
+        let bus = EventBus::new(16);
+        let rx = bus.subscribe();
+        let stream = Shutdown::new().spawn(live_stream(
+            WebSocketPeerThatStopsReadingAfterConnect { from_client },
+            rx,
+            |_| None,
+            skip_lag,
+            async move {
+                let _held = (permit, bus);
+                std::future::pending::<()>().await;
+            },
+            CancellationToken::new(),
+        ));
+
+        tokio::time::sleep(LIVE_STREAM_PING_INTERVAL - Duration::from_secs(1)).await;
+        client_tx
+            .unbounded_send(Ok(Message::Pong(Bytes::new())))
+            .unwrap();
+
+        tokio::time::timeout(
+            Duration::from_secs(1)
+                + LIVE_STREAM_OR_JOB_TERMINAL_BROWSER_MESSAGE_SEND_TIMEOUT
+                + Duration::from_secs(1),
+            stream,
+        )
+        .await
+        .expect("Streams to clients that stopped reading close at the send timeout.")
+        .unwrap();
+        assert!(
+            limit.try_acquire_open_slot_for_key(address).is_some(),
+            "The slot for the client address is free again after the send timeout."
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ping_send_failure_ends_live_stream_immediately() {
+        let (stream, _client_tx, client_rx) =
+            spawn_live_loop_with_fake_socket_and_held_access_lost(());
+        drop(client_rx);
+
+        tokio::time::timeout(LIVE_STREAM_PING_INTERVAL + Duration::from_secs(1), stream)
+            .await
+            .expect("Failures to send a ping end the stream immediately.")
+            .unwrap();
     }
 }

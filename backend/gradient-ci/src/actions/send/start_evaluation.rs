@@ -7,7 +7,7 @@
 use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
-use crate::{park_if_no_cache, park_if_no_workers, trigger_evaluation};
+use crate::{EvaluationCodeTrust, trigger_evaluation};
 use anyhow::{Context, Result, anyhow, bail};
 use gradient_db::lookup::by_id;
 use gradient_entity::evaluation::WalkMode;
@@ -39,7 +39,6 @@ pub(crate) async fn execute_start_evaluation(
     let evaluation = queue_evaluation(&txn, &task, head, parent).await?;
     txn.commit().await.context("commit the evaluation start")?;
 
-    let evaluation = park_if_blocked(ctx, evaluation, &task).await?;
     ctx.db.record_evaluation_created(&evaluation).await;
     Ok(ExecutorOk {
         status_code: Some(200),
@@ -89,6 +88,7 @@ pub(crate) async fn queue_evaluation<C: ConnectionTrait>(
         None,
         None,
         WalkMode::default(),
+        &EvaluationCodeTrust::CodeWithProjectCredentials,
     )
     .await
     .map_err(|e| anyhow!("queue the evaluation: {e}"))?;
@@ -102,14 +102,4 @@ pub(crate) async fn queue_evaluation<C: ConnectionTrait>(
             .context("record the parent exec job")?;
     }
     Ok(evaluation)
-}
-
-async fn park_if_blocked(
-    ctx: &CiContext,
-    evaluation: MEvaluation,
-    task: &MTask,
-) -> Result<MEvaluation> {
-    let db = &ctx.db.worker_db;
-    let evaluation = park_if_no_cache(db, evaluation, task.project).await?;
-    Ok(park_if_no_workers(db, evaluation, task.project).await?)
 }

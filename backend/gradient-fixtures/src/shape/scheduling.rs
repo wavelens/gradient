@@ -16,7 +16,7 @@ use gradient_entity::ids::{
     DerivationFeatureId, DerivationMetricId, DispatchedJobId, DispatchedJobPhaseId,
     EvalCacheStoreId, EvaluationFlakeInputOverrideId, EvaluationId, EvaluationInputUpdateId,
     EvaluationMetricId, FeatureId, FlakeInputOverrideId, GitHostConnectionId, ProjectId,
-    TaskActionId, TaskId, TaskTriggerId,
+    TaskActionId, TaskId, TaskTriggerId, UserId,
 };
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::task_trigger::TriggerType;
@@ -25,7 +25,7 @@ use gradient_entity::{
     derivation, derivation_build, derivation_feature, derivation_metric, dispatched_job,
     dispatched_job_phase, eval_cache_store, eval_split, evaluation,
     evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature,
-    task_action, task_flake_input_override, task_trigger,
+    task_action, task_flake_input_override, task_trigger, worker_registration,
 };
 use gradient_types::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
 
@@ -34,6 +34,21 @@ use crate::{rows, test_date};
 
 pub fn eval_job_key(evaluation: EvaluationId) -> String {
     format!("eval:{evaluation}")
+}
+
+pub(super) fn build_worker_registration_row(
+    project: ProjectId,
+    worker_id: &str,
+    owner: UserId,
+) -> worker_registration::Model {
+    worker_registration::Model {
+        peer_id: project,
+        worker_id: worker_id.into(),
+        token_hash: format!("token-{worker_id}"),
+        created_by: Some(owner),
+        created_at: test_date(),
+        ..rows::worker_registration(true, true)
+    }
 }
 
 impl Shape {
@@ -191,14 +206,7 @@ impl Shape {
         let owner = self.owner();
         let project = self.projects[self.current_task()].id;
         self.registrations
-            .push(gradient_entity::worker_registration::Model {
-                peer_id: project,
-                worker_id: worker_id.into(),
-                token_hash: format!("token-{worker_id}"),
-                created_by: Some(owner),
-                created_at: test_date(),
-                ..rows::worker_registration(true, true)
-            });
+            .push(build_worker_registration_row(project, worker_id, owner));
         self
     }
 
@@ -315,6 +323,35 @@ impl Shape {
         self
     }
 
+    pub fn derivation_metric_reported_by_worker(
+        self,
+        worker_id: &str,
+        change: impl FnOnce(&mut derivation_metric::Model),
+    ) -> Self {
+        let registration = self
+            .registrations
+            .iter()
+            .find(|r| r.worker_id == worker_id)
+            .map(|r| (r.id, r.peer_id));
+        let team_worker = self
+            .team_worker_rows
+            .iter()
+            .find(|w| w.worker_id == worker_id)
+            .map(|w| w.id);
+        assert!(
+            registration.is_some() || team_worker.is_some(),
+            "Declare worker {worker_id} first"
+        );
+        let worker_id = worker_id.to_owned();
+        self.derivation_metric(move |m| {
+            m.worker_id = worker_id;
+            m.worker_registration = registration.map(|(id, _)| id);
+            m.project = registration.map(|(_, project)| project);
+            m.team_worker = team_worker;
+            change(m);
+        })
+    }
+
     pub fn upstream(
         mut self,
         id: CacheUpstreamId,
@@ -350,11 +387,13 @@ impl Shape {
 
     pub fn eval_cache(mut self, fingerprint: &str) -> Self {
         let cache = self.caches[self.cache.expect("name a cache first")].id;
+        let project = self.projects[self.current_task()].id;
         self.eval_caches.push(eval_cache_store::Model {
             id: EvalCacheStoreId::now_v7(),
             cache,
+            project,
             fingerprint: fingerprint.into(),
-            storage_path: format!("eval-cache-segments/{cache}/{fingerprint}"),
+            storage_path: format!("eval-cache-segments/{cache}/{project}/{fingerprint}"),
             size_bytes: 1,
             created_at: test_date(),
             updated_at: test_date(),

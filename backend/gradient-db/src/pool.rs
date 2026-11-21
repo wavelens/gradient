@@ -9,9 +9,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use sea_orm::{
-    AccessMode, ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbBackend, DbErr,
-    ExecResult, IsolationLevel, QueryResult, Statement, TransactionError, TransactionOptions,
-    TransactionTrait,
+    AccessMode, ConnectionTrait, DatabaseConnection, DatabaseConnectionType, DatabaseTransaction,
+    DbBackend, DbErr, ExecResult, IsolationLevel, QueryResult, SqlxPostgresConnector, Statement,
+    TransactionError, TransactionOptions, TransactionTrait,
 };
 
 #[derive(Debug, Clone)]
@@ -56,6 +56,29 @@ impl WorkerDb {
 
     pub fn detached(&self) -> Self {
         Self(WorkerConn::Pool(Arc::clone(self.pool())))
+    }
+
+    /// Mock connections have no server to apply the settings. Calls on a mock connection always
+    /// get back the same handle unchanged.
+    pub fn new_with_separate_connection_pool_and_session_settings(
+        &self,
+        max_connections: u32,
+        settings: &[(&str, &str)],
+    ) -> Self {
+        let DatabaseConnectionType::SqlxPostgresPoolConnection(_) = &self.pool().inner else {
+            return self.detached();
+        };
+        let shared = self.pool().get_postgres_connection_pool();
+        let connect_options = (*shared.connect_options())
+            .clone()
+            .options(settings.iter().copied());
+        let pool = shared
+            .options()
+            .clone()
+            .max_connections(max_connections)
+            .min_connections(0)
+            .connect_lazy_with(connect_options);
+        Self::new(SqlxPostgresConnector::from_sqlx_postgres_pool(pool))
     }
 
     /// A pooled handle is releasing every lock at the end of the statement taking it.

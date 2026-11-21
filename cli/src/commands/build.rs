@@ -412,7 +412,7 @@ async fn download_result_dirs(client: &connector::Client, tree: &ArtefactTree, o
     }
 
     for (index, ep) in tree.entry_points.iter().enumerate() {
-        download_result_dir(client, ep, &result_link_name(index), out).await;
+        download_result_dir(client, ep, Path::new(&result_link_name(index)), out).await;
     }
 }
 
@@ -420,18 +420,32 @@ async fn download_result_dirs(client: &connector::Client, tree: &ArtefactTree, o
 async fn download_result_dir(
     client: &connector::Client,
     ep: &connector::api::EntryPointArtefacts,
-    dir_name: &str,
+    dir: &Path,
     out: Output,
 ) {
-    use crate::commands::download::{
-        product_filename, safe_relative_name, write_downloaded_byte_chunks_to_file,
+    use crate::commands::download::product_filename;
+    use crate::download_file_path_and_write::{
+        DownloadDestination, checked_file_path_in_directory_from_server_file_name,
+        create_download_directory_or_verify_existing_directory,
+        write_downloaded_byte_chunks_to_destination,
     };
 
-    let dir = PathBuf::from(dir_name);
+    let dir_name = dir.display();
+    if let Err(e) = create_download_directory_or_verify_existing_directory(dir) {
+        out.progress(e.to_string());
+        return;
+    }
     let mut wrote = 0usize;
     for output in &ep.outputs {
         for product in &output.products {
             let name = product_filename(product);
+            let dest = match checked_file_path_in_directory_from_server_file_name(dir, &name) {
+                Ok(dest) => dest,
+                Err(e) => {
+                    out.progress(e.to_string());
+                    continue;
+                }
+            };
             let chunks = match client
                 .builds()
                 .download_file(&ep.build_id.to_string(), &name)
@@ -443,11 +457,12 @@ async fn download_result_dir(
                     continue;
                 }
             };
-            let dest = dir.join(safe_relative_name(&name));
-            if let Some(parent) = dest.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if let Err(e) = write_downloaded_byte_chunks_to_file(chunks, &dest).await {
+            let destination = DownloadDestination::FileInServerNamedDirectory {
+                path: dest,
+                replace_existing: true,
+            };
+            if let Err(e) = write_downloaded_byte_chunks_to_destination(chunks, &destination).await
+            {
                 out.progress(format!("Failed to download {}: {}", name, e));
                 continue;
             }
@@ -587,6 +602,60 @@ mod tests {
         let message = failure_message(EvaluationStatus::Failed, Some("attr missing")).unwrap();
         assert!(message.contains("attr missing"), "{message}");
         assert!(message.contains("Failed"), "{message}");
+    }
+
+    #[cfg(not(feature = "nix"))]
+    #[tokio::test]
+    async fn test_build_does_not_write_downloaded_products_through_symlinked_result_directory() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/v1/builds/4c1f7a2e-8d3b-4e5a-b6c7-1f2e3d4c5b6a/download/git",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"payload".to_vec()))
+            .mount(&server)
+            .await;
+        let client = connector::Client::builder()
+            .base_url(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
+        let entry_point: connector::api::EntryPointArtefacts =
+            serde_json::from_value(serde_json::json!({
+                "attr": "packages.x86_64-linux.cli",
+                "derivation": "/nix/store/a.drv",
+                "build_id": "4c1f7a2e-8d3b-4e5a-b6c7-1f2e3d4c5b6a",
+                "outputs": [{
+                    "name": "out",
+                    "store_path": "/nix/store/a",
+                    "products": [{
+                        "id": "2c4e2b89-7b79-4a5a-b24f-0609f2f2f44a",
+                        "type": "file",
+                        "subtype": "",
+                        "name": "default",
+                        "path": "/p/git",
+                        "size": 7
+                    }]
+                }]
+            }))
+            .unwrap();
+        let checkout = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let result = checkout.path().join("result");
+        symlink(outside.path(), &result).unwrap();
+
+        super::download_result_dir(
+            &client,
+            &entry_point,
+            &result,
+            crate::output::Output::new(true),
+        )
+        .await;
+
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
     }
 
     #[test]

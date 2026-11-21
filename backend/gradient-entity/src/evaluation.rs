@@ -106,7 +106,11 @@ impl EvaluationStatus {
             Self::Fetching => &[Self::Queued],
             Self::EvaluatingFlake => &[Self::Queued, Self::Fetching],
             Self::EvaluatingDerivation => &[Self::EvaluatingFlake],
-            Self::Building => &[Self::EvaluatingDerivation, Self::Waiting],
+            Self::Building => &[
+                Self::EvaluatingFlake,
+                Self::EvaluatingDerivation,
+                Self::Waiting,
+            ],
             Self::Waiting => &[
                 Self::Building,
                 Self::Queued,
@@ -415,6 +419,7 @@ pub struct Model {
     pub abort_reason: Option<AbortReason>,
     pub aborted_by: Option<UserId>,
     pub superseded_by: Option<EvaluationId>,
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 #[derive(

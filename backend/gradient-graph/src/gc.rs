@@ -8,13 +8,16 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
+use futures::StreamExt;
+use gradient_db::DbContext;
+use gradient_db::graph::runtime_can_start::{StoreContentToRetire, retire_outputs};
 use gradient_db::graph::walks::{ClosureDirection, dependency_closure_cte_body};
-use gradient_db::{DbContext, graph::runtime_can_start::retire_outputs};
-use gradient_types::ids::{BuildAttemptId, DerivationId, EvaluationId};
+use gradient_entity::build::BuildStatus;
+use gradient_types::ids::{BuildAttemptId, CachedPathId, DerivationId, EvaluationId};
 use gradient_types::*;
 use ractor::ActorRef;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait, Value};
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::messages::{GcReport, GcRequest};
@@ -28,6 +31,8 @@ fn fresh_cte() -> String {
         ClosureDirection::Dependencies,
     )
 }
+
+const MAX_CONCURRENT_NAR_OBJECT_DELETES: usize = 16;
 
 const DELETE_DERIVATIONS_SQL: &str = "WITH RECURSIVE kept(derivation) AS ( \
          SELECT c.id FROM unnest($1::uuid[]) AS c(id) \
@@ -83,10 +88,32 @@ gradient_db::sql! {
         params = [CachedPathHashes(64), Now],
         tier = Sweep;
 
-    GC_UNCLAIMED_OLD_HASHES = "SELECT cp.hash FROM cached_path cp \
+    SELECT_CACHED_PATH_IDS_WITHOUT_CACHE_SIGNATURE_BEFORE_CUTOFF = "SELECT cp.id FROM cached_path cp \
              WHERE cp.hash = ANY($1::text[]) AND cp.created_at < $2 \
                AND NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)",
         params = [CachedPathHashes(64), Now],
+        tier = Sweep;
+
+    SELECT_OBJECT_STORAGE_KEYS_WITHOUT_CACHED_PATH_OR_ACTIVE_BUILD_OR_DERIVATION_REFERENCES = r#"
+    SELECT h.key AS key
+    FROM unnest($1::text[]) AS h(key)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM cached_path cp
+        WHERE cp.nar_object_storage_key = h.key)
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_output dout
+        JOIN derivation_build b ON b.derivation = dout.derivation
+        WHERE dout.hash = split_part(h.key, '-', 1) AND b.status NOT IN ($2, $3, $4, $5))
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_input_source s
+        JOIN derivation_build b ON b.derivation = s.derivation
+        WHERE s.hash = split_part(h.key, '-', 1))
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation d
+        JOIN derivation_build b ON b.derivation = d.id
+        WHERE d.hash = split_part(h.key, '-', 1))
+"#,
+        params = [CachedPathHashes(5000), Int(4), Int(5), Int(6), Int(9)],
         tier = Sweep;
 
     GC_CANDIDATE_ATTEMPTS = "SELECT b.derivation AS derivation, a.id AS attempt \
@@ -148,11 +175,66 @@ pub(crate) async fn apply(ctx: &DbContext, req: GcRequest) -> Result<GcReport> {
             unused_since,
             scanned_at,
         } => delete_unused_claims(ctx, &hashes, unused_since, scanned_at).await,
-        GcRequest::MissingNarFileCachedPathHashes { hashes } => {
-            retire_path_hashes(ctx, &hashes).await
+        GcRequest::RetireCachedPathsWithMissingNarFiles { ids } => {
+            retire_outputs_in_savepoint_and_report_unreferenced_object_storage_keys(
+                ctx,
+                StoreContentToRetire::OnlyTheseCachedPathIds(ids),
+            )
+            .await
         }
         GcRequest::Evaluations { ids } => delete_evaluations(ctx, &ids).await,
+        GcRequest::OrphanObjects {
+            object_storage_keys,
+        } => {
+            Ok(GcReport {
+                unreferenced_orphan_object_storage_keys:
+                    orphan_object_storage_keys_without_references(ctx, object_storage_keys).await?,
+                ..Default::default()
+            })
+        }
     }
+}
+
+async fn orphan_object_storage_keys_without_references(
+    ctx: &DbContext,
+    object_storage_keys: Vec<String>,
+) -> Result<Vec<String>> {
+    if object_storage_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    ctx.worker_db
+        .query_all_raw(
+            SELECT_OBJECT_STORAGE_KEYS_WITHOUT_CACHED_PATH_OR_ACTIVE_BUILD_OR_DERIVATION_REFERENCES
+                .bind([
+                    object_storage_keys.into(),
+                    Value::Int(Some(BuildStatus::FailedPermanent as i32)),
+                    Value::Int(Some(BuildStatus::Aborted as i32)),
+                    Value::Int(Some(BuildStatus::DependencyFailed as i32)),
+                    Value::Int(Some(BuildStatus::FailedTimeout as i32)),
+                ]),
+        )
+        .await
+        .context("GC: probe orphan object keys for references")?
+        .iter()
+        .map(|row| row.try_get::<String>("", "key").map_err(Into::into))
+        .collect()
+}
+
+pub(crate) async fn delete_gc_removed_and_orphan_nar_objects(ctx: &DbContext, report: &GcReport) {
+    let nar_storage = &ctx.storage.nar_storage;
+    futures::stream::iter(
+        report
+            .unreferenced_cached_path_object_storage_keys
+            .iter()
+            .chain(&report.unreferenced_orphan_object_storage_keys),
+    )
+    .for_each_concurrent(MAX_CONCURRENT_NAR_OBJECT_DELETES, |key| async move {
+        if let Err(e) = nar_storage.delete(key).await {
+            warn!(%key, error = %e, "GC: failed to delete NAR object from storage");
+        }
+    })
+    .await;
 }
 
 fn ids(derivations: &[DerivationId]) -> Value {
@@ -205,7 +287,11 @@ async fn retire_stale_paths(
     scanned_at: NaiveDateTime,
 ) -> Result<GcReport> {
     let still_stale = recheck_path_hashes(ctx, hashes, scanned_at).await?;
-    retire_path_hashes(ctx, &still_stale).await
+    retire_outputs_in_savepoint_and_report_unreferenced_object_storage_keys(
+        ctx,
+        StoreContentToRetire::StoreHashesWithGraphOutput(still_stale),
+    )
+    .await
 }
 
 async fn delete_unused_claims(
@@ -229,17 +315,25 @@ async fn delete_unused_claims(
         .context("GC: delete the cache claims unused since the cutoff")?
         .rows_affected();
 
-    let unclaimed: Vec<String> = db
-        .query_all_raw(GC_UNCLAIMED_OLD_HASHES.bind([still_stale.into(), unused_since]))
+    let unclaimed: Vec<CachedPathId> = db
+        .query_all_raw(
+            SELECT_CACHED_PATH_IDS_WITHOUT_CACHE_SIGNATURE_BEFORE_CUTOFF
+                .bind([still_stale.into(), unused_since]),
+        )
         .await
         .context("GC: select the paths left without a cache claim")?
         .iter()
-        .filter_map(|r| r.try_get::<String>("", "hash").ok())
+        .filter_map(|r| r.try_get::<Uuid>("", "id").ok())
+        .map(CachedPathId::new)
         .collect();
 
     Ok(GcReport {
         deleted_claim_row_count,
-        ..retire_path_hashes(ctx, &unclaimed).await?
+        ..retire_outputs_in_savepoint_and_report_unreferenced_object_storage_keys(
+            ctx,
+            StoreContentToRetire::OnlyTheseCachedPathIds(unclaimed),
+        )
+        .await?
     })
 }
 
@@ -265,9 +359,16 @@ async fn recheck_path_hashes(
         .collect())
 }
 
-async fn retire_path_hashes(ctx: &DbContext, still_stale: &[String]) -> Result<GcReport> {
+async fn retire_outputs_in_savepoint_and_report_unreferenced_object_storage_keys(
+    ctx: &DbContext,
+    content: StoreContentToRetire,
+) -> Result<GcReport> {
     let db = &ctx.worker_db;
-    if still_stale.is_empty() {
+    let nothing = match &content {
+        StoreContentToRetire::StoreHashesWithGraphOutput(hashes) => hashes.is_empty(),
+        StoreContentToRetire::OnlyTheseCachedPathIds(ids) => ids.is_empty(),
+    };
+    if nothing {
         return Ok(GcReport::default());
     }
 
@@ -276,7 +377,7 @@ async fn retire_path_hashes(ctx: &DbContext, still_stale: &[String]) -> Result<G
     // Postgres is keeping a subtransaction's locks until the outer commit.
     // The release below can therefore never drop one early.
     let savepoint = db.begin().await.context("GC: open the retire savepoint")?;
-    let retired = retire_outputs(&savepoint, still_stale)
+    let retired = retire_outputs(&savepoint, &content)
         .await
         .context("GC: retire the stale paths")?;
     savepoint
@@ -286,7 +387,8 @@ async fn retire_path_hashes(ctx: &DbContext, still_stale: &[String]) -> Result<G
     gradient_db::status::emit_transition_effects(ctx, &retired.transitions).await?;
 
     Ok(GcReport {
-        retired: retired.deleted,
+        unreferenced_cached_path_object_storage_keys: retired
+            .unreferenced_cached_path_object_storage_keys,
         ..Default::default()
     })
 }
@@ -373,4 +475,50 @@ async fn pairs<C: ConnectionTrait>(
             ))
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keep_clauses_protect_drv_and_sources_for_any_shared_build() {
+        let sql =
+            SELECT_OBJECT_STORAGE_KEYS_WITHOUT_CACHED_PATH_OR_ACTIVE_BUILD_OR_DERIVATION_REFERENCES
+                .text()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+        assert_eq!(
+            sql.matches("b.status NOT IN").count(),
+            1,
+            "only the outputs clause may gate on build status: {sql}"
+        );
+        assert!(
+            sql.contains(
+                "JOIN derivation_build b ON b.derivation = s.derivation WHERE s.hash = split_part(h.key, '-', 1))"
+            ),
+            "input sources kept for any shared build (no status gate): {sql}"
+        );
+        assert!(
+            sql.contains(
+                "JOIN derivation_build b ON b.derivation = d.id WHERE d.hash = split_part(h.key, '-', 1))"
+            ),
+            "drv kept for any shared build (no status gate): {sql}"
+        );
+    }
+
+    #[test]
+    fn the_orphan_probe_is_driven_by_the_listed_candidates() {
+        let sql =
+            SELECT_OBJECT_STORAGE_KEYS_WITHOUT_CACHED_PATH_OR_ACTIVE_BUILD_OR_DERIVATION_REFERENCES
+                .text();
+        assert!(sql.contains("FROM unnest($1::text[]) AS h(key)"), "{sql}");
+        assert!(
+            sql.contains("WHERE cp.nar_object_storage_key = h.key"),
+            "{sql}"
+        );
+        assert_eq!(sql.matches("NOT EXISTS").count(), 4, "{sql}");
+        assert!(!sql.contains("UNION"), "{sql}");
+    }
 }

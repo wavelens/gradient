@@ -9,19 +9,24 @@ use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_entity::ids::{
     ClusterJobId, DerivationId, DispatchedJobId, EntryPointId, EvaluationId, ExecJobAttemptId,
-    ExecJobId,
+    ExecJobId, TaskId,
 };
 use gradient_entity::{
-    entry_point, exec_job, exec_job_attempt, exec_job_output, exec_job_phase, project_access,
+    entry_point, exec_job, exec_job_attempt, exec_job_output, exec_job_phase, project_access, role,
 };
+use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{eval_at, project, public_project, superuser, task, user, view_role};
+use gradient_fixtures::rows::{
+    eval_at, project, public_project, superuser, task, user, view_role, write_role,
+};
 use gradient_fixtures::test_date;
 use gradient_test_support::log_storage::ReadErrorLogStorage;
 use gradient_test_support::state::TestState;
-use gradient_test_support::web::{make_test_server, signed_in_as};
+use gradient_test_support::web::{
+    make_test_server, mock_db_and_auth_header_for_api_key_owned_by_user, signed_in_as,
+};
 use gradient_types::exec::{DeviceRequest, ExecSpec};
-use gradient_types::permissions::Permission;
+use gradient_types::permissions::{Permission, mask_from};
 use gradient_types::waiting_reason::{ExecUnmet, WaitingReason};
 use sea_orm::MockDatabase;
 use serde_json::Value;
@@ -85,13 +90,24 @@ fn lost_attempt() -> exec_job_attempt::Model {
 }
 
 fn with_job(db: MockDatabase, status: ExecJobStatus) -> MockDatabase {
+    append_exec_job_of_task_with_status_to_mock_database(db, status, task())
+}
+
+fn append_exec_job_of_task_with_status_to_mock_database(
+    db: MockDatabase,
+    status: ExecJobStatus,
+    task: gradient_entity::task::Model,
+) -> MockDatabase {
     db.append_query_results([vec![job(status)]])
         .append_query_results([vec![entry_point::Model {
             eval: "apps.x86_64-linux.train".into(),
             ..Default::default()
         }]])
-        .append_query_results([vec![eval_at(evaluation_id(), 0)]])
-        .append_query_results([vec![task()]])
+        .append_query_results([vec![gradient_entity::evaluation::Model {
+            task: Some(task.id),
+            ..eval_at(evaluation_id(), 0)
+        }]])
+        .append_query_results([vec![task.clone()]])
         .append_query_results([vec![lost_attempt()]])
         .append_query_results([vec![exec_job_phase::Model {
             attempt: attempt_id(),
@@ -101,7 +117,7 @@ fn with_job(db: MockDatabase, status: ExecJobStatus) -> MockDatabase {
         }]])
         .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
         .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
-        .append_query_results([vec![task()]])
+        .append_query_results([vec![task]])
 }
 
 fn without_worker_names(db: MockDatabase) -> MockDatabase {
@@ -324,6 +340,269 @@ async fn an_outsider_cannot_open_a_console() {
         .await;
 
     assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn role_with_trigger_evaluation_but_without_view_project_gets_404_on_private_project_exec_job_endpoints()
+ {
+    let trigger_evaluation_role_without_view_project = role::Model {
+        permission: mask_from(&[Permission::TriggerEvaluation]),
+        ..view_role()
+    };
+    for (method, path) in [("GET", "shell"), ("POST", "run")] {
+        let (db, auth) = signed_in_as(user());
+        let db = with_job(db, ExecJobStatus::Running)
+            .append_query_results([vec![project()]])
+            .append_query_results([vec![project_access::Model {
+                team: None,
+                project: project().id,
+                user: user().id,
+                role: trigger_evaluation_role_without_view_project.id,
+            }]])
+            .append_query_results([vec![trigger_evaluation_role_without_view_project.clone()]]);
+        let server = make_test_server(db.into_connection());
+        let url = format!("/api/v1/exec/{}/{path}", job_id());
+
+        let res = if method == "GET" {
+            server.get(&url)
+        } else {
+            server.post(&url)
+        }
+        .add_header("authorization", auth)
+        .await;
+
+        assert_eq!(res.status_code(), StatusCode::NOT_FOUND, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn job_token_reading_exec_job_of_another_task_in_public_project_gets_404() {
+    let other_task = gradient_entity::task::Model {
+        id: TaskId::now_v7(),
+        name: "nightly".into(),
+        ..task()
+    };
+    let db = mock_db()
+        .append_query_results([vec![BTreeMap::from([
+            ("job", sea_orm::Value::from(Uuid::from_u128(0x7b))),
+            ("attempt", sea_orm::Value::from(Uuid::from_u128(0xa2))),
+            ("project", sea_orm::Value::from(project_id().into_inner())),
+            ("task", sea_orm::Value::from(task_id().into_inner())),
+            ("project_name", sea_orm::Value::from("infra")),
+            ("task_name", sea_orm::Value::from("master")),
+            ("acting_user", sea_orm::Value::from(user_id().into_inner())),
+            (
+                "allows_project_credentials_and_privileged_actions",
+                sea_orm::Value::from(true),
+            ),
+        ])]])
+        .append_query_results([vec![user()]]);
+    let db = append_exec_job_of_task_with_status_to_mock_database(
+        db,
+        ExecJobStatus::Running,
+        other_task,
+    )
+    .append_query_results([vec![public_project()]])
+    .append_query_results([Vec::<exec_job_output::Model>::new()])
+    .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()]);
+    let db = without_timeline_or_cluster(db);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}", job_id()))
+        .add_header(
+            "authorization",
+            "Bearer GRJ_0123456789012345678901234567890123456789012345678901234567890123",
+        )
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_superuser_without_a_role_cannot_open_terminals_or_start_jobs_in_a_foreign_project() {
+    for (method, path) in [
+        ("GET", "shell"),
+        ("GET", "console"),
+        ("GET", "forward?port=22"),
+        ("POST", "run"),
+        ("POST", "keep-vm-running"),
+    ] {
+        let (db, auth) = signed_in_as(superuser());
+        let db = with_job(db, ExecJobStatus::Running)
+            .append_query_results([vec![project()]])
+            .append_query_results([Vec::<project_access::Model>::new()]);
+        let server = make_test_server(db.into_connection());
+        let url = format!("/api/v1/exec/{}/{path}", job_id());
+
+        let res = if method == "GET" {
+            server.get(&url)
+        } else {
+            server.post(&url)
+        }
+        .add_header("authorization", auth)
+        .await;
+
+        assert_eq!(res.status_code(), StatusCode::NOT_FOUND, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn an_instance_admin_api_key_with_view_project_read_superuser_and_write_superuser_but_no_project_role_gets_not_found_on_shell_console_and_port_forward_of_an_exec_job_in_a_foreign_private_project()
+ {
+    for path in TERMINAL_PATHS {
+        let (db, auth) = mock_db_and_auth_header_for_api_key_owned_by_user(
+            superuser(),
+            mask_from(&[
+                Permission::ViewProject,
+                Permission::ReadSuperuser,
+                Permission::WriteSuperuser,
+            ]),
+            None,
+        );
+        let db = with_job(db, ExecJobStatus::Running)
+            .append_query_results([vec![project()]])
+            .append_query_results([Vec::<project_access::Model>::new()]);
+
+        assert_eq!(
+            get_exec_job_terminal_endpoint_status_code_with_authorization_header(db, auth, path)
+                .await,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_narrowed_api_key_of_a_superuser_cannot_abort_an_exec_job_of_a_foreign_project() {
+    let (db, auth) = mock_db_and_auth_header_for_api_key_owned_by_user(
+        superuser(),
+        mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]),
+        None,
+    );
+    let db = with_job(db, ExecJobStatus::Running)
+        .append_query_results([vec![project()]])
+        .append_query_results([Vec::<project_access::Model>::new()]);
+
+    let res = make_test_server(db.into_connection())
+        .post(&format!("/api/v1/exec/{}/abort", job_id()))
+        .add_header("authorization", auth)
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+}
+
+const TERMINAL_PATHS: [&str; 3] = ["shell", "console", "forward?port=22"];
+const ACCESS_GRANTED_BUT_NOT_WEBSOCKET_UPGRADE_BAD_REQUEST_STATUS: StatusCode =
+    StatusCode::BAD_REQUEST;
+
+fn add_running_exec_job_project_and_member_with_role_to_mock_database(
+    db: MockDatabase,
+    member_role: role::Model,
+) -> MockDatabase {
+    with_job(db, ExecJobStatus::Running)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![project_access::Model {
+            team: None,
+            project: project().id,
+            user: user().id,
+            role: member_role.id,
+        }]])
+        .append_query_results([vec![member_role]])
+}
+
+async fn get_exec_job_terminal_endpoint_status_code_with_authorization_header(
+    db: MockDatabase,
+    auth: String,
+    path: &str,
+) -> StatusCode {
+    make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/{path}", job_id()))
+        .add_header("authorization", auth)
+        .await
+        .status_code()
+}
+
+#[tokio::test]
+async fn api_key_with_only_view_project_and_trigger_evaluation_gets_forbidden_on_all_exec_job_terminal_endpoints_with_or_without_project_limit()
+ {
+    for pinned_project in [Some(project().id), None] {
+        for path in TERMINAL_PATHS {
+            let (db, auth) = mock_db_and_auth_header_for_api_key_owned_by_user(
+                user(),
+                mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]),
+                pinned_project,
+            );
+            let db = add_running_exec_job_project_and_member_with_role_to_mock_database(
+                db,
+                write_role(),
+            );
+
+            assert_eq!(
+                get_exec_job_terminal_endpoint_status_code_with_authorization_header(
+                    db, auth, path
+                )
+                .await,
+                StatusCode::FORBIDDEN,
+                "{path} pinned to {pinned_project:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn signed_in_member_role_with_trigger_evaluation_without_open_job_terminal_gets_forbidden_on_all_exec_job_terminal_endpoints()
+ {
+    let trigger_role = role::Model {
+        permission: mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]),
+        ..view_role()
+    };
+    for path in TERMINAL_PATHS {
+        let (db, auth) = signed_in_as(user());
+        let db = add_running_exec_job_project_and_member_with_role_to_mock_database(
+            db,
+            trigger_role.clone(),
+        );
+
+        assert_eq!(
+            get_exec_job_terminal_endpoint_status_code_with_authorization_header(db, auth, path)
+                .await,
+            StatusCode::FORBIDDEN,
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn signed_in_write_role_member_passes_permission_check_of_every_exec_job_terminal() {
+    for path in TERMINAL_PATHS {
+        let (db, auth) = signed_in_as(user());
+        let db =
+            add_running_exec_job_project_and_member_with_role_to_mock_database(db, write_role());
+
+        assert_eq!(
+            get_exec_job_terminal_endpoint_status_code_with_authorization_header(db, auth, path)
+                .await,
+            ACCESS_GRANTED_BUT_NOT_WEBSOCKET_UPGRADE_BAD_REQUEST_STATUS,
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn api_key_with_view_project_and_open_job_terminal_without_trigger_evaluation_passes_exec_job_shell_access_check()
+ {
+    let (db, auth) = mock_db_and_auth_header_for_api_key_owned_by_user(
+        user(),
+        mask_from(&[Permission::ViewProject, Permission::OpenJobTerminal]),
+        None,
+    );
+    let db = add_running_exec_job_project_and_member_with_role_to_mock_database(db, write_role());
+
+    assert_eq!(
+        get_exec_job_terminal_endpoint_status_code_with_authorization_header(db, auth, "shell")
+            .await,
+        ACCESS_GRANTED_BUT_NOT_WEBSOCKET_UPGRADE_BAD_REQUEST_STATUS
+    );
 }
 
 fn node_id(node: i16) -> ExecJobId {

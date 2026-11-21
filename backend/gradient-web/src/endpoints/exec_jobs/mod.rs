@@ -24,7 +24,9 @@ pub use self::query::{
     ExecJobTokenView, StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
 };
 
-use crate::access::{AccessRefusal, can_view_project, load_membership_with_permissions};
+use crate::access::{
+    Caller, ProjectItemAccessRequirement, ProjectItemLocation, can_access_project_resource,
+};
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::refusal::{Refusal, RefusalStatus};
@@ -32,7 +34,6 @@ use crate::resource::Resource;
 use gradient_db::WebDb;
 use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecNodeDetail};
 use gradient_db::lookup::by_id;
-use gradient_types::permissions::{Permission, mask_grants};
 use gradient_types::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -66,7 +67,7 @@ impl ExecJobAccessContext {
             .ok_or_else(|| ExecJobRefusal::NoSuchNode(index).into())
     }
 
-    pub(super) async fn load_unguarded(db: &WebDb, job: ExecJobId) -> WebResult<Self> {
+    async fn load_unguarded(db: &WebDb, job: ExecJobId) -> WebResult<Self> {
         let detail = reads::one(db, job)
             .await?
             .ok_or_else(|| WebError::not_found(Resource::ExecJob))?;
@@ -87,49 +88,28 @@ impl ExecJobAccessContext {
         })
     }
 
-    pub(super) async fn load_triggerable(
-        db: &WebDb,
-        job: ExecJobId,
-        user: &MUser,
-        api_key: Option<&ApiKeyContext>,
-    ) -> WebResult<Self> {
-        let ctx = Self::load_unguarded(db, job).await?;
-        let superuser_may_write = user.superuser
-            && api_key.is_none_or(|key| {
-                key.unpinned_key_has_superuser_permission(Permission::WriteSuperuser)
-            });
-        if superuser_may_write {
-            return Ok(ctx);
-        }
-        let mask = load_membership_with_permissions(db, user.id, ctx.project.id, api_key)
-            .await?
-            .unwrap_or(0);
-        if !ctx.project.public && !mask_grants(mask, Permission::ViewProject) {
-            return Err(WebError::not_found(Resource::ExecJob));
-        }
-        if !mask_grants(mask, Permission::TriggerEvaluation) {
-            return Err(
-                AccessRefusal::MissingProjectPermission(Permission::TriggerEvaluation).into(),
-            );
-        }
-        Ok(ctx)
-    }
-
     pub(super) async fn load(
         db: &WebDb,
         job: ExecJobId,
-        maybe_user: &Option<MUser>,
+        caller: Caller<'_>,
         api_key: Option<&ApiKeyContext>,
+        requirement: ProjectItemAccessRequirement,
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(db, job).await?;
-        let readable = ctx.project.public
-            || match maybe_user {
-                Some(user) => can_view_project(db, user.id, ctx.project.id, api_key).await?,
-                None => false,
-            };
-        if !readable {
-            return Err(WebError::not_found(Resource::ExecJob));
-        }
+        let resource = ProjectItemLocation::ItemInTask {
+            task: ctx.task.id,
+            parent_exec_job: None,
+        };
+        can_access_project_resource(
+            db,
+            caller,
+            api_key,
+            &ctx.project,
+            resource,
+            requirement,
+            Resource::ExecJob,
+        )
+        .await?;
         Ok(ctx)
     }
 }

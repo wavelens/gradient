@@ -5,7 +5,7 @@
  */
 
 use gradient_entity::build::BuildStatus;
-use gradient_entity::ids::EvaluationId;
+use gradient_entity::ids::{EvaluationId, ProjectId};
 use gradient_fixtures::shape::shape;
 use gradient_pool::score::RamNeed;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, Job, JobKind, JobPhase};
@@ -15,6 +15,10 @@ use crate::jobs::Assignment;
 
 const W1: &str = "w1";
 const W2: &str = "w2";
+const WORKER_ID_IN_OTHER_PROJECT: &str = "w-other-project";
+const TEAM_WORKER_ID_SHARED_WITH_PROJECTS: &str = "w-team";
+const LARGEST_WORKER_ID_WITH_16000_MB_RAM: &str = "w-largest";
+const TEAM_WORKER_ID_ALSO_REGISTERED_FOR_PROJECT: &str = "w-team-registered";
 const OUT_OF_MEMORY_AT_ONE_CORE: &str = "ran out of memory with 1 core";
 
 async fn start(seed: gradient_fixtures::shape::Shape) -> SchedulerCase {
@@ -22,10 +26,17 @@ async fn start(seed: gradient_fixtures::shape::Shape) -> SchedulerCase {
 }
 
 async fn dispatch(case: &SchedulerCase, worker: &str) -> Option<Assignment> {
-    case.admit_startable_moves().await;
-    let taken = case.request_job(worker, JobKind::Build).await?;
+    let taken = offer_job_and_hand_out_without_building_update(case, worker).await?;
     case.report_building(worker, taken.job_id()).await;
     Some(taken)
+}
+
+async fn offer_job_and_hand_out_without_building_update(
+    case: &SchedulerCase,
+    worker: &str,
+) -> Option<Assignment> {
+    case.admit_startable_moves().await;
+    case.request_job(worker, JobKind::Build).await
 }
 
 async fn kill(case: &SchedulerCase, worker: &str, taken: &Assignment, cores: Option<u32>) {
@@ -74,7 +85,7 @@ async fn last_failure_message(case: &SchedulerCase, path: &str) -> Option<String
 #[tokio::test]
 async fn e01_an_out_of_memory_kill_at_64_cores_retries_at_43_without_spending_an_attempt() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
         .await;
 
     let first = dispatch(&case, W1).await.expect("after 1: W1 takes A");
@@ -99,7 +110,7 @@ async fn e01_an_out_of_memory_kill_at_64_cores_retries_at_43_without_spending_an
 #[tokio::test]
 async fn e02_an_out_of_memory_kill_at_one_core_fails_the_build() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_build().cpus(1).ram_total_mb(8_000), &[])
+    case.connect(W1, w_build().cpus(1).ram_total_mb(8_000))
         .await;
 
     let taken = dispatch(&case, W1).await.expect("after 1: W1 takes A");
@@ -128,7 +139,7 @@ async fn e02_an_out_of_memory_kill_at_one_core_fails_the_build() {
 #[tokio::test]
 async fn e03_a_build_killed_at_every_step_ends_after_twelve_dispatches() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(1_024_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(1_024_000))
         .await;
 
     let mut sent = Vec::new();
@@ -173,10 +184,10 @@ async fn e03_a_build_killed_at_every_step_ends_after_twelve_dispatches() {
 async fn e04_a_kill_recorded_through_one_instance_caps_the_dispatch_on_another() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
         .await;
     second
-        .connect(W2, w_build().cpus(64).ram_total_mb(256_000), &[])
+        .connect(W2, w_build().cpus(64).ram_total_mb(256_000))
         .await;
 
     let first = dispatch(&case, W1).await.expect("after 1: W1 takes A");
@@ -196,10 +207,10 @@ async fn e04_a_kill_recorded_through_one_instance_caps_the_dispatch_on_another()
 async fn e05_a_build_already_pending_on_another_instance_follows_a_later_kill() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     let second = case.second_instance().await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
         .await;
     second
-        .connect(W2, w_build().cpus(64).ram_total_mb(256_000), &[])
+        .connect(W2, w_build().cpus(64).ram_total_mb(256_000))
         .await;
     second.resync_startable_set().await;
 
@@ -219,12 +230,8 @@ async fn e05_a_build_already_pending_on_another_instance_follows_a_later_kill() 
 #[tokio::test]
 async fn e06_the_steps_start_at_the_configured_core_limit() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(
-        W1,
-        w_build().cpus(64).core_limit(8).ram_total_mb(256_000),
-        &[],
-    )
-    .await;
+    case.connect(W1, w_build().cpus(64).core_limit(8).ram_total_mb(256_000))
+        .await;
 
     let first = dispatch(&case, W1).await.expect("after 1: W1 takes A");
     assert_eq!(sent_cores(&first), Some(8), "after 1: cores sent");
@@ -242,14 +249,14 @@ async fn e06_the_steps_start_at_the_configured_core_limit() {
 #[tokio::test]
 async fn e07_the_cap_follows_the_fewest_cores_a_build_was_killed_with() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W2, w_build().cpus(16).ram_total_mb(256_000), &[])
+    case.connect(W2, w_build().cpus(16).ram_total_mb(256_000))
         .await;
 
     let first = dispatch(&case, W2).await.expect("after 1: W2 takes A");
     assert_eq!(sent_cores(&first), Some(16), "after 1: cores sent");
     kill(&case, W2, &first, Some(16)).await;
 
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
         .await;
     let second = dispatch(&case, W1).await.expect("after 2: W1 takes A");
     assert_eq!(sent_cores(&second), Some(11), "after 2: cores sent");
@@ -267,7 +274,7 @@ async fn e07_the_cap_follows_the_fewest_cores_a_build_was_killed_with() {
 #[tokio::test]
 async fn e08_a_kill_without_a_core_count_spends_the_attempt_budget() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
         .await;
 
     for step in 1..=3 {
@@ -296,7 +303,7 @@ async fn e08_a_kill_without_a_core_count_spends_the_attempt_budget() {
 #[tokio::test]
 async fn e09_a_kill_with_fewer_cores_is_free_with_the_budget_almost_spent() {
     let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
         .await;
 
     for step in 1..=2 {
@@ -332,43 +339,17 @@ async fn e09_a_kill_with_fewer_cores_is_free_with_the_budget_almost_spent() {
 }
 
 #[tokio::test]
-async fn e10_a_worker_ignoring_the_sent_cores_ends_on_the_attempt_budget() {
-    let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
-        .await;
-
-    let mut dispatches = 0;
-    while let Some(taken) = dispatch(&case, W1).await {
-        dispatches += 1;
-        assert!(dispatches <= 4, "after {dispatches}: the retries never end");
-        kill(&case, W1, &taken, Some(64)).await;
-    }
-
-    assert_eq!(
-        dispatches, 4,
-        "after 1: one free retry, then three attempts"
-    );
-    assert_eq!(
-        case.sb(A).await.status,
-        BuildStatus::FailedPermanent,
-        "after 1: sb(A).status"
-    );
-    case.check("step 1").await;
-
-    case.finish().await;
-}
-
-#[tokio::test]
 async fn e11_a_row_without_a_build_time_from_a_lost_worker_caps_nothing() {
     let seed = shape()
         .one(EvaluationId::now_v7(), A, A_OUT)
-        .derivation_metric(|m| {
+        .worker_registration(W1)
+        .derivation_metric_reported_by_worker(W1, |m| {
             m.build_cores = Some(64);
             m.peak_ram_mb = Some(30_000);
             m.created_at = gradient_types::now();
         });
     let case = start(seed).await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
         .await;
 
     let taken = dispatch(&case, W1).await.expect("after 1: W1 takes A");
@@ -385,10 +366,12 @@ async fn e11_a_row_without_a_build_time_from_a_lost_worker_caps_nothing() {
 
 #[tokio::test]
 async fn e12_a_build_too_large_at_full_cores_starts_with_fewer() {
-    let mut seed = shape().one(EvaluationId::now_v7(), A, A_OUT);
+    let mut seed = shape()
+        .one(EvaluationId::now_v7(), A, A_OUT)
+        .worker_registration(W1);
     for (cores, peak) in [(64, 200_000), (16, 50_000)] {
         for _ in 0..3 {
-            seed = seed.derivation_metric(move |m| {
+            seed = seed.derivation_metric_reported_by_worker(W1, move |m| {
                 m.build_cores = Some(cores);
                 m.peak_ram_mb = Some(peak);
                 m.build_time_ms = Some(60_000);
@@ -397,13 +380,13 @@ async fn e12_a_build_too_large_at_full_cores_starts_with_fewer() {
         }
     }
     let case = start(seed).await;
-    case.connect(W1, w_build().cpus(64).ram_total_mb(60_000), &[])
+    case.connect(W1, w_build().cpus(64).ram_total_mb(60_000))
         .await;
     case.refit_build_history().await;
 
     let taken = dispatch(&case, W1).await.expect("after 1: W1 takes A");
     let cores = sent_cores(&taken).expect("after 1: cores sent");
-    assert!(cores < 64, "after 1: cores sent {cores}");
+    assert_eq!(cores, 14, "after 1: cores sent");
     assert!(
         reserved_mb(&taken).is_some_and(|mb| mb <= 60_000),
         "after 1: the reservation fits the worker: {:?}",
@@ -421,14 +404,15 @@ async fn e13_a_kill_of_another_build_of_the_package_holds_without_a_fit() {
         .pname("leaky")
         .startable(B, B_OUT)
         .pname("leaky")
-        .derivation_metric(|m| {
+        .worker_registration(W1)
+        .derivation_metric_reported_by_worker(W1, |m| {
             m.oom_killed = true;
             m.build_cores = Some(16);
             m.peak_ram_mb = Some(20_000);
             m.created_at = gradient_types::now();
         });
     let case = start(seed).await;
-    case.connect(W1, w_build().cpus(16).slots(2).ram_total_mb(256_000), &[])
+    case.connect(W1, w_build().cpus(16).slots(2).ram_total_mb(256_000))
         .await;
     let a = case.key(A).await;
 
@@ -445,6 +429,450 @@ async fn e13_a_kill_of_another_build_of_the_package_holds_without_a_fit() {
         reserved_mb(on_a).is_some_and(|mb| mb >= 22_000),
         "after 1: the kill of B holds for A: {:?}",
         on_a.ram_need
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn e14_an_out_of_memory_kill_at_16_cores_reported_by_a_worker_registered_only_in_project_x_does_not_lower_cores_sent_to_same_derivation_in_project_y_and_does_not_stop_project_y_free_retry_with_fewer_cores_after_its_own_out_of_memory_kill()
+ {
+    let seed = shape()
+        .evalq(EvaluationId::now_v7())
+        .worker_registration(WORKER_ID_IN_OTHER_PROJECT)
+        .one(EvaluationId::now_v7(), A, A_OUT)
+        .worker_registration(W1)
+        .derivation_metric_reported_by_worker(WORKER_ID_IN_OTHER_PROJECT, |m| {
+            m.oom_killed = true;
+            m.build_cores = Some(16);
+            m.peak_ram_mb = Some(20_000);
+            m.created_at = gradient_types::now();
+        });
+    let case = start(seed).await;
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
+        .await;
+
+    let first = dispatch(&case, W1).await.expect("after 1: W1 takes A");
+    assert_eq!(
+        sent_cores(&first),
+        Some(64),
+        "after 1: the kill reported in project X doesn't cap cores in project Y"
+    );
+    let attempt = case.sb(A).await.attempt;
+
+    kill(&case, W1, &first, Some(64)).await;
+    assert_eq!(case.sb(A).await.attempt, attempt, "after 2: attempt");
+
+    let second = dispatch(&case, W1)
+        .await
+        .expect("after 3: W1 takes A again");
+    assert_eq!(sent_cores(&second), Some(43), "after 3: cores sent");
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn e15_high_peak_ram_sample_from_worker_in_other_project_does_not_raise_ram_floor() {
+    let seed = shape()
+        .evalq(EvaluationId::now_v7())
+        .worker_registration(WORKER_ID_IN_OTHER_PROJECT)
+        .one(EvaluationId::now_v7(), A, A_OUT)
+        .worker_registration(W1)
+        .derivation_metric_reported_by_worker(WORKER_ID_IN_OTHER_PROJECT, |m| {
+            m.build_cores = Some(64);
+            m.peak_ram_mb = Some(30_000);
+            m.created_at = gradient_types::now();
+        });
+    let case = start(seed).await;
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
+        .await;
+
+    let taken = dispatch(&case, W1).await.expect("after 1: W1 takes A");
+    assert!(
+        reserved_mb(&taken).is_none_or(|mb| mb < 30_000),
+        "after 1: a peak that project X reported does not raise the lower bound in project Y: {:?}",
+        taken.ram_need
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+async fn dispatch_derivation_a_in_granted_or_ungranted_project_to_worker_granted_to_two_projects_reporting_30000_mb_peak_and_return_reserved_ram_mb(
+    project_includes_workers: bool,
+) -> Option<u64> {
+    let project_x_evaluation_id = EvaluationId::now_v7();
+    let second_project_evaluation_id_without_build = EvaluationId::now_v7();
+    let derivation_a_build_evaluation_id = EvaluationId::now_v7();
+    let seed = shape()
+        .evalq(project_x_evaluation_id)
+        .evalq(second_project_evaluation_id_without_build)
+        .one(derivation_a_build_evaluation_id, A, A_OUT)
+        .worker_registration(W1)
+        .add_team_worker_with_team_grants_for_evaluation_projects(
+            TEAM_WORKER_ID_SHARED_WITH_PROJECTS,
+            &if project_includes_workers {
+                [project_x_evaluation_id, derivation_a_build_evaluation_id]
+            } else {
+                [
+                    project_x_evaluation_id,
+                    second_project_evaluation_id_without_build,
+                ]
+            },
+        )
+        .derivation_metric_reported_by_worker(TEAM_WORKER_ID_SHARED_WITH_PROJECTS, |m| {
+            m.build_cores = Some(64);
+            m.peak_ram_mb = Some(30_000);
+            m.created_at = gradient_types::now();
+        });
+    let case = start(seed).await;
+    case.connect(W1, w_build().cpus(64).ram_total_mb(256_000))
+        .await;
+
+    let taken = dispatch(&case, W1).await.expect("after 1: W1 takes A");
+    case.check("step 1").await;
+    case.finish().await;
+    reserved_mb(&taken)
+}
+
+#[tokio::test]
+async fn e16_team_worker_peak_ram_sample_raises_ram_reservation_lower_bound_only_in_granted_project()
+ {
+    let derivation_a_build_reserved_ram_mb_in_granted_project = dispatch_derivation_a_in_granted_or_ungranted_project_to_worker_granted_to_two_projects_reporting_30000_mb_peak_and_return_reserved_ram_mb(true).await;
+    assert!(
+        derivation_a_build_reserved_ram_mb_in_granted_project.is_some_and(|mb| mb >= 30_000),
+        "The peak of team workers can raise the lower bound in projects that get workers from that team: {derivation_a_build_reserved_ram_mb_in_granted_project:?}"
+    );
+    let derivation_a_ungranted_project_build_reserved_ram_mb = dispatch_derivation_a_in_granted_or_ungranted_project_to_worker_granted_to_two_projects_reporting_30000_mb_peak_and_return_reserved_ram_mb(false).await;
+    assert!(
+        derivation_a_ungranted_project_build_reserved_ram_mb.is_none_or(|mb| mb < 30_000),
+        "The peak for team workers doesn't raise the lower bound in a project without a team grant: {derivation_a_ungranted_project_build_reserved_ram_mb:?}"
+    );
+}
+
+#[tokio::test]
+async fn e17_build_predicted_larger_than_every_project_worker_is_dispatched_to_largest_project_worker_and_fails_with_message_after_bounded_out_of_memory_kills()
+ {
+    let build_a_project_evaluation_id = EvaluationId::now_v7();
+    let second_project_evaluation_id = EvaluationId::now_v7();
+    let mut seed = shape()
+        .evalq(second_project_evaluation_id)
+        .worker_registration(WORKER_ID_IN_OTHER_PROJECT)
+        .one(build_a_project_evaluation_id, A, A_OUT)
+        .worker_registration(W1)
+        .worker_registration(LARGEST_WORKER_ID_WITH_16000_MB_RAM);
+    for _ in 0..20 {
+        seed = seed.derivation_metric(|m| {
+            m.peak_ram_mb = Some(200_000);
+            m.build_time_ms = Some(60_000);
+            m.created_at = gradient_types::now();
+        });
+    }
+    let case = start(seed).await;
+    let build_a_project_id = case.db.project_of(build_a_project_evaluation_id).await;
+    let other_project_id = case.db.project_of(second_project_evaluation_id).await;
+    case.connect_for_projects(
+        W1,
+        w_build().cpus(8).ram_total_mb(8_000),
+        &[build_a_project_id],
+    )
+    .await;
+    case.connect_for_projects(
+        LARGEST_WORKER_ID_WITH_16000_MB_RAM,
+        w_build().cpus(8).ram_total_mb(16_000),
+        &[build_a_project_id],
+    )
+    .await;
+    case.connect_for_projects(
+        WORKER_ID_IN_OTHER_PROJECT,
+        w_build().cpus(8).ram_total_mb(64_000),
+        &[other_project_id],
+    )
+    .await;
+
+    assert!(
+        dispatch(&case, W1).await.is_none(),
+        "after 1: the smaller worker W1 does not accept A"
+    );
+    let mut core_counts_sent_to_worker_per_dispatch_until_build_ended = Vec::new();
+    while let Some(worker_assignment_for_dispatch) =
+        dispatch(&case, LARGEST_WORKER_ID_WITH_16000_MB_RAM).await
+    {
+        assert!(
+            core_counts_sent_to_worker_per_dispatch_until_build_ended.len() < 20,
+            "After {} dispatches: out-of-memory retry loop does not end",
+            core_counts_sent_to_worker_per_dispatch_until_build_ended.len()
+        );
+        assert!(
+            reserved_mb(&worker_assignment_for_dispatch).is_some_and(|mb| mb <= 16_000),
+            "After 1: reservation can fit in the largest worker: {:?}",
+            worker_assignment_for_dispatch.ram_need
+        );
+        let cores = sent_cores(&worker_assignment_for_dispatch);
+        core_counts_sent_to_worker_per_dispatch_until_build_ended.push(cores.unwrap_or(0));
+        kill(
+            &case,
+            LARGEST_WORKER_ID_WITH_16000_MB_RAM,
+            &worker_assignment_for_dispatch,
+            cores,
+        )
+        .await;
+    }
+
+    assert_eq!(
+        core_counts_sent_to_worker_per_dispatch_until_build_ended,
+        vec![8, 6, 4, 3, 2, 1],
+        "First attempt onward: retries cut the core count. Last retry: 1 core."
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::FailedPermanent,
+        "After 1: sb(A).status"
+    );
+    assert_eq!(
+        last_failure_message(&case, A).await.as_deref(),
+        Some(OUT_OF_MEMORY_AT_ONE_CORE),
+        "After 1: failure message"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+async fn run_out_of_memory_case_collect_dispatched_core_counts_and_assert_failed_permanent(
+    seed: gradient_fixtures::shape::Shape,
+    worker: &str,
+) -> Vec<u32> {
+    let case = start(seed).await;
+    case.connect(worker, w_build().cpus(8).ram_total_mb(64_000))
+        .await;
+
+    let mut core_counts_sent_to_worker_per_dispatch_until_build_ended = Vec::new();
+    while let Some(worker_assignment_for_dispatch) = dispatch(&case, worker).await {
+        assert!(
+            core_counts_sent_to_worker_per_dispatch_until_build_ended.len() < 20,
+            "After {} dispatches: out-of-memory retry loop does not end",
+            core_counts_sent_to_worker_per_dispatch_until_build_ended.len()
+        );
+        let cores = sent_cores(&worker_assignment_for_dispatch);
+        core_counts_sent_to_worker_per_dispatch_until_build_ended.push(cores.unwrap_or(0));
+        kill(&case, worker, &worker_assignment_for_dispatch, cores).await;
+    }
+
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::FailedPermanent,
+        "After 1: sb(A).status"
+    );
+    assert_eq!(
+        last_failure_message(&case, A).await.as_deref(),
+        Some(OUT_OF_MEMORY_AT_ONE_CORE),
+        "After 1: failure message"
+    );
+    case.check("step 1").await;
+    case.finish().await;
+    core_counts_sent_to_worker_per_dispatch_until_build_ended
+}
+
+#[tokio::test]
+async fn e18_worker_without_project_registration_out_of_memory_at_every_core_step_with_cores_falling_8_6_4_3_2_1_ends_failed_permanent_at_one_core()
+ {
+    let core_counts_sent_to_worker_per_dispatch_until_build_ended =
+        run_out_of_memory_case_collect_dispatched_core_counts_and_assert_failed_permanent(
+            shape().one(EvaluationId::now_v7(), A, A_OUT),
+            W1,
+        )
+        .await;
+    assert_eq!(
+        core_counts_sent_to_worker_per_dispatch_until_build_ended,
+        vec![8, 6, 4, 3, 2, 1],
+        "First attempt onward: retries cut the core count. Last retry: 1 core."
+    );
+}
+
+#[tokio::test]
+async fn e19_team_worker_also_registered_for_project_killed_for_out_of_memory_at_every_core_step_fails_permanently_at_one_core()
+ {
+    let build_a_project_evaluation_id = EvaluationId::now_v7();
+    let core_counts_sent_to_worker_per_dispatch_until_build_ended =
+        run_out_of_memory_case_collect_dispatched_core_counts_and_assert_failed_permanent(
+            shape()
+                .one(build_a_project_evaluation_id, A, A_OUT)
+                .worker_registration(TEAM_WORKER_ID_ALSO_REGISTERED_FOR_PROJECT)
+                .add_team_worker_with_team_grants_for_evaluation_projects(
+                    TEAM_WORKER_ID_ALSO_REGISTERED_FOR_PROJECT,
+                    &[build_a_project_evaluation_id],
+                ),
+            TEAM_WORKER_ID_ALSO_REGISTERED_FOR_PROJECT,
+        )
+        .await;
+    assert_eq!(
+        core_counts_sent_to_worker_per_dispatch_until_build_ended,
+        vec![8, 6, 4, 3, 2, 1],
+        "First attempt onward: retries cut the core count. Last retry: 1 core."
+    );
+}
+
+#[tokio::test]
+async fn e20_zero_used_cores_with_oom_mark_spends_attempt_without_out_of_memory_failure() {
+    let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect(W1, w_build().cpus(8).ram_total_mb(64_000))
+        .await;
+
+    for step in 1..=3 {
+        let taken = dispatch(&case, W1)
+            .await
+            .unwrap_or_else(|| panic!("after {step}: W1 takes A"));
+        assert_eq!(sent_cores(&taken), Some(8), "after {step}: cores sent");
+        kill(&case, W1, &taken, Some(0)).await;
+    }
+
+    let shared = case.sb(A).await;
+    assert_eq!(
+        (shared.status, shared.attempt),
+        (BuildStatus::FailedPermanent, 2),
+        "after 3: sb(A) status and attempt"
+    );
+    assert_ne!(
+        last_failure_message(&case, A).await.as_deref(),
+        Some(OUT_OF_MEMORY_AT_ONE_CORE),
+        "after 3: The reported 0 cores do not come from an out-of-memory kill at 1 core."
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+async fn start_trusted_worker_transient_failure_then_untrusted_worker_takes_next_dispatch_without_building_update()
+-> (SchedulerCase, Assignment, ProjectId) {
+    let evaluation = EvaluationId::now_v7();
+    let case = start(shape().one(evaluation, A, A_OUT).worker_registration(W1)).await;
+    let project = case.db.project_of(evaluation).await;
+    case.connect(W1, w_build().cpus(8).ram_total_mb(256_000))
+        .await;
+    case.connect(W2, w_build().cpus(8).ram_total_mb(256_000))
+        .await;
+
+    let worker_one_first_assignment_that_fails_transiently =
+        dispatch(&case, W1).await.expect("After 1: W1 took A");
+    case.fail(
+        W1,
+        worker_one_first_assignment_that_fails_transiently.job_id(),
+        worker_one_first_assignment_that_fails_transiently.assignment_id(),
+        failure(BuildFailureKind::Transient)
+            .error("transient")
+            .spans(vec![span(JobPhase::Build, 0, 1)])
+            .elapsed_ms(1),
+    )
+    .await;
+    case.requeue_transient_retries().await;
+
+    let next_assignment_taken_by_worker_w2_without_building_update =
+        offer_job_and_hand_out_without_building_update(&case, W2)
+            .await
+            .expect("After 2: W2 can get A without an update to Building.");
+    (
+        case,
+        next_assignment_taken_by_worker_w2_without_building_update,
+        project,
+    )
+}
+
+#[tokio::test]
+async fn e21_stored_metric_row_for_untrusted_worker_after_transient_failure_names_no_trusted_worker_credentials()
+ {
+    let (case, next_assignment_taken_by_worker_w2_without_building_update, project) =
+        start_trusted_worker_transient_failure_then_untrusted_worker_takes_next_dispatch_without_building_update().await;
+
+    kill(
+        &case,
+        W2,
+        &next_assignment_taken_by_worker_w2_without_building_update,
+        Some(2),
+    )
+    .await;
+
+    let last_stored_derivation_metric_row = case.derivation_metrics(A).await.pop();
+    assert_eq!(
+        last_stored_derivation_metric_row.map(|row| (
+            row.worker_id,
+            row.worker_registration,
+            row.team_worker,
+            row.project,
+            row.build_cores
+        )),
+        Some((W2.to_owned(), None, None, Some(project), Some(2))),
+        "after 2: the stored row names the worker of the dispatch that sent the report, with no worker credentials and the project of that dispatch"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn metric_from_untrusted_worker_without_building_update_is_not_own_sample_for_project_trusting_trusted_worker()
+ {
+    let (case, next_assignment_taken_by_worker_w2_without_building_update, project) =
+        start_trusted_worker_transient_failure_then_untrusted_worker_takes_next_dispatch_without_building_update().await;
+
+    case.report_build_output(
+        W2,
+        next_assignment_taken_by_worker_w2_without_building_update.job_id(),
+        Vec::new(),
+        false,
+        Some(BuildMetrics {
+            peak_ram_mb: Some(100_000),
+            build_cores: Some(2),
+            ..Default::default()
+        }),
+    )
+    .await;
+
+    let last_stored_derivation_metric_row = case.derivation_metrics(A).await.pop();
+    assert_eq!(
+        last_stored_derivation_metric_row.map(|row| (
+            row.worker_id,
+            row.worker_registration,
+            row.team_worker,
+            row.project
+        )),
+        Some((W2.to_owned(), None, None, Some(project))),
+        "After 2: The system stores the build output for that worker without trusted worker credentials. The worker sent no Building update."
+    );
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn worker_with_overreported_cores_at_every_oom_kill_still_fails_permanently_after_same_bounded_dispatches()
+ {
+    let case = start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect(W1, w_build().cpus(8).ram_total_mb(64_000))
+        .await;
+
+    let mut core_counts_sent_to_worker_per_dispatch_until_build_ended = Vec::new();
+    while let Some(worker_assignment_for_dispatch) = dispatch(&case, W1).await {
+        assert!(
+            core_counts_sent_to_worker_per_dispatch_until_build_ended.len() < 20,
+            "After {} dispatches: out-of-memory retry loop does not end",
+            core_counts_sent_to_worker_per_dispatch_until_build_ended.len()
+        );
+        core_counts_sent_to_worker_per_dispatch_until_build_ended
+            .push(sent_cores(&worker_assignment_for_dispatch).unwrap_or(0));
+        kill(&case, W1, &worker_assignment_for_dispatch, Some(8)).await;
+    }
+
+    assert_eq!(
+        core_counts_sent_to_worker_per_dispatch_until_build_ended,
+        vec![8, 6, 4, 3, 2, 1],
+        "The first attempt can store the reported core count as the sent core count when the reported count is higher. Retries then drop the core count to 1 core."
+    );
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::FailedPermanent,
+        "After 1: sb(A).status"
     );
     case.check("step 1").await;
 

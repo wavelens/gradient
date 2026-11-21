@@ -9,6 +9,7 @@ use crate::gateway::{TerminalSize, run_forward, run_shell};
 use crate::gateway_user::{GatewayTarget, gateway_shell_kind};
 use crate::roots::Roots;
 use crate::session::{Session, SshHandles};
+use gradient_types::events::access_recheck::wait_until_access_check_fails;
 use russh::keys::{PrivateKey, PublicKey};
 use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session as SshSession};
 use russh::{Channel, ChannelId, ChannelOpenFailure, Disconnect, MethodKind, MethodSet, Pty};
@@ -16,8 +17,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-
-const OPEN_CONNECTION_ACCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn config(host_key: PrivateKey) -> russh::server::Config {
     russh::server::Config {
@@ -119,28 +118,50 @@ async fn recheck_connection_access_and_disconnect_if_changed(
     fingerprint: String,
     connection: Handle,
 ) {
-    loop {
-        tokio::select! {
-            () = session.closed.cancelled() => return,
-            () = tokio::time::sleep(OPEN_CONNECTION_ACCESS_RECHECK_INTERVAL) => {}
-        }
-        match check_session_access_still_matches_login(&session, &fingerprint).await {
-            Ok(true) => continue,
-            Ok(false) => break,
-            Err(error) => {
-                tracing::warn!(%error, "Failed to re-check access for the SSH session");
-                continue;
+    let access_lost = wait_until_access_check_fails(
+        session.handles.db.events.subscribe(),
+        Some(session.user.id),
+        || {
+            let session = Arc::clone(&session);
+            let fingerprint = fingerprint.clone();
+            async move {
+                recheck_session_ssh_key_login_from_database_and_cancel_token_on_change_or_error(
+                    &session,
+                    &fingerprint,
+                )
+                .await
             }
-        }
+        },
+    );
+    tokio::select! {
+        () = session.closed.cancelled() => return,
+        () = access_lost => {}
     }
-    session.closed.cancel();
     let _ = connection
         .disconnect(
             Disconnect::ByApplication,
-            "Access to this project changed. Reconnect.".to_owned(),
+            "The server failed to re-check this key's access to the project, or access changed. Reconnect.".to_owned(),
             String::new(),
         )
         .await;
+}
+
+pub(crate) async fn recheck_session_ssh_key_login_from_database_and_cancel_token_on_change_or_error(
+    session: &Session,
+    fingerprint: &str,
+) -> bool {
+    match check_session_access_still_matches_login(session, fingerprint).await {
+        Ok(true) => return true,
+        Ok(false) => {}
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "Access recheck of the SSH session failed. Closing the connection."
+            );
+        }
+    }
+    session.closed.cancel();
+    false
 }
 
 impl Drop for Connection {

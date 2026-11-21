@@ -10,9 +10,15 @@ use crate::actions::report::{
     build_ci_reports_from_commit_status_check_rows, persist_evaluation_check_id,
 };
 use crate::context::CiContext;
-use crate::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token;
+use crate::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token_for_task_repository;
+use crate::reporter_restricted_to_granted_repository::ReporterRestrictedToGrantedRepository;
 use crate::reporting::CommitStatusCheckWithIds;
 use anyhow::{Context, Result, anyhow};
+use gradient_db::git_host_connection_repository_grants::{
+    GitHostConnectionRepositoryAccessProof, GitHostConnectionRepositoryGrantError,
+    load_task_git_host_connection_project_and_grants_and_check_repository_access,
+    load_task_project_and_grants_and_check_given_git_host_connection_for_task_repository_access,
+};
 use gradient_db::lookup::by_id;
 use gradient_entity::task_commit_status_post_attempt as post_attempt;
 use gradient_git_host::reporter::{CiReport, CiReporter, CiStatus, GithubAppReporter};
@@ -20,6 +26,7 @@ use gradient_types::ids::TaskCommitStatusPostAttemptId;
 use gradient_types::*;
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::warn;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommitStatusTestSendError {
@@ -31,25 +38,34 @@ pub enum CommitStatusTestSendError {
     NoEvaluatedCommit,
     #[error("Can't read owner and repository from {repository}")]
     RepositoryUnparsable { repository: String },
+    #[error("{0}")]
+    GitHostConnectionCannotActOnTaskRepository(GitHostConnectionRepositoryGrantError),
 }
 
 pub async fn load_task_git_host_connection(
     ctx: &CiContext,
     task_id: TaskId,
-) -> Result<Option<(MTask, MGitHostConnection)>> {
+) -> Result<Option<(MTask, GitHostConnectionRepositoryAccessProof)>> {
     let Some(task) = by_id::<ETask, _>(&ctx.db.worker_db, task_id)
         .await
         .context("load task")?
     else {
         return Ok(None);
     };
-    let Some(connection_id) = task.git_host_connection else {
-        return Ok(None);
-    };
-    let connection = by_id::<EGitHostConnection, _>(&ctx.db.worker_db, connection_id)
-        .await
-        .context("load git host connection")?;
-    Ok(connection.map(|connection| (task, connection)))
+    match load_task_git_host_connection_project_and_grants_and_check_repository_access(
+        &ctx.db.worker_db,
+        &task,
+    )
+    .await
+    .context("check the git host connection of the task")?
+    {
+        Ok(allowed) => Ok(Some((task, allowed))),
+        Err(GitHostConnectionRepositoryGrantError::NoConnection) => Ok(None),
+        Err(refusal) => {
+            warn!(task = %task.id, %refusal, "connection to the Git host has no permission for the task repository");
+            Ok(None)
+        }
+    }
 }
 
 pub fn task_should_post_commit_statuses(task: &MTask, connection: &MGitHostConnection) -> bool {
@@ -61,30 +77,52 @@ pub async fn reporter_for_task(
     task_id: TaskId,
 ) -> Result<Option<Arc<dyn CiReporter>>> {
     match load_task_git_host_connection(ctx, task_id).await? {
-        Some((task, connection)) if task_should_post_commit_statuses(&task, &connection) => {
+        Some((task, allowed)) if task_should_post_commit_statuses(&task, allowed.connection()) => {
             Ok(Some(
-                build_commit_status_reporter_from_git_host_connection_row(ctx, &connection).await?,
+                build_git_host_reporter_refusing_other_repositories(ctx, &allowed).await?,
             ))
         }
         _ => Ok(None),
     }
 }
 
-pub async fn build_commit_status_posting_client_from_git_host_connection_id(
+pub(crate) async fn build_git_host_reporter_refusing_other_repositories(
     ctx: &CiContext,
-    connection_id: GitHostConnectionId,
+    allowed: &GitHostConnectionRepositoryAccessProof,
 ) -> Result<Arc<dyn CiReporter>> {
-    let connection = by_id::<EGitHostConnection, _>(&ctx.db.worker_db, connection_id)
-        .await
-        .context("load git host connection")?
-        .ok_or_else(|| anyhow!("git host connection {connection_id} not found"))?;
-    build_commit_status_reporter_from_git_host_connection_row(ctx, &connection).await
+    let reporter =
+        build_unrestricted_git_host_reporter_for_allowed_connection(ctx, allowed).await?;
+    Ok(Arc::new(ReporterRestrictedToGrantedRepository::new(
+        reporter, allowed,
+    )))
 }
 
-pub async fn build_commit_status_reporter_from_git_host_connection_row(
+pub(crate) async fn build_task_repository_reporter_if_git_host_connection_allowed(
     ctx: &CiContext,
-    connection: &MGitHostConnection,
+    task: &MTask,
+    connection: GitHostConnectionId,
+) -> Result<Result<Arc<dyn CiReporter>, GitHostConnectionRepositoryGrantError>> {
+    let allowed = load_task_project_and_grants_and_check_given_git_host_connection_for_task_repository_access(
+        &ctx.db.worker_db,
+        task,
+        connection,
+    )
+    .await
+    .context("check the git host connection of the task")?;
+    match allowed {
+        Ok(allowed) => Ok(Ok(build_git_host_reporter_refusing_other_repositories(
+            ctx, &allowed,
+        )
+        .await?)),
+        Err(refusal) => Ok(Err(refusal)),
+    }
+}
+
+async fn build_unrestricted_git_host_reporter_for_allowed_connection(
+    ctx: &CiContext,
+    allowed: &GitHostConnectionRepositoryAccessProof,
 ) -> Result<Arc<dyn CiReporter>> {
+    let connection = allowed.connection();
     let git_host = connection.git_host_type;
     let provider = ctx
         .git_host
@@ -99,7 +137,7 @@ pub async fn build_commit_status_reporter_from_git_host_connection_row(
             .await
             .context("read github app private key")?;
         let reporter = GithubAppReporter::new(
-            ctx.http.clone(),
+            ctx.db.user_supplied_url_http_client.clone(),
             "",
             github_app.app_id,
             pem,
@@ -108,16 +146,16 @@ pub async fn build_commit_status_reporter_from_git_host_connection_row(
         return Ok(Arc::new(reporter));
     }
 
-    let token = refresh_and_get_usable_decrypted_access_token(
+    let token = refresh_and_get_usable_decrypted_access_token_for_task_repository(
         ctx.db.web_db.inner(),
         &ctx.db.config,
-        &ctx.http,
-        connection,
+        &ctx.db.user_supplied_url_http_client,
+        allowed,
     )
     .await?;
     provider.build_reporter(
-        ctx.http.clone(),
-        connection.base_url.as_deref(),
+        ctx.db.user_supplied_url_http_client.clone(),
+        gradient_types::git_host::base_url_of_git_host_connection(connection),
         token.as_ref().map(|t| t.expose()),
     )
 }
@@ -157,7 +195,7 @@ async fn persist_check_run_id(
     check_run_id: i64,
 ) -> Result<()> {
     match check {
-        CommitStatusCheckWithIds::Approval { approval } => {
+        CommitStatusCheckWithIds::Approval { approval, .. } => {
             gradient_db::fork_pull_request_approvals::store_approval_check_run_id(
                 &ctx.db.worker_db,
                 *approval,
@@ -214,10 +252,11 @@ pub async fn post_commit_status_reports_for_task_check_event_and_record_attempt(
     event: &str,
     check: &CommitStatusCheckWithIds,
 ) -> Result<()> {
-    let Some((task, connection)) = load_task_git_host_connection(ctx, task_id).await? else {
+    let Some((task, allowed)) = load_task_git_host_connection(ctx, task_id).await? else {
         return Ok(());
     };
-    if !task_should_post_commit_statuses(&task, &connection) {
+    let connection = allowed.connection();
+    if !task_should_post_commit_statuses(&task, connection) {
         return Ok(());
     }
     let reports = build_ci_reports_from_commit_status_check_rows(ctx, check).await?;
@@ -227,8 +266,7 @@ pub async fn post_commit_status_reports_for_task_check_event_and_record_attempt(
 
     let started = Instant::now();
     let outcome = async {
-        let reporter =
-            build_commit_status_reporter_from_git_host_connection_row(ctx, &connection).await?;
+        let reporter = build_git_host_reporter_refusing_other_repositories(ctx, &allowed).await?;
         post_reports(ctx, reporter.as_ref(), &reports, Some(check)).await
     }
     .await;
@@ -242,16 +280,29 @@ pub async fn post_pending_test_commit_status_for_last_evaluation_and_record_atte
     ctx: &CiContext,
     task: &MTask,
 ) -> Result<post_attempt::Model> {
-    let connection_id = task
-        .git_host_connection
-        .ok_or(CommitStatusTestSendError::NoConnection)?;
-    let connection = by_id::<EGitHostConnection, _>(&ctx.db.worker_db, connection_id)
+    let allowed =
+        match load_task_git_host_connection_project_and_grants_and_check_repository_access(
+            &ctx.db.worker_db,
+            task,
+        )
         .await
-        .context("load git host connection")?
-        .ok_or(CommitStatusTestSendError::NoConnection)?;
+        .context("check the git host connection of the task")?
+        {
+            Ok(allowed) => allowed,
+            Err(GitHostConnectionRepositoryGrantError::NoConnection) => {
+                return Err(CommitStatusTestSendError::NoConnection.into());
+            }
+            Err(refusal) => {
+                return Err(
+                    CommitStatusTestSendError::GitHostConnectionCannotActOnTaskRepository(refusal)
+                        .into(),
+                );
+            }
+        };
+    let connection = allowed.connection();
     if !connection.reports_status {
         return Err(CommitStatusTestSendError::ConnectionCannotReportStatus {
-            name: connection.name,
+            name: connection.name.clone(),
         }
         .into());
     }
@@ -286,8 +337,7 @@ pub async fn post_pending_test_commit_status_for_last_evaluation_and_record_atte
 
     let started = Instant::now();
     let outcome = async {
-        let reporter =
-            build_commit_status_reporter_from_git_host_connection_row(ctx, &connection).await?;
+        let reporter = build_git_host_reporter_refusing_other_repositories(ctx, &allowed).await?;
         post_reports(ctx, reporter.as_ref(), &[report], None).await
     }
     .await;
@@ -301,3 +351,6 @@ pub async fn post_pending_test_commit_status_for_last_evaluation_and_record_atte
     )
     .await
 }
+
+#[cfg(test)]
+mod tests;

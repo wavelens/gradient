@@ -38,6 +38,9 @@ async fn update_member_blocks_demoting_last_admin() {
     let (db, auth) = sole_admin_targets_self();
     let db = db
         .append_query_results([vec![view_role()]])
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![count_row(1)]]);
 
     let server = make_test_server(db.into_connection());
@@ -57,7 +60,11 @@ async fn update_member_blocks_demoting_last_admin() {
 #[tokio::test]
 async fn remove_member_blocks_last_admin() {
     let (db, auth) = sole_admin_targets_self();
-    let db = db.append_query_results([vec![count_row(1)]]);
+    let db = db
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![count_row(1)]]);
 
     let server = make_test_server(db.into_connection());
     let res = server

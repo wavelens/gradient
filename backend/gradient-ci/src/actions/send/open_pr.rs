@@ -7,7 +7,7 @@
 use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
-use crate::task_commit_status_posting::build_commit_status_posting_client_from_git_host_connection_id;
+use crate::task_commit_status_posting::build_task_repository_reporter_if_git_host_connection_allowed;
 use anyhow::{Context, Result, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::parse_owner_repo;
@@ -84,9 +84,12 @@ pub(crate) async fn execute_open_pr(
             repository: task.repository.clone(),
         })?;
 
-    let reporter =
-        build_commit_status_posting_client_from_git_host_connection_id(ctx, git_host_connection_id)
-            .await?;
+    let reporter = build_task_repository_reporter_if_git_host_connection_allowed(
+        ctx,
+        &task,
+        git_host_connection_id,
+    )
+    .await??;
     let base_branch = reporter
         .default_branch(&owner, &repo)
         .await

@@ -11,11 +11,11 @@
 
 use axum::http::StatusCode;
 use base64::Engine;
-use gradient_entity::{api, cache, ids::*};
+use gradient_entity::{api, cache, ids::*, task};
 use gradient_fixtures::ids::{cache_id, project_id, user_id};
 use gradient_fixtures::mock::{exec_ok, mock_db};
 use gradient_fixtures::rows::{
-    cache_member, cache_member_in, cache_view_role, cache_with_id, user,
+    cache_member, cache_member_in, cache_view_role, cache_with_id, project_with_id, user,
 };
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
@@ -536,4 +536,98 @@ async fn superuser_api_key_with_read_only_permission_allows_get_and_denies_post_
         json!(["writeSuperuser"]),
         "{body}"
     );
+}
+
+#[tokio::test]
+async fn project_pinned_api_key_in_token_query_is_refused_on_another_private_project() {
+    let raw = "v".repeat(64);
+    let key = api::Model {
+        project: Some(project_id()),
+        ..view_project_key(&raw)
+    };
+    let other_project = project_with_id(ProjectId::now_v7(), "other-project");
+    for path in [
+        "/api/v1/tasks/other-project/nightly/badge",
+        "/api/v1/tasks/other-project/nightly/entry-point-downloads?eval=hello&filename=out",
+    ] {
+        let separator = if path.contains('?') { '&' } else { '?' };
+        let db = with_key(mock_db(), &key)
+            .append_query_results([vec![other_project.clone()]])
+            .append_query_results([vec![task::Model {
+                project: other_project.id,
+                ..gradient_fixtures::rows::task()
+            }]])
+            .append_query_results([vec![gradient_entity::project_access::Model {
+                project: other_project.id,
+                user: user_id(),
+                role: BASE_ROLE_ADMIN_ID,
+                team: None,
+            }]])
+            .append_query_results([vec![gradient_fixtures::rows::admin_role()]]);
+        let res = make_test_server(db.into_connection())
+            .get(&format!("{path}{separator}token=GRAD{raw}"))
+            .await;
+        res.assert_status(StatusCode::NOT_FOUND);
+    }
+}
+
+#[tokio::test]
+async fn anonymous_request_for_private_project_badge_or_entry_point_download_returns_unauthorized()
+{
+    for path in [
+        "/api/v1/tasks/test-project/nightly/badge",
+        "/api/v1/tasks/test-project/nightly/entry-point-downloads?eval=hello&filename=out",
+    ] {
+        let db = mock_db()
+            .append_query_results([vec![gradient_fixtures::rows::project()]])
+            .append_query_results([vec![gradient_fixtures::rows::task()]]);
+        let res = make_test_server(db.into_connection()).get(path).await;
+        res.assert_status(StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn project_pinned_api_key_in_token_query_is_refused_from_source_ip_outside_allow_list() {
+    let raw = "w".repeat(64);
+    let key = api::Model {
+        project: Some(project_id()),
+        allowed_ips: Some(vec!["203.0.113.7/32".into()]),
+        ..view_project_key(&raw)
+    };
+    for path in [
+        "/api/v1/tasks/test-project/nightly/badge",
+        "/api/v1/tasks/test-project/nightly/entry-point-downloads?eval=hello&filename=out",
+    ] {
+        let separator = if path.contains('?') { '&' } else { '?' };
+        let res = make_test_server(with_key(mock_db(), &key).into_connection())
+            .get(&format!("{path}{separator}token=GRAD{raw}"))
+            .await;
+        res.assert_status(StatusCode::FORBIDDEN);
+        assert_eq!(
+            res.json::<serde_json::Value>()["message"],
+            "API key not allowed from this source IP",
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn cache_pinned_key_in_token_query_is_refused_on_badge_and_entry_point_download() {
+    let raw = "x".repeat(64);
+    for path in [
+        "/api/v1/tasks/test-project/nightly/badge",
+        "/api/v1/tasks/test-project/nightly/entry-point-downloads?eval=hello&filename=out",
+    ] {
+        let separator = if path.contains('?') { '&' } else { '?' };
+        let db = with_key(mock_db(), &cache_scope_key(&raw));
+        let res = make_test_server(db.into_connection())
+            .get(&format!("{path}{separator}token=GRAD{raw}"))
+            .await;
+        res.assert_status(StatusCode::FORBIDDEN);
+        assert_eq!(
+            res.json::<serde_json::Value>()["message"],
+            "Cache-pinned API key cannot be used on this endpoint.",
+            "{path}"
+        );
+    }
 }

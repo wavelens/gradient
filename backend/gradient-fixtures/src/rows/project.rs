@@ -105,6 +105,7 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
         commit: commit_id(),
         wildcard: "*".into(),
         status: evaluation::EvaluationStatus::Completed,
+        allows_project_credentials_and_privileged_actions: true,
         created_at,
         updated_at: created_at,
         ..Default::default()

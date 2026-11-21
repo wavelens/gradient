@@ -135,22 +135,6 @@ pub async fn get_any_task_by_name(
     }
 }
 
-pub async fn get_cache_by_name(
-    ctx: &DbContext,
-    user_id: UserId,
-    name: String,
-) -> Result<Option<MCache>> {
-    ECache::find()
-        .filter(
-            Condition::all()
-                .add(CCache::CreatedBy.eq(user_id))
-                .add(CCache::Name.eq(name)),
-        )
-        .one(&ctx.web_db)
-        .await
-        .context("query cache")
-}
-
 pub async fn get_any_cache_by_name(ctx: &DbContext, name: String) -> Result<Option<MCache>> {
     ECache::find()
         .filter(CCache::Name.eq(name))

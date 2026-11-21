@@ -11,10 +11,11 @@ use std::time::{Duration, Instant};
 use gradient_entity::dispatched_job::{self, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
+use gradient_pool::ProjectAccess;
 use gradient_pool::session_port::SessionSignal;
 use gradient_wire::types::{
     BuildFailureKind, BuildMetrics, BuildOutput, BumpedInputWire, DiscoveredDerivation,
-    EvalMessageLevel, EvalStatsReport, InputOutcome, JobKind, JobPhaseSpan,
+    EvalMessageLevel, EvalStatsReport, GradientCapabilities, InputOutcome, JobKind, JobPhaseSpan,
 };
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
@@ -49,6 +50,10 @@ pub(crate) fn failure(kind: BuildFailureKind) -> Failure {
         elapsed_ms: 0,
         metrics: None,
     }
+}
+
+fn only_projects(projects: &[ProjectId]) -> ProjectAccess {
+    ProjectAccess::OnlyListedProjects(projects.iter().copied().collect::<HashSet<_>>())
 }
 
 impl Failure {
@@ -88,12 +93,34 @@ pub(crate) struct ClusterAssignment {
 }
 
 impl SchedulerCase {
-    pub async fn connect(&self, worker: &str, profile: Profile, projects: &[ProjectId]) {
-        self.register(worker, profile, projects, false).await;
+    pub async fn connect(&self, worker: &str, profile: Profile) {
+        self.register(worker, profile, ProjectAccess::AllProjects, false)
+            .await;
     }
 
-    pub async fn connect_reclaiming(&self, worker: &str, profile: Profile, projects: &[ProjectId]) {
-        self.register(worker, profile, projects, true).await;
+    pub async fn connect_for_projects(
+        &self,
+        worker: &str,
+        profile: Profile,
+        projects: &[ProjectId],
+    ) {
+        self.register(worker, profile, only_projects(projects), false)
+            .await;
+    }
+
+    pub async fn connect_reclaiming(&self, worker: &str, profile: Profile) {
+        self.register(worker, profile, ProjectAccess::AllProjects, true)
+            .await;
+    }
+
+    pub async fn connect_reclaiming_for_projects(
+        &self,
+        worker: &str,
+        profile: Profile,
+        projects: &[ProjectId],
+    ) {
+        self.register(worker, profile, only_projects(projects), true)
+            .await;
     }
 
     pub async fn requeue_unreclaimed_after(&self, elapsed: Duration) {
@@ -102,21 +129,30 @@ impl SchedulerCase {
             .await;
     }
 
+    pub async fn run_input_fetch_expiry_after(&self, elapsed: Duration) {
+        let now = Instant::now() + elapsed;
+        self.scheduler
+            .fail_evaluations_waiting_on_inputs_without_worker_fetch_before_timeout(now)
+            .await;
+        self.scheduler
+            .move_timed_out_input_fetches_to_another_worker(now)
+            .await;
+    }
+
     async fn register(
         &self,
         worker: &str,
         profile: Profile,
-        projects: &[ProjectId],
+        project_access: ProjectAccess,
         reclaims_jobs: bool,
     ) {
-        let projects: HashSet<ProjectId> = projects.iter().copied().collect();
         let port = self.port_of(worker);
         let registered = self
             .scheduler
             .register_worker(
                 worker,
                 profile.caps.clone(),
-                projects.clone(),
+                project_access.clone(),
                 port,
                 reclaims_jobs,
             )
@@ -129,7 +165,7 @@ impl SchedulerCase {
         }
         if let Some(session) = lock(&self.sessions).get_mut(worker) {
             session.caps = profile.caps;
-            session.projects = projects;
+            session.project_access = project_access;
             session.last_seen = registered.last_seen;
         }
         lock(&self.connected_workers).insert(worker.to_owned());
@@ -147,7 +183,7 @@ impl SchedulerCase {
                 port,
                 inbox,
                 caps: Default::default(),
-                projects: HashSet::new(),
+                project_access: ProjectAccess::no_project_access(),
                 last_seen: Default::default(),
                 jobs: HashMap::new(),
             }
@@ -179,14 +215,25 @@ impl SchedulerCase {
         self.scheduler.mark_worker_draining(worker).await;
     }
 
-    pub async fn authorize(&self, worker: &str, projects: &[ProjectId]) {
-        let projects: HashSet<ProjectId> = projects.iter().copied().collect();
+    pub async fn replace_authorization(
+        &self,
+        worker: &str,
+        project_access: ProjectAccess,
+        capabilities: GradientCapabilities,
+    ) {
         self.scheduler
-            .update_authorized_peers(worker, projects.clone())
+            .replace_worker_authorization(worker, project_access.clone(), capabilities.clone())
             .await;
         if let Some(session) = lock(&self.sessions).get_mut(worker) {
-            session.projects = projects;
+            session.project_access = project_access;
+            session.caps = capabilities;
         }
+    }
+
+    pub async fn authorize(&self, worker: &str, projects: &[ProjectId]) {
+        let capabilities = self.session_caps(worker);
+        self.replace_authorization(worker, only_projects(projects), capabilities)
+            .await;
     }
 
     pub async fn reauth_result(&self, worker: &str, projects: &[ProjectId]) {
@@ -194,15 +241,32 @@ impl SchedulerCase {
     }
 
     pub async fn revoke(&self, worker: &str, projects: &[ProjectId]) {
-        let revoked: HashSet<ProjectId> = projects.iter().copied().collect();
-        self.scheduler
-            .abort_project_jobs_on_worker(worker, &revoked)
-            .await;
-        let remaining: Vec<ProjectId> = lock(&self.sessions)
-            .get(worker)
-            .map(|s| s.projects.difference(&revoked).copied().collect())
-            .unwrap_or_default();
+        let remaining: Vec<ProjectId> = match self.session_project_access(worker) {
+            ProjectAccess::OnlyListedProjects(granted) => granted
+                .into_iter()
+                .filter(|project| !projects.contains(project))
+                .collect(),
+            ProjectAccess::AllProjects => {
+                panic!("connect {worker} with connect_for_projects before revoking projects")
+            }
+        };
         self.authorize(worker, &remaining).await;
+    }
+
+    fn session_caps(&self, worker: &str) -> GradientCapabilities {
+        lock(&self.sessions)
+            .get(worker)
+            .unwrap_or_else(|| panic!("connect {worker} first"))
+            .caps
+            .clone()
+    }
+
+    fn session_project_access(&self, worker: &str) -> ProjectAccess {
+        lock(&self.sessions)
+            .get(worker)
+            .unwrap_or_else(|| panic!("connect {worker} first"))
+            .project_access
+            .clone()
     }
 
     pub async fn request_reauth(&self, worker: &str) {
@@ -385,7 +449,7 @@ impl SchedulerCase {
         }
         let _ = self
             .scheduler
-            .handle_build_output(key, build_id(key), outputs, metrics, substituted)
+            .handle_build_output(worker, key, outputs, metrics, substituted)
             .await;
     }
 
@@ -447,7 +511,7 @@ impl SchedulerCase {
 
     pub async fn evalrun(&self, worker: &str, evaluation: EvaluationId) -> DispatchedJobId {
         if !lock(&self.connected_workers).contains(worker) {
-            self.connect(worker, w_all(), &[]).await;
+            self.connect(worker, w_all()).await;
         }
         self.assign_queued_evals().await;
         let assignment = self
@@ -500,10 +564,37 @@ impl SchedulerCase {
         if !self.owns_remembered(worker, key).await {
             return;
         }
+        let mut derivations = derivations;
+        if let Some(PendingJob::Eval(job)) = self.scheduler.active_job(key).await {
+            for reported in &mut derivations {
+                *reported = self
+                    .upload_reported_derivation_as_evaluation_project_worker(
+                        job.project_id,
+                        reported,
+                    )
+                    .await;
+            }
+        }
         let _ = self
             .scheduler
             .handle_eval_result(key, derivations, Vec::new(), Vec::new())
             .await;
+    }
+
+    pub async fn assert_report_eval_result_matches_seeded_derivations_and_row_count_unchanged(
+        &self,
+        worker: &str,
+        key: &str,
+        derivations: Vec<DiscoveredDerivation>,
+    ) {
+        let before = self.db.rows::<gradient_entity::derivation::Entity>().await;
+        self.report_eval_result(worker, key, derivations).await;
+        let after = self.db.rows::<gradient_entity::derivation::Entity>().await;
+        assert_eq!(
+            after.len(),
+            before.len(),
+            "Seeded derivations are the only rows in the report. New derivations get no row."
+        );
     }
 
     pub async fn report_eval_message(
@@ -659,20 +750,20 @@ impl SchedulerCase {
             self.remember(worker, key, *assignment_id, job.clone());
             active.push(Reattached::single((*key).to_owned(), *assignment_id, job));
         }
-        let (caps, projects, port) = {
+        let (caps, project_access, port) = {
             let sessions = lock(&self.sessions);
             let session = sessions
                 .get(worker)
                 .unwrap_or_else(|| panic!("connect {worker} first"));
             (
                 session.caps.clone(),
-                session.projects.clone(),
+                session.project_access.clone(),
                 std::sync::Arc::clone(&session.port),
             )
         };
         let registered = self
             .scheduler
-            .reattach_worker(worker, caps, projects, port, active, false)
+            .reattach_worker(worker, caps, project_access, port, active, false)
             .await
             .expect("the worker reattaches");
         if let Some(session) = lock(&self.sessions).get_mut(worker) {

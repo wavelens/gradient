@@ -98,10 +98,11 @@ impl<'a> StateApplicator<'a> {
 
         let db = self.db;
 
-        unmark_managed!(db, user, usernames, username, delete_state, "user");
+        self.remove_undeclared_accounts(&usernames, delete_state)
+            .await?;
         unmark_managed!(db, project, project_names, name, delete_state, "project");
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
-        unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
+        unmark_managed!(db, api, api_key_names, name, true, "API key");
         unmark_managed!(db, team, team_names, name, delete_state, "team");
 
         self.unmark_removed_tasks(&task_keys, &project_name_by_id, delete_state)
@@ -163,6 +164,37 @@ impl<'a> StateApplicator<'a> {
             tracing::info!(worker_id, "Deleted team worker");
         }
 
+        Ok(())
+    }
+
+    async fn remove_undeclared_accounts(
+        &self,
+        usernames: &HashSet<&String>,
+        delete_state: bool,
+    ) -> Result<(), DynError> {
+        let declared: HashSet<String> = usernames.iter().map(|u| u.to_lowercase()).collect();
+        let state_accounts = user::Entity::find()
+            .filter(user::Column::AccountOrigin.eq(AccountOrigin::DeclaredInStateFile))
+            .filter(user::Column::Managed.eq(true))
+            .all(self.db)
+            .await?;
+        for account in state_accounts {
+            if declared.contains(&account.username.to_lowercase()) {
+                continue;
+            }
+            let username = account.username.clone();
+            if delete_state {
+                user::Entity::delete_by_id(account.id).exec(self.db).await?;
+                tracing::info!(%username, "Deleted managed user");
+            } else {
+                let mut active: user::ActiveModel = account.into();
+                active.managed = Set(false);
+                active.superuser = Set(false);
+                active.active = Set(false);
+                active.update(self.db).await?;
+                tracing::info!(%username, "Deactivated user no longer declared in state");
+            }
+        }
         Ok(())
     }
 
@@ -423,11 +455,13 @@ mod managed_git_host_connection_reconciliation_tests {
     }
 
     async fn reconcile(db: &DatabaseConnection, owners: &Owners, delete: bool) {
+        let transaction = sea_orm::TransactionTrait::begin(db).await.unwrap();
         let app = StateApplicator {
-            db,
+            db: &transaction,
             crypt_secret_file: "",
             credentials_dir: std::path::Path::new(""),
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
         let project_name_by_id = HashMap::from([
             (owners.acme, "acme".to_string()),
@@ -442,6 +476,7 @@ mod managed_git_host_connection_reconciliation_tests {
         )
         .await
         .unwrap();
+        transaction.commit().await.unwrap();
     }
 
     fn mentions(statement: &Statement, id: GitHostConnectionId) -> bool {

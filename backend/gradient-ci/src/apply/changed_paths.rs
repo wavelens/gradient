@@ -9,7 +9,8 @@ use gradient_db::lookup::by_id;
 use gradient_sources::{ComparisonBaseCommit, get_changed_file_path_pairs_between_commits};
 use gradient_types::triggers::ChangedFilePathFilter;
 use gradient_types::*;
-use gradient_util::glob::glob_match;
+use gradient_util::http_base_url::remove_user_name_and_password_from_urls_in_error_text;
+use gradient_wildcard::candidate_matches_wildcard_pattern;
 use sea_orm::ConnectionTrait;
 use std::time::Duration;
 use tracing::warn;
@@ -43,6 +44,7 @@ pub async fn should_fire_trigger_for_path_filter<C: ConnectionTrait>(
         Ok(Ok(Some(paths))) => changed_paths_match_trigger_path_filter(filter, &paths),
         Ok(Ok(None)) => true,
         Ok(Err(error)) => {
+            let error = remove_user_name_and_password_from_urls_in_error_text(&error.to_string());
             warn!(%error, task_id = %task.id, "Failed to get the changed file list for the trigger path filter. Trigger fires anyway.");
             true
         }
@@ -119,7 +121,9 @@ pub fn changed_paths_match_trigger_path_filter(
 }
 
 fn path_matches_any_glob(patterns: &[String], path: &str) -> bool {
-    patterns.iter().any(|pattern| glob_match(pattern, path))
+    patterns
+        .iter()
+        .any(|pattern| candidate_matches_wildcard_pattern(pattern, path))
 }
 
 #[cfg(test)]

@@ -7,13 +7,18 @@
 use super::helpers::{EntityLookup, ErrorCollector};
 use crate::config::StateProject;
 use gradient_types::https_git_url_host::normalize_bare_https_git_host;
+use gradient_types::input::check_index_name;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let config = lookup.config;
     let mut project_ids_seen: HashSet<String> = HashSet::new();
     for project in config.projects.values() {
-        if !lookup.user_exists(&project.created_by) {
+        errors.record_input_error_at_field(
+            format!("projects.{}.name", project.name),
+            check_index_name(&project.name),
+        );
+        if !lookup.creator_is_blank_or_user_exists(&project.created_by) {
             errors.push(
                 format!("projects.{}.created_by", project.name),
                 format!("User '{}' does not exist", project.created_by),
@@ -64,7 +69,12 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                     ),
                 );
             }
-            // A missing user is intentionally not an error (issue #94).
+            if !lookup.user_exists(&member.user) {
+                errors.push(
+                    format!("projects.{}.members.{}.user", project.name, member.user),
+                    format!("User '{}' does not exist", member.user),
+                );
+            }
         }
 
         validate_project_https_git_credentials(project, errors);

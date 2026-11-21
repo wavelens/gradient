@@ -97,6 +97,8 @@ async fn create_role_rejects_duplicate_name() {
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![existing]]);
 
     let server = make_test_server(db.into_connection());
@@ -194,6 +196,8 @@ async fn delete_role_rejects_a_role_granted_to_a_team() {
         .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![custom]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([vec![gradient_entity::team_cache::Model {
             id: TeamCacheId::now_v7(),
@@ -231,6 +235,8 @@ async fn delete_role_rejects_role_in_use() {
         .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![custom]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![in_use]]);
 
     let server = make_test_server(db.into_connection());

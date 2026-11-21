@@ -12,13 +12,13 @@ use gradient_db::WebDb;
 use gradient_db::lookup::{by_id, get_any_project_by_name};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_util::debounce::Debounce;
 use http::{StatusCode, header};
 use serde::Deserialize;
 use std::sync::Arc;
-use uuid::Uuid;
 
-use crate::access::can_view_project;
+use crate::access::{
+    Caller, ProjectItemAccessRequirement, ProjectItemLocation, can_access_project_resource,
+};
 use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebError;
 use crate::helpers::OptionExt;
@@ -35,7 +35,6 @@ pub struct BadgeParams {
     #[serde(default = "default_label")]
     pub label: String,
     pub eval: Option<String>,
-    pub token: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, Copy, utoipa::ToSchema)]
@@ -125,51 +124,25 @@ fn badge_for_status(status: Option<EvaluationStatus>, has_failed_builds: bool) -
     }
 }
 
-async fn resolve_badge_user(
-    db: &WebDb,
-    jwt_secret: &SecretString,
-    last_used_stamps: &Debounce<Uuid>,
-    maybe_user: Option<MUser>,
-    api_key: MaybeApiKey,
-    token: Option<String>,
-    client_ip: std::net::IpAddr,
-) -> Result<(Option<MUser>, Option<ApiKeyContext>), WebError> {
-    match token {
-        Some(tok) => {
-            let (user, decoded) =
-                crate::authorization::verify_credential_and_return_user_and_decoded_credential(
-                    db,
-                    jwt_secret,
-                    last_used_stamps,
-                    tok,
-                    &http::Method::GET,
-                    client_ip,
-                )
-                .await?;
-            Ok((Some(user), decoded.api_key_context().cloned()))
-        }
-        None => Ok((maybe_user, api_key.as_ref().cloned())),
-    }
-}
-
 async fn check_badge_project_access(
     db: &WebDb,
     project: &MProject,
     resolved_user: &Option<MUser>,
     api_key: Option<&ApiKeyContext>,
 ) -> Result<(), WebError> {
-    if project.public {
-        return Ok(());
+    if !project.public && resolved_user.is_none() {
+        return Err(SharedRefusal::AuthorizationRequired.into());
     }
-    match resolved_user {
-        Some(user) => {
-            if !can_view_project(db, user.id, project.id, api_key).await? {
-                return Err(WebError::not_found(Resource::Project));
-            }
-        }
-        None => return Err(SharedRefusal::AuthorizationRequired.into()),
-    }
-    Ok(())
+    can_access_project_resource(
+        db,
+        Caller::from(resolved_user),
+        api_key,
+        project,
+        ProjectItemLocation::ProjectAsWhole,
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+        Resource::Project,
+    )
+    .await
 }
 
 async fn badge_status_for_entry_point(
@@ -260,9 +233,6 @@ pub async fn get_task_badge(
     state: State<Arc<ServerState>>,
     axum::Extension(MaybeUser(maybe_user)): axum::Extension<MaybeUser>,
     axum::Extension(api_key): axum::Extension<MaybeApiKey>,
-    axum::Extension(crate::client_ip::ClientIp(client_ip)): axum::Extension<
-        crate::client_ip::ClientIp,
-    >,
     Path((project, task)): Path<(String, String)>,
     Query(params): Query<BadgeParams>,
 ) -> Result<Response, WebError> {
@@ -270,23 +240,7 @@ pub async fn get_task_badge(
         .await?
         .or_not_found(Resource::Project)?;
 
-    let (resolved_user, resolved_key) = resolve_badge_user(
-        &state.web_db,
-        &state.jwt_secret,
-        &state.memory.last_used_stamps,
-        maybe_user,
-        api_key,
-        params.token,
-        client_ip,
-    )
-    .await?;
-    check_badge_project_access(
-        &state.web_db,
-        &project,
-        &resolved_user,
-        resolved_key.as_ref(),
-    )
-    .await?;
+    check_badge_project_access(&state.web_db, &project, &maybe_user, api_key.as_ref()).await?;
 
     let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
         .await?

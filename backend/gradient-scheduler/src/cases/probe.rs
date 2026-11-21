@@ -340,7 +340,7 @@ async fn p07_a_project_without_a_candidate_upstream_gets_a_final_miss_at_once() 
     );
     case.check("step 1").await;
 
-    case.connect(W1, w_build(), &[]).await;
+    case.connect(W1, w_build()).await;
     case.refresh_waiting_state().await;
     let evaluation = case.evaluation(e1).await;
     assert_eq!(
@@ -741,6 +741,43 @@ async fn p15_a_new_need_asks_again_after_an_earlier_miss() {
         case.upstream_metrics().await,
         vec![tally(&u1, 1, 1, 0)],
         "after 1: upstream_metric(U1.url)"
+    );
+    case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn r3_unprobed_wanted_build_with_output_only_in_another_project_worker_content_variant_is_probed_upstream_gets_404_and_is_not_cache_available_or_substituted()
+ {
+    let (other, e1) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let u1 = UpstreamServer::start().await;
+    u1.miss(A_OUT).await;
+    let given = shape()
+        .evaluation(other)
+        .cached_path(A_OUT, "a")
+        .evaluation(e1)
+        .evaluation_status(EvaluationStatus::Building)
+        .unprobed(A, A_OUT)
+        .into_cache(CacheId::now_v7())
+        .http_upstream(&u1, CacheSubscriptionMode::ReadWrite, true);
+    let case = SchedulerCase::start(given).await;
+
+    assert_eq!(
+        planned_targets(&case.plan_probes(&[A]).await),
+        targets(&[(e1, &[A_OUT])]),
+        "after 1: only variants of another project exist in the store. Requests from the plan to upstream for A's output still remain."
+    );
+    case.probe_round(&[A]).await;
+    let sb_a = case.sb(A).await;
+    assert!(
+        sb_a.probed && !sb_a.cache_available && sb_a.status != BuildStatus::Substituted,
+        "after 1: sb(A) has probed, not cache_available and not Substituted"
+    );
+    assert_eq!(
+        case.upstream_metrics().await,
+        vec![tally(&u1, 1, 0, 1)],
+        "After 1: upstream_metric(U1.url)"
     );
     case.check("step 1").await;
 

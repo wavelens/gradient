@@ -5,6 +5,7 @@
  */
 
 use std::collections::BTreeMap;
+use std::net::Ipv4Addr;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use gradient_secret::{SecretBytes, SecretString};
@@ -178,6 +179,20 @@ impl Proto for SecretString {
 
     fn describe(_: u16, out: &mut String) {
         out.push_str("str");
+    }
+}
+
+impl Proto for Ipv4Addr {
+    fn encode(&self, version: u16, out: &mut BytesMut) -> Result<(), EncodeError> {
+        u32::from(*self).encode(version, out)
+    }
+
+    fn decode(input: &mut Bytes, version: u16) -> Result<Self, DecodeError> {
+        u32::decode(input, version).map(Ipv4Addr::from)
+    }
+
+    fn describe(_: u16, out: &mut String) {
+        out.push_str("ipv4");
     }
 }
 

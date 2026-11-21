@@ -6,13 +6,14 @@
 
 use super::super::DynError;
 use super::super::StateApplicator;
-use super::super::{lookup_id, read_credential};
+use super::super::read_credential;
 use crate::config::*;
 use anyhow::Result;
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_db::git_host_connections::{self, GitHostConnectionOwnerByDatabaseId};
 use gradient_types::git_host::GitHostConnectionOwner;
 use gradient_types::*;
+use gradient_util::http_base_url::ValidatedHttpBaseUrl;
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use std::collections::HashMap;
 
@@ -27,7 +28,7 @@ impl<'a> StateApplicator<'a> {
         }
 
         let project_map = self.project_lookup().await?;
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
 
         for (label, state_connection) in state_connections {
             let owner = state_connection
@@ -64,8 +65,6 @@ impl<'a> StateApplicator<'a> {
                 GitHostConnectionOwnerByDatabaseId::Project(project) => (Some(project), None),
             };
 
-            let created_by_id = lookup_id(&user_map, &state_connection.created_by, "User")?;
-
             let git_host = GitHostType::from_path_segment(&state_connection.git_host_type).ok_or_else(|| {
                 format!(
                     "Git host connection '{}' has invalid git_host_type '{}'. Expected gitea/forgejo/gitlab/github.",
@@ -101,10 +100,18 @@ impl<'a> StateApplicator<'a> {
             )?;
 
             let base_url = state_connection
-                .base_url
-                .as_deref()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
+                .address()
+                .and_then(|address| address.base_url)
+                .map(|s| {
+                    s.parse::<ValidatedHttpBaseUrl>()
+                        .map(|base_url| base_url.to_string())
+                        .map_err(|e| {
+                            format!(
+                                "Invalid base_url for the connection to Git host '{label}': {e}"
+                            )
+                        })
+                })
+                .transpose()?;
 
             let display_name = state_connection
                 .display_name
@@ -133,6 +140,11 @@ impl<'a> StateApplicator<'a> {
                     github_installation_id,
                 )
                 .await?;
+            let created_by_id = state_users.resolve_creator_username_to_state_account_id(
+                &state_connection.created_by,
+                &format!("Git host connection '{label}'"),
+                existing.as_ref().map(|connection| connection.created_by),
+            )?;
 
             if let Some(existing) = existing {
                 let mut active = existing.into_active_model();
@@ -286,11 +298,15 @@ mod tests {
 
     async fn database_with_user() -> TestDatabase {
         let db = TestDatabase::create().await;
-        rows::user()
-            .into_active_model()
-            .insert(&db.connection())
-            .await
-            .unwrap();
+        MUser {
+            account_origin: AccountOrigin::DeclaredInStateFile,
+            managed: true,
+            ..rows::user()
+        }
+        .into_active_model()
+        .insert(&db.connection())
+        .await
+        .unwrap();
         db
     }
 
@@ -298,17 +314,21 @@ mod tests {
         db: &DatabaseConnection,
         connection: StateGitHostConnection,
     ) -> Result<(), DynError> {
+        let transaction = sea_orm::TransactionTrait::begin(db).await?;
         let app = StateApplicator {
-            db,
+            db: &transaction,
             crypt_secret_file: "",
             credentials_dir: Path::new(""),
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
         app.apply_git_host_connections(
             &HashMap::from([(connection.name.clone(), connection)]),
             &HashMap::new(),
         )
-        .await
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     #[tokio::test]
@@ -370,6 +390,26 @@ mod tests {
         assert_eq!(row.id, installed.id);
         assert!(row.managed);
         assert!(row.reports_status);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_apply_state_file_gitlab_connection_without_base_url_stores_gitlab_com_base_url() {
+        let db = database_with_user().await;
+
+        apply(
+            &db.connection(),
+            StateGitHostConnection {
+                git_host_type: "gitlab".into(),
+                base_url: None,
+                ..state_connection("gitlab", None)
+            },
+        )
+        .await
+        .unwrap();
+
+        let row = db.rows::<EGitHostConnection>().await.remove(0);
+        assert_eq!(row.base_url.as_deref(), Some("https://gitlab.com"));
         db.finish().await;
     }
 

@@ -4,34 +4,43 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand, NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES,
+    REQUIRES_INTERACTIVE_TERMINAL,
+};
 use crate::commands::run_terminal::attach_terminal_to_job_serial_console;
-use crate::error::{CliError, FileAction};
+use crate::download_file_path_and_write::{
+    DownloadDestination, checked_file_path_in_directory_from_server_file_name,
+    write_downloaded_byte_chunks_to_destination,
+};
 use crate::input::{OnOffSetting, client_from_config, evaluation_uuid_from_reference};
 use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
-use futures::StreamExt;
-use std::path::PathBuf;
-use tokio::io::AsyncWriteExt;
+use std::path::{Path, PathBuf};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// List the execution jobs of an evaluation
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// An evaluation UUID, `project/task` (the latest evaluation of the task), `project/task@<commit>`, or a link copied from the Web UI.
         evaluation: TaskOrEvaluationReference,
     },
     /// Show details for an exec job
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// ID of the execution job
         job: String,
     },
     /// Print the logs for an exec job
+    #[command(add = McpToolMayRunCommand)]
     Logs {
         /// ID of the execution job
         job: String,
     },
     /// Cancel an exec job
+    #[command(add = McpToolMayRunCommand)]
     Cancel {
         /// ID of the execution job
         job: String,
@@ -42,6 +51,7 @@ pub enum Commands {
         cmd: ExecJobArtifactCommand,
     },
     /// Keep the VM of an exec job running after the end of the program (`on`), or stop that VM (`off`).
+    #[command(add = McpToolMayRunCommand)]
     KeepVmRunning {
         /// ID of the execution job
         job: String,
@@ -49,6 +59,7 @@ pub enum Commands {
         setting: OnOffSetting,
     },
     /// Connect this terminal to the serial console of the VM for an exec job. Type `~.` at the start of a line to detach.
+    #[command(add = REQUIRES_INTERACTIVE_TERMINAL)]
     Console {
         /// ID of the execution job
         job: String,
@@ -57,6 +68,7 @@ pub enum Commands {
         node_index: Option<u32>,
     },
     /// List the pull requests that exec jobs open
+    #[command(add = McpToolMayRunCommand)]
     PullRequests {
         /// ID of the execution job
         job: String,
@@ -66,6 +78,7 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum ExecJobArtifactCommand {
     /// List the output files that the exec job uploaded
+    #[command(add = McpToolMayRunCommand)]
     List {
         /// ID of the execution job
         job: String,
@@ -74,6 +87,7 @@ pub enum ExecJobArtifactCommand {
         node_index: Option<u32>,
     },
     /// Download one output file of an exec job
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Download {
         /// ID of the execution job
         job: String,
@@ -82,6 +96,9 @@ pub enum ExecJobArtifactCommand {
         /// File to write to. Default: the name of the output file in the current directory.
         #[arg(long)]
         output_file_path: Option<PathBuf>,
+        /// Replace any existing file with the output name
+        #[arg(long)]
+        replace_existing: bool,
         /// Node index in a multi-node job. The first node is 0.
         #[arg(long)]
         node_index: Option<u32>,
@@ -163,31 +180,33 @@ pub async fn handle(cmd: Commands, out: Output) {
                     job,
                     path,
                     output_file_path,
+                    replace_existing,
                     node_index,
                 },
         } => {
-            let destination = output_file_path
-                .unwrap_or_else(|| PathBuf::from(path.rsplit('/').next().unwrap_or(path.as_str())));
-            let mut chunks = jobs
+            let destination = match output_file_path {
+                Some(explicit_path) => DownloadDestination::CommandLinePath(explicit_path),
+                None => {
+                    let output_file_name = path.rsplit('/').next().unwrap_or(path.as_str());
+                    DownloadDestination::FileInServerNamedDirectory {
+                        path: checked_file_path_in_directory_from_server_file_name(
+                            Path::new(""),
+                            output_file_name,
+                        )
+                        .unwrap_or_else(|e| out.fail(e)),
+                        replace_existing,
+                    }
+                }
+            };
+            let chunks = jobs
                 .download_job_output_file_from_node(&job, &path, node_index)
                 .await
                 .unwrap_or_else(|e| out.fail(e));
-            let mut file = tokio::fs::File::create(&destination)
+            let written = write_downloaded_byte_chunks_to_destination(chunks, &destination)
                 .await
-                .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Create, &destination, e)));
-            let mut written: u64 = 0;
-            while let Some(chunk) = chunks.next().await {
-                let chunk = chunk.unwrap_or_else(|e| out.fail(e));
-                file.write_all(&chunk).await.unwrap_or_else(|e| {
-                    out.fail(CliError::file(FileAction::Write, &destination, e))
-                });
-                written += chunk.len() as u64;
-            }
-            file.flush()
-                .await
-                .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &destination, e)));
-            out.ok(&serde_json::json!({"path": destination, "bytes": written}));
-            out.human(format!("Saved {}.", destination.display()));
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&serde_json::json!({"path": destination.path(), "bytes": written}));
+            out.human(format!("Saved {}.", destination.path().display()));
         }
         Commands::KeepVmRunning { job, setting } => {
             let keep = setting == OnOffSetting::On;

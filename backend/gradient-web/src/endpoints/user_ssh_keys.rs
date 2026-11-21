@@ -5,6 +5,7 @@
  */
 
 use crate::audit::Audit;
+use crate::authorization::credential_insert_error_to_http_error;
 use crate::error::{WebError, WebResult};
 use crate::extractors::{JsonBody, Path};
 use crate::helpers::{OptionExt, ok_json};
@@ -147,6 +148,7 @@ pub async fn post_ssh_key(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
+    Extension(session): Extension<MSession>,
     JsonBody(body): JsonBody<CreateSshKeyRequest>,
 ) -> WebResult<Json<BaseResponse<SshKeyInfo>>> {
     require_ssh(&state.config)?;
@@ -164,20 +166,32 @@ pub async fn post_ssh_key(
         return Err(WebError::already_exists(Resource::SshKey));
     }
 
-    let inserted = gradient_db::rows::insert::<EUserSshKey, _>(
-        &state.web_db,
-        MUserSshKey {
-            id: UserSshKeyId::now_v7(),
-            user: user.id,
-            name: name.to_string(),
-            public_key: body.public_key.trim().to_string(),
-            fingerprint,
-            created_at: now(),
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(|e| WebError::from_db_err(e, Resource::SshKey))?;
+    let ssh_key = MUserSshKey {
+        id: UserSshKeyId::now_v7(),
+        user: user.id,
+        name: name.to_string(),
+        public_key: body.public_key.trim().to_string(),
+        fingerprint,
+        created_at: now(),
+        ..Default::default()
+    };
+    let inserted =
+        gradient_db::users::insert_credential_after_locking_user_row_and_rechecking_authorisation(
+            state.web_db.inner(),
+            user.id,
+            gradient_db::users::VerifiedFactForSessionOrCredentialCreation::ExistingSignInSession(
+                session.id,
+            ),
+            |tx| {
+                Box::pin(
+                    async move { gradient_db::rows::insert::<EUserSshKey, _>(tx, ssh_key).await },
+                )
+            },
+        )
+        .await
+        .map_err(|e| {
+            credential_insert_error_to_http_error(e, |e| WebError::from_db_err(e, Resource::SshKey))
+        })?;
 
     audit.write(Action::SshKeyCreate, EventOwner::default(), serde_json::json!({ "ssh_key_id": inserted.id.to_string(), "fingerprint": inserted.fingerprint, }))
     .await;

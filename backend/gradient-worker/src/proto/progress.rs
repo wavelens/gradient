@@ -540,7 +540,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![7u8; 300_000]))
             .mount(&server)
             .await;
-        let http = gradient_util::http::build_download_client().expect("download client");
+        let http = gradient_worker_client::http::build_download_client().expect("download client");
         let response = http.get(server.uri()).send().await.unwrap();
         let mut sent = Recorded::default();
         let mut progress = Progress::new(&mut sent);

@@ -5,6 +5,7 @@
  */
 
 use crate::commands::attr_spec;
+use crate::output::{ExitKind, Output};
 use clap::Args;
 use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
 use gradient_eval::ipc::{FlakeEvalTarget, License, ResolvedItem};
@@ -12,10 +13,8 @@ use gradient_eval::pool::{
     EvalPool, EvalPoolConfig, MemoryGuard, RefuseDependencies, default_workers,
 };
 use serde::Serialize;
-use std::io::Write;
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::Path;
-use std::sync::PoisonError;
 
 #[derive(Args, Debug)]
 pub struct EvalArgs {
@@ -106,13 +105,8 @@ async fn evaluate(
         fetch_through_parent: false,
     });
 
-    let out = std::sync::Mutex::new(std::io::stdout());
-    let print = |job: Job| {
-        if let Ok(line) = serde_json::to_string(&job) {
-            let mut out = out.lock().unwrap_or_else(PoisonError::into_inner);
-            let _ = writeln!(out, "{line}");
-        }
-    };
+    let out = Output::new(false);
+    let print = |job: Job| out.print_serializable_value_as_json_line(&job);
 
     let dependencies = RefuseDependencies("the local evaluation");
     let found = |items: Vec<ResolvedItem>| items.into_iter().map(Job::from_item).for_each(print);
@@ -141,14 +135,9 @@ async fn evaluate(
     };
     pool.shutdown().await;
 
-    let mut out = out.into_inner().unwrap_or_else(PoisonError::into_inner);
-    out.flush()?;
     match outcome {
         Ok(()) => Ok(()),
-        Err(e) => {
-            eprintln!("gradient eval: {e:#}");
-            std::process::exit(1);
-        }
+        Err(e) => out.err(ExitKind::Api, format!("gradient eval: {e:#}")),
     }
 }
 

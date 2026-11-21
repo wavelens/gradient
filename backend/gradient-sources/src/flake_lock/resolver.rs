@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use gradient_types::RepositoryUrl;
 use gradient_wire::traits::InputProgressSink;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -159,7 +160,9 @@ impl HttpRevisionResolver {
     }
 
     async fn resolve_git(&self, url: &str, ref_: &Option<String>) -> Result<ResolvedRev> {
-        let url = url.to_owned();
+        let url = url
+            .parse::<RepositoryUrl>()
+            .with_context(|| format!("Invalid URL `{url}` for the git input in flake.lock"))?;
         let ref_owned = ref_.clone();
         let git_credentials = self.git_credentials.clone();
         let (rev, last_modified, tmp) = tokio::task::spawn_blocking(move || {
@@ -267,7 +270,7 @@ fn url_with_percent_encoded_path_segments(base: &Url, segments: &[&str]) -> Resu
 }
 
 fn git_checkout(
-    url: &str,
+    url: &RepositoryUrl,
     ref_: Option<&str>,
     git_credentials: &crate::git::GitOperationCredentials,
 ) -> Result<(String, i64, tempfile::TempDir)> {
@@ -378,7 +381,7 @@ mod tests {
     #[test]
     fn git_checkout_fetches_file_url() {
         let (_tmp, repo) = make_git_repo();
-        let url = format!("file://{}", repo.display());
+        let url = RepositoryUrl::local_test_repository(&repo);
         let (rev, _, checkout) =
             git_checkout(&url, None, &crate::git::GitOperationCredentials::default()).unwrap();
         assert_eq!(
@@ -404,7 +407,7 @@ mod tests {
             &repo,
             &["checkout", "main"],
         );
-        let url = format!("file://{}", repo.display());
+        let url = RepositoryUrl::local_test_repository(&repo);
 
         let (rev, last_modified, checkout) = git_checkout(
             &url,
@@ -433,7 +436,7 @@ mod tests {
     #[test]
     fn git_checkout_with_ssh_key_still_clones_file_url() {
         let (_tmp, repo) = make_git_repo();
-        let url = format!("file://{}", repo.display());
+        let url = RepositoryUrl::local_test_repository(&repo);
         let ssh = crate::git::SshGitPrivateKeyKnownHostsAndObservations::new(
             "-----BEGIN OPENSSH PRIVATE KEY-----\n".into(),
             Vec::new(),

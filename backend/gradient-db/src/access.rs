@@ -748,8 +748,8 @@ mod tests {
         let (weaker, stronger) = (UserId::now_v7(), UserId::now_v7());
         for (user, role) in [(weaker, BASE_ROLE_VIEW_ID), (stronger, BASE_ROLE_ADMIN_ID)] {
             db.execute(&format!(
-                "INSERT INTO \"user\" (id, username, name, email, last_login_at, created_at) \
-                 VALUES ('{user}', 'u{}', 'U', 'u{}@example.com', now(), now()); \
+                "INSERT INTO \"user\" (id, username, name, email, last_login_at, created_at, account_origin) \
+                 VALUES ('{user}', 'u{}', 'U', 'u{}@example.com', now(), now(), 0); \
                  INSERT INTO team_user (id, team, \"user\", role) VALUES ('{}', '{team}', '{user}', 1); \
                  INSERT INTO project_user (id, project, \"user\", role) VALUES ('{}', '{project}', '{user}', '{role}');",
                 user.into_inner().simple(),

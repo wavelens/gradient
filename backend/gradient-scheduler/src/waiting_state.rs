@@ -7,25 +7,148 @@
 use gradient_db::lookup::by_id;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
 use gradient_db::status::update_evaluation_status;
-use gradient_db::{DbContext, WorkerDb};
+use gradient_db::{DbContext, WorkerDb, database_error_kind_text_and_sqlstate_for_warning_log};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::Graph;
-use gradient_pool::WorkerInfo;
+use gradient_pool::{ProjectAccess, WorkerInfo};
 use gradient_types::events::worker_demand::WorkerDemand;
 use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::*;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait, Value,
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait, Value,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
+
+const WAITING_REFRESH_DATABASE_POOL_CONNECTION_COUNT: u32 = 2;
+const WAITING_REFRESH_SESSION_SETTINGS: [(&str, &str); 2] =
+    [("statement_timeout", "5s"), ("lock_timeout", "2s")];
+
+pub(crate) fn waiting_refresh_database_pool(db: &DbContext) -> DbContext {
+    DbContext {
+        worker_db: db
+            .worker_db
+            .new_with_separate_connection_pool_and_session_settings(
+                WAITING_REFRESH_DATABASE_POOL_CONNECTION_COUNT,
+                &WAITING_REFRESH_SESSION_SETTINGS,
+            ),
+        ..db.clone()
+    }
+}
+
+pub(crate) struct WaitingRefreshStateBetweenPasses {
+    pub(crate) budget: Duration,
+    last_refreshed_evaluation_id: Option<EvaluationId>,
+    warned_errors_by_evaluation: WaitingRefreshWarningRecord,
+    previous_refresh_pass_hit_budget: bool,
+}
+
+impl Default for WaitingRefreshStateBetweenPasses {
+    fn default() -> Self {
+        Self {
+            budget: crate::loops::WAITING_REFRESH_TIME_BUDGET,
+            last_refreshed_evaluation_id: None,
+            warned_errors_by_evaluation: WaitingRefreshWarningRecord::default(),
+            previous_refresh_pass_hit_budget: false,
+        }
+    }
+}
+
+impl WaitingRefreshStateBetweenPasses {
+    fn log_waiting_refresh_budget_stop(&mut self, refreshed: usize, skipped: usize) {
+        const WAITING_REFRESH_PASS_TIME_BUDGET_REACHED_LOG_MESSAGE: &str =
+            "waiting refresh exhausted time budget. skipped evaluations come first on next pass";
+        if self.previous_refresh_pass_hit_budget {
+            debug!(
+                refreshed,
+                skipped, "{WAITING_REFRESH_PASS_TIME_BUDGET_REACHED_LOG_MESSAGE}"
+            );
+        } else {
+            info!(
+                refreshed,
+                skipped, "{WAITING_REFRESH_PASS_TIME_BUDGET_REACHED_LOG_MESSAGE}"
+            );
+        }
+        self.previous_refresh_pass_hit_budget = true;
+    }
+
+    fn record_waiting_refresh_pass_within_budget(&mut self) {
+        self.previous_refresh_pass_hit_budget = false;
+    }
+}
+
+fn rotate_evaluations_after_last_refreshed<T>(
+    sorted_by_id: &mut [T],
+    last_refreshed: Option<EvaluationId>,
+    id_of: impl Fn(&T) -> EvaluationId,
+) {
+    let Some(last_refreshed) = last_refreshed else {
+        return;
+    };
+    let start = sorted_by_id.partition_point(|item| id_of(item) <= last_refreshed);
+    sorted_by_id.rotate_left(start);
+}
+
+#[derive(Default)]
+struct WaitingRefreshWarningRecord {
+    last_waiting_refresh_warning_error_kind_and_sqlstate_by_evaluation_id:
+        HashMap<EvaluationId, (&'static str, Option<String>)>,
+}
+
+impl WaitingRefreshWarningRecord {
+    fn log_waiting_refresh_failure(&mut self, evaluation_id: EvaluationId, err: &anyhow::Error) {
+        let reduced_error = database_error_kind_text_and_sqlstate_for_warning_log(err);
+        let (error_kind, sqlstate) = (
+            reduced_error.0,
+            reduced_error.1.as_deref().unwrap_or("none"),
+        );
+        if self
+            .last_waiting_refresh_warning_error_kind_and_sqlstate_by_evaluation_id
+            .get(&evaluation_id)
+            == Some(&reduced_error)
+        {
+            debug!(
+                %evaluation_id,
+                error_kind,
+                sqlstate,
+                error = format!("{err:#}"),
+                "update of the waiting state for an evaluation failed again with the same error"
+            );
+            return;
+        }
+        warn!(
+            %evaluation_id,
+            error_kind,
+            sqlstate,
+            "failed to update waiting state of one evaluation. proceed to next evaluation"
+        );
+        debug!(
+            %evaluation_id,
+            error = format!("{err:#}"),
+            "failed to update the waiting state of an evaluation"
+        );
+        self.last_waiting_refresh_warning_error_kind_and_sqlstate_by_evaluation_id
+            .insert(evaluation_id, reduced_error);
+    }
+
+    fn clear_warned_error(&mut self, evaluation_id: EvaluationId) {
+        self.last_waiting_refresh_warning_error_kind_and_sqlstate_by_evaluation_id
+            .remove(&evaluation_id);
+    }
+
+    fn retain(&mut self, in_flight: &HashSet<EvaluationId>) {
+        self.last_waiting_refresh_warning_error_kind_and_sqlstate_by_evaluation_id
+            .retain(|evaluation_id, _| in_flight.contains(evaluation_id));
+    }
+}
 
 use crate::assessment_memo::AssessmentMemo;
 use crate::buildability::{BuildWorkerCaps, BuildabilityChecker};
@@ -36,6 +159,7 @@ pub(crate) struct WaitingRefresh<'a> {
     pub(crate) db: &'a DbContext,
     pub(crate) graph: &'a Graph,
     pub(crate) memo: &'a Mutex<AssessmentMemo>,
+    pub(crate) progress: &'a gradient_util::sync::Mutex<WaitingRefreshStateBetweenPasses>,
 }
 
 impl WaitingRefresh<'_> {
@@ -44,6 +168,11 @@ impl WaitingRefresh<'_> {
         workers: &[WorkerInfo],
         draining: bool,
     ) -> Result<Vec<Unbuildable>> {
+        let (budget, last_refreshed_evaluation_id) = {
+            let progress = self.progress.lock();
+            (progress.budget, progress.last_refreshed_evaluation_id)
+        };
+        let deadline = Instant::now() + budget;
         gradient_db::evaluations::counters::fold_shared_build_deltas(&self.db.worker_db)
             .await
             .context("fold evaluation shared build deltas")?;
@@ -57,6 +186,7 @@ impl WaitingRefresh<'_> {
                 EvaluationStatus::Building,
                 EvaluationStatus::Waiting,
             ]))
+            .order_by_asc(CEvaluation::Id)
             .all(&self.db.worker_db)
             .await
             .context("fetch in-flight evaluations")?;
@@ -95,146 +225,201 @@ impl WaitingRefresh<'_> {
         }
 
         let tasks = EvalTasks::load(&self.db.worker_db, &evals).await?;
-        let mut caps_by_project: HashMap<Option<ProjectId>, Vec<BuildWorkerCaps>> = HashMap::new();
-        let mut has_writable_cache_by_project: HashMap<ProjectId, bool> = HashMap::new();
-        let now = gradient_types::now();
-        let mut unbuildables = Vec::new();
         let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
         let counters =
             gradient_db::evaluations::counters::in_flight_counters(&self.db.worker_db, &ids)
                 .await
                 .context("read evaluation shared build counters")?;
-        lock(self.memo).retain(&ids.iter().copied().collect::<HashSet<_>>());
+        let in_flight = ids.iter().copied().collect::<HashSet<_>>();
+        lock(self.memo).retain(&in_flight);
+        self.progress
+            .lock()
+            .warned_errors_by_evaluation
+            .retain(&in_flight);
+        let mut pass = WaitingRefreshPassSharedInputs {
+            deadline,
+            workers,
+            tasks,
+            counters,
+            now: gradient_types::now(),
+            caps_by_project: HashMap::new(),
+            has_writable_cache_by_project: HashMap::new(),
+        };
 
-        for eval in evals {
-            let eval_counters = counters.get(&eval.id).copied().unwrap_or_default();
-            let reason = eval
-                .waiting_reason
-                .as_ref()
-                .and_then(WaitingReason::from_json);
-            let project = tasks.project_of(&eval);
-            let project_workers = ProjectWorkerCounts::of(workers, project);
-            let worker_caps = caps_by_project
-                .entry(project)
-                .or_insert_with(|| project_worker_caps(workers, project))
-                .as_slice();
-
-            if eval.status == EvaluationStatus::Waiting
-                && matches!(reason, Some(WaitingReason::CacheStorageFull))
-            {
-                continue;
+        let mut evals = evals;
+        rotate_evaluations_after_last_refreshed(&mut evals, last_refreshed_evaluation_id, |e| e.id);
+        let mut unbuildables = Vec::new();
+        let in_flight_count = evals.len();
+        let mut waiting_refresh_reached_deadline = false;
+        for (refreshed, eval) in evals.into_iter().enumerate() {
+            if Instant::now() >= pass.deadline {
+                self.progress
+                    .lock()
+                    .log_waiting_refresh_budget_stop(refreshed, in_flight_count - refreshed);
+                waiting_refresh_reached_deadline = true;
+                break;
             }
-
-            let cache_outcome = self
-                .refresh_waiting_evaluation_cache_state(
-                    &eval,
-                    reason.as_ref(),
-                    project,
-                    project_workers,
-                    &mut has_writable_cache_by_project,
-                )
-                .await?;
-            let outcome = if let Some(cache_outcome) = cache_outcome {
-                Some(cache_outcome)
-            } else {
-                match eval.status {
-                    EvaluationStatus::Waiting => match reason {
-                        Some(WaitingReason::EvalWorkers { capability, .. }) => {
-                            Some(decide_eval_recovery(capability, project_workers))
-                        }
-                        Some(WaitingReason::Draining) => Some((eval.status_after_draining(), None)),
-                        _ => match self
-                            .build_phase_decision(
-                                eval.id,
-                                eval_counters,
-                                worker_caps,
-                                reason.as_ref(),
-                            )
-                            .await?
-                        {
-                            BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                            BuildPhase::Settled => continue,
-                            BuildPhase::Unnamed => {
-                                Some(decide_eval_recovery(EvalCapability::Eval, project_workers))
-                            }
-                        },
-                    },
-                    EvaluationStatus::Queued
-                    | EvaluationStatus::Fetching
-                    | EvaluationStatus::EvaluatingFlake
-                    | EvaluationStatus::EvaluatingDerivation => decide_pre_build_target(
-                        eval.kind,
-                        eval.status,
-                        check_repository_url_is_ssh(&eval.repository),
-                        project_workers,
-                    ),
-                    EvaluationStatus::Building => {
-                        match self
-                            .build_phase_decision(
-                                eval.id,
-                                eval_counters,
-                                worker_caps,
-                                reason.as_ref(),
-                            )
-                            .await?
-                        {
-                            BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                            BuildPhase::Settled | BuildPhase::Unnamed => {
-                                self.exec_jobs_wait(eval.id, reason.as_ref()).await?
-                            }
-                        }
-                    }
-                    _ => None,
+            let evaluation_id = eval.id;
+            let outcome = self.refresh_evaluation_waiting_state(&mut pass, eval).await;
+            let mut progress = self.progress.lock();
+            progress.last_refreshed_evaluation_id = Some(evaluation_id);
+            match outcome {
+                Ok(found) => {
+                    progress
+                        .warned_errors_by_evaluation
+                        .clear_warned_error(evaluation_id);
+                    unbuildables.extend(found);
                 }
-            };
-
-            let Some((target, new_reason)) = outcome else {
-                continue;
-            };
-
-            let waits = tasks.wait_for_workers(&eval);
-            if let Some(unmet) =
-                unbuildable(&eval, reason.as_ref(), new_reason.as_ref(), waits, now)
-            {
-                unbuildables.push(Unbuildable {
-                    evaluation: eval,
-                    unmet,
-                });
-                continue;
+                Err(e) => progress
+                    .warned_errors_by_evaluation
+                    .log_waiting_refresh_failure(evaluation_id, &e),
             }
-
-            if eval.status != target {
-                info!(
-                    evaluation_id = %eval.id,
-                    from = ?eval.status,
-                    to = ?target,
-                    workers = project_workers.connected,
-                    eval_workers = project_workers.eval,
-                    network_workers = project_workers.network,
-                    "refreshing evaluation waiting state"
-                );
-            }
-
-            if let (Some(project), Some(gap)) =
-                (project, opened_gap(reason.as_ref(), new_reason.as_ref()))
-            {
-                announce_worker_gap(self.db, eval.id, project, gap).await;
-            }
-
-            persist_waiting_reason(
-                &self.db.worker_db,
-                eval.id,
-                &eval.waiting_reason,
-                new_reason.as_ref(),
-            )
-            .await;
-
-            if eval.status != target {
-                update_evaluation_status(self.db, eval, target).await?;
-            }
+        }
+        if !waiting_refresh_reached_deadline {
+            self.progress
+                .lock()
+                .record_waiting_refresh_pass_within_budget();
         }
 
         Ok(unbuildables)
+    }
+
+    async fn refresh_evaluation_waiting_state(
+        &self,
+        pass: &mut WaitingRefreshPassSharedInputs<'_>,
+        eval: MEvaluation,
+    ) -> Result<Option<Unbuildable>> {
+        let workers = pass.workers;
+        let deadline = pass.deadline;
+        let eval_counters = pass.counters.get(&eval.id).copied().unwrap_or_default();
+        let reason = eval
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json);
+        let project = pass.tasks.project_of(&eval);
+        let project_workers = ProjectWorkerCounts::of(workers, project);
+        let worker_caps = pass
+            .caps_by_project
+            .entry(project)
+            .or_insert_with(|| project_worker_caps(workers, project))
+            .as_slice();
+
+        if eval.status == EvaluationStatus::Waiting
+            && matches!(reason, Some(WaitingReason::CacheStorageFull))
+        {
+            return Ok(None);
+        }
+
+        let cache_outcome = self
+            .refresh_waiting_evaluation_cache_state(
+                &eval,
+                reason.as_ref(),
+                project,
+                project_workers,
+                &mut pass.has_writable_cache_by_project,
+            )
+            .await?;
+        let outcome = if let Some(cache_outcome) = cache_outcome {
+            Some(cache_outcome)
+        } else {
+            match eval.status {
+                EvaluationStatus::Waiting => match reason {
+                    Some(WaitingReason::EvalWorkers { capability, .. }) => {
+                        Some(decide_eval_recovery(capability, project_workers))
+                    }
+                    Some(WaitingReason::Draining) => Some((eval.status_after_draining(), None)),
+                    _ => match self
+                        .build_phase_decision(
+                            eval.id,
+                            eval_counters,
+                            worker_caps,
+                            reason.as_ref(),
+                            deadline,
+                        )
+                        .await?
+                    {
+                        BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                        BuildPhase::Settled => return Ok(None),
+                        BuildPhase::Unnamed => {
+                            Some(decide_eval_recovery(EvalCapability::Eval, project_workers))
+                        }
+                    },
+                },
+                EvaluationStatus::Queued
+                | EvaluationStatus::Fetching
+                | EvaluationStatus::EvaluatingFlake
+                | EvaluationStatus::EvaluatingDerivation => decide_pre_build_target(
+                    eval.kind,
+                    eval.status,
+                    check_repository_url_is_ssh(&eval.repository),
+                    project_workers,
+                ),
+                EvaluationStatus::Building => {
+                    match self
+                        .build_phase_decision(
+                            eval.id,
+                            eval_counters,
+                            worker_caps,
+                            reason.as_ref(),
+                            deadline,
+                        )
+                        .await?
+                    {
+                        BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                        BuildPhase::Settled | BuildPhase::Unnamed => {
+                            self.exec_jobs_wait(eval.id, reason.as_ref()).await?
+                        }
+                    }
+                }
+                _ => None,
+            }
+        };
+
+        let Some((target, new_reason)) = outcome else {
+            return Ok(None);
+        };
+
+        let waits = pass.tasks.wait_for_workers(&eval);
+        if let Some(unmet) =
+            unbuildable(&eval, reason.as_ref(), new_reason.as_ref(), waits, pass.now)
+        {
+            return Ok(Some(Unbuildable {
+                evaluation: eval,
+                unmet,
+            }));
+        }
+
+        if eval.status != target {
+            info!(
+                evaluation_id = %eval.id,
+                from = ?eval.status,
+                to = ?target,
+                workers = project_workers.connected,
+                eval_workers = project_workers.eval,
+                network_workers = project_workers.network,
+                "refreshing evaluation waiting state"
+            );
+        }
+
+        if let (Some(project), Some(gap)) =
+            (project, opened_gap(reason.as_ref(), new_reason.as_ref()))
+        {
+            announce_worker_gap(self.db, eval.id, project, gap).await;
+        }
+
+        persist_waiting_reason(
+            &self.db.worker_db,
+            eval.id,
+            &eval.waiting_reason,
+            new_reason.as_ref(),
+        )
+        .await;
+
+        if eval.status != target {
+            update_evaluation_status(self.db, eval, target).await?;
+        }
+
+        Ok(None)
     }
 
     async fn refresh_waiting_evaluation_cache_state(
@@ -348,6 +533,16 @@ fn worker_demand_events(
         .collect()
 }
 
+struct WaitingRefreshPassSharedInputs<'a> {
+    deadline: Instant,
+    workers: &'a [WorkerInfo],
+    tasks: EvalTasks,
+    counters: HashMap<EvaluationId, EvalCounters>,
+    now: chrono::NaiveDateTime,
+    caps_by_project: HashMap<Option<ProjectId>, Vec<BuildWorkerCaps>>,
+    has_writable_cache_by_project: HashMap<ProjectId, bool>,
+}
+
 #[derive(Default)]
 struct EvalTasks {
     projects: HashMap<TaskId, ProjectId>,
@@ -399,6 +594,7 @@ impl WaitingRefresh<'_> {
         counters: EvalCounters,
         worker_caps: &[BuildWorkerCaps],
         current: Option<&WaitingReason>,
+        deadline: Instant,
     ) -> Result<BuildPhase> {
         let a = match assess_buildability(
             &self.db.worker_db,
@@ -427,6 +623,10 @@ impl WaitingRefresh<'_> {
                     reason: Some(WaitingReason::graph_stuck(a.pending)),
                     pending: a.pending,
                 }));
+            }
+            if Instant::now() >= deadline {
+                // A graph stuck reason here can mark unstick as complete and later passes skip it.
+                return Ok(BuildPhase::Pending(a));
             }
 
             return self.attempt_graph_unstick(evaluation_id, worker_caps).await;
@@ -815,10 +1015,10 @@ fn pre_build_capability(
 }
 
 fn eligible_for(worker: &WorkerInfo, project: Option<ProjectId>) -> bool {
-    worker
-        .authorized_peers
-        .as_ref()
-        .is_none_or(|peers| project.is_some_and(|p| peers.contains(&p)))
+    match project {
+        Some(project) => worker.project_access.contains(&project),
+        None => worker.project_access == ProjectAccess::AllProjects,
+    }
 }
 
 fn project_worker_caps(workers: &[WorkerInfo], project: Option<ProjectId>) -> Vec<BuildWorkerCaps> {
@@ -926,8 +1126,67 @@ pub(crate) async fn persist_waiting_reason(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct FakeDatabaseErrorWithStatementLiteralInMessage;
+
+    impl std::fmt::Display for FakeDatabaseErrorWithStatementLiteralInMessage {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(sea_orm::sqlx::error::DatabaseError::message(self))
+        }
+    }
+
+    impl std::error::Error for FakeDatabaseErrorWithStatementLiteralInMessage {}
+
+    impl sea_orm::sqlx::error::DatabaseError for FakeDatabaseErrorWithStatementLiteralInMessage {
+        fn message(&self) -> &str {
+            "invalid input syntax for type uuid: \"secret-literal-of-statement\""
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some("22P02".into())
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sea_orm::sqlx::error::ErrorKind {
+            sea_orm::sqlx::error::ErrorKind::Other
+        }
+    }
+
+    #[test]
+    fn database_error_kind_and_sqlstate_warn_log_does_not_contain_postgres_message() {
+        let db_err = sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(std::sync::Arc::new(
+            sea_orm::sqlx::Error::Database(Box::new(
+                FakeDatabaseErrorWithStatementLiteralInMessage,
+            )),
+        )));
+        let err = anyhow::Error::new(db_err);
+        assert!(
+            format!("{err:#}").contains("secret-literal-of-statement"),
+            "the full error text quotes the literal"
+        );
+
+        let (kind, sqlstate) = database_error_kind_text_and_sqlstate_for_warning_log(&err);
+        assert_eq!(kind, "error for database query");
+        assert_eq!(sqlstate.as_deref(), Some("22P02"));
+        assert!(
+            !format!("{kind} {sqlstate:?}").contains("secret-literal-of-statement"),
+            "the warn summary leaves out the literal"
+        );
+    }
 
     #[test]
     fn unproducible_drv_block_sql_shape() {
@@ -991,7 +1250,10 @@ mod tests {
             assigned_job_count: 0,
             assigned_build_count: 0,
             draining: false,
-            authorized_peers,
+            project_access: authorized_peers.map_or(
+                ProjectAccess::AllProjects,
+                ProjectAccess::OnlyListedProjects,
+            ),
             cpu_usage_pct: None,
             ram_free_mb: None,
             ram_total_mb: 0,
@@ -1280,5 +1542,245 @@ mod tests {
         ));
         assert!(!unstick_due(Some(&WaitingReason::graph_stuck(3)), 3));
         assert!(unstick_due(Some(&WaitingReason::graph_stuck(3)), 2));
+    }
+
+    #[test]
+    fn waiting_refresh_pass_starts_after_last_refreshed_evaluation_and_wraps_to_smallest_id() {
+        let mut sorted: Vec<EvaluationId> = (0..3).map(|_| EvaluationId::now_v7()).collect();
+        sorted.sort();
+        let (first, second, third) = (sorted[0], sorted[1], sorted[2]);
+        let rotated = |mut ids: Vec<EvaluationId>, last_refreshed| {
+            rotate_evaluations_after_last_refreshed(&mut ids, last_refreshed, |id| *id);
+            ids
+        };
+
+        assert_eq!(
+            rotated(sorted.clone(), None),
+            vec![first, second, third],
+            "Nothing refreshed yet. The smallest id is first in the pass order."
+        );
+        assert_eq!(
+            rotated(sorted.clone(), Some(first)),
+            vec![second, third, first],
+            "Begin the pass after the last refreshed id. Wrap around at the end."
+        );
+        assert_eq!(
+            rotated(sorted.clone(), Some(third)),
+            vec![first, second, third],
+            "Refresh passes move back to the start after the last id. They begin with the smallest id."
+        );
+        assert_eq!(
+            rotated(vec![first, third], Some(second)),
+            vec![third, first],
+            "The last refreshed evaluation is no longer in the set. Refresh passes start from the next higher ID."
+        );
+    }
+
+    #[derive(Clone, Default)]
+    pub(crate) struct TestLogEventRecorder(
+        std::sync::Arc<std::sync::Mutex<Vec<(tracing::Level, String)>>>,
+    );
+
+    impl TestLogEventRecorder {
+        pub(crate) fn count(&self, level: tracing::Level, message: &str) -> usize {
+            self.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(l, m)| *l == level && m == message)
+                .count()
+        }
+    }
+
+    impl tracing::Subscriber for TestLogEventRecorder {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Message(String);
+            impl tracing::field::Visit for Message {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0 = format!("{value:?}");
+                    }
+                }
+            }
+            let mut message = Message(String::new());
+            event.record(&mut message);
+            self.0
+                .lock()
+                .unwrap()
+                .push((*event.metadata().level(), message.0));
+        }
+
+        fn enter(&self, _: &tracing::span::Id) {}
+
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    fn build_invalid_text_representation_query_error_with_literal() -> anyhow::Error {
+        anyhow::Error::new(sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(
+            std::sync::Arc::new(sea_orm::sqlx::Error::Database(Box::new(
+                FakeDatabaseErrorWithStatementLiteralInMessage,
+            ))),
+        )))
+    }
+
+    const FAILURE_WARNING: &str =
+        "failed to update waiting state of one evaluation. proceed to next evaluation";
+    const REPEATED_FAILURE: &str =
+        "update of the waiting state for an evaluation failed again with the same error";
+
+    #[test]
+    fn waiting_refresh_failure_streak_logs_warn_then_debug_and_resets_on_error_change_or_success() {
+        let events = TestLogEventRecorder::default();
+        let evaluation_id = EvaluationId::now_v7();
+        let mut warned = WaitingRefreshWarningRecord::default();
+
+        tracing::subscriber::with_default(events.clone(), || {
+            for _ in 0..3 {
+                warned.log_waiting_refresh_failure(
+                    evaluation_id,
+                    &build_invalid_text_representation_query_error_with_literal(),
+                );
+            }
+        });
+        assert_eq!(
+            events.count(tracing::Level::WARN, FAILURE_WARNING),
+            1,
+            "1 WARN line after 3 failed attempts"
+        );
+        assert_eq!(
+            events.count(tracing::Level::DEBUG, REPEATED_FAILURE),
+            2,
+            "Three failing passes produce two DEBUG lines for the repetition."
+        );
+
+        tracing::subscriber::with_default(events.clone(), || {
+            warned.log_waiting_refresh_failure(
+                evaluation_id,
+                &anyhow::anyhow!("graph writer stopped"),
+            );
+        });
+        assert_eq!(
+            events.count(tracing::Level::WARN, FAILURE_WARNING),
+            2,
+            "Second WARN line after an error change"
+        );
+
+        tracing::subscriber::with_default(events.clone(), || {
+            warned.clear_warned_error(evaluation_id);
+            warned.log_waiting_refresh_failure(
+                evaluation_id,
+                &anyhow::anyhow!("graph writer stopped"),
+            );
+        });
+        assert_eq!(
+            events.count(tracing::Level::WARN, FAILURE_WARNING),
+            3,
+            "Same failure after success: WARN line again"
+        );
+        assert_eq!(
+            events.count(tracing::Level::DEBUG, REPEATED_FAILURE),
+            2,
+            "Do not output a repeated DEBUG line after a changed error or after a success."
+        );
+    }
+
+    #[test]
+    fn evaluation_no_longer_running_is_removed_from_warned_failures() {
+        let (kept, gone) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let mut warned = WaitingRefreshWarningRecord::default();
+
+        tracing::subscriber::with_default(TestLogEventRecorder::default(), || {
+            warned.log_waiting_refresh_failure(
+                kept,
+                &build_invalid_text_representation_query_error_with_literal(),
+            );
+            warned.log_waiting_refresh_failure(
+                gone,
+                &build_invalid_text_representation_query_error_with_literal(),
+            );
+        });
+        warned.retain(&HashSet::from([kept]));
+
+        assert!(
+            warned
+                .last_waiting_refresh_warning_error_kind_and_sqlstate_by_evaluation_id
+                .contains_key(&kept),
+            "In-flight evaluations retain the warned error."
+        );
+        assert!(
+            !warned
+                .last_waiting_refresh_warning_error_kind_and_sqlstate_by_evaluation_id
+                .contains_key(&gone),
+            "Evaluations that leave the in-flight set also leave the map."
+        );
+    }
+
+    #[test]
+    fn waiting_refresh_over_budget_streak_logs_info_then_debug_and_pass_within_budget_ends_streak()
+    {
+        const WAITING_REFRESH_PASS_TIME_BUDGET_REACHED_LOG_MESSAGE: &str =
+            "waiting refresh exhausted time budget. skipped evaluations come first on next pass";
+        let events = TestLogEventRecorder::default();
+        let mut progress = WaitingRefreshStateBetweenPasses::default();
+        let lines = |events: &TestLogEventRecorder| {
+            (
+                events.count(
+                    tracing::Level::INFO,
+                    WAITING_REFRESH_PASS_TIME_BUDGET_REACHED_LOG_MESSAGE,
+                ),
+                events.count(
+                    tracing::Level::DEBUG,
+                    WAITING_REFRESH_PASS_TIME_BUDGET_REACHED_LOG_MESSAGE,
+                ),
+            )
+        };
+
+        tracing::subscriber::with_default(events.clone(), || {
+            progress.log_waiting_refresh_budget_stop(1, 2)
+        });
+        assert_eq!(lines(&events), (1, 0), "after pass 1 spent: one INFO line");
+
+        tracing::subscriber::with_default(events.clone(), || {
+            progress.log_waiting_refresh_budget_stop(1, 2)
+        });
+        assert_eq!(
+            lines(&events),
+            (1, 1),
+            "Pass 2 used up. One DEBUG line, no new INFO line."
+        );
+
+        tracing::subscriber::with_default(events.clone(), || {
+            progress.record_waiting_refresh_pass_within_budget()
+        });
+        assert_eq!(
+            lines(&events),
+            (1, 1),
+            "Refresh pass 3 finished within budget. No budget line."
+        );
+
+        tracing::subscriber::with_default(events.clone(), || {
+            progress.log_waiting_refresh_budget_stop(1, 2)
+        });
+        assert_eq!(
+            lines(&events),
+            (2, 1),
+            "after pass 4 spent: an INFO line again"
+        );
     }
 }

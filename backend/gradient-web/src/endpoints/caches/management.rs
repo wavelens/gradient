@@ -10,7 +10,8 @@ use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
 use crate::endpoints::access::{TeamNameAndDisplayName, team_names};
-use crate::endpoints::teams::management::lookup_owner_team_id_and_check_user_is_member_or_admin;
+use crate::endpoints::projects::workers::reauth_project_workers;
+use crate::endpoints::teams::management::lookup_team_id_by_name_if_user_is_team_admin_or_superuser;
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::extractors::{JsonBody, Query};
 use crate::helpers::{CreatedEntityResponse, ok_json};
@@ -184,11 +185,7 @@ pub async fn get(
             cache_pin: Some(pin),
             ..
         }) => Condition::all()
-            .add(
-                gradient_db::caches::binary_caches_created_by_user_or_with_direct_cache_role_for_user(
-                    user.id,
-                ),
-            )
+            .add(gradient_db::caches::binary_caches_with_direct_cache_role_for_user(user.id))
             .add(CCache::Id.eq(pin)),
         Some(key) => sql_condition_for_caches_api_key_without_cache_pin_can_list(user.id, &key),
     };
@@ -216,11 +213,8 @@ fn sql_condition_for_caches_api_key_without_cache_pin_can_list(
         );
     }
     if key.cache_permission_mask != 0 {
-        condition = condition.add(
-            gradient_db::caches::binary_caches_created_by_user_or_with_direct_cache_role_for_user(
-                user_id,
-            ),
-        );
+        condition = condition
+            .add(gradient_db::caches::binary_caches_with_direct_cache_role_for_user(user_id));
     }
     condition
 }
@@ -231,7 +225,7 @@ fn sql_condition_for_caches_api_key_without_cache_pin_can_list(
     operation_id = "createCache",
     tag = "caches",
     summary = "Create cache",
-    description = "Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches. `owner_team` can place the cache in a team with the caller as a member.",
+    description = "Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches. `owner_team` can place a cache in a team where the caller is an Admin.",
     request_body = MakeCacheRequest,
     responses((status = OK, description = "Cache created", body = CreatedEntityResponse), WebError)
 )]
@@ -263,7 +257,7 @@ pub async fn put(
 
     let owner_team = match body.owner_team.as_deref() {
         Some(name) => Some(
-            lookup_owner_team_id_and_check_user_is_member_or_admin(&state.web_db, &user, name)
+            lookup_team_id_by_name_if_user_is_team_admin_or_superuser(&state.web_db, &user, name)
                 .await?,
         ),
         None => None,
@@ -406,7 +400,7 @@ pub async fn get_cache(
     operation_id = "patchCache",
     tag = "caches",
     summary = "Update cache",
-    description = "Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API. `manageCacheMembers` and membership in the new team are also necessary for a change to `owner_team`.",
+    description = "Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API. Changes to `owner_team` also need `manageCacheMembers` and Admin of the new team.",
     params(CachePath),
     request_body = PatchCacheRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
@@ -443,7 +437,7 @@ pub async fn patch_cache(
             }
             Some(match owner_team.as_deref() {
                 Some(name) => Some(
-                    lookup_owner_team_id_and_check_user_is_member_or_admin(
+                    lookup_team_id_by_name_if_user_is_team_admin_or_superuser(
                         &state.web_db,
                         &user,
                         name,
@@ -552,6 +546,7 @@ pub async fn patch_cache(
 pub async fn delete_cache(
     CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::DeleteCache>>,
     audit: Audit,
+    Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache_id = cache.id;
     let cache_name = cache.name.clone();
@@ -565,6 +560,9 @@ pub async fn delete_cache(
             .collect();
 
     gradient_db::rows::delete::<ECache, _>(&db.web_db, cache).await?;
+    for project in &subscribing_projects {
+        reauth_project_workers(&db.web_db, &scheduler, *project).await;
+    }
 
     audit.write(Action::CacheDelete, EventOwner::cache(cache_id), serde_json::json!({ "cache_id": cache_id.to_string(), "cache_name": cache_name, "subscribing_projects": subscribing_projects.iter().map(|o| o.to_string()).collect::<Vec<_>>(), })).await;
 

@@ -609,11 +609,16 @@ async fn c12_unused_claim_deleted_shared_path_kept_until_last_claim() {
         "after 1: usage(C1, C2)"
     );
     case.zero_drift("step 1").await;
+    let o_out_nar_object_storage_key = case
+        .find_cached_path(O_OUT)
+        .await
+        .expect("cached_path(O_OUT) present")
+        .nar_object_storage_key;
 
     let report = gc_unused_cache_claims(&case, fetched_at + Duration::hours(1)).await;
 
     let expected = GcReport {
-        retired: vec![O_OUT.to_owned()],
+        unreferenced_cached_path_object_storage_keys: vec![o_out_nar_object_storage_key],
         deleted_claim_row_count: 1,
         ..Default::default()
     };
@@ -697,11 +702,16 @@ async fn c13_pinned_claim_keeps_shared_path_until_unpinned_then_gc_retires_path(
             .await
             .expect("the pin is cleared");
     assert_eq!(unpinned, 1, "unpin: changed claims");
+    let o_out_nar_object_storage_key = case
+        .find_cached_path(O_OUT)
+        .await
+        .expect("cached_path(O_OUT) present")
+        .nar_object_storage_key;
 
     let report = gc_unused_cache_claims(&case, fetched_at + Duration::hours(1)).await;
 
     let expected = GcReport {
-        retired: vec![O_OUT.to_owned()],
+        unreferenced_cached_path_object_storage_keys: vec![o_out_nar_object_storage_key],
         deleted_claim_row_count: 1,
         ..Default::default()
     };

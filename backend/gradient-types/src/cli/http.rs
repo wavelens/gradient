@@ -45,6 +45,17 @@ pub struct HttpArgs {
     /// {option}`services.gradient.http.cacheRequestsPerSecond` applies.
     #[arg(default_value = "20000")]
     pub cache_request_burst: NonZeroU32,
+
+    /// Maximum number of WebSocket connections that a visitor without an account or API key can
+    /// keep open at the same time from one client IP. IPv6 limits use a /64 network. Connection
+    /// limits impose an upper bound on the number of database access checks that one address can
+    /// trigger. These WebSocket connections repeat one access check every minute. Browser tabs open
+    /// at most two WebSocket connections. Additional connections receive a 429 response until open
+    /// connections from that address drop below the limit. Reverse proxy setups need an entry for
+    /// the proxy in {option}`services.gradient.http.trustedProxies`. Without that entry, all
+    /// visitors share the proxy address.
+    #[arg(default_value = "256")]
+    pub anonymous_websocket_max_connections_per_ip: NonZeroUsize,
 }
 
 #[derive(Debug, thiserror::Error)]

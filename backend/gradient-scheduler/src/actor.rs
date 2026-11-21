@@ -13,7 +13,7 @@ use gradient_pool::score::{InstanceContext, ScoringPolicy};
 use gradient_types::ids::{
     ClusterAttemptId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId, ProjectId,
 };
-use gradient_wire::types::{BuildStage, GradientCapabilities, JobKind};
+use gradient_wire::types::{BuildMetrics, BuildStage, GradientCapabilities, JobKind};
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info, warn};
@@ -21,17 +21,18 @@ use tracing::{debug, info, warn};
 use crate::jobs::{
     AssignDecision, Assignment, AwaitingReclaim, BoardActiveJob, CandidateDetail, HeldReclaim,
     JobTracker, PendingBuildJob, PendingJob, PendingJobInfo, Reattached,
+    RefusedAndRevokedReattachedJobs, visible_to, worker_capability_flags_allow_job,
 };
 use gradient_db::maintenance::recovery::KeptAssignment;
 use gradient_pool::session_port::{SessionPort, SessionSignal};
-use gradient_pool::{WorkerCaps, WorkerInfo, WorkerPool};
+use gradient_pool::{ProjectAccess, WorkerCaps, WorkerInfo, WorkerPool};
 
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Registration {
     pub worker: String,
     pub capabilities: GradientCapabilities,
-    pub authorized_peers: HashSet<ProjectId>,
+    pub project_access: ProjectAccess,
     pub session: Arc<dyn SessionPort>,
     pub active: Vec<crate::jobs::Reattached>,
     pub reclaims_jobs: bool,
@@ -42,6 +43,7 @@ pub struct Registration {
 pub struct Registered {
     pub last_seen: Arc<AtomicI64>,
     pub unreclaimed: Vec<(String, AwaitingReclaim)>,
+    pub revoked: Vec<(String, PendingJob)>,
 }
 
 pub type WorkerCapabilities = gradient_pool::WorkerProfile;
@@ -76,6 +78,7 @@ pub enum JobRequestOrigin {
 
 pub struct Released {
     pub job: Option<PendingJob>,
+    pub dispatched_job: Option<DispatchedJobId>,
     pub worker_idle: bool,
 }
 
@@ -124,7 +127,7 @@ pub enum SchedulerMsg {
         worker: String,
         reattached: Vec<Reattached>,
         hold_again: Vec<(String, AwaitingReclaim)>,
-        reply: RpcReplyPort<Vec<Reattached>>,
+        reply: RpcReplyPort<RefusedAndRevokedReattachedJobs>,
     },
     TakeUnlisted {
         worker: String,
@@ -144,14 +147,10 @@ pub enum SchedulerMsg {
         project: ProjectId,
         reply: RpcReplyPort<bool>,
     },
-    UpdatePeers {
+    ReplaceWorkerAuthorization {
         worker: String,
-        peers: HashSet<ProjectId>,
-        reply: RpcReplyPort<()>,
-    },
-    RevokePeers {
-        worker: String,
-        revoked: HashSet<ProjectId>,
+        project_access: ProjectAccess,
+        capabilities: GradientCapabilities,
         reply: RpcReplyPort<Vec<PendingJob>>,
     },
     Reauth {
@@ -308,10 +307,31 @@ pub enum SchedulerMsg {
         job_id: String,
         reply: RpcReplyPort<Option<PendingJob>>,
     },
+    MarkEvaluationJobReportBatchLost {
+        job_id: String,
+        message: String,
+        reply: RpcReplyPort<()>,
+    },
     ActiveBuildDispatch {
         worker: String,
         job_id: String,
         reply: RpcReplyPort<Option<(DispatchedJobId, PendingBuildJob)>>,
+    },
+    AcceptFirstActiveBuildOutputReport {
+        worker: String,
+        job_id: String,
+        reply: RpcReplyPort<Option<(DispatchedJobId, PendingBuildJob)>>,
+    },
+    LimitReportedBuildMetricsToWorkerAdvertisedRamAndCoreCount {
+        worker: String,
+        job_id: String,
+        metrics: BuildMetrics,
+        reply: RpcReplyPort<BuildMetrics>,
+    },
+    UndoBuildOutputReportAcceptanceAfterBuildGraphRecordFailure {
+        worker: String,
+        job_id: String,
+        assignment_id: DispatchedJobId,
     },
     ActiveExecAttempt {
         worker: String,
@@ -339,12 +359,16 @@ pub enum SchedulerMsg {
     PendingSharedBuilds {
         reply: RpcReplyPort<Vec<DerivationBuildId>>,
     },
-    LastingRamShortages {
-        reply: RpcReplyPort<Vec<gradient_graph::RamShortage>>,
-    },
     EstimatesToRefresh {
         changes: crate::build_history::Changes,
-        reply: RpcReplyPort<Vec<(String, gradient_pool::estimate::GroupKey, DerivationId)>>,
+        reply: RpcReplyPort<
+            Vec<(
+                String,
+                gradient_pool::estimate::GroupKey,
+                DerivationId,
+                gradient_types::ids::ProjectId,
+            )>,
+        >,
     },
     LearnEstimates {
         estimates: Vec<(String, gradient_pool::score::BuildEstimate)>,
@@ -419,7 +443,6 @@ pub struct SchedulerCore {
     idle: crate::cluster::IdleSlots,
     reservation: Option<crate::cluster::Reservation>,
     unmeasured_build_ram_mb: u64,
-    ram_shortages: crate::ram_shortage::RamShortages,
 }
 
 impl SchedulerCore {
@@ -484,6 +507,93 @@ impl SchedulerCore {
         }
     }
 
+    /// New values enter the pool before `send_jobs_available_signal_to_workers_with_free_capacity`. The next offer can't return aborted jobs
+    /// directly to this worker.
+    fn replace_worker_authorization(
+        &mut self,
+        worker: &str,
+        project_access: ProjectAccess,
+        capabilities: GradientCapabilities,
+    ) -> Vec<PendingJob> {
+        let aborted = self.abort_and_requeue_jobs_worker_is_not_allowed_to_run(
+            worker,
+            &project_access,
+            &capabilities,
+        );
+        self.pool
+            .replace_worker_authorization(worker, project_access, capabilities);
+        self.release_cluster_reservation_if(|core, held| {
+            held.seats_worker(worker)
+                && !core.every_seated_worker_can_run_its_assigned_member(&held.placement)
+        });
+        self.send_jobs_available_signal_to_workers_with_free_capacity();
+        aborted.into_iter().map(|(_, job)| job).collect()
+    }
+
+    fn release_cluster_reservation_if(
+        &mut self,
+        release: impl FnOnce(&Self, &crate::cluster::Reservation) -> bool,
+    ) {
+        if self
+            .reservation
+            .as_ref()
+            .is_some_and(|held| release(self, held))
+        {
+            self.reservation = None;
+        }
+    }
+
+    fn every_seated_worker_can_run_its_assigned_member(
+        &self,
+        placement: &crate::cluster::Placement,
+    ) -> bool {
+        let Some(cluster) = self.tracker.waiting_cluster(placement.cluster) else {
+            return false;
+        };
+        placement.seats.iter().all(|seat| {
+            let (authorized, caps) = self.auth_and_caps(&seat.worker);
+            cluster
+                .members
+                .get(seat.member)
+                .and_then(|member| member.job.as_ref())
+                .is_some_and(|job| visible_to(job, &authorized, caps.as_ref()))
+        })
+    }
+
+    fn abort_and_requeue_jobs_worker_is_not_allowed_to_run(
+        &mut self,
+        worker: &str,
+        project_access: &ProjectAccess,
+        capabilities: &GradientCapabilities,
+    ) -> Vec<(String, PendingJob)> {
+        let lost: Vec<(String, PendingJob, &'static str)> = self
+            .tracker
+            .active_jobs()
+            .filter(|(job_id, on, _)| *on == worker && !self.tracker.is_aborting(job_id))
+            .filter_map(|(job_id, _, job)| {
+                let reason = if !project_access.contains(&job.project_id()) {
+                    "project deactivated worker"
+                } else if !worker_capability_flags_allow_job(job, capabilities) {
+                    "worker lost a capability needed by this job"
+                } else {
+                    return None;
+                };
+                Some((job_id.to_owned(), job.clone(), reason))
+            })
+            .collect();
+        let mut job_ids = Vec::with_capacity(lost.len());
+        let mut aborted = Vec::with_capacity(lost.len());
+        for (job_id, job, reason) in lost {
+            self.pool
+                .send_abort(worker, job_id.clone(), reason.to_owned());
+            self.pool.release_job(worker, &job_id);
+            job_ids.push(job_id.clone());
+            aborted.push((job_id, job));
+        }
+        self.return_to_pending(&job_ids);
+        aborted
+    }
+
     /// A build lost with its worker keeps the peak RAM the worker last reported for it. The
     /// next attempt reserves at least that much.
     fn unregister(&mut self, worker: &str, grace: Duration) -> crate::jobs::Disconnected {
@@ -491,13 +601,7 @@ impl SchedulerCore {
         let reclaims_jobs = self.pool.reclaims_jobs(worker);
         let orphaned = self.pool.unregister(worker);
         self.idle.forget_worker(worker);
-        if self
-            .reservation
-            .as_ref()
-            .is_some_and(|r| r.seats_worker(worker))
-        {
-            self.reservation = None;
-        }
+        self.release_cluster_reservation_if(|_, held| held.seats_worker(worker));
         self.tracker.raise_predicted_ram(&observed_peak_ram_mb);
         let gone = if reclaims_jobs && !grace.is_zero() {
             self.tracker
@@ -516,7 +620,7 @@ impl SchedulerCore {
         }
     }
 
-    fn restore(&mut self, worker: &str, reattached: Vec<Reattached>) {
+    fn restore(&mut self, worker: &str, reattached: Vec<Reattached>) -> Vec<(String, PendingJob)> {
         for reattached in reattached {
             let job_id = reattached.job_id.clone();
             let kind = reattached.job.job_kind();
@@ -532,6 +636,17 @@ impl SchedulerCore {
                 }
             }
         }
+        let (project_access, _) = self.auth_and_caps(worker);
+        let capabilities = self.pool.gradient_caps_for(worker).unwrap_or_default();
+        let revoked = self.abort_and_requeue_jobs_worker_is_not_allowed_to_run(
+            worker,
+            &project_access,
+            &capabilities,
+        );
+        if !revoked.is_empty() {
+            self.send_jobs_available_signal_to_workers_with_free_capacity();
+        }
+        revoked
     }
 
     fn return_unreclaimed(&mut self, unreclaimed: &[(String, AwaitingReclaim)]) {
@@ -563,30 +678,27 @@ impl SchedulerCore {
             .collect()
     }
 
-    fn auth_and_caps(&self, worker: &str) -> (Option<HashSet<ProjectId>>, Option<WorkerCaps>) {
-        let authorized = self
-            .pool
-            .peer_auth_for(worker)
-            .and_then(|a| a.as_filter())
-            .cloned();
-        (authorized, self.pool.worker_caps(worker))
-    }
-
-    fn lasting_ram_shortages(&mut self, now: Instant) -> Vec<gradient_graph::RamShortage> {
-        let workers: Vec<crate::jobs::BuildWorker> = self
-            .pool
+    fn collect_connected_non_draining_worker_access_and_capabilities(
+        &self,
+    ) -> Vec<(ProjectAccess, WorkerCaps)> {
+        self.pool
             .all_workers()
             .into_iter()
-            .filter_map(|worker| {
-                let (authorized, caps) = self.auth_and_caps(&worker.id);
-                caps.filter(|caps| caps.takes_jobs_of(&JobKind::Build))
-                    .map(|caps| crate::jobs::BuildWorker { authorized, caps })
+            .filter(|w| !w.draining)
+            .filter_map(|w| {
+                let (authorized, caps) = self.auth_and_caps(&w.id);
+                caps.map(|caps| (authorized, caps))
             })
-            .collect();
-        let current = self.tracker.builds_no_worker_fits(&workers);
+            .collect()
+    }
 
-        self.ram_shortages
-            .lasting(current, now, crate::ram_shortage::RAM_SHORTAGE_GRACE)
+    fn auth_and_caps(&self, worker: &str) -> (ProjectAccess, Option<WorkerCaps>) {
+        let authorized = self
+            .pool
+            .project_access_for_worker_id(worker)
+            .cloned()
+            .unwrap_or_else(ProjectAccess::no_project_access);
+        (authorized, self.pool.worker_caps(worker))
     }
 
     fn assign(
@@ -639,9 +751,12 @@ impl SchedulerCore {
         let instance = self.with_live_transfers(instance);
         self.unmeasured_build_ram_mb = instance.unmeasured_build_ram_mb();
         let exec_peers = self.warm_exec_peers(worker, kind);
+        self.tracker.replace_connected_workers(
+            self.collect_connected_non_draining_worker_access_and_capabilities(),
+        );
         match self.tracker.take_best_of_kind(
             worker,
-            authorized.as_ref(),
+            &authorized,
             caps.as_ref(),
             self.pool.worker_local_store_bloom_filter(worker),
             kind,
@@ -707,7 +822,7 @@ impl SchedulerCore {
             });
             (seats_free, self.placement_master_port(cluster, placement))
         };
-        if !seats_free {
+        if !seats_free || !self.every_seated_worker_can_run_its_assigned_member(placement) {
             return None;
         }
         let master_port = master_port?;
@@ -727,6 +842,9 @@ impl SchedulerCore {
         let policy = Arc::clone(&self.policy);
         let instance = self.with_live_transfers(instance);
         self.unmeasured_build_ram_mb = instance.unmeasured_build_ram_mb();
+        self.tracker.replace_connected_workers(
+            self.collect_connected_non_draining_worker_access_and_capabilities(),
+        );
         let seats: Option<Vec<CommittedSeat>> = placement
             .seats
             .iter()
@@ -931,7 +1049,6 @@ impl Actor for CoreActor {
             idle: Default::default(),
             reservation: None,
             unmeasured_build_ram_mb: 0,
-            ram_shortages: Default::default(),
         })
     }
 
@@ -951,10 +1068,10 @@ impl Actor for CoreActor {
                 let last_seen = core.pool.register(
                     reg.worker.clone(),
                     reg.capabilities,
-                    reg.authorized_peers,
+                    reg.project_access,
                     reg.session,
                 );
-                core.restore(&reg.worker, reg.active);
+                let revoked = core.restore(&reg.worker, reg.active);
                 core.pool.set_reclaims_jobs(&reg.worker, reg.reclaims_jobs);
                 let unreclaimed = if reg.reclaims_jobs {
                     core.tracker.extend_reclaim_deadlines_for_worker(
@@ -969,6 +1086,7 @@ impl Actor for CoreActor {
                 let _ = reply.send(Some(Registered {
                     last_seen,
                     unreclaimed,
+                    revoked,
                 }));
             }
             SchedulerMsg::Unregister {
@@ -983,8 +1101,11 @@ impl Actor for CoreActor {
                 listed,
                 reply,
             } => {
-                let taken = core.tracker.take_reclaimable(&worker, &listed);
-                core.restore(&worker, taken.reattached.clone());
+                let mut taken = core.tracker.take_reclaimable(&worker, &listed);
+                taken.revoked = core.restore(&worker, taken.reattached.clone());
+                taken
+                    .reattached
+                    .retain(|job| !taken.revoked.iter().any(|(id, _)| *id == job.job_id));
                 let _ = reply.send(taken);
             }
             SchedulerMsg::RestoreReclaimed {
@@ -997,8 +1118,8 @@ impl Actor for CoreActor {
                 let (refused, restored): (Vec<_>, Vec<_>) = reattached
                     .into_iter()
                     .partition(|job| core.tracker.contains_job(&job.job_id));
-                core.restore(&worker, restored);
-                let _ = reply.send(refused);
+                let revoked = core.restore(&worker, restored);
+                let _ = reply.send(RefusedAndRevokedReattachedJobs { refused, revoked });
             }
             SchedulerMsg::TakeUnlisted {
                 worker,
@@ -1031,42 +1152,19 @@ impl Actor for CoreActor {
             } => {
                 let ok = core
                     .pool
-                    .peer_auth_for(&worker)
-                    .map(|a| a.contains(&project))
-                    .unwrap_or(false);
+                    .project_access_for_worker_id(&worker)
+                    .is_some_and(|access| access.contains(&project));
                 let _ = reply.send(ok);
             }
-            SchedulerMsg::UpdatePeers {
+            SchedulerMsg::ReplaceWorkerAuthorization {
                 worker,
-                peers,
+                project_access,
+                capabilities,
                 reply,
             } => {
-                core.pool.update_authorized_peers(&worker, peers);
-                let _ = reply.send(());
-            }
-            SchedulerMsg::RevokePeers {
-                worker,
-                revoked,
-                reply,
-            } => {
-                let job_ids = core.tracker.peer_jobs_on_worker(&worker, &revoked);
-                let jobs: Vec<PendingJob> = job_ids
-                    .iter()
-                    .filter_map(|id| core.tracker.active_job(id).cloned())
-                    .collect();
-                for job_id in &job_ids {
-                    core.pool.send_abort(
-                        &worker,
-                        job_id.clone(),
-                        "project deactivated worker".to_owned(),
-                    );
-                    core.pool.release_job(&worker, job_id);
-                }
-                core.return_to_pending(&job_ids);
-                if !job_ids.is_empty() {
-                    core.send_jobs_available_signal_to_workers_with_free_capacity();
-                }
-                let _ = reply.send(jobs);
+                let aborted =
+                    core.replace_worker_authorization(&worker, project_access, capabilities);
+                let _ = reply.send(aborted);
             }
             SchedulerMsg::Reauth { worker } => core.pool.request_reauth(&worker),
             SchedulerMsg::UpdateCapabilities {
@@ -1194,7 +1292,8 @@ impl Actor for CoreActor {
                 let free = core
                     .reservation
                     .as_ref()
-                    .is_none_or(|held| held.cluster() == reservation.cluster());
+                    .is_none_or(|held| held.cluster() == reservation.cluster())
+                    && core.every_seated_worker_can_run_its_assigned_member(&reservation.placement);
                 if free {
                     info!(cluster = %reservation.cluster(), "cluster reserved its seats");
                     core.reservation = Some(reservation);
@@ -1286,6 +1385,10 @@ impl Actor for CoreActor {
                 reply,
             } => {
                 let worker_idle = core.pool.release_job(&worker, &job_id);
+                let dispatched_job = core
+                    .tracker
+                    .active_build_dispatch(&worker, &job_id)
+                    .map(|(dispatched_job, _)| dispatched_job);
                 let job = core
                     .tracker
                     .is_active_job_on_worker(&worker, &job_id)
@@ -1308,7 +1411,11 @@ impl Actor for CoreActor {
                             &worker, present,
                         );
                 }
-                let _ = reply.send(Released { job, worker_idle });
+                let _ = reply.send(Released {
+                    job,
+                    dispatched_job,
+                    worker_idle,
+                });
             }
             SchedulerMsg::AbortJob {
                 worker,
@@ -1367,6 +1474,15 @@ impl Actor for CoreActor {
             SchedulerMsg::ActiveJob { job_id, reply } => {
                 let _ = reply.send(core.tracker.active_job(&job_id).cloned());
             }
+            SchedulerMsg::MarkEvaluationJobReportBatchLost {
+                job_id,
+                message,
+                reply,
+            } => {
+                core.tracker
+                    .store_lost_report_batch_failure_message_for_evaluation_job(&job_id, message);
+                let _ = reply.send(());
+            }
             SchedulerMsg::ActiveExecAttempt {
                 worker,
                 job_id,
@@ -1384,6 +1500,40 @@ impl Actor for CoreActor {
                     .active_build_dispatch(&worker, &job_id)
                     .map(|(assignment_id, build)| (assignment_id, build.clone()));
                 let _ = reply.send(dispatch);
+            }
+            SchedulerMsg::LimitReportedBuildMetricsToWorkerAdvertisedRamAndCoreCount {
+                worker,
+                job_id,
+                metrics,
+                reply,
+            } => {
+                let _ = reply.send(
+                    core.pool
+                        .clamp_reported_build_metrics_to_advertised_worker_capabilities(
+                            &worker, &job_id, metrics,
+                        ),
+                );
+            }
+            SchedulerMsg::AcceptFirstActiveBuildOutputReport {
+                worker,
+                job_id,
+                reply,
+            } => {
+                let _ = reply.send(
+                    core.tracker
+                        .accept_build_output_report_for_worker_job(&worker, &job_id),
+                );
+            }
+            SchedulerMsg::UndoBuildOutputReportAcceptanceAfterBuildGraphRecordFailure {
+                worker,
+                job_id,
+                assignment_id,
+            } => {
+                core.tracker.clear_build_output_accepted_for_worker_job(
+                    &worker,
+                    &job_id,
+                    assignment_id,
+                );
             }
             SchedulerMsg::OwnsDispatch {
                 worker,
@@ -1405,9 +1555,6 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::PendingSharedBuilds { reply } => {
                 let _ = reply.send(core.tracker.pending_shared_builds());
-            }
-            SchedulerMsg::LastingRamShortages { reply } => {
-                let _ = reply.send(core.lasting_ram_shortages(Instant::now()));
             }
             SchedulerMsg::EstimatesToRefresh { changes, reply } => {
                 let _ = reply.send(core.tracker.estimates_to_refresh(&changes));
@@ -1528,14 +1675,13 @@ mod tests {
             idle: Default::default(),
             reservation: None,
             unmeasured_build_ram_mb: 0,
-            ram_shortages: Default::default(),
         };
         let caps = GradientCapabilities {
             build: true,
             ..GradientCapabilities::default()
         };
         core.pool
-            .register("w1".into(), caps, HashSet::new(), port().0);
+            .register("w1".into(), caps, ProjectAccess::AllProjects, port().0);
         core.pool.update_capabilities(
             "w1",
             gradient_pool::WorkerProfile {
@@ -1588,6 +1734,14 @@ mod tests {
             matches!(answer(&mut core), AssignOutcome::Nothing),
             "no waiting request left for the second response. the first response consumed that request."
         );
+    }
+
+    #[test]
+    fn unknown_worker_gets_no_project_access_and_no_capabilities() {
+        let core = core_with_a_128_gb_worker();
+        let (authorized, caps) = core.auth_and_caps("w9");
+        assert!(!authorized.contains(&ProjectId::now_v7()));
+        assert!(caps.is_none());
     }
 
     #[test]
@@ -1665,35 +1819,6 @@ mod tests {
     }
 
     #[test]
-    fn a_build_above_the_free_ram_of_an_idle_fleet_is_short_once_the_grace_passed() {
-        let mut core = core_with_a_128_gb_worker();
-        let large = pending_heavy_build(&mut core, 120_000);
-        let start = Instant::now();
-        let grace = crate::ram_shortage::RAM_SHORTAGE_GRACE;
-
-        assert!(core.lasting_ram_shortages(start).is_empty());
-        let lasting = core.lasting_ram_shortages(start + grace);
-
-        assert_eq!(lasting.len(), 1, "{lasting:?}");
-        assert_eq!(crate::jobs::build_job_key(lasting[0].shared_build), large);
-        assert_eq!(lasting[0].largest_available_mb, 118_000);
-    }
-
-    #[test]
-    fn a_large_build_is_not_short_while_the_worker_holds_ram_it_will_release() {
-        let mut core = core_with_a_128_gb_worker();
-        pending_heavy_build(&mut core, 120_000);
-        let small = pending_heavy_build(&mut core, 10_000);
-        assert_eq!(assigned_build(&mut core, "w1"), Some(small));
-        let start = Instant::now();
-        let grace = crate::ram_shortage::RAM_SHORTAGE_GRACE;
-
-        core.lasting_ram_shortages(start);
-
-        assert!(core.lasting_ram_shortages(start + grace).is_empty());
-    }
-
-    #[test]
     fn a_build_lost_with_its_worker_is_requeued_with_its_observed_peak() {
         let mut core = core_with_a_128_gb_worker();
         let build = pending_heavy_build(&mut core, 2_000);
@@ -1715,10 +1840,34 @@ mod tests {
     }
 
     #[test]
+    fn a_build_lost_with_its_worker_keeps_observed_peak_ram_at_most_the_advertised_total_ram_even_when_progress_claimed_more()
+     {
+        let mut core = core_with_a_128_gb_worker();
+        let build = pending_heavy_build(&mut core, 2_000);
+        assert_eq!(assigned_build(&mut core, "w1"), Some(build.clone()));
+        core.pool
+            .observe_build_ram("w1", Some(vec![(build.clone(), 9_000_000)]));
+
+        let gone = core.unregister("w1", Duration::ZERO);
+
+        assert_eq!(
+            gone.observed_peak_ram_mb.get(&build),
+            Some(&128_000),
+            "The peak RAM of the lost build can't exceed the RAM that the worker reported."
+        );
+    }
+
+    #[test]
     fn a_reattached_exec_job_holds_its_devices_before_the_inventory_arrives() {
         use gradient_types::exec::{DeviceRequest, ExecSpec};
         use gradient_wire::types::{DeviceClass, ExecInventory};
         let mut core = core_with_a_128_gb_worker();
+        let exec_worker = GradientCapabilities {
+            exec: true,
+            ..GradientCapabilities::default()
+        };
+        core.pool
+            .replace_worker_authorization("w1", ProjectAccess::AllProjects, exec_worker);
         let job = crate::test_jobs::exec_job(ExecSpec {
             devices: vec![DeviceRequest {
                 name: "gpu:h100".into(),

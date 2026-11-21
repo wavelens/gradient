@@ -12,17 +12,12 @@ use std::time::{Duration, Instant};
 use gradient_util::sync::Mutex;
 use tokio::sync::mpsc;
 
-use super::core::{AdmissionCore, Decision, Limits, ObjectKey, Outcome, Request, SessionId};
+use super::core::{AdmissionCore, Limits, ObjectKey, Request, SessionId};
 
-pub enum Admitted {
-    Granted {
-        id: u64,
-        object: ObjectKey,
-        permit: UploadPermit,
-    },
-    Skip {
-        id: u64,
-    },
+pub struct Admitted {
+    pub id: u64,
+    pub object: ObjectKey,
+    pub permit: UploadPermit,
 }
 
 #[derive(Debug, Default)]
@@ -119,15 +114,14 @@ impl UploadAdmission {
         object: ObjectKey,
         size: u64,
         wait: Duration,
-    ) -> Option<Admission> {
+    ) -> Option<HeldPermit> {
         let (session, mut admitted) = self.open_session(label);
         session.request(0, object, size, false);
         match tokio::time::timeout(wait, admitted.recv()).await {
-            Ok(Some(Admitted::Granted { permit, .. })) => Some(Admission::Granted(HeldPermit {
-                permit,
+            Ok(Some(Admitted { permit, .. })) => Some(HeldPermit {
+                _permit: permit,
                 _session: session,
-            })),
-            Ok(Some(Admitted::Skip { .. })) => Some(Admission::AlreadyCommitted),
+            }),
             _ => None,
         }
     }
@@ -140,41 +134,30 @@ impl UploadAdmission {
         self.granted_total.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn apply(self: &Arc<Self>, change: impl FnOnce(&mut AdmissionCore) -> Vec<Decision>) {
-        let decisions = change(&mut self.core.lock());
-        for decision in decisions {
-            self.deliver(decision);
+    fn apply(self: &Arc<Self>, change: impl FnOnce(&mut AdmissionCore) -> Vec<Request>) {
+        let grants = change(&mut self.core.lock());
+        for grant in grants {
+            self.deliver(grant);
         }
     }
 
-    fn deliver(self: &Arc<Self>, decision: Decision) {
-        let (session, admitted) = match decision {
-            Decision::Grant(Request {
+    fn deliver(self: &Arc<Self>, grant: Request) {
+        let Request {
+            session,
+            id,
+            object,
+            ..
+        } = grant;
+        self.record_grant(session, id);
+        let admitted = Admitted {
+            id,
+            object,
+            permit: UploadPermit {
+                admission: Arc::clone(self),
                 session,
                 id,
-                object,
-                ..
-            }) => (
-                session,
-                Admitted::Granted {
-                    id,
-                    object,
-                    permit: UploadPermit {
-                        admission: Arc::clone(self),
-                        session,
-                        id,
-                        settled: false,
-                    },
-                },
-            ),
-            Decision::Skip(Request { session, id, .. }) => (session, Admitted::Skip { id }),
+            },
         };
-        match &admitted {
-            Admitted::Granted { id, .. } => self.record_grant(session, *id),
-            Admitted::Skip { id } => {
-                self.enqueued_at.lock().remove(&(session, *id));
-            }
-        }
         let tx = self.sessions.lock().get(&session).map(|(_, tx)| tx.clone());
         if let Some(tx) = tx {
             let _ = tx.send(admitted);
@@ -182,20 +165,9 @@ impl UploadAdmission {
     }
 }
 
-pub enum Admission {
-    Granted(HeldPermit),
-    AlreadyCommitted,
-}
-
 pub struct HeldPermit {
-    permit: UploadPermit,
+    _permit: UploadPermit,
     _session: AdmissionSession,
-}
-
-impl HeldPermit {
-    pub fn committed(self) {
-        self.permit.committed();
-    }
 }
 
 pub struct AdmissionSession {
@@ -240,39 +212,26 @@ impl Drop for AdmissionSession {
     }
 }
 
-/// A permit dropped without `committed` is counted as a failed upload. Every exit path is thereby
-/// returning the budget.
+/// Drops of `UploadPermit` end the upload on every exit path. Those drops return the budget and
+/// grant the next upload of the same object.
 pub struct UploadPermit {
     admission: Arc<UploadAdmission>,
     session: SessionId,
     id: u64,
-    settled: bool,
 }
 
 impl UploadPermit {
-    pub fn committed(mut self) {
-        self.settle(Outcome::Committed);
-    }
-
     pub fn release_budget(&mut self) {
         let (session, id) = (self.session, self.id);
         self.admission
             .apply(|core| core.release_budget(session, id));
     }
-
-    fn settle(&mut self, outcome: Outcome) {
-        self.settled = true;
-        let (session, id) = (self.session, self.id);
-        self.admission
-            .apply(|core| core.release(session, id, outcome));
-    }
 }
 
 impl Drop for UploadPermit {
     fn drop(&mut self) {
-        if !self.settled {
-            self.settle(Outcome::Failed);
-        }
+        let (session, id) = (self.session, self.id);
+        self.admission.apply(|core| core.release(session, id));
     }
 }
 
@@ -309,33 +268,25 @@ mod tests {
         let (session, mut rx) = admission.open_session("test");
         session.request(1, nar("a"), 1, false);
         session.request(2, nar("b"), 1, false);
-        let Admitted::Granted { id: 1, permit, .. } = next(&mut rx).await else {
+        let Admitted { id: 1, permit, .. } = next(&mut rx).await else {
             panic!("request 1 is granted first");
         };
         assert!(idle(&mut rx), "request 2 waits for the permit");
         drop(permit);
-        assert!(matches!(
-            next(&mut rx).await,
-            Admitted::Granted { id: 2, .. }
-        ));
+        assert!(matches!(next(&mut rx).await, Admitted { id: 2, .. }));
     }
 
     #[tokio::test]
-    async fn a_committed_permit_skips_the_same_object_in_another_session() {
+    async fn upload_permit_is_granted_to_waiting_session_when_upload_ends() {
         let admission = admission(4);
         let (first, mut first_rx) = admission.open_session("test");
         let (second, mut second_rx) = admission.open_session("test");
         first.request(1, nar("a"), 1, false);
         second.request(9, nar("a"), 1, false);
-        let Admitted::Granted { permit, .. } = next(&mut first_rx).await else {
-            panic!("the first request leads");
-        };
+        let Admitted { permit, .. } = next(&mut first_rx).await;
         assert!(idle(&mut second_rx));
-        permit.committed();
-        assert!(matches!(
-            next(&mut second_rx).await,
-            Admitted::Skip { id: 9 }
-        ));
+        drop(permit);
+        assert!(matches!(next(&mut second_rx).await, Admitted { id: 9, .. }));
     }
 
     #[tokio::test]
@@ -345,11 +296,9 @@ mod tests {
         let (second, mut second_rx) = admission.open_session("test");
         first.request(1, nar("a"), 1, false);
         second.request(1, nar("b"), 1, false);
-        let Admitted::Granted { permit, .. } = next(&mut first_rx).await else {
-            panic!("the first worker is granted");
-        };
+        let Admitted { permit, .. } = next(&mut first_rx).await;
         drop(first);
-        let Admitted::Granted {
+        let Admitted {
             id: 1,
             permit: held,
             ..
@@ -372,9 +321,7 @@ mod tests {
         let (session, mut rx) = admission.open_session("test");
         session.request(1, nar("a"), 1, false);
         session.request(2, nar("b"), 1, false);
-        let Admitted::Granted { permit, .. } = next(&mut rx).await else {
-            panic!("request 1 is granted");
-        };
+        let Admitted { permit, .. } = next(&mut rx).await;
         session.cancel(2);
         drop(permit);
         assert!(idle(&mut rx));

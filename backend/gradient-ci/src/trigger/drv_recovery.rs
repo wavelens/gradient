@@ -53,6 +53,8 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
         updated_at: now,
         flake_source: stuck.flake_source.clone(),
         only_evaluate: stuck.only_evaluate,
+        allows_project_credentials_and_privileged_actions: stuck
+            .allows_project_credentials_and_privileged_actions,
         ..Default::default()
     }
     .into_active_model();

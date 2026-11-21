@@ -7,6 +7,8 @@
 mod fixtures;
 
 use super::*;
+use crate::EvaluationCodeTrust;
+use crate::apply::tests::fixtures::{with_eval_worker, with_writable_cache};
 use fixtures::{make_entry_point, make_eval, make_shared_build, make_task};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus, WalkMode};
@@ -17,24 +19,25 @@ use sea_orm::MockExecResult;
 #[tokio::test]
 async fn trigger_records_the_requested_walk_mode() {
     let task = make_task();
-    let db = mock_db()
-        .append_query_results([Vec::<evaluation::Model>::new()])
-        .append_query_results([vec![gradient_entity::commit::Model {
-            id: CommitId::now_v7(),
-            hash: vec![0u8; 20],
-            ..Default::default()
-        }]])
-        .append_query_results([vec![make_eval(
-            EvaluationId::now_v7(),
-            EvaluationStatus::Queued,
-        )]])
-        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        .append_query_results([vec![task.clone()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .into_connection();
+    let db = with_eval_worker(with_writable_cache(
+        mock_db().append_query_results([Vec::<evaluation::Model>::new()]),
+    ))
+    .append_query_results([vec![gradient_entity::commit::Model {
+        id: CommitId::now_v7(),
+        hash: vec![0u8; 20],
+        ..Default::default()
+    }]])
+    .append_query_results([vec![make_eval(
+        EvaluationId::now_v7(),
+        EvaluationStatus::Queued,
+    )]])
+    .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+    .append_query_results([vec![task.clone()]])
+    .append_exec_results([MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }])
+    .into_connection();
 
     trigger_evaluation(
         &db,
@@ -50,6 +53,7 @@ async fn trigger_records_the_requested_walk_mode() {
         None,
         None,
         WalkMode::Full,
+        &EvaluationCodeTrust::CodeWithProjectCredentials,
     )
     .await
     .unwrap();
@@ -93,22 +97,23 @@ async fn trigger_drops_dangling_last_evaluation_pointer() {
 
     let new_eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
-    let db = mock_db()
-        .append_query_results([Vec::<evaluation::Model>::new()])
-        .append_query_results([Vec::<evaluation::Model>::new()])
-        .append_query_results([vec![gradient_entity::commit::Model {
-            id: commit_id,
-            hash: vec![0u8; 20],
-            ..Default::default()
-        }]])
-        .append_query_results([vec![make_eval(new_eval_id, EvaluationStatus::Queued)]])
-        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        .append_query_results([vec![task.clone()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .into_connection();
+    let db = with_eval_worker(with_writable_cache(
+        mock_db().append_query_results([Vec::<evaluation::Model>::new()]),
+    ))
+    .append_query_results([Vec::<evaluation::Model>::new()])
+    .append_query_results([vec![gradient_entity::commit::Model {
+        id: commit_id,
+        hash: vec![0u8; 20],
+        ..Default::default()
+    }]])
+    .append_query_results([vec![make_eval(new_eval_id, EvaluationStatus::Queued)]])
+    .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+    .append_query_results([vec![task.clone()]])
+    .append_exec_results([MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }])
+    .into_connection();
 
     let result = trigger_evaluation(
         &db,
@@ -124,6 +129,7 @@ async fn trigger_drops_dangling_last_evaluation_pointer() {
         None,
         None,
         WalkMode::Pruned,
+        &EvaluationCodeTrust::CodeWithProjectCredentials,
     )
     .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
@@ -152,6 +158,7 @@ async fn trigger_already_in_progress() {
         None,
         None,
         WalkMode::Pruned,
+        &EvaluationCodeTrust::CodeWithProjectCredentials,
     )
     .await;
     assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
@@ -164,7 +171,10 @@ async fn trigger_already_in_progress() {
 async fn restart_with_all_cached_inserts_completed_eval() {
     let task = make_task();
     let prev_eval_id = EvaluationId::now_v7();
-    let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Completed);
+    let prev_eval = evaluation::Model {
+        building_started_at: Some(gradient_types::now()),
+        ..make_eval(prev_eval_id, EvaluationStatus::Completed)
+    };
     let new_eval_id = EvaluationId::now_v7();
 
     let drv_a = DerivationId::now_v7();
@@ -219,6 +229,7 @@ async fn restart_with_one_failed_inserts_a_manual_retry_eval_and_inherits_the_na
     let trigger = TaskTriggerId::now_v7();
     let prev_eval = evaluation::Model {
         trigger: Some(trigger),
+        building_started_at: Some(gradient_types::now()),
         ..make_eval(prev_eval_id, EvaluationStatus::Failed)
     };
     let retried_by = UserId::now_v7();
@@ -407,4 +418,34 @@ async fn input_update_creates_eval_for_tracked_input() {
         .await
         .unwrap();
     assert_eq!(created, InputUpdateOutcome::Started(vec![eval_id]));
+}
+
+#[test]
+fn fork_clone_url_with_backslash_and_host_before_at_sign_is_not_on_task_host() {
+    let mut task = make_task();
+    task.repository = "https://gitea.example.com/o/r".into();
+    for fork in [
+        "https://evil.example#@gitea.example.com/o/r",
+        "https://evil.example\\@gitea.example.com/o/r",
+    ] {
+        assert_eq!(
+            new_evaluation::fork_repository_url_if_same_host_and_port(&task, fork.parse().ok()),
+            None,
+            "{fork}"
+        );
+    }
+}
+
+#[test]
+fn fork_repository_url_kept_only_if_host_and_port_match() {
+    let mut task = make_task();
+    task.repository = "https://gitea.example.com/o/r".into();
+    let fork = |url: &str| {
+        new_evaluation::fork_repository_url_if_same_host_and_port(&task, url.parse().ok())
+    };
+    assert_eq!(fork("https://gitea.example.com:8443/f/r"), None);
+    assert_eq!(
+        fork("https://GITEA.example.com/f/r"),
+        Some("https://GITEA.example.com/f/r".to_owned())
+    );
 }

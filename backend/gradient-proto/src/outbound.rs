@@ -14,6 +14,10 @@ use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
 use gradient_types::{ETeamWorker, EWorkerRegistration, SecretString};
 use gradient_util::error_cause_chain_formatting::error_chain;
+use gradient_util::http_base_url::{
+    remove_user_name_and_password_from_urls_in_error_text,
+    upstream_cache_url_for_display_without_username_password_query_and_fragment,
+};
 use gradient_util::http_validation::check_worker_url_and_resolve_allowed_socket_addresses;
 use gradient_util::supervision::{ChildSpec, Pass, PassError};
 use gradient_wire::Rejection;
@@ -350,7 +354,14 @@ async fn dial(
 ) {
     let worker_id = target.credentials.worker_id.clone();
     let url = target.url.clone();
-    debug!(%worker_id, %url, "connecting outbound to worker");
+    let worker_connection_url_without_user_name_password_and_query =
+        upstream_cache_url_for_display_without_username_password_query_and_fragment(&url)
+            .map(|shown| shown.url);
+    debug!(
+        %worker_id,
+        url = worker_connection_url_without_user_name_password_and_query.as_deref(),
+        "connecting outbound to worker"
+    );
 
     let private_networks_allowed = handles
         .db
@@ -361,11 +372,15 @@ async fn dial(
         let addrs =
             check_worker_url_and_resolve_allowed_socket_addresses(&url, private_networks_allowed)
                 .await?;
-        gradient_wire::client::dial_with_prechecked_socket_addrs(&url, &addrs).await
+        gradient_wire::client::dial_with_prechecked_socket_addrs(&url, &addrs, None).await
     };
     match tokio::time::timeout(DIAL_TIMEOUT, connect).await {
         Ok(Ok(socket)) => {
-            debug!(%worker_id, %url, "outbound connection established");
+            debug!(
+                %worker_id,
+                url = worker_connection_url_without_user_name_password_and_query.as_deref(),
+                "outbound connection established"
+            );
             handle_socket(
                 socket,
                 handles.clone(),
@@ -377,7 +392,11 @@ async fn dial(
             debug!(%worker_id, "outbound connection closed");
         }
         Ok(Err(e)) => {
-            error!(%worker_id, %url, error = %e, "outbound connection failed");
+            log_error_that_outbound_worker_connection_failed_with_redacted_url_and_error(
+                &worker_id,
+                worker_connection_url_without_user_name_password_and_query.as_deref(),
+                &e,
+            );
             scheduler.connection_failures.record(
                 &worker_id,
                 ConnectionDirection::Outbound,
@@ -386,7 +405,11 @@ async fn dial(
             );
         }
         Err(_) => {
-            error!(%worker_id, %url, "outbound connection timed out (10s)");
+            error!(
+                %worker_id,
+                url = worker_connection_url_without_user_name_password_and_query.as_deref(),
+                "outbound connection timed out (10s)"
+            );
             scheduler.connection_failures.record(
                 &worker_id,
                 ConnectionDirection::Outbound,
@@ -395,6 +418,19 @@ async fn dial(
             );
         }
     }
+}
+
+fn log_error_that_outbound_worker_connection_failed_with_redacted_url_and_error(
+    worker_id: &str,
+    worker_connection_url_without_user_name_password_and_query: Option<&str>,
+    error: &anyhow::Error,
+) {
+    error!(
+        %worker_id,
+        url = worker_connection_url_without_user_name_password_and_query,
+        error = remove_user_name_and_password_from_urls_in_error_text(&error.to_string()),
+        "outbound connection failed"
+    );
 }
 
 #[cfg(test)]
@@ -581,5 +617,33 @@ mod tests {
             gradient_sources::decrypt_secret(&path, enc).ok()
         }));
         assert_eq!(target.credentials.tokens, pairs(&[("p1", "s3cret")]));
+    }
+
+    #[test]
+    fn failed_outbound_worker_connection_error_log_hides_user_name_and_password() {
+        let log_output_temp_file = tempfile::NamedTempFile::new().unwrap();
+        let captured_log_format_subscriber = tracing_subscriber::fmt()
+            .with_writer(Arc::new(log_output_temp_file.reopen().unwrap()))
+            .with_ansi(false)
+            .finish();
+        let connection_error_with_worker_websocket_url_and_credentials =
+            anyhow::anyhow!("failed to connect to 'wss://alice:s3cret@worker.example.com/proto'");
+
+        tracing::subscriber::with_default(captured_log_format_subscriber, || {
+            log_error_that_outbound_worker_connection_failed_with_redacted_url_and_error(
+                "worker-1",
+                Some("wss://worker.example.com/proto"),
+                &connection_error_with_worker_websocket_url_and_credentials,
+            )
+        });
+
+        let captured_log_output_text =
+            std::fs::read_to_string(log_output_temp_file.path()).unwrap();
+        assert!(
+            captured_log_output_text.contains("outbound connection failed")
+                && !captured_log_output_text.contains("alice")
+                && !captured_log_output_text.contains("s3cret"),
+            "Log lines for an outbound connection failure to a worker show the username or password.: {captured_log_output_text}"
+        );
     }
 }

@@ -11,7 +11,7 @@ use std::time::Duration;
 use axum::extract::ws::{CloseFrame as AxumCloseFrame, Message as AxumMessage, WebSocket};
 use bytes::Bytes;
 use futures::stream::SplitStream;
-use futures::{SinkExt, StreamExt};
+use futures::{Sink, SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -390,9 +390,10 @@ impl ProtoSocket {
     pub fn split(
         self,
         send_chunk_timeout: Duration,
+        outgoing_frame_accept_timeout: Option<Duration>,
         shutdown: &Shutdown,
     ) -> (ProtoReader, ProtoWriter) {
-        self.split_typed(send_chunk_timeout, |task| {
+        self.split_typed(send_chunk_timeout, outgoing_frame_accept_timeout, |task| {
             shutdown.spawn(task);
         })
     }
@@ -406,7 +407,7 @@ impl ProtoSocket {
         send_chunk_timeout: Duration,
     ) -> (ServerReader, ClientWriter, JoinHandle<()>) {
         let mut writer_task = None;
-        let (reader, writer) = self.split_typed(send_chunk_timeout, |task| {
+        let (reader, writer) = self.split_typed(send_chunk_timeout, None, |task| {
             writer_task = Some(tokio::spawn(task));
         });
         (
@@ -419,6 +420,7 @@ impl ProtoSocket {
     fn split_typed<In: WireMessage, Out: WireMessage>(
         self,
         send_chunk_timeout: Duration,
+        outgoing_frame_accept_timeout: Option<Duration>,
         spawn: impl FnOnce(WriterTask),
     ) -> (MsgReader<In>, MsgWriter<Out>) {
         let version = self
@@ -439,12 +441,22 @@ impl ProtoSocket {
         let inner = match self.transport {
             Transport::Axum(ws) => {
                 let (sink, stream) = (*ws).split();
-                spawn(Box::pin(axum_writer_task(lanes, sink)));
+                spawn(Box::pin(write_frame_batches_to_sink(
+                    lanes,
+                    sink,
+                    AxumMessage::Binary,
+                    outgoing_frame_accept_timeout,
+                )));
                 ReaderInner::Axum(stream)
             }
             Transport::Tungstenite(ws) => {
                 let (sink, stream) = (*ws).split();
-                spawn(Box::pin(tungstenite_writer_task(lanes, sink)));
+                spawn(Box::pin(write_frame_batches_to_sink(
+                    lanes,
+                    sink,
+                    TungsteniteMessage::Binary,
+                    outgoing_frame_accept_timeout,
+                )));
                 ReaderInner::Tungstenite(stream)
             }
         };
@@ -570,6 +582,10 @@ impl<M> MsgWriter<M> {
     pub fn with_observer(mut self, observer: Arc<dyn MsgObserver<M>>) -> Self {
         self.observer = Some(observer);
         self
+    }
+
+    pub async fn wait_for_writer_task_end(&self) {
+        self.control_tx.closed().await;
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -730,51 +746,57 @@ enum Lane {
     Bulk,
 }
 
-async fn axum_writer_task(
+async fn write_frame_batches_to_sink<S, T>(
     mut lanes: WriterLanes,
-    mut sink: futures::stream::SplitSink<WebSocket, AxumMessage>,
-) {
+    mut sink: S,
+    frame: fn(Bytes) -> T,
+    outgoing_frame_accept_timeout: Option<Duration>,
+) where
+    S: Sink<T> + Unpin,
+    S::Error: std::fmt::Display,
+{
     let mut batch = Vec::with_capacity(WRITE_BATCH);
-    loop {
-        if !lanes.next_batch(&mut batch).await {
-            break;
-        }
-        for bytes in batch.drain(..) {
-            if let Err(e) = sink.feed(AxumMessage::Binary(bytes)).await {
-                debug!(error = %e, "axum WS writer task: send failed; exiting");
+    while lanes.next_batch(&mut batch).await {
+        let deadline = outgoing_frame_accept_timeout
+            .map(|per_chunk| send_timeout_for_batch(per_chunk, &batch));
+        let write = write_frame_batch_to_sink_and_flush(&mut sink, &mut batch, frame);
+        let written = match deadline {
+            Some(deadline) => tokio::time::timeout(deadline, write).await,
+            None => Ok(write.await),
+        };
+        match written {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                debug!(error = %e, "Writer task for WS: send failed. The task stopped.");
                 return;
             }
-        }
-        if let Err(e) = sink.flush().await {
-            debug!(error = %e, "axum WS writer task: flush failed; exiting");
-            return;
+            Err(_) => {
+                warn!("Close WebSocket. Peer did not accept sent frames in time.");
+                return;
+            }
         }
     }
 }
 
-async fn tungstenite_writer_task(
-    mut lanes: WriterLanes,
-    mut sink: futures::stream::SplitSink<
-        WebSocketStream<MaybeTlsStream<TcpStream>>,
-        TungsteniteMessage,
-    >,
-) {
-    let mut batch = Vec::with_capacity(WRITE_BATCH);
-    loop {
-        if !lanes.next_batch(&mut batch).await {
-            break;
-        }
-        for bytes in batch.drain(..) {
-            if let Err(e) = sink.feed(TungsteniteMessage::Binary(bytes)).await {
-                debug!(error = %e, "tungstenite WS writer task: send failed; exiting");
-                return;
-            }
-        }
-        if let Err(e) = sink.flush().await {
-            debug!(error = %e, "tungstenite WS writer task: flush failed; exiting");
-            return;
-        }
+async fn write_frame_batch_to_sink_and_flush<S, T>(
+    sink: &mut S,
+    batch: &mut Vec<Bytes>,
+    frame: fn(Bytes) -> T,
+) -> Result<(), S::Error>
+where
+    S: Sink<T> + Unpin,
+{
+    for bytes in batch.drain(..) {
+        sink.feed(frame(bytes)).await?;
     }
+    sink.flush().await
+}
+
+/// The deadline can grow with batch size, so peers that read at least one 512 KiB chunk per send timeout can keep the connection.
+fn send_timeout_for_batch(per_chunk: Duration, batch: &[Bytes]) -> Duration {
+    let bytes: usize = batch.iter().map(Bytes::len).sum();
+    let chunks = u32::try_from(bytes.div_ceil(BULK_CHUNK_SIZE).max(1)).unwrap_or(u32::MAX);
+    per_chunk.saturating_mul(chunks)
 }
 
 pub async fn recv_client_msg(reader: &mut ProtoReader) -> Option<ClientMessage> {
@@ -1082,6 +1104,80 @@ mod tests {
         assert!(
             reply_bytes <= SAFE_INFLIGHT_MESSAGE_SIZE,
             "worst-case CacheStatus encodes to {reply_bytes} bytes"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_writer_task_ends_after_deadline_and_drops_queues_when_sink_never_accepts_frame() {
+        let (control_tx, control_rx) = mpsc::channel::<Bytes>(CONTROL_QUEUE_DEPTH);
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let never_accepts = Box::pin(futures::sink::unfold((), |(), _: Bytes| {
+            std::future::pending::<Result<(), std::convert::Infallible>>()
+        }));
+        let accept_timeout = Duration::from_secs(30);
+        let mut writer_task = tokio::task::JoinSet::new();
+        writer_task.spawn(write_frame_batches_to_sink(
+            WriterLanes::new(control_rx, bulk_rx),
+            never_accepts,
+            std::convert::identity,
+            Some(accept_timeout),
+        ));
+        control_tx.send(Bytes::from_static(&[1])).await.unwrap();
+        bulk_tx.send(bulk(BULK_CHUNK_SIZE)).await.unwrap();
+
+        assert!(
+            tokio::time::timeout(accept_timeout * 2, writer_task.join_next())
+                .await
+                .is_ok(),
+            "Each writer task can exit at the deadline when no frames reach the peer."
+        );
+        assert!(
+            control_tx.is_closed() && bulk_tx.is_closed(),
+            "The writer task ended and dropped both queues. The session can then detect that the writer has exited."
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_sink_within_deadline_receives_every_frame_including_2_mib_frame() {
+        let (control_tx, control_rx) = mpsc::channel::<Bytes>(CONTROL_QUEUE_DEPTH);
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let accept_timeout = Duration::from_secs(30);
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let slow_sink = Box::pin(futures::sink::unfold(
+            Arc::clone(&received),
+            |received, frame: Bytes| async move {
+                let chunks = u32::try_from(frame.len().div_ceil(BULK_CHUNK_SIZE)).unwrap();
+                tokio::time::sleep(Duration::from_secs(25) * chunks).await;
+                received.lock().unwrap().push(frame.len());
+                Ok::<_, std::convert::Infallible>(received)
+            },
+        ));
+        control_tx.send(bulk(4 * BULK_CHUNK_SIZE)).await.unwrap();
+        for _ in 0..3 {
+            bulk_tx.send(bulk(BULK_CHUNK_SIZE)).await.unwrap();
+        }
+        drop((control_tx, bulk_tx));
+
+        tokio::time::timeout(
+            Duration::from_secs(600),
+            write_frame_batches_to_sink(
+                WriterLanes::new(control_rx, bulk_rx),
+                slow_sink,
+                std::convert::identity,
+                Some(accept_timeout),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *received.lock().unwrap(),
+            [
+                4 * BULK_CHUNK_SIZE,
+                BULK_CHUNK_SIZE,
+                BULK_CHUNK_SIZE,
+                BULK_CHUNK_SIZE
+            ],
+            "Peers that accept all frames within their deadline receive all frames."
         );
     }
 }

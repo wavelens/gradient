@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use gradient_pool::WorkerCaps;
-use gradient_types::ids::ProjectId;
+use gradient_pool::{ProjectAccess, WorkerCaps};
 use gradient_wire::types::JobKind;
 
 use super::{ClusterMember, PendingCluster};
@@ -93,7 +92,7 @@ pub struct Slot {
     pub kind: SlotKind,
     pub zone: Option<String>,
     pub caps: WorkerCaps,
-    pub authorized: Option<HashSet<ProjectId>>,
+    pub authorized: ProjectAccess,
 }
 
 #[derive(Debug, Clone, Default)]

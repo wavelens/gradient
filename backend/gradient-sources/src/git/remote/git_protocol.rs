@@ -7,7 +7,7 @@
 use super::AdvertisedRef;
 use crate::SourceError;
 use crate::git::pktline::{MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT, read_advertised_refs};
-use crate::git::url::parse_git_protocol_url;
+use crate::git::url::{GIT_PROTOCOL_DEFAULT_PORT, parse_git_protocol_url};
 use std::io::{self, Read};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
@@ -62,7 +62,12 @@ fn connect_tcp_with_timeout(host: &str, port: u16) -> std::io::Result<TcpStream>
 pub(super) fn list_refs_git_protocol(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {
     use std::io::Write;
 
-    let (host, port, repo_path) = parse_git_protocol_url(url)?;
+    let url = parse_git_protocol_url(url)?;
+    let (host, port, repo_path) = (
+        url.git_server_host_name(),
+        url.git_server_port().unwrap_or(GIT_PROTOCOL_DEFAULT_PORT),
+        url.repository_path(),
+    );
 
     let failed = |e: io::Error| SourceError::GitCommandFailed {
         stderr: e.to_string(),

@@ -22,7 +22,7 @@ pub struct UploadArgs {
     /// Upload a pre-dumped NAR file without any local nix (needs --narinfo).
     #[arg(long)]
     pub nar_file: Option<PathBuf>,
-    /// Narinfo metadata file describing --nar-file.
+    /// Narinfo metadata file describing `--nar-file`. A Compression line, if present, names zstd.
     #[arg(long)]
     pub narinfo: Option<PathBuf>,
     /// Upload only the given store paths, skipping their runtime closure
@@ -40,6 +40,7 @@ pub async fn handle(args: UploadArgs, out: Output) {
             .unwrap_or_else(|e| out.err(ExitKind::Usage, format!("cannot read narinfo: {e}")));
         let ni = Narinfo::parse(&narinfo_text)
             .unwrap_or_else(|e| out.err(ExitKind::Usage, format!("bad narinfo: {e}")));
+        check_narinfo_compression_is_zstd(&ni).unwrap_or_else(|e| out.err(ExitKind::Usage, e));
         let bytes = std::fs::read(nar_file)
             .unwrap_or_else(|e| out.err(ExitKind::Usage, format!("cannot read nar: {e}")));
         upload_one_owned(&args.cache, ni, bytes, out).await;
@@ -61,6 +62,15 @@ pub async fn handle(args: UploadArgs, out: Output) {
 
     #[cfg(feature = "nix")]
     crate::commands::cache_upload_nix::upload_paths(&args, out).await;
+}
+
+fn check_narinfo_compression_is_zstd(ni: &Narinfo) -> Result<(), String> {
+    match ni.compression.as_deref() {
+        None | Some("zstd") => Ok(()),
+        Some(value) => Err(format!(
+            "The narinfo has `Compression: {value}`. The cache upload command accepts only NAR files compressed with zstd."
+        )),
+    }
 }
 
 /// Each request must stay below the bundled reverse proxy's 100 MiB body cap.

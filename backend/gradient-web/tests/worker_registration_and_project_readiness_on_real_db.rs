@@ -101,7 +101,13 @@ async fn register_project_worker_returns_generated_id_token_and_nixos_snippet_an
     assert_eq!(stored.len(), 1);
     assert_eq!(stored[0].worker_id, id);
     assert_ne!(stored[0].token_hash, token);
-    assert!(password_auth::verify_password(&token, &stored[0].token_hash).is_ok());
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Test data require real Argon2 hashes. The password module of gradient-web is private, so tests cannot access that module."
+    )]
+    let plain_worker_token_verification_result =
+        password_auth::verify_password(&token, &stored[0].token_hash);
+    assert!(plain_worker_token_verification_result.is_ok());
     instance.db.finish().await;
 }
 

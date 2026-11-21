@@ -19,11 +19,12 @@ pub(crate) async fn execute_send_web_request(
     url: &str,
     token: Option<&str>,
 ) -> Result<ExecutorOk> {
-    gradient_util::http_validation::validate_webhook_url(url)
-        .map_err(|cause| ActionError::UrlRejected { cause })?;
     let body = serde_json::to_string(envelope).context("serialize webhook envelope")?;
-    let mut req = gradient_util::http::public_client()
-        .post(url)
+    let mut req = ctx
+        .db
+        .user_supplied_url_http_client
+        .request_builder_for_checked_url(reqwest::Method::POST, url)
+        .map_err(|cause| ActionError::UrlRejected { cause })?
         .header("Content-Type", "application/json")
         .header("X-Gradient-Event", event)
         .body(body.clone());

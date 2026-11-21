@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use gradient_wire::traits::InputProgressSink;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::lock::{FlakeLock, LockedRef};
@@ -67,7 +67,7 @@ pub trait ResolveProgress: Send + Sync {
 pub trait PatchGenerator: Send + Sync {
     async fn produce(
         &self,
-        checkout: &Path,
+        flake_lock_bytes: &[u8],
         tracked: &[InputName],
         progress: &dyn ResolveProgress,
     ) -> Result<Option<Patch>>;
@@ -124,15 +124,11 @@ impl<R: RevisionResolver> FlakeLockGenerator<R> {
 impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
     async fn produce(
         &self,
-        checkout: &Path,
+        flake_lock_bytes: &[u8],
         tracked: &[InputName],
         progress: &dyn ResolveProgress,
     ) -> Result<Option<Patch>> {
-        let lock_path = checkout.join("flake.lock");
-        let bytes = tokio::fs::read(&lock_path)
-            .await
-            .with_context(|| format!("read {}", lock_path.display()))?;
-        let mut lock = FlakeLock::parse(&bytes)?;
+        let mut lock = FlakeLock::parse(flake_lock_bytes)?;
 
         let targets = targets(&lock, tracked)?;
         let names: Vec<String> = targets.iter().map(|t| t.input.clone()).collect();
@@ -160,6 +156,13 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
     }
 }
 
+pub fn check_each_tracked_input_is_a_remote_direct_input(
+    flake_lock_bytes: &[u8],
+    tracked: &[InputName],
+) -> Result<()> {
+    targets(&FlakeLock::parse(flake_lock_bytes)?, tracked).map(drop)
+}
+
 fn targets(lock: &FlakeLock, tracked: &[InputName]) -> Result<Vec<Target>> {
     let declared = lock.root_input_names();
     let mut seen = std::collections::BTreeSet::new();
@@ -168,7 +171,7 @@ fn targets(lock: &FlakeLock, tracked: &[InputName]) -> Result<Vec<Target>> {
         let names: Vec<String> = if gradient_util::glob::is_pattern(&input.0) {
             declared
                 .iter()
-                .filter(|d| gradient_util::glob::glob_match(&input.0, d))
+                .filter(|d| gradient_wildcard::candidate_matches_wildcard_pattern(&input.0, d))
                 .cloned()
                 .collect()
         } else {
@@ -192,6 +195,12 @@ fn target(lock: &FlakeLock, input: String) -> Result<Target> {
         .nodes
         .get(&node_name)
         .with_context(|| format!("lock node `{node_name}` missing for input `{input}`"))?;
+    if let Some(original) = &node.original {
+        gradient_types::fetch_source_allowlist_and_request_validation::ValidatedFetchTreeInputAttributes::check(original)
+            .with_context(|| {
+                format!("The `original` reference for input `{input}` doesn't point to a remote source")
+            })?;
+    }
     let reference = node
         .original_ref()
         .with_context(|| format!("read `original` of input `{input}`"))?;
@@ -245,6 +254,7 @@ mod tests {
     use super::*;
     use gradient_util::sync::Mutex;
     use std::collections::HashMap;
+    use std::path::Path;
 
     struct FakeResolver(HashMap<String, ResolvedRev>);
 
@@ -345,7 +355,7 @@ mod tests {
 
         let err = lockgen
             .produce(
-                dir.path(),
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
                 &["flake-utils".into(), "nixpkgs*".into()],
                 &progress,
             )
@@ -391,7 +401,11 @@ mod tests {
 
         let produced = tokio::time::timeout(
             std::time::Duration::from_secs(10),
-            lockgen.produce(dir.path(), &["*".into()], &RecordedProgress::default()),
+            lockgen.produce(
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
+                &["*".into()],
+                &RecordedProgress::default(),
+            ),
         )
         .await;
 
@@ -444,7 +458,7 @@ mod tests {
 
         let patch = lockgen
             .produce(
-                dir.path(),
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
                 &["nixpkgs".into()],
                 &RecordedProgress::default(),
             )
@@ -521,7 +535,7 @@ mod tests {
 
         let patch = lockgen
             .produce(
-                dir.path(),
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
                 &["nixpkgs*".into()],
                 &RecordedProgress::default(),
             )
@@ -576,7 +590,7 @@ mod tests {
 
         let patch = lockgen
             .produce(
-                dir.path(),
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
                 &["nixpkgs".into()],
                 &RecordedProgress::default(),
             )
@@ -635,7 +649,11 @@ mod tests {
         )])));
 
         let patch = lockgen
-            .produce(dir.path(), &["dep".into()], &RecordedProgress::default())
+            .produce(
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
+                &["dep".into()],
+                &RecordedProgress::default(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -668,7 +686,7 @@ mod tests {
 
         let patch = lockgen
             .produce(
-                dir.path(),
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
                 &["nixpkgs".into()],
                 &RecordedProgress::default(),
             )
@@ -688,12 +706,49 @@ mod tests {
         let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::new()));
         let err = lockgen
             .produce(
-                dir.path(),
+                &std::fs::read(dir.path().join("flake.lock")).unwrap(),
                 &["does-not-exist".into()],
                 &RecordedProgress::default(),
             )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not a direct flake input"));
+    }
+
+    #[tokio::test]
+    async fn input_with_file_url_original_is_refused() {
+        let local = "file:///var/lib/gradient-worker/repo";
+        let lock = serde_json::json!({
+            "nodes": {
+                "dep": {
+                    "locked": {
+                        "narHash": "sha256-OLD0000000000000000000000000000000000000000=",
+                        "rev": "1111111111111111111111111111111111111111",
+                        "type": "git",
+                        "url": "https://example.com/dep.git"
+                    },
+                    "original": { "type": "git", "url": local }
+                },
+                "root": { "inputs": { "dep": "dep" } }
+            },
+            "root": "root",
+            "version": 7
+        });
+        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([(
+            local.into(),
+            resolved_at("2222222222222222222222222222222222222222"),
+        )])));
+        let progress = RecordedProgress::default();
+
+        let err = lockgen
+            .produce(lock.to_string().as_bytes(), &["dep".into()], &progress)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("doesn't point to a remote source"),
+            "{err:#}"
+        );
+        assert!(progress.0.lock().is_empty());
     }
 }

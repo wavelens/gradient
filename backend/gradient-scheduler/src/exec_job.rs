@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use gradient_db::scheduling::assignment_record::EXEC_KEY_PREFIX;
-use gradient_pool::WorkerCaps;
 use gradient_pool::score::ScoreBreakdown;
 use gradient_pool::score::exec::{self, ExecCandidate};
+use gradient_pool::{ProjectAccess, WorkerCaps};
 use gradient_types::exec::{
     ExecDefaults, ExecInventory, ExecRequirement, ExecSpec, Phase, hash_job_token,
     job_token_expiry, mint_job_token,
@@ -49,6 +48,7 @@ pub struct PendingExecJob {
     pub api_url: String,
     pub assignment: Option<ExecAssignment>,
     pub secrets: ResolvedSecretNames,
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +82,7 @@ impl PendingExecJob {
 
     pub fn fits(&self, caps: &WorkerCaps) -> bool {
         self.requirement_for(caps)
-            .is_some_and(|requirement| caps.can_run_exec(&requirement))
+            .is_some_and(|requirement| caps.can_run_exec(&requirement, self.project_id))
     }
 
     pub fn dispatch_on(
@@ -180,23 +180,20 @@ impl PendingExecJob {
         let Some(inventory) = peer.caps.exec.as_ref() else {
             return false;
         };
-        let authorized = peer
-            .authorized
-            .as_ref()
-            .is_none_or(|projects| projects.contains(&self.project_id));
+        let authorized = peer.authorized.contains(&self.project_id);
         let requirement = self.requirement_with(&inventory.defaults);
         authorized
             && peer
                 .caps
                 .allowed_jobs
                 .contains(gradient_pool::WorkerJob::Exec)
-            && peer.caps.can_run_exec(&requirement)
+            && peer.caps.can_run_exec(&requirement, self.project_id)
             && exec::has_usable_warm_guest(&requirement, inventory)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ExecPeer {
-    pub authorized: Option<HashSet<ProjectId>>,
+    pub authorized: ProjectAccess,
     pub caps: WorkerCaps,
 }

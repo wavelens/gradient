@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_db::metrics::cache_traffic::minute_bucket;
+use gradient_db::store_path_content_variant_reader_choice::StorePathContentVariantReader;
 use gradient_types::ids::CacheId;
 use gradient_types::{StorePath, StorePathMapper};
 use tokio::sync::Semaphore;
@@ -15,6 +16,7 @@ use tracing::{debug, info, warn};
 
 use gradient_wire::Rejection;
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
+use gradient_wire::session::frame::ProtoReader;
 use gradient_wire::session::handshake as handshake_fsm;
 
 use super::SessionHandles;
@@ -137,8 +139,16 @@ impl CacheSession {
             let shutdown = handles.db.shutdown.clone();
             shutdown.spawn(async move {
                 let _slot = slot;
-                match serve_nar_request(&handles, &writer, &mapper, &job_id, &store_path, 0, None)
-                    .await
+                match serve_nar_request(
+                    &handles,
+                    &writer,
+                    &mapper,
+                    StorePathContentVariantReader::Cache(cache_id),
+                    &job_id,
+                    &store_path,
+                    None,
+                )
+                .await
                 {
                     Ok(bytes) => handles.cache_traffic.record(
                         cache_id,
@@ -190,30 +200,43 @@ pub async fn handle_cache_socket(
 
     let send_chunk_timeout =
         Duration::from_secs(handles.db.config.nar.send_chunk_timeout_secs.get());
-    let (mut reader, writer) = socket.split(send_chunk_timeout, &handles.db.shutdown);
-    let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
-    let cancel = handles.db.shutdown.token();
+    let (reader, writer) = socket.split(
+        send_chunk_timeout,
+        Some(send_chunk_timeout),
+        &handles.db.shutdown,
+    );
     let session = CacheSession::new(handles, writer, cache_id);
+    let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
+    run_cache_session_client_message_loop(&session, reader, idle).await;
 
+    info!(%cache_id, "cache websocket session closed");
+}
+
+async fn run_cache_session_client_message_loop(
+    session: &CacheSession,
+    mut reader: ProtoReader,
+    idle: Duration,
+) {
+    let cache_id = session.cache_id;
+    let cancel = session.handles.db.shutdown.token();
+
+    // Silent clients disconnect at the idle bound after the last message, but only when no NAR
+    // download is in progress. Active downloads extend the deadline, so clients that receive a
+    // large download stay connected.
+    let mut cache_session_silence_end_instant = tokio::time::Instant::now() + idle;
     loop {
-        // The idle timeout is only enforced while no NAR transfer is in flight. A client quietly
-        // receiving a large download must not be disconnected.
-        let next = async {
-            if session.serving_nothing() {
-                match tokio::time::timeout(idle, recv_client_msg(&mut reader)).await {
-                    Ok(m) => m,
-                    Err(_) => {
-                        debug!(%cache_id, "cache websocket idle timeout; closing");
-                        None
-                    }
-                }
-            } else {
-                recv_client_msg(&mut reader).await
-            }
-        };
         let msg = tokio::select! {
             _ = cancel.cancelled() => break,
-            m = next => match m {
+            _ = session.writer.wait_for_writer_task_end() => break,
+            _ = tokio::time::sleep_until(cache_session_silence_end_instant) => {
+                if session.serving_nothing() {
+                    debug!(%cache_id, "cache websocket idle timeout; closing");
+                    break;
+                }
+                cache_session_silence_end_instant = tokio::time::Instant::now() + idle;
+                continue;
+            }
+            m = recv_client_msg(&mut reader) => match m {
                 Some(m) => m,
                 None => break,
             },
@@ -222,9 +245,8 @@ pub async fn handle_cache_socket(
         if !session.serve(msg).await {
             break;
         }
+        cache_session_silence_end_instant = tokio::time::Instant::now() + idle;
     }
-
-    info!(%cache_id, "cache websocket session closed");
 }
 
 #[cfg(test)]
@@ -291,17 +313,11 @@ mod tests {
         let cache_id = CacheId::nil();
         let stored = gradient_entity::cached_path::Model {
             hash: EXAMPLE_STORED_HASH.into(),
-            file_hash: Some("sha256:f".into()),
-            confirmed: true,
+            nar_object_storage_key: EXAMPLE_STORED_HASH.into(),
+            file_hash: "sha256:f".into(),
             ..Default::default()
         };
         let cache_db = gradient_fixtures::mock::mock_db()
-            .append_query_results([vec![stored.clone()]])
-            .append_query_results([vec![gradient_entity::cached_path_signature::Model {
-                cached_path: stored.id,
-                cache: cache_id,
-                ..Default::default()
-            }]])
             .append_query_results([vec![stored]])
             .into_connection();
         let state = TestState::new()
@@ -338,5 +354,91 @@ mod tests {
             decode(sent.try_recv().unwrap()),
             ServerMessage::CacheStatus { query_id, cached } if query_id == "q2" && cached.is_empty()
         ));
+    }
+
+    const TEST_SESSION_IDLE_TIMEOUT_MILLIS: u64 = 200;
+
+    async fn open_loopback_cache_session() -> (
+        CacheSession,
+        ProtoReader,
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) {
+        let (socket, client) = crate::handler::session_actor::tests::connected_pair().await;
+        let state = gradient_test_support::state::TestState::new().build();
+        let handles = SessionHandles::from_state(&state);
+        let (reader, writer) = socket.split(
+            Duration::from_secs(5),
+            Some(Duration::from_secs(5)),
+            &handles.db.shutdown,
+        );
+
+        (
+            CacheSession::new(handles, writer, CacheId::nil()),
+            reader,
+            client,
+        )
+    }
+
+    #[tokio::test]
+    async fn client_that_finishes_nar_download_is_disconnected_after_idle_bound() {
+        let (session, reader, _client) = open_loopback_cache_session().await;
+        let download = Arc::clone(&session.nar_serve_semaphore)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let idle = Duration::from_millis(TEST_SESSION_IDLE_TIMEOUT_MILLIS);
+        let session_loop = run_cache_session_client_message_loop(&session, reader, idle);
+        tokio::pin!(session_loop);
+
+        assert!(
+            tokio::time::timeout(idle / 2, &mut session_loop)
+                .await
+                .is_err(),
+            "Keep the session open while a download is in progress."
+        );
+        drop(download);
+        assert!(
+            tokio::time::timeout(idle * 10, session_loop).await.is_ok(),
+            "Disconnect clients that send nothing after the download at the idle bound."
+        );
+    }
+
+    #[tokio::test]
+    async fn message_loop_ends_when_writer_task_ends() {
+        let (socket, _client) = crate::handler::session_actor::tests::connected_pair().await;
+        let state = gradient_test_support::state::TestState::new().build();
+        let handles = SessionHandles::from_state(&state);
+        let (reader, _socket_writer) =
+            socket.split(Duration::from_secs(5), None, &handles.db.shutdown);
+        let (writer, writer_task_queue) = ProtoWriter::spy(Duration::from_secs(5));
+        let session = CacheSession::new(handles, writer, CacheId::nil());
+        drop(writer_task_queue);
+        let session_loop =
+            run_cache_session_client_message_loop(&session, reader, Duration::from_secs(60));
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), session_loop)
+                .await
+                .is_ok(),
+            "Cache sessions close at writer task exit, not at idle timeout."
+        );
+    }
+
+    #[tokio::test]
+    async fn nar_download_longer_than_idle_bound_keeps_session_connected() {
+        let (session, reader, _client) = open_loopback_cache_session().await;
+        let _download = Arc::clone(&session.nar_serve_semaphore)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let idle = Duration::from_millis(TEST_SESSION_IDLE_TIMEOUT_MILLIS);
+        let session_loop = run_cache_session_client_message_loop(&session, reader, idle);
+
+        assert!(
+            tokio::time::timeout(idle * 5, session_loop).await.is_err(),
+            "Downloads that run longer than the idle bound don't end the session."
+        );
     }
 }

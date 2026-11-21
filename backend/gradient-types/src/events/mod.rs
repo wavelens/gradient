@@ -7,6 +7,7 @@
 //! The pending deliveries are storing each [`Event`] by its Rust variant name. The published
 //! [`Envelope`] is carrying its dotted name.
 
+pub mod access_recheck;
 pub mod audit;
 pub mod build;
 mod bus;

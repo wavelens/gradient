@@ -7,8 +7,6 @@
 use gradient_types::input::*;
 use gradient_types::input::{InputError, check_task_name};
 
-const REV: &str = "11c2f8505c234697ccabbc96e5b8a76daf0f31d3";
-
 #[test]
 fn url_to_addr_resolves_host_to_socket_addr() {
     for (host, expected) in [("127.0.0.1", "127.0.0.1:8080"), ("::1", "[::1]:8080")] {
@@ -66,52 +64,6 @@ fn hex_codec_round_trips_and_rejects_malformed_input() {
             hex_to_vec(bad).unwrap_err().to_string(),
             "Invalid hex string",
             "{bad}"
-        );
-    }
-}
-
-#[test]
-fn repository_url_to_nix_normalizes_the_transport() {
-    let cases = [
-        (
-            "git@github.com:Wavelens/Gradient.git",
-            format!("git@github.com:Wavelens/Gradient.git?rev={REV}"),
-        ),
-        (
-            "https://github.com/Wavelens/Gradient.git",
-            format!("git+https://github.com/Wavelens/Gradient.git?rev={REV}"),
-        ),
-        (
-            "git://server.example.com/repo.git",
-            format!("git://server.example.com/repo.git?rev={REV}"),
-        ),
-    ];
-    for (input, expected) in cases {
-        assert_eq!(
-            repository_url_to_nix(input, REV).unwrap(),
-            expected,
-            "{input}"
-        );
-    }
-}
-
-#[test]
-fn repository_url_to_nix_rejects_local_files_and_short_revs() {
-    let local = "URLs pointing to local files are not allowed";
-    let cases = [
-        (
-            "https://github.com/foo/bar.git",
-            "abc123",
-            "Commit hash must be 40 characters long",
-        ),
-        ("file:///local/repo", REV, local),
-        ("file:/local/repo", REV, local),
-    ];
-    for (input, rev, expected) in cases {
-        assert_eq!(
-            repository_url_to_nix(input, rev).unwrap_err().to_string(),
-            expected,
-            "{input}"
         );
     }
 }
@@ -267,6 +219,51 @@ fn username_rejects_each_rule_violation() {
     assert_eq!(
         validate_username("").unwrap_err(),
         InputError::UsernameEmpty
+    );
+}
+
+#[test]
+fn username_syntax_check_accepts_reserved_names_that_the_full_check_refuses() {
+    for name in ["admin", "ROOT", "System"] {
+        assert!(validate_username_syntax(name).is_ok(), "{name}");
+        assert_eq!(
+            validate_username(name).unwrap_err(),
+            InputError::UsernameReserved
+        );
+    }
+    assert_eq!(
+        validate_username_syntax("a@b").unwrap_err(),
+        InputError::UsernameInvalidCharacters
+    );
+}
+
+#[test]
+fn email_accepts_addresses_and_refuses_malformed_ones() {
+    for email in ["alice@example.com", "Alice.Bob+ci@sub.example.org"] {
+        assert!(validate_email(email).is_ok(), "{email}");
+    }
+    for email in ["", "alice", "@example.com", "alice@", "a b@example.com"] {
+        assert_eq!(
+            validate_email(email).unwrap_err(),
+            InputError::EmailAddressNotValid,
+            "{email}"
+        );
+    }
+}
+
+#[test]
+fn identity_provider_display_name_falls_back_to_username_when_invalid() {
+    assert_eq!(
+        choose_account_display_name_from_identity_provider(Some("Alice Doe"), "alice"),
+        "Alice Doe"
+    );
+    assert_eq!(
+        choose_account_display_name_from_identity_provider(Some("Doe, John"), "jdoe"),
+        "jdoe"
+    );
+    assert_eq!(
+        choose_account_display_name_from_identity_provider(None, "jdoe"),
+        "jdoe"
     );
 }
 

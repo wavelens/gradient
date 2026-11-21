@@ -5,7 +5,7 @@
  */
 
 use super::super::StateApplicator;
-use super::super::{DynError, PendingProjectMembership, PendingProjectMemberships};
+use super::super::{DynError, StateFileManagedUserIdsByUsername};
 use super::super::{derive_public_key, lookup_id, read_credential};
 use crate::config::*;
 use anyhow::Result;
@@ -23,7 +23,7 @@ impl<'a> StateApplicator<'a> {
         state_projects: &HashMap<String, StateProject>,
         team_ids: &HashMap<String, TeamId>,
     ) -> Result<(), DynError> {
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
 
         for state_project in state_projects.values() {
             let owner_team = state_project
@@ -43,12 +43,15 @@ impl<'a> StateApplicator<'a> {
             let public_key = derive_public_key(private_key)?;
             let encrypted_private_key = self.encrypt_to_b64(private_key, "SSH private key")?;
 
-            let created_by_id = lookup_id(&user_map, &state_project.created_by, "User")?;
-
             let existing_project = project::Entity::find()
                 .filter(project::Column::Name.eq(&state_project.name))
                 .one(self.db)
                 .await?;
+            let created_by_id = state_users.resolve_creator_username_to_state_account_id(
+                &state_project.created_by,
+                &format!("project '{}'", state_project.name),
+                existing_project.as_ref().map(|project| project.created_by),
+            )?;
 
             let now = now();
 
@@ -133,16 +136,22 @@ impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_project_members(
         &self,
         state_projects: &HashMap<String, StateProject>,
-        pending: &PendingProjectMemberships,
     ) -> Result<(), DynError> {
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
         let project_map = self.project_lookup().await?;
 
         for state_project in state_projects.values() {
             let project_id = lookup_id(&project_map, &state_project.name, "Project")?;
-            let created_by_id = lookup_id(&user_map, &state_project.created_by, "User")?;
 
             if state_project.members.is_empty() {
+                if state_project.created_by.is_empty() {
+                    continue;
+                }
+                let Some(created_by_id) = state_users
+                    .resolve_username_to_user_id(&state_project.created_by, "project creator")
+                else {
+                    continue;
+                };
                 let existing = project_user::Entity::find()
                     .filter(project_user::Column::Project.eq(project_id))
                     .filter(project_user::Column::User.eq(created_by_id))
@@ -170,7 +179,7 @@ impl<'a> StateApplicator<'a> {
                     project_id,
                     &state_project.name,
                     &state_project.members,
-                    pending,
+                    &state_users,
                 )
                 .await
                 .map_err(|e| {
@@ -190,10 +199,8 @@ impl<'a> StateApplicator<'a> {
         project_id: ProjectId,
         project_name: &str,
         members: &[StateProjectMemberEntry],
-        pending: &PendingProjectMemberships,
+        state_users: &StateFileManagedUserIdsByUsername,
     ) -> Result<(), DynError> {
-        let user_map = self.user_lookup().await?;
-
         let custom_roles: HashMap<String, RoleId> = role::Entity::find()
             .filter(role::Column::Project.eq(project_id))
             .filter(role::Column::Managed.eq(true))
@@ -219,58 +226,44 @@ impl<'a> StateApplicator<'a> {
                 })?,
             };
 
-            match user_map.get(&member.user).copied() {
-                Some(user_id) => {
-                    declared_user_ids.insert(user_id);
-                    let existing = project_user::Entity::find()
-                        .filter(project_user::Column::Project.eq(project_id))
-                        .filter(project_user::Column::User.eq(user_id))
-                        .one(self.db)
-                        .await?;
-                    if let Some(row) = existing {
-                        if row.role != role_id {
-                            let mut active: project_user::ActiveModel = row.into();
-                            active.role = Set(role_id);
-                            active.update(self.db).await?;
-                            tracing::info!(
-                                project = %project_name,
-                                user = %member.user,
-                                "Updated project membership role"
-                            );
-                        }
-                    } else {
-                        project_user::Model {
-                            id: ProjectUserId::now_v7(),
-                            project: project_id,
-                            user: user_id,
-                            role: role_id,
-                        }
-                        .into_active_model()
-                        .insert(self.db)
-                        .await?;
-                        tracing::info!(
-                            project = %project_name,
-                            user = %member.user,
-                            "Added project member"
-                        );
-                    }
-                }
-                None => {
+            let Some(user_id) = state_users.resolve_username_to_user_id(
+                &member.user,
+                &format!("project '{project_name}' member"),
+            ) else {
+                continue;
+            };
+            declared_user_ids.insert(user_id);
+            let existing = project_user::Entity::find()
+                .filter(project_user::Column::Project.eq(project_id))
+                .filter(project_user::Column::User.eq(user_id))
+                .one(self.db)
+                .await?;
+            if let Some(row) = existing {
+                if row.role != role_id {
+                    let mut active: project_user::ActiveModel = row.into();
+                    active.role = Set(role_id);
+                    active.update(self.db).await?;
                     tracing::info!(
                         project = %project_name,
                         user = %member.user,
-                        "Declared member not yet registered; deferring until user creation"
+                        "Updated project membership role"
                     );
-                    pending
-                        .defer(
-                            member.user.clone(),
-                            PendingProjectMembership {
-                                project: project_id,
-                                role: role_id,
-                            },
-                        )
-                        .await;
                 }
+            } else {
+                project_user::Model {
+                    id: ProjectUserId::now_v7(),
+                    project: project_id,
+                    user: user_id,
+                    role: role_id,
+                }
+                .into_active_model()
+                .insert(self.db)
+                .await?;
+                tracing::info!(
+                    project = %project_name,
+                    user = %member.user,
+                    "Added project member"
+                );
             }
         }
 

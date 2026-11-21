@@ -84,7 +84,7 @@ fn split_evaluation_messages_encode_and_decode_at_oldest_supported_protocol_vers
     let client = [
         ClientMessage::EvalSourceReady {
             job_id: "eval:e".into(),
-            store_path: "/nix/store/[hash130]-source".into(),
+            store_path: "/nix/store/pii7dzyyd5a34p3f3isxhzja58rg67cs-source".into(),
             fingerprint: "fp".into(),
         },
         ClientMessage::EvalShardsPlanned {
@@ -111,7 +111,7 @@ fn split_evaluation_messages_encode_and_decode_at_oldest_supported_protocol_vers
             retry_after_ms: 1000,
         },
         EvalShardOutcome::Source {
-            store_path: "/nix/store/[hash130]-source".into(),
+            store_path: "/nix/store/pii7dzyyd5a34p3f3isxhzja58rg67cs-source".into(),
             fingerprint: "fp".into(),
         },
         EvalShardOutcome::Plan,
@@ -119,7 +119,7 @@ fn split_evaluation_messages_encode_and_decode_at_oldest_supported_protocol_vers
             id: "s".into(),
             pattern: "packages.*".into(),
             children: None,
-            drv_paths: vec!["/nix/store/[hash131]-hello.drv".into()],
+            drv_paths: vec!["/nix/store/iy9qs7zh0l1nb82q5sjcz0v06y11fmv4-hello.drv".into()],
         }),
         EvalShardOutcome::Finished,
     ];
@@ -565,6 +565,49 @@ fn an_inventory_from_protocol_63_or_older_has_no_max_server_requested_warm_guest
 }
 
 #[test]
+fn test_exec_inventory_with_project_release_wire_protocol_v66_round_trip() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::host_resource_project_access::WorkerResourceProjectAccess;
+    use crate::types::{ExecInventory, WorkerExecInventoryResourceProjectAccess};
+
+    let released_to_project_uuid = uuid::Uuid::now_v7();
+    let worker_resource_project_access_for_test_project_only =
+        WorkerResourceProjectAccess::OnlyProjects([released_to_project_uuid].into());
+    let exec_inventory_with_release_data = ExecInventory {
+        project_release_by_resource_name: WorkerExecInventoryResourceProjectAccess {
+            released_projects_by_worker_sops_secret_name: [(
+                "hf-token".into(),
+                worker_resource_project_access_for_test_project_only.clone(),
+            )]
+            .into(),
+            project_access_by_worker_mount: [(
+                "datasets".into(),
+                worker_resource_project_access_for_test_project_only.clone(),
+            )]
+            .into(),
+            released_projects_by_device_class: [
+                (
+                    "gpu".into(),
+                    worker_resource_project_access_for_test_project_only,
+                ),
+                ("camera".into(), WorkerResourceProjectAccess::EveryProject),
+            ]
+            .into(),
+        },
+        ..ExecInventory::default()
+    };
+    let version = 66;
+    assert_eq!(
+        from_bytes::<ExecInventory>(
+            to_bytes(&exec_inventory_with_release_data, version).unwrap(),
+            version
+        )
+        .unwrap(),
+        exec_inventory_with_release_data
+    );
+}
+
+#[test]
 fn a_warm_guest_of_any_reported_size_fits_its_job() {
     use crate::types::{ExecInventory, GuestSize, WarmGuests};
 
@@ -777,6 +820,48 @@ fn open_channel_allowance_and_channel_total_output_bytes_read_need_the_ninth_gue
 }
 
 #[test]
+fn prepare_tap_leased_guest_ipv4_address_is_present_from_guest_protocol_version_10_and_none_at_version_9()
+ {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::guest::{
+        GUEST_PREPARE_TAP_LEASED_IPV4_ADDRESS_SINCE, GUEST_PROTO_VERSIONS, SupervisorRequest,
+    };
+
+    let since = GUEST_PREPARE_TAP_LEASED_IPV4_ADDRESS_SINCE;
+    let build_prepare_tap_request = |guest_ipv4_address| SupervisorRequest::PrepareTap {
+        name: "gr-tap-7".to_owned(),
+        bridge: "gradient-guests".to_owned(),
+        guest_ipv4_address,
+    };
+    let example_leased_guest_ipv4_address = Some(std::net::Ipv4Addr::new(10, 233, 0, 2));
+    assert!(GUEST_PROTO_VERSIONS.contains(&since));
+    assert_eq!(
+        from_bytes::<SupervisorRequest>(
+            to_bytes(
+                &build_prepare_tap_request(example_leased_guest_ipv4_address),
+                since
+            )
+            .unwrap(),
+            since
+        )
+        .unwrap(),
+        build_prepare_tap_request(example_leased_guest_ipv4_address)
+    );
+    assert_eq!(
+        from_bytes::<SupervisorRequest>(
+            to_bytes(
+                &build_prepare_tap_request(example_leased_guest_ipv4_address),
+                since - 1
+            )
+            .unwrap(),
+            since - 1
+        )
+        .unwrap(),
+        build_prepare_tap_request(None)
+    );
+}
+
+#[test]
 fn a_console_resize_needs_the_eighth_guest_version() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::guest::{GUEST_CONSOLE_RESIZE_SINCE, GUEST_PROTO_VERSIONS, WorkerToAgent};
@@ -860,25 +945,6 @@ fn fetch_input_drops_ssh_host_keys_below_version_63() {
 }
 
 #[test]
-fn ssh_host_keys_credential_round_trips_at_version_63() {
-    use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{CredentialKind, ServerMessage};
-
-    let since = 63;
-    let msg = ServerMessage::Credential {
-        kind: CredentialKind::SshHostKeys {
-            keys: vec![elektrat_host_key()],
-        },
-        data: Vec::new().into(),
-    };
-    assert_eq!(
-        from_bytes::<ServerMessage>(to_bytes(&msg, since).unwrap(), since).unwrap(),
-        msg
-    );
-    assert!(to_bytes(&msg, since - 1).is_err());
-}
-
-#[test]
 fn worker_local_store_bloom_filter_chunk_round_trips_at_version_65_and_is_refused_at_version_64() {
     use crate::codec::{EncodeError, from_bytes, to_bytes};
     use crate::messages::ClientMessage;
@@ -905,20 +971,89 @@ fn worker_local_store_bloom_filter_chunk_round_trips_at_version_65_and_is_refuse
     ));
 }
 
-#[test]
-fn https_git_credentials_round_trip_at_version_65() {
-    use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{CredentialKind, HttpsGitCredential, ServerMessage};
+fn assign_job_message_for_flake_with_git_ssh_key_and_host_keys() -> crate::messages::ServerMessage {
+    use crate::types::{FlakeJob, FlakeSource, FlakeStep, Job};
 
-    let version = 65;
-    let credential = ServerMessage::Credential {
-        kind: CredentialKind::GitHttpsCredential {
+    crate::messages::ServerMessage::AssignJob {
+        job_id: "flake:j1".into(),
+        assignment_id: "a1".into(),
+        job: Job::Flake(Box::new(FlakeJob {
+            steps: vec![FlakeStep::FetchFlake],
+            source: FlakeSource::Repository {
+                url: "ssh://git@git.elektrat.de:2222/o/r".into(),
+                commit: "0".repeat(40),
+            },
+            wildcards: vec!["*".into()],
+            timeout_secs: None,
+            input_overrides: vec![],
+            input_update: None,
+            flake_dir: None,
+            run_overrides: None,
+            nix_evaluation_fetch_url_access: Default::default(),
+        })),
+        cluster: None,
+        ssh_key: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+        ssh_host_keys: vec![elektrat_host_key()],
+        https_git_credentials: Vec::new(),
+    }
+}
+
+#[test]
+fn assign_job_with_ssh_key_and_host_keys_encode_decode_equal_at_version_66() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::ServerMessage;
+
+    let version = 66;
+    let msg = assign_job_message_for_flake_with_git_ssh_key_and_host_keys();
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, version).unwrap(), version).unwrap(),
+        msg
+    );
+}
+
+#[test]
+fn assign_job_https_git_credentials_round_trip_at_protocol_version_66() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{HttpsGitCredential, ServerMessage};
+
+    let version = 66;
+    let ServerMessage::AssignJob {
+        job_id,
+        assignment_id,
+        job,
+        cluster,
+        ..
+    } = assign_job_message_for_flake_with_git_ssh_key_and_host_keys()
+    else {
+        unreachable!();
+    };
+    let msg = ServerMessage::AssignJob {
+        job_id,
+        assignment_id,
+        job,
+        cluster,
+        ssh_key: None,
+        ssh_host_keys: Vec::new(),
+        https_git_credentials: vec![HttpsGitCredential {
             host: "git.example.org:8443".into(),
             username: "x-access-token".into(),
-        },
-        data: b"ghp-secret".as_slice().into(),
+            password: "ghp-secret".into(),
+        }],
     };
-    let fetch = ServerMessage::FetchInput {
+    assert!(msg.carries_secret());
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, version).unwrap(), version).unwrap(),
+        msg
+    );
+}
+
+#[test]
+fn fetch_input_https_git_credentials_carries_secret_round_trip_at_protocol_version_66() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{HttpsGitCredential, ServerMessage};
+
+    let version = 66;
+    let msg = ServerMessage::FetchInput {
         fetch_id: "f1".into(),
         project: "p".into(),
         request: "{}".into(),
@@ -930,11 +1065,93 @@ fn https_git_credentials_round_trip_at_version_65() {
             password: "ghp-secret".into(),
         }],
     };
-    assert!(fetch.carries_secret());
-    for msg in [credential, fetch] {
-        assert_eq!(
-            from_bytes::<ServerMessage>(to_bytes(&msg, version).unwrap(), version).unwrap(),
-            msg
-        );
-    }
+    assert!(msg.carries_secret());
+    assert_eq!(
+        from_bytes::<ServerMessage>(to_bytes(&msg, version).unwrap(), version).unwrap(),
+        msg
+    );
+}
+
+#[test]
+fn assign_job_carries_secret_with_ssh_key_and_does_not_without_ssh_key_or_https_credentials() {
+    use crate::messages::ServerMessage;
+
+    let with_key = assign_job_message_for_flake_with_git_ssh_key_and_host_keys();
+    assert!(with_key.carries_secret());
+    let ServerMessage::AssignJob {
+        job_id,
+        assignment_id,
+        job,
+        cluster,
+        ssh_host_keys,
+        ..
+    } = with_key
+    else {
+        unreachable!();
+    };
+    let without_key = ServerMessage::AssignJob {
+        job_id,
+        assignment_id,
+        job,
+        cluster,
+        ssh_key: None,
+        ssh_host_keys,
+        https_git_credentials: Vec::new(),
+    };
+    assert!(!without_key.carries_secret());
+}
+
+#[test]
+fn run_job_guest_network_ipv6_configuration_is_present_from_guest_protocol_version_11_and_none_at_version_10()
+ {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::guest::{
+        GUEST_IPV6_NETWORK_CONFIGURATION_SINCE, GUEST_PROTO_VERSIONS, GuestNetwork,
+        GuestNetworkIpv6, RunJob, WorkerToAgent,
+    };
+
+    let since = GUEST_IPV6_NETWORK_CONFIGURATION_SINCE;
+    let build_guest_network = |ipv6_configuration| {
+        WorkerToAgent::RunJob(Box::new(RunJob {
+            network: Some(GuestNetwork {
+                address: "10.233.0.2".to_owned(),
+                prefix: 16,
+                gateway: "10.233.0.1".to_owned(),
+                nameservers: vec!["10.233.0.1".to_owned()],
+                mac: "02:47:52:00:00:02".to_owned(),
+                ipv6_configuration,
+            }),
+            ..RunJob::default()
+        }))
+    };
+    let example_leased_guest_ipv6_network_configuration = Some(GuestNetworkIpv6 {
+        address: "fd00:ec2:6::2".to_owned(),
+        prefix: 64,
+        gateway: "fd00:ec2:6::1".to_owned(),
+    });
+    assert!(GUEST_PROTO_VERSIONS.contains(&since));
+    assert_eq!(
+        from_bytes::<WorkerToAgent>(
+            to_bytes(
+                &build_guest_network(example_leased_guest_ipv6_network_configuration.clone()),
+                since
+            )
+            .unwrap(),
+            since
+        )
+        .unwrap(),
+        build_guest_network(example_leased_guest_ipv6_network_configuration.clone())
+    );
+    assert_eq!(
+        from_bytes::<WorkerToAgent>(
+            to_bytes(
+                &build_guest_network(example_leased_guest_ipv6_network_configuration),
+                since - 1
+            )
+            .unwrap(),
+            since - 1
+        )
+        .unwrap(),
+        build_guest_network(None)
+    );
 }

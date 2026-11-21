@@ -67,7 +67,6 @@ pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Resul
             "nar_upload_grace_hours",
             config.gc.nar_upload_grace_hours.to_string(),
         ),
-        ("nar_verify_digest", config.nar.verify_digest.to_string()),
     ];
 
     // The resolved S3 policy is written instead of the raw arguments. A local-disk instance is

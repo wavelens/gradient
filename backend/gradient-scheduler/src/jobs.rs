@@ -17,7 +17,7 @@ use gradient_types::ids::{
     DispatchedJobId, EvaluationId, ExecJobId, ProjectId, TaskId,
 };
 use gradient_wire::types::{
-    BuildJob, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, Job, JobKind,
+    BuildJob, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job, JobKind,
 };
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
@@ -29,13 +29,12 @@ use crate::pending_job_input_store_paths::{
     build_pending_job_shared_inputs_from_stored_path_and_nar_size_pairs_with_optional_project_store_path_mapping,
 };
 use crate::pending_jobs::PendingJobs;
-use gradient_graph::RamShortage;
 use gradient_pool::score::weights::REFERENCE_CORES;
 use gradient_pool::score::{
     BuildEstimate, CoreChoice, JobContext, RamFit, RamNeed, ScoreBreakdown, ScoredJob,
     ScoringPolicy, WorkerContext,
 };
-use gradient_pool::{WorkerCaps, WorkerJob};
+use gradient_pool::{ProjectAccess, WorkerCaps, WorkerJob};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -57,6 +56,8 @@ pub struct PendingEvalJob {
     pub build_request: bool,
     pub continuation: Option<ExecJobId>,
     pub flake_fetch_needs_secrets: bool,
+    pub derivation_batch_save_failure_message: Option<String>,
+    pub allows_project_credentials_and_privileged_actions: bool,
 }
 
 impl PendingEvalJob {
@@ -203,6 +204,14 @@ impl PendingBuildJob {
 }
 
 impl PendingJob {
+    pub fn allows_project_credentials_and_privileged_actions(&self) -> bool {
+        match self {
+            PendingJob::Eval(j) => j.allows_project_credentials_and_privileged_actions,
+            PendingJob::Exec(j) => j.allows_project_credentials_and_privileged_actions,
+            PendingJob::Build(_) => false,
+        }
+    }
+
     pub fn job_key(&self) -> String {
         match self {
             PendingJob::Eval(j) => eval_job_key(j.evaluation_id, j.eval_index),
@@ -268,18 +277,11 @@ impl PendingJob {
                 record.exec = exec.assignment.clone();
                 dispatch.map(|(_, wire)| Job::Exec(Box::new(wire)))
             }
-            other => other.clone().into_job(record.choice.map(|c| c.cores)),
-        }
-    }
-
-    pub(crate) fn into_job(self, cores: Option<u32>) -> Option<Job> {
-        match self {
-            PendingJob::Eval(j) => Some(Job::Flake(Box::new(j.job))),
-            PendingJob::Build(mut j) => {
-                j.job.build.build_cores = cores;
-                Some(Job::Build(j.job))
+            PendingJob::Build(build) => {
+                build.job.build.build_cores = record.choice.map(|c| c.cores);
+                Some(Job::Build(build.job.clone()))
             }
-            PendingJob::Exec(_) => None,
+            PendingJob::Eval(eval) => Some(Job::Flake(Box::new(eval.job.clone()))),
         }
     }
 
@@ -542,14 +544,40 @@ fn sort_scored_candidates_by_total_score_then_job_id(scored: &mut [(String, Scor
     });
 }
 
+pub(crate) fn worker_capability_flags_allow_job(
+    job: &PendingJob,
+    capabilities: &GradientCapabilities,
+) -> bool {
+    match job {
+        PendingJob::Exec(j) => {
+            capabilities.exec && (capabilities.secrets || j.secrets.server_names().is_empty())
+        }
+        PendingJob::Eval(j) => WorkerCaps {
+            capabilities: capabilities.clone(),
+            ..WorkerCaps::default()
+        }
+        .can_eval(
+            &j.job,
+            j.flake_fetch_needs_secrets && j.allows_project_credentials_and_privileged_actions,
+        ),
+        PendingJob::Build(j) => {
+            let build = &j.job.build;
+            (build.kind != BuildSpecKind::Build || capabilities.build)
+                && (capabilities.network
+                    || !gradient_pool::build_needs_network(build.kind, build.is_fixed_output))
+        }
+    }
+}
+
 fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     let Some(c) = caps else {
         return !matches!(job, PendingJob::Exec(_));
     };
     c.allowed_jobs.contains(job.worker_job())
+        && worker_capability_flags_allow_job(job, &c.capabilities)
         && match job {
             PendingJob::Exec(j) => j.fits(c),
-            PendingJob::Eval(j) => c.can_eval(&j.job, j.flake_fetch_needs_secrets),
+            PendingJob::Eval(_) => true,
             PendingJob::Build(j) => c.can_run_build(&j.job),
         }
 }
@@ -570,11 +598,10 @@ impl AbortedJobs {
 
 pub(crate) fn visible_to(
     job: &PendingJob,
-    authorized: Option<&HashSet<ProjectId>>,
+    authorized: &ProjectAccess,
     caps: Option<&WorkerCaps>,
 ) -> bool {
-    authorized.is_none_or(|peers| peers.contains(&job.project_id()))
-        && job_eligible_for_caps(job, caps)
+    authorized.contains(&job.project_id()) && job_eligible_for_caps(job, caps)
 }
 
 fn wins(sc: &ScoredCandidate) -> bool {
@@ -591,41 +618,6 @@ fn reserves_ram_while_held(job: &PendingJob, now: chrono::NaiveDateTime) -> bool
     let held_secs = (now - job.ready_at()).num_seconds();
     job.prioritized()
         || held_secs >= gradient_pool::score::weights::HELD_BUILD_RESERVES_RAM_AFTER_SECS
-}
-
-fn ram_shortage(job: &PendingJob, workers: &[BuildWorker]) -> Option<RamShortage> {
-    let PendingJob::Build(build) = job else {
-        return None;
-    };
-    let RamNeed::Predicted(_) = job.ram_need_at(1, false) else {
-        return None;
-    };
-
-    let mut needed_mb = None;
-    let mut largest_available_mb = None;
-    for worker in workers
-        .iter()
-        .filter(|w| visible_to(job, w.authorized.as_ref(), Some(&w.caps)))
-    {
-        let metrics = worker.caps.metrics?;
-        let choice =
-            gradient_pool::estimate::choose_cores(&metrics, build.estimate.max_cores, 0, |cores| {
-                job.ram_need_at(cores, false)
-            });
-        if choice.fit != RamFit::DoesNotFit {
-            return None;
-        }
-        let need = choice.need.reserved_mb(0);
-        needed_mb = Some(needed_mb.map_or(need, |least: u64| least.min(need)));
-        largest_available_mb = largest_available_mb.max(metrics.ram_available_mb());
-    }
-
-    Some(RamShortage {
-        shared_build: build.derivation_build,
-        evaluation: build.evaluation_id,
-        needed_mb: needed_mb?,
-        largest_available_mb: largest_available_mb?,
-    })
 }
 
 fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
@@ -827,6 +819,7 @@ struct ActiveJob {
     job: PendingJob,
     aborted_at: Option<Instant>,
     cluster: Option<ClusterAttemptId>,
+    build_output_accepted: bool,
 }
 
 impl ActiveJob {
@@ -837,6 +830,7 @@ impl ActiveJob {
             job,
             aborted_at: None,
             cluster: None,
+            build_output_accepted: false,
         }
     }
 }
@@ -889,18 +883,19 @@ pub struct HeldReclaim {
     pub reattached: Vec<Reattached>,
     pub unresolved: Vec<DispatchedJobId>,
     pub seeded: Vec<(String, AwaitingReclaim)>,
+    pub revoked: Vec<(String, PendingJob)>,
+}
+
+#[derive(Debug, Default)]
+pub struct RefusedAndRevokedReattachedJobs {
+    pub refused: Vec<Reattached>,
+    pub revoked: Vec<(String, PendingJob)>,
 }
 
 pub fn reclaim_grace(configured: Duration, exits_at: Option<Instant>, now: Instant) -> Duration {
     exits_at.map_or(configured, |exits_at| {
         configured.min(exits_at.saturating_duration_since(now))
     })
-}
-
-#[derive(Debug, Clone)]
-pub struct BuildWorker {
-    pub authorized: Option<HashSet<ProjectId>>,
-    pub caps: WorkerCaps,
 }
 
 #[cfg(test)]
@@ -920,11 +915,33 @@ pub struct JobTracker {
     clusters: ClusterBook,
     waiting_builds: HashMap<String, WaitingBuild>,
     awaiting_reclaim: HashMap<String, AwaitingReclaim>,
+    connected_non_draining_workers_with_project_access_and_capabilities:
+        Vec<(ProjectAccess, WorkerCaps)>,
 }
 
 impl JobTracker {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn replace_connected_workers(
+        &mut self,
+        new_connected_non_draining_workers: Vec<(ProjectAccess, WorkerCaps)>,
+    ) {
+        self.connected_non_draining_workers_with_project_access_and_capabilities =
+            new_connected_non_draining_workers;
+    }
+
+    fn largest_visible_connected_worker_ram_mb_for_pending_job(
+        &self,
+        job: &PendingJob,
+    ) -> Option<u64> {
+        self.connected_non_draining_workers_with_project_access_and_capabilities
+            .iter()
+            .filter(|(access, caps)| visible_to(job, access, Some(caps)))
+            .filter_map(|(_, caps)| caps.metrics.map(|m| m.ram_total_mb))
+            .filter(|&mb| mb > 0)
+            .max()
     }
 
     #[cfg(test)]
@@ -997,7 +1014,7 @@ impl JobTracker {
     pub fn take_best_of_kind(
         &mut self,
         worker_id: &str,
-        authorized: Option<&HashSet<ProjectId>>,
+        authorized: &ProjectAccess,
         caps: Option<&WorkerCaps>,
         local_store: Option<&WorkerStorePathBloomFilter>,
         kind: &JobKind,
@@ -1092,7 +1109,7 @@ impl JobTracker {
     fn recheck_waiting_build(
         &mut self,
         worker_id: &str,
-        authorized: Option<&HashSet<ProjectId>>,
+        authorized: &ProjectAccess,
         caps: Option<&WorkerCaps>,
         local_store: Option<&WorkerStorePathBloomFilter>,
         policy: &dyn ScoringPolicy,
@@ -1187,7 +1204,7 @@ impl JobTracker {
     fn score_candidates(
         &self,
         local_store: Option<&WorkerStorePathBloomFilter>,
-        authorized: Option<&HashSet<ProjectId>>,
+        authorized: &ProjectAccess,
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
         policy: &dyn ScoringPolicy,
@@ -1259,6 +1276,9 @@ impl JobTracker {
         let project_work_share = shares.share(job.project_id());
         let ctx = JobContext {
             job: &scored_job,
+            largest_usable_worker_ram_mb: matches!(job, PendingJob::Build(_))
+                .then(|| self.largest_visible_connected_worker_ram_mb_for_pending_job(job))
+                .flatten(),
             ..build_scoring_job_context_for_pending_job(job, score, project_work_share, now)
         };
         let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
@@ -1272,7 +1292,8 @@ impl JobTracker {
             choice,
             vetoed: !breakdown.vetoes.is_empty(),
             held_for_ram: breakdown.vetoes
-                == [gradient_pool::score::rules::ResourceSaturationRule::NAME],
+                == [gradient_pool::score::rules::ResourceSaturationRule::NAME]
+                && choice.is_none_or(|c| c.fit != RamFit::WaitsForLargerWorker),
             rule_score_breakdown: breakdown,
             store_bloom_filter_missing_inputs_and_outputs_present: score.clone(),
             job_project_running_build_work_share: project_work_share,
@@ -1507,6 +1528,35 @@ impl JobTracker {
         }
     }
 
+    pub fn accept_build_output_report_for_worker_job(
+        &mut self,
+        worker_id: &str,
+        job_id: &str,
+    ) -> Option<(DispatchedJobId, PendingBuildJob)> {
+        let (assignment_id, build) = self.active_build_dispatch(worker_id, job_id)?;
+        let build = build.clone();
+        let active = self.active.get_mut(job_id)?;
+        if std::mem::replace(&mut active.build_output_accepted, true) {
+            return None;
+        }
+        Some((assignment_id, build))
+    }
+
+    pub fn clear_build_output_accepted_for_worker_job(
+        &mut self,
+        worker_id: &str,
+        job_id: &str,
+        assignment_id: DispatchedJobId,
+    ) {
+        if let Some(active) = self
+            .active
+            .get_mut(job_id)
+            .filter(|a| a.worker == worker_id && a.assignment_id == assignment_id)
+        {
+            active.build_output_accepted = false;
+        }
+    }
+
     pub fn active_exec_attempt(
         &self,
         worker_id: &str,
@@ -1621,7 +1671,12 @@ impl JobTracker {
     pub(crate) fn estimates_to_refresh(
         &self,
         changes: &crate::build_history::Changes,
-    ) -> Vec<(String, gradient_pool::estimate::GroupKey, DerivationId)> {
+    ) -> Vec<(
+        String,
+        gradient_pool::estimate::GroupKey,
+        DerivationId,
+        ProjectId,
+    )> {
         self.pending
             .iter()
             .filter_map(|(job_id, job)| match job {
@@ -1629,7 +1684,14 @@ impl JobTracker {
                     .history_key
                     .as_ref()
                     .filter(|key| changes.touches(key, build.derivation))
-                    .map(|key| (job_id.clone(), key.clone(), build.derivation)),
+                    .map(|key| {
+                        (
+                            job_id.clone(),
+                            key.clone(),
+                            build.derivation,
+                            build.project_id,
+                        )
+                    }),
                 _ => None,
             })
             .collect()
@@ -1648,18 +1710,6 @@ impl JobTracker {
 
     pub fn pending_job(&self, job_id: &str) -> Option<&PendingJob> {
         self.pending.get(job_id)
-    }
-
-    pub fn peer_jobs_on_worker(
-        &self,
-        worker_id: &str,
-        revoked_peers: &HashSet<ProjectId>,
-    ) -> Vec<String> {
-        self.active
-            .iter()
-            .filter(|(_, a)| a.worker == worker_id && revoked_peers.contains(&a.job.project_id()))
-            .map(|(id, _)| id.clone())
-            .collect()
     }
 
     pub fn raise_predicted_ram(&mut self, observed_peak_ram_mb: &HashMap<String, u64>) {
@@ -1824,6 +1874,20 @@ impl JobTracker {
         self.awaiting_reclaim.remove(job_id);
     }
 
+    pub fn store_lost_report_batch_failure_message_for_evaluation_job(
+        &mut self,
+        job_id: &str,
+        message: String,
+    ) {
+        if let Some(ActiveJob {
+            job: PendingJob::Eval(job),
+            ..
+        }) = self.active.get_mut(job_id)
+        {
+            job.derivation_batch_save_failure_message = Some(message);
+        }
+    }
+
     pub fn mark_aborting(&mut self, job_id: &str, now: Instant) {
         if let Some(active) = self.active.get_mut(job_id) {
             active.aborted_at.get_or_insert(now);
@@ -1924,13 +1988,6 @@ impl JobTracker {
             .update_all_pending_jobs_and_resort_jobs_with_changed_sort_key(prioritize);
         let active = self.active.values_mut().map(|a| &mut a.job);
         active.chain(self.clusters.jobs_mut()).for_each(prioritize);
-    }
-
-    pub fn builds_no_worker_fits(&self, workers: &[BuildWorker]) -> Vec<RamShortage> {
-        self.pending
-            .values()
-            .filter_map(|job| ram_shortage(job, workers))
-            .collect()
     }
 
     pub fn pending_shared_builds(&self) -> Vec<DerivationBuildId> {
@@ -2065,7 +2122,7 @@ mod tests {
     use super::*;
     use gradient_wire::types::{
         BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep,
-        GradientCapabilities, GuestSize,
+        GuestSize,
     };
     use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_two_u64_words;
 
@@ -2083,7 +2140,7 @@ mod tests {
         let instance = gradient_pool::score::InstanceContext::default();
         tracker.take_best_of_kind(
             worker,
-            None,
+            &ProjectAccess::AllProjects,
             Some(caps),
             None,
             &JobKind::Exec,
@@ -2106,7 +2163,7 @@ mod tests {
 
     fn peer(caps: WorkerCaps) -> ExecPeer {
         ExecPeer {
-            authorized: None,
+            authorized: ProjectAccess::AllProjects,
             caps,
         }
     }
@@ -2148,7 +2205,7 @@ mod tests {
     fn a_warm_guest_elsewhere_holds_nothing_when_it_cannot_take_the_job() {
         let mut tracker = JobTracker::new();
         let unauthorized = ExecPeer {
-            authorized: Some(HashSet::new()),
+            authorized: ProjectAccess::no_project_access(),
             ..peer(exec_caps_with_warm_guests(1, sized(2)))
         };
         pending_exec(&mut tracker, sized(2));
@@ -2156,6 +2213,19 @@ mod tests {
 
         let cold = exec_caps_with_warm_guests(0, sized(2));
         assert!(take_exec_beside(&mut tracker, "cold", &cold, &peers).is_some());
+    }
+
+    #[test]
+    fn exec_job_is_eligible_only_while_worker_has_exec_capability() {
+        let job = PendingJob::Exec(Box::new(crate::test_jobs::exec_job(
+            gradient_types::exec::ExecSpec::default(),
+        )));
+        let mut caps = exec_caps_with_warm_guests(0, sized(2));
+        assert!(job_eligible_for_caps(&job, Some(&caps)));
+
+        caps.capabilities.exec = false;
+        assert!(!worker_capability_flags_allow_job(&job, &caps.capabilities));
+        assert!(!job_eligible_for_caps(&job, Some(&caps)));
     }
 
     #[test]
@@ -2264,9 +2334,72 @@ mod tests {
         })));
         assert!(!visible_to(
             &job,
-            None,
+            &ProjectAccess::AllProjects,
             Some(&exec_caps(allow_all(), ExecDefaults::default()))
         ));
+    }
+
+    #[test]
+    fn exec_job_for_project_with_secret_released_on_second_worker_is_placed_on_second_worker_and_project_without_released_secret_gets_not_found_refusal()
+     {
+        use crate::exec_secrets::{ResolvedSecretNames, secret_refusal};
+        use crate::test_jobs::{
+            exec_job, exec_worker_caps_allowing_all_commands_with_sops_secret_for_one_project,
+            worker_info,
+        };
+        use gradient_types::exec::{ExecDefaults, ExecSpec};
+
+        let project_id = ProjectId::now_v7();
+        let project_p2_id = ProjectId::now_v7();
+        let third_project_with_no_release_on_any_worker = ProjectId::now_v7();
+        let first_worker_caps =
+            exec_worker_caps_allowing_all_commands_with_sops_secret_for_one_project(
+                "hf-token", project_id,
+            );
+        let second_worker_caps =
+            exec_worker_caps_allowing_all_commands_with_sops_secret_for_one_project(
+                "hf-token",
+                project_p2_id,
+            );
+        let pending_exec_job_for_project_with_hf_token_worker_secret =
+            |project_id: ProjectId| PendingExecJob {
+                project_id,
+                secrets: ResolvedSecretNames {
+                    worker: vec!["hf-token".into()],
+                    ..Default::default()
+                },
+                ..exec_job(ExecSpec::default())
+            };
+
+        let mut tracker = JobTracker::new();
+        let job = pending_exec_job_for_project_with_hf_token_worker_secret(project_p2_id);
+        let key = exec_job_key(job.exec_job);
+        tracker.add_pending(key.clone(), PendingJob::Exec(Box::new(job)));
+        assert!(take_exec(&mut tracker, "w1", &first_worker_caps).is_none());
+        let assignment = take_exec(&mut tracker, "w2", &second_worker_caps).expect("placed");
+        assert_eq!(assignment.job_id(), key);
+
+        let job = pending_exec_job_for_project_with_hf_token_worker_secret(
+            third_project_with_no_release_on_any_worker,
+        );
+        let requirement = job
+            .spec
+            .requirement_on(&job.architecture, &ExecDefaults::default());
+        let workers = [
+            worker_info("w1", first_worker_caps),
+            worker_info("w2", second_worker_caps),
+        ];
+        assert_eq!(
+            secret_refusal(
+                &requirement,
+                &job.secrets,
+                &workers,
+                third_project_with_no_release_on_any_worker
+            )
+            .expect("refused")
+            .to_string(),
+            r#"secret "hf-token" not found in project secrets, repository sops files or worker sops files"#
+        );
     }
 
     #[test]
@@ -2378,6 +2511,8 @@ mod tests {
             eval_index: 0,
             continuation: None,
             flake_fetch_needs_secrets: false,
+            derivation_batch_save_failure_message: None,
+            allows_project_credentials_and_privileged_actions: true,
         })
     }
 
@@ -2417,6 +2552,8 @@ mod tests {
             eval_index: 0,
             continuation: None,
             flake_fetch_needs_secrets: true,
+            derivation_batch_save_failure_message: None,
+            allows_project_credentials_and_privileged_actions: true,
         })
     }
 
@@ -2456,59 +2593,8 @@ mod tests {
         assert!(!lifted(&tracker, "dep"), "the lift ends with the import");
     }
 
-    fn build_predicted(peak_ram_mb: u64) -> PendingJob {
-        let mut job = build_job(ProjectId::now_v7(), vec![]);
-        if let PendingJob::Build(build) = &mut job {
-            build.estimate = gradient_pool::score::BuildEstimate::fixed(Some(peak_ram_mb), None, 1);
-        }
-        job
-    }
-
-    fn build_worker(total_mb: u64, free_mb: u64, reserved_mb: u64) -> BuildWorker {
-        BuildWorker {
-            authorized: None,
-            caps: WorkerCaps {
-                metrics: Some(gradient_pool::score::WorkerMetricsView {
-                    ram_total_mb: total_mb,
-                    ram_free_mb: Some(free_mb),
-                    ram_reserved_mb: reserved_mb,
-                    ..Default::default()
-                }),
-                ..build_caps(&["x86_64-linux"], &[])
-            },
-        }
-    }
-
-    #[test]
-    fn a_build_above_the_free_ram_of_every_unreserved_worker_fits_no_worker() {
-        let mut tracker = JobTracker::new();
-        let job = build_predicted(113_218);
-        let PendingJob::Build(build) = &job else {
-            unreachable!()
-        };
-        let (shared_build, evaluation) = (build.derivation_build, build.evaluation_id);
-        tracker.add_pending("large".into(), job);
-        tracker.add_pending("small".into(), build_predicted(4_000));
-        tracker.add_pending("unmeasured".into(), build_job(ProjectId::now_v7(), vec![]));
-
-        let workers = [
-            build_worker(128_540, 102_754, 0),
-            build_worker(30_720, 30_720, 0),
-        ];
-
-        assert_eq!(
-            tracker.builds_no_worker_fits(&workers),
-            vec![RamShortage {
-                shared_build,
-                evaluation,
-                needed_mb: 113_218,
-                largest_available_mb: 102_754,
-            }]
-        );
-    }
-
     fn keyed_build(tracker: &mut JobTracker, job_id: &str, pname: &str) -> DerivationId {
-        let mut job = build_job(ProjectId::now_v7(), vec![]);
+        let mut job = build_job(gradient_fixtures::ids::project_id(), vec![]);
         let PendingJob::Build(build) = &mut job else {
             unreachable!()
         };
@@ -2590,55 +2676,53 @@ mod tests {
         assert!(history.take_changes().is_empty());
     }
 
-    #[test]
-    fn a_build_that_fits_with_fewer_cores_is_not_reported() {
-        let mut tracker = JobTracker::new();
-        let mut job = build_predicted(113_218);
-        if let PendingJob::Build(build) = &mut job
-            && let Some(ram) = build.estimate.ram.as_mut()
-        {
-            ram.per_log_core = 1.0;
+    fn build_predicted(peak_ram_mb: u64) -> PendingJob {
+        let mut job = build_job(ProjectId::now_v7(), vec![]);
+        if let PendingJob::Build(build) = &mut job {
+            build.estimate = gradient_pool::score::BuildEstimate::fixed(Some(peak_ram_mb), None, 1);
         }
-        tracker.add_pending("large".into(), job);
+        job
+    }
 
-        assert!(
-            tracker
-                .builds_no_worker_fits(&[build_worker(30_720, 30_720, 0)])
-                .is_empty(),
-            "at one core the build needs a sixteenth of its reference RAM"
-        );
+    fn build_worker(total_mb: u64, free_mb: u64, reserved_mb: u64) -> WorkerCaps {
+        WorkerCaps {
+            metrics: Some(gradient_pool::score::WorkerMetricsView {
+                ram_total_mb: total_mb,
+                ram_free_mb: Some(free_mb),
+                ram_reserved_mb: reserved_mb,
+                ..Default::default()
+            }),
+            ..build_caps(&["x86_64-linux"], &[])
+        }
     }
 
     #[test]
-    fn a_build_some_worker_can_still_hold_is_not_reported() {
+    fn largest_visible_connected_worker_ram_mb_for_pending_job_ignores_workers_without_metrics_zero_ram_other_architecture_or_project_access_and_uses_total_ram()
+     {
         let mut tracker = JobTracker::new();
-        tracker.add_pending("large".into(), build_predicted(113_218));
-        let idle = build_worker(128_540, 102_754, 0);
-
-        let releases_ram = build_worker(128_540, 60_000, 40_000);
-        assert!(
-            tracker
-                .builds_no_worker_fits(&[idle.clone(), releases_ram])
-                .is_empty(),
-            "a worker with reserved RAM fits the build once its jobs finish"
-        );
-
+        let job = build_predicted(113_218);
         let mut unmeasured = build_worker(0, 0, 0);
-        unmeasured.caps.metrics = None;
-        assert!(
-            tracker
-                .builds_no_worker_fits(&[idle.clone(), unmeasured])
-                .is_empty(),
-            "a worker without a sample yet is not known to be too small"
-        );
+        unmeasured.metrics = None;
+        let zero = build_worker(0, 0, 0);
+        let mut other_architecture = build_worker(256_000, 256_000, 0);
+        other_architecture.architectures = vec!["aarch64-linux".into()];
+        let not_granted = build_worker(512_000, 512_000, 0);
+        let busy = build_worker(128_540, 60_000, 40_000);
+        tracker.replace_connected_workers(vec![
+            (ProjectAccess::AllProjects, unmeasured),
+            (ProjectAccess::AllProjects, zero),
+            (ProjectAccess::AllProjects, other_architecture),
+            (
+                ProjectAccess::OnlyListedProjects(HashSet::new()),
+                not_granted,
+            ),
+            (ProjectAccess::AllProjects, busy),
+        ]);
 
-        let mut other_architecture = idle;
-        other_architecture.caps.architectures = vec!["aarch64-linux".into()];
-        assert!(
-            tracker
-                .builds_no_worker_fits(&[other_architecture])
-                .is_empty(),
-            "no worker able to build it is a missing worker, not missing RAM"
+        assert_eq!(
+            tracker.largest_visible_connected_worker_ram_mb_for_pending_job(&job),
+            Some(128_540),
+            "The largest available worker is a busy x86_64-linux worker with 128540 MB total RAM."
         );
     }
 
@@ -2921,10 +3005,10 @@ mod tests {
     fn pending_job_visible_only_to_authorized_peer() {
         let peer_a = ProjectId::now_v7();
         let peer_b = ProjectId::now_v7();
-        let authorized = HashSet::from([peer_a]);
+        let authorized = ProjectAccess::OnlyListedProjects(HashSet::from([peer_a]));
 
-        assert!(visible_to(&eval_job(peer_a), Some(&authorized), None));
-        assert!(!visible_to(&eval_job(peer_b), Some(&authorized), None));
+        assert!(visible_to(&eval_job(peer_a), &authorized, None));
+        assert!(!visible_to(&eval_job(peer_b), &authorized, None));
     }
 
     #[test]
@@ -2933,7 +3017,7 @@ mod tests {
         let x86_caps = build_caps(&["x86_64-linux"], &[]);
         let visible = |architecture: &str| {
             let job = build_job_arch(peer, vec![], architecture, vec![]);
-            visible_to(&job, None, Some(&x86_caps))
+            visible_to(&job, &ProjectAccess::AllProjects, Some(&x86_caps))
         };
 
         assert!(visible("x86_64-linux"));
@@ -2960,7 +3044,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     "w1",
-                    None,
+                    &ProjectAccess::AllProjects,
                     Some(&no_fetch),
                     None,
                     &JobKind::Flake,
@@ -2988,7 +3072,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     "w2",
-                    None,
+                    &ProjectAccess::AllProjects,
                     Some(&with_fetch),
                     None,
                     &JobKind::Flake,
@@ -3022,7 +3106,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     "w1",
-                    None,
+                    &ProjectAccess::AllProjects,
                     Some(&eval_no_fetch),
                     None,
                     &JobKind::Flake,
@@ -3058,7 +3142,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     "w1",
-                    None,
+                    &ProjectAccess::AllProjects,
                     Some(&fetch_build),
                     None,
                     &JobKind::Flake,
@@ -3085,7 +3169,7 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind(
             "w1",
-            None,
+            &ProjectAccess::AllProjects,
             Some(&x86_caps),
             None,
             &JobKind::Build,
@@ -3127,7 +3211,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     worker,
-                    None,
+                    &ProjectAccess::AllProjects,
                     Some(caps),
                     None,
                     &JobKind::Build,
@@ -3162,7 +3246,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     "w1",
-                    None,
+                    &ProjectAccess::AllProjects,
                     Some(&no_kvm),
                     None,
                     &JobKind::Build,
@@ -3176,7 +3260,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     "w2",
-                    None,
+                    &ProjectAccess::AllProjects,
                     Some(&with_kvm),
                     None,
                     &JobKind::Build,
@@ -3198,7 +3282,16 @@ mod tests {
 
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[])
+                .take_best_of_kind(
+                    "w1",
+                    &ProjectAccess::AllProjects,
+                    None,
+                    None,
+                    &JobKind::Build,
+                    &p,
+                    &inst,
+                    &[]
+                )
                 .is_none()
         );
         let decisions = tracker.recent_decisions();
@@ -3216,7 +3309,16 @@ mod tests {
         tracker.add_pending("valid".into(), build_job(peer, vec![]));
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[])
+                .take_best_of_kind(
+                    "w1",
+                    &ProjectAccess::AllProjects,
+                    None,
+                    None,
+                    &JobKind::Build,
+                    &p,
+                    &inst,
+                    &[]
+                )
                 .is_some()
         );
         let decisions = tracker.recent_decisions();
@@ -3232,7 +3334,16 @@ mod tests {
         let p = gradient_pool::score::RulePolicy::new("test", vec![Box::new(PreferAndVeto)], false);
         let inst = gradient_pool::score::InstanceContext::default();
 
-        tracker.take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[]);
+        tracker.take_best_of_kind(
+            "w1",
+            &ProjectAccess::AllProjects,
+            None,
+            None,
+            &JobKind::Build,
+            &p,
+            &inst,
+            &[],
+        );
 
         let decisions = tracker.recent_decisions();
         let cand = &decisions[0].candidates[0];
@@ -3303,7 +3414,7 @@ mod tests {
 
         let assignment = tracker.take_best_of_kind(
             "w1",
-            None,
+            &ProjectAccess::AllProjects,
             None,
             Some(&holds_two),
             &JobKind::Build,
@@ -3340,7 +3451,7 @@ mod tests {
             tracker
                 .take_best_of_kind(
                     worker,
-                    None,
+                    &ProjectAccess::AllProjects,
                     None,
                     local_store,
                     &JobKind::Build,
@@ -3445,7 +3556,16 @@ mod tests {
         );
         let inst = gradient_pool::score::InstanceContext::default();
         tracker
-            .take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[])
+            .take_best_of_kind(
+                "w1",
+                &ProjectAccess::AllProjects,
+                None,
+                None,
+                &JobKind::Build,
+                &p,
+                &inst,
+                &[],
+            )
             .map(|a| a.job_id().to_owned())
     }
 
@@ -3523,7 +3643,7 @@ mod tests {
                 tracker
                     .take_best_of_kind(
                         "w1",
-                        None,
+                        &ProjectAccess::AllProjects,
                         Some(caps),
                         None,
                         &JobKind::Build,
@@ -3541,7 +3661,7 @@ mod tests {
         tracker.add_pending("heavy".into(), pending_build_with_60_gb_predicted_peak_ram);
 
         let worker_caps_with_ram_reserved_by_assigned_jobs =
-            build_worker(128_000, 128_000, 100_000).caps;
+            build_worker(128_000, 128_000, 100_000);
         assert_eq!(
             send_job_request_from_worker_w1_with_capabilities(
                 &mut tracker,
@@ -3559,7 +3679,7 @@ mod tests {
             tracker.add_pending(format!("older:{index:04}"), older_pending_build);
         }
 
-        let worker_capabilities_after_jobs_finished = build_worker(128_000, 128_000, 0).caps;
+        let worker_capabilities_after_jobs_finished = build_worker(128_000, 128_000, 0);
         assert_eq!(
             send_job_request_from_worker_w1_with_capabilities(
                 &mut tracker,
@@ -3579,8 +3699,16 @@ mod tests {
         let p = gradient_pool::score::RulePolicy::new("test", vec![Box::new(PreferAndVeto)], false);
         let inst = gradient_pool::score::InstanceContext::default();
 
-        let assignment =
-            tracker.take_best_of_kind("w1", None, None, None, &JobKind::Build, &p, &inst, &[]);
+        let assignment = tracker.take_best_of_kind(
+            "w1",
+            &ProjectAccess::AllProjects,
+            None,
+            None,
+            &JobKind::Build,
+            &p,
+            &inst,
+            &[],
+        );
 
         assert_eq!(
             assignment.map(|a| a.job_id().to_owned()).as_deref(),
@@ -3601,8 +3729,16 @@ mod tests {
 
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        let assignment =
-            tracker.take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[]);
+        let assignment = tracker.take_best_of_kind(
+            "w1",
+            &ProjectAccess::AllProjects,
+            None,
+            None,
+            &JobKind::Flake,
+            &*p,
+            &inst,
+            &[],
+        );
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
@@ -3621,7 +3757,7 @@ mod tests {
 
         tracker.take_best_of_kind(
             "w1",
-            None,
+            &ProjectAccess::AllProjects,
             None,
             None,
             &JobKind::Flake,
@@ -3631,7 +3767,7 @@ mod tests {
         );
         tracker.take_best_of_kind(
             "w1",
-            None,
+            &ProjectAccess::AllProjects,
             None,
             None,
             &JobKind::Flake,
@@ -3669,82 +3805,18 @@ mod tests {
 
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        let assignment =
-            tracker.take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[]);
+        let assignment = tracker.take_best_of_kind(
+            "w1",
+            &ProjectAccess::AllProjects,
+            None,
+            None,
+            &JobKind::Flake,
+            &*p,
+            &inst,
+            &[],
+        );
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id(), "j2");
-    }
-
-    #[test]
-    fn test_drain_peer_jobs_on_worker_aborts_only_revoked_project() {
-        let mut tracker = JobTracker::new();
-        let project_a = ProjectId::now_v7();
-        let project_b = ProjectId::now_v7();
-        tracker.add_pending("ja1".into(), eval_job(project_a));
-        tracker.add_pending("ja2".into(), eval_job(project_a));
-        tracker.add_pending("jb1".into(), eval_job(project_b));
-
-        tracker.take_best_of_kind(
-            "w1",
-            None,
-            None,
-            None,
-            &JobKind::Flake,
-            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
-            &gradient_pool::score::InstanceContext::default(),
-            &[],
-        );
-        tracker.take_best_of_kind(
-            "w1",
-            None,
-            None,
-            None,
-            &JobKind::Flake,
-            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
-            &gradient_pool::score::InstanceContext::default(),
-            &[],
-        );
-        tracker.take_best_of_kind(
-            "w1",
-            None,
-            None,
-            None,
-            &JobKind::Flake,
-            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
-            &gradient_pool::score::InstanceContext::default(),
-            &[],
-        );
-        assert_eq!(tracker.active_jobs().count(), 3);
-
-        let revoked = HashSet::from([project_a]);
-        let aborted = tracker.peer_jobs_on_worker("w1", &revoked);
-        aborted.iter().for_each(|id| assert!(id.starts_with("ja")));
-        aborted.iter().for_each(|id| tracker.release_to_pending(id));
-        assert_eq!(aborted.len(), 2);
-
-        assert_eq!(tracker.active_jobs().count(), 1);
-        assert_eq!(tracker.pending_count(), 2);
-    }
-
-    #[test]
-    fn test_drain_peer_jobs_on_worker_empty_revoked() {
-        let mut tracker = JobTracker::new();
-        let project_a = ProjectId::now_v7();
-        tracker.add_pending("j1".into(), eval_job(project_a));
-        tracker.take_best_of_kind(
-            "w1",
-            None,
-            None,
-            None,
-            &JobKind::Flake,
-            &*gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple),
-            &gradient_pool::score::InstanceContext::default(),
-            &[],
-        );
-
-        let aborted = tracker.peer_jobs_on_worker("w1", &HashSet::new());
-        assert!(aborted.is_empty());
-        assert_eq!(tracker.active_jobs().count(), 1);
     }
 
     #[test]
@@ -3757,7 +3829,7 @@ mod tests {
 
         tracker.take_best_of_kind(
             "w1",
-            None,
+            &ProjectAccess::AllProjects,
             None,
             None,
             &JobKind::Flake,
@@ -3785,7 +3857,7 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.take_best_of_kind(
             "w1",
-            None,
+            &ProjectAccess::AllProjects,
             None,
             None,
             &JobKind::Flake,
@@ -3993,7 +4065,16 @@ mod tests {
         let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[])
+                .take_best_of_kind(
+                    "w1",
+                    &ProjectAccess::AllProjects,
+                    None,
+                    None,
+                    &JobKind::Flake,
+                    &*p,
+                    &inst,
+                    &[]
+                )
                 .is_none()
         );
     }
@@ -4169,7 +4250,16 @@ mod tests {
         tracker.add_pending("single".into(), eval_job(peer));
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
-        tracker.take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[]);
+        tracker.take_best_of_kind(
+            "w1",
+            &ProjectAccess::AllProjects,
+            None,
+            None,
+            &JobKind::Flake,
+            &*p,
+            &inst,
+            &[],
+        );
         tracker.activate_members(
             attempt,
             vec![(
@@ -4286,7 +4376,16 @@ mod tests {
         let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
         let inst = gradient_pool::score::InstanceContext::default();
         let claimed = tracker
-            .take_best_of_kind("w1", None, None, None, &JobKind::Flake, &*p, &inst, &[])
+            .take_best_of_kind(
+                "w1",
+                &ProjectAccess::AllProjects,
+                None,
+                None,
+                &JobKind::Flake,
+                &*p,
+                &inst,
+                &[],
+            )
             .expect("w1 claims eval:x")
             .assignment_id();
         let reattached = DispatchedJobId::now_v7();
@@ -4300,5 +4399,42 @@ mod tests {
         assert!(!tracker.owns_dispatch("w1", "eval:x", DispatchedJobId::now_v7()));
         assert!(!tracker.owns_dispatch("w2", "eval:x", claimed));
         assert!(!tracker.owns_dispatch("w1", "eval:z", claimed));
+    }
+
+    #[test]
+    fn undoing_build_output_acceptance_allows_next_report_again_and_other_dispatch_id_has_no_effect()
+     {
+        let mut tracker = JobTracker::new();
+        let dispatch = DispatchedJobId::now_v7();
+        tracker.restore_active(
+            "w1",
+            Reattached::single(
+                "build:a".into(),
+                dispatch,
+                build_job(ProjectId::now_v7(), vec![]),
+            ),
+        );
+        let accepted = |tracker: &mut JobTracker| {
+            tracker
+                .accept_build_output_report_for_worker_job("w1", "build:a")
+                .map(|(id, _)| id)
+        };
+
+        assert_eq!(accepted(&mut tracker), Some(dispatch));
+        assert_eq!(accepted(&mut tracker), None);
+
+        tracker.clear_build_output_accepted_for_worker_job(
+            "w1",
+            "build:a",
+            DispatchedJobId::now_v7(),
+        );
+        assert_eq!(accepted(&mut tracker), None);
+
+        tracker.clear_build_output_accepted_for_worker_job("w2", "build:a", dispatch);
+        assert_eq!(accepted(&mut tracker), None);
+
+        tracker.clear_build_output_accepted_for_worker_job("w1", "build:a", dispatch);
+        assert_eq!(accepted(&mut tracker), Some(dispatch));
+        assert_eq!(accepted(&mut tracker), None);
     }
 }

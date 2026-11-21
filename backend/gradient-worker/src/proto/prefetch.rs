@@ -85,6 +85,21 @@ impl std::fmt::Display for SubstituteNotOnUpstream {
 
 impl std::error::Error for SubstituteNotOnUpstream {}
 
+#[derive(Debug)]
+pub struct UpstreamNarInfoMissingNarHash(pub String);
+
+impl std::fmt::Display for UpstreamNarInfoMissingNarHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = &self.0;
+        write!(
+            f,
+            "substitute {path}: upstream answer has no NAR hash, so the worker cannot verify the archive before import"
+        )
+    }
+}
+
+impl std::error::Error for UpstreamNarInfoMissingNarHash {}
+
 fn presigned_status_is_missing(status: u16) -> bool {
     matches!(status, 404 | 410)
 }
@@ -1002,7 +1017,7 @@ mod tests {
         );
         cp.file_size = Some(9);
 
-        let http = gradient_util::http::build_download_client().expect("download client");
+        let http = gradient_worker_client::http::build_download_client().expect("download client");
         let (path, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
             .await
             .expect("download");
@@ -1059,7 +1074,7 @@ mod tests {
         );
         cp.file_size = Some(227840);
 
-        let http = gradient_util::http::build_download_client().expect("download client");
+        let http = gradient_worker_client::http::build_download_client().expect("download client");
         let (path, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
             .await
             .expect("download");
@@ -1092,7 +1107,7 @@ mod tests {
         cp.nar_size = Some(nar.len() as u64);
         cp.nar_hash = Some(gradient_worker_client::nar::sha256_nix32(&nar));
 
-        let http = gradient_util::http::build_download_client().expect("download client");
+        let http = gradient_worker_client::http::build_download_client().expect("download client");
         let (_, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
             .await
             .expect("download");

@@ -13,6 +13,7 @@ use gradient_daemon::backend::{Backend, ConnInfo};
 use gradient_daemon::journal::Journal;
 use gradient_daemon::store_features_beyond_nix_daemon_protocol::StoreFeaturesBeyondDaemonProtocol;
 use gradient_db::cache_paths::{ServedPath, served_hashes, served_path};
+use gradient_db::store_path_content_variant_reader_choice::highest_ranked_trusted_content_variant_by_store_path_hash_for_project;
 use gradient_types::{OriginalStorePath, StorePathMapper};
 use gradient_util::nix_hash::normalize_nar_hash;
 use harmonia_protocol::daemon::wire::types2::{
@@ -29,6 +30,7 @@ use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathSet};
 use harmonia_store_path_info::NarHash;
 use harmonia_utils_hash::fmt::Any;
 use harmonia_utils_signature::Signature;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::{Future, ready};
 use std::pin::Pin;
@@ -47,6 +49,10 @@ impl SshBackend {
             session,
             journal: Journal::new(),
         }
+    }
+
+    pub fn session(&self) -> &Session {
+        &self.session
     }
 }
 
@@ -107,9 +113,42 @@ impl CacheStore {
     }
 
     async fn served_stored(&self, hash: &str) -> DaemonResult<Option<ServedPath>> {
-        served_path(&self.session.handles.db.web_db, &self.session.caches, hash)
+        let caches = self
+            .session
+            .readable_cache_ids_or_closed_error()
+            .map_err(err)?;
+        let Some(row) = served_path(&self.session.handles.db.web_db, caches, hash)
             .await
-            .map_err(err)
+            .map_err(err)?
+        else {
+            return Ok(None);
+        };
+        if row.package.ends_with(".drv")
+            && self
+                .store_path_hashes_with_trusted_content_variant(std::slice::from_ref(&row.hash))
+                .await?
+                .is_empty()
+        {
+            return Ok(None);
+        }
+        Ok(Some(row))
+    }
+
+    async fn store_path_hashes_with_trusted_content_variant(
+        &self,
+        hashes: &[String],
+    ) -> DaemonResult<HashSet<String>> {
+        if hashes.is_empty() {
+            return Ok(HashSet::new());
+        }
+        highest_ranked_trusted_content_variant_by_store_path_hash_for_project(
+            &self.session.handles.db.web_db,
+            self.session.project.id,
+            hashes,
+        )
+        .await
+        .map(|trusted| trusted.into_keys().collect())
+        .map_err(err)
     }
 
     async fn copy_in(
@@ -130,21 +169,16 @@ impl CacheStore {
 
     async fn path_info(&self, row: ServedPath) -> anyhow::Result<UnkeyedValidPathInfo> {
         let handles = &self.session.handles;
-        let nar_hash = row
-            .nar_hash
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("{} has no NAR hash", row.hash))?;
-        let nar_hash = normalize_nar_hash(nar_hash)
+        let nar_hash = normalize_nar_hash(&row.nar_hash)
             .parse::<Any<NarHash>>()
             .map_err(|e| anyhow::anyhow!("{}: {e}", row.hash))?
             .into_hash();
 
-        let references =
-            gradient_db::graph::runtime_closure::references_for_hash(&handles.db.web_db, &row.hash)
-                .await?
-                .iter()
-                .map(|r| original(&self.mapper, r))
-                .collect::<anyhow::Result<_>>()?;
+        let references = row
+            .referenced_store_paths
+            .iter()
+            .map(|r| original(&self.mapper, r))
+            .collect::<anyhow::Result<_>>()?;
 
         let signatures = row
             .signatures
@@ -169,7 +203,7 @@ impl CacheStore {
             nar_hash,
             references,
             registration_time: None,
-            nar_size: row.nar_size.unwrap_or_default() as u64,
+            nar_size: row.nar_size as u64,
             ultimate: false,
             signatures,
             ca: row.ca.as_deref().and_then(|ca| ca.parse().ok()),
@@ -204,23 +238,34 @@ impl DaemonStore for CacheStore {
         _substitute: bool,
     ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + 'a {
         async move {
-            let hashes: Vec<String> = paths
+            let stored_paths: Vec<_> = paths
                 .iter()
-                .map(|p| stored(&self.mapper, p).map(|s| s.hash().to_owned()))
+                .map(|p| stored(&self.mapper, p))
                 .collect::<anyhow::Result<_>>()
                 .map_err(err)?;
-            let served = served_hashes(
-                &self.session.handles.db.web_db,
-                &self.session.caches,
-                &hashes,
-            )
-            .await
-            .map_err(err)?;
+            let hashes: Vec<String> = stored_paths.iter().map(|s| s.hash().to_owned()).collect();
+            let caches = self
+                .session
+                .readable_cache_ids_or_closed_error()
+                .map_err(err)?;
+            let served = served_hashes(&self.session.handles.db.web_db, caches, &hashes)
+                .await
+                .map_err(err)?;
+            let served_derivations: Vec<String> = stored_paths
+                .iter()
+                .filter(|s| s.is_derivation() && served.contains(s.hash()))
+                .map(|s| s.hash().to_owned())
+                .collect();
+            let trusted = self
+                .store_path_hashes_with_trusted_content_variant(&served_derivations)
+                .await?;
 
             Ok(paths
                 .iter()
-                .zip(&hashes)
-                .filter(|(_, hash)| served.contains(*hash))
+                .zip(&stored_paths)
+                .filter(|(_, s)| {
+                    served.contains(s.hash()) && (!s.is_derivation() || trusted.contains(s.hash()))
+                })
                 .map(|(p, _)| p.clone())
                 .collect())
         }
@@ -261,14 +306,17 @@ impl DaemonStore for CacheStore {
     ) -> impl ResultLog<Output = DaemonResult<impl AsyncBufRead + Send + use<>>> + Send + 's {
         async move {
             let stored = stored(&self.mapper, path).map_err(err)?;
-            if self.served_stored(stored.hash()).await?.is_none() {
+            let Some(served) = self.served_stored(stored.hash()).await? else {
                 return Err(err(format!("{path} is not in the project caches")));
-            }
+            };
 
-            crate::nar::open_raw(&self.session.handles.db.storage.nar_storage, stored.hash())
-                .await
-                .map_err(err)?
-                .ok_or_else(|| err(format!("{path} has no stored NAR")))
+            crate::nar::open_raw(
+                &self.session.handles.db.storage.nar_storage,
+                &served.nar_object_storage_key,
+            )
+            .await
+            .map_err(err)?
+            .ok_or_else(|| err(format!("{path} has no stored NAR")))
         }
         .empty_logs()
     }
@@ -459,6 +507,7 @@ mod tests {
             gradient_fixtures::rows::project(),
             0,
             vec![CacheId::now_v7()],
+            true,
         )
         .await
         .unwrap();
@@ -487,16 +536,15 @@ mod tests {
                 Value::from(Some(format!("sha256:{}", "00".repeat(32)))),
             ),
             ("nar_size".to_owned(), Value::from(Some(42_i64))),
+            (
+                "nar_object_storage_key".to_owned(),
+                Value::from(format!("{HASH}-hello")),
+            ),
             ("deriver".to_owned(), Value::from(None::<String>)),
             ("ca".to_owned(), Value::from(None::<String>)),
             ("cache_name".to_owned(), Value::from("main")),
             ("signature".to_owned(), Value::from(vec![7_u8; 64])),
-        ])
-    }
-
-    fn references_row() -> BTreeMap<String, Value> {
-        BTreeMap::from([
-            ("hash".to_owned(), Value::from(HASH)),
+            ("id".to_owned(), Value::from(uuid::Uuid::nil())),
             (
                 "references".to_owned(),
                 Value::from(Some(format!("{HASH}-hello"))),
@@ -523,7 +571,6 @@ mod tests {
     async fn path_info_comes_from_the_project_caches() {
         let db = mock_db()
             .append_query_results([vec![served_row()]])
-            .append_query_results([vec![references_row()]])
             .into_connection();
         let (_server, mut client) = connect(session_over(db).await).await;
 
@@ -542,16 +589,12 @@ mod tests {
         let (original, stored) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
         let mut row = served_row();
         row.insert("hash".to_owned(), Value::from(stored));
-        let references = BTreeMap::from([
-            ("hash".to_owned(), Value::from(stored)),
-            (
-                "references".to_owned(),
-                Value::from(Some(format!("{stored}-hello"))),
-            ),
-        ]);
+        row.insert(
+            "references".to_owned(),
+            Value::from(Some(format!("{stored}-hello"))),
+        );
         let db = mock_db()
             .append_query_results([vec![row]])
-            .append_query_results([vec![references]])
             .into_connection();
         let session = session_in(
             TestState::new()
@@ -589,6 +632,36 @@ mod tests {
                 .expect("info")
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn access_recheck_database_error_closes_session_and_next_drv_query_does_not_read_cache_paths_or_reach_drv_trust_check_and_transaction_log_has_only_ssh_key_lookup()
+     {
+        let db = mock_db()
+            .append_query_errors([sea_orm::DbErr::Custom("connection lost".into())])
+            .into_connection();
+        let session = session_in(TestState::new().web_db(db.clone())).await;
+
+        assert!(
+            !crate::server::recheck_session_ssh_key_login_from_database_and_cancel_token_on_change_or_error(
+                &session,
+                "SHA256:known",
+            )
+            .await
+        );
+        assert!(session.closed.is_cancelled());
+
+        let (_server, mut client) = connect(session).await;
+        let drv = StorePath::from_base_path(&format!("{HASH}-hello.drv")).expect("path");
+        let paths: StorePathSet = [drv.clone()].into_iter().collect();
+        let valid = client.query_valid_paths(&paths, false).await;
+        assert!(valid.map_or(true, |valid| valid.is_empty()));
+        let info = client.query_path_info(&drv).await;
+        assert!(info.map_or(true, |info| info.is_none()));
+
+        let log = db.into_transaction_log();
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert!(format!("{log:?}").contains("user_ssh_key"), "{log:?}");
     }
 
     #[test]
@@ -669,6 +742,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_session_over_cache_c2_reads_nar_bytes_of_content_variant_served_by_c2() {
+        use gradient_fixtures::store_path_content_variants::{
+            FIRST_KEY, SECOND_KEY, SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+        };
+        use gradient_test_support::cache_fixture::create_temp_directory_with_one_file_and_get_zstd_compressed_nar;
+
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        let state = TestState::new().web_db(readers.db.connection()).build();
+        for (key, contents) in [
+            (FIRST_KEY, b"variant of project A"),
+            (SECOND_KEY, b"variant of project B"),
+        ] {
+            let object =
+                create_temp_directory_with_one_file_and_get_zstd_compressed_nar("file", contents)
+                    .await;
+            state.nar_storage.put(key, object).await.unwrap();
+        }
+        let project = gradient_entity::project::Model {
+            id: readers.project_b,
+            ..gradient_fixtures::rows::project()
+        };
+        let session = Session::open(
+            SshHandles::for_tests(&state),
+            gradient_fixtures::rows::user(),
+            project,
+            0,
+            vec![readers.cache_two],
+            true,
+        )
+        .await
+        .unwrap();
+        let (_server, mut client) = connect(Arc::new(session)).await;
+        let shared = StorePath::from_base_path(&format!("{SHARED}-shared")).expect("path");
+
+        let reader = client.nar_from_path(&shared).await.expect("nar");
+        let mut nar = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut std::pin::pin!(reader), &mut nar)
+            .await
+            .expect("read");
+
+        let nar = String::from_utf8_lossy(&nar);
+        assert!(
+            nar.contains("variant of project B") && !nar.contains("variant of project A"),
+            "Sessions over cache C2 read the bytes of the variant that C2 serves."
+        );
+        drop(client);
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
     async fn a_missing_opaque_path_fails_the_build() {
         let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -683,5 +806,124 @@ mod tests {
             err.to_string().contains("not in the project caches"),
             "{err}"
         );
+    }
+
+    #[tokio::test]
+    async fn ssh_session_copies_other_project_worker_derivation_when_reading_project_subscription_changes_to_write_only()
+     {
+        use gradient_entity::project_cache::CacheSubscriptionMode;
+        use gradient_fixtures::shape::shape;
+        use gradient_types::permissions::{Permission, mask_from};
+        use gradient_types::{EvaluationId, MProject};
+        use sea_orm::{ActiveEnum as _, ConnectionTrait as _};
+
+        const DEP_ATERM: &[u8] = include_bytes!("../testdata/input-addressed-dep.drv");
+        const DEP_PATH: &str = include_str!("../testdata/input-addressed-dep.drv.path");
+
+        let base = DEP_PATH.trim().trim_start_matches("/nix/store/");
+        let (drv_hash, drv_package) = base.split_once('-').expect("base path");
+        let (reading, building) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let cache = CacheId::now_v7();
+        let db = shape()
+            .evaluation(reading)
+            .into_cache(cache)
+            .evaluation(building)
+            .into_cache(cache)
+            .cached_path(drv_hash, drv_package)
+            .into_database()
+            .await;
+        db.connection()
+            .execute_unprepared(&format!(
+                "INSERT INTO cached_path_signature (id, cached_path, cache, signature, fetch_count, created_at) \
+                 SELECT uuidv7(), id, '{}', '\\x07', 0, now() FROM cached_path",
+                cache.into_inner()
+            ))
+            .await
+            .expect("Signature of .drv in Shared Cache");
+
+        let nar_storage_dir =
+            std::env::temp_dir().join(format!("gradient-ssh-drv-{}", uuid::Uuid::now_v7()));
+        let graph = gradient_graph::Graph::new();
+        let state = TestState::new()
+            .worker_db(db.connection())
+            .cache_db(db.connection())
+            .web_db(db.connection())
+            .nar_storage(
+                gradient_storage::NarStore::local(&nar_storage_dir).expect("local NAR storage"),
+            )
+            .graph(Arc::clone(&graph))
+            .build();
+        let _writer = graph
+            .spawn(state.db(), None, None)
+            .await
+            .expect("the graph writer starts");
+        let session = Arc::new(
+            Session::open(
+                SshHandles::for_tests(&state),
+                gradient_fixtures::rows::user(),
+                MProject {
+                    id: db.project_of(reading).await,
+                    ..gradient_fixtures::rows::project()
+                },
+                mask_from(&[Permission::TriggerEvaluation]),
+                vec![cache],
+                true,
+            )
+            .await
+            .expect("session"),
+        );
+        db.connection()
+            .execute_unprepared(&format!(
+                "UPDATE project_cache SET mode = {} WHERE project = '{}'",
+                CacheSubscriptionMode::WriteOnly.to_value(),
+                db.project_of(reading).await.into_inner()
+            ))
+            .await
+            .expect("The reading project can write to the shared cache but can't read from it while the session is open.");
+        let (_server, mut client) = connect(session.clone()).await;
+        let drv = StorePath::from_base_path(base).expect("path");
+
+        assert!(
+            !client.is_valid_path(&drv).await.expect("valid"),
+            "The project doesn't trust any stored variant of the `.drv`. The store can tell the client to copy the variant."
+        );
+
+        let nar = nar_of(DEP_ATERM).await;
+        client
+            .add_to_store_nar(
+                &ValidPathInfo {
+                    path: drv.clone(),
+                    info: UnkeyedValidPathInfo {
+                        deriver: None,
+                        nar_hash: NarHash::digest(&nar),
+                        references: Default::default(),
+                        registration_time: None,
+                        nar_size: nar.len() as u64,
+                        ultimate: false,
+                        signatures: Default::default(),
+                        ca: None,
+                        store_dir: StoreDir::default(),
+                    },
+                },
+                std::io::Cursor::new(nar),
+                false,
+                true,
+            )
+            .await
+            .expect("copy the .drv");
+
+        let read = crate::build_request::closure(
+            &crate::build_request::VerifiedProjectDrvSource { session: &session },
+            &[DEP_PATH.trim().to_owned()],
+        )
+        .await
+        .expect("A copy of the session can create a variant that the project can trust, so the build request can read the .drv.");
+        assert_eq!(
+            read.read_stored_derivation_path_and_derivation_file_record_pairs
+                .len(),
+            1
+        );
+        assert!(client.is_valid_path(&drv).await.expect("valid"));
+        db.finish().await;
     }
 }

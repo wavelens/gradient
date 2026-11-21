@@ -7,9 +7,7 @@
  * never-before-seen worker UUID and zero auth tokens.
  *
  * The expected result is `Reject` according to `docs/src/contributors/proto/connection.md` (`401` `unknown worker id or wrong token`).
- * If the server instead returns `InitAck`, an
- * unauthenticated client has been admitted in "open mode" (`PeerAuth::Open`,
- * backend/gradient-pool/src/peer_auth.rs).
+ * A reply of `InitAck` instead means the server did admit an unauthenticated client in open mode (`ProjectAccess::AllProjects`, backend/gradient-pool/src/project_access.rs).
  *
  * Usage: cargo run -p gradient-wire --example probe_handshake -- ws://127.0.0.1:3000/proto
  *

@@ -11,6 +11,10 @@ use crate::messages::FailedPeer;
 /// Two storage formats are verifiable in constant time. PHC strings like `$argon2id$...` are what
 /// new registrations are writing. Lowercase hex SHA-256 is a legacy format that no new row is
 /// using.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "gradient-wire can't depend on gradient-web, so the worker token check must call Argon2 directly."
+)]
 pub fn verify_token(token: &str, token_hash: &str) -> bool {
     if token_hash.starts_with('$') {
         password_auth::verify_password(token, token_hash).is_ok()
@@ -75,6 +79,10 @@ mod tests {
         hex::encode(Sha256::digest(s.as_bytes()))
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Test data require real Argon2 hashes. The password module of gradient-web is private, so tests cannot access that module."
+    )]
     fn argon2(s: &str) -> String {
         password_auth::generate_hash(s)
     }

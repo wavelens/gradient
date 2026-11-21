@@ -15,6 +15,7 @@ use crate::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
 use gradient_types::GitHostType;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 
 #[derive(Debug)]
 pub struct GitlabProvider;
@@ -26,7 +27,7 @@ impl GitHostProvider for GitlabProvider {
 
     fn build_reporter(
         &self,
-        http: reqwest::Client,
+        http: HttpClientForUserSuppliedUrls,
         endpoint_url: Option<&str>,
         token: Option<&str>,
     ) -> anyhow::Result<Arc<dyn CiReporter>> {

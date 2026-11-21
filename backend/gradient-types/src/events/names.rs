@@ -37,6 +37,8 @@ pub const FORK_PULL_REQUEST_APPROVAL_NEEDS_MAINTAINER_APPROVAL: &str =
     "fork_pull_request_approval.needs_maintainer_approval";
 pub const FORK_PULL_REQUEST_APPROVAL_EVALUATION_STARTED_AFTER_APPROVAL: &str =
     "fork_pull_request_approval.evaluation_started_after_approval";
+pub const FORK_PULL_REQUEST_APPROVAL_APPROVAL_WITHOUT_CHANGED_FILE_MATCHING_TRIGGER_PATH: &str =
+    "fork_pull_request_approval.approval_without_changed_file_matching_trigger_path";
 
 pub const CACHE_CHANGED: &str = "cache.changed";
 pub const CACHE_NAR_FETCHED: &str = "cache.nar.fetched";

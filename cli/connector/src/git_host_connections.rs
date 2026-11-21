@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    CreateGitHostConnectionRequest, GitHostConnectionOwner, GitHostConnectionResponse,
-    GitHostConnectionSummary, GitHostConnectionTaskResponse, GitHostConnectionTestResponse,
-    IncomingWebhookDeliveryResponse, PatchGitHostConnectionRequest,
+    CreateGitHostConnectionRequest, CreateRepositoryGrantRequest, GitHostConnectionOwner,
+    GitHostConnectionRepositoryGrantId, GitHostConnectionResponse, GitHostConnectionSummary,
+    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
+    PatchGitHostConnectionRequest, RepositoryGrantResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -186,6 +187,54 @@ impl GitHostConnections<'_> {
             Method::GET,
             owner,
             &format!("/{}/deliveries", encode_url_component(id)),
+        )?)
+        .await
+    }
+
+    pub async fn list_repository_grants_for_git_host_connection(
+        &self,
+        owner: &GitHostConnectionSetOwner,
+        id: &str,
+    ) -> Result<Vec<RepositoryGrantResponse>, ConnectorError> {
+        Self::send(self.request(
+            Method::GET,
+            owner,
+            &format!("/{}/repository-grants", encode_url_component(id)),
+        )?)
+        .await
+    }
+
+    pub async fn create_repository_grant(
+        &self,
+        owner: &GitHostConnectionSetOwner,
+        id: &str,
+        body: &CreateRepositoryGrantRequest,
+    ) -> Result<RepositoryGrantResponse, ConnectorError> {
+        Self::send(
+            self.request(
+                Method::PUT,
+                owner,
+                &format!("/{}/repository-grants", encode_url_component(id)),
+            )?
+            .json(body),
+        )
+        .await
+    }
+
+    pub async fn delete_repository_grant(
+        &self,
+        owner: &GitHostConnectionSetOwner,
+        id: &str,
+        repository_grant_uuid: &GitHostConnectionRepositoryGrantId,
+    ) -> Result<bool, ConnectorError> {
+        Self::send(self.request(
+            Method::DELETE,
+            owner,
+            &format!(
+                "/{}/repository-grants/{}",
+                encode_url_component(id),
+                repository_grant_uuid.0
+            ),
         )?)
         .await
     }

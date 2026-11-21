@@ -29,6 +29,7 @@ gradient-pool = { workspace = true }
 gradient-wire = { workspace = true }
 gradient-entity = { workspace = true }
 gradient-util = { workspace = true }
+gradient-wildcard = { workspace = true }
 ractor        = { workspace = true }
 
 anyhow     = { workspace = true }
@@ -51,6 +52,7 @@ git2 = { workspace = true }
 tempfile    = { workspace = true }
 gradient-fixtures = { workspace = true }
 gradient-graph = { workspace = true, features = ["testing"] }
+gradient-storage = { workspace = true, features = ["testing"] }
 gradient-test-support = { workspace = true }
 proptest    = { workspace = true }
 tokio       = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }

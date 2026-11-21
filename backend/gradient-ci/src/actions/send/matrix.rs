@@ -11,7 +11,7 @@ use crate::actions::summary::EventSummary;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
 use gradient_types::TaskActionId;
-use gradient_util::http_validation::validate_webhook_url;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
 
@@ -31,7 +31,7 @@ pub(crate) async fn execute_send_matrix_message(
     access_token: Option<&str>,
 ) -> Result<ExecutorOk> {
     let homeserver =
-        validate_webhook_url(homeserver).map_err(|e| anyhow!("homeserver rejected: {e}"))?;
+        reqwest::Url::parse(homeserver).map_err(|e| anyhow!("homeserver rejected: {e}"))?;
     let access_token = decrypt_with_server_key(
         ctx,
         access_token.ok_or_else(|| anyhow!("Matrix action has no access token"))?,
@@ -47,7 +47,7 @@ pub(crate) async fn execute_send_matrix_message(
         access_token: &access_token,
     };
     post_matrix_message(
-        gradient_util::http::public_client(),
+        &ctx.db.user_supplied_url_http_client,
         &room,
         &matrix_txn_id(action, event, at),
         &summary,
@@ -56,7 +56,7 @@ pub(crate) async fn execute_send_matrix_message(
 }
 
 pub(crate) async fn post_matrix_message(
-    http: &reqwest::Client,
+    http: &HttpClientForUserSuppliedUrls,
     room: &MatrixRoom<'_>,
     txn_id: &str,
     summary: &EventSummary,
@@ -82,7 +82,8 @@ pub(crate) async fn post_matrix_message(
         "formatted_body": summary.html(),
     });
     let resp = http
-        .put(url)
+        .request_builder_for_checked_url(reqwest::Method::PUT, url.as_str())
+        .map_err(|e| anyhow!("homeserver rejected: {e}"))?
         .bearer_auth(room.access_token)
         .json(&body)
         .send()

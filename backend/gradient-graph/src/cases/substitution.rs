@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::graph::repair::RepairScope;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::{Shape, shape};
 
 use super::{A, A_OUT, B, B_OUT, B_OUT2, C, C_OUT, C_OUT2, Case, D, D_OUT, commit_of, narinfo};
+use crate::messages::Transition;
 
 fn a_builds_with(evaluation: EvaluationId, outputs_of_b: &[&str]) -> Shape {
     shape()
@@ -528,6 +530,55 @@ async fn s11_a_shared_build_whose_output_our_cache_already_holds_becomes_availab
 }
 
 #[tokio::test]
+async fn r3_a_producer_whose_only_stored_output_variant_was_built_by_another_project_worker_is_not_cache_available_and_not_substituted()
+ {
+    let (other, e1) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(
+        shape()
+            .evaluation(other)
+            .cached_path(B_OUT, "b")
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .drv_cached()
+            .output(B_OUT)
+            .depends_on(C)
+            .derivation(C)
+            .walked()
+            .job()
+            .drv_cached()
+            .output(C_OUT)
+            .build_status(BuildStatus::Skipped),
+    )
+    .await;
+
+    case.upstream_probed(&[B]).await;
+
+    let b = case.sb(B).await;
+    assert!(
+        !b.cache_available,
+        "After 1: only a variant of another project is in the store, so sb(B) isn't cache_available"
+    );
+    assert_ne!(
+        b.status,
+        BuildStatus::Substituted,
+        "After 1: sb(B) does not have the Substituted status"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn s12_a_missing_output_needed_while_the_fetch_result_is_pending_turns_its_producer_after_the_result()
  {
     let e1 = EvaluationId::now_v7();
@@ -735,5 +786,126 @@ async fn s14_a_worker_claim_for_the_old_job_that_downloads_only_the_old_output_i
         "after 5: sb(D) status, blocking_deps"
     );
     case.zero_drift("step 5").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn s15_probe_answer_completes_runtime_input_makes_waiting_build_fetchable_and_parent_queued()
+{
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(D)
+            .derivation(D)
+            .walked()
+            .drv_cached()
+            .output(D_OUT)
+            .cached_output(D)
+            .references(&[(B_OUT, "b")])
+            .build_status(BuildStatus::Completed)
+            .runtime_depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .drv_cached()
+            .output(B_OUT)
+            .named_output(B_OUT2, "dev")
+            .cached_output(B),
+    )
+    .await;
+    assert_eq!(
+        case.closure_state(D).await,
+        (false, 1),
+        "after the seed: sb(D) fetchable, missing_runtime_deps"
+    );
+    assert_eq!(
+        case.queue_state(A).await,
+        (BuildStatus::Created, 1),
+        "after the seed: sb(A) status, blocking_deps"
+    );
+
+    case.upstream_probed(&[B]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.cache_available, b.unneeded_outputs),
+        (true, vec!["dev".to_owned()]),
+        "after 1: sb(B) cache_available, unneeded_outputs"
+    );
+    assert_eq!(
+        case.closure_state(D).await,
+        (true, 0),
+        "after 1: sb(D) fetchable, missing_runtime_deps"
+    );
+    assert_eq!(
+        case.queue_state(A).await,
+        (BuildStatus::Queued, 0),
+        "after 1: sb(A) status, blocking_deps"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn s16_graph_repair_marks_build_completed_when_cache_holds_output_and_queues_waiting_parent()
+{
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .probed()
+            .drv_cached()
+            .output(A_OUT)
+            .depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .drv_cached()
+            .output(B_OUT)
+            .cached_output(B),
+    )
+    .await;
+    assert_eq!(
+        case.closure_state(B).await,
+        (false, 0),
+        "after the seed: sb(B) fetchable, missing_runtime_deps"
+    );
+    assert_eq!(
+        case.queue_state(A).await,
+        (BuildStatus::Created, 1),
+        "after the seed: sb(A) status, blocking_deps"
+    );
+
+    case.transition(Transition::Repair {
+        scope: RepairScope::Eval(e1),
+    })
+    .await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.fetchable),
+        (BuildStatus::Completed, true),
+        "after 1: sb(B) status, fetchable"
+    );
+    assert_eq!(
+        case.queue_state(A).await,
+        (BuildStatus::Queued, 0),
+        "after 1: sb(A) status, blocking_deps"
+    );
+    case.zero_drift("step 1").await;
     case.finish().await;
 }

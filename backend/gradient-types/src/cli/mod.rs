@@ -23,6 +23,7 @@ mod metrics;
 mod nar;
 mod oidc;
 mod options;
+mod outbound;
 mod permissions;
 mod proto;
 mod pull_requests;
@@ -56,6 +57,7 @@ pub use options::{
     EffectiveConfigOption, OptionSpec, ServerOptionValueSource,
     collect_active_options_with_secret_values_hidden, options_json,
 };
+pub use outbound::OutboundConnectionArgs;
 pub use permissions::{CreatePermission, PermissionsArgs};
 pub use proto::ProtoArgs;
 pub use pull_requests::PullRequestsArgs;

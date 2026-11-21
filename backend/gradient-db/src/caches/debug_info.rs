@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::store_path_content_variant_reader_choice::cached_path_by_store_hash_subquery_sql;
 use gradient_entity::cached_path::{Entity as ECachedPath, Model as MCachedPath};
 use gradient_entity::ids::{CacheId, CachedPathId};
 use gradient_storage::NarStore;
@@ -14,23 +15,25 @@ use tracing::debug;
 
 const DEBUG_OUTPUT_SUFFIX: &str = "-debug";
 
-crate::sql! {
-    /// The `cached_path_signature` join is the access gate.
-    /// Its row is proving that the caller's authorised cache is holding the path.
-    LOOKUP_SQL = "SELECT cp.hash AS hash, d.member AS member \
-     FROM debug_info d \
-     JOIN cached_path cp ON cp.id = d.cached_path \
-     JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = $1 \
-     WHERE d.build_id = $2 AND cp.file_hash IS NOT NULL \
-     ORDER BY d.created_at DESC \
-     LIMIT 1",
+crate::sql_fn! {
+    LOOKUP_SQL = || format!(
+        "SELECT served.hash AS hash, d.member AS member \
+         FROM debug_info d \
+         JOIN cached_path cp ON cp.id = d.cached_path \
+         CROSS JOIN LATERAL ({served}) served \
+         WHERE d.build_id = $2 AND served.id = cp.id \
+         ORDER BY d.created_at DESC \
+         LIMIT 1",
+        served = cached_path_by_store_hash_subquery_sql("cp.hash", "$1::uuid"),
+    ),
         params = [CacheId, Text("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")];
+}
 
+crate::sql! {
     /// The `-debug` pattern is a literal to match the partial index on this predicate.
     /// A bound parameter would not match, and the sweep would seq-scan `cached_path`.
     PENDING_SQL = "SELECT * FROM cached_path \
      WHERE NOT debug_info_indexed AND package LIKE '%-debug' \
-       AND file_hash IS NOT NULL \
      ORDER BY created_at \
      LIMIT $1",
         params = [Int(32)],
@@ -80,16 +83,15 @@ pub async fn index_cached_path<C: ConnectionTrait>(
     db: &C,
     nar_storage: &NarStore,
     cached_path: CachedPathId,
-    hash: &str,
 ) -> anyhow::Result<usize> {
-    if !needs_index(db, cached_path).await? {
+    let Some(key) = unindexed_nar_object_storage_key(db, cached_path).await? else {
         return Ok(0);
-    }
+    };
 
-    let entries = match nar_storage.get_stream(hash).await? {
+    let entries = match nar_storage.get_stream(&key).await? {
         Some((_, stream)) => scan_build_ids(nar_reader_from_stream(stream)).await?,
         None => {
-            debug!(%hash, "debug index: NAR object absent; marking scanned");
+            debug!(%key, "debug index: NAR object absent; marking scanned");
             Vec::new()
         }
     };
@@ -105,7 +107,8 @@ pub async fn index_cached_path<C: ConnectionTrait>(
 }
 
 crate::sql! {
-    DEBUG_INFO_INDEXED_SELECT = "SELECT debug_info_indexed FROM cached_path WHERE id = $1",
+    UNINDEXED_NAR_OBJECT_STORAGE_KEY_SELECT = "SELECT nar_object_storage_key FROM cached_path \
+         WHERE id = $1 AND NOT debug_info_indexed",
         params = [CachedPathId];
 
     INSERT_DEBUG_INFO = "INSERT INTO debug_info (id, build_id, cached_path, member, created_at) \
@@ -118,17 +121,16 @@ crate::sql! {
         params = [CachedPathId];
 }
 
-async fn needs_index<C: ConnectionTrait>(db: &C, cached_path: CachedPathId) -> Result<bool, DbErr> {
-    let row = db
-        .query_one_raw(
-            DEBUG_INFO_INDEXED_SELECT.bind([Value::Uuid(Some(cached_path.into_inner()))]),
-        )
-        .await?;
-
-    match row {
-        Some(row) => Ok(!row.try_get::<bool>("", "debug_info_indexed")?),
-        None => Ok(false),
-    }
+async fn unindexed_nar_object_storage_key<C: ConnectionTrait>(
+    db: &C,
+    cached_path: CachedPathId,
+) -> Result<Option<String>, DbErr> {
+    db.query_one_raw(
+        UNINDEXED_NAR_OBJECT_STORAGE_KEY_SELECT.bind([Value::Uuid(Some(cached_path.into_inner()))]),
+    )
+    .await?
+    .map(|row| row.try_get("", "nar_object_storage_key"))
+    .transpose()
 }
 
 async fn insert_entries<C: ConnectionTrait>(
@@ -183,20 +185,41 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_lookup_is_gated_on_this_cache_holding_the_path() {
-        let sql = LOOKUP_SQL
-            .text()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+    #[tokio::test]
+    async fn find_debug_info_by_build_id_finds_all_cache_signed_content_variants_even_when_producer_is_untrusted()
+     {
+        use gradient_fixtures::store_path_content_variants::{
+            FIRST_KEY, UNTRUSTED, two_variants_of_one_hash_and_one_untrusted_hash,
+        };
+
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        readers
+            .db
+            .execute(&format!(
+                "INSERT INTO debug_info (id, build_id, cached_path, member, created_at) \
+                 SELECT uuidv7(), CASE WHEN hash = '{UNTRUSTED}' THEN 'untrusted-build-id' \
+                                       ELSE 'trusted-build-id' END, id, 'lib/debug/member', now() \
+                 FROM cached_path WHERE hash = '{UNTRUSTED}' OR nar_object_storage_key = '{FIRST_KEY}';"
+            ))
+            .await;
+        let conn = readers.db.connection();
+
+        let trusted = lookup_for_cache(&conn, readers.cache_one, "trusted-build-id")
+            .await
+            .expect("The trusted lookup ran.");
+        let untrusted = lookup_for_cache(&conn, readers.cache_one, "untrusted-build-id")
+            .await
+            .expect("The untrusted lookup ran");
+
         assert!(
-            sql.contains("JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = $1"),
-            "the cache gate must stay a join, not a filter that can be dropped: {sql}"
+            trusted.is_some(),
+            "Cache C1 served the variants that C1 trusted, so the lookup found the debug info."
         );
-        assert!(
-            sql.contains("cp.file_hash IS NOT NULL"),
-            "a path with no stored NAR has nothing to point at: {sql}"
+        assert_eq!(
+            untrusted.map(|target| target.hash),
+            Some(UNTRUSTED.to_owned()),
+            "Cache C1 signed the only variant of this hash. The lookup found the debug info for that variant, even though no projects that subscribe trust the producer of that variant."
         );
+        readers.db.finish().await;
     }
 }

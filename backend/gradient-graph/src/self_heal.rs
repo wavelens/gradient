@@ -6,6 +6,10 @@
 
 use anyhow::Result;
 use gradient_db::DbContext;
+use gradient_db::caches::demotion::{
+    StoreContentToRetire, diagnose_missing_input, object_exists_in_storage_or_error,
+};
+use gradient_db::store_path_content_variant_reader_choice::list_all_content_variant_rows_for_store_path_hashes;
 use gradient_types::*;
 use tracing::{info, warn};
 
@@ -22,6 +26,53 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
     false
 }
 
+async fn stored_content_with_missing_object(
+    ctx: &DbContext,
+    path: &str,
+    hash: &str,
+) -> Option<StoreContentToRetire> {
+    let variants = match list_all_content_variant_rows_for_store_path_hashes(
+        &ctx.worker_db,
+        &[hash.to_owned()],
+    )
+    .await
+    {
+        Ok(variants) => variants,
+        Err(e) => {
+            warn!(%path, error = %e, "missing input: content variant query failed");
+            return None;
+        }
+    };
+    if variants.is_empty() {
+        warn!(%path, hash, "missing input: no stored content variant");
+        return Some(StoreContentToRetire::StoreHashesWithGraphOutput(vec![
+            hash.to_owned(),
+        ]));
+    }
+
+    let mut missing = Vec::new();
+    for variant in &variants {
+        let object_present = object_exists_in_storage_or_error(ctx, variant).await;
+        match diagnose_missing_input(&ctx.worker_db, variant).await {
+            Ok(d) => warn!(
+                %path,
+                content_variant = %d.content_variant,
+                nar_object_storage_key = %d.nar_object_storage_key,
+                object_present,
+                outputs_total = d.outputs_total,
+                producer_statuses = ?d.producer_build_statuses,
+                "missing input: cache/build state at failure"
+            ),
+            Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
+        }
+        if !object_present {
+            missing.push(variant.id);
+        }
+    }
+
+    (!missing.is_empty()).then_some(StoreContentToRetire::OnlyTheseCachedPathIds(missing))
+}
+
 /// Present inputs stay, whoever reported them missing: a worker view of the cache can lag behind
 /// storage. Retire the `cached_path` row of a gone object. An immediate retry for its
 /// terminal-failed producer.
@@ -30,9 +81,7 @@ pub(crate) async fn repair_missing_inputs(
     failed_derivation: DerivationId,
     missing_paths: &[String],
 ) -> Result<()> {
-    use gradient_db::caches::demotion::{
-        DemoteWhen, demote_cached_output, object_exists_in_storage_or_error, unwalk_parents_of,
-    };
+    use gradient_db::caches::demotion::{DemoteWhen, demote_cached_output, unwalk_parents_of};
 
     let db = &ctx.worker_db;
     let mut purged = 0usize;
@@ -44,22 +93,15 @@ pub(crate) async fn repair_missing_inputs(
             continue;
         };
         let hash = stored.hash();
+        let Some(content) = stored_content_with_missing_object(ctx, path, hash).await else {
+            kept.push(path);
+            continue;
+        };
 
-        match gradient_db::caches::demotion::diagnose_missing_input(db, hash).await {
-            Ok(d) => warn!(
-                %path,
-                hash,
-                cached_path_present = d.cached_path_present,
-                fully_cached = d.fully_cached,
-                outputs_total = d.outputs_total,
-                producer_statuses = ?d.producer_build_statuses,
-                "missing input: cache/build state at failure"
-            ),
-            Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
-        }
-
-        let object_present = object_exists_in_storage_or_error(ctx, hash).await;
-        match demote_cached_output(ctx, hash, DemoteWhen::ObjectMissing, object_present).await {
+        match demote_cached_output(ctx, &content, DemoteWhen::ObjectMissing, false)
+            .await
+            .map(|demoted| demoted.producers)
+        {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
                 if !any_reachable(db, &drvs).await {

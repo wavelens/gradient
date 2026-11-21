@@ -6,6 +6,10 @@
 
 use crate::commands::builds::BuildClass;
 use crate::commands::git_host_connection::resolve_git_host_connection_available_to_project;
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand, NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES,
+    UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES,
+};
 use crate::commands::{completion, task_subcommands};
 use crate::config::*;
 use crate::input::{
@@ -23,16 +27,20 @@ use connector::api::{
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Select the task later commands act on, within the selected project
+    #[command(add = NOT_AVAILABLE_BECAUSE_COMMAND_USES_LOCAL_FILES)]
     Select {
         /// Task name
         #[arg(add = ArgValueCompleter::new(completion::complete_tasks))]
         task: String,
     },
     /// Show the selected task with its last evaluation and builds
+    #[command(add = McpToolMayRunCommand)]
     Show,
     /// Stream the logs of the selected task's last evaluation
+    #[command(add = McpToolMayRunCommand)]
     Log,
     /// Create a task in the selected project with missing fields opened in $EDITOR, then select it unless `--json` is set
+    #[command(add = McpToolMayRunCommand)]
     Create {
         /// Name
         #[arg(short, long)]
@@ -49,7 +57,7 @@ pub enum Commands {
         /// Flake attribute wildcard to evaluate
         #[arg(short = 'w', long)]
         wildcard: Option<String>,
-        /// Connection name or UUID of `gradient project git-host-connection list`. Omit this flag so the server can select the connection when exactly one connection can match the repository.
+        /// Connection name or UUID of `gradient project git-host-connection list`. Omit this flag so the server can select the connection when exactly one connection can match the repository. Team connections and instance connections apply only to a task in a project with a repository grant for that connection and for the task's repository. Team admins create grants for team connections. Superusers create grants for instance connections. Project connections need no grant. Team and instance connections without a grant do not take part in automatic selection.
         #[arg(long)]
         git_host_connection: Option<String>,
         /// Post commit status for task evaluations: true or false. Default: on if the connection can report status.
@@ -59,6 +67,7 @@ pub enum Commands {
         task_create_trigger_flags: TaskCreateTriggerFlags,
     },
     /// Copy the selected task and its settings, triggers, and actions to a new task for another branch.
+    #[command(add = McpToolMayRunCommand)]
     Duplicate {
         /// New task name
         #[arg(short, long)]
@@ -71,8 +80,10 @@ pub enum Commands {
         branch: String,
     },
     /// List the tasks of the selected project
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Edit the selected task
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// New name
         #[arg(short, long)]
@@ -91,14 +102,17 @@ pub enum Commands {
         wildcard: Option<String>,
     },
     /// Delete the selected task
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Delete without a confirmation prompt
         #[arg(short = 'y', long)]
         yes: bool,
     },
     /// Start an evaluation of the selected task
+    #[command(add = McpToolMayRunCommand)]
     Evaluate,
     /// Move the selected task to another project.
+    #[command(add = McpToolMayRunCommand)]
     Transfer {
         /// Name of the target project
         #[arg(add = ArgValueCompleter::new(completion::complete_projects))]
@@ -129,9 +143,11 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum TaskRepositoryCommands {
     /// Show the repository for the selected task, the connection to the Git host, commit status reports, and the latest webhook events.
+    #[command(add = McpToolMayRunCommand)]
     Show,
     /// Select the connection to the Git host for the selected task and turn commit status reports on or off. Flags not specified keep current values.
     #[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["connection", "no_connection", "report_status"])))]
+    #[command(add = McpToolMayRunCommand)]
     SetConnection {
         /// Connection name or UUID from the connections available in `gradient task repository show`
         #[arg(long, conflicts_with = "no_connection")]
@@ -144,23 +160,29 @@ pub enum TaskRepositoryCommands {
         report_status: Option<bool>,
     },
     /// Post a pending test commit status to the commit of the latest evaluation.
+    #[command(add = McpToolMayRunCommand)]
     CheckCommitStatus,
     /// Add the SSH key of the project as a read-only deploy key to the repository on the Git host
+    #[command(add = McpToolMayRunCommand)]
     InstallDeployKey,
     /// Create a webhook on the Git host to send repository events to Gradient.
+    #[command(add = McpToolMayRunCommand)]
     InstallWebhook,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum TaskActionCommands {
     /// List the actions for the selected task.
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Show Action
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Action name or UUID
         action: String,
     },
     /// Create an action. The output can only show the `send_web_request` action token, once.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Create {
         /// Action Name
         #[arg(short, long)]
@@ -176,6 +198,7 @@ pub enum TaskActionCommands {
         inactive: bool,
     },
     /// Change the action. Flags not specified keep their current values.
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Action name or UUID
         action: String,
@@ -193,11 +216,13 @@ pub enum TaskActionCommands {
         active: Option<bool>,
     },
     /// Delete action
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Action name or UUID
         action: String,
     },
     /// List past deliveries of the action
+    #[command(add = McpToolMayRunCommand)]
     Deliveries {
         /// Action name or UUID
         action: String,
@@ -209,6 +234,7 @@ pub enum TaskActionCommands {
         offset: Option<u64>,
     },
     /// Show delivery with request body and response body.
+    #[command(add = McpToolMayRunCommand)]
     Delivery {
         /// Action name or UUID
         action: String,
@@ -216,6 +242,7 @@ pub enum TaskActionCommands {
         delivery: String,
     },
     /// Run the action right now with a test event. Actions for a Git host only check the connection.
+    #[command(add = McpToolMayRunCommand)]
     Test {
         /// Action name or UUID
         action: String,
@@ -225,13 +252,16 @@ pub enum TaskActionCommands {
 #[derive(Subcommand, Debug)]
 pub enum FlakeInputCommands {
     /// List the flake input overrides of the selected task
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Display override settings for flake inputs
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Name of the flake input, or the UUID of the override
         input: String,
     },
     /// Override flake inputs for evaluation of the selected task
+    #[command(add = McpToolMayRunCommand)]
     Create {
         /// Name of the flake input (e.g. nixpkgs)
         input_name: String,
@@ -240,6 +270,7 @@ pub enum FlakeInputCommands {
         url: Option<String>,
     },
     /// Change the override for a flake input.
+    #[command(add = McpToolMayRunCommand)]
     Edit {
         /// Name of the flake input, or the UUID of the override
         input: String,
@@ -254,6 +285,7 @@ pub enum FlakeInputCommands {
         clear_url: bool,
     },
     /// Delete flake input overrides
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Name of the flake input, or the UUID of the override
         input: String,
@@ -263,13 +295,16 @@ pub enum FlakeInputCommands {
 #[derive(Subcommand, Debug)]
 pub enum TaskTriggerCommands {
     /// List the triggers for the selected task.
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Show trigger
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Trigger UUID
         trigger: String,
     },
     /// Create a trigger
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Create {
         /// Specify the trigger configuration as JSON with a `type` field. An example is '{"type":"time","cron":"0 3 * * *"}'
         #[arg(short, long)]
@@ -279,6 +314,7 @@ pub enum TaskTriggerCommands {
         inactive: bool,
     },
     /// Change the trigger. Omitted flags keep their current value.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Edit {
         /// Trigger UUID
         trigger: String,
@@ -290,21 +326,25 @@ pub enum TaskTriggerCommands {
         active: Option<bool>,
     },
     /// Delete Trigger
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Trigger UUID
         trigger: String,
     },
     /// Fire the trigger now against the task's current head commit.
+    #[command(add = McpToolMayRunCommand)]
     Test {
         /// Trigger UUID
         trigger: String,
     },
     /// Set the trigger to default. Manual evaluations use that branch.
+    #[command(add = McpToolMayRunCommand)]
     Default {
         /// Trigger UUID
         trigger: String,
     },
     /// Replace the secret of the post_request trigger. Invalidate the old secret immediately.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     RotateTriggerSecret {
         /// Trigger UUID
         trigger: String,

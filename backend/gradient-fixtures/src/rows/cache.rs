@@ -87,6 +87,7 @@ pub fn project_cache_link(
         id,
         project,
         cache,
+        sign_outputs: mode.writes_build_outputs_to_cache(),
         mode,
         ..Default::default()
     }

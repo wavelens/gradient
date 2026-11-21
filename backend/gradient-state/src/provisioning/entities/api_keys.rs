@@ -23,20 +23,17 @@ impl<'a> StateApplicator<'a> {
         &self,
         state_api_keys: &HashMap<String, StateApiKey>,
     ) -> Result<(), DynError> {
-        let user_lookup = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
         let project_lookup = self.project_lookup().await?;
         let now = now();
 
         for state_api_key in state_api_keys.values() {
-            let owned_by_id = user_lookup
-                .get(&state_api_key.owned_by)
-                .copied()
-                .ok_or_else(|| {
-                    format!(
-                        "User '{}' not found for API key '{}'",
-                        state_api_key.owned_by, state_api_key.name
-                    )
-                })?;
+            let Some(owned_by_id) = state_users.resolve_username_to_user_id(
+                &state_api_key.owned_by,
+                &format!("API key '{}' owner", state_api_key.name),
+            ) else {
+                continue;
+            };
 
             let mask = project_permission_bitmask_from_wire_names(state_api_key)?;
             let cache_mask = parse_cache_permission_names_to_bitmask(state_api_key)?;
@@ -169,11 +166,15 @@ mod tests {
     async fn state_api_key_cache_permissions_are_provisioned() {
         let db = TestDatabase::create().await;
         let connection = db.connection();
-        let owner = rows::user()
-            .into_active_model()
-            .insert(&connection)
-            .await
-            .unwrap();
+        let owner = MUser {
+            account_origin: AccountOrigin::DeclaredInStateFile,
+            managed: true,
+            ..rows::user()
+        }
+        .into_active_model()
+        .insert(&connection)
+        .await
+        .unwrap();
         let credentials_dir =
             std::env::temp_dir().join(format!("gradient-state-{}", ApiId::now_v7()));
         std::fs::create_dir_all(&credentials_dir).unwrap();
@@ -182,11 +183,13 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
         )
         .unwrap();
+        let transaction = sea_orm::TransactionTrait::begin(&connection).await.unwrap();
         let app = StateApplicator {
-            db: &connection,
+            db: &transaction,
             crypt_secret_file: "",
             credentials_dir: &credentials_dir,
             email_enabled: false,
+            user_url_destination_allowlist: &Default::default(),
         };
 
         let applied = app
@@ -204,6 +207,7 @@ mod tests {
             .await;
         std::fs::remove_dir_all(&credentials_dir).unwrap();
         applied.unwrap();
+        transaction.commit().await.unwrap();
 
         let key = db
             .rows::<api::Entity>()

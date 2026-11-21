@@ -11,6 +11,7 @@ pub enum ConnectorError {
         message: String,
     },
     Unauthorized,
+    WebBrowserSignInRequired,
     Transport(reqwest::Error),
     Decode(serde_json::Error),
     Io(std::io::Error),
@@ -24,6 +25,9 @@ impl fmt::Display for ConnectorError {
                 write!(f, "api error ({}): {}", status.as_u16(), message)
             }
             Self::Unauthorized => f.write_str("unauthorized: token missing or rejected"),
+            Self::WebBrowserSignInRequired => f.write_str(
+                "This operation needs a session from sign-in on the web interface. The browser flow of `gradient login` can't sign in for this operation. API keys don't work either. Run the operation on the web interface, or sign in with `gradient login --username <USERNAME>` if the account has a password.",
+            ),
             Self::Transport(e) => write!(f, "transport error: {}", e),
             Self::Decode(e) => write!(f, "decode error: {}", e),
             Self::Io(e) => write!(f, "io error: {}", e),

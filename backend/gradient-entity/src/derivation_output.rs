@@ -54,6 +54,6 @@ impl ActiveModelBehavior for ActiveModel {}
 impl Model {
     pub fn store_path(&self) -> Option<crate::store_path::StorePath> {
         let (hash, package) = (self.hash.as_ref()?, self.package.as_ref()?);
-        Some(crate::store_path::StorePath::from_stored(hash, package))
+        Some(crate::store_path::StorePath::from_hash_and_name_without_validation(hash, package))
     }
 }

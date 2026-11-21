@@ -131,7 +131,7 @@ fn adopt_address(addresses: &GuestAddresses, state: &GuestState) -> Option<Addre
     let address = state.address.as_deref()?;
     let lease = addresses.adopt(address);
     if lease.is_none() {
-        warn!(guest = %state.guest_id, %address, "guest address is outside exec.subnet or held twice");
+        warn!(guest = %state.guest_id, %address, "guest address is outside exec.subnet.v4 or held twice");
     }
     lease
 }

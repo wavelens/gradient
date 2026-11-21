@@ -6,6 +6,11 @@
 
 use crate::reporter::parse_owner_repo;
 use gradient_types::GitHostType;
+pub use gradient_types::git_host::repository_host;
+use gradient_types::git_host::{
+    check_task_repository_url_host_matches_git_host_connection_host,
+    host_name_of_git_host_type_and_base_url,
+};
 
 pub struct GitHostConnectionAddress<'a> {
     pub git_host_type: GitHostType,
@@ -15,24 +20,15 @@ pub struct GitHostConnectionAddress<'a> {
 
 impl GitHostConnectionAddress<'_> {
     pub fn expected_host(&self) -> Option<String> {
-        match (self.base_url, self.git_host_type) {
-            (Some(base_url), _) => url_host(base_url),
-            (None, GitHostType::GitHub) => Some("github.com".to_owned()),
-            (None, GitHostType::GitLab) => Some("gitlab.com".to_owned()),
-            (None, GitHostType::Gitea | GitHostType::Forgejo) => None,
-        }
+        host_name_of_git_host_type_and_base_url(self.git_host_type, self.base_url)
     }
 
     pub fn check_repository(&self, repository: &str) -> Result<(), String> {
-        let host = repository_host(repository)
-            .ok_or_else(|| format!("Can't read the host of {repository}"))?;
-        if let Some(expected) = self.expected_host()
-            && expected != host
-        {
-            return Err(format!(
-                "Repository host {host} does not match connection host {expected}."
-            ));
-        }
+        check_task_repository_url_host_matches_git_host_connection_host(
+            repository,
+            self.git_host_type,
+            self.base_url,
+        )?;
         let Some((owner, _)) = parse_owner_repo(repository) else {
             return Err(format!(
                 "Can't read the owner and repository from {repository}"
@@ -49,40 +45,10 @@ impl GitHostConnectionAddress<'_> {
     }
 }
 
-pub fn repository_host(repository: &str) -> Option<String> {
-    let lower = repository.trim().to_ascii_lowercase();
-    let lower = lower.strip_prefix("git+").unwrap_or(&lower);
-    if lower.starts_with("github:") {
-        Some("github.com".to_owned())
-    } else if lower.starts_with("gitlab:") {
-        Some("gitlab.com".to_owned())
-    } else {
-        url_host(repository)
-    }
-}
-
-pub fn url_host(url: &str) -> Option<String> {
-    let s = url.trim();
-    let s = s.strip_prefix("git+").unwrap_or(s);
-
-    let authority = match ["https://", "http://", "ssh://", "git://"]
-        .iter()
-        .find_map(|scheme| s.strip_prefix(scheme))
-    {
-        Some(rest) => rest.split(['/', '?', '#']).next().unwrap_or(""),
-        None => s.split_once(':')?.0,
-    };
-    if authority.contains('/') {
-        return None;
-    }
-    let host_and_port = authority.rsplit('@').next().unwrap_or(authority);
-    let host = host_and_port.split(':').next().unwrap_or("");
-    (!host.is_empty()).then(|| host.to_ascii_lowercase())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_types::git_host::url_host;
 
     #[test]
     fn host_parsing_covers_url_shapes() {
@@ -103,5 +69,18 @@ mod tests {
             repository_host("git+github:acme/infra").as_deref(),
             Some("github.com")
         );
+    }
+
+    #[test]
+    fn check_repository_rejects_gitea_connection_without_base_url() {
+        let address = GitHostConnectionAddress {
+            git_host_type: GitHostType::Gitea,
+            base_url: None,
+            github_app_account: None,
+        };
+        let reason = address
+            .check_repository("https://git.example.com/acme/infra")
+            .unwrap_err();
+        assert!(reason.contains("has no base URL"), "{reason}");
     }
 }

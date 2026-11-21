@@ -8,7 +8,8 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::permissions::{
-    CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
+    CachePermission, Permission, PermissionMask, cache_mask_grants, cache_mask_to_vec, mask_grants,
+    mask_to_vec,
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
@@ -16,9 +17,10 @@ use gradient_db::access::CacheRoleAndPermissionMask;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
-use gradient_types::ids::{CacheId, ProjectId, UserId};
+use gradient_types::ids::{CacheId, ExecJobId, ProjectId, TaskId, UserId};
 use gradient_types::{
-    CProjectUser, EProjectUser, MCache, MProject, MProjectUser, MTask, MTeam, MUser, TeamRole,
+    CProjectUser, EProjectUser, MCache, MEvaluation, MProject, MProjectUser, MTask, MTeam, MUser,
+    TeamRole,
 };
 use sea_orm::Condition;
 use sea_orm::sea_query::Expr;
@@ -44,6 +46,16 @@ pub(crate) enum AccessRefusal {
         .0.iter().map(|p| format!("\"{}\"", p.permission_label())).collect::<Vec<_>>().join(", ")
     )]
     MissingUpstreamCacheStorePermissions(Vec<CachePermission>),
+    #[error(
+        "Users can grant or remove only project permissions that they have. Missing - {}.",
+        .0.iter().map(|p| format!("\"{}\"", p.permission_label())).collect::<Vec<_>>().join(", ")
+    )]
+    MissingProjectPermissions(Vec<Permission>),
+    #[error(
+        "A caller can grant or revoke only cache permissions that belong to that caller. Missing - {}.",
+        .0.iter().map(|p| format!("\"{}\"", p.permission_label())).collect::<Vec<_>>().join(", ")
+    )]
+    MissingCachePermissions(Vec<CachePermission>),
 }
 
 impl Refusal for AccessRefusal {
@@ -56,7 +68,11 @@ impl Refusal for AccessRefusal {
             Self::MissingProjectPermission(permission)
             | Self::MissingServerWidePermission(permission) => vec![permission.as_wire_name()],
             Self::MissingCachePermission(permission) => vec![permission.as_wire_name()],
-            Self::MissingUpstreamCacheStorePermissions(permissions) => {
+            Self::MissingUpstreamCacheStorePermissions(permissions)
+            | Self::MissingCachePermissions(permissions) => {
+                permissions.iter().map(|p| p.as_wire_name()).collect()
+            }
+            Self::MissingProjectPermissions(permissions) => {
                 permissions.iter().map(|p| p.as_wire_name()).collect()
             }
             Self::CachePinnedKeyOnEndpoint
@@ -121,6 +137,7 @@ pub enum TaskAccess {
 #[derive(Clone, Copy)]
 pub enum CacheAccess {
     Readable,
+    ReadStoreAllowed,
     Require {
         permission: CachePermission,
         reject_managed: bool,
@@ -150,38 +167,35 @@ pub async fn load_project(
         .await?
         .or_not_found(label)?;
 
-    match access {
-        ProjectAccess::Readable { .. } => {
-            if !project.public {
-                let visible = match caller.user_id() {
-                    Some(uid) => can_view_project(&db.web_db, uid, project.id, api_key).await?,
-                    None => false,
-                };
-                if !visible {
-                    return Err(WebError::not_found(label));
-                }
-            }
-        }
-        ProjectAccess::Member { reject_managed } => {
-            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !can_view_project(&db.web_db, uid, project.id, api_key).await? {
-                return Err(WebError::not_found(label));
-            }
-            if reject_managed {
-                reject_managed_project(&project)?;
-            }
-        }
+    let (requirement, reject_managed) = match access {
+        ProjectAccess::Readable { .. } => (
+            ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+            false,
+        ),
+        ProjectAccess::Member { reject_managed } => (
+            ProjectItemAccessRequirement::ProjectMemberOnlyViewProject,
+            reject_managed,
+        ),
         ProjectAccess::Require {
             permission,
             reject_managed,
-        } => {
-            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            require_project_permission(&db.web_db, uid, project.id, permission, label, api_key)
-                .await?;
-            if reject_managed {
-                reject_managed_project(&project)?;
-            }
-        }
+        } => (
+            ProjectItemAccessRequirement::IncludesPermission(permission),
+            reject_managed,
+        ),
+    };
+    can_access_project_resource(
+        &db.web_db,
+        caller,
+        api_key,
+        &project,
+        ProjectItemLocation::ProjectAsWhole,
+        requirement,
+        label,
+    )
+    .await?;
+    if reject_managed {
+        reject_managed_project(&project)?;
     }
 
     Ok(project)
@@ -205,38 +219,124 @@ pub async fn load_task(
         .await?
         .or_not_found(label)?;
 
-    match access {
-        TaskAccess::Readable => {
-            if !project.public {
-                let visible = match caller.user_id() {
-                    Some(uid) => can_view_project(&db.web_db, uid, project.id, api_key).await?,
-                    None => false,
-                };
-                if !visible {
-                    return Err(WebError::not_found(label));
-                }
-            }
-        }
-        TaskAccess::Member => {
-            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !can_view_project(&db.web_db, uid, project.id, api_key).await? {
-                return Err(WebError::not_found(label));
-            }
-        }
+    let (requirement, reject_managed) = match access {
+        TaskAccess::Readable => (
+            ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+            false,
+        ),
+        TaskAccess::Member => (
+            ProjectItemAccessRequirement::ProjectMemberOnlyViewProject,
+            false,
+        ),
         TaskAccess::Require {
             permission,
             reject_managed,
-        } => {
-            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            require_project_permission(&db.web_db, uid, project.id, permission, label, api_key)
-                .await?;
-            if reject_managed && task.managed {
-                return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Task).into());
-            }
-        }
+        } => (
+            ProjectItemAccessRequirement::IncludesPermission(permission),
+            reject_managed,
+        ),
+    };
+    let resource = ProjectItemLocation::ItemInTask {
+        task: task.id,
+        parent_exec_job: None,
+    };
+    can_access_project_resource(
+        &db.web_db,
+        caller,
+        api_key,
+        &project,
+        resource,
+        requirement,
+        label,
+    )
+    .await?;
+    if reject_managed && task.managed {
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Task).into());
     }
 
     Ok((project, task))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectItemAccessRequirement {
+    PublicProjectOrCanViewProject,
+    ProjectMemberOnlyViewProject,
+    IncludesPermission(Permission),
+    CanAbortRunningWork,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectItemLocation {
+    ProjectAsWhole,
+    ItemInTask {
+        task: TaskId,
+        parent_exec_job: Option<ExecJobId>,
+    },
+}
+
+impl ProjectItemLocation {
+    pub fn from_evaluation(evaluation: &MEvaluation) -> WebResult<Self> {
+        let task = evaluation.task.ok_or_else(|| {
+            tracing::warn!(evaluation_id = %evaluation.id, "evaluation has no task");
+            WebError::data_inconsistency(Resource::Evaluation)
+        })?;
+        Ok(Self::ItemInTask {
+            task,
+            parent_exec_job: evaluation.parent_exec_job,
+        })
+    }
+}
+
+/// The one access check for anything in a project. The API key cap and the task binding of a job
+/// token apply before any requirement. Private projects also need ViewProject and a caller
+/// without it gets the same 404 as for a missing row.
+/// An instance admin can bypass project permissions only to abort running work.
+pub async fn can_access_project_resource(
+    db: &WebDb,
+    caller: Caller<'_>,
+    api_key: Option<&ApiKeyContext>,
+    project: &MProject,
+    resource: ProjectItemLocation,
+    requirement: ProjectItemAccessRequirement,
+    label: Resource,
+) -> WebResult<()> {
+    use ProjectItemAccessRequirement::*;
+
+    if api_key
+        .and_then(|key| key.job_binding)
+        .is_some_and(|binding| !binding.allows_resource(resource))
+    {
+        return Err(WebError::not_found(label));
+    }
+    match (requirement, caller) {
+        (PublicProjectOrCanViewProject, _) if project.public => return Ok(()),
+        (CanAbortRunningWork, Caller::User(user)) if user.superuser => return Ok(()),
+        _ => {}
+    }
+
+    let Some(user_id) = caller.user_id() else {
+        return Err(WebError::not_found(label));
+    };
+    let mask = load_membership_with_permissions(db, user_id, project.id, api_key).await?;
+    let can_view = mask.is_some_and(|mask| mask_grants(mask, Permission::ViewProject));
+    let permission = match requirement {
+        PublicProjectOrCanViewProject | ProjectMemberOnlyViewProject => {
+            return if can_view {
+                Ok(())
+            } else {
+                Err(WebError::not_found(label))
+            };
+        }
+        IncludesPermission(permission) => permission,
+        CanAbortRunningWork => Permission::TriggerEvaluation,
+    };
+    if !project.public && !can_view {
+        return Err(WebError::not_found(label));
+    }
+    match mask {
+        Some(mask) if mask_grants(mask, permission) => Ok(()),
+        _ => Err(AccessRefusal::MissingProjectPermission(permission).into()),
+    }
 }
 
 pub async fn load_cache(
@@ -260,6 +360,17 @@ pub async fn load_cache(
     }
 
     match access {
+        CacheAccess::ReadStoreAllowed => {
+            if !cache.public {
+                let allowed = match caller.user_id() {
+                    Some(uid) => can_read_store(&db.web_db, uid, cache.id, api_key).await?,
+                    None => false,
+                };
+                if !allowed {
+                    return Err(WebError::not_found(label));
+                }
+            }
+        }
         CacheAccess::Readable => {
             if !cache.public {
                 let visible = match caller.user_id() {
@@ -415,25 +526,6 @@ pub async fn caller_project_mask(
     )
 }
 
-pub(crate) async fn require_project_permission(
-    db: &WebDb,
-    user_id: UserId,
-    project_id: ProjectId,
-    permission: Permission,
-    not_found_label: Resource,
-    api_key: Option<&ApiKeyContext>,
-) -> WebResult<()> {
-    let mask = load_membership_with_permissions(db, user_id, project_id, api_key)
-        .await?
-        .ok_or_else(|| WebError::not_found(not_found_label))?;
-
-    if !mask_grants(mask, permission) {
-        return Err(AccessRefusal::MissingProjectPermission(permission).into());
-    }
-
-    Ok(())
-}
-
 fn reject_managed_project(project: &MProject) -> WebResult<()> {
     if project.managed {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Project).into());
@@ -462,12 +554,8 @@ async fn is_cache_project_subscriber(
         return Ok(false);
     }
 
-    let subscriber_projects: Vec<ProjectId> =
-        gradient_db::projects::caches::subscriptions_to(db, cache_id)
-            .await?
-            .into_iter()
-            .map(|oc| oc.project)
-            .collect();
+    let subscriber_projects =
+        gradient_db::projects::caches::project_ids_with_read_access_to_cache(db, cache_id).await?;
 
     let allowed: Vec<ProjectId> = match api_key.and_then(|k| k.project) {
         Some(pinned) => subscriber_projects
@@ -569,6 +657,17 @@ pub async fn caller_cache_mask(
         .unwrap_or(0))
 }
 
+pub(crate) async fn can_read_store(
+    db: &WebDb,
+    user_id: UserId,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<bool> {
+    Ok(effective_cache_mask(db, user_id, cache_id, api_key)
+        .await?
+        .is_some_and(|mask| cache_mask_grants(mask, CachePermission::ReadStore)))
+}
+
 pub async fn has_cache_permission(
     db: &WebDb,
     user_id: UserId,
@@ -597,6 +696,34 @@ async fn require_cache_permission(
         return Err(AccessRefusal::MissingCachePermission(permission).into());
     }
 
+    Ok(())
+}
+
+pub async fn load_caller_project_permissions_and_require_can_grant(
+    db: &WebDb,
+    caller: Caller<'_>,
+    project_id: ProjectId,
+    api_key: Option<&ApiKeyContext>,
+    granted: PermissionMask,
+) -> WebResult<()> {
+    let missing = granted & !caller_project_mask(db, caller, project_id, api_key).await?;
+    if missing != 0 {
+        return Err(AccessRefusal::MissingProjectPermissions(mask_to_vec(missing)).into());
+    }
+    Ok(())
+}
+
+pub async fn ensure_cache_permissions_are_subset_of_caller_permissions(
+    db: &WebDb,
+    caller: Caller<'_>,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+    granted: PermissionMask,
+) -> WebResult<()> {
+    let missing = granted & !caller_cache_mask(db, caller, cache_id, api_key).await?;
+    if missing != 0 {
+        return Err(AccessRefusal::MissingCachePermissions(cache_mask_to_vec(missing)).into());
+    }
     Ok(())
 }
 
@@ -1205,7 +1332,152 @@ mod tests {
             project,
             cache_pin: None,
             allowed_ips: Vec::new(),
+            job_binding: None,
         }
+    }
+
+    fn job_token_ctx(task: TaskId, exec_job: ExecJobId) -> ApiKeyContext {
+        ApiKeyContext {
+            job_binding: Some(crate::authorization::JobTokenTaskAndExecJobIds { task, exec_job }),
+            ..api_key_ctx(
+                mask_from(Permission::ALL),
+                Some(project_fixture(true, false).id),
+            )
+        }
+    }
+
+    #[test]
+    fn job_token_cannot_read_item_in_other_task_of_same_project() {
+        run(async {
+            let user = user_fixture();
+            let key = job_token_ctx(TaskId::now_v7(), ExecJobId::now_v7());
+            let state = make_state(mock_db().into_connection());
+            let resource = ProjectItemLocation::ItemInTask {
+                task: TaskId::now_v7(),
+                parent_exec_job: None,
+            };
+            let err = can_access_project_resource(
+                &state.web_db,
+                Caller::User(&user),
+                Some(&key),
+                &project_fixture(true, false),
+                resource,
+                ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+                Resource::Evaluation,
+            )
+            .await
+            .expect_err("a job token is bound to its own task");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn job_token_can_read_evaluation_started_by_its_own_exec_job() {
+        run(async {
+            let user = user_fixture();
+            let exec_job = ExecJobId::now_v7();
+            let key = job_token_ctx(TaskId::now_v7(), exec_job);
+            let state = make_state(mock_db().into_connection());
+            let resource = ProjectItemLocation::ItemInTask {
+                task: TaskId::now_v7(),
+                parent_exec_job: Some(exec_job),
+            };
+            let result = can_access_project_resource(
+                &state.web_db,
+                Caller::User(&user),
+                Some(&key),
+                &project_fixture(true, false),
+                resource,
+                ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+                Resource::Evaluation,
+            )
+            .await;
+            assert!(result.is_ok(), "{:?}", result.err());
+        });
+    }
+
+    #[test]
+    fn superuser_without_project_role_gets_404_for_trigger_evaluation_but_can_abort() {
+        run(async {
+            let user = MUser {
+                superuser: true,
+                ..user_fixture()
+            };
+            let db = mock_db()
+                .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let project = project_fixture(false, false);
+            let check = |requirement| {
+                can_access_project_resource(
+                    &state.web_db,
+                    Caller::User(&user),
+                    None,
+                    &project,
+                    ProjectItemLocation::ProjectAsWhole,
+                    requirement,
+                    Resource::ExecJob,
+                )
+            };
+            let err = check(ProjectItemAccessRequirement::IncludesPermission(
+                Permission::TriggerEvaluation,
+            ))
+            .await
+            .expect_err("a superuser holds no project permission");
+            assert!(matches!(err, WebError::NotFound(..)));
+            check(ProjectItemAccessRequirement::CanAbortRunningWork)
+                .await
+                .expect("a superuser may stop running work");
+        });
+    }
+
+    fn check_project_access_for_api_key_with_only_trigger_evaluation_permission(
+        public: bool,
+        requirement: ProjectItemAccessRequirement,
+    ) -> WebResult<()> {
+        run(async {
+            let user = user_fixture();
+            let key = api_key_ctx(Permission::TriggerEvaluation.bit(), None);
+            let db = mock_db()
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
+                .into_connection();
+            let state = make_state(db);
+            can_access_project_resource(
+                &state.web_db,
+                Caller::User(&user),
+                Some(&key),
+                &project_fixture(public, false),
+                ProjectItemLocation::ProjectAsWhole,
+                requirement,
+                Resource::ExecJob,
+            )
+            .await
+        })
+    }
+
+    #[test]
+    fn api_key_without_view_project_gets_not_found_for_every_action_on_private_project() {
+        for requirement in [
+            ProjectItemAccessRequirement::IncludesPermission(Permission::TriggerEvaluation),
+            ProjectItemAccessRequirement::CanAbortRunningWork,
+        ] {
+            let err = check_project_access_for_api_key_with_only_trigger_evaluation_permission(
+                false,
+                requirement,
+            )
+            .expect_err("Private projects require ViewProject for all actions.");
+            assert!(matches!(err, WebError::NotFound(..)), "{requirement:?}");
+        }
+    }
+
+    #[test]
+    fn public_project_action_does_not_need_view_project_permission() {
+        check_project_access_for_api_key_with_only_trigger_evaluation_permission(
+            true,
+            ProjectItemAccessRequirement::IncludesPermission(Permission::TriggerEvaluation),
+        )
+        .expect("Public projects are visible without ViewProject.");
     }
 
     #[test]
@@ -1509,6 +1781,7 @@ mod tests {
             project: None,
             cache_pin: Some(cache_fixture(false).id),
             allowed_ips: Vec::new(),
+            job_binding: None,
         }
     }
 
@@ -1583,6 +1856,35 @@ mod tests {
     }
 
     #[test]
+    fn api_key_with_only_view_cache_permission_cannot_open_private_cache_read_connection() {
+        run(async {
+            let user = user_fixture();
+            let key = ApiKeyContext {
+                cache_permission_mask: gradient_types::permissions::cache_mask_from(&[
+                    CachePermission::ViewCache,
+                ]),
+                ..cache_view_api_key()
+            };
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_view_fixture()]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&key),
+                "test-cache".into(),
+                CacheAccess::ReadStoreAllowed,
+            )
+            .await
+            .expect_err("a key without readStore must not download from the cache");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
     fn cache_member_allows_member() {
         run(async {
             let user = user_fixture();
@@ -1632,16 +1934,11 @@ mod tests {
         });
     }
 
-    fn project_cache_fixture() -> gradient_entity::project_cache::Model {
-        gradient_entity::project_cache::Model {
-            id: gradient_types::ids::ProjectCacheId::new(uuid!(
-                "a0000000-0000-0000-0000-000000000040"
-            )),
-            project: ProjectId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
-            cache: gradient_types::ids::CacheId::new(uuid!("a0000000-0000-0000-0000-000000000020")),
-            mode: gradient_entity::project_cache::CacheSubscriptionMode::ReadOnly,
-            ..Default::default()
-        }
+    fn project_id_only_mock_row() -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
+        std::collections::BTreeMap::from([(
+            "project",
+            membership_fixture(BASE_ROLE_VIEW_ID).project.into(),
+        )])
     }
 
     #[test]
@@ -1673,7 +1970,7 @@ mod tests {
             let user = user_fixture();
             let db = mock_db()
                 .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
-                .append_query_results([vec![project_cache_fixture()]])
+                .append_query_results([vec![project_id_only_mock_row()]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
             let state = make_state(db);
@@ -1743,6 +2040,7 @@ mod tests {
             ))),
             cache_pin: None,
             allowed_ips: Vec::new(),
+            job_binding: None,
         }
     }
 
@@ -1826,7 +2124,7 @@ mod tests {
             let api_key = api_key_ctx(mask_from(&[Permission::ViewProject]), None);
             let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
-                .append_query_results([vec![project_cache_fixture()]])
+                .append_query_results([vec![project_id_only_mock_row()]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
             let state = make_state(db);
@@ -1872,7 +2170,7 @@ mod tests {
             let api_key = api_key_context_for_fixed_test_project();
             let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
-                .append_query_results([vec![project_cache_fixture()]])
+                .append_query_results([vec![project_id_only_mock_row()]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
             let state = make_state(db);
@@ -1911,20 +2209,13 @@ mod tests {
     }
 
     #[test]
-    fn cache_visibility_filter_covers_created_direct_and_project_caches() {
-        use sea_orm::QueryTrait;
-        let sql = ECache::find()
-            .filter(gradient_db::caches::visible_to_user(UserId::now_v7()))
-            .build(DatabaseBackend::Postgres)
-            .to_string();
-        for name in [
-            "created_by",
-            "cache_access",
-            "project_access",
-            "project_cache",
-        ] {
+    fn cache_visibility_filter_covers_direct_and_project_caches_but_not_the_creator() {
+        let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
+        let sql = listed_sql(false, Some(visible));
+        for name in ["cache_access", "project_access", "project_cache"] {
             assert!(sql.contains(name), "{name} missing from sql = {sql}");
         }
+        assert!(!sql.contains("created_by"), "sql = {sql}");
     }
 
     fn listed_sql(public_listing: bool, visible: Option<Condition>) -> String {
@@ -1942,7 +2233,7 @@ mod tests {
         let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
         let sql = listed_sql(true, Some(visible));
         assert!(sql.contains("\"public\" = TRUE"), "sql = {sql}");
-        assert!(sql.contains("created_by"), "sql = {sql}");
+        assert!(!sql.contains("created_by"), "sql = {sql}");
     }
 
     #[test]
@@ -1950,7 +2241,7 @@ mod tests {
         let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
         let sql = listed_sql(false, Some(visible));
         assert!(!sql.contains("\"public\""), "sql = {sql}");
-        assert!(sql.contains("created_by"), "sql = {sql}");
+        assert!(!sql.contains("created_by"), "sql = {sql}");
     }
 
     #[test]
@@ -2001,5 +2292,209 @@ mod tests {
             read_access_view,
             "visibility must be read from project_access"
         );
+    }
+
+    async fn insert_user_private_cache_project_member_and_subscription(
+        db: &sea_orm::DatabaseConnection,
+        cache_active: bool,
+        mode: gradient_entity::project_cache::CacheSubscriptionMode,
+    ) -> MUser {
+        use gradient_fixtures::rows;
+        let user = gradient_db::rows::insert::<gradient_types::EUser, _>(db, rows::user())
+            .await
+            .expect("Insert a user.");
+        gradient_db::rows::insert::<ECache, _>(
+            db,
+            gradient_entity::cache::Model {
+                active: cache_active,
+                public: false,
+                ..rows::cache()
+            },
+        )
+        .await
+        .expect("The cache write succeeded.");
+        let project = gradient_db::rows::insert::<gradient_types::EProject, _>(db, rows::project())
+            .await
+            .expect("The write of the project row finished.");
+        gradient_db::rows::insert::<gradient_types::ERole, _>(db, rows::view_role())
+            .await
+            .expect("The role was written");
+        gradient_db::rows::insert::<gradient_types::EProjectUser, _>(
+            db,
+            rows::project_member(BASE_ROLE_VIEW_ID),
+        )
+        .await
+        .expect("The member row write succeeds.");
+        gradient_db::rows::insert::<gradient_types::EProjectCache, _>(
+            db,
+            rows::project_cache_link(
+                gradient_types::ids::ProjectCacheId::now_v7(),
+                project.id,
+                rows::cache().id,
+                mode,
+            ),
+        )
+        .await
+        .expect("The subscription write completed.");
+        user
+    }
+
+    async fn load_cache_readable_and_permission_mask_for_user(
+        db: &sea_orm::DatabaseConnection,
+        user: &MUser,
+    ) -> (bool, Option<i64>) {
+        let state = make_state(db.clone());
+        let readable = load_cache(
+            &state.db(),
+            Caller::User(user),
+            None,
+            gradient_fixtures::rows::cache().name,
+            CacheAccess::Readable,
+        )
+        .await
+        .is_ok();
+        let mask = effective_cache_mask(
+            &state.web_db,
+            user.id,
+            gradient_fixtures::rows::cache().id,
+            None,
+        )
+        .await
+        .expect("Value read from the mask");
+        (readable, mask)
+    }
+
+    #[tokio::test]
+    async fn write_only_private_cache_subscription_gives_project_member_no_cache_permission_mask_and_no_readable_access()
+     {
+        let test_db = gradient_fixtures::database::TestDatabase::create().await;
+        let db = test_db.connection();
+        let user = insert_user_private_cache_project_member_and_subscription(
+            &db,
+            true,
+            gradient_entity::project_cache::CacheSubscriptionMode::WriteOnly,
+        )
+        .await;
+
+        let cache_readable_and_effective_permission_mask =
+            load_cache_readable_and_permission_mask_for_user(&db, &user).await;
+
+        assert_eq!(cache_readable_and_effective_permission_mask, (false, None));
+        test_db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_read_write_project_member_gets_no_permissions_for_inactive_private_cache() {
+        let test_db = gradient_fixtures::database::TestDatabase::create().await;
+        let db = test_db.connection();
+        let user = insert_user_private_cache_project_member_and_subscription(
+            &db,
+            false,
+            gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
+        )
+        .await;
+
+        let cache_readable_and_effective_permission_mask =
+            load_cache_readable_and_permission_mask_for_user(&db, &user).await;
+
+        assert_eq!(cache_readable_and_effective_permission_mask, (false, None));
+        test_db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_project_member_with_read_only_or_read_write_project_subscription_gets_view_cache_and_read_store_mask_and_can_open_active_private_cache_as_readable()
+     {
+        for mode in [
+            gradient_entity::project_cache::CacheSubscriptionMode::ReadOnly,
+            gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
+        ] {
+            let test_db = gradient_fixtures::database::TestDatabase::create().await;
+            let db = test_db.connection();
+            let user =
+                insert_user_private_cache_project_member_and_subscription(&db, true, mode.clone())
+                    .await;
+
+            let cache_readable_and_effective_permission_mask =
+                load_cache_readable_and_permission_mask_for_user(&db, &user).await;
+
+            assert_eq!(
+                cache_readable_and_effective_permission_mask,
+                (true, Some(crate::permissions::cache_view_mask())),
+                "{mode:?}"
+            );
+            test_db.finish().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn project_member_with_write_only_subscription_and_direct_cache_write_role_keeps_role_permissions()
+     {
+        let test_db = gradient_fixtures::database::TestDatabase::create().await;
+        let db = test_db.connection();
+        let user = insert_user_private_cache_project_member_and_subscription(
+            &db,
+            true,
+            gradient_entity::project_cache::CacheSubscriptionMode::WriteOnly,
+        )
+        .await;
+        gradient_db::rows::insert::<gradient_types::ECacheUser, _>(
+            &db,
+            gradient_fixtures::rows::cache_member(gradient_types::consts::BASE_CACHE_ROLE_WRITE_ID),
+        )
+        .await
+        .expect("Cache member written");
+
+        let cache_readable_and_effective_permission_mask =
+            load_cache_readable_and_permission_mask_for_user(&db, &user).await;
+
+        assert_eq!(
+            cache_readable_and_effective_permission_mask,
+            (true, Some(crate::permissions::cache_write_mask()))
+        );
+        test_db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn project_member_with_read_write_subscription_to_inactive_private_cache_and_direct_admin_role_keeps_cache_admin_permissions()
+     {
+        let test_db = gradient_fixtures::database::TestDatabase::create().await;
+        let db = test_db.connection();
+        let user = insert_user_private_cache_project_member_and_subscription(
+            &db,
+            false,
+            gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
+        )
+        .await;
+        gradient_db::rows::insert::<gradient_types::ECacheUser, _>(
+            &db,
+            gradient_fixtures::rows::cache_member(gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID),
+        )
+        .await
+        .expect("Wrote member as cache admin");
+
+        let cache_readable_and_effective_permission_mask =
+            load_cache_readable_and_permission_mask_for_user(&db, &user).await;
+        let cache_load_with_manage_cache_settings_permission_succeeded = load_cache(
+            &make_state(db.clone()).db(),
+            Caller::User(&user),
+            None,
+            gradient_fixtures::rows::cache().name,
+            CacheAccess::Require {
+                permission: CachePermission::ManageCacheSettings,
+                reject_managed: false,
+            },
+        )
+        .await
+        .is_ok();
+
+        assert!(
+            matches!(
+                cache_readable_and_effective_permission_mask,
+                (true, Some(mask)) if cache_mask_grants(mask, CachePermission::ManageCacheSettings)
+            ),
+            "{cache_readable_and_effective_permission_mask:?}"
+        );
+        assert!(cache_load_with_manage_cache_settings_permission_succeeded);
+        test_db.finish().await;
     }
 }

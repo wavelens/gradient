@@ -4,14 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::input::client_from_config;
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand,
+    UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES,
+};
+use crate::input::{client_from_config, selected_project};
 use crate::output::{ExitKind, Output};
-use clap::{Args, Subcommand};
+use clap::{ArgGroup, Args, Subcommand};
 use connector::Client;
 use connector::api::{
-    CreateGitHostConnectionRequest, GitHostConnectionId, GitHostConnectionOwner,
-    GitHostConnectionResponse, GitHostConnectionSummary, IncomingWebhookDeliveryResponse,
-    IndexName, PatchGitHostConnectionRequest,
+    CreateGitHostConnectionRequest, CreateRepositoryGrantRequest, GitHostConnectionId,
+    GitHostConnectionOwner, GitHostConnectionRepositoryGrantId, GitHostConnectionResponse,
+    GitHostConnectionSummary, IncomingWebhookDeliveryResponse, IndexName,
+    PatchGitHostConnectionRequest, RepositoryGrantResponse,
 };
 use connector::git_host_connections::GitHostConnectionSetOwner;
 
@@ -56,8 +61,10 @@ impl GitHostConnectionArgs {
 #[derive(Subcommand, Debug)]
 pub enum GitHostConnectionSubcommands {
     /// List connections to Git hosts that the owner can use.
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Create a connection to a Git host. One-time display of the generated webhook secret.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Create {
         /// Connection Name
         #[arg(short, long)]
@@ -72,11 +79,13 @@ pub enum GitHostConnectionSubcommands {
         settings: GitHostConnectionArgs,
     },
     /// Display one connection to a Git host.
+    #[command(add = McpToolMayRunCommand)]
     Show {
         /// Connection name or UUID
         connection: String,
     },
-    /// Change the connection to the Git host. Flags that aren't specified keep their current values.
+    /// Change the connection to the Git host. Flags that aren't specified keep their current values. Changes to `--host-type` or to the scheme, host or port of `--base-url` delete the stored access token, OAuth refresh token and webhook secret. A new `--access-token` and a new `--secret` in the same edit remain stored. A new access token does not keep the old webhook secret.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Edit {
         /// Connection name or UUID
         connection: String,
@@ -90,24 +99,66 @@ pub enum GitHostConnectionSubcommands {
         settings: GitHostConnectionArgs,
     },
     /// Remove the connection to the Git host. Tasks that use the connection stop reporting commit status.
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Connection name or UUID
         connection: String,
     },
     /// List the latest 50 webhook deliveries that reached the connection, newest first.
+    #[command(add = McpToolMayRunCommand)]
     Deliveries {
         /// Connection name or UUID
         connection: String,
     },
     /// Sign in to the Git host with the stored access token and print the account or the error from the host.
+    #[command(add = McpToolMayRunCommand)]
     Test {
         /// Connection name or UUID
         connection: String,
     },
     /// List the tasks that use the connection.
+    #[command(add = McpToolMayRunCommand)]
     Tasks {
         /// Connection name or UUID
         connection: String,
+    },
+    /// Manage which projects can use this instance connection or team connection on which repositories.
+    RepositoryGrants {
+        /// Connection name or UUID
+        connection: String,
+        #[command(subcommand)]
+        cmd: GitHostConnectionRepositoryGrantSubcommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GitHostConnectionRepositoryGrantSubcommands {
+    /// List the repository grants of a connection.
+    #[command(add = McpToolMayRunCommand)]
+    List,
+    /// Tasks in the selected project can use this connection on one repository or on all repositories of an owner. The command can return an error for an existing grant.
+    #[command(add = McpToolMayRunCommand)]
+    #[command(group(
+        ArgGroup::new("repository_selection_group")
+            .required(true)
+            .args(["repository_name", "all_repositories"])
+    ))]
+    Create {
+        /// Owner of a repository on a Git host (for example, an organization)
+        #[arg(long)]
+        repository_owner: String,
+        /// Repository name on the Git host. Conflicts with `--all-repositories`.
+        #[arg(long)]
+        repository_name: Option<String>,
+        /// Apply to all repositories of the owner, not one repository.
+        #[arg(long)]
+        all_repositories: bool,
+    },
+    /// Delete a repository grant. Tasks in that project can no longer use connections on that repository.
+    #[command(add = McpToolMayRunCommand)]
+    Delete {
+        /// UUID of the repository grant
+        repository_grant_uuid: GitHostConnectionRepositoryGrantId,
     },
 }
 
@@ -242,6 +293,88 @@ pub fn print_incoming_webhook_delivery_line(
         "{} {} {} {}{repository}{detail}",
         delivery.created_at, delivery.event, delivery.status_code, delivery.result
     ));
+}
+
+fn print_repository_grant_line(out: Output, grant: &RepositoryGrantResponse) {
+    let repository_name = grant
+        .repository_name
+        .as_deref()
+        .unwrap_or("* (all repositories)");
+    let project = grant
+        .project_name
+        .clone()
+        .unwrap_or_else(|| grant.project.to_string());
+    out.human(format!(
+        "{}/{repository_name} {project} {}: {}",
+        grant.repository_owner, grant.source, grant.id.0
+    ));
+}
+
+fn exit_with_usage_error_if_repository_grant_connection_owner_is_project(
+    owner: &GitHostConnectionSetOwner,
+    out: Output,
+) {
+    if matches!(owner, GitHostConnectionSetOwner::Project(_)) {
+        out.err(
+            ExitKind::Usage,
+            "Repository grants exist only for instance connections and team connections. Use `--owner instance` or `--owner team/<name>`.",
+        );
+    }
+}
+
+async fn run_repository_grant_subcommand_for_resolved_connection(
+    cmd: GitHostConnectionRepositoryGrantSubcommands,
+    client: &Client,
+    owner: &GitHostConnectionSetOwner,
+    id: &str,
+    out: Output,
+) {
+    let connections = client.git_host_connections();
+    match cmd {
+        GitHostConnectionRepositoryGrantSubcommands::List => {
+            let grants = connections
+                .list_repository_grants_for_git_host_connection(owner, id)
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&grants);
+            if grants.is_empty() {
+                out.human("No repository grants.");
+            }
+            grants
+                .iter()
+                .for_each(|grant| print_repository_grant_line(out, grant));
+        }
+
+        GitHostConnectionRepositoryGrantSubcommands::Create {
+            repository_owner,
+            repository_name,
+            all_repositories: _,
+        } => {
+            let body = CreateRepositoryGrantRequest {
+                project: selected_project(out),
+                repository_owner,
+                repository_name,
+            };
+            let created = connections
+                .create_repository_grant(owner, id, &body)
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&created);
+            out.human("Created a repository grant.");
+            print_repository_grant_line(out, &created);
+        }
+
+        GitHostConnectionRepositoryGrantSubcommands::Delete {
+            repository_grant_uuid,
+        } => {
+            let deleted = connections
+                .delete_repository_grant(owner, id, &repository_grant_uuid)
+                .await
+                .unwrap_or_else(|e| out.fail(e));
+            out.ok(&deleted);
+            out.human("Removed the repository grant.");
+        }
+    }
 }
 
 async fn resolve_git_host_connection_uuid_from_name_or_uuid(
@@ -407,6 +540,12 @@ pub async fn run_git_host_connection_subcommand(
             out.ok(&updated);
             out.human("Updated the connection to the Git host.");
             print_git_host_connection_fields(out, &updated);
+            if let Some(secret) = &updated.generated_secret {
+                out.human(format!("Webhook secret: {secret}"));
+                out.human(
+                    "Store the webhook secret in a safe place. There's no way to show it again. Enter it in the webhook settings of the Git host.",
+                );
+            }
         }
 
         GitHostConnectionSubcommands::Delete { connection } => {
@@ -499,6 +638,19 @@ pub async fn run_git_host_connection_subcommand(
                     on_off(task.report_status)
                 ));
             }
+        }
+
+        GitHostConnectionSubcommands::RepositoryGrants { connection, cmd } => {
+            exit_with_usage_error_if_repository_grant_connection_owner_is_project(&owner, out);
+            let id = resolve_git_host_connection_uuid_from_name_or_uuid(
+                &client,
+                &owner,
+                &connection,
+                out,
+            )
+            .await;
+            run_repository_grant_subcommand_for_resolved_connection(cmd, &client, &owner, &id, out)
+                .await;
         }
     }
 }

@@ -11,8 +11,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `domain` | string | - | - | Domain under which Gradient is reachable. |
 | `enable` | bool | `false` | - | Whether to enable Gradient, a Nix-CI for Teams. |
 | `environmentVariables` | lazy attribute set of (null or bool or int or string or path) | `{ }` | - | Environment variables of the Gradient server. The [configuration reference](https://wavelens.github.io/gradient/reference/configuration) lists every variable and its default. Set a variable to `null` to unset it. Secrets belong into `secrets`. |
+| `grantLocalWorkerToNewProjects` | bool | `false` | - | Set whether all new projects receive a local worker on this host. A local worker can access the Nix store, the network, and files that belong to user `gradient-worker` on the server host. Default: `false`. Admins use that default to add a local worker to a project by granting team `server` with the workers flag enabled for that project. |
 | `listenAddr` | string | `"127.0.0.1"` | `GRADIENT_LISTEN_ADDR` | IP address for the Gradient server to listen on. |
-| `localWorker` | bool | `worker.enable` | - | Whether to register the `worker` on this host automatically, with an ID from the hostname and a token and peers file from the first start. The state-declared team `server` is part of every new project. |
+| `localWorker` | bool | `worker.enable` | - | Whether to automatically register `worker` on this host with an ID based on the hostname, a token from first boot and a peer file. The worker is part of team `server` declared in the state. Jobs for projects on that worker run on the server host and can reach the Nix store and network of that host. Administrators can allow the worker per project, or `grantLocalWorkerToNewProjects` can give the worker to every new project. Only superusers can create projects by default after that. See `permissions.createProject`. |
 | `port` | port | `3000` | `GRADIENT_PORT` | Port for the Gradient server to listen on. |
 | `publicListing` | bool | `true` | `GRADIENT_PUBLIC_LISTING` | Whether to list public projects and caches to everyone. Set this option to `false` for `404` from `GET /api/v1/projects/public` and `GET /api/v1/caches/public`. Search operations skip public items. These items don't have the user's membership, share, subscription, or star. Cache dashboards skip public caches. These caches don't have membership, share, or subscription. Stars, dashboards, and direct links still work for public projects, tasks, and caches. |
 | `retentionDays` | unsigned int | `90` | `GRADIENT_RETENTION_DAYS` | Days to keep job assignment records, finished deliveries, worker connection history, webhook and task action deliveries, expired sessions and CLI logins. Finished admin tasks, the audit log, per-build resource samples and finished cluster jobs share the same limit. Removed resource samples no longer feed build predictions. Finished cluster jobs without remaining members go on the next hourly pass. Active cluster jobs and the newest finished admin task of each kind stay exempt. Open worker connections stay until the next connection of the same worker. Set it to `0` to keep every record forever. |
@@ -40,7 +41,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 |---|---|---|---|---|
 | `cache.debugIndexIntervalSecs` | positive int | `300` | `GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS` | Seconds between passes of the DWARF build ID index backfill. Uploads enter the index immediately. Only paths cached before the index existed or interrupted by a restart need the pass. |
 | `cache.maxStorageGb` | unsigned int | `0` | `GRADIENT_CACHE_MAX_STORAGE_GB` | Instance-wide limit on cached NAR storage in GB. New evaluations wait while every writable cache of a project has less than 10 MiB left. Set it to `0` to disable the limit. Per-cache limits still apply. |
-| `cache.signSweepIntervalSecs` | positive int | `3600` | `GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS` | Seconds between NAR signature backfill passes. Uploads receive their signature immediately. Only subscription placeholders and unsigned leftovers need the pass. |
+| `cache.signSweepIntervalSecs` | positive int | `3600` | `GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS` | Seconds between passes that sign unsigned cache entries. Uploads receive a signature at once. Only three kinds of rows need this pass. They are subscription placeholders, unsigned leftovers and published dependency outputs. The cache publishes dependency outputs every 300 seconds and on every wake. |
 | `cache.upstreamQueryConcurrency` | positive int | `32` | `GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY` | Maximum simultaneous narinfo requests to upstream caches across the server. |
 
 ## `database`
@@ -49,7 +50,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 |---|---|---|---|---|
 | `database.cache.maxConnections` | positive int | `32` | `GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS` | Maximum connections of the cache query pool. It is separate from the scheduler pool to keep a large evaluation's prefetch traffic from starving job assignment. |
 | `database.cache.minConnections` | unsigned int | `2` | `GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS` | Minimum connections kept open in the cache query pool. |
-| `database.maxConnections` | positive int | `16` | `GRADIENT_DATABASE_MAX_CONNECTIONS` | Maximum connections of the scheduler and worker pool. Server processes each open up to the sum of `database.maxConnections`, `database.cache.maxConnections` and `database.web.maxConnections`. PostgreSQL's `max_connections` must accommodate that sum. |
+| `database.maxConnections` | positive int | `16` | `GRADIENT_DATABASE_MAX_CONNECTIONS` | Maximum connections of the scheduler and worker pool. Server processes each open up to the sum of `database.maxConnections`, `database.cache.maxConnections` and `database.web.maxConnections`. PostgreSQL's `max_connections` must accommodate that sum. The scheduler opens 2 more connections in a separate pool for refreshing waiting evaluations. `max_connections` must also accommodate them. |
 | `database.minConnections` | unsigned int | `2` | `GRADIENT_DATABASE_MIN_CONNECTIONS` | Minimum connections kept open in the scheduler and worker pool. |
 | `database.url` | string | `"postgresql://gradient@localhost/gradient?host=/run/postgresql"` | `GRADIENT_DATABASE_URL` | Use a connection URL for PostgreSQL without a password. Files in the Nix store are world-readable and contain the connection URL. Use `database.urlFile` for a URL with a password. |
 | `database.urlFile` | path | derived | `GRADIENT_DATABASE_URL_FILE` | File containing the PostgreSQL connection URL, taking precedence over `database.url`. |
@@ -74,7 +75,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `eval.allowedUriPrefixes` | list of string | `[ ]` | `GRADIENT_EVAL_ALLOWED_URI_PREFIXES` | Allowed URL prefixes that each project evaluation can fetch from in addition to the inputs locked in `flake.lock`. Evaluations in Nix under `restrict-eval` make `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` can allow the whole scheme. Projects can add prefixes of their own or disable the restriction. |
+| `eval.allowedUriPrefixes` | list of string | `[ ]` | `GRADIENT_EVAL_ALLOWED_URI_PREFIXES` | Allowed URL prefixes that each project evaluation can fetch, in addition to the inputs pinned by `flake.lock`. Under Nix setting `restrict-eval`, `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` allows the whole scheme. Projects can add their own prefixes, but they can't disable the restriction. |
 | `eval.cache.maxAgeDays` | unsigned int | `30` | `GRADIENT_EVAL_CACHE_MAX_AGE_DAYS` | Days since the last compaction after which the eval cache of a flake fingerprint leaves with all its segments, regardless of the size limit. |
 | `eval.cache.maxTotalBytes` | unsigned int | `10737418240` | `GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES` | Total size in bytes of the shared eval caches, counted after compaction. The eval cache of a flake fingerprint leaves with all its segments, least recently compacted first, until the total is within this size. |
 | `eval.cache.sweepIntervalSecs` | positive int | `3600` | `GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS` | Seconds between eval cache eviction passes. |
@@ -135,6 +136,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `http.anonymousWebsocketMaxConnectionsPerIp` | positive int | `256` | `GRADIENT_HTTP_ANONYMOUS_WEBSOCKET_MAX_CONNECTIONS_PER_IP` | Maximum number of WebSocket connections that a visitor without an account or API key can keep open at the same time from one client IP. IPv6 limits use a /64 network. Connection limits impose an upper bound on the number of database access checks that one address can trigger. These WebSocket connections repeat one access check every minute. Browser tabs open at most two WebSocket connections. Additional connections receive a 429 response until open connections from that address drop below the limit. Reverse proxy setups need an entry for the proxy in `http.trustedProxies`. Without that entry, all visitors share the proxy address. |
 | `http.cacheRequestBurst` | positive int | `20000` | `GRADIENT_HTTP_CACHE_REQUEST_BURST` | Requests each client IP can make to the binary cache in a burst before `http.cacheRequestsPerSecond` applies. |
 | `http.cacheRequestsPerSecond` | positive int | `1000` | `GRADIENT_HTTP_CACHE_REQUESTS_PER_SECOND` | Sustained requests per second each client IP can make to the binary cache (`narinfo`, NAR and cache proto endpoints). Nix asks for one narinfo per path of a closure. |
 | `http.localIps` | list of string | `[ "192.168.0.0/16" "172.16.0.0/12" "100.64.0.0/10" "10.0.0.0/8" "fc00::/7" ]` | `GRADIENT_HTTP_LOCAL_IPS` | Clients in these CIDR ranges receive a cache's `local_priority`, if set and non-zero. |
@@ -186,7 +188,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `nar.sendChunkTimeoutSecs` | positive int | `30` | `GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS` | Seconds an outbound `NarPush` chunk can wait for the WebSocket to drain before an abort of the transfer with `NarAbort`. |
 | `nar.smallBytes` | unsigned int | `1048576` | `GRADIENT_NAR_SMALL_BYTES` | Size in bytes up to which NAR downloads come from the server itself instead of a presigned S3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not depend on this value. |
 | `nar.storageOpenTimeoutSecs` | positive int | `60` | `GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS` | Seconds to wait for a NAR object stream from storage (for example an S3 GET) before answering the worker with `NarAbort`. Workers retry after a `NarAbort`. |
-| `nar.verifyDigest` | bool | `false` | `GRADIENT_NAR_VERIFY_DIGEST` | Whether to download NARs committed through presigned S3 uploads and verify their hash, catching same-length corruption at the cost of a full object read. Size checks run either way. Passthrough and REST uploads always go through verification. |
 
 ## `oidc`
 
@@ -198,6 +199,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `oidc.enable` | bool | `false` | `GRADIENT_OIDC_ENABLE` | Whether to enable OIDC. |
 | `oidc.required` | bool | `false` | `GRADIENT_OIDC_REQUIRED` | Whether to enable OIDC as the only login method. |
 | `oidc.scopes` | list of string | `[ "openid" "email" "profile" ]` | `GRADIENT_OIDC_SCOPES` | OIDC scopes to request. |
+
+## `outbound`
+
+| Option | Type | Default | Env | Description |
+|---|---|---|---|---|
+| `outbound.allowedNonPublicNetworkTargets` | list of string | `[ ]` | `GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS` | The server can reach private network targets through URLs that project members enter. These targets include upstream caches, APIs of git hosts, actions and outbound webhooks. Each entry can be a CIDR range (`10.0.0.0/8`), an IP address, or an exact-match hostname (`git.internal.example`). Default settings allow the server to connect only to public addresses. Addresses of the server's own network interfaces don't count as public. They need entries too. The server doesn't detect addresses that network configuration can forward to the host without assigning them to an interface. Examples include kube-proxy service addresses and AnyIP routes. List self-hosted git hosts and internal caches here. Project members who can set such URLs can reach all listed targets. Servers trust the listed hostnames for every address that those hostnames resolve to. Loopback addresses and addresses for cloud metadata such as 169.254.169.254 also receive that trust. List only hostnames within managed DNS zones. The server can always connect to hosts in `giteaApp.instanceBaseUrl`. |
 
 ## `packages`
 
@@ -250,7 +257,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `registration.enable` | bool | `true` | `GRADIENT_REGISTRATION_ENABLE` | Whether to enable self-service user registration. |
+| `registration.enable` | bool | `false` | `GRADIENT_REGISTRATION_ENABLE` | Whether to enable self-service user registration. |
 
 ## `reverseProxy`
 
@@ -286,6 +293,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `scheduler.clusterPrepareTimeoutSecs` | positive int | `30` | `GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS` | Seconds for every member of a cluster job attempt to accept its assignment. Attempts not accepted by all members in time abort, and their cluster jobs return to the queue. |
 | `scheduler.clusterReserveAfterSecs` | positive int | `600` | `GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS` | Seconds cluster jobs that can start wait for enough simultaneously idle workers before reserving a placement. Reserved workers receive no new single jobs until the cluster job's start or the reservation's expiry. |
 | `scheduler.clusterReserveTimeoutSecs` | positive int | `1800` | `GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS` | Number of seconds to keep a reservation for a cluster job before release. Cluster jobs wait one cluster-reserve-after period before they can reserve workers again. |
+| `scheduler.inputFetchTimeoutSecs` | positive int | `3600` | `GRADIENT_SCHEDULER_INPUT_FETCH_TIMEOUT_SECS` | Seconds for a worker to respond to an input fetch. A different worker takes over a fetch with no response in time if that worker can fetch it. Waiting evaluations end in failure if no connected workers remain. |
 | `scheduler.scoringPolicy` | one of `simple` `resource-aware` | `"resource-aware"` | `GRADIENT_SCHEDULER_SCORING_POLICY` | Policy ranking queued jobs for a requesting worker. Factors of `simple`: path availability, NAR size, dependency count, waiting time, builtins and fetch worker reservation. Factors of `resource-aware`: the same plus memory fit, worker saturation, CPU, disk and network affinity and `preferLocalBuild`. |
 
 ## `scim`
@@ -348,6 +356,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `worker.maxLifetime` | null or (unsigned int) | `null` | `GRADIENT_WORKER_MAX_LIFETIME` | Seconds after start after which the worker drains, finishes its running jobs and exits. `null` keeps it running. |
 | `worker.peersFile` | null or path | `null` | `GRADIENT_WORKER_PEERS_FILE` | File of peer tokens for challenge-response authentication with the server, with `peer_id:token` per line and `#` starting a comment. ``` <uuid>:<token> *:<token> ``` Use peer ID `*` to match any UUID in the server's challenge. Tokens are 48 byte random secrets, for example from `openssl rand -base64 48`. Register them via the API through `POST /api/v1/projects/{project}/workers`. Set it to `null` for open mode without authentication; avoid that in a production setup. |
 | `worker.port` | port | `3100` | `GRADIENT_WORKER_PORT` | Port the worker listens on for incoming server connections. |
+| `worker.releaseGuestTaps` | null or string | `null` | `GRADIENT_WORKER_RELEASE_GUEST_TAPS` | Release the tap for the guest with this id after exit of the root supervisor and after a force-kill (internal - do not set manually). |
 | `worker.serverUrl` | null or string | `null` | `GRADIENT_WORKER_SERVER_URL` | WebSocket URL of the Gradient server's `/proto` endpoint. `null` skips the outbound connection, leaving only incoming server connections through `worker.discoverable`. |
 | `worker.useTls` | bool | `true` | - | Whether to enable TLS. |
 | `worker.zone` | null or string | `null` | `GRADIENT_WORKER_ZONE` | Locality label advertised to the scheduler. A cluster job asking for one zone places every member on workers with the same label. `null` places the worker among the unlabelled workers. |
@@ -389,11 +398,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `worker.exec.allow.allowedPrivateNetworks` | list of string matching the pattern [0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}\|[0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3} | `[ ]` | - | Use this option to list IPv4 and IPv6 networks in CIDR format. Guest network filters drop private, shared and link-local destinations (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, etc.) and all IPv6 destinations outside 2000::/3. Guests with network access can still reach networks in this list. IPv6 entries have an effect only with exec.subnet.v6. Add the guest subnets of other workers for multi-node jobs. Add private hosts that the job needs, such as package mirrors. Guests on this worker cannot reach each other, even if those subnets appear in the list. |
+| `worker.exec.allow.blockedGlobalIPv6Networks` | null or (list of string matching the pattern [0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3}) | `null` | - | IPv6 networks in CIDR form that a guest with network access must not reach belong in this list. Set this option together with `worker.exec.subnet.v6`. The global IPv6 prefixes of the host's own network belong here too (for example the host LAN prefix). Guest network filters block private IPv4 networks. They do not block global IPv6 networks. Values of `[ ]` block nothing. A value in `exec.subnet.v6` and no value in this option cause evaluation to stop. This option is ineffective without `exec.subnet.v6`. The docs for `exec.subnet.v6` describe this next to that option. |
 | `worker.exec.allow.customImages` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_CUSTOM_IMAGES` | Whether exec jobs may boot their own guest image instead of `worker.exec.image`. |
 | `worker.exec.allow.devices` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_ALLOW_DEVICES` | Device names from `worker.exec.devices` exec jobs may request. An empty list allows none. |
+| `worker.exec.allow.guestConnectableHostTcpPorts` | list of port | `[ ]` | - | TCP ports on the worker host that a guest with network access can reach on any address of the host. Guest network filters drop all other connections from a guest to the host. A DNS forwarder for guests on the host makes DNS to the bridge address the exception. These ports are also open on the host firewall for the guest bridge. Set this option when the Gradient server and the jobs share a host and the jobs need to reach its API. |
 | `worker.exec.allow.maxSilent` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_MAX_SILENT` | Most seconds an exec job may go without output. The server lowers a larger request to this value. `null` sets no cap. |
 | `worker.exec.allow.mounts` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_ALLOW_MOUNTS` | Mount names from `worker.exec.mounts` exec jobs may request. An empty list allows none. |
-| `worker.exec.allow.network` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_NETWORK` | Whether exec jobs may reach the network through `worker.exec.bridge`. |
+| `worker.exec.allow.network` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_NETWORK` | Whether exec jobs reach the network through `worker.exec.bridge`. The worker module adds steps to `nftables.service` when `networking.nftables.enable` is on. Those steps restore the guest filter after stop/start. |
 | `worker.exec.allow.nodes` | unsigned int | `1` | `GRADIENT_WORKER_EXEC_ALLOW_NODES` | Most nodes an exec job may span. |
 | `worker.exec.allow.ports` | null or (list of (port or list of port)) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_PORTS` | Guest ports that exec jobs can request. Each entry can be a single port or `[ first last ]` range. No ports pass with an empty list. `null` stands for ports 1024 to 65535. |
 | `worker.exec.allow.retries` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_ALLOW_RETRIES` | Most retries an exec job may request. |
@@ -407,6 +419,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `worker.exec.devices` | list of (submodule) | `[ ]` | `GRADIENT_WORKER_EXEC_DEVICES` | Devices that exec jobs can ask for. Set exactly `vfio`, `dev` or `usb` per entry. Devices held by a job stay out of reach for other jobs. |
 | `worker.exec.devices.*.dev` | null or path | `null` | - | Host device file for the guest, relayed over vsock. |
 | `worker.exec.devices.*.name` | string | - | - | Device class name that exec jobs ask for. |
+| `worker.exec.devices.*.projects` | value "all" (singular enum) or list of string matching the pattern [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12} | - | - | Projects with jobs that can use this entry: `"all"`, or a list of project UUIDs. This entry is not present for jobs in projects outside the list. |
 | `worker.exec.devices.*.usb` | null or string matching the pattern [0-9a-f]{4}:[0-9a-f]{4} | `null` | - | USB device as `vendor:product`, attached to the guest over USB/IP. |
 | `worker.exec.devices.*.vfio` | list of string | `[ ]` | - | PCI addresses of the devices in this class, a device per address. The worker hot-plugs them into the guest over VFIO. Bind each device to `vfio-pci` first. |
 | `worker.exec.guestCpus` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_GUEST_CPUS` | CPUs the running and warm guests of this worker share. An exec job waits until its `cpus` fit. `null` uses the CPU count of the host. |
@@ -420,14 +433,18 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `worker.exec.mounts.*.name` | string | - | - | Mount name that exec jobs ask for. Guests find the mount at `/mnt/<name>`. |
 | `worker.exec.mounts.*.path` | path | - | - | Host directory for the guest, shared over virtiofs. |
 | `worker.exec.mounts.*.perJob` | bool | `false` | - | Whether to give each job a fresh directory below `path`, deleted after the job. |
+| `worker.exec.mounts.*.projects` | value "all" (singular enum) or list of string matching the pattern [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12} | - | - | Projects with jobs that can use this entry: `"all"`, or a list of project UUIDs. This entry is not present for jobs in projects outside the list. |
 | `worker.exec.mounts.*.readOnly` | bool | `false` | - | Whether to share the directory read-only. |
 | `worker.exec.nameservers` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_NAMESERVERS` | IPv4 addresses of the nameservers for guests with network access. An empty list uses the address of `worker.exec.bridge`, where the NixOS module runs a DNS forwarder. |
 | `worker.exec.noSwap` | bool | `false` | - | Whether to keep the worker service and `gradient-guests.slice` out of swap. Guest memory and the secrets in it then stay in RAM. Under memory pressure the kernel kills guests and worker processes instead of swapping them out. |
 | `worker.exec.preWarm` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_PRE_WARM` | Guests booted from `worker.exec.image` and paused, waiting for a job. |
-| `worker.exec.sops.files` | list of path | `[ ]` | `GRADIENT_WORKER_EXEC_SOPS_FILES` | Sops files decrypted on the worker with `worker.exec.sops.keyFile`. Exec jobs get their top-level values by name. The server never sees them. |
+| `worker.exec.sops.files` | list of (submodule) | `[ ]` | `GRADIENT_WORKER_EXEC_SOPS_FILES` | Sops files that the worker can decrypt with `worker.exec.sops.keyFile`. Exec jobs fetch top-level values from a file by name, but only for jobs of projects in `projects` of that file. Values never reach the server. |
+| `worker.exec.sops.files.*.path` | path | - | - | Path of the sops file on the worker host. |
+| `worker.exec.sops.files.*.projects` | value "all" (singular enum) or list of string matching the pattern [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12} | - | - | Projects with jobs that can use this entry: `"all"`, or a list of project UUIDs. This entry is not present for jobs in projects outside the list. |
 | `worker.exec.sops.keyFile` | null or path | `null` | `GRADIENT_WORKER_EXEC_SOPS_KEY_FILE` | SSH private key decrypting `worker.exec.sops.files`, an Ed25519 or RSA key. The age recipient derives from it. The worker reads it through a systemd credential, and `systemctl reload gradient-worker` decrypts the files again. `null` decrypts no file. |
 | `worker.exec.stopGuestsWithWorker` | bool | `true` | `GRADIENT_WORKER_EXEC_STOP_GUESTS_WITH_WORKER` | Whether stopping or restarting the worker stops every guest. The server queues the exec jobs of stopped guests again without using a retry. `false` keeps guests running across a worker restart and the restarted worker reattaches to them. |
-| `worker.exec.subnet` | null or string | `null` | `GRADIENT_WORKER_EXEC_SUBNET` | The IPv4 subnet for `worker.exec.bridge`. Set this option when `worker.capabilities.exec` is on. Pick a subnet free of other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span several nodes need a separate subnet on each Exec worker in the zone. |
+| `worker.exec.subnet.v4` | null or string | `null` | `GRADIENT_WORKER_EXEC_SUBNET_V4` | IPv4 subnet for `worker.exec.bridge`. Set this option when `worker.capabilities.exec` is on. Choose a subnet without overlap with other networks on the host. The bridge address is the first host address. Guests with network access get the lowest unused address after the bridge address. Exec jobs that span multiple nodes need a separate subnet on each Exec worker in the zone. |
+| `worker.exec.subnet.v6` | null or string | `null` | `GRADIENT_WORKER_EXEC_SUBNET_V6` | The IPv6 subnet for `worker.exec.bridge`. Guests get no IPv6 address from `null`. Guests with network access get an address in this subnet with the same host offset as their IPv4 address in `worker.exec.subnet.v4`. They can reach the internet through IPv6 masquerade. The bridge address is the first host address. The prefix length must fall between 64 and the `worker.exec.subnet.v4` prefix length plus 96. Host bits must be zero. A random unique local `/64` (`fd00::/8`) can fit. |
 
 ## `worker.log`
 

@@ -20,8 +20,8 @@ use crate::count::clamp_to_u32;
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::{FetchedNar, digest_of};
 use crate::proto::prefetch::{
-    CorruptCachedNar, MissingInputs, Staging, SubstituteNotOnUpstream, download_size,
-    stage_one_presigned,
+    CorruptCachedNar, MissingInputs, Staging, SubstituteNotOnUpstream,
+    UpstreamNarInfoMissingNarHash, download_size, stage_one_presigned,
 };
 use crate::proto::progress::{Progress, ProgressSink};
 use gradient_worker_client::nar::NarReader;
@@ -123,6 +123,10 @@ async fn fetch_one(
     progress: &mut Progress<impl ProgressSink>,
 ) -> Result<RawNar> {
     let path = &upstream.path;
+    let claimed_nar_hash = upstream
+        .nar_hash
+        .as_deref()
+        .ok_or_else(|| anyhow::Error::new(UpstreamNarInfoMissingNarHash(path.clone())))?;
     let compressed = io
         .download(upstream, progress)
         .await?
@@ -133,11 +137,7 @@ async fn fetch_one(
         .await
         .with_context(|| format!("decompress the upstream NAR of {path}"))?;
     let nar_hash = digest.nix32();
-    if upstream
-        .nar_hash
-        .as_deref()
-        .is_some_and(|claimed| normalize_nar_hash(claimed) != nar_hash)
-    {
+    if normalize_nar_hash(claimed_nar_hash) != nar_hash {
         return Err(anyhow::Error::new(CorruptCachedNar(path.clone())));
     }
 
@@ -387,6 +387,27 @@ mod tests {
         .unwrap_err();
 
         assert!(err.downcast_ref::<CorruptCachedNar>().is_some(), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_upstream_answer_without_a_nar_hash_is_refused_before_download_as_substitute_unavailable()
+     {
+        let mut io = fake(OUT, &sha256_nix32(&nar()), &[]);
+        io.upstream.get_mut(OUT).unwrap().nar_hash = None;
+
+        let err = fetch_outputs(
+            &mut io,
+            &[("out".to_owned(), OUT.to_owned())],
+            &mut Progress::silent(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(io.downloads.is_empty());
+        assert_eq!(
+            crate::executor::failure::classify_substitute_failure("b", err).kind,
+            gradient_wire::messages::BuildFailureKind::SubstituteUnavailable
+        );
     }
 
     #[tokio::test]

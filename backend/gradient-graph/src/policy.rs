@@ -138,13 +138,6 @@ pub(crate) const fn retried_as(kind: BuildFailureKind, out_of_memory: bool) -> B
     }
 }
 
-pub(crate) fn not_enough_resources_message(needed_mb: u64, largest_available_mb: u64) -> String {
-    format!(
-        "no connected worker has enough memory for this build: it needs {needed_mb} MB and the \
-         most any worker able to build it has free is {largest_available_mb} MB"
-    )
-}
-
 pub(crate) fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
     match kind {
         BuildFailureKind::SubstituteUnavailable => {
@@ -251,10 +244,9 @@ mod tests {
     use super::{
         BuildEnd, FailureOutcome, Substitution, attempt_outcome, attempt_reason,
         attempt_reason_for, decide_failure_outcome, failure_log_entry, history_sample,
-        inputs_unavailable_circuit_open, not_enough_resources_message, out_of_memory,
-        out_of_memory_outcome, retried_as, retry_backoff_elapsed, retry_failed_eval,
-        spends_substitute_budget, terminal_success_outcome, terminal_success_status,
-        truncate_failure_message,
+        inputs_unavailable_circuit_open, out_of_memory, out_of_memory_outcome, retried_as,
+        retry_backoff_elapsed, retry_failed_eval, spends_substitute_budget,
+        terminal_success_outcome, terminal_success_status, truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -454,13 +446,6 @@ mod tests {
                 "{outcome:?}"
             );
         }
-    }
-
-    #[test]
-    fn the_shortage_message_names_the_need_and_the_largest_free_memory() {
-        let message = not_enough_resources_message(124_540, 102_754);
-        assert!(message.contains("124540 MB"), "{message}");
-        assert!(message.contains("102754 MB"), "{message}");
     }
 
     #[test]

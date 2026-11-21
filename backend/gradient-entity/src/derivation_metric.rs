@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DerivationId, DerivationMetricId};
+use crate::ids::{DerivationId, DerivationMetricId, ProjectId, TeamWorkerId, WorkerRegistrationId};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_metric")]
@@ -31,6 +31,9 @@ pub struct Model {
     pub cpu_core_score: Option<i32>,
     pub input_pnames: Option<Vec<String>>,
     pub worker_id: String,
+    pub worker_registration: Option<WorkerRegistrationId>,
+    pub team_worker: Option<TeamWorkerId>,
+    pub project: Option<ProjectId>,
     pub created_at: NaiveDateTime,
 }
 

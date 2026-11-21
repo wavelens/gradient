@@ -172,7 +172,13 @@ pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
 
         let copies = match target.scale {
             Scale::To(rows) => {
-                let copies = (rows / u64::from(scale.max(1)) / live).max(1) as i32;
+                let copies = i32::try_from((rows / u64::from(scale.max(1)) / live).max(1))
+                    .with_context(|| {
+                        format!(
+                            "Copy count for {} does not fit in a 32-bit integer",
+                            target.table
+                        )
+                    })?;
                 counts.insert(target.table, copies);
                 copies
             }

@@ -5,11 +5,12 @@
  */
 
 use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
 
 pub fn drv_present_predicate(alias: &str) -> String {
     format!(
         "EXISTS (SELECT 1 FROM derivation d JOIN cached_path cp ON cp.hash = d.hash \
-         WHERE d.id = {alias}.derivation AND cp.file_hash IS NOT NULL)"
+         WHERE d.id = {alias}.derivation)"
     )
 }
 
@@ -106,21 +107,60 @@ pub fn failure_spreads_predicate(edge: &str) -> String {
     )
 }
 
+pub fn aborted_dependency_without_failure_spread_predicate(
+    edge: &str,
+    dependency_build_alias: &str,
+    parent_derivation_build_alias: Option<&str>,
+) -> String {
+    let parent_cache_available_and_all_referenced_dependency_outputs_are_held_somewhere =
+        match parent_derivation_build_alias {
+            Some(parent) => format!(
+                "({parent}.cache_available AND NOT {referenced_unavailable})",
+                referenced_unavailable =
+                    references_unavailable_output(edge, &format!("{parent}.derivation")),
+            ),
+            None => format!(
+                "EXISTS (SELECT 1 FROM derivation_build rb \
+                 WHERE rb.derivation = {edge}.derivation AND rb.cache_available \
+                   AND NOT {referenced_unavailable})",
+                referenced_unavailable = references_unavailable_output(edge, "rb.derivation"),
+            ),
+        };
+    format!(
+        "({dependency_build_alias}.status = {aborted} \
+         AND ({dependency_build_alias}.fetchable \
+              OR {parent_cache_available_and_all_referenced_dependency_outputs_are_held_somewhere}))",
+        aborted = crate::sql::status::build(BuildStatus::Aborted),
+    )
+}
+
 fn references_unavailable_output(edge: &str, parent: &str) -> String {
     format!(
         "EXISTS (SELECT 1 FROM derivation_output o \
-         WHERE o.derivation = {edge}.dependency AND o.external_url IS NULL \
-           AND NOT EXISTS (SELECT 1 FROM cached_path cp \
-                           WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL) \
+         WHERE o.derivation = {edge}.dependency AND {unavailable} \
            AND EXISTS (SELECT 1 FROM derivation_output po \
                        LEFT JOIN cached_path pcp ON pcp.hash = po.hash \
                        WHERE po.derivation = {parent} \
                          AND CASE WHEN {refs} IS NULL THEN {edge}.kind IN (1, 2) \
                                   ELSE string_to_array({refs}, ' ') \
                                        && {tokens} END))",
+        unavailable = sql_condition_for_derivation_output_without_cached_path_and_external_url("o"),
         refs = PARENT_REFERENCES,
         tokens = store_path_tokens("o"),
     )
+}
+
+pub fn sql_condition_for_derivation_output_without_cached_path_and_external_url(
+    output: &str,
+) -> String {
+    format!(
+        "({output}.external_url IS NULL AND {without_cached_path})",
+        without_cached_path = sql_condition_for_derivation_output_without_cached_path(output),
+    )
+}
+
+pub fn sql_condition_for_derivation_output_without_cached_path(output: &str) -> String {
+    format!("NOT EXISTS (SELECT 1 FROM cached_path cp WHERE cp.hash = {output}.hash)")
 }
 
 const PARENT_REFERENCES: &str = "coalesce(pcp.\"references\", po.references_list)";
@@ -175,7 +215,7 @@ fn directly_needed_predicate(output: &str) -> String {
                     LATERAL (SELECT {refs} AS refs FROM derivation_output po \
                              LEFT JOIN cached_path pcp ON pcp.hash = po.hash \
                              WHERE po.derivation = e.derivation \
-                               AND (pcp.file_hash IS NOT NULL OR po.references_list IS NOT NULL) \
+                               AND (pcp.hash IS NOT NULL OR po.references_list IS NOT NULL) \
                              OFFSET 0) r \
                     WHERE e.dependency = {output}.derivation AND e.kind IN (1, 2) \
                       AND (r.refs IS NULL OR string_to_array(r.refs, ' ') && {tokens})))",
@@ -212,17 +252,26 @@ pub fn fetchable_predicate(alias: &str) -> String {
     )
 }
 
+/// The presence predicate must count every content variant of each output hash. A check in `store_path_content_variant_reader_choice` at read time tells whether a reader can consume that variant.
 pub fn present_predicate(alias: &str) -> String {
     format!(
         "(EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = {alias}.derivation) \
-         AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash \
-                         WHERE o.derivation = {alias}.derivation AND cp.file_hash IS NULL \
-                           AND o.name <> ALL({alias}.unneeded_outputs)))"
+         AND NOT EXISTS (SELECT 1 FROM derivation_output o \
+                         WHERE o.derivation = {alias}.derivation AND {needed_without_cached_path}))",
+        needed_without_cached_path =
+            sql_condition_for_needed_output_without_cached_path("o", alias),
+    )
+}
+
+pub fn sql_condition_for_needed_output_without_cached_path(output: &str, build: &str) -> String {
+    format!(
+        "{output}.name <> ALL({build}.unneeded_outputs) AND {without_cached_path}",
+        without_cached_path = sql_condition_for_derivation_output_without_cached_path(output),
     )
 }
 
 fn all_outputs_cached_or_unneeded(alias: &str) -> String {
-    format!("bool_and(cp.file_hash IS NOT NULL OR o.name = ANY({alias}.unneeded_outputs))")
+    format!("bool_and(cp.id IS NOT NULL OR o.name = ANY({alias}.unneeded_outputs))")
 }
 
 pub fn present_value(alias: &str) -> String {
@@ -272,6 +321,81 @@ pub fn promotable_predicate(alias: &str) -> String {
         "({alias}.status = {created} AND {gates})",
         created = crate::sql::status::from(BuildStatus::QUEUE),
         gates = gates_predicate(alias),
+    )
+}
+
+pub(crate) fn not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build(
+    shared_build: &str,
+) -> String {
+    format!(
+        "FROM build_job live_job \
+         JOIN evaluation live_evaluation ON live_evaluation.id = live_job.evaluation \
+         JOIN task live_task ON live_task.id = live_evaluation.task \
+         WHERE live_job.derivation = {shared_build}.derivation \
+           AND live_job.derivation_build = {shared_build}.id \
+           AND live_job.evaluation = ANY (ARRAY(SELECT unfinished_evaluation.id \
+               FROM evaluation unfinished_evaluation \
+               WHERE unfinished_evaluation.status NOT IN ({terminal}))) \
+           AND NOT live_job.aborted",
+        terminal = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+    )
+}
+
+pub const PUBLISH_JOB_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
+
+pub(crate) fn not_aborted_build_jobs_with_unfinished_or_recently_finished_evaluation_sql_for_derivation_build(
+    shared_build: &str,
+) -> String {
+    format!(
+        "FROM build_job live_job \
+         JOIN evaluation live_evaluation ON live_evaluation.id = live_job.evaluation \
+         JOIN task live_task ON live_task.id = live_evaluation.task \
+         WHERE live_job.derivation_build = {shared_build}.id AND NOT live_job.aborted \
+           AND (live_evaluation.status NOT IN ({terminal}) \
+                OR live_evaluation.finished_at >= (now() AT TIME ZONE 'UTC') - interval '{PUBLISH_JOB_MAX_AGE_SECONDS} seconds')",
+        terminal = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+    )
+}
+
+pub fn derivation_build_has_build_job_not_aborted_and_evaluation_not_finished_sql_predicate(
+    shared_build: &str,
+) -> String {
+    format!(
+        "EXISTS (SELECT 1 {live_jobs})",
+        live_jobs = not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build(
+            shared_build
+        )
+    )
+}
+
+pub fn content_variant_trusted_by_all_projects_with_live_job_on_shared_build(
+    variant: &str,
+    shared_build: &str,
+) -> String {
+    format!(
+        "NOT EXISTS (SELECT 1 {live_jobs} AND NOT {trusted})",
+        live_jobs = not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build(
+            shared_build
+        ),
+        trusted =
+            crate::store_path_content_variant_trust::project_trusts_content_variant_exists_sql(
+                variant,
+                "live_task.project"
+            ),
+    )
+}
+
+pub fn stored_copy_in_input_closure_or_trusted_by_every_project_with_live_job_on_shared_build_sql_condition(
+    variant: &str,
+    shared_build: &str,
+    store_path_hash_in_input_closure_sql_condition: &str,
+) -> String {
+    format!(
+        "({store_path_hash_in_input_closure_sql_condition} OR {trusted})",
+        trusted = content_variant_trusted_by_all_projects_with_live_job_on_shared_build(
+            variant,
+            shared_build,
+        ),
     )
 }
 
@@ -344,7 +468,8 @@ mod tests {
     fn the_gate_needs_the_drv_present_not_complete() {
         let g = norm(&gates_predicate("db"));
         assert!(
-            g.contains("cp.file_hash IS NOT NULL") && !g.contains("missing_references"),
+            g.contains("JOIN cached_path cp ON cp.hash = d.hash")
+                && !g.contains("missing_references"),
             "{g}"
         );
         assert_eq!(
@@ -360,8 +485,8 @@ mod tests {
             norm(&shared_build_complete_predicate("db")),
             "(db.missing_runtime_deps = 0 AND (EXISTS (SELECT 1 FROM derivation_output o2 \
              WHERE o2.derivation = db.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o \
-             LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = db.derivation \
-             AND cp.file_hash IS NULL AND o.name <> ALL(db.unneeded_outputs))))"
+             WHERE o.derivation = db.derivation AND o.name <> ALL(db.unneeded_outputs) \
+             AND NOT EXISTS (SELECT 1 FROM cached_path cp WHERE cp.hash = o.hash))))"
         );
         let f = norm(&fetchable_predicate("db"));
         assert!(f.contains("db.missing_runtime_deps = 0"), "{f}");
@@ -375,7 +500,11 @@ mod tests {
     fn fetchable_is_terminal_success_with_complete_outputs_in_our_own_cache() {
         let p = norm(&fetchable_predicate("db"));
         assert!(p.starts_with("(db.status IN (3, 7)"), "{p}");
-        assert!(p.contains("cp.file_hash IS NULL"), "{p}");
+        assert!(
+            p.contains("NOT EXISTS (SELECT 1 FROM cached_path cp WHERE cp.hash = o.hash)")
+                && !p.contains("file_hash"),
+            "{p}"
+        );
         assert!(
             !p.contains("cache_available"),
             "an upstream copy is not our cache: {p}"
@@ -558,5 +687,356 @@ mod tests {
             "{cte}"
         );
         assert_eq!(cte.matches("LATERAL (").count(), 1, "one probe: {cte}");
+    }
+
+    const SHARED_BUILD_OUTPUT_STORE_PATH_HASH: &str = "88888888888888888888888888888888";
+    const FINISHED_EVALUATION_SHARED_BUILD_OUTPUT_STORE_PATH_HASH: &str =
+        "99999999999999999999999999999999";
+
+    fn test_only_old_not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build(
+        shared_build: &str,
+    ) -> String {
+        format!(
+            "FROM build_job live_job \
+             JOIN evaluation live_evaluation ON live_evaluation.id = live_job.evaluation \
+             JOIN task live_task ON live_task.id = live_evaluation.task \
+             WHERE live_job.derivation_build = {shared_build}.id AND NOT live_job.aborted \
+               AND live_evaluation.status NOT IN ({terminal})",
+            terminal = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+        )
+    }
+
+    async fn run_live_build_job_fragment_statements_and_collect_sorted_labelled_rows(
+        db: &gradient_fixtures::database::TestDatabase,
+        live_jobs: fn(&str) -> String,
+    ) -> Vec<String> {
+        use sea_orm::{ConnectionTrait, TransactionTrait, Value};
+
+        let render = |label: &str, text: &str| {
+            let aliases = ["reader_build", "db", "p"];
+            assert!(
+                aliases.iter().any(|alias| text.contains(
+                    &not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build(
+                        alias
+                    )
+                )),
+                "The fragment for the live build job is part of statement {label}."
+            );
+            aliases.iter().fold(text.to_owned(), |text, alias| {
+                text.replace(
+                    &not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build(
+                        alias,
+                    ),
+                    &live_jobs(alias),
+                )
+            })
+        };
+        let registered = |name: &str| {
+            render(
+                name,
+                &crate::sql::query::registry()
+                    .find(|query| query.name == name)
+                    .unwrap_or_else(|| {
+                        panic!("The entries in the statement registry include {name}.")
+                    })
+                    .text(),
+            )
+        };
+        let uuids = |sql: &'static str| async move {
+            db.texts(sql)
+                .await
+                .iter()
+                .map(|id| id.parse::<uuid::Uuid>().expect("a uuid"))
+                .collect::<Vec<_>>()
+        };
+        let outputs = uuids("SELECT derivation::text FROM derivation_output ORDER BY hash").await;
+        let hashes = db
+            .texts("SELECT hash FROM derivation_output ORDER BY hash")
+            .await;
+        let evaluations = uuids("SELECT id::text FROM evaluation ORDER BY id").await;
+        let shared_builds = uuids("SELECT id::text FROM derivation_build ORDER BY id").await;
+        let per_evaluation = |extra: &[Value]| {
+            evaluations
+                .iter()
+                .map(|evaluation| {
+                    let mut values = extra.to_vec();
+                    values.push(Value::Uuid(Some(*evaluation)));
+                    values
+                })
+                .collect::<Vec<_>>()
+        };
+        let runs: Vec<(&str, String, Vec<Vec<Value>>)> = vec![
+            (
+                "live jobs",
+                format!(
+                    "SELECT DISTINCT sb.id AS shared_build, live.* FROM derivation_build sb \
+                     CROSS JOIN LATERAL (SELECT live_task.project {}) live",
+                    live_jobs("sb")
+                ),
+                vec![vec![]],
+            ),
+            (
+                "graph writer",
+                render(
+                    "graph writer",
+                    &format!(
+                        "SELECT output.id FROM derivation_output output \
+                         JOIN derivation_build reader_build ON reader_build.derivation = output.derivation \
+                         WHERE output.derivation = ANY($1::uuid[]) AND output.hash IS NOT NULL \
+                           AND EXISTS ({})",
+                        crate::store_path_content_variant_reader_choice::select_best_stored_copy_for_own_build_outputs_trusted_by_all_projects_with_live_jobs_excluding_direct_use(
+                            "output.hash",
+                            "reader_build",
+                        ),
+                    ),
+                ),
+                vec![vec![outputs.clone().into()]],
+            ),
+            (
+                "own outputs",
+                registered(
+                    "DERIVATION_ID_AND_TRUSTED_CONTENT_VARIANT_ROW_FOR_OWN_OUTPUT_STORE_PATH_HASHES_ON_SHARED_BUILD_QUERY",
+                ),
+                vec![vec![outputs.clone().into(), hashes.clone().into()]],
+            ),
+            (
+                "build input",
+                registered("STORED_COPY_BY_STORE_PATH_HASH_USABLE_AS_SHARED_BUILD_BUILD_INPUT_QUERY"),
+                shared_builds
+                    .iter()
+                    .map(|shared_build| {
+                        vec![
+                            hashes.clone().into(),
+                            Value::Uuid(Some(*shared_build)),
+                            Vec::<String>::new().into(),
+                        ]
+                    })
+                    .collect(),
+            ),
+            (
+                "complete output hashes",
+                registered("COMPLETE_OUTPUT_HASHES"),
+                per_evaluation(&[hashes.clone().into()]),
+            ),
+            (
+                "repair cached shared builds",
+                registered("REPAIR_CACHED_SHARED_BUILDS_FOR_EVAL"),
+                per_evaluation(&[]),
+            ),
+            (
+                "needed outputs without stored copy",
+                registered(
+                    "STORE_PATH_HASHES_OF_NEEDED_OUTPUTS_WITHOUT_STORED_COPY_OLDEST_FIRST_LIMIT",
+                ),
+                vec![vec![64_i64.into()]],
+            ),
+        ];
+        let connection = db.connection();
+        let mut rows = Vec::new();
+        for (label, sql, binds) in runs {
+            for (bind, values) in binds.into_iter().enumerate() {
+                let transaction = connection.begin().await.expect("a transaction");
+                let result = transaction
+                    .query_all_raw(
+                        crate::sql::query::registry()
+                            .find(|query| query.name == "COMPLETE_OUTPUT_HASHES")
+                            .expect(
+                                "The contents of the statement registry include `COMPLETE_OUTPUT_HASHES`.",
+                            )
+                            .bind_built(
+                                format!(
+                                    "WITH statement_result_rows_as_json_text_lines AS ({sql}) \
+                                     SELECT to_jsonb(statement_result_rows_as_json_text_lines)::text \
+                                     FROM statement_result_rows_as_json_text_lines ORDER BY 1"
+                                ),
+                                values,
+                            ),
+                    )
+                    .await
+                    .unwrap_or_else(|error| panic!("Statement {label} executed. {error}"));
+                transaction.rollback().await.expect("a rollback");
+                rows.extend(result.iter().map(|row| {
+                    format!(
+                        "{label} {bind} {}",
+                        row.try_get_by_index::<String>(0).expect("a text column")
+                    )
+                }));
+            }
+        }
+        rows.sort();
+        rows
+    }
+
+    async fn assert_old_and_new_rows_equal_and_graph_writer_returns_output_id_for_store_path_hash(
+        db: &gradient_fixtures::database::TestDatabase,
+        hash: &str,
+    ) -> bool {
+        let old = run_live_build_job_fragment_statements_and_collect_sorted_labelled_rows(
+            db,
+            test_only_old_not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build,
+        )
+        .await;
+        let new = run_live_build_job_fragment_statements_and_collect_sorted_labelled_rows(
+            db,
+            not_aborted_build_jobs_with_unfinished_evaluation_sql_for_derivation_build,
+        )
+        .await;
+        assert!(
+            !old.is_empty(),
+            "The old fragment can return at least one row in this state."
+        );
+        assert_eq!(
+            old, new,
+            "The old live build job fragment and the new live build job fragment return the same rows for every statement."
+        );
+        let output = db
+            .texts(&format!(
+                "SELECT id::text FROM derivation_output WHERE hash = '{hash}'"
+            ))
+            .await;
+        new.iter()
+            .any(|row| row.starts_with("graph writer") && row.contains(&output[0]))
+    }
+
+    #[tokio::test]
+    async fn test_live_build_job_sql_fragments_return_same_rows_on_fixture_states() {
+        use gradient_types::EvaluationId;
+
+        let unfinished_project_a_evaluation_id_on_shared_build = EvaluationId::now_v7();
+        let completed_evaluation_id_of_project_b_with_shared_build_job = EvaluationId::now_v7();
+        let second_unfinished_evaluation_id = EvaluationId::now_v7();
+        let project_d_failed_evaluation_id_with_no_unfinished_evaluation_build_jobs =
+            EvaluationId::now_v7();
+        let shared = format!("/nix/store/{}-shared.drv", "s".repeat(32));
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(unfinished_project_a_evaluation_id_on_shared_build)
+            .derivation(&shared)
+            .output(SHARED_BUILD_OUTPUT_STORE_PATH_HASH)
+            .job()
+            .cached_path(SHARED_BUILD_OUTPUT_STORE_PATH_HASH, "shared")
+            .evaluation(completed_evaluation_id_of_project_b_with_shared_build_job)
+            .evaluation_status(EvaluationStatus::Completed)
+            .derivation(&shared)
+            .job()
+            .evaluation(second_unfinished_evaluation_id)
+            .derivation(&shared)
+            .job()
+            .evaluation(project_d_failed_evaluation_id_with_no_unfinished_evaluation_build_jobs)
+            .evaluation_status(EvaluationStatus::Failed)
+            .derivation(&format!("/nix/store/{}-finished.drv", "f".repeat(32)))
+            .output(FINISHED_EVALUATION_SHARED_BUILD_OUTPUT_STORE_PATH_HASH)
+            .job()
+            .cached_path(
+                FINISHED_EVALUATION_SHARED_BUILD_OUTPUT_STORE_PATH_HASH,
+                "finished",
+            )
+            .into_database()
+            .await;
+        let insert_trusted_stored_copy_producer_row = |evaluation: EvaluationId, hash: &str| {
+            format!(
+                "INSERT INTO store_path_content_producer (cached_path, kind, uploading_member_project_id) \
+                 SELECT cp.id, 2, t.project FROM cached_path cp, evaluation e JOIN task t ON t.id = e.task \
+                 WHERE cp.hash = '{hash}' AND e.id = '{evaluation}';"
+            )
+        };
+        db.execute(&format!(
+            "DELETE FROM store_path_content_producer; {} {} \
+             UPDATE build_job SET aborted = true WHERE evaluation = '{second_unfinished_evaluation_id}'; {}",
+            insert_trusted_stored_copy_producer_row(
+                unfinished_project_a_evaluation_id_on_shared_build,
+                SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            ),
+            insert_trusted_stored_copy_producer_row(
+                project_d_failed_evaluation_id_with_no_unfinished_evaluation_build_jobs,
+                FINISHED_EVALUATION_SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            ),
+            insert_trusted_stored_copy_producer_row(
+                second_unfinished_evaluation_id,
+                SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            ),
+        ))
+        .await;
+        assert!(
+            assert_old_and_new_rows_equal_and_graph_writer_returns_output_id_for_store_path_hash(
+                &db,
+                SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            )
+            .await,
+            "Build jobs of completed evaluations don't count, so the graph writer can return the trusted stored copy of the shared build output."
+        );
+
+        db.execute(&format!(
+            "DELETE FROM store_path_content_producer USING evaluation e JOIN task t ON t.id = e.task \
+             WHERE e.id = '{second_unfinished_evaluation_id}' \
+               AND store_path_content_producer.uploading_member_project_id = t.project; {}",
+            insert_trusted_stored_copy_producer_row(
+                completed_evaluation_id_of_project_b_with_shared_build_job,
+                SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            ),
+        ))
+        .await;
+        assert!(
+            assert_old_and_new_rows_equal_and_graph_writer_returns_output_id_for_store_path_hash(
+                &db,
+                SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            )
+            .await,
+            "Aborted build jobs don't count. The graph writer can return a trusted saved copy of the shared build output."
+        );
+
+        db.execute(&format!(
+            "UPDATE build_job SET aborted = false WHERE evaluation = '{second_unfinished_evaluation_id}'"
+        ))
+        .await;
+        assert!(
+            !assert_old_and_new_rows_equal_and_graph_writer_returns_output_id_for_store_path_hash(
+                &db,
+                SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            )
+            .await,
+            "Projects with live build jobs that don't trust stored copies hide shared build outputs from the graph writer."
+        );
+
+        db.execute(&insert_trusted_stored_copy_producer_row(
+            second_unfinished_evaluation_id,
+            SHARED_BUILD_OUTPUT_STORE_PATH_HASH,
+        ))
+        .await;
+        assert!(
+            assert_old_and_new_rows_equal_and_graph_writer_returns_output_id_for_store_path_hash(
+                &db,
+                SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            )
+            .await,
+            "The graph writer can return the shared build output if both projects have running build jobs and trust the stored copy."
+        );
+        assert!(
+            assert_old_and_new_rows_equal_and_graph_writer_returns_output_id_for_store_path_hash(
+                &db,
+                FINISHED_EVALUATION_SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            )
+            .await,
+            "A shared build with no live build job returns its stored output to the graph writer."
+        );
+
+        db.execute(&format!(
+            "INSERT INTO build_job (id, evaluation, derivation, derivation_build, created_at) \
+             SELECT gen_random_uuid(), '{unfinished_project_a_evaluation_id_on_shared_build}', \
+                    finished.derivation, shared_build.id, now() \
+             FROM derivation_output finished, derivation_build shared_build \
+             JOIN derivation_output shared ON shared.derivation = shared_build.derivation \
+             WHERE finished.hash = '{FINISHED_EVALUATION_SHARED_BUILD_OUTPUT_STORE_PATH_HASH}' \
+               AND shared.hash = '{SHARED_BUILD_OUTPUT_STORE_PATH_HASH}'"
+        ))
+        .await;
+        assert!(
+            assert_old_and_new_rows_equal_and_graph_writer_returns_output_id_for_store_path_hash(
+                &db,
+                FINISHED_EVALUATION_SHARED_BUILD_OUTPUT_STORE_PATH_HASH
+            )
+            .await,
+            "A build job whose shared build belongs to another derivation does not count as a live build job for either derivation."
+        );
+        db.finish().await;
     }
 }

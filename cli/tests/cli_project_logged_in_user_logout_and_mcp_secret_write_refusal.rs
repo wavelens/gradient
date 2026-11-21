@@ -362,6 +362,65 @@ async fn mcp_run_gradient_command_refuses_task_action_create_that_prints_a_one_t
 }
 
 #[tokio::test]
+async fn mcp_tool_refuses_artifact_download_to_envrc_sends_no_request_and_writes_no_file() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("export EVIL=1\n"))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+    let working_directory = TempDir::new().unwrap();
+
+    Command::cargo_bin("gradient")
+        .unwrap()
+        .current_dir(working_directory.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .env("TMPDIR", home.path())
+        .env_remove("GRADIENT_TOKEN")
+        .env_remove("GRADIENT_SERVER")
+        .env_remove("GRADIENT_ACCOUNT")
+        .args(["mcp", "--control"])
+        .write_stdin(
+            build_mcp_stdin_json_rpc_frames_for_initialize_initialized_and_run_gradient_command_call(
+                json!([
+                    "exec-job",
+                    "artifact",
+                    "download",
+                    "job1",
+                    "x/.envrc",
+                    "--output-file-path",
+                    "pwned"
+                ]),
+            ),
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("can't run here"));
+
+    assert!(!working_directory.path().join("pwned").exists());
+    assert!(!working_directory.path().join(".envrc").exists());
+}
+
+#[tokio::test]
+async fn mcp_exec_job_artifact_download_help_returns_help_text_instead_of_refusal() {
+    let server = MockServer::start().await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+
+    run_gradient_with_temp_home_stdin_and_args(
+        &home,
+        &build_mcp_stdin_json_rpc_frames_for_initialize_initialized_and_run_gradient_command_call(
+            json!(["exec-job", "artifact", "download", "--help"]),
+        ),
+        &["mcp", "--control"],
+    )
+    .success()
+    .stdout(predicate::str::contains("--output-file-path"))
+    .stdout(predicate::str::contains("can't run here").not());
+}
+
+#[tokio::test]
 async fn mcp_allows_listing_secret_names() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

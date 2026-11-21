@@ -7,7 +7,9 @@
 use super::refusal::TaskRefusal;
 use super::repository::check_git_host_connection_fits_task;
 use crate::api_spec::TaskPath;
-use crate::endpoints::git_host_connections::{url_host, webhook_url};
+use crate::endpoints::git_host_connections::{
+    read_checked_git_host_connection_base_url_or_host_type_default, webhook_url,
+};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::scope::{Requires, TaskScope, can};
@@ -16,13 +18,16 @@ use axum::Json;
 use axum::extract::State;
 use gradient_ci::CiContext;
 use gradient_ci::actions::decrypt_secret_with_file;
-use gradient_ci::git_host_connection_token_refresh::refresh_and_get_usable_decrypted_access_token;
+use gradient_ci::git_host_connection_token_refresh::{
+    StoredAccessTokenNotSentForMissingOrDifferentBaseUrlOriginError,
+    refresh_and_get_usable_decrypted_access_token_for_task_repository,
+};
 use gradient_core::ServerState;
+use gradient_db::git_host_connection_repository_grants::GitHostConnectionRepositoryAccessProof;
 use gradient_git_host::provision::{self, ForgeAccess, ProvisionError};
 use gradient_sources::format_public_key;
 use gradient_types::*;
-use gradient_util::http::public_client;
-use gradient_util::http_validation::validate_webhook_url;
+use gradient_util::http_validation::parse_and_check_allowed_outbound_url;
 use std::sync::Arc;
 
 impl From<ProvisionError> for WebError {
@@ -36,7 +41,7 @@ impl From<ProvisionError> for WebError {
 }
 
 struct Target {
-    connection: MGitHostConnection,
+    git_host_connection_allowed_for_task_repository: GitHostConnectionRepositoryAccessProof,
     repository: String,
     base_url: String,
 }
@@ -46,50 +51,60 @@ impl Target {
         let task_repository = &scope.task.repository;
         let repository = provision::repository_path(task_repository)
             .ok_or_else(|| TaskRefusal::InvalidRepositoryUrl(task_repository.clone()))?;
-        let host = url_host(task_repository)
-            .ok_or_else(|| TaskRefusal::InvalidRepositoryUrl(task_repository.clone()))?;
         let id = scope
             .task
             .git_host_connection
             .ok_or(TaskRefusal::GitHostConnectionMissing)?;
-        let connection = check_git_host_connection_fits_task(
-            &scope.db.web_db,
-            &scope.project,
-            task_repository,
-            id,
-        )
-        .await?;
-        if connection.github_installation_id.is_some() {
+        let allowed =
+            check_git_host_connection_fits_task(&scope.db.web_db, &scope.task, id).await?;
+        if allowed.connection().github_installation_id.is_some() {
             return Err(ProvisionError::Unsupported("GitHub").into());
         }
-        let base_url = connection
-            .base_url
-            .clone()
-            .filter(|u| !u.trim().is_empty())
-            .unwrap_or_else(|| format!("https://{host}"));
-        validate_webhook_url(&base_url)
-            .map_err(|e| TaskRefusal::InvalidWebhookUrl(e.to_string()))?;
+        let base_url =
+            read_checked_git_host_connection_base_url_or_host_type_default(allowed.connection())?
+                .to_string();
+        parse_and_check_allowed_outbound_url(
+            &base_url,
+            scope.db.user_supplied_url_http_client.allowlist(),
+        )
+        .map_err(|e| TaskRefusal::InvalidWebhookUrl(e.to_string()))?;
         Ok(Self {
-            connection,
+            git_host_connection_allowed_for_task_repository: allowed,
             repository,
             base_url,
         })
     }
 
+    fn git_host_connection(&self) -> &MGitHostConnection {
+        self.git_host_connection_allowed_for_task_repository
+            .connection()
+    }
+
     async fn token(&self, ci: &CiContext) -> WebResult<SecretString> {
-        refresh_and_get_usable_decrypted_access_token(
+        refresh_and_get_usable_decrypted_access_token_for_task_repository(
             ci.db.web_db.inner(),
             &ci.db.config,
-            &ci.http,
-            &self.connection,
+            &ci.db.user_supplied_url_http_client,
+            &self.git_host_connection_allowed_for_task_repository,
         )
-        .await?
+        .await
+        .map_err(|error| {
+            match error
+                .downcast::<StoredAccessTokenNotSentForMissingOrDifferentBaseUrlOriginError>()
+            {
+                Ok(refusal) => {
+                    TaskRefusal::OAuthConnectionBaseUrlMissingOrDifferent(refusal.to_string())
+                        .into()
+                }
+                Err(error) => WebError::from(error),
+            }
+        })?
         .ok_or_else(|| TaskRefusal::ProvisionTokenMissing.into())
     }
 
     fn access<'a>(&'a self, token: &'a SecretString) -> ForgeAccess<'a> {
         ForgeAccess {
-            git_host: self.connection.git_host_type,
+            git_host: self.git_host_connection().git_host_type,
             endpoint_url: &self.base_url,
             token: token.expose(),
             repository: &self.repository,
@@ -117,12 +132,12 @@ pub async fn post_install_webhook(
     scope: TaskScope<Requires<can::ManageIntegrations>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = Target::load(&scope).await?;
-    let webhook_url = webhook_url(&state.config.server.serve_url, &target.connection)
+    let webhook_url = webhook_url(&state.config.server.serve_url, target.git_host_connection())
         .ok_or(TaskRefusal::ProvisionSecretMissing)?;
     let secret = decrypt(
         &state.config.secrets.crypt_file,
         target
-            .connection
+            .git_host_connection()
             .secret
             .as_deref()
             .ok_or(TaskRefusal::ProvisionSecretMissing)?,
@@ -130,7 +145,7 @@ pub async fn post_install_webhook(
     let token = target.token(&state.ci()).await?;
 
     provision::install_webhook(
-        public_client().clone(),
+        state.user_supplied_url_http_client.clone(),
         &target.access(&token),
         &webhook_url,
         secret.expose(),
@@ -163,7 +178,7 @@ pub async fn post_install_deploy_key(
         .to_owned();
 
     provision::install_deploy_key(
-        public_client().clone(),
+        state.user_supplied_url_http_client.clone(),
         &target.access(&token),
         &title,
         &public_key,

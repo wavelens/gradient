@@ -60,13 +60,12 @@ async fn post(db: MockDatabase, session_id: SessionId, body: Value) -> axum_test
         .await
 }
 
-#[tokio::test]
-async fn queues_an_evaluation_against_the_remote_url() {
-    let session_id = SessionId::now_v7();
-    let commit = CommitId::now_v7();
-    let evaluation = EvaluationId::now_v7();
-
-    let db = base_db(session_id)
+fn mock_database_for_successful_build_request_with_commit_and_evaluation_ids(
+    session_id: SessionId,
+    commit: CommitId,
+    evaluation: EvaluationId,
+) -> MockDatabase {
+    base_db(session_id)
         .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([vec![reserved_task()]])
         .append_query_results([vec![gradient_entity::commit::Model {
@@ -92,10 +91,19 @@ async fn queues_an_evaluation_against_the_remote_url() {
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]);
+        }])
+}
+
+#[tokio::test]
+async fn queues_an_evaluation_against_the_remote_url() {
+    let session_id = SessionId::now_v7();
+    let commit = CommitId::now_v7();
+    let evaluation = EvaluationId::now_v7();
 
     let res = post(
-        db,
+        mock_database_for_successful_build_request_with_commit_and_evaluation_ids(
+            session_id, commit, evaluation,
+        ),
         session_id,
         json!({
             "project": "test-project",
@@ -182,6 +190,59 @@ async fn rejects_a_local_file_url() {
         "unexpected message: {}",
         body["message"]
     );
+}
+
+#[tokio::test]
+async fn build_request_with_local_repository_url_and_branch_but_no_commit_is_refused_before_any_git_command_runs()
+ {
+    for url in ["git+file:/tmp/x", "path:/etc"] {
+        let session_id = SessionId::now_v7();
+        let res = post(
+            base_db(session_id),
+            session_id,
+            json!({"project": "test-project", "url": url, "ref": "main"}),
+        )
+        .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert!(
+            body["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid repository URL"),
+            "{url}: unexpected message: {}",
+            body["message"]
+        );
+    }
+}
+
+#[tokio::test]
+async fn build_request_with_local_repository_url_and_commit_is_refused_and_stores_no_evaluation() {
+    for url in ["path:/etc", "file:///x"] {
+        let session_id = SessionId::now_v7();
+        let res = post(
+            mock_database_for_successful_build_request_with_commit_and_evaluation_ids(
+                session_id,
+                CommitId::now_v7(),
+                EvaluationId::now_v7(),
+            ),
+            session_id,
+            json!({"project": "test-project", "url": url, "rev": REV}),
+        )
+        .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert!(
+            body["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid repository URL"),
+            "{url}: unexpected message: {}",
+            body["message"]
+        );
+    }
 }
 
 #[tokio::test]

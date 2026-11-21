@@ -11,7 +11,10 @@ use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::shape;
 use gradient_wire::types::BuildFailureKind;
 
-use super::{A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, X, X_OUT, drv, store_path, with_output};
+use super::{
+    A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, X, X_OUT, chain_done, drv, store_path,
+    with_output,
+};
 use crate::test_ctx::BatchReport;
 
 async fn walk_leaf(case: &Case, evaluation: EvaluationId, path: &str, output: &str) -> BatchReport {
@@ -36,6 +39,7 @@ async fn w01_unwalked_inputs_reads_build_inputs_only_and_ignores_a_runtime_stub(
             .evaluation(e1)
             .derivation(A)
             .walked()
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .entry_point("pkg.a")
             .job()
             .probed()
@@ -76,6 +80,7 @@ async fn w02_a_chain_completes_level_by_level_in_a_single_batch() {
             .evaluation(e1)
             .derivation(A)
             .walked()
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .entry_point("pkg.a")
             .job()
             .probed()
@@ -84,6 +89,7 @@ async fn w02_a_chain_completes_level_by_level_in_a_single_batch() {
             .depends_on(B)
             .derivation(B)
             .walked()
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .job()
             .probed()
             .drv_cached()
@@ -213,5 +219,23 @@ async fn w04_missing_producerless_drv_in_cache_fails_build_marks_derivation_not_
     assert_eq!(columns, (true, 0), "after 2: report");
     assert_eq!(case.rows().await, rows, "after 2: no row changes");
     case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn w05_walked_derivation_row_is_reported_known_only_when_stored_verified_hash_modulo_value_exists()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        chain_done(e1)
+            .derivation(B)
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths(),
+    )
+    .await;
+
+    let known = case.known(&[A, B]).await;
+
+    assert_eq!(known, [B], "after 1: known_derivations");
+    case.zero_drift("step 1").await;
     case.finish().await;
 }

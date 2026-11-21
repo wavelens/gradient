@@ -76,7 +76,7 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
     Ok(unparked)
 }
 
-/// This unparks only the zero-workers, empty-unmet shape that `park_if_no_workers` wrote.
+/// Unpark only the forms from `compute_new_evaluation_initial_status_and_waiting_reason` that have zero workers and no unsatisfied requirements.
 /// Other `Workers` parks belong to the build-dispatch repair pass. Callers are invoking this
 /// after any registration touch. The guard prevents re-queue -> re-park churn when nothing changed.
 pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(

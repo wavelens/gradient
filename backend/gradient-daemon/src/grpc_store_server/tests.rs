@@ -20,10 +20,15 @@ use harmonia_store_derivation::derived_path::{DerivedPath, SingleDerivedPath};
 use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_path_info::NarHash;
 use std::io::Cursor;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Duration;
 use tokio::io::AsyncBufRead;
 use tonic::Code;
+use tonic::codegen::{Service as _, http};
 use tonic::transport::server::TcpIncoming;
 use tonic::transport::{Channel, Server};
+use zstd::zstd_safe::DCtx;
 
 const ACCEPTED_BEARER_TOKEN: &str = "test-token";
 
@@ -180,31 +185,128 @@ struct FixedBearerTokenTestCredentialChecker(Arc<FakeBackend>);
 impl GrpcCallCredentialChecker for FixedBearerTokenTestCredentialChecker {
     type Backend = FakeBackend;
 
+    type OpenCallSlotPermit = ();
+
     async fn check_call_credentials_and_return_store_backend(
         &self,
-        metadata: &MetadataMap,
+        headers: &HeaderMap,
         _extensions: &Extensions,
-    ) -> Result<Arc<FakeBackend>, Status> {
+    ) -> Result<AuthenticatedGrpcCallWithOpenCallSlotGuard<FakeBackend, ()>, Status> {
         let expected = format!("Bearer {ACCEPTED_BEARER_TOKEN}");
-        match metadata
+        match headers
             .get("authorization")
             .and_then(|value| value.to_str().ok())
         {
-            Some(value) if value == expected => Ok(Arc::clone(&self.0)),
+            Some(value) if value == expected => Ok(AuthenticatedGrpcCallWithOpenCallSlotGuard {
+                project_nix_store_backend: Arc::clone(&self.0),
+                open_call_slot_permit: (),
+                caller_lost_access_future: Box::pin(futures::future::pending()),
+            }),
             _ => Err(Status::unauthenticated("bearer token")),
         }
     }
 }
 
+struct FixedBearerTokenOneCallSlotTestCredentialChecker {
+    backend: Arc<FakeBackend>,
+    call_slots: Arc<tokio::sync::Semaphore>,
+}
+
+impl GrpcCallCredentialChecker for FixedBearerTokenOneCallSlotTestCredentialChecker {
+    type Backend = FakeBackend;
+    type OpenCallSlotPermit = tokio::sync::OwnedSemaphorePermit;
+
+    async fn check_call_credentials_and_return_store_backend(
+        &self,
+        headers: &HeaderMap,
+        extensions: &Extensions,
+    ) -> Result<
+        AuthenticatedGrpcCallWithOpenCallSlotGuard<FakeBackend, tokio::sync::OwnedSemaphorePermit>,
+        Status,
+    > {
+        let call = FixedBearerTokenTestCredentialChecker(Arc::clone(&self.backend))
+            .check_call_credentials_and_return_store_backend(headers, extensions)
+            .await?;
+        let open_call_slot_permit = Arc::clone(&self.call_slots)
+            .try_acquire_owned()
+            .map_err(|_| Status::resource_exhausted("call slot"))?;
+        Ok(AuthenticatedGrpcCallWithOpenCallSlotGuard {
+            project_nix_store_backend: call.project_nix_store_backend,
+            open_call_slot_permit,
+            caller_lost_access_future: Box::pin(futures::future::pending()),
+        })
+    }
+}
+
+struct FixedBearerTokenOneShotSenderTestCredentialChecker {
+    backend: Arc<FakeBackend>,
+    caller_lost_access_receiver: std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
+impl GrpcCallCredentialChecker for FixedBearerTokenOneShotSenderTestCredentialChecker {
+    type Backend = FakeBackend;
+    type OpenCallSlotPermit = ();
+
+    async fn check_call_credentials_and_return_store_backend(
+        &self,
+        headers: &HeaderMap,
+        extensions: &Extensions,
+    ) -> Result<AuthenticatedGrpcCallWithOpenCallSlotGuard<FakeBackend, ()>, Status> {
+        let call = FixedBearerTokenTestCredentialChecker(Arc::clone(&self.backend))
+            .check_call_credentials_and_return_store_backend(headers, extensions)
+            .await?;
+        let caller_lost_access_receiver = self
+            .caller_lost_access_receiver
+            .lock()
+            .expect("receiver lock")
+            .take()
+            .expect("one call per checker");
+        Ok(AuthenticatedGrpcCallWithOpenCallSlotGuard {
+            caller_lost_access_future: Box::pin(async move {
+                let _ = caller_lost_access_receiver.await;
+            }),
+            ..call
+        })
+    }
+}
+
+async fn start_nix_store_server_with_caller_lost_access_sender_on_random_port_and_connect() -> (
+    JoinSet<Result<(), tonic::transport::Error>>,
+    Channel,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    let (caller_lost_access_sender, caller_lost_access_receiver) = tokio::sync::oneshot::channel();
+    let (server, channel) =
+        start_nix_store_server_with_credential_checker_on_random_port_and_connect(
+            FixedBearerTokenOneShotSenderTestCredentialChecker {
+                backend: Arc::new(FakeBackend(Journal::new())),
+                caller_lost_access_receiver: std::sync::Mutex::new(Some(
+                    caller_lost_access_receiver,
+                )),
+            },
+        )
+        .await;
+    (server, channel, caller_lost_access_sender)
+}
+
 async fn start_nix_store_server_on_random_port_and_connect()
 -> (JoinSet<Result<(), tonic::transport::Error>>, Channel) {
+    start_nix_store_server_with_credential_checker_on_random_port_and_connect(
+        FixedBearerTokenTestCredentialChecker(Arc::new(FakeBackend(Journal::new()))),
+    )
+    .await
+}
+
+async fn start_nix_store_server_with_credential_checker_on_random_port_and_connect<
+    C: GrpcCallCredentialChecker,
+>(
+    checker: C,
+) -> (JoinSet<Result<(), tonic::transport::Error>>, Channel) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind");
     let address = listener.local_addr().expect("address");
-    let service = AuthenticatedNixGrpcStoreService::new(Arc::new(
-        FixedBearerTokenTestCredentialChecker(Arc::new(FakeBackend(Journal::new()))),
-    ));
+    let service = AuthenticatedNixGrpcStoreService::new(Arc::new(checker));
     let mut server = JoinSet::new();
     server.spawn(
         Server::builder()
@@ -254,6 +356,214 @@ async fn call_without_bearer_token_is_rejected_with_unauthenticated() {
         .await
         .expect_err("rejected");
     assert_eq!(status.code(), Code::Unauthenticated);
+}
+
+struct EmptyRequestBodyThatNeverEnds;
+
+impl http_body::Body for EmptyRequestBodyThatNeverEnds {
+    type Data = Bytes;
+    type Error = Status;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        _context: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Bytes>, Status>>> {
+        Poll::Pending
+    }
+}
+
+#[tokio::test]
+async fn unauthenticated_call_with_never_ending_body_is_refused_without_reading_body() {
+    let service = AuthenticatedNixGrpcStoreService::new(Arc::new(
+        FixedBearerTokenTestCredentialChecker(Arc::new(FakeBackend(Journal::new()))),
+    ));
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("/nix.remote.NixRemote/StoreInfo")
+        .header("content-type", "application/grpc")
+        .body(EmptyRequestBodyThatNeverEnds)
+        .expect("request");
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        service.nix_remote_grpc_service().call(request),
+    )
+    .await
+    .expect("refused without waiting for the body")
+    .expect("response");
+    assert_eq!(
+        response
+            .headers()
+            .get("grpc-status")
+            .and_then(|value| value.to_str().ok()),
+        Some("16")
+    );
+}
+
+#[tokio::test]
+async fn authenticated_query_valid_paths_over_message_limit_is_refused_with_out_of_range() {
+    let (_server, channel) = start_nix_store_server_on_random_port_and_connect().await;
+    let mut client = NixRemoteClient::new(channel);
+    let path = fake_store_known_store_path().to_string();
+    let paths = vec![path.clone(); 17 * 1024 * 1024 / path.len() + 1];
+    let status = client
+        .query_valid_paths(wrap_message_in_request_with_accepted_bearer_token(
+            QueryValidPathsRequest {
+                paths,
+                substitute: false,
+            },
+        ))
+        .await
+        .expect_err("refused");
+    assert_eq!(status.code(), Code::OutOfRange);
+}
+
+fn query_valid_paths_request_with_encoded_length(encoded_length: usize) -> QueryValidPathsRequest {
+    let path = fake_store_known_store_path().to_string();
+    let mut request = QueryValidPathsRequest {
+        paths: vec![path.clone(); (encoded_length - 64) / (path.len() + 2)],
+        substitute: false,
+    };
+    let remaining = encoded_length - prost::Message::encoded_len(&request);
+    let filler_length = (remaining.saturating_sub(4)..remaining)
+        .find(|length| {
+            1 + prost::encoding::encoded_len_varint(*length as u64) + length == remaining
+        })
+        .expect("filler length");
+    request
+        .paths
+        .push(path.repeat(filler_length / path.len() + 1)[..filler_length].to_owned());
+    assert_eq!(prost::Message::encoded_len(&request), encoded_length);
+    request
+}
+
+#[tokio::test]
+async fn query_valid_paths_of_exactly_the_message_limit_is_decoded_and_one_byte_more_is_out_of_range()
+ {
+    let (_server, channel) = start_nix_store_server_on_random_port_and_connect().await;
+    let mut client = NixRemoteClient::new(channel);
+    let at_limit = client
+        .query_valid_paths(wrap_message_in_request_with_accepted_bearer_token(
+            query_valid_paths_request_with_encoded_length(MAX_DECODED_GRPC_MESSAGE_SIZE_BYTES),
+        ))
+        .await
+        .map(|_| ())
+        .map_err(|status| status.code());
+    assert_eq!(at_limit, Ok(()));
+    let over_limit = client
+        .query_valid_paths(wrap_message_in_request_with_accepted_bearer_token(
+            query_valid_paths_request_with_encoded_length(MAX_DECODED_GRPC_MESSAGE_SIZE_BYTES + 1),
+        ))
+        .await
+        .expect_err("refused");
+    assert_eq!(over_limit.code(), Code::OutOfRange);
+}
+
+#[tokio::test]
+async fn streaming_response_body_holds_open_call_slot_until_dropped() {
+    let (_server, channel) =
+        start_nix_store_server_with_credential_checker_on_random_port_and_connect(
+            FixedBearerTokenOneCallSlotTestCredentialChecker {
+                backend: Arc::new(FakeBackend(Journal::new())),
+                call_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            },
+        )
+        .await;
+    let mut scheduler = SchedulerClient::new(channel.clone());
+    let mut client = NixRemoteClient::new(channel);
+    let (request_sender, request_stream) = futures::channel::mpsc::unbounded::<ClientMsgs>();
+    let open_stream = scheduler
+        .schedule(wrap_message_in_request_with_accepted_bearer_token(
+            request_stream,
+        ))
+        .await
+        .expect("schedule")
+        .into_inner();
+    let status = client
+        .store_info(wrap_message_in_request_with_accepted_bearer_token(
+            StoreInfoRequest {},
+        ))
+        .await
+        .expect_err("no free call slot");
+    assert_eq!(status.code(), Code::ResourceExhausted);
+    drop(request_sender);
+    drop(open_stream);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while client
+            .store_info(wrap_message_in_request_with_accepted_bearer_token(
+                StoreInfoRequest {},
+            ))
+            .await
+            .is_err()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("call slot released after the stream was dropped");
+}
+
+#[derive(Default)]
+struct LargestWriteSizeRecordingWriter {
+    largest_write: usize,
+}
+
+impl AsyncWrite for LargestWriteSizeRecordingWriter {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _context: &mut Context<'_>,
+        data: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        self.largest_write = self.largest_write.max(data.len());
+        Poll::Ready(Ok(data.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        _context: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[tokio::test]
+async fn highly_compressed_piece_is_written_in_slices_no_larger_than_decoder_output_size() {
+    let piece = ZstdStreamCompressor::new()
+        .expect("compressor")
+        .compress(&vec![0; 64 * 1024 * 1024])
+        .expect("compress");
+    assert!(piece.len() < 1024 * 1024);
+    let mut writer = LargestWriteSizeRecordingWriter::default();
+    decompress_zstd_stream_to_writer(futures::stream::iter([Ok(piece)]), &mut writer)
+        .await
+        .expect("decompress");
+    assert!(writer.largest_write > 0);
+    assert!(writer.largest_write <= DCtx::out_size());
+}
+
+#[tokio::test]
+async fn zstd_stream_over_per_message_limit_decompresses_unchanged_to_slow_pipe_writer() {
+    let data: Vec<u8> = (0..32 * 1024 * 1024u32)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let mut compressor = ZstdStreamCompressor::new().expect("compressor");
+    let pieces: Vec<Result<Vec<u8>, Status>> = data
+        .chunks(256 * 1024)
+        .map(|chunk| Ok(compressor.compress(chunk).expect("compress")))
+        .collect();
+    let (writer, mut reader) = tokio::io::duplex(64 * 1024);
+    let (decompressed, received) = tokio::join!(
+        decompress_zstd_stream_to_writer(futures::stream::iter(pieces), writer),
+        async {
+            let mut received = Vec::new();
+            reader.read_to_end(&mut received).await.map(|_| received)
+        }
+    );
+    decompressed.expect("decompress");
+    assert!(received.expect("read") == data);
 }
 
 #[tokio::test]
@@ -329,7 +639,10 @@ async fn fetch_nars_streams_zstd_frames_that_decompress_to_nar_then_empty_end_of
             break;
         }
         data_frames += 1;
-        nar.extend(decompressor.decompress(&frame.data).expect("decompress"));
+        decompressor
+            .decompress_piece_to_async_writer(&frame.data, &mut nar)
+            .await
+            .expect("decompress");
     }
     assert!(frames.message().await.expect("end").is_none());
     assert_eq!(data_frames, 2);
@@ -403,9 +716,83 @@ async fn test_connect_rpc_tunnels_nix_worker_protocol_and_returns_daemon_magic()
     let mut received = Vec::new();
     while received.len() < 8 {
         let reply = replies.message().await.expect("reply").expect("chunk");
-        received.extend(decompressor.decompress(&reply.data).expect("decompress"));
+        decompressor
+            .decompress_piece_to_async_writer(&reply.data, &mut received)
+            .await
+            .expect("decompress");
     }
     assert_eq!(received[..8], SERVER_MAGIC.to_le_bytes());
+}
+
+#[tokio::test]
+async fn connect_stream_ends_with_permission_denied_after_access_lost_future_completes() {
+    let (_server, channel, caller_lost_access_sender) =
+        start_nix_store_server_with_caller_lost_access_sender_on_random_port_and_connect().await;
+    let mut client = NixRemoteClient::new(channel);
+    let mut compressor = ZstdStreamCompressor::new().expect("compressor");
+    let hello = Chunk {
+        data: compressor
+            .compress(&CLIENT_MAGIC.to_le_bytes())
+            .expect("compress"),
+    };
+    let chunks = futures::stream::iter([hello]).chain(futures::stream::pending());
+    let mut replies = client
+        .connect(wrap_message_in_request_with_accepted_bearer_token(chunks))
+        .await
+        .expect("connect")
+        .into_inner();
+    let mut decompressor = ZstdStreamPieceDecompressor::new().expect("decompressor");
+    let mut received = Vec::new();
+    while received.len() < 8 {
+        let reply = replies.message().await.expect("reply").expect("chunk");
+        decompressor
+            .decompress_piece_to_async_writer(&reply.data, &mut received)
+            .await
+            .expect("decompress");
+    }
+    drop(caller_lost_access_sender);
+    let status = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Err(status) = replies.message().await {
+                return status;
+            }
+        }
+    })
+    .await
+    .expect("connect stream ends within 5 seconds after access is lost");
+    assert_eq!(status.code(), Code::PermissionDenied);
+}
+
+#[tokio::test]
+async fn add_multiple_to_store_upload_returns_permission_denied_when_access_lost_before_response_exists()
+ {
+    let (_server, channel, caller_lost_access_sender) =
+        start_nix_store_server_with_caller_lost_access_sender_on_random_port_and_connect().await;
+    let mut client = NixRemoteClient::new(channel);
+    let mut compressor = ZstdStreamCompressor::new().expect("compressor");
+    let first_chunk = AddMultipleChunk {
+        repair: false,
+        check_sigs: false,
+        data: compressor
+            .compress(&1u64.to_le_bytes()[..4])
+            .expect("compress"),
+    };
+    let chunks = futures::stream::iter([first_chunk]).chain(futures::stream::pending());
+    let mut upload = JoinSet::new();
+    upload.spawn(async move {
+        client
+            .add_multiple_to_store(wrap_message_in_request_with_accepted_bearer_token(chunks))
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    drop(caller_lost_access_sender);
+    let status = tokio::time::timeout(Duration::from_secs(5), upload.join_next())
+        .await
+        .expect("upload answers within 5 seconds after access is lost")
+        .expect("upload task")
+        .expect("upload task")
+        .expect_err("permission denied");
+    assert_eq!(status.code(), Code::PermissionDenied);
 }
 
 #[tokio::test]
@@ -426,7 +813,10 @@ async fn get_build_log_streams_zstd_chunks_that_decompress_to_build_log() {
     let mut received_chunks = 0;
     while let Some(chunk) = chunks.message().await.expect("chunk") {
         received_chunks += 1;
-        log.extend(decompressor.decompress(&chunk.data).expect("decompress"));
+        decompressor
+            .decompress_piece_to_async_writer(&chunk.data, &mut log)
+            .await
+            .expect("decompress");
     }
     assert!(received_chunks > 1);
     assert_eq!(log, fake_store_known_derivation_build_log_bytes());

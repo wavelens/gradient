@@ -78,7 +78,7 @@ pub(crate) fn pre_warm_counts(
                             let requirement = exec
                                 .spec
                                 .requirement_on(&exec.architecture, &inventory.defaults);
-                            caps.fits_exec(&requirement, DeviceCount::Total)
+                            caps.fits_exec(&requirement, DeviceCount::Total, exec.project)
                         })
                 })
                 .map(|(index, _)| index)
@@ -385,7 +385,9 @@ mod tests {
         let draining = worker_info("draining", exec_caps_labelled("lab-a"));
         let workers = [
             WorkerInfo {
-                authorized_peers: Some(HashSet::from([mine])),
+                project_access: gradient_pool::ProjectAccess::OnlyListedProjects(HashSet::from([
+                    mine,
+                ])),
                 ..restricted
             },
             open,

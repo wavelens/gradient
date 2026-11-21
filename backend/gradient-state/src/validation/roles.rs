@@ -5,12 +5,17 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
+use gradient_types::input::check_index_name;
 use gradient_types::permissions::Permission;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let mut role_keys_seen_per_project: HashSet<(String, String)> = HashSet::new();
     for role in lookup.config.roles.values() {
+        errors.record_input_error_at_field(
+            format!("roles.{}.name", role.name),
+            check_index_name(&role.name),
+        );
         if !lookup.project_exists(&role.project) {
             errors.push(
                 format!("roles.{}.project", role.name),

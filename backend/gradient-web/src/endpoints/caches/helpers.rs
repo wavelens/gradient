@@ -5,13 +5,14 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::access::effective_cache_mask;
-use crate::authorization::{ApiKeyContext, DecodedRequest, decode_jwt};
+use crate::access::can_read_store;
+use crate::authorization::{
+    DecodedRequest, decode_jwt, reject_job_token_without_project_credentials_or_privileged_actions,
+};
 use crate::client_ip::resolve_client_ip;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::is_allowed as ip_allowed;
-use crate::permissions::{CachePermission, cache_mask_grants};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::store_paths::original_text;
@@ -62,6 +63,9 @@ async fn try_authenticate_basic(
     let Ok(decoded) = decode_jwt(db, jwt_secret, last_used_stamps, password).await else {
         return Ok(None);
     };
+    if reject_job_token_without_project_credentials_or_privileged_actions(&decoded).is_err() {
+        return Ok(None);
+    }
     if let Some(ctx) = decoded.api_key_context()
         && !ip_allowed(client_ip, &ctx.allowed_ips)
     {
@@ -91,21 +95,26 @@ async fn require_cache_auth(
         return Err(CacheRefusal::AuthenticationRequired.into());
     };
     let api_key = decoded.api_key_context();
-    if can_read_store(db, &user, cache, api_key).await? {
+    if can_read_store(db, user.id, cache.id, api_key).await? {
         return Ok(());
     }
     Err(CacheRefusal::ReadCachePermissionRequired.into())
 }
 
-async fn can_read_store(
+pub(super) async fn content_variant_served_by_cache(
     db: &WebDb,
-    user: &MUser,
-    cache: &MCache,
-    api_key: Option<&ApiKeyContext>,
-) -> WebResult<bool> {
-    Ok(effective_cache_mask(db, user.id, cache.id, api_key)
+    cache: CacheId,
+    hash: &str,
+) -> WebResult<Option<MCachedPath>> {
+    Ok(
+        gradient_db::store_path_content_variant_reader_choice::get_content_variants_served_by_binary_cache_for_store_path_hashes(
+            db,
+            cache,
+            &[hash.to_owned()],
+        )
         .await?
-        .is_some_and(|mask| cache_mask_grants(mask, CachePermission::ReadStore)))
+        .remove(hash),
+    )
 }
 
 pub(super) async fn get_nar_by_hash(
@@ -116,10 +125,8 @@ pub(super) async fn get_nar_by_hash(
     hash: StoreHash,
 ) -> Result<NixPathInfo, WebError> {
     let hash = mapper.inbound_hash(hash);
-    let cached_path_row = gradient_db::cached_paths::by_hash(db, hash.as_str())
-        .await
-        .map_err(WebError::from)?
-        .filter(|row| row.is_fully_cached())
+    let cached_path_row = content_variant_served_by_cache(db, cache.id, hash.as_str())
+        .await?
         .or_not_found(Resource::Path)?;
 
     let cached_path_sig =
@@ -142,26 +149,21 @@ pub(super) async fn get_nar_by_hash(
         return Err(CacheRefusal::SignaturePending.into());
     }
 
-    let file_hash = cached_path_row
-        .file_hash
-        .as_deref()
-        .map(normalize_nar_hash)
-        .ok_or(CacheRefusal::NotRecorded("FileHash"))?;
+    let file_hash = normalize_nar_hash(&cached_path_row.file_hash);
     let file_size = cached_path_row
         .file_size
         .and_then(|size| u64::try_from(size).ok())
         .ok_or(CacheRefusal::NotRecorded("FileSize"))?;
-    let nar_hash = cached_path_row
-        .nar_hash
+    let nar_hash = normalize_nar_hash(&cached_path_row.nar_hash);
+    let nar_size = u64::try_from(cached_path_row.nar_size)
+        .map_err(|_| CacheRefusal::NotRecorded("NarSize"))?;
+    let references: Vec<String> = cached_path_row
+        .references
         .as_deref()
-        .map(normalize_nar_hash)
-        .ok_or(CacheRefusal::NotRecorded("NarHash"))?;
-    let nar_size = cached_path_row
-        .nar_size
-        .and_then(|size| u64::try_from(size).ok())
-        .ok_or(CacheRefusal::NotRecorded("NarSize"))?;
-    let references =
-        gradient_db::graph::runtime_closure::references_for_hash(db, &cached_path_row.hash).await?;
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
 
     Ok(NixPathInfo {
         store_path: original_text(mapper, cached_path_row.store_path()),
@@ -170,8 +172,8 @@ pub(super) async fn get_nar_by_hash(
             original_text(mapper, cached_path_row.hash.clone())
         ),
         compression: "zstd".to_string(),
-        file_hash,
-        file_size,
+        file_hash: Some(file_hash),
+        file_size: Some(file_size),
         nar_hash,
         nar_size,
         references: references
@@ -242,11 +244,15 @@ pub async fn fetch_nar_stream(
     cache: CacheId,
     stored_hash: &str,
 ) -> WebResult<(u64, BoxStream<'static, anyhow::Result<Bytes>>)> {
-    if !gradient_db::cached_paths::signed_in_cache(db, cache, stored_hash).await? {
-        return Err(WebError::not_found(Resource::Path));
-    }
+    let cached_path_row_for_served_content_variant =
+        content_variant_served_by_cache(db, cache, stored_hash)
+            .await?
+            .or_not_found(Resource::Path)?;
     let source = nar_storage
-        .open(stored_hash, 0)
+        .open(
+            &cached_path_row_for_served_content_variant.nar_object_storage_key,
+            0,
+        )
         .await
         .context("read NAR")?
         .or_not_found(Resource::Path)?;
@@ -282,7 +288,9 @@ pub(super) async fn delete_nar_from_cache(
         .await
         .context("demote the cache claim")?;
     let cached_path = report.cached_path.or_not_found(Resource::Nar)?;
-    nar_storage.hot().invalidate(hash);
+    nar_storage
+        .hot()
+        .invalidate(&cached_path.nar_object_storage_key);
 
     Ok((
         cached_path,

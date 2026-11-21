@@ -385,4 +385,268 @@ mod tests {
         assert_eq!(connections_after_second_up, connections);
         db.finish().await;
     }
+
+    #[tokio::test]
+    async fn test_base_url_migration_backfills_gitlab_keeps_existing_gitea_and_forgejo_and_rejects_new_rows_without_base_url()
+     {
+        use gradient_entity::git_host_connection::{
+            Entity as EGitHostConnection, GitHostType, Model as MGitHostConnection,
+        };
+        use gradient_entity::ids::GitHostConnectionId;
+        use sea_orm_migration::SchemaManager;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let connection = db.connection();
+        let migration = gradient_migration::Migrator::migrations()
+            .into_iter()
+            .find(|m| m.name().starts_with("m20261228_000000_"))
+            .expect("register the migration that requires a base URL of git host connections");
+        migration
+            .down(&SchemaManager::new(&connection))
+            .await
+            .expect("the migration reverts");
+        crate::rows::insert::<gradient_entity::user::Entity, _>(
+            &connection,
+            gradient_fixtures::rows::user(),
+        )
+        .await
+        .expect("insert user");
+        let row = |name: &str, git_host_type| MGitHostConnection {
+            id: GitHostConnectionId::now_v7(),
+            name: name.into(),
+            display_name: name.into(),
+            git_host_type,
+            created_by: user_id(),
+            created_at: chrono::Utc::now().naive_utc(),
+            ..Default::default()
+        };
+        let mut legacy_ids = Vec::new();
+        for (name, git_host_type) in [
+            ("gitlab", GitHostType::GitLab),
+            ("gitea", GitHostType::Gitea),
+            ("forgejo", GitHostType::Forgejo),
+            ("github", GitHostType::GitHub),
+        ] {
+            let stored =
+                crate::rows::insert::<EGitHostConnection, _>(&connection, row(name, git_host_type))
+                    .await
+                    .expect("the old schema stores a connection without base URL");
+            legacy_ids.push(stored.id);
+        }
+
+        migration
+            .up(&SchemaManager::new(&connection))
+            .await
+            .expect("the migration runs");
+
+        let mut base_urls = Vec::new();
+        for id in legacy_ids {
+            let stored = db
+                .find::<EGitHostConnection>(id)
+                .await
+                .expect("row remains");
+            base_urls.push(stored.base_url);
+        }
+        assert_eq!(
+            base_urls,
+            [Some("https://gitlab.com".to_owned()), None, None, None]
+        );
+        for (name, git_host_type) in [
+            ("new-gitea", GitHostType::Gitea),
+            ("new-forgejo", GitHostType::Forgejo),
+            ("new-gitlab", GitHostType::GitLab),
+        ] {
+            let refused =
+                crate::rows::insert::<EGitHostConnection, _>(&connection, row(name, git_host_type))
+                    .await;
+            assert!(refused.is_err(), "{name} without base URL was stored");
+        }
+        crate::rows::insert::<EGitHostConnection, _>(
+            &connection,
+            row("new-github", GitHostType::GitHub),
+        )
+        .await
+        .expect("a GitHub connection needs no base URL");
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn m20261229_grants_shared_git_host_connections_to_task_repositories_in_owner_team_projects_and_detaches_tasks_without_owner_repo_path()
+     {
+        use gradient_entity::ids::{GitHostConnectionId, ProjectId, TaskId};
+        use gradient_entity::{git_host_connection, project, task, team, user};
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let connection = db.connection();
+        let migrations = gradient_migration::Migrator::migrations();
+        let migrations_to_revert_to_schema_before_repository_grants = u32::try_from(
+            migrations.len()
+                - migrations
+                    .iter()
+                    .position(|m| m.name().starts_with("m20261229_000000_"))
+                    .expect("register the migration that creates repository grants"),
+        )
+        .expect("the count fits in u32");
+        gradient_migration::Migrator::down(
+            &connection,
+            Some(migrations_to_revert_to_schema_before_repository_grants),
+        )
+        .await
+        .expect("schema before repository grants");
+
+        let team_project = project_id();
+        let project_outside_team = ProjectId::now_v7();
+        let instance_connection = GitHostConnectionId::now_v7();
+        let team_connection = GitHostConnectionId::now_v7();
+        let unparsable_task = TaskId::now_v7();
+        let task_outside_team = TaskId::now_v7();
+        crate::rows::insert::<user::Entity, _>(&connection, gradient_fixtures::rows::user())
+            .await
+            .expect("user");
+        crate::rows::insert::<team::Entity, _>(&connection, gradient_fixtures::rows::team())
+            .await
+            .expect("team");
+        for (id, name, owner_team) in [
+            (
+                team_project,
+                "in-team",
+                Some(gradient_fixtures::ids::team_id()),
+            ),
+            (project_outside_team, "outside-team", None),
+        ] {
+            crate::rows::insert::<project::Entity, _>(
+                &connection,
+                project::Model {
+                    id,
+                    name: name.into(),
+                    owner_team,
+                    ..gradient_fixtures::rows::project()
+                },
+            )
+            .await
+            .expect("project");
+        }
+        for (id, name, owner_team) in [
+            (instance_connection, "instance", None),
+            (
+                team_connection,
+                "team",
+                Some(gradient_fixtures::ids::team_id()),
+            ),
+        ] {
+            crate::rows::insert::<git_host_connection::Entity, _>(
+                &connection,
+                git_host_connection::Model {
+                    id,
+                    owner_team,
+                    name: name.into(),
+                    display_name: name.into(),
+                    created_by: user_id(),
+                    created_at: gradient_fixtures::test_date(),
+                    base_url: Some("https://gitea.example.com".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("connection");
+        }
+        for (id, project, name, repository, git_host_connection) in [
+            (
+                task_id(),
+                team_project,
+                "app",
+                "https://github.com/Acme/App.git",
+                Some(instance_connection),
+            ),
+            (
+                unparsable_task,
+                team_project,
+                "no-repo-path",
+                "https://github.com/acme",
+                Some(instance_connection),
+            ),
+            (
+                TaskId::now_v7(),
+                team_project,
+                "nested",
+                "https://gitlab.example.com/group/sub/repo",
+                Some(team_connection),
+            ),
+            (
+                task_outside_team,
+                project_outside_team,
+                "outside",
+                "https://gitlab.example.com/other/repo",
+                Some(team_connection),
+            ),
+            (
+                TaskId::now_v7(),
+                team_project,
+                "pull-requests",
+                "git@github.com:acme/lib.git",
+                None,
+            ),
+        ] {
+            crate::rows::insert::<task::Entity, _>(
+                &connection,
+                task::Model {
+                    id,
+                    project,
+                    name: name.into(),
+                    repository: repository.into(),
+                    git_host_connection,
+                    report_status: git_host_connection.is_some(),
+                    ..gradient_fixtures::rows::task()
+                },
+            )
+            .await
+            .expect("task");
+        }
+        db.execute(&format!(
+            "INSERT INTO task_action (id, task, name, action_type, config, events, active, created_by) \
+             SELECT gen_random_uuid(), id, 'open pr', 3, \
+             '{{\"type\":\"open_pr\",\"git_host_connection_id\":\"{instance_connection}\"}}', '[]', true, \
+             '{user}' FROM task WHERE name IN ('pull-requests', 'no-repo-path');",
+            user = user_id(),
+        ))
+        .await;
+
+        gradient_migration::Migrator::up(&connection, None)
+            .await
+            .expect("repository grants after migration");
+        let grants = db
+            .texts(
+                "SELECT c.name || ' ' || p.name || ' ' || g.repository_owner || ' ' || \
+                 coalesce(g.repository_name, '*') || ' ' || g.source || ' ' || \
+                 coalesce(g.created_by::text, 'nobody') \
+                 FROM git_host_connection_repository_grant g \
+                 JOIN git_host_connection c ON c.id = g.git_host_connection \
+                 JOIN project p ON p.id = g.project ORDER BY 1",
+            )
+            .await;
+        let task_fields = db
+            .texts(&format!(
+                "SELECT name || ' ' || coalesce(git_host_connection::text, 'none') || ' ' || \
+                 report_status FROM task WHERE id IN ('{unparsable_task}', '{task_outside_team}') \
+                 ORDER BY name"
+            ))
+            .await;
+
+        assert_eq!(
+            grants,
+            vec![
+                "instance in-team acme app 1 nobody",
+                "instance in-team acme lib 1 nobody",
+                "team in-team group sub/repo 1 nobody",
+            ]
+        );
+        assert_eq!(
+            task_fields,
+            vec![
+                "no-repo-path none false".to_owned(),
+                format!("outside {team_connection} true"),
+            ]
+        );
+        db.finish().await;
+    }
 }

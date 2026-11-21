@@ -20,7 +20,8 @@ pub struct DatabaseArgs {
     /// the sum of {option}`services.gradient.database.maxConnections`,
     /// {option}`services.gradient.database.cache.maxConnections` and
     /// {option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`
-    /// must accommodate that sum.
+    /// must accommodate that sum. The scheduler opens 2 more connections in a separate pool
+    /// for refreshing waiting evaluations. `max_connections` must also accommodate them.
     #[arg(default_value = "16")]
     pub max_connections: NonZeroU32,
 

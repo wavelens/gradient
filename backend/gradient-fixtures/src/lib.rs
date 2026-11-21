@@ -14,6 +14,7 @@ pub mod ids;
 pub mod mock;
 pub mod rows;
 pub mod shape;
+pub mod store_path_content_variants;
 
 pub fn test_date() -> chrono::NaiveDateTime {
     chrono::NaiveDate::from_ymd_opt(2026, 1, 1)

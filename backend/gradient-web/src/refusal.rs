@@ -18,6 +18,7 @@ pub enum RefusalStatus {
     Gone,
     PayloadTooLarge,
     UnprocessableEntity,
+    TooManyRequests,
     BadGateway,
     ServiceUnavailable,
 }
@@ -33,6 +34,7 @@ impl RefusalStatus {
             Self::Gone => ErrorCode::GONE,
             Self::PayloadTooLarge => ErrorCode::PAYLOAD_TOO_LARGE,
             Self::UnprocessableEntity => ErrorCode::UNPROCESSABLE_ENTITY,
+            Self::TooManyRequests => ErrorCode::RATE_LIMIT_EXCEEDED,
             Self::BadGateway => ErrorCode::BAD_GATEWAY,
             Self::ServiceUnavailable => ErrorCode::SERVICE_UNAVAILABLE,
         }
@@ -58,7 +60,6 @@ pub enum Change {
     Modify,
     Delete,
     Revoke,
-    TransferOwnership,
 }
 
 impl Display for Change {
@@ -67,7 +68,6 @@ impl Display for Change {
             Self::Modify => "modify",
             Self::Delete => "delete",
             Self::Revoke => "revoke",
-            Self::TransferOwnership => "transfer ownership of",
         })
     }
 }
@@ -108,8 +108,10 @@ pub enum SharedRefusal {
         "Gradient can't read the latest commit of the repository. {reason}. Check the repository URL and branch. Verify the access key of the project (deploy key). Then retry."
     )]
     RepositoryStateFetchFailed { reason: String },
-    #[error("Only members of a team can set that team as the owner of a project or cache.")]
-    NotMemberOfOwnerTeam,
+    #[error(
+        "Only team managers and instance administrators can set the team as the owner of a project or cache."
+    )]
+    NotAllowedToSetOwnerTeam,
     #[error(
         "Only instance admins can add a member without an invitation, unless the person is in the owner team or already has access through a team. Send an invitation instead."
     )]
@@ -139,7 +141,7 @@ impl Refusal for SharedRefusal {
             | Self::SourceIpNotAllowed
             | Self::AccountDeactivated
             | Self::MissingPermission
-            | Self::NotMemberOfOwnerTeam
+            | Self::NotAllowedToSetOwnerTeam
             | Self::AddingMemberWithoutInvitationNotAllowed => RefusalStatus::Forbidden,
             Self::RoleAssignedToMembers
             | Self::RoleGrantedToTeam
@@ -180,6 +182,7 @@ impl<R: Refusal> From<R> for WebError {
             RefusalStatus::Gone => Self::Gone(code, message),
             RefusalStatus::PayloadTooLarge => Self::PayloadTooLarge(code, message),
             RefusalStatus::UnprocessableEntity => Self::UnprocessableEntity(code, message),
+            RefusalStatus::TooManyRequests => Self::TooManyRequests(code, message),
             RefusalStatus::BadGateway => Self::BadGateway(code, message),
             RefusalStatus::ServiceUnavailable => Self::ServiceUnavailable(code, message),
         }

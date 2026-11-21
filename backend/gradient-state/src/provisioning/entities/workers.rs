@@ -24,7 +24,7 @@ impl<'a> StateApplicator<'a> {
         team_ids: &HashMap<String, TeamId>,
     ) -> Result<(), DynError> {
         let project_map = self.project_lookup().await?;
-        let user_map = self.user_lookup().await?;
+        let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
 
         for state_worker in state_workers.values() {
             let (token, _) = read_credential(
@@ -34,13 +34,18 @@ impl<'a> StateApplicator<'a> {
                 "token",
                 "worker token file",
             )?;
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "This hash of worker tokens from state settings cannot call the password module of gradient-web, because gradient-web depends on gradient-state."
+            )]
             let token_hash = password_auth::generate_hash(token.trim());
             let token_encrypted = self.encrypt_dial_token(state_worker, token.trim())?;
-            let created_by_id = state_worker
-                .created_by
-                .as_ref()
-                .map(|user| lookup_id(&user_map, user, "User"))
-                .transpose()?;
+            let created_by_id = state_worker.created_by.as_deref().and_then(|user| {
+                state_users.resolve_username_to_user_id(
+                    user,
+                    &format!("worker '{}' creator", state_worker.worker_id),
+                )
+            });
 
             if let Some(team) = &state_worker.team {
                 let team_id = lookup_id(team_ids, team, "Team")?;

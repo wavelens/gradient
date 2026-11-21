@@ -8,7 +8,8 @@
 
 use connector::Client;
 use connector::api::{
-    CreateGitHostConnectionRequest, DeliveryResult, GitHostConnectionOwner, IndexName,
+    CreateGitHostConnectionRequest, CreateRepositoryGrantRequest, DeliveryResult,
+    GitHostConnectionOwner, GitHostConnectionRepositoryGrantId, IndexName,
     PatchGitHostConnectionRequest,
 };
 use connector::git_host_connections::GitHostConnectionSetOwner;
@@ -19,6 +20,7 @@ const CONNECTION: &str = "00000000-0000-0000-0000-000000006100";
 const USER: &str = "00000000-0000-0000-0000-000000006101";
 const DELIVERY: &str = "00000000-0000-0000-0000-000000006102";
 const TASK: &str = "00000000-0000-0000-0000-000000006103";
+const REPOSITORY_GRANT_UUID: &str = "b273c6c3-7044-42b4-89ee-7b6f9027a0d6";
 
 fn ok<T: serde::Serialize>(m: T) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(serde_json::json!({ "error": false, "message": m }))
@@ -220,6 +222,76 @@ async fn test_check_and_tasks_address_one_connection() {
     let tasks = api.list_tasks(&owner, CONNECTION).await.unwrap();
     assert_eq!(tasks[0].name, "app");
     assert!(tasks[0].report_status);
+}
+
+fn repository_grant_response_json() -> serde_json::Value {
+    serde_json::json!({
+        "id": REPOSITORY_GRANT_UUID, "project": USER, "project_name": "web",
+        "repository_owner": "org", "repository_name": "repo", "source": "api",
+        "created_by": USER, "created_at": "2026-11-11T00:00:00Z"
+    })
+}
+
+#[tokio::test]
+async fn test_repository_grants_list_create_delete_use_instance_and_team_paths_and_send_body() {
+    let server = MockServer::start().await;
+    for prefix in ["/api/v1/admin", "/api/v1/teams/ops"] {
+        let grants = format!("{prefix}/git-host-connections/{CONNECTION}/repository-grants");
+        Mock::given(method("GET"))
+            .and(path(grants.clone()))
+            .respond_with(ok(serde_json::json!([repository_grant_response_json()])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path(grants.clone()))
+            .and(body_json(
+                serde_json::json!({"project": "web", "repository_owner": "org"}),
+            ))
+            .respond_with(ok(repository_grant_response_json()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path(format!("{grants}/{REPOSITORY_GRANT_UUID}")))
+            .respond_with(ok(true))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let client = client(&server);
+    let api = client.git_host_connections();
+    let repository_grant_id: GitHostConnectionRepositoryGrantId =
+        REPOSITORY_GRANT_UUID.parse().unwrap();
+    for owner in [
+        GitHostConnectionSetOwner::Instance,
+        GitHostConnectionSetOwner::Team("ops".into()),
+    ] {
+        let grants = api
+            .list_repository_grants_for_git_host_connection(&owner, CONNECTION)
+            .await
+            .unwrap();
+        assert_eq!(grants[0].repository_name.as_deref(), Some("repo"));
+        let created = api
+            .create_repository_grant(
+                &owner,
+                CONNECTION,
+                &CreateRepositoryGrantRequest {
+                    project: "web".into(),
+                    repository_owner: "org".into(),
+                    repository_name: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.id, repository_grant_id);
+        assert!(
+            api.delete_repository_grant(&owner, CONNECTION, &repository_grant_id)
+                .await
+                .unwrap()
+        );
+    }
 }
 
 #[test]

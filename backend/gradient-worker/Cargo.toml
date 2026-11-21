@@ -19,6 +19,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+gradient-wildcard = { workspace = true }
 gradient-eval = { path = "../gradient-eval" }
 gradient-sources = { workspace = true }
 gradient-redact = { workspace = true }
@@ -49,6 +50,7 @@ harmonia-store-remote          = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
 hex                   = { workspace = true }
+ipnet                 = { workspace = true }
 libc                  = { workspace = true }
 nix                   = { workspace = true }
 nix-bindings          = { workspace = true, features = ["store"] }
@@ -76,5 +78,6 @@ zstd                  = { workspace = true }
 
 [dev-dependencies]
 gradient-test-support = { workspace = true }
+gradient-types        = { workspace = true, features = ["test-functions"] }
 tokio                 = { workspace = true, features = ["test-util"] }
 wiremock              = { workspace = true }

@@ -25,12 +25,15 @@ pub struct CoreChoice {
     pub fit: RamFit,
 }
 
-/// A build fitting no step by its estimate gets the benefit of the doubt: RAM proportional to
-/// cores picks where it starts, and out-of-memory kills take the steps down from there.
+/// A build that fits no step in the estimate gets a pass for now. RAM proportional to core count
+/// picks the start point. An out-of-memory kill lowers the step from there. A build still too
+/// large for all workers the project can use takes at most the total RAM of the largest worker.
+/// Smaller workers leave it to that one.
 pub fn choose_cores(
     worker: &WorkerMetricsView,
     max_cores: Option<u32>,
     unmeasured_mb: u64,
+    largest_usable_worker_ram_mb: Option<u64>,
     need_at: impl Fn(u32) -> RamNeed,
 ) -> CoreChoice {
     let full = max_cores.map_or(worker.full_cores(), |cap| cap.min(worker.full_cores()));
@@ -42,9 +45,23 @@ pub fn choose_cores(
     let RamNeed::Predicted(at_full) = need_at(full) else {
         return estimated;
     };
-    largest_fitting(worker, &steps, unmeasured_mb, |cores| {
-        RamNeed::Predicted((at_full * u64::from(cores)).div_ceil(u64::from(full)))
-    })
+    let proportional = |at_full: u64| {
+        largest_fitting(worker, &steps, unmeasured_mb, |cores| {
+            RamNeed::Predicted((at_full * u64::from(cores)).div_ceil(u64::from(full)))
+        })
+    };
+    let scaled = proportional(at_full);
+    match largest_usable_worker_ram_mb {
+        _ if scaled.fit != RamFit::DoesNotFit => scaled,
+        Some(largest) if worker.ram_total_mb >= largest => {
+            proportional(at_full.min(worker.ram_total_mb))
+        }
+        Some(_) => CoreChoice {
+            fit: RamFit::WaitsForLargerWorker,
+            ..scaled
+        },
+        None => scaled,
+    }
 }
 
 fn largest_fitting(
@@ -101,14 +118,14 @@ mod tests {
 
     #[test]
     fn the_largest_step_that_fits_now_is_chosen() {
-        let choice = choose_cores(&worker(128_000, 119_000, 0), None, 0, linear(2_000));
+        let choice = choose_cores(&worker(128_000, 119_000, 0), None, 0, None, linear(2_000));
         assert_eq!((choice.cores, choice.fit), (43, RamFit::Fits));
     }
 
     #[test]
     fn a_build_waits_for_ram_instead_of_shrinking_when_no_step_fits_now() {
         let busy = worker(128_000, 1_000, 100_000);
-        let choice = choose_cores(&busy, None, 0, linear(1_500));
+        let choice = choose_cores(&busy, None, 0, None, linear(1_500));
         assert_eq!(
             (choice.cores, choice.fit),
             (64, RamFit::FitsOnceRamIsReleased)
@@ -118,13 +135,13 @@ mod tests {
     #[test]
     fn a_step_that_fits_now_wins_over_a_larger_one_after_a_wait() {
         let busy = worker(128_000, 50_000, 70_000);
-        let choice = choose_cores(&busy, None, 0, linear(1_000));
+        let choice = choose_cores(&busy, None, 0, None, linear(1_000));
         assert_eq!((choice.cores, choice.fit), (43, RamFit::Fits));
     }
 
     #[test]
     fn a_build_too_large_at_every_step_assumes_ram_proportional_to_cores() {
-        let choice = choose_cores(&worker(60_000, 60_000, 0), None, 0, |_| {
+        let choice = choose_cores(&worker(60_000, 60_000, 0), None, 0, None, |_| {
             RamNeed::Predicted(100_000)
         });
         assert_eq!((choice.cores, choice.fit), (29, RamFit::Fits));
@@ -133,21 +150,57 @@ mod tests {
 
     #[test]
     fn a_build_too_large_even_at_one_proportional_core_does_not_fit() {
-        let choice = choose_cores(&worker(1_000, 1_000, 0), None, 0, |_| {
+        let choice = choose_cores(&worker(1_000, 1_000, 0), None, 0, None, |_| {
             RamNeed::Predicted(128_000)
         });
         assert_eq!((choice.cores, choice.fit), (1, RamFit::DoesNotFit));
     }
     #[test]
     fn the_cap_after_an_out_of_memory_kill_bounds_the_steps() {
-        let choice = choose_cores(&worker(128_000, 128_000, 0), Some(29), 0, linear(10));
+        let choice = choose_cores(&worker(128_000, 128_000, 0), Some(29), 0, None, linear(10));
         assert_eq!(choice.cores, 29);
     }
 
     #[test]
     fn a_worker_without_any_core_count_still_gets_one_core() {
         let unknown = WorkerMetricsView::default();
-        let choice = choose_cores(&unknown, None, 0, |_| RamNeed::Negligible);
+        let choice = choose_cores(&unknown, None, 0, None, |_| RamNeed::Negligible);
         assert_eq!(choice.cores, 1);
+    }
+
+    #[test]
+    fn test_build_ram_above_largest_worker_caps_ram_requirement_and_fits_at_reduced_core_count() {
+        let choice = choose_cores(&worker(1_000, 800, 0), None, 0, Some(1_000), |_| {
+            RamNeed::Predicted(128_000)
+        });
+        assert_eq!((choice.cores, choice.fit), (43, RamFit::Fits));
+        assert_eq!(choice.need, RamNeed::Predicted(672));
+    }
+
+    #[test]
+    fn test_build_too_large_for_all_core_counts_on_smaller_than_largest_usable_worker_gets_no_cap_and_does_not_fit()
+     {
+        let choice = choose_cores(&worker(1_000, 1_000, 0), None, 0, Some(2_000), |_| {
+            RamNeed::Predicted(128_000)
+        });
+        assert_eq!(
+            (choice.cores, choice.fit),
+            (1, RamFit::WaitsForLargerWorker)
+        );
+    }
+
+    #[test]
+    fn build_that_fits_by_estimate_gets_same_core_count_with_or_without_largest_usable_worker_ram()
+    {
+        assert_eq!(
+            choose_cores(
+                &worker(128_000, 119_000, 0),
+                None,
+                0,
+                Some(128_000),
+                linear(2_000)
+            ),
+            choose_cores(&worker(128_000, 119_000, 0), None, 0, None, linear(2_000))
+        );
     }
 }

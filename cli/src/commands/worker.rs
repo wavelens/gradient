@@ -5,6 +5,10 @@
  */
 
 use crate::commands::completion;
+use crate::commands::mcp_command_run_decisions::{
+    McpToolCommandPermission::McpToolMayRunCommand,
+    UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES,
+};
 use crate::commands::team::WorkerCapabilityToggles;
 use crate::input::{client_from_config, confirm_delete, selected_project};
 use crate::output::Output;
@@ -15,6 +19,7 @@ use connector::api::WorkerRegistrationResponse;
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Register a new worker under the selected project. The server can generate a worker ID and token, then write the NixOS configuration for the worker machine.
+    #[command(add = UNAVAILABLE_BECAUSE_COMMAND_REVEALS_OR_SETS_SECRET_VALUES)]
     Register {
         /// Human-readable display name shown in the workers list
         #[arg(short = 'n', long = "display-name")]
@@ -26,8 +31,10 @@ pub enum Commands {
         capabilities: WorkerCapabilityToggles,
     },
     /// List all workers registered under the selected project
+    #[command(add = McpToolMayRunCommand)]
     List,
     /// Unregister a worker from the selected project
+    #[command(add = McpToolMayRunCommand)]
     Delete {
         /// Worker ID to unregister
         #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
@@ -37,12 +44,14 @@ pub enum Commands {
         yes: bool,
     },
     /// Print metrics for a worker in the selected project.
+    #[command(add = McpToolMayRunCommand)]
     Metrics {
         /// Worker ID
         #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
         worker_id: String,
     },
     /// Check the worker connection and the permission to work on the selected project.
+    #[command(add = McpToolMayRunCommand)]
     Check {
         /// Worker ID
         #[arg(add = ArgValueCompleter::new(completion::complete_workers))]

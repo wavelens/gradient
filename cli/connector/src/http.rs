@@ -50,6 +50,16 @@ pub(crate) async fn decode<T: DeserializeOwned>(res: Response) -> Result<T, Conn
         return Ok(env.message);
     }
 
+    if let Ok(env) = serde_json::from_slice::<ErrorResponseBody>(&bytes) {
+        return Err(match env.code.as_str() {
+            "cli_auth_needs_browser_session" => ConnectorError::WebBrowserSignInRequired,
+            _ => ConnectorError::Api {
+                status,
+                message: env.message,
+            },
+        });
+    }
+
     if let Ok(env) = serde_json::from_slice::<Envelope<String>>(&bytes) {
         return Err(ConnectorError::Api {
             status,

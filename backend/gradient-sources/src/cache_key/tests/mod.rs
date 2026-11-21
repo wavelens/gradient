@@ -290,60 +290,86 @@ fn sign_narinfo_short_key_fails() {
 
 #[test]
 fn verify_narinfo_signature_accepts_valid() {
-    let (body, public_key) = signed_narinfo_fixture();
-    assert!(verify_narinfo_signature(&public_key, &body));
+    let (path_info, public_key) = signed_narinfo_fixture();
+    assert!(verify_narinfo_signature(&public_key, &path_info));
 }
 
 #[test]
 fn verify_narinfo_signature_rejects_wrong_public_key() {
-    let (body, _real_key) = signed_narinfo_fixture();
+    let (path_info, _real_key) = signed_narinfo_fixture();
     let (_f, path) = temp_secret_file();
     let (_, other_pub_b64) = generate_signing_key(&path).expect("generate failed");
     let name = _real_key.rsplit_once(':').unwrap().0;
     let wrong = format!("{name}:{other_pub_b64}");
-    assert!(!verify_narinfo_signature(&wrong, &body));
+    assert!(!verify_narinfo_signature(&wrong, &path_info));
 }
 
 #[test]
 fn verify_narinfo_signature_rejects_name_mismatch() {
-    let (body, real_key) = signed_narinfo_fixture();
+    let (path_info, real_key) = signed_narinfo_fixture();
     let pub_b64 = real_key.rsplit_once(':').unwrap().1;
     let wrong = format!("other-name:{pub_b64}");
-    assert!(!verify_narinfo_signature(&wrong, &body));
+    assert!(!verify_narinfo_signature(&wrong, &path_info));
 }
 
 #[test]
 fn verify_narinfo_signature_rejects_tampered_nar_size() {
-    let (body, public_key) = signed_narinfo_fixture();
-    let tampered = body.replace("NarSize: 1234", "NarSize: 9999");
-    assert!(!verify_narinfo_signature(&public_key, &tampered));
+    let (mut path_info, public_key) = signed_narinfo_fixture();
+    path_info.nar_size = 9999;
+    assert!(!verify_narinfo_signature(&public_key, &path_info));
+}
+
+#[test]
+fn verify_narinfo_signature_rejects_tampered_store_path() {
+    let (mut path_info, public_key) = signed_narinfo_fixture();
+    path_info.store_path = "/nix/store/0c8xfp8wr4dhz8gm2qv5nk5r6dl7hzsk-evil".to_owned();
+    assert!(!verify_narinfo_signature(&public_key, &path_info));
+}
+
+#[test]
+fn verify_narinfo_signature_rejects_tampered_references() {
+    let (mut path_info, public_key) = signed_narinfo_fixture();
+    path_info.references.pop();
+    assert!(!verify_narinfo_signature(&public_key, &path_info));
 }
 
 #[test]
 fn verify_narinfo_signature_rejects_missing_sig() {
-    let (body, public_key) = signed_narinfo_fixture();
-    let stripped: String = body
-        .lines()
-        .filter(|l| !l.starts_with("Sig: "))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!verify_narinfo_signature(&public_key, &stripped));
+    let (mut path_info, public_key) = signed_narinfo_fixture();
+    path_info.signature_lines.clear();
+    assert!(!verify_narinfo_signature(&public_key, &path_info));
 }
 
 #[test]
 fn verify_narinfo_signature_rejects_malformed_public_key() {
-    let (body, _) = signed_narinfo_fixture();
-    assert!(!verify_narinfo_signature("no-colon-here", &body));
-    assert!(!verify_narinfo_signature("name:!!not-base64!!", &body));
+    let (path_info, _) = signed_narinfo_fixture();
+    assert!(!verify_narinfo_signature("no-colon-here", &path_info));
+    assert!(!verify_narinfo_signature("name:!!not-base64!!", &path_info));
 }
 
 #[test]
-fn verify_narinfo_signature_rejects_missing_fingerprint_fields() {
-    let public_key = {
-        let (_f, path) = temp_secret_file();
-        let (_, pub_b64) = generate_signing_key(&path).expect("generate failed");
-        format!("upstream:{pub_b64}")
-    };
-    let body = "URL: nar/x.nar.xz\nSig: upstream:AAAA\n";
-    assert!(!verify_narinfo_signature(&public_key, body));
+fn verify_narinfo_signature_rejects_all_narinfo_with_empty_public_key() {
+    let (path_info, public_key) = signed_narinfo_fixture();
+    let key_name = public_key.rsplit_once(':').unwrap().0;
+    assert!(!verify_narinfo_signature("", &path_info));
+    assert!(!verify_narinfo_signature(
+        &format!("{key_name}:"),
+        &path_info
+    ));
+}
+
+#[test]
+fn verify_narinfo_signature_accepts_multiple_sig_lines_when_one_matches_public_key() {
+    let (mut path_info, public_key) = signed_narinfo_fixture();
+    let key_name = public_key.rsplit_once(':').unwrap().0;
+    let zero_signature = general_purpose::STANDARD.encode([0u8; 64]);
+    path_info.signature_lines.splice(
+        0..0,
+        [
+            format!("{key_name}:{zero_signature}"),
+            format!("other-name:{zero_signature}"),
+            format!("{key_name}:not-base64"),
+        ],
+    );
+    assert!(verify_narinfo_signature(&public_key, &path_info));
 }

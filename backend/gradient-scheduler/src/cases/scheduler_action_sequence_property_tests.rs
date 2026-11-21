@@ -297,7 +297,7 @@ async fn apply_action(
     match action {
         WorkerAtSlotConnectsWithOneOrTwoBuildSlots { worker, slots } => {
             if !book.connected[worker] {
-                case.connect(ACTION_WORKER_NAMES[worker], w_all().slots(slots), &[])
+                case.connect(ACTION_WORKER_NAMES[worker], w_all().slots(slots))
                     .await;
                 book.connected[worker] = true;
             }
@@ -432,7 +432,7 @@ async fn run_liveness_check(
     case.check("Assignments that workers still hold").await;
 
     let worker = WORKER_NAME_FOR_FINISHING_REMAINING_WORK;
-    case.connect(worker, w_all(), &[]).await;
+    case.connect(worker, w_all()).await;
     for round in 0..3 * keys.len() + 6 {
         if !case.evaluation(evaluation).await.status.is_active() {
             break;
@@ -454,6 +454,190 @@ async fn run_liveness_check(
     );
 }
 
+fn build_generated_derivation_dependency_and_action_test_input_with_not_built_already_probed_starts_and_no_runtime_output_references(
+    derivation_dependency_indices: Vec<Vec<usize>>,
+    actions_to_run: Vec<GeneratedSchedulerAction>,
+) -> GeneratedDerivationDependencyAndActionTestInput {
+    let derivation_count = derivation_dependency_indices.len();
+    GeneratedDerivationDependencyAndActionTestInput {
+        derivation_dependency_indices,
+        runtime_output_reference_derivation_dependency_indices: vec![vec![]; derivation_count],
+        generated_starting_states_by_derivation_index: vec![
+            InitialDerivationState::DerivationNotBuiltAndAlreadyProbed;
+            derivation_count
+        ],
+        actions_to_run,
+    }
+}
+
+#[test]
+fn replay_shrunk_failing_action_list_check_consistency_and_evaluation_finish() {
+    use GeneratedSchedulerAction::*;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("The tokio runtime can start.");
+    let input = build_generated_derivation_dependency_and_action_test_input_with_not_built_already_probed_starts_and_no_runtime_output_references(
+        vec![vec![1], vec![]],
+        vec![
+            UploadOutputAndReportBuildCompleted { assignment: 2 },
+            WorkerAtSlotConnectsWithOneOrTwoBuildSlots {
+                worker: 2,
+                slots: 1,
+            },
+            WorkerAsksSchedulerForBuildJob { worker: 2 },
+            UpstreamCacheProbeNotFoundForEveryWaitingBuild,
+            WorkerAsksSchedulerForBuildJob { worker: 0 },
+            AdminRetriesDerivationBuild { derivation: 2 },
+            UpstreamCacheProbeNotFoundForEveryWaitingBuild,
+            AdminAbortsBuildOfOneDerivation { derivation: 2 },
+            WorkerReportedBuildFailed {
+                assignment: 0,
+                permanent: false,
+            },
+            WorkerAtSlotConnectsWithOneOrTwoBuildSlots {
+                worker: 1,
+                slots: 1,
+            },
+            UpstreamCacheProbeNotFoundForEveryWaitingBuild,
+            WorkerAsksSchedulerForBuildJob { worker: 1 },
+            WorkerAtSlotConnectsWithOneOrTwoBuildSlots {
+                worker: 1,
+                slots: 2,
+            },
+            RequeueTransientlyFailedBuilds,
+            WorkerAsksSchedulerForBuildJob { worker: 1 },
+            RequeueTransientlyFailedBuilds,
+            RequeueTransientlyFailedBuilds,
+        ],
+    );
+    if let Err(failure) = runtime.block_on(
+        run_generated_input_catch_panic_and_delete_test_database(input),
+    ) {
+        panic!("{failure}");
+    }
+}
+
+async fn assert_evaluation_leaves_building_after_aborted_dependent_and_failed_build(
+    substitute_miss_failure_count_for_b_before_aborting_a: usize,
+    failure_kind_reported_for_b_after_admin_aborted_a: BuildFailureKind,
+    is_b_output_in_upstream_binary_cache: bool,
+) {
+    let evaluation = EvaluationId::now_v7();
+    let mut seed = build_test_database_shape_from_dependency_lists(
+        evaluation,
+        &build_generated_derivation_dependency_and_action_test_input_with_not_built_already_probed_starts_and_no_runtime_output_references(
+            vec![vec![1], vec![]],
+            vec![],
+        ),
+    );
+    if is_b_output_in_upstream_binary_cache {
+        seed = seed.cache_available();
+    }
+    let case = SchedulerCase::start_with(seed, |config| config.build.retry_backoff_secs = 0).await;
+    let keys = vec![case.key(A).await, case.key(B).await];
+    let worker = ACTION_WORKER_NAMES[0];
+    case.connect(worker, w_all()).await;
+    for round in 0..=substitute_miss_failure_count_for_b_before_aborting_a {
+        case.admit_startable_moves().await;
+        let handed = case
+            .request_job(worker, JobKind::Build)
+            .await
+            .expect("The worker can take the job for the remaining build.");
+        let held = assignment_of(&keys, worker, handed.job_id(), handed.assignment_id());
+        case.report_building(held.worker, &held.key).await;
+        let kind = if round < substitute_miss_failure_count_for_b_before_aborting_a {
+            BuildFailureKind::SubstituteUnavailable
+        } else {
+            let _ = case.abort_build(evaluation, A).await;
+            failure_kind_reported_for_b_after_admin_aborted_a
+        };
+        case.fail(held.worker, &held.key, held.assignment, failure(kind))
+            .await;
+    }
+    case.requeue_transient_retries().await;
+    case.check("The worker reported failures for the remaining builds. The retry pass ran.")
+        .await;
+    run_liveness_check(
+        &case,
+        evaluation,
+        &keys,
+        ConnectedWorkersAndJobAssignments::default(),
+    )
+    .await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn substitute_miss_on_only_remaining_build_after_aborting_dependent_requeues_build_and_evaluation_leaves_building()
+ {
+    assert_evaluation_leaves_building_after_aborted_dependent_and_failed_build(
+        0,
+        BuildFailureKind::SubstituteUnavailable,
+        true,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn canceled_build_after_aborting_only_dependent_returns_to_queued_and_evaluation_leaves_building()
+ {
+    assert_evaluation_leaves_building_after_aborted_dependent_and_failed_build(
+        0,
+        BuildFailureKind::Canceled,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_evaluation_leaves_building_when_substitute_miss_exceeds_limit_for_only_remaining_build_after_admin_aborted_its_only_dependent()
+ {
+    assert_evaluation_leaves_building_after_aborted_dependent_and_failed_build(
+        1,
+        BuildFailureKind::SubstituteUnavailable,
+        true,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn aborting_only_dependent_then_worker_disconnect_returns_build_to_queued_and_evaluation_leaves_building()
+ {
+    let evaluation = EvaluationId::now_v7();
+    let seed = build_test_database_shape_from_dependency_lists(
+        evaluation,
+        &build_generated_derivation_dependency_and_action_test_input_with_not_built_already_probed_starts_and_no_runtime_output_references(
+            vec![vec![1], vec![]],
+            vec![],
+        ),
+    );
+    let case = SchedulerCase::start(seed).await;
+    let keys = vec![case.key(A).await, case.key(B).await];
+    let worker = ACTION_WORKER_NAMES[0];
+    case.connect(worker, w_all()).await;
+    case.admit_startable_moves().await;
+    let handed = case
+        .request_job(worker, JobKind::Build)
+        .await
+        .expect("The worker can take the job for the remaining build.");
+    let held = assignment_of(&keys, worker, handed.job_id(), handed.assignment_id());
+    case.report_building(held.worker, &held.key).await;
+    let _ = case.abort_build(evaluation, A).await;
+    case.disconnect(worker).await;
+    case.requeue_transient_retries().await;
+    case.check("The worker disconnected from the remaining build. The retry pass ran.")
+        .await;
+    run_liveness_check(
+        &case,
+        evaluation,
+        &keys,
+        ConnectedWorkersAndJobAssignments::default(),
+    )
+    .await;
+    case.finish().await;
+}
+
 #[test]
 fn test_random_action_sequences_on_random_derivation_graphs_preserve_scheduler_invariants_and_finish_evaluation()
  {
@@ -472,6 +656,64 @@ fn test_random_action_sequences_on_random_derivation_graphs_preserve_scheduler_i
             input,
         ))
     }) {
+        panic!("{failure}");
+    }
+}
+
+#[test]
+fn replay_saved_failing_six_derivation_action_list_ending_with_admin_abort_after_retry_check_consistency_after_each_action_and_evaluation_finish()
+ {
+    use GeneratedSchedulerAction::*;
+    use InitialDerivationState::*;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("The tokio runtime can start.");
+    let input = GeneratedDerivationDependencyAndActionTestInput {
+        derivation_dependency_indices: vec![vec![]; 6],
+        runtime_output_reference_derivation_dependency_indices: vec![
+            vec![4],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        ],
+        generated_starting_states_by_derivation_index: vec![
+            OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated,
+            DerivationNotBuiltAndAlreadyProbed,
+            OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated,
+            SharedBuildAlreadyCompletedAndOutputStoredInCache,
+            OutputInOwnCacheUpstreamCacheProbeUnansweredBuildCreated,
+            DerivationNotBuiltAndAlreadyProbed,
+        ],
+        actions_to_run: vec![
+            WorkerReportsBuildStarted { assignment: 7 },
+            UploadOutputAndReportBuildCompleted { assignment: 4 },
+            WorkerAsksSchedulerForBuildJob { worker: 1 },
+            UploadOutputAndReportBuildCompleted { assignment: 4 },
+            UploadOutputAndReportBuildCompleted { assignment: 2 },
+            AdminRetriesDerivationBuild { derivation: 4 },
+            RequeueTransientlyFailedBuilds,
+            UpstreamCacheProbeNotFoundForEveryWaitingBuild,
+            WorkerReportsBuildStarted { assignment: 0 },
+            AdminAbortsBuildOfOneDerivation { derivation: 4 },
+            WorkerAtSlotConnectsWithOneOrTwoBuildSlots {
+                worker: 1,
+                slots: 1,
+            },
+            WorkerAtSlotConnectsWithOneOrTwoBuildSlots {
+                worker: 2,
+                slots: 1,
+            },
+            WorkerAsksSchedulerForBuildJob { worker: 2 },
+            WorkerAsksSchedulerForBuildJob { worker: 1 },
+            WorkerAsksSchedulerForBuildJob { worker: 0 },
+        ],
+    };
+    if let Err(failure) = runtime.block_on(
+        run_generated_input_catch_panic_and_delete_test_database(input),
+    ) {
         panic!("{failure}");
     }
 }

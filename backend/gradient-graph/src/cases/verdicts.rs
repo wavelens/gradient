@@ -511,6 +511,7 @@ async fn probed_above_a_cut_off_subtree(e1: EvaluationId) -> Case {
             .evaluation(e1)
             .derivation(A)
             .walked()
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .probed()
             .drv_cached()
             .output(A_OUT)
@@ -518,6 +519,7 @@ async fn probed_above_a_cut_off_subtree(e1: EvaluationId) -> Case {
             .build_status(BuildStatus::Skipped)
             .derivation(B)
             .walked()
+            .with_verified_serialized_derivation_hash_for_dependent_output_paths()
             .probed()
             .drv_cached()
             .output(B_OUT)
@@ -881,5 +883,49 @@ async fn v13_a_replay_of_the_two_resent_transitions_is_harmless() {
         "after 3: counters(E1)"
     );
     case.zero_drift("step 3").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn v14_evaluation_stuck_in_evaluating_flake_by_lost_evaluating_derivation_write_is_promoted_to_building_when_stream_completes()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(chain(e1).evaluation_status(EvaluationStatus::EvaluatingFlake)).await;
+
+    stream_completed(&case, e1).await;
+
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Building,
+        "after 1: evaluation(E1).status"
+    );
+    assert_eq!(
+        case.status(B).await,
+        BuildStatus::Queued,
+        "after 1: sb(B).status"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn v15_evaluation_with_no_derivations_stays_evaluating_flake_after_lost_status_write_and_becomes_completed_when_stream_completes()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::EvaluatingFlake),
+    )
+    .await;
+
+    stream_completed(&case, e1).await;
+
+    assert_eq!(
+        case.evaluation_status(e1).await,
+        EvaluationStatus::Completed,
+        "after 1: evaluation(E1).status"
+    );
+    case.zero_drift("step 1").await;
     case.finish().await;
 }

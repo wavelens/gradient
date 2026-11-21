@@ -5,8 +5,8 @@
  */
 
 use super::{
-    MemberTable, Owner, OwnerScope, RoleRow, RoleTable, active, delete_row, insert_unique_row,
-    update_unique_row,
+    ActingScope, MemberTable, Owner, OwnerScope, RoleRow, RoleTable, active, delete_row,
+    insert_unique_row, update_unique_row,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -143,6 +143,7 @@ pub async fn create<O: Owner>(
     let owner = scope.id();
     let db = &scope.db().web_db;
     let mask = O::parse_permissions(&body.permissions)?;
+    scope.ensure_user_holds_all_permissions(mask).await?;
 
     // Names must be unique within the owner and must not collide with a built-in role name.
     // Membership lookup by name would become ambiguous otherwise.
@@ -199,7 +200,11 @@ pub async fn update<O: Owner>(
     }
 
     if let Some(perms) = body.permissions {
-        <O::Roles as RoleTable>::set_permission(&mut row, O::parse_permissions(&perms)?);
+        let mask = O::parse_permissions(&perms)?;
+        scope
+            .ensure_user_holds_all_permissions(previous_mask | mask)
+            .await?;
+        <O::Roles as RoleTable>::set_permission(&mut row, mask);
     }
 
     let updated = update_unique_row::<O::Roles>(db, row, Resource::RoleName).await?;
@@ -230,6 +235,10 @@ pub async fn delete<O: Owner>(
     if current.managed {
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::Role).into());
     }
+
+    scope
+        .ensure_user_holds_all_permissions(current.permission)
+        .await?;
 
     if assigned_to_members::<O::Members>(&tx, owner, role_id).await? {
         return Err(SharedRefusal::RoleAssignedToMembers.into());

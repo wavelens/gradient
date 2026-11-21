@@ -67,6 +67,15 @@ pub enum CliError {
         path: PathBuf,
         reason: io::Error,
     },
+    #[error("Refused to save {name:?}: the file name from the server {rule}.")]
+    ServerDownloadFileNameRejectedBySafetyRule { name: String, rule: &'static str },
+    #[error("{} already exists. Pass `--replace-existing` to replace it.", .0.display())]
+    DownloadTargetFileAlreadyExists(PathBuf),
+    #[error(
+        "Refused to write into {}: it is a symlink or not a directory. Remove it and run the command again.",
+        .0.display()
+    )]
+    DownloadsPathIsSymlinkOrNotDirectory(PathBuf),
     #[error(transparent)]
     Api(#[from] ConnectorError),
 }
@@ -90,9 +99,14 @@ impl CliError {
             | Self::MissingArgument(_)
             | Self::EmptyField(_)
             | Self::NotAnInteger(_)
-            | Self::ReadInput(..) => ExitKind::Usage,
+            | Self::ReadInput(..)
+            | Self::DownloadTargetFileAlreadyExists(_)
+            | Self::DownloadsPathIsSymlinkOrNotDirectory(_) => ExitKind::Usage,
             Self::NotLoggedIn => ExitKind::Unauthorized,
-            Self::AuthorizationExpired | Self::TerminalUi(_) | Self::File { .. } => ExitKind::Api,
+            Self::AuthorizationExpired
+            | Self::TerminalUi(_)
+            | Self::File { .. }
+            | Self::ServerDownloadFileNameRejectedBySafetyRule { .. } => ExitKind::Api,
             Self::Api(e) => e.into(),
         }
     }

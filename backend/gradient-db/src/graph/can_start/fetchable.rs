@@ -97,19 +97,42 @@ crate::sql_fn! {
         tier = Bulk;
 }
 
+fn parent_build_blocking_dep_count_recount_subquery(alias: &str) -> String {
+    format!(
+        "(SELECT p.derivation, {count} AS n FROM derivation_build p \
+         WHERE p.derivation IN (SELECT e.derivation FROM derivation_dependency e \
+                                WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2))) {alias}",
+        count = blocking_dependency_count("p"),
+    )
+}
+
+crate::sql! {
+    LOCK_PARENT_BUILDS_OF_UNFETCHABLE_DEPENDENCIES_IN_DERIVATION_ID_ORDER =
+        "SELECT 1 FROM derivation_build p \
+         WHERE p.derivation IN (SELECT e.derivation FROM derivation_dependency e \
+                                WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2)) \
+         ORDER BY p.derivation FOR NO KEY UPDATE",
+        params = [DerivationIds(64)],
+        tier = Bulk;
+}
+
+// Fetchability losses remove the stored output row for the trust check. The code can lose the
+// earlier edge state, so parents receive only a recount, not an incremental adjustment. All locks
+// acquire the parent row first. Second fetchability changes for another dependency of the same
+// parent need to wait for this commit and then recount with the first change visible.
 static BLOCK_PARENTS: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE derivation_build d \
-         SET blocking_deps = d.blocking_deps + c.n, \
+         SET blocking_deps = c.n, \
              status = CASE WHEN {unqueue} THEN {created} ELSE d.status END, \
              updated_at = CASE WHEN {unqueue} \
                                THEN (now() AT TIME ZONE 'UTC') ELSE d.updated_at END \
          FROM {counted} \
-         WHERE d.derivation = c.derivation \
+         WHERE d.derivation = c.derivation AND d.blocking_deps <> c.n \
          RETURNING d.derivation, old.status AS from_status, d.status AS to_status",
-        counted = parents_counted("c"),
+        counted = parent_build_blocking_dep_count_recount_subquery("c"),
         unqueue = format!(
-            "d.status = {queued} AND {not_in_flight}",
+            "c.n > 0 AND d.status = {queued} AND {not_in_flight}",
             queued = crate::sql::status::from(BuildStatus::UNQUEUE),
             not_in_flight = crate::scheduling::assignment_record::no_open_assignment_predicate(
                 &crate::scheduling::assignment_record::build_job_key_sql("d.id")
@@ -200,6 +223,12 @@ pub(super) async fn mark_unfetchable(
         return Ok(MarkedUnfetchable::default());
     }
 
+    lock.txn
+        .execute_raw(
+            LOCK_PARENT_BUILDS_OF_UNFETCHABLE_DEPENDENCIES_IN_DERIVATION_ID_ORDER
+                .bind([ids(&marked)]),
+        )
+        .await?;
     let rows = lock
         .txn
         .query_all_raw(BLOCK_PARENTS_QUERY.bind([ids(&marked)]))
@@ -293,28 +322,35 @@ mod tests {
         let sql = norm(&blocking_dependency_count("db"));
         assert_eq!(
             sql,
-            "(SELECT count(*) FROM derivation_dependency e \
-             LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
-             WHERE e.derivation = db.derivation \
-             AND e.kind IN (0, 2) \
-             AND (dep.derivation IS NULL OR NOT dep.fetchable \
-             OR (dep.unneeded_outputs <> '{}' AND (e.dependency_outputs IS NULL \
-             OR e.dependency_outputs && dep.unneeded_outputs))))"
+            norm(
+                "(SELECT count(*) FROM derivation_dependency e \
+                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
+                 WHERE e.derivation = db.derivation \
+                 AND e.kind IN (0, 2) \
+                 AND (dep.derivation IS NULL OR NOT dep.fetchable \
+                 OR (dep.unneeded_outputs <> '{}' AND (e.dependency_outputs IS NULL \
+                 OR e.dependency_outputs && dep.unneeded_outputs))))"
+            )
         );
     }
 
     #[test]
     fn a_ripple_moves_only_the_edges_the_count_reads_through_the_flag() {
         let unneeded = norm(&builds_with_unneeded_output_predicate("e", "dep"));
-        for sql in [
-            UNBLOCK_PARENTS.text().into_owned(),
-            BLOCK_PARENTS.to_string(),
-        ] {
-            assert!(
-                norm(&sql).contains(&format!("AND NOT {unneeded} GROUP BY e.derivation")),
-                "an edge blocked by an unneeded output never moved with the flag: {sql}"
-            );
-        }
+        let sql = UNBLOCK_PARENTS.text().into_owned();
+        assert!(
+            norm(&sql).contains(&format!("AND NOT {unneeded} GROUP BY e.derivation")),
+            "an edge blocked by an unneeded output never moved with the flag: {sql}"
+        );
+    }
+
+    #[test]
+    fn blocking_parent_builds_recounts_blocking_dependency_count() {
+        let sql = norm(&BLOCK_PARENTS);
+        assert!(
+            sql.contains(&norm(&blocking_dependency_count("p"))),
+            "{sql}"
+        );
     }
 
     #[test]
@@ -469,7 +505,7 @@ mod tests {
         let d1 = DerivationId::now_v7();
         let d2 = DerivationId::now_v7();
         let db = mock_db()
-            .append_exec_results([exec(1), exec(0), exec(0)])
+            .append_exec_results([exec(1), exec(2), exec(0), exec(0)])
             .append_query_results([vec![drv(x)]])
             .append_query_results([vec![transition_row(d1, 1, 0), transition_row(d2, 0, 0)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -490,26 +526,31 @@ mod tests {
         let log = statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            6,
-            "lock, mark, ripple, then the raised, locked update below the flip: {log:?}"
+            7,
+            "lock, mark, parent lock, ripple, then the raised, locked update below the flipped build: {log:?}"
         );
         assert!(
             log[1].contains("SET fetchable = false") && log[1].contains("db.fetchable AND NOT"),
             "{log:?}"
         );
         assert!(
-            log[3].contains("SET LOCAL work_mem")
-                && log[4].contains(&x.to_string())
-                && log[5].contains("region(evaluation, derivation, builder)"),
-            "the update is rooted at the shared build the mark flipped: {log:?}"
-        );
-        assert!(
-            log[2].contains("blocking_deps + c.n")
-                && log[2].contains("status = CASE WHEN d.status = 1 AND NOT EXISTS"),
+            log[2].contains("ORDER BY p.derivation FOR NO KEY UPDATE")
+                && log[2].contains(&x.to_string()),
             "{log:?}"
         );
         assert!(
-            log[2].contains("updated_at = CASE WHEN d.status = 1 AND NOT EXISTS"),
+            log[4].contains("SET LOCAL work_mem")
+                && log[5].contains(&x.to_string())
+                && log[6].contains("region(evaluation, derivation, builder)"),
+            "the update is rooted at the shared build the mark flipped: {log:?}"
+        );
+        assert!(
+            log[3].contains("SET blocking_deps = c.n,")
+                && log[3].contains("status = CASE WHEN c.n > 0 AND d.status = 1 AND NOT EXISTS"),
+            "{log:?}"
+        );
+        assert!(
+            log[3].contains("updated_at = CASE WHEN c.n > 0 AND d.status = 1 AND NOT EXISTS"),
             "a parent that only counted up keeps its updated_at: a FailedTransient \
              row's retry backoff is measured from that column, so bumping it here \
              restarts the window a dependency's regression had nothing to do with: {log:?}"
@@ -527,14 +568,130 @@ mod tests {
         for column in ["status", "updated_at"] {
             assert!(
                 sql.contains(&format!(
-                    "{column} = CASE WHEN d.status = 1 AND {gate} THEN"
+                    "{column} = CASE WHEN c.n > 0 AND d.status = 1 AND {gate} THEN"
                 )),
                 "{sql}"
             );
         }
         assert!(
-            sql.contains("blocking_deps = d.blocking_deps + c.n"),
+            sql.contains("SET blocking_deps = c.n,") && sql.contains("AND d.blocking_deps <> c.n"),
             "{sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn blocking_dependency_counter_seed_statement_has_no_recursive_sql_or_recursive_union_plan_without_keyed_cache()
+     {
+        let fixture = crate::store_path_content_variant_trust::tests::setup_stored_dependency_variant_with_live_parent_build_job_and_read_write_signing_cache(
+            false,
+            |shape, _| shape,
+        )
+        .await;
+        let parent = fixture.parent;
+        let blocking_dependency_seed_explain_analyze_output = fixture
+            .db
+            .texts(&format!(
+                "EXPLAIN (ANALYZE) {}",
+                SEED_BLOCKING_DEPS.replace("$1::uuid[]", &format!("ARRAY['{parent}']::uuid[]"))
+            ))
+            .await
+            .join("\n");
+        fixture.db.finish().await;
+        assert_eq!(
+            (
+                SEED_BLOCKING_DEPS.contains("RECURSIVE"),
+                blocking_dependency_seed_explain_analyze_output
+                    .contains("Update on derivation_build"),
+                blocking_dependency_seed_explain_analyze_output.contains("Recursive Union")
+            ),
+            (false, true, false),
+            "Never follow input closures to determine Readiness. There is no RECURSIVE in the seed statement for the blocking dependency counter. That query plan can update derivation_build without a Recursive Union. {blocking_dependency_seed_explain_analyze_output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_concurrent_transactions_mark_different_parent_dependencies_not_fetchable_and_parent_blocking_dependency_count_is_two()
+     {
+        let [x, y, parent] =
+            ["4", "5", "6"].map(|c| format!("/nix/store/{}-race.drv", c.repeat(32)));
+        let [x_output, y_output] = ["7", "8"].map(|c| c.repeat(32));
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7())
+            .derivation(&x)
+            .output(&x_output)
+            .build_status(BuildStatus::Completed)
+            .cached_path(&x_output, "x")
+            .derivation(&y)
+            .output(&y_output)
+            .build_status(BuildStatus::Completed)
+            .cached_path(&y_output, "y")
+            .derivation(&parent)
+            .depends_on(&x)
+            .depends_on(&y)
+            .into_database()
+            .await;
+        db.execute(
+            "UPDATE derivation_build SET fetchable = (status = 3), missing_runtime_deps = 0, \
+             blocking_deps = 0",
+        )
+        .await;
+        let (x_id, y_id) = (db.id_of(&x).await, db.id_of(&y).await);
+        let connection = db.connection();
+
+        let first = connection.begin().await.unwrap();
+        first
+            .execute_unprepared(&format!(
+                "DELETE FROM cached_path WHERE hash = '{x_output}'"
+            ))
+            .await
+            .unwrap();
+        lost_fetchability(&lock_shared_builds(&first, &[x_id]).await.unwrap())
+            .await
+            .unwrap();
+
+        let postgres_lock_waiting_sessions_of_test_database_query = format!(
+            "SELECT wait_event_type FROM pg_stat_activity WHERE datname = '{}' AND wait_event_type = 'Lock'",
+            db.name()
+        );
+        let wait_until_second_transaction_blocks_on_row_lock_then_commit_first_transaction = async {
+            let mut polls = 0;
+            while db
+                .texts(&postgres_lock_waiting_sessions_of_test_database_query)
+                .await
+                .is_empty()
+            {
+                polls += 1;
+                assert!(
+                    polls < 200,
+                    "The second transaction didn't wait on the parent row that the first uncommitted transaction locked."
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            first.commit().await.unwrap();
+        };
+        let second = async {
+            let second = connection.begin().await.unwrap();
+            second
+                .execute_unprepared(&format!(
+                    "DELETE FROM cached_path WHERE hash = '{y_output}'"
+                ))
+                .await
+                .unwrap();
+            lost_fetchability(&lock_shared_builds(&second, &[y_id]).await.unwrap())
+                .await
+                .unwrap();
+            second.commit().await.unwrap();
+        };
+        tokio::join!(
+            second,
+            wait_until_second_transaction_blocks_on_row_lock_then_commit_first_transaction
+        );
+
+        let blocking_deps = db.shared_build(&parent).await.blocking_deps;
+        db.finish().await;
+        assert_eq!(
+            blocking_deps, 2,
+            "Both parent dependencies are no longer fetchable. The parent must wait for two dependencies. A count of 1 can let the parent start with unavailable inputs."
         );
     }
 }

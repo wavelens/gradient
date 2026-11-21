@@ -15,12 +15,24 @@ use gradient_wire::types::{
     BuildFailureKind, DiscoveredDerivation, ImportOutcome, JobKind, Realisation,
 };
 
+use std::sync::LazyLock;
+
 use super::{
-    CaseShapes, P, P_OUT, SchedulerCase, X, X_OUT, Y, Y_OUT, attr_of, build_output, drv, drv_path,
-    eval_key, failure, output_nar, remove_jobs_available_for_requested_kinds_signals, w_all,
+    CaseShapes, P, P_OUT, SchedulerCase, X, X_OUT, Y, Y_OUT, attr_of, build_output,
+    computed_out_output_path_hash, drv, drv_path, eval_key, failure, output_nar,
+    remove_jobs_available_for_requested_kinds_signals, test_derivation_store_file_name, w_all,
     with_attr, with_ifd, with_output,
 };
 use crate::job_handlers::import::NO_ENTRY_POINT;
+
+static X_DERIVATION_STORE_FILE_NAME: LazyLock<String> =
+    LazyLock::new(|| test_derivation_store_file_name(&with_output(drv(X, &[]), X_OUT)));
+static Y_DERIVATION_FILE_NAME: LazyLock<String> =
+    LazyLock::new(|| test_derivation_store_file_name(&with_output(drv(Y, &[]), Y_OUT)));
+static X_OUTPUT_HASH: LazyLock<String> =
+    LazyLock::new(|| computed_out_output_path_hash(&with_output(drv(X, &[]), X_OUT)));
+static Y_OUTPUT_PATH_HASH: LazyLock<String> =
+    LazyLock::new(|| computed_out_output_path_hash(&with_output(drv(Y, &[]), Y_OUT)));
 
 const W1: &str = "w1";
 const W2: &str = "w2";
@@ -32,11 +44,11 @@ async fn f01_no_store_path_or_no_build_job_answers_unknown_and_opens_no_wait() {
     let case = SchedulerCase::start(
         shape()
             .evalq(e1)
-            .derivation(P)
+            .derivation(&entry_point_derivation_store_file_name_for_imported_derivations(&[]))
             .walked()
             .entry_point(&attr_of(P))
             .job()
-            .output(P_OUT),
+            .output(&entry_point_derivation_store_path_hash_for_imported_derivations(&[])),
     )
     .await;
     evaluating(&case, e1, vec![entry(P, P_OUT, &[])]).await;
@@ -57,22 +69,24 @@ async fn f01_no_store_path_or_no_build_job_answers_unknown_and_opens_no_wait() {
     );
     case.check("step 1").await;
 
-    let before = (case.sb(P).await, case.evaluation(e1).await);
-    case.import_request(W1, &key, "r2", &[drv_path(Y)]).await;
+    let p = entry_point_derivation_store_file_name_for_imported_derivations(&[]);
+    let before = (case.sb(&p).await, case.evaluation(e1).await);
+    case.import_request(W1, &key, "r2", &[drv_path(&Y_DERIVATION_FILE_NAME)])
+        .await;
     assert_eq!(
         case.signals(W1),
         vec![answer(
             e1,
             "r2",
             ImportOutcome::Unknown {
-                drv_path: drv_path(Y),
+                drv_path: drv_path(&Y_DERIVATION_FILE_NAME),
             }
         )],
         "after 2: signals(W1)"
     );
     assert_eq!(case.import_waits(), 0, "after 2: no pending wait");
     assert_eq!(
-        (case.sb(P).await, case.evaluation(e1).await),
+        (case.sb(&p).await, case.evaluation(e1).await),
         before,
         "after 2: nothing written"
     );
@@ -87,23 +101,36 @@ async fn f02_an_import_without_an_entry_point_in_the_evaluation_answers_failed()
     let case = SchedulerCase::start(
         shape()
             .evalq(e1)
-            .derivation(X)
+            .derivation(&X_DERIVATION_STORE_FILE_NAME)
             .walked()
             .probed()
             .drv_cached()
             .ifd()
             .job()
-            .output(X_OUT)
+            .output(X_OUTPUT_HASH.as_str())
             .build_status(BuildStatus::Skipped),
     )
     .await;
-    evaluating(&case, e1, vec![with_ifd(with_output(drv(X, &[]), X_OUT))]).await;
+    evaluating(
+        &case,
+        e1,
+        vec![with_ifd(with_output(
+            drv(&X_DERIVATION_STORE_FILE_NAME, &[]),
+            X_OUT,
+        ))],
+    )
+    .await;
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     let failed = ImportOutcome::Failed {
-        drv_path: drv_path(X),
-        build_id: build_job_of(&case, e1, X).await,
+        drv_path: drv_path(&X_DERIVATION_STORE_FILE_NAME),
+        build_id: build_job_of(&case, e1, &X_DERIVATION_STORE_FILE_NAME).await,
         status: NO_ENTRY_POINT.into(),
     };
     assert_eq!(
@@ -120,16 +147,26 @@ async fn f02_an_import_without_an_entry_point_in_the_evaluation_answers_failed()
 async fn f03_an_import_of_a_completed_build_answers_completed_at_once() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
-        importing(e1, &[X], BuildStatus::Created)
-            .derivation(X)
+        importing(e1, &[&X_DERIVATION_STORE_FILE_NAME], BuildStatus::Created)
+            .derivation(&X_DERIVATION_STORE_FILE_NAME)
             .build_status(BuildStatus::Completed)
-            .cached_output(X),
+            .cached_output(&X_DERIVATION_STORE_FILE_NAME),
     )
     .await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     assert_eq!(
         case.signals(W1),
         vec![answer(
@@ -150,23 +187,37 @@ async fn f03_an_import_of_a_completed_build_answers_completed_at_once() {
 async fn f03b_a_completed_import_names_the_paths_its_build_realised() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
-        importing(e1, &[X], BuildStatus::Created)
-            .derivation(X)
-            .output_option(X_OUT, |o| o.path_known_after_build = true)
+        importing(e1, &[&X_DERIVATION_STORE_FILE_NAME], BuildStatus::Created)
+            .derivation(&X_DERIVATION_STORE_FILE_NAME)
+            .output_option(X_OUTPUT_HASH.as_str(), |o| o.path_known_after_build = true)
             .build_status(BuildStatus::Completed)
-            .cached_output(X),
+            .cached_output(&X_DERIVATION_STORE_FILE_NAME),
     )
     .await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     let realised = Realisation {
-        drv_path: drv_path(X),
+        drv_path: drv_path(&X_DERIVATION_STORE_FILE_NAME),
         output: "out".into(),
         path: format!(
-            "/nix/store/{X_OUT}-{}",
-            case.output_of(X, "out").await.package.unwrap_or_default()
+            "/nix/store/{}-{}",
+            *X_OUTPUT_HASH,
+            case.output_of(&X_DERIVATION_STORE_FILE_NAME, "out")
+                .await
+                .package
+                .unwrap_or_default()
         ),
     };
     assert_eq!(
@@ -189,9 +240,9 @@ async fn f03b_a_completed_import_names_the_paths_its_build_realised() {
 async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the_answer() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start_with_unstored_outputs(
-        importing(e1, &[X], BuildStatus::Created)
-            .derivation(X)
-            .output_option(X_OUT, |o| {
+        importing(e1, &[&X_DERIVATION_STORE_FILE_NAME], BuildStatus::Created)
+            .derivation(&X_DERIVATION_STORE_FILE_NAME)
+            .output_option(X_OUTPUT_HASH.as_str(), |o| {
                 o.path_known_after_build = true;
                 o.hash = None;
                 o.package = None;
@@ -200,19 +251,31 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
         1,
     )
     .await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
-    let x = case.key(X).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
+    let x = case.key(&X_DERIVATION_STORE_FILE_NAME).await;
     assert_eq!(
-        case.output_of(X, "out").await.hash,
+        case.output_of(&X_DERIVATION_STORE_FILE_NAME, "out")
+            .await
+            .hash,
         None,
         "after 0: output(X,out).hash"
     );
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::Queued,
         "after 1: sb(X).status"
     );
@@ -228,15 +291,22 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
         .expect("after 2: W2 gets build:X")
         .assignment_id();
     case.report_building(W2, &x).await;
-    let realised = build_output(X, X_OUT);
+    let realised = build_output(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str());
     case.report_build_output(W2, &x, vec![realised.clone()], true, None)
         .await;
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        case.output_of(X, "out").await.hash.as_deref(),
-        Some(X_OUT),
+        case.output_of(&X_DERIVATION_STORE_FILE_NAME, "out")
+            .await
+            .hash
+            .as_deref(),
+        Some(X_OUTPUT_HASH.as_str()),
         "after 2: output(X,out).hash"
     );
     assert_eq!(
@@ -246,7 +316,7 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
             "r1",
             ImportOutcome::Completed {
                 realisations: vec![Realisation {
-                    drv_path: drv_path(X),
+                    drv_path: drv_path(&X_DERIVATION_STORE_FILE_NAME),
                     output: "out".into(),
                     path: realised.store_path,
                 }]
@@ -264,13 +334,22 @@ async fn f03c_a_substituted_import_without_its_output_path_is_rebuilt_before_the
 async fn f04_an_import_of_a_running_build_waits_and_answers_completed_exactly_once() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(startable_import(e1)).await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
 
     let (x, a2) = claimed_by_w2(&case).await;
     waiting_import(&case, e1).await;
 
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     assert_eq!(
         remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
@@ -308,20 +387,34 @@ async fn f04_an_import_of_a_running_build_waits_and_answers_completed_exactly_on
 async fn f05_an_import_of_an_aborted_build_requeues_it_and_answers_after_the_rebuild() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
-        importing(e1, &[X], BuildStatus::DependencyFailed)
-            .derivation(X)
-            .build_status(BuildStatus::Aborted)
-            .job_option(|job| job.aborted = true)
-            .attempt(AttemptOutcome::Aborted, None),
+        importing(
+            e1,
+            &[&X_DERIVATION_STORE_FILE_NAME],
+            BuildStatus::DependencyFailed,
+        )
+        .derivation(&X_DERIVATION_STORE_FILE_NAME)
+        .build_status(BuildStatus::Aborted)
+        .job_option(|job| job.aborted = true)
+        .attempt(AttemptOutcome::Aborted, None),
     )
     .await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
-    let x = case.key(X).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
+    let x = case.key(&X_DERIVATION_STORE_FILE_NAME).await;
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
-    let sb = case.sb(X).await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
+    let sb = case.sb(&X_DERIVATION_STORE_FILE_NAME).await;
     assert_eq!(
         (sb.status, sb.attempt),
         (BuildStatus::Queued, 0),
@@ -337,11 +430,15 @@ async fn f05_an_import_of_an_aborted_build_requeues_it_and_answers_after_the_reb
         .expect("after 2: W2 gets build:X")
         .assignment_id();
     case.report_building(W2, &x).await;
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::Completed,
         "after 2: sb(X).status"
     );
@@ -366,27 +463,45 @@ async fn f05_an_import_of_an_aborted_build_requeues_it_and_answers_after_the_reb
 async fn f06_a_reproducible_builder_failure_is_not_requeued_and_answers_failed() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
-        importing(e1, &[X], BuildStatus::DependencyFailed)
-            .derivation(X)
-            .build_status(BuildStatus::FailedPermanent)
-            .attempt(
-                AttemptOutcome::Failed,
-                Some(AttemptFailureReason::BuilderNonzero),
-            ),
+        importing(
+            e1,
+            &[&X_DERIVATION_STORE_FILE_NAME],
+            BuildStatus::DependencyFailed,
+        )
+        .derivation(&X_DERIVATION_STORE_FILE_NAME)
+        .build_status(BuildStatus::FailedPermanent)
+        .attempt(
+            AttemptOutcome::Failed,
+            Some(AttemptFailureReason::BuilderNonzero),
+        ),
     )
     .await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::FailedPermanent,
         "after 1: sb(X).status"
     );
     assert_eq!(
         case.signals(W1),
-        vec![answer(e1, "r1", failed(&case, e1, X).await)],
+        vec![answer(
+            e1,
+            "r1",
+            failed(&case, e1, &X_DERIVATION_STORE_FILE_NAME).await
+        )],
         "after 1: signals(W1)"
     );
     case.check("step 1").await;
@@ -398,16 +513,31 @@ async fn f06_a_reproducible_builder_failure_is_not_requeued_and_answers_failed()
 async fn f07_two_paths_settle_when_both_are_terminal_and_the_first_failure_wins() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
-        importing(e1, &[X, Y], BuildStatus::Created)
-            .derivation(X)
-            .build_status(BuildStatus::Queued)
-            .derivation(Y)
-            .build_status(BuildStatus::Queued),
+        importing(
+            e1,
+            &[&X_DERIVATION_STORE_FILE_NAME, &Y_DERIVATION_FILE_NAME],
+            BuildStatus::Created,
+        )
+        .derivation(&X_DERIVATION_STORE_FILE_NAME)
+        .build_status(BuildStatus::Queued)
+        .derivation(&Y_DERIVATION_FILE_NAME)
+        .build_status(BuildStatus::Queued),
     )
     .await;
-    evaluating(&case, e1, batch(&[(X, X_OUT), (Y, Y_OUT)])).await;
-    case.connect(W2, w_all().slots(2), &[]).await;
-    let (x, y) = (case.key(X).await, case.key(Y).await);
+    evaluating(
+        &case,
+        e1,
+        batch(&[
+            (&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str()),
+            (&Y_DERIVATION_FILE_NAME, Y_OUTPUT_PATH_HASH.as_str()),
+        ]),
+    )
+    .await;
+    case.connect(W2, w_all().slots(2)).await;
+    let (x, y) = (
+        case.key(&X_DERIVATION_STORE_FILE_NAME).await,
+        case.key(&Y_DERIVATION_FILE_NAME).await,
+    );
 
     case.admit_startable_moves().await;
     let mut claimed = Vec::new();
@@ -426,8 +556,16 @@ async fn f07_two_paths_settle_when_both_are_terminal_and_the_first_failure_wins(
     case.signals(W2);
     case.check("step 1").await;
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X), drv_path(Y)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[
+            drv_path(&X_DERIVATION_STORE_FILE_NAME),
+            drv_path(&Y_DERIVATION_FILE_NAME),
+        ],
+    )
+    .await;
     assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
     case.check("step 2").await;
 
@@ -439,7 +577,17 @@ async fn f07_two_paths_settle_when_both_are_terminal_and_the_first_failure_wins(
     )
     .await;
     assert_eq!(
-        (case.sb(X).await.status, case.sb(P).await.status),
+        (
+            case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
+            case.sb(
+                &entry_point_derivation_store_file_name_for_imported_derivations(&[
+                    &X_DERIVATION_STORE_FILE_NAME,
+                    &Y_DERIVATION_FILE_NAME
+                ])
+            )
+            .await
+            .status
+        ),
         (BuildStatus::FailedPermanent, BuildStatus::DependencyFailed),
         "after 3: sb(X).status, sb(P).status"
     );
@@ -453,12 +601,20 @@ async fn f07_two_paths_settle_when_both_are_terminal_and_the_first_failure_wins(
     );
     case.check("step 4").await;
 
-    case.commit_nar(output_nar(Y, Y_OUT)).await;
+    case.commit_nar(output_nar(
+        &Y_DERIVATION_FILE_NAME,
+        Y_OUTPUT_PATH_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &y, a3, Vec::new(), 1).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
         remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
-        vec![answer(e1, "r1", failed(&case, e1, X).await)],
+        vec![answer(
+            e1,
+            "r1",
+            failed(&case, e1, &X_DERIVATION_STORE_FILE_NAME).await
+        )],
         "after 5: signals(W1)"
     );
     case.signals(W2);
@@ -472,7 +628,7 @@ async fn f08_a_transient_failure_waits_through_the_retry_and_ends_on_the_permane
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(
         startable_import(e1)
-            .derivation(X)
+            .derivation(&X_DERIVATION_STORE_FILE_NAME)
             .shared_build_option(|build| build.attempt = 2)
             .attempt(
                 AttemptOutcome::Failed,
@@ -484,8 +640,13 @@ async fn f08_a_transient_failure_waits_through_the_retry_and_ends_on_the_permane
             ),
     )
     .await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
 
     let (x, a2) = claimed_by_w2(&case).await;
     waiting_import(&case, e1).await;
@@ -499,13 +660,17 @@ async fn f08_a_transient_failure_waits_through_the_retry_and_ends_on_the_permane
     .await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::FailedPermanent,
         "after 3: sb(X).status"
     );
     assert_eq!(
         remove_jobs_available_for_requested_kinds_signals(case.signals(W1)),
-        vec![answer(e1, "r1", failed(&case, e1, X).await)],
+        vec![answer(
+            e1,
+            "r1",
+            failed(&case, e1, &X_DERIVATION_STORE_FILE_NAME).await
+        )],
         "after 3: signals(W1)"
     );
     case.signals(W2);
@@ -518,8 +683,13 @@ async fn f08_a_transient_failure_waits_through_the_retry_and_ends_on_the_permane
 async fn f08b_a_transient_failure_with_attempts_left_keeps_the_import_waiting() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(startable_import(e1)).await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
 
     let (x, a2) = claimed_by_w2(&case).await;
     waiting_import(&case, e1).await;
@@ -533,7 +703,7 @@ async fn f08b_a_transient_failure_with_attempts_left_keeps_the_import_waiting() 
     .await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::FailedTransient,
         "after 3: sb(X).status"
     );
@@ -552,8 +722,13 @@ async fn f08b_a_transient_failure_with_attempts_left_keeps_the_import_waiting() 
 async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(startable_import(e1)).await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
     let (x, a2) = claimed_by_w2(&case).await;
     waiting_import(&case, e1).await;
     let key = eval_key(e1);
@@ -570,7 +745,7 @@ async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
         "after 1: evaluation(E1).status"
     );
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::Aborted,
         "after 1: sb(X).status"
     );
@@ -581,7 +756,11 @@ async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
     );
     case.check("step 1").await;
 
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
@@ -601,7 +780,7 @@ async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
         "after 2: dj(build:X)[0].outcome"
     );
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::Aborted,
         "after 2: sb(X).status"
     );
@@ -615,11 +794,16 @@ async fn f09_aborting_the_importing_evaluation_drops_its_waits() {
 async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_wait() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(startable_import(e1)).await;
-    let a1 = evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    let a1 = evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
     let (x, a2) = claimed_by_w2(&case).await;
     waiting_import(&case, e1).await;
-    case.connect(W3, w_all(), &[]).await;
+    case.connect(W3, w_all()).await;
     let key = eval_key(e1);
 
     case.disconnect(W1).await;
@@ -640,7 +824,7 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
         "after 1: evaluation(E1).status in {{Waiting, Queued}}, got {status:?}"
     );
     assert_eq!(
-        case.sb(X).await.status,
+        case.sb(&X_DERIVATION_STORE_FILE_NAME).await.status,
         BuildStatus::Building,
         "after 1: sb(X).status"
     );
@@ -660,7 +844,8 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
         .await;
     case.check("step 2").await;
 
-    case.import_request(W3, &key, "r1", &[drv_path(X)]).await;
+    case.import_request(W3, &key, "r1", &[drv_path(&X_DERIVATION_STORE_FILE_NAME)])
+        .await;
     assert_eq!(
         remove_jobs_available_for_requested_kinds_signals(case.signals(W3)),
         vec![],
@@ -668,7 +853,11 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
     );
     case.check("step 3").await;
 
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
@@ -697,13 +886,23 @@ async fn f10_a_lost_evaluating_worker_gets_no_answer_and_the_rerun_gets_a_fresh_
 async fn f11_an_import_request_from_a_session_not_running_the_job_is_ignored() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(startable_import(e1)).await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
     let (x, a2) = claimed_by_w2(&case).await;
-    case.connect(W3, w_all(), &[]).await;
+    case.connect(W3, w_all()).await;
 
-    case.import_request(W3, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W3,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     for worker in [W1, W2, W3] {
         assert_eq!(
             remove_jobs_available_for_requested_kinds_signals(case.signals(worker)),
@@ -712,7 +911,11 @@ async fn f11_an_import_request_from_a_session_not_running_the_job_is_ignored() {
         );
     }
     assert_eq!(case.import_waits(), 0, "after 1: no wait opened");
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
@@ -732,8 +935,13 @@ async fn f12_a_disconnected_evaluating_worker_drops_pending_import_waits_and_the
  {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(startable_import(e1)).await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
     let (x, a2) = claimed_by_w2(&case).await;
     waiting_import(&case, e1).await;
 
@@ -741,7 +949,11 @@ async fn f12_a_disconnected_evaluating_worker_drops_pending_import_waits_and_the
     assert_eq!(case.import_waits(), 0, "after 3: the import wait is gone");
     case.check("step 3").await;
 
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     let lost = case.signals(W1);
@@ -759,18 +971,32 @@ async fn f12_a_disconnected_evaluating_worker_drops_pending_import_waits_and_the
 async fn f13_worker_resending_same_import_request_keeps_one_wait_and_gets_one_answer() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(startable_import(e1)).await;
-    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
-    case.connect(W2, w_all(), &[]).await;
+    evaluating(
+        &case,
+        e1,
+        batch(&[(&X_DERIVATION_STORE_FILE_NAME, X_OUTPUT_HASH.as_str())]),
+    )
+    .await;
+    case.connect(W2, w_all()).await;
     let (x, a2) = claimed_by_w2(&case).await;
     waiting_import(&case, e1).await;
 
-    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(e1),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     assert_eq!(case.signals(W1), vec![], "after 3: signals(W1)");
     assert_eq!(case.import_waits(), 1, "after 3: still one import wait");
     case.check("step 3").await;
 
-    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.commit_nar(output_nar(
+        &X_DERIVATION_STORE_FILE_NAME,
+        X_OUTPUT_HASH.as_str(),
+    ))
+    .await;
     case.complete(W2, &x, a2, Vec::new(), 5).await;
     case.build_assign_pass(false, false).await;
     assert_eq!(
@@ -804,11 +1030,11 @@ fn importing(evaluation: EvaluationId, imports: &[&str], entry_status: BuildStat
             .output(output_of(path));
     }
     seed = seed
-        .derivation(P)
+        .derivation(&entry_point_derivation_store_file_name_for_imported_derivations(imports))
         .walked()
         .entry_point(&attr_of(P))
         .job()
-        .output(P_OUT)
+        .output(&entry_point_derivation_store_path_hash_for_imported_derivations(imports))
         .build_status(entry_status);
     for path in imports {
         seed = seed.depends_on(path);
@@ -817,17 +1043,33 @@ fn importing(evaluation: EvaluationId, imports: &[&str], entry_status: BuildStat
 }
 
 fn startable_import(evaluation: EvaluationId) -> Shape {
-    importing(evaluation, &[X], BuildStatus::Created)
-        .derivation(X)
-        .build_status(BuildStatus::Queued)
+    importing(
+        evaluation,
+        &[&X_DERIVATION_STORE_FILE_NAME],
+        BuildStatus::Created,
+    )
+    .derivation(&X_DERIVATION_STORE_FILE_NAME)
+    .build_status(BuildStatus::Queued)
 }
 
 fn output_of(path: &str) -> &'static str {
-    if path == Y { Y_OUT } else { X_OUT }
+    if path == *Y_DERIVATION_FILE_NAME {
+        Y_OUTPUT_PATH_HASH.as_str()
+    } else {
+        X_OUTPUT_HASH.as_str()
+    }
 }
 
 fn entry(path: &str, out: &str, dependencies: &[&str]) -> DiscoveredDerivation {
     with_attr(with_output(drv(path, dependencies), out), &attr_of(path))
+}
+
+fn entry_point_derivation_store_file_name_for_imported_derivations(imports: &[&str]) -> String {
+    test_derivation_store_file_name(&entry(P, P_OUT, imports))
+}
+
+fn entry_point_derivation_store_path_hash_for_imported_derivations(imports: &[&str]) -> String {
+    computed_out_output_path_hash(&entry(P, P_OUT, imports))
 }
 
 fn batch(imports: &[(&str, &str)]) -> Vec<DiscoveredDerivation> {
@@ -853,14 +1095,23 @@ async fn evaluating(
     case.check("step 0 up to EvaluatingFlake").await;
     case.report_status(W1, &key, EvaluationStatus::EvaluatingDerivation)
         .await;
-    case.report_eval_result(W1, &key, derivations).await;
+    for imported in derivations.iter().filter(|derivation| derivation.ifd) {
+        case.write_drv_nar_to_seeded_content_variant_object_key(imported)
+            .await;
+    }
+    case.assert_report_eval_result_matches_seeded_derivations_and_row_count_unchanged(
+        W1,
+        &key,
+        derivations,
+    )
+    .await;
     case.signals(W1);
     case.check("step 0").await;
     a1
 }
 
 async fn claimed_by_w2(case: &SchedulerCase) -> (String, DispatchedJobId) {
-    let x = case.key(X).await;
+    let x = case.key(&X_DERIVATION_STORE_FILE_NAME).await;
     case.admit_startable_moves().await;
     let assignment = case
         .request_job(W2, JobKind::Build)
@@ -884,8 +1135,13 @@ async fn claimed_by_w2(case: &SchedulerCase) -> (String, DispatchedJobId) {
 }
 
 async fn waiting_import(case: &SchedulerCase, evaluation: EvaluationId) {
-    case.import_request(W1, &eval_key(evaluation), "r1", &[drv_path(X)])
-        .await;
+    case.import_request(
+        W1,
+        &eval_key(evaluation),
+        "r1",
+        &[drv_path(&X_DERIVATION_STORE_FILE_NAME)],
+    )
+    .await;
     assert_eq!(case.signals(W1), vec![], "after 2: signals(W1)");
     assert_eq!(case.import_waits(), 1, "after 2: import wait open");
     case.check("step 2").await;

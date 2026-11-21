@@ -127,14 +127,21 @@ pub async fn upstream_nar(
 
     let upstream_caches = pull_through_upstream_caches(&state.web_db, &ctx.cache).await?;
 
-    let sources = named_first(substitution_sources(&upstream_caches), upstream_id);
+    let sources = named_first(
+        substitution_sources(&upstream_caches, &state.config.secrets.crypt_file).await,
+        upstream_id,
+    );
     if sources.is_empty() {
         return Err(WebError::not_found(Resource::Upstream));
     }
 
-    let Some(object) =
-        fetch_from_upstream_caches(&sources, &upstream_nar_path(&path, query.as_deref())?, None)
-            .await
+    let Some(object) = fetch_from_upstream_caches(
+        &state.user_supplied_url_http_client,
+        &sources,
+        &upstream_nar_path(&path, query.as_deref())?,
+        None,
+    )
+    .await
     else {
         return Err(WebError::not_found(Resource::NarInUpstream));
     };
@@ -205,15 +212,18 @@ mod tests {
         }
     }
 
-    fn upstream_bases(rows: &[MCacheUpstream], named: Uuid) -> Vec<String> {
-        named_first(substitution_sources(rows), named)
-            .into_iter()
-            .map(|s| s.url)
-            .collect()
+    async fn upstream_bases(rows: &[MCacheUpstream], named: Uuid) -> Vec<String> {
+        named_first(
+            substitution_sources(rows, "/nonexistent/gradient-crypt").await,
+            named,
+        )
+        .into_iter()
+        .map(|s| s.url.to_string())
+        .collect()
     }
 
-    #[test]
-    fn a_write_only_upstream_is_never_proxied() {
+    #[tokio::test]
+    async fn a_write_only_upstream_is_never_proxied() {
         let rows = vec![
             MCacheUpstream {
                 mode: gradient_entity::project_cache::CacheSubscriptionMode::WriteOnly,
@@ -223,58 +233,62 @@ mod tests {
         ];
 
         assert_eq!(
-            upstream_bases(&rows, uuid::Uuid::from_u128(1)),
+            upstream_bases(&rows, uuid::Uuid::from_u128(1)).await,
             vec!["https://b.example"]
         );
     }
 
-    #[test]
-    fn the_named_upstream_is_tried_first() {
+    #[tokio::test]
+    async fn the_named_upstream_is_tried_first() {
         let rows = vec![
             upstream_row(1, Some("https://a.example")),
             upstream_row(2, Some("https://b.example")),
         ];
 
-        let bases = upstream_bases(&rows, uuid::Uuid::from_u128(2));
+        let bases = upstream_bases(&rows, uuid::Uuid::from_u128(2)).await;
 
         assert_eq!(bases, vec!["https://b.example", "https://a.example"]);
     }
 
-    #[test]
-    fn a_deleted_upstream_falls_back_to_the_rest() {
+    #[tokio::test]
+    async fn a_deleted_upstream_falls_back_to_the_rest() {
         let rows = vec![
             upstream_row(1, Some("https://a.example")),
             upstream_row(2, Some("https://b.example")),
         ];
 
-        let bases = upstream_bases(&rows, uuid::Uuid::from_u128(99));
+        let bases = upstream_bases(&rows, uuid::Uuid::from_u128(99)).await;
 
         assert_eq!(bases, vec!["https://a.example", "https://b.example"]);
     }
 
-    #[test]
-    fn upstream_caches_without_a_url_are_skipped() {
+    #[tokio::test]
+    async fn upstream_caches_without_a_url_are_skipped() {
         let rows = vec![
             upstream_row(1, None),
             upstream_row(2, Some("https://b.example")),
         ];
 
         assert_eq!(
-            upstream_bases(&rows, uuid::Uuid::from_u128(1)),
+            upstream_bases(&rows, uuid::Uuid::from_u128(1)).await,
             vec!["https://b.example"]
         );
-        assert!(upstream_bases(&[upstream_row(1, None)], uuid::Uuid::from_u128(1)).is_empty());
+        assert!(
+            upstream_bases(&[upstream_row(1, None)], uuid::Uuid::from_u128(1))
+                .await
+                .is_empty()
+        );
     }
 
-    #[test]
-    fn the_named_upstream_is_not_tried_twice() {
+    #[tokio::test]
+    async fn the_named_upstream_is_not_tried_twice() {
         let rows = vec![
             upstream_row(1, Some("https://a.example")),
             upstream_row(2, Some("https://a.example")),
         ];
 
         assert_eq!(
-            upstream_bases(&rows, uuid::Uuid::from_u128(1)),
+            upstream_bases(&rows, uuid::Uuid::from_u128(1)).await,
             vec!["https://a.example"]
         );
     }

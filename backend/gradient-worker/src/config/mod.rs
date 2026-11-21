@@ -16,6 +16,7 @@ use gradient_eval::pool::MemoryGuard;
 use gradient_secret::SecretString;
 use gradient_vm::{SupervisorConfig, VmConfig};
 use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities, GuestSize, PortRanges};
+use ipnet::Ipv6Net;
 
 pub fn host_system() -> String {
     let arch = std::env::consts::ARCH;
@@ -227,14 +228,45 @@ impl ExecArgs {
         }
     }
 
-    pub fn supervisor_config(&self) -> SupervisorConfig {
-        SupervisorConfig {
+    pub fn parse_exec_subnet_v6(&self) -> anyhow::Result<Option<Ipv6Net>> {
+        let Some(subnet_v6) = self.subnet_v6.as_deref() else {
+            return Ok(None);
+        };
+        let Some(subnet_v4) = self.subnet_v4.as_deref() else {
+            anyhow::bail!("Set exec.subnet.v4 to use exec.subnet.v6.");
+        };
+        let guest_bridge_ipv4_subnet = gradient_vm::parse_guest_subnet(subnet_v4)?;
+        gradient_vm::parse_guest_subnet_v6(subnet_v6, guest_bridge_ipv4_subnet).map(Some)
+    }
+
+    pub fn supervisor_config(&self) -> anyhow::Result<SupervisorConfig> {
+        let guest_bridge_ipv4_subnet = self
+            .subnet_v4
+            .as_deref()
+            .map(gradient_vm::parse_guest_subnet)
+            .transpose()?;
+        Ok(SupervisorConfig {
             virtiofsd_bin: self.virtiofsd_bin.clone(),
             devices: self.devices.clone(),
             mounts: self.mounts.clone(),
             bridge: self.bridge.clone(),
-        }
+            guest_bridge_ipv4_subnet,
+            guest_bridge_ipv6_subnet: self.parse_exec_subnet_v6()?,
+        })
     }
+}
+
+pub const REMOVED_GRADIENT_WORKER_EXEC_SUBNET_ENV_VAR_NAME: &str = "GRADIENT_WORKER_EXEC_SUBNET";
+
+pub fn fail_on_removed_exec_subnet_env_var(
+    removed_exec_subnet_env_var_value: Option<&std::ffi::OsStr>,
+) -> anyhow::Result<()> {
+    if removed_exec_subnet_env_var_value.is_some() {
+        anyhow::bail!(
+            "The worker won't start when the removed `GRADIENT_WORKER_EXEC_SUBNET` environment variable is set. Rename it to `GRADIENT_WORKER_EXEC_SUBNET_V4`."
+        );
+    }
+    Ok(())
 }
 
 fn parse_token_hashes(raw: &str) -> Vec<(String, String)> {
@@ -260,7 +292,7 @@ mod tests {
     fn devices_come_from_a_json_environment_value() {
         let config = parse(&[
             "--exec-devices",
-            r#"[{"name":"gpu:h100","vfio":["0000:17:00.0","0000:18:00.0"]},{"name":"camera","usb":"1d6b:0002"}]"#,
+            r#"[{"name":"gpu:h100","projects":"all","vfio":["0000:17:00.0","0000:18:00.0"]},{"name":"camera","projects":[],"usb":"1d6b:0002"}]"#,
         ])
         .expect("valid devices");
 
@@ -269,12 +301,14 @@ mod tests {
             vec![
                 gradient_vm::DeviceConfig {
                     name: "gpu:h100".into(),
+                    projects: gradient_wire::host_resource_project_access::WorkerResourceProjectAccess::EveryProject,
                     vfio: vec!["0000:17:00.0".into(), "0000:18:00.0".into()],
                     dev: None,
                     usb: None,
                 },
                 gradient_vm::DeviceConfig {
                     name: "camera".into(),
+                    projects: gradient_wire::host_resource_project_access::WorkerResourceProjectAccess::OnlyProjects(Default::default()),
                     vfio: Vec::new(),
                     dev: None,
                     usb: Some("1d6b:0002".into()),
@@ -284,12 +318,49 @@ mod tests {
     }
 
     #[test]
-    fn sops_files_come_from_a_comma_separated_value() {
-        let config = parse(&["--exec-sops-files", "/a.yaml,/b.yaml"]).expect("valid paths");
+    fn json_list_with_two_sops_files_parses_into_two_entries_with_paths_and_projects() {
+        let second_sops_file_project_uuid = uuid::Uuid::now_v7();
+        let sops_files_json_text_with_two_entries = format!(
+            r#"[{{"path":"/a.yaml","projects":"all"}},{{"path":"/b.yaml","projects":["{second_sops_file_project_uuid}"]}}]"#
+        );
+        let config = parse(&["--exec-sops-files", &sops_files_json_text_with_two_entries])
+            .expect("valid entries");
         assert_eq!(
             config.exec.sops_files,
-            [PathBuf::from("/a.yaml"), PathBuf::from("/b.yaml")]
+            [
+                gradient_vm::SopsSecretFileEntry {
+                    path: PathBuf::from("/a.yaml"),
+                    projects: gradient_wire::host_resource_project_access::WorkerResourceProjectAccess::EveryProject,
+                },
+                gradient_vm::SopsSecretFileEntry {
+                    path: PathBuf::from("/b.yaml"),
+                    projects: gradient_wire::host_resource_project_access::WorkerResourceProjectAccess::OnlyProjects(
+                        [second_sops_file_project_uuid].into()
+                    ),
+                },
+            ]
         );
+    }
+
+    #[test]
+    fn sops_file_entry_without_projects_is_rejected_with_entry_name() {
+        let sops_file_entry_without_projects_parse_error_text = parse(&[
+            "--exec-sops-files",
+            r#"[{"path":"/a.yaml","projects":"all"},{"path":"/b.yaml"}]"#,
+        ])
+        .expect_err("entry without projects")
+        .to_string();
+        assert!(
+            sops_file_entry_without_projects_parse_error_text.contains("entry 1")
+                && sops_file_entry_without_projects_parse_error_text.contains("projects"),
+            "{sops_file_entry_without_projects_parse_error_text}"
+        );
+    }
+
+    #[test]
+    fn rejects_old_comma_separated_sops_file_path_list() {
+        assert!(parse(&["--exec-sops-files", "/a.yaml,/b.yaml"]).is_err());
+        assert!(parse(&["--exec-sops-files", "/a.yaml"]).is_err());
     }
 
     #[test]
@@ -362,6 +433,58 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn worker_supervisor_config_includes_exec_subnet_v4_and_v6_from_env() {
+        let command = WorkerConfig::command();
+        for (long, env) in [
+            ("exec-subnet-v4", "GRADIENT_WORKER_EXEC_SUBNET_V4"),
+            ("exec-subnet-v6", "GRADIENT_WORKER_EXEC_SUBNET_V6"),
+        ] {
+            let arg = command
+                .get_arguments()
+                .find(|arg| arg.get_long() == Some(long))
+                .unwrap_or_else(|| panic!("--{long}"));
+            assert_eq!(arg.get_env(), Some(std::ffi::OsStr::new(env)));
+        }
+
+        let config = parse(&[
+            "--exec-subnet-v4",
+            "10.233.0.0/16",
+            "--exec-subnet-v6",
+            "fd00:ec2::/64",
+        ])
+        .unwrap();
+        let supervisor_config = config.exec.supervisor_config().unwrap();
+        assert_eq!(
+            supervisor_config.guest_bridge_ipv4_subnet,
+            Some("10.233.0.0/16".parse().unwrap())
+        );
+        assert_eq!(
+            supervisor_config.guest_bridge_ipv6_subnet,
+            Some("fd00:ec2::/64".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn supervisor_config_rejects_ipv6_subnet_when_ipv4_subnet_missing() {
+        let config = parse(&["--exec-subnet-v6", "fd00:ec2::/64"]).unwrap();
+        assert!(config.exec.supervisor_config().is_err());
+        assert!(config.exec.parse_exec_subnet_v6().is_err());
+    }
+
+    #[test]
+    fn worker_start_check_rejects_old_subnet_variable() {
+        let error = fail_on_removed_exec_subnet_env_var(Some("10.233.0.0/16".as_ref()))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`GRADIENT_WORKER_EXEC_SUBNET`"), "{error}");
+        assert!(
+            error.contains("`GRADIENT_WORKER_EXEC_SUBNET_V4`"),
+            "{error}"
+        );
+        assert!(fail_on_removed_exec_subnet_env_var(None).is_ok());
     }
 
     #[test]

@@ -5,13 +5,15 @@
  */
 
 use chrono::NaiveDateTime;
+use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::sea_query::extension::postgres::PgExpr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder, Select,
+    JoinType, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Select,
 };
 
 pub async fn by_name<C: ConnectionTrait>(
@@ -55,6 +57,36 @@ pub async fn move_to_project<C: ConnectionTrait>(
         Condition::all().add(CTask::Project.eq(read_project)),
     )
     .await
+}
+
+pub async fn task_has_active_evaluation_or_unfinished_exec_job<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+) -> Result<bool, DbErr> {
+    let active_evaluation_id: Option<EvaluationId> = EEvaluation::find()
+        .select_only()
+        .column(CEvaluation::Id)
+        .filter(CEvaluation::Task.eq(task))
+        .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
+        .into_tuple()
+        .one(db)
+        .await?;
+    if active_evaluation_id.is_some() {
+        return Ok(true);
+    }
+    let unfinished_exec_job_id: Option<ExecJobId> = EExecJob::find()
+        .select_only()
+        .column(CExecJob::Id)
+        .join(
+            JoinType::InnerJoin,
+            gradient_entity::exec_job::Relation::Evaluation.def(),
+        )
+        .filter(CEvaluation::Task.eq(task))
+        .filter(CExecJob::Status.is_in(ExecJobStatus::OPEN))
+        .into_tuple()
+        .one(db)
+        .await?;
+    Ok(unfinished_exec_job_id.is_some())
 }
 
 const FETCH_ERROR_LIMIT: usize = 2000;

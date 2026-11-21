@@ -5,6 +5,11 @@
  */
 
 use crate::graph::walks::{ClosureDirection, dependency_closure_cte};
+use crate::store_path_content_variant_reader_choice::{
+    StorePathContentVariantReader,
+    find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash,
+    get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache,
+};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, FromQueryResult,
     QueryFilter, TransactionTrait,
@@ -101,18 +106,10 @@ pub async fn transitive_closure_reachable_in(
 
 pub async fn output_sizes_by_drv<C: ConnectionTrait>(
     db: &C,
+    reader: StorePathContentVariantReader,
     drv_ids: &[DerivationId],
 ) -> Result<HashMap<DerivationId, i64>, DbErr> {
-    if drv_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let outputs = crate::fetch_in_chunks(drv_ids, |chunk| async move {
-        EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await?;
+    let outputs = load_derivation_outputs_for_derivation_ids_in_chunks(db, drv_ids).await?;
 
     let missing_hashes: Vec<String> = outputs
         .iter()
@@ -123,15 +120,14 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
         .collect();
 
     let cached_size_by_hash: HashMap<String, i64> =
-        crate::fetch_in_chunks(&missing_hashes, |chunk| async move {
-            ECachedPath::find()
-                .filter(CCachedPath::Hash.is_in(chunk))
-                .all(db)
-                .await
-        })
+        get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
+            db,
+            reader,
+            &missing_hashes,
+        )
         .await?
         .into_iter()
-        .filter_map(|cp| cp.nar_size.map(|n| (cp.hash, n)))
+        .map(|(hash, variant)| (hash, variant.nar_size))
         .collect();
 
     let mut by_drv: HashMap<DerivationId, i64> = HashMap::new();
@@ -147,14 +143,17 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
     Ok(by_drv)
 }
 
-pub async fn transitive_closure_size<C>(db: &C, roots: &[DerivationId]) -> Result<i64, DbErr>
-where
-    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
-{
-    let closure = transitive_closure_reachable(db, roots).await?;
-    let all_ids: Vec<DerivationId> = closure.into_iter().collect();
-    let by_drv = output_sizes_by_drv(db, &all_ids).await?;
-    Ok(by_drv.values().sum())
+async fn load_derivation_outputs_for_derivation_ids_in_chunks<C: ConnectionTrait>(
+    db: &C,
+    drv_ids: &[DerivationId],
+) -> Result<Vec<MDerivationOutput>, DbErr> {
+    crate::fetch_in_chunks(drv_ids, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
 }
 
 pub async fn transitive_closure_sizes<C>(
@@ -187,33 +186,81 @@ where
         reachable.insert(to);
     }
 
-    let sizes = output_sizes_by_drv(db, &reachable.iter().copied().collect::<Vec<_>>()).await?;
-
-    let mut result: HashMap<DerivationId, i64> = HashMap::with_capacity(roots.len());
-    for &root in roots {
-        let mut visited: HashSet<DerivationId> = HashSet::from([root]);
-        let mut stack = vec![root];
-        let mut total = 0i64;
-        while let Some(node) = stack.pop() {
-            total += sizes.get(&node).copied().unwrap_or(0);
-            if let Some(children) = adjacency.get(&node) {
-                for &child in children {
+    let closure_of_root: HashMap<DerivationId, HashSet<DerivationId>> = roots
+        .iter()
+        .map(|&root| {
+            let mut visited: HashSet<DerivationId> = HashSet::from([root]);
+            let mut stack = vec![root];
+            while let Some(node) = stack.pop() {
+                for &child in adjacency.get(&node).into_iter().flatten() {
                     if visited.insert(child) {
                         stack.push(child);
                     }
                 }
             }
-        }
-        result.insert(root, total);
+            (root, visited)
+        })
+        .collect();
+
+    let reachable: Vec<DerivationId> = reachable.into_iter().collect();
+    let mut outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
+    for output in load_derivation_outputs_for_derivation_ids_in_chunks(db, &reachable).await? {
+        outputs_by_drv
+            .entry(output.derivation)
+            .or_default()
+            .push(output);
     }
-    Ok(result)
+    let outputs_in = |closure: &HashSet<DerivationId>| -> Vec<&MDerivationOutput> {
+        closure
+            .iter()
+            .flat_map(|drv| outputs_by_drv.get(drv).into_iter().flatten())
+            .collect()
+    };
+
+    let wanted: Vec<(DerivationId, String)> = closure_of_root
+        .iter()
+        .flat_map(|(&root, closure)| {
+            outputs_in(closure)
+                .into_iter()
+                .filter(|o| o.nar_size.is_none())
+                .filter_map(move |o| o.hash.clone().map(|hash| (root, hash)))
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let consumed =
+        find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash(db, &wanted)
+            .await?;
+
+    Ok(closure_of_root
+        .iter()
+        .map(|(&root, closure)| {
+            let total = outputs_in(closure)
+                .into_iter()
+                .filter_map(|o| {
+                    o.nar_size.or_else(|| {
+                        let hash = o.hash.clone()?;
+                        consumed.get(&(root, hash)).map(|variant| variant.nar_size)
+                    })
+                })
+                .sum();
+            (root, total)
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::runtime_closure::runtime_closure_reachable;
+    use crate::graph::sbom::with_referenced_paths;
+    use crate::store_path_content_variant_reader_choice::StorePathContentVariantReader;
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_fixtures::rows::{derivation_dependency, derivation_output};
+    use gradient_fixtures::store_path_content_variants::{
+        BUILD_A, BUILD_B, FIRST_KEY, Readers, SECOND_KEY, SHARED,
+        two_variants_of_one_hash_and_one_untrusted_hash,
+    };
 
     fn raise() -> sea_orm::MockExecResult {
         sea_orm::MockExecResult {
@@ -223,30 +270,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sums_closure_output_sizes() {
-        let root = DerivationId::now_v7();
-        let child = DerivationId::now_v7();
-        let db = mock_db()
-            .append_exec_results([raise()])
-            .append_query_results([vec![
-                derivation_dependency(root, root),
-                derivation_dependency(child, child),
-            ]])
-            .append_query_results([vec![
-                derivation_output(root, "r", Some(100)),
-                derivation_output(child, "c", Some(40)),
-            ]])
-            .into_connection();
-
-        let total = transitive_closure_size(&db, &[root]).await.unwrap();
-        assert_eq!(total, 140);
-    }
-
-    #[tokio::test]
     async fn empty_roots_is_zero() {
         let db = empty_db();
-        let total = transitive_closure_size(&db, &[]).await.unwrap();
-        assert_eq!(total, 0);
+        let sizes = transitive_closure_sizes(&db, &[]).await.unwrap();
+        assert!(sizes.is_empty());
     }
 
     #[tokio::test]
@@ -294,5 +321,121 @@ mod tests {
 
         assert_eq!(first, HashSet::from([a]));
         assert_eq!(second, HashSet::from([b]));
+    }
+
+    async fn insert_two_content_variants_with_derivation_output()
+    -> (Readers, DerivationId, DerivationId) {
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        let derivation_a = readers.db.shared_build(BUILD_A).await.derivation;
+        let derivation_b = readers.db.shared_build(BUILD_B).await.derivation;
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET \
+                   nar_size = CASE WHEN nar_object_storage_key = '{FIRST_KEY}' THEN 100 ELSE 200 END, \
+                   \"references\" = CASE WHEN nar_object_storage_key = '{FIRST_KEY}' \
+                                    THEN '{SHARED}-first' ELSE '{SHARED}-second' END \
+                 WHERE hash = '{SHARED}'; \
+                 INSERT INTO derivation_output \
+                   (id, derivation, name, hash, package, path_known_after_build, created_at) \
+                 VALUES (uuidv7(), '{derivation_a}', 'out', '{SHARED}', '{SHARED}-shared', false, now()), \
+                        (uuidv7(), '{derivation_b}', 'out', '{SHARED}', '{SHARED}-shared', false, now());"
+            ))
+            .await;
+        (readers, derivation_a, derivation_b)
+    }
+
+    fn optional_path_row_to_storage_key_nar_size_and_references(
+        path: Option<&MCachedPath>,
+    ) -> Option<(String, i64, Option<String>)> {
+        path.map(|path| {
+            (
+                path.nar_object_storage_key.clone(),
+                path.nar_size,
+                path.references.clone(),
+            )
+        })
+    }
+
+    #[tokio::test]
+    async fn runtime_closure_output_sizes_and_sbom_reference_completion_use_content_variant_trusted_by_reading_project_for_shared_store_path_hash()
+     {
+        let (readers, derivation_a, derivation_b) =
+            insert_two_content_variants_with_derivation_output().await;
+        let conn = readers.db.connection();
+        let seeds = [SHARED.to_owned()];
+
+        let mut seen = Vec::new();
+        for (project, derivation) in [
+            (readers.project_a, derivation_a),
+            (readers.project_b, derivation_b),
+        ] {
+            let reader = StorePathContentVariantReader::Project(project);
+            let closure = runtime_closure_reachable(&conn, reader.clone(), &seeds)
+                .await
+                .expect("The runtime closure walk ran.");
+            let referencing = MCachedPath {
+                hash: "root".into(),
+                references: Some(format!("{SHARED}-shared")),
+                ..Default::default()
+            };
+            let completed = with_referenced_paths(
+                &conn,
+                reader.clone(),
+                HashMap::from([("root".into(), referencing)]),
+            )
+            .await
+            .expect("The SBOM reference completion ran.");
+            let sizes = output_sizes_by_drv(&conn, reader, &[derivation])
+                .await
+                .expect("The output size read ran.");
+            seen.push((
+                optional_path_row_to_storage_key_nar_size_and_references(closure.get(SHARED)),
+                optional_path_row_to_storage_key_nar_size_and_references(completed.get(SHARED)),
+                sizes.get(&derivation).copied(),
+            ));
+        }
+
+        let first = Some((FIRST_KEY.to_owned(), 100, Some(format!("{SHARED}-first"))));
+        let second = Some((SECOND_KEY.to_owned(), 200, Some(format!("{SHARED}-second"))));
+        assert_eq!(
+            seen,
+            vec![
+                (first.clone(), first, Some(100)),
+                (second.clone(), second, Some(200)),
+            ],
+            "Projects read only the content variant that they trust. Content variants contain their own row, references and size."
+        );
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn scheduler_closure_sizes_per_root_derivation_use_worker_built_dependency_output_copy_for_shared_builds_when_hash_has_worker_built_and_trusted_uploaded_copies()
+     {
+        let (readers, derivation_a, derivation_b) =
+            insert_two_content_variants_with_derivation_output().await;
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cache SET private_key = 'signing-key' \
+                 WHERE id IN ('{}', '{}');",
+                readers.cache_one, readers.cache_two
+            ))
+            .await;
+
+        let sizes =
+            transitive_closure_sizes(&readers.db.connection(), &[derivation_a, derivation_b])
+                .await
+                .expect("The closure size read ran.");
+
+        assert_eq!(
+            (
+                sizes.get(&derivation_a).copied(),
+                sizes.get(&derivation_b).copied()
+            ),
+            (Some(100), Some(100)),
+            "A shared build can put the worker-built content variant ahead of the variant that a project uploaded in the estimate of the size of dependency outputs. That order can apply even when a project can trust its own upload."
+        );
+        readers.db.finish().await;
     }
 }

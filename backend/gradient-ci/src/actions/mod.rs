@@ -74,10 +74,21 @@ pub fn matching_actions(
 ) -> Vec<gradient_types::MTaskAction> {
     let is_input_update =
         payload.get("evaluation_kind").and_then(|v| v.as_str()) == Some("input_update");
+    let allows_project_credentials_and_privileged_actions = payload
+        .get("allows_project_credentials_and_privileged_actions")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
 
     actions
         .into_iter()
         .filter(|a| matches_event(a, event))
+        .filter(|a| {
+            allows_project_credentials_and_privileged_actions
+                || !matches!(
+                    a.action_type,
+                    ActionType::OpenPr | ActionType::StartEvaluation
+                )
+        })
         .filter(|a| a.action_type != ActionType::OpenPr || opens_for(a, is_input_update))
         .collect()
 }
@@ -93,4 +104,4 @@ fn opens_for(action: &gradient_types::MTaskAction, is_input_update: bool) -> boo
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -24,8 +24,9 @@ use gradient_wire::types::{BuildFailureKind, JobKind};
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, GitRepo, N, N_OUT, P, P_OUT, S, S_OUT,
-    SchedulerCase, ago, attr_of, drv, drv_path, eval_key, failure, is_recent, output_nar, polling,
-    time_trigger, w_all, with_attr, with_output,
+    SchedulerCase, ago, attr_of, computed_out_output_path_hash, drv, drv_path, eval_key, failure,
+    is_recent, output_nar, polling, test_derivation_store_file_name, time_trigger, w_all,
+    with_attr, with_output,
 };
 
 const W1: &str = "w1";
@@ -793,6 +794,8 @@ async fn t15_a_hard_abort_spares_a_build_a_live_third_evaluation_wants() {
 #[tokio::test]
 async fn t16_auto_aborts_the_older_evaluation_once_the_new_one_builds() {
     let (e1, t1) = (EvaluationId::now_v7(), TaskTriggerId::now_v7());
+    let test_derivation_drv_store_path =
+        test_derivation_store_file_name(&with_attr(with_output(drv(S, &[]), S_OUT), &attr_of(S)));
     let repo = GitRepo::new();
     let c0 = repo.commit("c0");
     let c1 = repo.commit("c1");
@@ -807,11 +810,19 @@ async fn t16_auto_aborts_the_older_evaluation_once_the_new_one_builds() {
             ConcurrencyPolicy::Auto,
         )
         .startable(A, A_OUT)
-        .startable(S, S_OUT)
+        .startable(
+            &test_derivation_drv_store_path,
+            &computed_out_output_path_hash(&with_output(drv(S, &[]), S_OUT)),
+        )
         .add_missing_cached_build_input(A, D, D_OUT),
     )
     .await;
-    let [a, s] = auto_prefix(&case, e1).await;
+    case.write_drv_nar_to_seeded_content_variant_object_key(&with_attr(
+        with_output(drv(S, &[]), S_OUT),
+        &attr_of(S),
+    ))
+    .await;
+    let [a, s] = auto_prefix(&case, e1, &test_derivation_drv_store_path).await;
 
     case.fire_once().await;
     case.deliver_trigger_fires().await;
@@ -898,7 +909,7 @@ async fn t16_auto_aborts_the_older_evaluation_once_the_new_one_builds() {
         "after 3: sb(A).status"
     );
     assert_eq!(
-        case.sb(S).await.status,
+        case.sb(&test_derivation_drv_store_path).await.status,
         BuildStatus::Building,
         "after 3: sb(S).status"
     );
@@ -931,7 +942,7 @@ async fn t17_auto_keeps_the_older_evaluation_when_the_new_one_fails_to_evaluate(
         .startable(A, A_OUT),
     )
     .await;
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     let k1 = eval_key(e1);
     let a1 = case.evalrun(W1, e1).await;
     case.advance_evaluation(W1, &k1, EvaluationStatus::EvaluatingDerivation)
@@ -1408,6 +1419,13 @@ async fn t27_second_poll_of_skipped_docs_only_head_does_not_list_changed_files_a
     case.check("step 1").await;
 
     repo.delete_commit_object(&c0);
+    // The git daemon strips the trailing slash, so the URL still names the same repository and the
+    // record of skipped comparisons, which holds no URL, still matches. The store of changed-file
+    // listings is keyed by the URL as written, so the new listing misses it and fails on the
+    // deleted c0.
+    case.db
+        .execute(&format!("UPDATE task SET repository = '{}/'", repo.url()))
+        .await;
     let polling_trigger_row = case.trigger(t1).await;
     let trigger_owner_task = case
         .db
@@ -1771,7 +1789,7 @@ async fn take_build(case: &SchedulerCase, worker: &str, key: &str) {
 }
 
 async fn evaluate_and_build_a(case: &SchedulerCase, e0: EvaluationId) -> String {
-    case.connect(W1, w_all().slots(2), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
     start_eval_job(case, e0).await;
     let a = case.key(A).await;
     take_build(case, W1, &a).await;
@@ -1781,8 +1799,8 @@ async fn evaluate_and_build_a(case: &SchedulerCase, e0: EvaluationId) -> String 
 }
 
 async fn hard_abort_prefix(case: &SchedulerCase, e0: EvaluationId) -> [String; 3] {
-    case.connect(W1, w_all().slots(2), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+    case.connect(W1, w_all().slots(2)).await;
+    case.connect(W2, w_all()).await;
     start_eval_job(case, e0).await;
     let (a, b, c) = (case.key(A).await, case.key(B).await, case.key(C).await);
     case.install_worker_local_store_bloom_filter(W1, &[D_OUT])
@@ -1799,11 +1817,18 @@ async fn hard_abort_prefix(case: &SchedulerCase, e0: EvaluationId) -> [String; 3
     [a, b, c]
 }
 
-async fn auto_prefix(case: &SchedulerCase, e1: EvaluationId) -> [String; 2] {
-    case.connect(W1, w_all().slots(2), &[]).await;
-    case.connect(W2, w_all(), &[]).await;
+async fn auto_prefix(
+    case: &SchedulerCase,
+    e1: EvaluationId,
+    test_derivation_drv_store_path: &str,
+) -> [String; 2] {
+    case.connect(W1, w_all().slots(2)).await;
+    case.connect(W2, w_all()).await;
     start_eval_job(case, e1).await;
-    let (a, s) = (case.key(A).await, case.key(S).await);
+    let (a, s) = (
+        case.key(A).await,
+        case.key(test_derivation_drv_store_path).await,
+    );
     take_build(case, W2, &s).await;
     take_build(case, W1, &a).await;
     case.signals(W1);

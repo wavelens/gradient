@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
-
-use gradient_types::ids::ProjectId;
 
 use gradient_wire::types::{
     BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities, GuestCapacity,
@@ -19,7 +17,7 @@ use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
 use crate::worker_caps::{effective_free, effective_free_amount};
 
-use crate::peer_auth::PeerAuth;
+use crate::project_access::ProjectAccess;
 use crate::session_port::SessionPort;
 
 mod private {
@@ -89,7 +87,7 @@ pub struct WorkerShared {
     pub assigned_jobs: HashMap<String, AssignedJob>,
     pub observes_build_ram: bool,
     pub reclaims_jobs: bool,
-    pub peer_auth: PeerAuth,
+    pub project_access: ProjectAccess,
     pub local_store_bloom_filter: Option<WorkerStorePathBloomFilter>,
     pub session: Arc<dyn SessionPort>,
     /// The session loop is bumping this lock-free on every inbound frame. The liveness watchdog is
@@ -202,7 +200,7 @@ impl std::fmt::Debug for WorkerShared {
             .field("capabilities", &self.capabilities)
             .field("architectures", &self.architectures)
             .field("assigned_jobs", &self.assigned_jobs)
-            .field("peer_auth", &self.peer_auth)
+            .field("project_access", &self.project_access)
             .finish_non_exhaustive()
     }
 }
@@ -238,7 +236,7 @@ impl TypedWorker<Draining> {
 impl TypedWorker<Active> {
     pub fn new(
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<ProjectId>,
+        project_access: ProjectAccess,
         session: Arc<dyn SessionPort>,
     ) -> Self {
         Self {
@@ -262,7 +260,7 @@ impl TypedWorker<Active> {
                 assigned_jobs: HashMap::new(),
                 observes_build_ram: false,
                 reclaims_jobs: false,
-                peer_auth: PeerAuth::from(authorized_peers),
+                project_access,
                 local_store_bloom_filter: None,
                 session,
                 last_seen: Arc::new(AtomicI64::new(
