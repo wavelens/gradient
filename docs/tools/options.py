@@ -18,7 +18,7 @@ SERVER_SUB_GROUPS = {
     "metrics": ["retention", "otlp"],
     "proto": ["anonymous_cache"],
 }
-WORKER_SUB_GROUPS = {"eval": ["cache"], "log": ["level"], "exec": ["allow", "defaults", "sops"]}
+WORKER_SUB_GROUPS = {"eval": ["cache"], "log": ["level"], "exec": ["allow", "defaults", "sops", "subnet"]}
 TYPES = [
     (r"16 bit unsigned integer; between 0 and 65535 \(both inclusive\)", "port"),
     (r"positive integer, meaning >0", "positive int"),

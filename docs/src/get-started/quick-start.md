@@ -70,7 +70,7 @@ Add this to `configuration.nix`:
 
 1.  An nginx virtual host from the module, answering on this domain. Only set it to false if you know what you are doing.
 2.  A local PostgreSQL database for Gradient.
-3.  A worker on the same host, self-registering and joining every project.
+3.  A worker on the same host with automatic self-registration at startup. Admins grant this worker to each project. See [First Project](first-project.md). Only superusers can create projects with this worker enabled.
 4.  Gradient needs PostgreSQL 18 or newer. The NixOS default may be older.
 
 ## Verify Deployment
@@ -78,7 +78,7 @@ Add this to `configuration.nix`:
 - The login page is reachable at `https://gradient.example.com`.
 - `systemctl status gradient-server gradient-worker` shows both services running.
 
-The worker keeps trying to reconnect until a project with a cache exists. This loop is normal at this stage. The next page covers creation of both.
+Connection attempts from the local worker continue until a project with a cache grants team `server` the workers flag. That loop is normal at this stage. All three steps appear on the next page.
 
 ## Next Steps
 

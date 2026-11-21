@@ -32,7 +32,7 @@ All three payloads use one JSON structure: websocket messages, webhook bodies, a
 |---|---|---|
 | `build.<status>` | yes (entry points) | `build.queued`, `build.started`, `build.completed`, `build.failed`, `build.substituted` |
 | `evaluation.<phase>` | yes | `evaluation.queued`, `evaluation.building`, `evaluation.failed`, `evaluation.aborted` |
-| `fork_pull_request_approval.<phase>` | yes | `fork_pull_request_approval.needs_maintainer_approval`, `fork_pull_request_approval.evaluation_started_after_approval` |
+| `fork_pull_request_approval.<phase>` | yes | `fork_pull_request_approval.needs_maintainer_approval`, `fork_pull_request_approval.evaluation_started_after_approval`, `fork_pull_request_approval.approval_without_changed_file_matching_trigger_path` |
 | `exec_job.<status>` | yes | `exec_job.queued`, `exec_job.started`, `exec_job.phase`, `exec_job.completed`, `exec_job.failed`, `exec_job.aborted` |
 | `project.*`, `task.*`, `cache.*` | yes | `project.create`, `task.star`, `task.action.update`, `cache.nar.upload`, `cache.member.create` |
 | `gc.*` | yes | `gc.swept`, `gc.deep_finished` |
@@ -48,6 +48,8 @@ All three payloads use one JSON structure: websocket messages, webhook bodies, a
 Every `build.*` event with a per-evaluation `build_id` also includes `derivation_build`. That field identifies the shared build, and `worker.job_dispatched` names this same build as its `build_id`.
 
 The `build.*`, `evaluation.*` and `exec_job.*` events include `status_name`, a snake_case status name, in addition to the numeric `status`. Example values include `completed`, `failed_permanent` and `running`.
+
+Events `build.*`, `evaluation.*`, and `exec_job.*` include `allows_project_credentials_and_privileged_actions`. The value is `false` for evaluations of pull requests from forks that maintainers have not approved. Such evaluations receive neither project secrets nor SSH keys. That event doesn't trigger `open_pr` or `start_evaluation` task actions.
 
 ## Webhooks
 

@@ -65,18 +65,18 @@ A subscribed project both pushes build outputs to the cache and pulls packages f
     - A subscription with write access to the cache can take effect at once.
     - All other subscriptions wait as requests marked **Pending approval** that carry the cache administrator name. The cache administrator can approve or deny the request under **Subscriptions** on the cache page or at **Requests** in the header user menu. The administrator can lower the requested mode at approval time, for example Read & Write to Read only.
 
-    All subscription rows show a switch **Sign pushed paths with the cache key**. The paths from the project to the cache receive a signature from the server while the switch is on. In the CLI, choose the mode with `gradient project cache add <CACHE> --mode ReadOnly`.
+    All subscription rows show a switch **Sign pushed paths with the cache key**. Paths from a project to a cache receive a signature from the server while the switch is on. Existing signatures stay in place with the switch off. The cache can serve those paths as before. New paths from this project stay unsigned unless another subscription can sign them, from the same cache and with the switch on. In the CLI, choose the mode with `gradient project cache add <CACHE> --mode ReadOnly`.
 
 === "Declarative"
 
     ```nix
     services.gradient.state.caches.main.projects = [
       "acme"
-      { name = "widgets"; mode = "ReadOnly"; sign_outputs = false; }
+      { name = "widgets"; mode = "ReadOnly"; }
     ];
     ```
 
-    Declared subscriptions skip the approval step. The UI and API lock them. Change or remove them in the config. The default values are `ReadWrite` for `mode` and `true` for `sign_outputs`.
+    Declared subscriptions skip the approval step. The UI and API lock them. Change or remove them in the config. The default `mode` is `ReadWrite`. Omitted `sign_outputs` values follow the mode. They're on for `ReadWrite` and `WriteOnly`. They're off for `ReadOnly`. `ReadOnly` subscriptions with `sign_outputs = true` fail validation.
 
 ## 3. Invite Members
 

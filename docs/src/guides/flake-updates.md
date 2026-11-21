@@ -72,7 +72,7 @@ flowchart LR
     bump[Bump tracked inputs] --> verify[Evaluate and build] --> pr[Open or update the PR]
 ```
 
-- A force-push can land each branch as a single commit on top of the current base.
+- Force updates from Gradient go through the Git host connection of the `open_pr` action. These updates set each branch to the current base branch plus one new commit. Branch protection on the Git host is the only guard for a branch.
 - Pull requests never lag behind.
 - Unchanged `flake.lock` files trigger no pull request.
 - A failed build with the default `build` check blocks pull request creation.

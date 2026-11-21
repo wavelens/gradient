@@ -154,13 +154,10 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
 - **Eval Job Outage:** Eval jobs failing `Transient` re-queue the evaluation, up to `build.maxAttempts` (3) attempts. Abandoned dispatches stay out of this count.
     - Typical causes are a dropped server connection, or an object PUT or `CacheQuery` without an answer.
 - **Out of Memory:** Builds killed by the kernel for memory count as `Transient`, whatever kind the worker sent. The attempts close with the reason `Oom`.
-    - Out-of-memory builds with more than 1 core in `BuildMetrics.build_cores` go back to `FailedTransient` without using up `build.maxAttempts`. The next attempt can get a third fewer cores.
+    - Out-of-memory failures only return to `FailedTransient` without consuming `build.maxAttempts` if the attempt has a known project and `BuildMetrics.build_cores` is above 1 and below every earlier kill of that derivation in the same project. Other kills consume one attempt. The next attempt can reduce the core count by one third.
     - A kill at 1 core can end the build as `FailedPermanent` with the message `ran out of memory with 1 core`.
     - Out-of-memory builds from workers without a core count use up attempts like other `Transient` failures.
-- **Not Enough Resources:** A queued build can turn `FailedPermanent` after 5 minutes without a worker able to hold the build. Such attempts close with the reason `NotEnoughResources` and without a dispatched job.
-    - The predicted peak memory of such builds at 1 core is above the free memory of every connected worker able to build them.
-    - Workers with memory reserved for running jobs are large enough while the total memory can take the build.
-    - Unmeasured builds and workers without a sample stay out of this check.
+- **Builds Larger Than Every Worker:** Predicted RAM values exceed every worker's capacity, even with 1 core and RAM proportional to core count. Builds with these values wait for the largest connected worker the project can use and run there. Small workers don't accept those builds. Such builds can fail only through an out-of-memory kill. Only attempts from releases before 2.1 have reason `NotEnoughResources`.
 - Evaluations end `Completed`, or `Failed` with a build in `Failed`, `Aborted` or `DependencyFailed`, or with an error message present.
 
 ## Cluster Members
@@ -179,9 +176,10 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
 | Worker stop | The worker releases all held members the same way, with `worker draining` |
 
 - Held members count against `eval.maxConcurrent` / `build.maxConcurrent` like running jobs.
-- Held exec members lease a guest address first and accept with `AssignJobResponse.endpoint` set to that address. Workers reject the member with `no free guest address in exec.subnet` on a full subnet.
+- Held exec members lease a guest address first and accept with `AssignJobResponse.endpoint` set to that address. Workers reject the member with ``No free guest addresses in `exec.subnet.v4` `` on a full subnet.
+- Versions 11 and later of the guest protocol include ``GuestNetworkIpv6`` in ``RunJob.network.ipv6_configuration``, with an address, a prefix length and a gateway. Workers fill this field only when worker configs set option ``exec.subnet.v6``. Agents below protocol 11 receive no IPv6 configuration and use IPv4 only.
 - Exec job executors get the roster and the lease from the worker on `StartCluster`. The executor can build the cluster context from the roster endpoints and `JobContext.master_port`.
-- Duplicate roster addresses fail the node with `two nodes have the guest address <address>; give every exec worker its own exec.subnet`.
+- Duplicate roster addresses fail the node with `Two nodes have guest address <address>. Assign a unique exec.subnet.v4 to each exec worker.`
 - `hold_secs`: the server's `scheduler.clusterPrepareTimeoutSecs` (30 s) plus a 10 s margin.
 
 ### Split Evaluation Members

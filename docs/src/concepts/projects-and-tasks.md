@@ -25,7 +25,7 @@ flowchart LR
 - **Workers**: Jobs from a project reach workers only when the worker flag on that project enable.
 - **Teams**: A granted [team](teams.md) bring its users with a role, its workers, or both.
 - **Cache Subscriptions**: Build outputs of a project go to every subscribed cache.
-- **Git Host Connections**: Connections to GitHub, Gitea / Forgejo, or GitLab receive events and report commit status. A project can use its own connections, the connections of its owner team, and connections from the instance.
+- **Git Host Connections**: Connections to GitHub, Gitea / Forgejo, or GitLab receive events and report commit status. A project can use its own connections freely. Connections of the owner team and the instance require [repository grant](#repository-grants).
 
 ## Task
 
@@ -34,10 +34,49 @@ flowchart LR
 | Repository URL | Location of the flake, see [Repository URL](#repository-url) |
 | Evaluation Wildcard | Which flake outputs to build, see [wildcards](../reference/wildcards.md) |
 | [Triggers](triggers.md) | Start condition and branch of an evaluation: push, pull request, polling (every 300 s by default) or a cron schedule |
-| Git Host Connection | A connection to a Git host for task events. This connection can report commit status when **Report commit status** is on. See [Connect GitHub](../guides/github.md#4-choose-the-connection-on-the-task). |
+| Git Host Connection | A connection to a Git host for task events. This connection can report commit status when **Report commit status** is on. Team connections and instance connections need a [repository grant](#repository-grants). See [Connect GitHub](../guides/github.md#4-choose-the-connection-on-the-task). |
 | Actions | Follow-up steps: email, web request, Matrix or Slack message, flake update pull request |
 | Flake Input Overrides | Replace a flake input for every evaluation, e.g. a newer nixpkgs |
 | Keep Evaluations | Number of completed evaluations to keep. Default 30. Server option `eval.maxKeep` can set the upper limit for this value. The settings page can show that limit as **Instance limit**. **Delete old evaluations** in the task's **Danger Zone** can remove completed evaluations created before the specified date. |
+
+## Repository Grants
+
+A task can use the connection to the Git host of an instance or team only with a grant for the task repository on that connection. Grants specify one project and one repository owner. A grant can also include one repository.
+
+| Connection owner | Grant needed | Granted by |
+|---|---|---|
+| Project | No | - |
+| Team | Yes, for projects of that team only | Team Admin |
+| Instance | Yes | Superuser |
+
+- **Owner Grant**: Grants with no repository name apply to every repository of that owner on the Git host.
+- **Letter Case**: Owner and name of a grant in Gradient stay lowercase. Comparisons ignore case.
+- **Team Connections**: Projects outside the team don't get a grant for the team connection.
+- **Host**: The repository URL must point to the host of the connection. Gitea and Forgejo connections need a base URL for this check.
+- **Declarative Tasks**: Tasks declared in `services.gradient.state` get a grant from the state file for exactly their own repository. `open_pr` actions with an instance connection or a team connection also get their own grant from the state file, for exactly the repository of each action. Tasks that leave the state file no longer have a grant.
+
+A task without a grant:
+
+- The **Git host connection** list on the task doesn't include the connection.
+- Selecting the connection, an `open_pr` action with it and moving the task to another project all fail with `403`. Error messages show the name of the missing permission, `This task can't use Git host connection <id>: This connection has no grant for this repository in the task's project.`.
+- The connection's webhooks don't start an evaluation of the task. Commit statuses and pull requests stop too.
+
+Grants don't have a UI page yet. Superusers and team admins manage grants through the API.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/admin/git-host-connections/{id}/repository-grants` | List grants of an instance connection with project name and source |
+| `PUT` | `/api/v1/admin/git-host-connections/{id}/repository-grants` | Create a grant, body `{ "project": "acme", "repository_owner": "acme", "repository_name": "app" }` |
+| `DELETE` | `/api/v1/admin/git-host-connections/{id}/repository-grants/{grant}` | Delete a grant |
+| `GET`, `PUT`, `DELETE` | `/api/v1/teams/{team}/git-host-connections/{id}/repository-grants[/{grant}]` | The same for a team connection |
+
+- **`repository_name`**: Optional. Omit the field for an owner grant. GitLab subgroups belong in the name. Take owner `group` and name `sub/app`. That grant matches only `group/sub/app`.
+- **`project_name`**: The project name is empty in the team list after the project left the team. Deleting the grant still works.
+- **Takeover**: Create requests for a grant made by the state file or a version upgrade turn that grant into an admin grant. Task removals from the state file leave that admin grant in place.
+- **`400`**: An owner that isn't a single path segment. A name with an empty segment, `.` or `..`, or `.git` at the end. An owner or name over 255 characters. A project outside the team.
+- **`404`**: The connection belongs to another owner, or the project doesn't exist.
+- **`409`**: Identical admin grants already exist.
+- **State-managed Teams**: Teams declared in `services.gradient.state` reject any change to grants through the API.
 
 ## Repository URL
 

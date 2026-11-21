@@ -60,7 +60,7 @@ The Nix store never uses secret material. Each `*_file` option points to a path 
 - Run `gradient hash` to enter the password twice and get the hash. Piping a password through `<<<` puts a trailing newline into the hash, and later sign-ins then fail.
 - Upload `acme-ssh-key.pub` to the Git host as the deploy key.
 - `nix-store` writes the key as `main:<key>`. Store only the key in the file, without the `main:` prefix. Gradient can derive the public key itself.
-- A user without `password_file` can sign in through OIDC only.
+- Users without `password_file` can sign in only through an external login provider such as OIDC. Servers link that account to the provider's ID on first sign-in only when the provider reports `email` as a verified email address. Servers skip a declared user when another method (registration, SCIM, external sign-in) created an account with that username or email address. They log an error. They skip the memberships for that user too. Set `existing_account_id` to intentionally adopt such an account. Servers remove the password, sessions, undeclared API keys, external ID links, and SCIM external ID of that account with this setting.
 
 ### API Key Files
 
@@ -85,7 +85,7 @@ The command outputs two values: the `API token` for clients (`Authorization: Bea
 
 ## Removal
 
-The `services.gradient.state.delete` option controls removal of users, projects and caches that no longer appear in the configuration. Removal is on by default. Turn the option off to keep those entities in the database, where they remain editable in the UI.
+The option `services.gradient.state.delete` controls deletion of users, projects and caches that no longer appear in the config. That option is on by default. Disable that option and these entities remain in the database, editable in the UI. Deleted users become inactive and lose superuser status. Always delete API keys removed from the config.
 
 ## Export
 

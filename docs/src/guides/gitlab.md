@@ -33,11 +33,16 @@ flowchart LR
 | Owner | Created in | Used by |
 |---|---|---|
 | Project | **Project settings -> Git host connections** | Tasks of the project |
-| Team | Team settings, tab **Git host connections** (team admins) | Tasks of every project the team owns |
-| Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
+| Team | Team settings, tab **Git host connections** (team admins) | Task in a team project with a repository grant |
+| Instance | **Administration -> Git host connections** (instance admins) | Tasks with a grant for their own repository |
 
 - Both switches sit under **Advanced** in the connection dialog. **Reports status** is on by default for connections with an access token.
 - A new project connection can link project tasks on the same host that still have no connection.
+- Team connections and instance connections need a [repository grant](../concepts/projects-and-tasks.md#repository-grants) for each project and repository. Team admins can grant team connections. Superusers can grant instance connections.
+- Edits that change the host type or the scheme, host, or port of the base URL delete the stored access token and webhook secret. Tokens or secrets entered in the same edit remain.
+- Enter the access token again after that edit. Install the webhook again or set a new secret.
+- A connection with **Receives events** on gets a new webhook secret if such an edit does not contain a secret. Gradient shows the new secret once. The webhook on the Git host needs the new secret.
+- Connections with **Reports status** on reject such edits without a new access token.
 - Events for all tasks that use the connection reach the webhook URL `/api/v1/hooks/<connection-id>`. Gradient can match events to tasks by the `owner/repo` part of the repository URL.
 - Calls to GitLab use the account of the token. Statuses and comments appear under that account name.
 - The writer check and reactions to comments use the task's connection to its Git host.
@@ -94,7 +99,7 @@ services.gradient.state.git_host_connections.gitlab = {
 };
 ```
 
-1.  `team/<name>` can share connections with all projects of the team. `instance` can share connections with all projects.
+1.  `team/<name>` or `instance` share a connection with the granted repositories of other projects. Declared tasks get that permission from the state file.
 2.  Any random string, e.g. `openssl rand -hex 32`. The GitLab webhook must use the same value.
 3.  Base URL of GitLab, without `/api/v4`.
 4.  The access token from above, as the only content of the file.
@@ -133,11 +138,11 @@ services.gradient.state.tasks.app = {
 | Action on GitLab | Effect |
 |---|---|
 | Open or update a merge request | Evaluate the head commit of that merge request |
-| Comment `/gradient run` | Trigger a new evaluation of the merge request |
-| Comment `/gradient approve` | Start evaluation of the commits in a merge request from a fork awaiting maintainer approval. |
+| Comment `/gradient run` | A new evaluation of the head commit runs without project secrets for a merge request from a fork if the option is off. Gradient waits for approval with the option on, then answers with the command for the head commit. |
+| Comment `/gradient approve <commit>` | Start the evaluation of that commit in a merge request from a fork with pending maintainer approval. Use the full 40-character hash. |
 | Comment `/gradient summary` | Post one comment with the built, failed and unchanged packages, and update it after every push |
 
-The **Pull Request (reporter)** trigger has an option called **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). GitLab does not fire a webhook when a reviewer approves a merge request through the review UI. A `/gradient approve` comment therefore remains the only way to grant approval.
+The **Pull Request (reporter)** trigger options include **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). GitLab does not fire a webhook when reviewers approve a merge request in the review UI. A `/gradient approve` comment is the only way to grant approval. Merge requests from forks always wait for this comment on open or update, even with the option off. A `/gradient run` comment with no commit can start the head commit of a merge request from a fork without the project secret when the option is off. A `/gradient approve` comment can approve only the commit with a full 40-character hash. A `/gradient approve` comment with a short hash cannot approve anything. A `/gradient approve` comment with no commit approves the head commit only when Gradient recorded that commit at least 60 seconds before the comment. Other `/gradient approve` comments without a commit don't count as approval. Gradient may have recorded the head commit later, or not at all. Replies from Gradient then contain `/gradient approve <commit>` with the full hash of the head commit. New pushes need a new approval.
 
 Only project members with the Developer role or higher can use `/gradient` commands. Accepted commands get a 👀 reaction, rejected ones a 😕.
 
@@ -148,7 +153,8 @@ Only project members with the Developer role or higher can use `/gradient` comma
 | `401` in the webhook's recent events | The secret does not match. Re-enter it on both sides (**Edit -> Webhook Secret** in Gradient) |
 | `403 forbidden_source_ip` | The connection's allowed source IPs do not include the GitLab address |
 | `404` | The webhook URL names a wrong connection, or the connection has **Receives events** off |
-| `200`, but no evaluation | No task with a matching trigger uses this connection, or no task repository URL matches |
+| `200`, but no evaluation | No tasks with a matching trigger use this connection, or the URL of the task repository doesn't match, or the team or instance connection has no [grant](../concepts/projects-and-tasks.md#repository-grants) for the repository |
+| `403 This task can't use Git host connection` on the task | Team or instance connections lack a grant to the task repository. Ask a Team Admin or Superuser for the grant |
 | No status on the commit | Either **Report commit status** is off on the **Repository** page of the task, or the token does not have the `api` scope or the Developer role. See the response from GitLab in **Test the status report**. |
 
 ## Next Steps

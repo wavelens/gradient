@@ -14,7 +14,7 @@ Pull requests from the changes of an exec job, opened from inside the program or
 
 ## 1. Call Gradient from the Job { #job-token }
 
-Attempts launch with a distinct job token. The `gradient` CLI inside the guest works without a login.
+All attempts start with their own job token. The `gradient` CLI in the guest can run without login. Jobs for pull requests from unapproved forks can use only `gradient build`. That job can send a build request and stream the build logs of evaluations that it created. That job can also poll those evaluations.
 
 | Place | Content |
 |---|---|
@@ -27,6 +27,7 @@ Attempts launch with a distinct job token. The `gradient` CLI inside the guest w
 | Reads | Own project, its tasks, evaluations, builds and exec jobs |
 | Writes | Build requests, evaluations and pull requests of the own task |
 | Everything else | `403` with `job tokens only reach their own project and task` |
+| Evaluation without project credentials | Build request routes. `POST /evals/{id}/builds`, `GET /evals/{id}` and `GET /evals/{id}/artefacts` apply only to evaluations from the job's own build request. All other routes return `403` with `job tokens without project credentials for evaluations reach only build requests and the evaluations that those build requests started`. |
 
 - Job tokens act with the rights of the user behind the evaluation, else the task creator.
 - Tokens end with the attempt. Job pages list each token with its expiry, never its value.
@@ -50,6 +51,7 @@ gradient pr open --title "flake: update inputs" --branch update/flake flake.lock
 
 - Listed paths limit the diff. Calls without paths take the whole tree, new untracked files included.
 - Equal paths without `--branch` update the same pull request.
+- Force updates from Gradient move the branch from `--branch` or `branch_pattern` to the base branch and the new commit. These force updates go through the connection to the Git host for the `open_pr` action. Only the protection measures for branches on the Git host protect the branch.
 - Patches deleting a file fail with `the patch deletes <path>; deleting files is not supported`.
 - Secret values in the patch receive masks before the upload.
 - All options are in the [CLI reference](../reference/cli.md#pull-requests).

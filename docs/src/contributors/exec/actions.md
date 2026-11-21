@@ -40,7 +40,8 @@ flowchart LR
 
 - Permission checks narrow to the read and trigger rights of the acting user.
 - `job_scope` can add a `403` with `job tokens only reach their own project and task`. Without the scope check, the project pin alone can answer `404`.
-- `authorize` and `authorize_optional` both call `job_scope`. Job tokens on a public route of another project never fall back to an anonymous read.
+- `authorize` and `authorize_optional` both call `job_scope`. Job tokens on a public route of another project Never fall back to anonymous reads.
+- Job evaluations without project credentials (`allows_project_credentials_and_privileged_actions`) reach only the routes for build requests through `job_scope`. Such evaluations also reach `POST /evals/{id}/builds`, `GET /evals/{id}`, `GET /evals/{id}/artefacts` if their own build request started them (`evaluation.parent_exec_job`). That middleware can return `job tokens without project credentials for evaluations reach only build requests and the evaluations that those build requests started` for `403`. Token resolvers read a flag from the evaluation row. Downloads for badges and entrypoints that use `?token=`, Basic auth on cache routes, and the gRPC store reject those tokens through `reject_job_token_without_project_credentials_or_privileged_actions`.
 
 | List | Routes |
 |---|---|

@@ -59,11 +59,11 @@ Register a team worker once in the **Workers** section of the team page. The wor
 
 ## Owner Team
 
-Every project and cache can have an owner team. Select an owner team in the **Owner team** field of the create dialog, or pass `--team` to `gradient project create`. Members with exactly one team get that team preselected in this field. The **Create Project** and **Create Cache** buttons on a team page open the dialog with that team preselected. Team members and instance administrators alone can select a team as owner. The project and cache lists show the owner team after each name.
+Every project and cache can have an owner team. Select an owner team in the **Owner team** field of the create dialog, or pass `--team` to `gradient project create`. The field and `gradient project create` preselect a team only when the user can administer exactly one team. Instance administrators see the only team of the user preselected. Team administrators and instance administrators see **Create Project** and **Create Cache** buttons on a team page. Those buttons open the dialog with that team preselected. Only team administrators and instance administrators can select a team as owner. The project and cache lists show the owner team after each name.
 
 The **Default role for members on team projects** setting can assign the selected role to every user on the team for projects of the team. Access has one source. One grant with the mark of the owner grant is that source. Project admins don't need an invitation to add members of the owner team. They can also add users who already have project access through team grants.
 
-**Add team workers to all new projects**: this setting can grant the team workers to all new projects regardless of the owner team. Only superusers can edit these settings. Team `server` is in system state. [local worker](workers.md#access) is the worker for that team. All new projects receive this worker through this setting.
+**Add team workers to all new projects**: this setting can grant the team workers to all new projects regardless of the owner team. Only superusers can edit these settings. Team `server` is in system state. [local worker](workers.md#access) is the worker for that team. New projects get this worker only when `services.gradient.grantLocalWorkerToNewProjects` is `true`.
 
 ## Single Sign-On
 

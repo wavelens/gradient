@@ -18,12 +18,12 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `Reject` | Decline the session and close it | `code`, `reason` |
 | `Error` | Protocol error | `code`, `message` |
 | `Draining` | Session will end soon. Send no more job requests | - |
-| `AssignJob` | Hand a job to the worker. `cluster` marks one member of a cluster attempt and hold it until `StartCluster` | `job_id`, `assignment_id`, `job`, `cluster` |
+| `AssignJob` | Give the job to the worker. Use `cluster` to mark the job as part of the cluster attempt. Workers hold the job until `StartCluster`. `ssh_key`, `ssh_host_keys` and `https_git_credentials` carry the project's Git credentials for this job only. | `job_id`, `assignment_id`, `job`, `cluster`, `ssh_key`, `ssh_host_keys`, `https_git_credentials` |
 | `AbortJob` | Cancel a job | `job_id`, `reason` |
 | `StartCluster` | All members accepted. Run the held jobs | `attempt`, `roster` |
 | `ClusterSignal` | Control message sent by another member of the attempt | `attempt`, `from`, `payload` |
 | `AbortCluster` | Drop or abort all jobs of the attempt | `attempt`, `reason` |
-| `Credential` | Short-term credentials (such as SSH keys for a project and login for HTTPS Git). All logins for HTTPS Git in a project go from the server to flake and exec jobs. Only workers with `secrets` receive them | `kind`, `data` |
+| `Credential` | Project secrets for one job. One message per secret name. Only workers with `secrets` receive these messages. | `kind`, `data` |
 | `NarStreamHeader` | Open a NAR pull stream | `job_id`, `store_path`, `total_bytes`, `stream_token` |
 | `NarPush` (bulk) | One NAR pull chunk of `nar.chunkBytes` zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
 | `NarUnavailable` | Storage holds no object for the path. No chunks will follow | `job_id`, `store_path`, `reason` |
@@ -38,7 +38,7 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `ImportResult` | Reply to `ImportRequest`, sent after the imported derivations finished: completed, failed with the build, or unknown | `job_id`, `request_id`, `outcome` |
 | `InputResult` | Reply to `InputRequest`: the fetch answer with the store path, or the download error | `job_id`, `request_id`, `outcome` |
 | `InputProgress` | Download bytes of the input fetch an `InputRequest` waits for | `job_id`, `request_id`, `bytes_done`, `bytes_total` |
-| `FetchInput` | Download one project input and push the result to the cache. A worker with `secrets` can obtain the project SSH key for SSH inputs. A worker with `secrets` can also obtain the login for Git over HTTPS for the host in the input URL. Only stored logins for that host in the project allow that access | `fetch_id`, `project`, `request`, `ssh_key`, `ssh_host_keys`, `https_git_credentials` |
+| `FetchInput` | Download one project input and push the result to the cache. A worker with `secrets` can obtain the project SSH key for SSH inputs. A worker with `secrets` can also obtain the login for Git over HTTPS for the host in the input URL. Only login credentials stored in the project for that host allow that access. A fetch of a fork pull request without maintainer approval cannot bring any of these credentials. | `fetch_id`, `project`, `request`, `ssh_key`, `ssh_host_keys`, `https_git_credentials` |
 | `EvalShardReply` | Reply to `EvalShardRequest`, see [Split Evaluation Messages](#split-evaluation-messages) (since 40) | `job_id`, `outcome` |
 | `OpenGuestChannel` | Open a terminal or a port forward into the guest of a running exec job, see [Guest Channels](../exec/index.md#guest-channels) (since 44) | `job_id`, `channel_id`, `kind` (`Shell { pty, attach }`, `Forward { port }`, `Console`), `max_unread_output_bytes` (since 60) |
 | `GuestChannelData` | Input bytes for a guest channel, at most 32 KiB (since 44) | `channel_id`, `data` |

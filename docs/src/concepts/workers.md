@@ -51,7 +51,7 @@ Workers in a single datacenter can share a zone label, `services.gradient.worker
 |---|---|---|
 | Project worker | Under one project | That project |
 | Team worker | Under one [team](teams.md) | Every project granting the team's workers |
-| Local worker | On the server host, automatically | Every new project, as a worker of the state-declared team `server` |
+| Local worker | On the server host, automatically | Projects that grant team `server` the workers flag, or all new projects when `grantLocalWorkerToNewProjects` is true |
 
 Workers receive jobs only from projects with a writable cache subscription. The **Readiness** card on the project page can list the workers that serve that project, the cache subscriptions, and the Git access. Each row can show the changes that its role can grant. Viewers see rows without buttons. The Git access row can show tasks that can't clone the repository on the task's **Repository** page. [Git host connection](../guides/gitea.md#git-host-connections) and deploy keys are on this page.
 
@@ -78,14 +78,15 @@ Exec workers decrypt their own sops files. [Exec jobs](../exec/secrets.md) fetch
 ```nix
 # configuration.nix
 services.gradient.worker.exec.sops = {
-  files = [ "/etc/gradient/worker-secrets.yaml" ];
+  files = [ { path = "/etc/gradient/worker-secrets.yaml"; projects = "all"; } ];
   keyFile = "/etc/ssh/ssh_host_ed25519_key"; # (1)!
 };
 ```
 
 1.  An SSH private key, Ed25519 or RSA. Ed25519 keys yield an age recipient through `ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub`.
 
-- Workers advertise names, never values. Jobs listing such a name reach only workers with that name.
+- Workers publish names and never values. Jobs that list such a name go only to the worker with that name.
+- Set `projects` on each sops file entry. Use the string `"all"` or a list of project UUIDs. Jobs from other projects get the same response as for a secret that doesn't exist.
 - Run `systemctl reload gradient-worker` to decrypt the files again. Failed reloads keep the previous values.
 - The files need group read for `gradient-worker`. They hold ciphertext only.
 
