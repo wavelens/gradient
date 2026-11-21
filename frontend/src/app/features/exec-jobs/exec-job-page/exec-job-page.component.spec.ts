@@ -204,7 +204,7 @@ describe('ExecJobPageComponent', () => {
     ['failed', 2, undefined],
   ] as const)('shows the retries left of a %s job with %i left only while it can still retry', (status, left, chip) => {
     const { fixture } = setup(status, SSH, {}, { ...job(status), retries: 2, retries_left: left });
-    expect((fixture.nativeElement as HTMLElement).querySelector('.retries-left')?.textContent?.trim()).toBe(chip);
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="exec-job-retries-left-chip"]')?.textContent?.trim()).toBe(chip);
   });
 
   it('offers abort but no keep VM running before a VM exists', () => {
@@ -536,7 +536,7 @@ describe('ExecJobPageComponent', () => {
     attempts: [lostAttempt(1), lostAttempt(2), { number: 3, worker: 'w1', started_at: '2026-01-01T15:18:00' }],
   });
   const getAttemptFailedWarningText = (root: HTMLElement) =>
-    root.querySelector('.exec-job-attempt-failed-warning .message-banner__content')?.textContent?.replace(/\s+/g, ' ').trim();
+    root.querySelector('[data-testid="exec-job-previous-attempt-ended-warning"] .message-banner__content')?.textContent?.replace(/\s+/g, ' ').trim();
 
   it('Warn that the attempt immediately before the running attempt lost a worker, with the reported message and consecutive losses', () => {
     const { fixture } = setup('running', SSH, {}, restartedAfterWorkerLosses());

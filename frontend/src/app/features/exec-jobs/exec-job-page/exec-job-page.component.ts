@@ -92,6 +92,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   templateUrl: './exec-job-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
+    '../../../shared/log/log-viewer.header.scss',
     '../../../shared/log/log-page.scss',
     '../../../shared/log/log-sidebar.scss',
     '../../../shared/evaluation/phone-breadcrumb.scss',

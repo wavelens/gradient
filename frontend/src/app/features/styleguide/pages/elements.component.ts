@@ -19,6 +19,7 @@ import {
   FieldRowComponent,
   IconComponent,
   IconSize,
+  LabelExplanationButtonComponent,
   LoadingSpinnerComponent,
   LoadStateComponent,
   LogoComponent,
@@ -34,7 +35,9 @@ import {
 import {
   AllowedCapabilitiesComponent,
   CheckGroupsComponent,
+  EntityNameComponent,
   EvalStatusBadgeComponent,
+  LiveStatusComponent,
   type BarSegment,
   MetricChartComponent,
   PermissionPickerComponent,
@@ -66,6 +69,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
     AllowedCapabilitiesComponent,
     PermissionPickerComponent,
     CheckGroupsComponent,
+    EntityNameComponent, LiveStatusComponent, LabelExplanationButtonComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.
   providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],

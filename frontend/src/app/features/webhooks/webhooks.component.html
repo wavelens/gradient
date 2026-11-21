@@ -30,7 +30,7 @@
     <div class="webhook-list">
       @for (hook of webhooks(); track hook.id) {
         <div class="webhook-row">
-          <div class="webhook-info">
+          <div>
             <div class="webhook-name">{{ hook.name }}</div>
             <div class="webhook-meta text-secondary">
               <code>{{ urlWithoutQuery(hook.url) }}</code>

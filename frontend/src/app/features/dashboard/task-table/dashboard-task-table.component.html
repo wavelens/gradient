@@ -96,7 +96,7 @@
               <span>{{ page() }} / {{ pages() }}</span>
               <button grButton severity="secondary" size="small" label="Next" [disabled]="page() === pages()" (click)="go(page() + 1)"></button>
             }
-            <button grButton class="show-less" severity="secondary" size="small" [text]="true" label="Show less" (click)="go(null)"></button>
+            <button grButton data-testid="collapse-task-table-button" severity="secondary" size="small" [text]="true" label="Show less" (click)="go(null)"></button>
           </nav>
         }
       } @else {

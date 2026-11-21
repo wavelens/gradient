@@ -226,8 +226,8 @@ a {
     mask-image: linear-gradient(
       to right,
       transparent,
-      #000 var(--gr-scroll-fade-start),
-      #000 calc(100% - var(--gr-scroll-fade-end)),
+      black var(--gr-scroll-fade-start),
+      black calc(100% - var(--gr-scroll-fade-end)),
       transparent
     );
     animation: gr-scroll-fade-start linear both, gr-scroll-fade-end linear both;

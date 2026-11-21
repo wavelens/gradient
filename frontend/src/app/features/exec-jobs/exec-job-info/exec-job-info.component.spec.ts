@@ -42,7 +42,7 @@ function render(job: ExecJobResponse): HTMLElement {
 }
 
 function rows(root: HTMLElement): Record<string, string> {
-  return Object.fromEntries(Array.from(root.querySelectorAll('.requested tr')).map((row) => [
+  return Object.fromEntries(Array.from(root.querySelectorAll('[data-testid="exec-job-requested-resources-table"] tr')).map((row) => [
     row.querySelector('td.label')?.textContent?.trim() ?? '',
     Array.from(row.querySelectorAll('.values > span')).map((value) => value.textContent?.trim()).join(', '),
   ]));

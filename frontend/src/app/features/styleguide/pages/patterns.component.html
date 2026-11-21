@@ -17,6 +17,19 @@ SPDX-License-Identifier: AGPL-3.0-only
   </gr-page-layout>
 </div>
 
+<h2>Breadcrumbs</h2>
+<p>A breadcrumb list can appear above the page title. All items except the last link to their page. The last item is the current page marker. Loading items show a placeholder while their names load.</p>
+<div class="sg-frame">
+  <gr-breadcrumb [trail]="crumbs" />
+  <gr-breadcrumb [trail]="loadingBreadcrumbTrail" />
+</div>
+
+<h2>Link Tabs</h2>
+<p>Sibling pages display as a row of tabs. Each tab is a real link, so browser history and open in new tab work. A distinct style can indicate the tab for the current page. Narrow screens scroll the row to center that tab.</p>
+<div class="sg-frame">
+  <gr-link-tabs ariaLabel="Styleguide pages" [tabs]="styleguideLinkTabSamples" />
+</div>
+
 <h2>Row list</h2>
 <p>An entity per row with a name line, a meta line and per-row actions.</p>
 <div class="sg-frame">
@@ -120,6 +133,24 @@ SPDX-License-Identifier: AGPL-3.0-only
   <gr-build-progress [progress]="prefetch" [compact]="true" />
   <gr-build-progress [progress]="upload" [compact]="true" />
   <gr-build-progress class="sg-download" [progress]="download" />
+</div>
+
+<h2>Project Readiness</h2>
+<p>Workers, a writable cache and access to the repository are still missing before the project can build. The viewer can apply a fix for each missing item. A compact view can show only the items with problems.</p>
+<div class="sg-frame">
+  <gr-project-readiness-card project="my-project" [projectPermissions]="viewerProjectPermissions" />
+</div>
+<div class="sg-frame">
+  <gr-project-readiness-card project="my-project" [projectPermissions]="viewerProjectPermissions" showOnlyProblemItems />
+</div>
+
+<h2>Waiting Notice</h2>
+<p>The cause of a pending evaluation or job. How to resolve the pending state. Project admins see a link to a page with fixes. Visitors from outside the project see who to contact. Pages with other content show this notice as a banner.</p>
+<div class="sg-frame">
+  <gr-waiting-notice [reason]="{ kind: 'cache_storage_full' }" project="my-project" [access]="projectAdminWaitingAccess" />
+</div>
+<div class="sg-frame">
+  <gr-waiting-notice [reason]="{ kind: 'no_cache' }" project="my-project" [access]="outsideVisitorWaitingAccess" banner />
 </div>
 
 <h2>Settings Navigation</h2>

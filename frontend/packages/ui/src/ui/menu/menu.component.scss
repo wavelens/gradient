@@ -6,6 +6,8 @@
 
 @use '../../styles/variables' as *;
 
+$menu-item-icon-glyph-font-size: 1.125rem;
+
 .gr-menu {
   min-width: 11rem;
   margin: 0;
@@ -41,7 +43,7 @@
   &:disabled, &[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
 }
 
-.gr-menu__icon { color: var(--gr-text-secondary); font-size: 1.125rem; }
+.gr-menu__icon { color: var(--gr-text-secondary); font-size: $menu-item-icon-glyph-font-size; }
 
 .gr-menu__chevron { margin-left: auto; }
 

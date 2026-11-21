@@ -183,6 +183,31 @@ SPDX-License-Identifier: AGPL-3.0-only
           (click)="statusPhase.set(phase)"></button>
 }
 
+<h2>Entity Name</h2>
+<p>Show a project, task, cache, or team by display name. Append the slug after the display name when the two differ. Put the owning team last. The tooltip can display the full label.</p>
+<gr-row-list>
+  <gr-row><gr-entity-name kind="project" displayName="Gradient" name="gradient" /></gr-row>
+  <gr-row><gr-entity-name kind="task" name="web" /></gr-row>
+  <gr-row><gr-entity-name kind="cache" displayName="Nixpkgs Mirror" name="nixpkgs-mirror" [ownerTeam]="{ display_name: 'Build Farm', name: 'build-farm' }" /></gr-row>
+  <gr-row><gr-entity-name kind="team" displayName="Build Farm" name="build-farm" /></gr-row>
+</gr-row-list>
+
+<h2>Live status</h2>
+<p>Show whether live updates reach the page. Warn that values can be stale during connection loss.</p>
+<gr-live-status [connected]="true" />
+<gr-live-status [connected]="false" />
+
+<h2>Button for Label Explanation</h2>
+<p>Help icon after the label. A tooltip can explain the label, or the icon can open a specified documentation page in a new tab.</p>
+<label>
+  Display name
+  <gr-label-explanation-button iconButtonAriaLabel="About Display name" explanationText="The UI always shows this name in place of the slug." />
+</label>
+<label>
+  Flake reference
+  <gr-label-explanation-button iconButtonAriaLabel="Documentation for flake references" documentationPageUrl="https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-flake#flake-references" />
+</label>
+
 <h2>Charts</h2>
 <gr-metric-chart title="Throughput" type="line" [series]="chartSeries" [categories]="chartCategories" />
 

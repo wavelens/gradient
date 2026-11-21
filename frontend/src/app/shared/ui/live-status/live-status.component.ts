@@ -21,8 +21,8 @@ import { BadgeComponent } from '@gradient/ui/ui';
       }
     </span>
   `,
-  styles: [':host { display: flex; justify-content: flex-end; min-width: 7rem; margin-left: auto; margin-bottom: 0.5rem; }'],
   changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './live-status.component.scss',
 })
 export class LiveStatusComponent {
   connected = input.required<boolean>();

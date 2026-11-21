@@ -53,7 +53,7 @@
                     <span>Last fired: {{ action.last_fired_at | relativeTime }}</span>
                     @if (action.last_delivery; as delivery) {
                       @if (!delivery.success) {
-                        <span class="fire-fail last-delivery-failed" [title]="delivery.error_message ?? ''">
+                        <span class="fire-fail" data-testid="task-action-last-delivery-failed-reason" [title]="delivery.error_message ?? ''">
                           <gr-icon name="error" size="sm" />
                           Last delivery failed: {{ getDeliveryResultReason(delivery) }}
                         </span>

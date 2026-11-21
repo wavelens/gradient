@@ -7,6 +7,8 @@
 @use '../../styles/variables' as *;
 
 $stat-label-explanation-button-side-length: $spacing-lg;
+$stat-card-value-font-size-shrinking-with-card-width: min($font-size-xxl, 19cqi);
+$compact-stat-card-value-font-size: min($font-size-xl, 19cqi);
 
 :host {
   display: block;
@@ -52,7 +54,7 @@ $stat-label-explanation-button-side-length: $spacing-lg;
   color: var(--gr-text-primary);
   line-height: $line-height-tight;
   margin-bottom: $spacing-xs;
-  font-size: min($font-size-xxl, 19cqi);
+  font-size: $stat-card-value-font-size-shrinking-with-card-width;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -94,7 +96,7 @@ $stat-label-explanation-button-side-length: $spacing-lg;
   padding: $spacing-md;
 
   .stat-value {
-    font-size: min($font-size-xl, 19cqi);
+    font-size: $compact-stat-card-value-font-size;
   }
 }
 

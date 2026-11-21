@@ -308,7 +308,7 @@ describe('TaskActionsComponent - write failures', () => {
     list.mockReturnValue(of([{ ...action, last_delivery: { id: 'd1', event: 'evaluation.completed', success: false, response_status: 502, duration_ms: 40, delivered_at: '2026-06-08T00:00:00Z' } }]));
     fixture.componentInstance.testAction('a-1');
     fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).querySelector('.last-delivery-failed')?.textContent).toContain('Last delivery failed: HTTP 502');
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="task-action-last-delivery-failed-reason"]')?.textContent).toContain('Last delivery failed: HTTP 502');
   });
 
   it('reports a failed test with the server reason', () => {
