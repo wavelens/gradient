@@ -46,10 +46,8 @@ sequenceDiagram
     - The worker can retry a `Retry` up to 3 times. A `Rejected` answer made the upload fail.
     - Both rules also hold for an answer arriving before the grant.
     - A failed transfer or an abandoned request led to an `UploadCancel` message.
-- **Commit:** For a passthrough upload, the server checked length and SHA-256, then moved the upload into the NAR store.
-    - The commit for a presigned PUT checked the size of the temporary object. It only copied the object to the NAR store, if no other content existed at that path. The commit then deleted the temporary object. Deep garbage collection can remove leftovers older than 2 hours.
-    - A commit for a multipart upload only completed the transfer, if there was no other content at that path. The commit then checked the object size.
-    - A full digest check happened only with `nar.verifyDigest` set.
+- **Commit:** The server does the calculation of the NAR hash, NAR size, file hash, and file size for all transfer types. It compares those values with the declared values from the worker. A mismatch makes the server reject the upload. The server inspects passthrough uploads inside the staged file, then moves them to the NAR store.
+    - Presigned PUT requests and multipart uploads store data at a temporary object key. Commits read the object back. They decode it and run the same checks. Reads abort once the number of bytes read is above the declared size. Commits move the object to the NAR store key only when no other content is present at that path. Commits delete the object otherwise. S3 can copy only up to 5 GiB per request, so objects over 5 GiB on S3 stream to the final key. Deep garbage collection can delete remnants older than 2 hours.
 - **Leases:** A passthrough upload expired after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session released its uploads.
 - **Evaluation cache segments** reuse the same handshake, with `UploadObject::EvalCacheSegment` and `UploadMetadata::EvalCache` as the payload types.
     - A request over 8 MiB (`SEGMENT_MAX_BYTES`) got `Rejected`.
@@ -76,7 +74,7 @@ Before any build work starts, workers fetch all inputs that the local store does
 
 | Condition | Delivered As |
 |---|---|
-| S3 store, confirmed NAR above `nar.smallBytes` (1 MiB) | Presigned GET URL |
+| S3 store, NAR over `nar.smallBytes` (1 MiB) | Presigned GET URL |
 | Anything else | Stream over `/proto`, at most `nar.maxConcurrentServes` (8) paths per connection and `nar.maxConcurrentDownloads` (16) across all connections |
 
 - Small NARs come from an in-memory hot cache, `nar.hotCacheBytes` (512 MiB).
@@ -119,10 +117,10 @@ Before any build work starts, workers fetch all inputs that the local store does
 
 ## Credentials
 
-- The project's SSH key serve as the sole credential. Clones of private repositories and inputs depend on it.
-- Right before the `AssignJob` message, the server decrypt the key and send `Credential { SshKey }`.
-- Only a flake job with a fetch step on a worker with `secrets` can receive the credential.
-- A project without a key receive no credential.
+- Git credentials for a job consist of the project SSH key, saved SSH host keys, and saved login credentials for HTTPS Git.
+- These credentials appear only inside the ``AssignJob`` message, never in a separate message.
+- Workers with ``secrets`` get Git credentials only for a flake job with a fetch step or for an exec job.
+- Jobs for pull requests from forks without maintainer approval receive none of these.
 - Workers hold the key in locked memory and zero it on drop.
 - At job completion, workers clear the key.
 

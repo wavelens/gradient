@@ -24,8 +24,8 @@ flowchart LR
 ${baseDir}/nars/<2 chars>/<rest>.nar.zst
 ```
 
-- Named by the **store-path hash**.
-- The server will presign upload URLs before the worker has the content hash.
+- The storage key `<store-path hash>-<SHA-256 of the compressed file>` is the name of each stored NAR object. The keys live in column `cached_path.nar_object_storage_key`. Store path hashes map to one row per stored content.
+- Presigned upload URLs point to `nar-uploads/<store-path hash>-<UUID>.nar.zst`, a temporary object. Hash and size checks run on the server before the move of that object to the storage key.
 - The narinfo will advertise `nar/<store hash>.nar.zst` as the URL, with the hash as the client sees it.
 - NAR requests keyed by file hash end with `404`. All copies of the same NAR share one file hash. Only the store hash can name a single path.
 - `last_fetched_at` and `fetch_count` on `cached_path_signature` contribute to eviction for each cache.
@@ -36,20 +36,19 @@ ${baseDir}/nars/<2 chars>/<rest>.nar.zst
 |---|---|
 | Presigned upload (S3) | The worker writes directly to S3. On `UploadFinished`, the server completes the multipart upload. |
 | Passthrough (local storage) | Every upload streams through the server. At commit time, the server checks length and SHA-256, then moves the file in with `adopt_file`. |
-| REST upload (`nix copy`) | `import_nar_reader` -> `put_nar_idempotent_reader`: skipped for a stored path, see [First Content](#first-content) |
+| REST upload (`nix copy`) | Uploads go through server staging into a temporary object. Hash and size checks follow. Next is the move to the storage key through `move_verified_upload_to_final_storage_key`. |
 
-### First Content
+### Stored Contents per Path
 
-A stored path retains the first content it received, mirroring valid paths in Nix. Non-reproducible builds can produce different bytes for one input-addressed path.
+Stored paths keep one `cached_path` row per stored content. Storage keys are unique per row. Non-reproducible builds sometimes generate different bytes for one input-addressed path.
 
-- **Stored:** A confirmed `cached_path` row with a `file_hash` (`MCachedPath::is_stored`).
-- **Grant:** Workers requesting an upload of a stored path get a `Skip` grant. They discard the NAR and count the output as uploaded.
-- **Writes:** Passthrough, REST and SSH leave the object of a stored path untouched. Only identical bytes can replace a missing object.
-- **Commit:** Always preserve the content fields of a stored row during the NAR commit. Only `deriver` can change.
-- **Signatures:** Workers with different bytes get the stored content signed into their project caches. REST and SSH clients with different bytes get no signature.
-- **SSH:** An `AddMultipleToStore` with different bytes can still succeed. The server drains and drops those bytes.
+- **Stored:** A `cached_path` row. Such rows contain the file hash, NAR hash and NAR size.
+- **Grant:** A worker can upload the NAR of a stored path like any other NAR, without a skip grant.
+- **Writes:** Uploads that carry the NAR hash of a stored row reuse that row. Server-side deletes drop uploaded objects with no referencing row.
+- **Commit:** Commits with different NAR hashes add a new `cached_path` row with their own storage key. Existing row fields, including deriver, do not change.
+- **Narinfo:** Narinfo requests get exactly one signed row in that cache. Rows that were uploaded to that cache come first. Rows that jobs built on Gradient workers come next. Rows with the oldest age come last.
 - **Concurrent Uploads:** Uploads of a path take turns on a server, and each upload rechecks the row on its turn, see [Transfer](../proto/transfer.md#upload).
-- **Self-Heal:** The verify-on-read self-heal can demote a path whose object does not match its `file_hash`.
+- **Self-Heal:** Missing objects retire only the `cached_path` row for that content.
 
 !!! warning "Bucket Requirements"
     - No object versioning, object lock or replication. Object lock and replication force versioning.
@@ -88,7 +87,7 @@ Every storage backend checked against the database, a unit at a time (`gradient-
 |---|---|
 | `blobs` | `build-request-blobs/...` objects and `build_request_blob` rows without a partner |
 | `logs/<xx>` | Logs of a shard, named by `BuildAttemptId`, without a `build_attempt` row. An attempt without a log is legitimate |
-| `nars/<xx>` | A two-character NAR shard out of the 1024. Objects past `gc.narUploadGraceHours` without a keeping row. Confirmed `cached_path` rows of the shard (an index range on `hash`) with a missing object. Maintenance: eviction of outdated live paths |
+| `nars/<xx>` | Two-character NAR shards out of 1024. Objects older than `gc.narUploadGraceHours` with no row to keep them. All `cached_path` rows of a shard with a missing object (index range on `hash`). Maintenance: eviction of outdated live paths. |
 | `partials` | Unfinished uploads under `nar-partial`, `nar-upload-partial` and `source-upload-partial` older than `nar.partialTtlSecs` and directories left empty by the older nested layout. These roots: no other sweep. A walk on a session or request path: a stall of that path behind the filesystem |
 
 - **Rounds:** an `admin_task` row, `kind = deep_gc`, `pending` -> `running` -> `completed`. A single active round per the partial unique index `admin_task_one_active_per_kind`.

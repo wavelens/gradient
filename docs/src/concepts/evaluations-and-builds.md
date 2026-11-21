@@ -65,6 +65,8 @@ Builds belong to a derivation, not to an evaluation. Every evaluation that needs
 | Aborted | Cancelled by hand or together with the evaluation |
 | Skipped | An unneeded build-time dependency whose outputs already sit in a cache |
 
+The server can only mark a build as Completed, when stored copies of every needed output are on the server. Builds without stored copies go back to the queue and fail after the last try.
+
 ## Abort and Retry
 
 - **Abort** on a running build can stop that build in the current evaluation. Dependent builds then fail. The evaluation can finish with status Aborted. A later evaluation can run that build again.

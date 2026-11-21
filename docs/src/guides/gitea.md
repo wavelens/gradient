@@ -33,11 +33,17 @@ flowchart LR
 | Owner | Created in | Used by |
 |---|---|---|
 | Project | **Project settings -> Git host connections** | Tasks of the project |
-| Team | Team settings, tab **Git host connections** (team admins) | Tasks of every project the team owns |
-| Instance | **Administration -> Git host connections** (instance admins) | Tasks of every project |
+| Team | Team settings, tab **Git host connections** (team admins) | Task in a team project with a repository grant |
+| Instance | **Administration -> Git host connections** (instance admins) | Tasks with a grant for their own repository |
 
 - Both switches sit under **Advanced** in the connection dialog. A connection with an access token has **Reports status** on by default.
 - A new project connection can link project tasks on the same host that don't have a connection yet.
+- Team connections and instance connections need a [repository grant](../concepts/projects-and-tasks.md#repository-grants) for each project and repository. Team admins can grant team connections. Superusers can grant instance connections.
+- All Gitea and Forgejo connections need a base URL. Tasks can't use a connection without a base URL.
+- Edits that change the host type or the scheme, host, or port of the base URL delete the stored access token and webhook secret. Tokens or secrets entered in the same edit remain.
+- Enter the access token again after that edit. A connection from sign-in needs a new sign-in. Install the webhook again or set a new secret.
+- A connection with **Receives events** on gets a new webhook secret if such an edit does not contain a secret. Gradient shows the new secret once. The webhook on the Git host needs the new secret.
+- Connections with **Reports status** on reject such edits without a new access token.
 - Webhook URL `/api/v1/hooks/<connection-id>` can receive events for all tasks with that connection. Events map to tasks by the `owner/repo` part of the repository URL.
 - Calls to the Git host act as the token account. Statuses and comments appear under that account name.
 - The writer check and comment reactions use the Git host connection of the task.
@@ -147,10 +153,10 @@ services.gradient.state.git_host_connections.gitea = {
 };
 ```
 
-1.  `team/<name>` can share connections with all projects of the team. `instance` can share connections with all projects.
+1.  `team/<name>` or `instance` share a connection with the granted repositories of other projects. Declared tasks get that permission from the state file.
 2.  `forgejo` for Forgejo.
 3.  Any random string, e.g. `openssl rand -hex 32`. Set the same value in the Git host webhook.
-4.  Base URL of the Git host, without `/api/v1`.
+4.  Base URL of the Git host (without `/api/v1`). Tasks need it to use this connection.
 5.  The bot's token from above, as the only content of the file.
 
 Connection pages show webhook URL `https://gradient.example.com/api/v1/hooks/<connection-id>`. Project connections also accept old URL `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea` (for Forgejo, `forgejo` instead of `gitea`).
@@ -187,12 +193,16 @@ services.gradient.state.tasks.app = {
 | Git host action | Result |
 |---|---|
 | Open or update a pull request | The head commit of the pull request get evaluated |
-| Comment `/gradient run` | A new evaluation of the pull request start |
-| Comment `/gradient approve` | Gradient can evaluate the latest commit of a fork pull request with pending maintainer approval. |
-| Approve the review | Gradient can evaluate the head commit at review time of a fork pull request with pending maintainer approval. |
+| Comment `/gradient run` | Gradient can start a new evaluation of the head commit. Gradient does not start an evaluation for a fork pull request while maintainer approval is on, even when its author can push. The reply comments from Gradient contain `/gradient run <commit>` for the head commit. |
+| Comment `/gradient approve <commit>` | Maintainers approve and evaluate that commit on a fork pull request with pending approval. Use the full 40-character hash. |
+| Approve the review | Maintainers with write permission approve the commit from their latest approving review if pending approvals sit on that commit. Gradient read that commit only from the reviews API, never from the webhook. Newer reviews with a change request from that same maintainer approve nothing. Newer comments-only reviews from that maintainer keep the approval. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
+The endpoint of the review API can return 404, omit the `commit_id` or `dismissed` field, fail, or take more than 4 seconds. These cases leave the review unapproved. A dismissal of the latest approving review can block approval. A pull request with more than 500 reviews can block approval too. Next, post `/gradient approve <commit>` as a comment with the full 40-character hash.
+
 There's a setting called **Require maintainer approval for PRs from non-writers** for the **Pull Request (reporter)** trigger (`require_approval` in `config`). Approval checks depend on this setting. New commits need a new approval.
+
+Approvals by comment name one commit by the full 40-character hash. A `/gradient approve` comment with no commit approves the head commit only when Gradient recorded that commit at least 60 seconds before the comment. Other `/gradient approve` comments without a commit get no approval. Gradient may have recorded the head commit later, or not at all. Replies from Gradient then contain `/gradient approve <commit>` with the full hash of the head commit. New pushes need a new approval. Pull requests from forks run without project secrets, SSH keys of the project and actions of `open_pr` and `start_evaluation` if the check is off.
 
 Pull requests from the [AGit flow](https://docs.gitea.com/usage/issues-prs/agit/) (`git push origin HEAD:refs/for/main`) get evaluated too.
 
@@ -208,7 +218,8 @@ Only repository writers can send `/gradient` commands. Accepted commands receive
 | `401` in the Git host's delivery log | The secrets on the two sides differ, or the connection has none. Re-enter the secret on both sides (**Edit -> Webhook Secret** on the connection in Gradient) |
 | `403 forbidden_source_ip` | Add the Git host's address to the connection's allowed source IPs |
 | `404` | The webhook URL names a wrong connection, or the connection has **Receives events** off |
-| `200`, but no evaluation | No task with a matching trigger uses this connection, or no task repository URL matches |
+| `200`, but no evaluation | No tasks with a matching trigger use this connection, or the URL of the task repository doesn't match, or the team or instance connection has no [grant](../concepts/projects-and-tasks.md#repository-grants) for the repository |
+| `403 This task can't use Git host connection` on the task | Team or instance connections lack a grant to the task repository. Ask a Team Admin or Superuser for the grant |
 | No status on the commit | Either **Report commit status** is off on the task's **Repository** page, or `write:repository` is missing from the token. The response from the Git host is in **Test the status report**. |
 | 😕 on a maintainer's `/gradient` comment | The bot account lack admin access to the repository |
 

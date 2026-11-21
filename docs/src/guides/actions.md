@@ -132,6 +132,7 @@ web/app: hello-2.12.1 failed on 3f9c2ab
 - Use a dedicated bot account. The bot has to have joined the room.
 - Encrypted rooms do not work.
 - Find the **Room ID** under room settings -> Advanced, in the form `!abc123:example.org`. Rooms of version 12 and later have IDs without the server part, like `!abc123`. Room aliases like `#ops:example.org` get rejected.
+- Edits that move **Homeserver** to another scheme, host, or port require the access token again. These edits fail without the token. Failed edits leave the stored token unchanged.
 
 A password login gives the access token of the bot account.
 

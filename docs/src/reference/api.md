@@ -37,6 +37,7 @@ Responses use the envelope `{ "error": false, "message": <payload> }`. Set `erro
 - No key can exceed the permissions of its owner. A key pinned to a project can only grant permissions the owner holds in that project.
 - Every project key includes `viewProject`.
 - `createProject` is valid only on a key without a pin. A key with it can call `PUT /projects` when its owner can create projects.
+- Add `openJobTerminal` to the key to use shell, console and port forwarding for exec jobs. A key with only `viewProject` and `triggerEvaluation` cannot open shell, console or port forwarding.
 - `GET /user/keys/{id}/reach` lists the projects and caches a key can reach, with its permissions on each.
 - 401 and 403 responses to signed-in callers list the missing permissions in `missing_permissions` (for example, `["readStore"]`). Add these names to the key's `permissions` to allow the request.
 

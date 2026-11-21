@@ -50,8 +50,8 @@ Click **Install on GitHub** in the **GitHub App** section. Select the account th
 | "The GitHub App is on GitHub, but this server doesn't have it yet." | The server configuration from step 2 isn't active yet. Apply it and restart the server, then open the page again. |
 
 - Each installation is a connection named `github-<account>` with the instance as owner.
-- Every project can use that connection. The connection can receive events and report status.
-- A new installation can link every task with no connection yet and a repository of that account.
+- Tasks only use that connection, if they have [repository grant](../concepts/projects-and-tasks.md#repository-grants) for their repository. Superusers create grants. Declared tasks get grants from the state file. Connections receive events and report status.
+- Gradient links a new installation to every task that has no connection, a repository in the installation account and a repository grant for that repository.
 - All installations appear under the App with their account, last event and task count.
 - Deletions of a GitHub installation remove the connection.
 
@@ -120,12 +120,14 @@ Push events require the **Push (reporter)** trigger from step 4. Pull Requests r
 | Action on GitHub | Effect |
 |---|---|
 | Open or update a pull request | Evaluation of the pull request's head commit |
-| Comment `/gradient run` | New evaluation of the pull request |
-| Comment `/gradient approve` | Evaluation of the latest commit in a fork pull request awaiting maintainer approval. |
-| Approve the review | Evaluation of the reviewed commit in a fork pull request awaiting maintainer approval. |
+| Comment `/gradient run` | New evaluation of the head commit. Fork pull requests get no evaluation while maintainer approval is on, even when their authors can push. Gradient replies carry `/gradient run <commit>` for the head commit. |
+| Comment `/gradient approve <commit>` | Evaluation of that commit in a fork pull request awaiting maintainer approval. Use the full 40-character hash for the commit. |
+| Approve the review | Evaluation of the reviewed commit in a fork pull request awaiting maintainer approval. Reviews approve nothing if checks of write access take longer than 4 seconds. Use a `/gradient approve` comment with the full commit hash instead. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
 
 Commits in pull requests from forks wait for maintainer approval before the start of evaluation. The `gradient/<task>: Approval` check can show the **Approve and run** button. Each new commit must get a new approval. Set **Require maintainer approval for PRs from non-writers** with the **Pull Request (reporter)** trigger to enable this check.
+
+A `/gradient approve` comment can approve only the commit with a full 40-character hash. A comment with an abbreviated commit hash can approve nothing. A comment without a commit approves the head commit only when Gradient recorded that head commit at least 60 seconds before the comment. Other comments with no commit don't get approval. Gradient may have recorded the head commit later, or not at all. Replies from Gradient then contain `/gradient approve <commit>` with the full hash of the head commit. New pushes require new approval. Fork pull requests run without project secrets, project SSH keys, and the `open_pr` and `start_evaluation` actions when the check is off.
 
 ### Merge Queue
 
@@ -157,7 +159,8 @@ GitHub can merge an entry after a passed check, or drop the entry after a failed
 | Merge queue entries wait for the Gradient check without end | The App predates the `merge_group` event. Grant **Merge queues** read access and enable **Merge group** under the App's **Permissions & events** |
 | "GitHub doesn't report the installation yet." stays after **Check again** | App webhook doesn't arrive at `https://gradient.example.com/api/v1/hooks/github`. Check the App's **Advanced -> Recent Deliveries** on GitHub |
 | "An instance admin can install the GitHub App on <account>" | Only instance administrators can install an App. An instance administrator needs to click **Install on GitHub** |
-| Pushes arrive but no evaluation starts | The task's **Repository** page shows the failing step (no connection, no push trigger, or a repository outside the installation account) |
+| Pushes arrive but no evaluation starts | The task's **Repository** page shows the failing step (no connection, no push trigger, no [grant](../concepts/projects-and-tasks.md#repository-grants) for the repository, or a repository outside the installation account) |
+| `github-<account>` missing from the task's connection list, or `403 This task can't use Git host connection` | No grant for the task repository on the connection. Ask a superuser |
 | No status on the commit | **Report commit status** is off on the task's **Repository** page |
 | `403 forbidden_source_ip` | The connection's allowed source IPs don't cover the GitHub `hooks` ranges from `https://api.github.com/meta` |
 

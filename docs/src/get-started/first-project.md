@@ -14,11 +14,7 @@ A flake built by Gradient, with the outputs in a binary cache.
 
 ## 1. First User
 
-=== "UI"
-
-    Open `https://gradient.example.com/account/register` and create the first user.
-
-    The server will refuse registration with `registration.enable = false` or `oidc.required`. Use the declarative tab or sign in through OIDC then.
+The first superuser can come only from declarative state. Registration is off by default. Accounts from registration never become superusers.
 
 === "Declarative"
 
@@ -41,6 +37,10 @@ A flake built by Gradient, with the outputs in a binary cache.
 
     Sign in as `admin` with the password. Registration can stay off. Other user options are in [Declarative State](../concepts/declarative-state.md).
 
+=== "Registration"
+
+    Set `services.gradient.registration.enable = true` to allow more users to sign up through `https://gradient.example.com/account/register`. Registration requests fail with `oidc.required` on. Only superusers can create projects by default with local workers enabled. Set `services.gradient.permissions.createProject = "everyone"` to let registered users create projects.
+
 ## 2. Create a Cache
 
 Go to **Caches -> Create Cache**. Choose a name and set the visibility.
@@ -51,7 +51,7 @@ A cache holds all build outputs of the project. `nix` treats the cache as a subs
 
 Open **Projects -> Create Project** and set up a new project. Then go to **Settings -> Cache Subscriptions -> Add Cache** and select the cache created in step 2.
 
-A project acts as the access boundary. All members, workers and caches live inside one project. After the subscription, the local worker shows up under **Settings -> Workers** within about a minute.
+A project acts as the access boundary. All members, workers and caches live inside one project. Open **Settings -> Workers -> Grant Team** after the subscription. Select team `server` and click **Grant**. Find the local worker under **Settings -> Workers** within about 1 minute.
 
 ## 4. Create a Task
 

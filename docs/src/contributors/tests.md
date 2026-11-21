@@ -193,10 +193,10 @@ Hand-written statements go through `gradient_db::sql!` with parameter kinds and 
 | `Walk` | Recursive closure walks | Asserting the `OFFSET 0` fence in the recursive term |
 | `Sweep` | Timer-driven work allowed to scan | |
 
-- **Failures:** A sequential scan of a large relation throwing most of its read away. A buffer or amplification budget overrun. A per-row rescan. A disk spill.
+- **Failures:** A sequential scan of a large relation throwing most of its read away. A buffer or amplification budget overrun. A per-row rescan. A disk spill. A statement cancelled after the statement timeout of 30 seconds.
 - **Exceptions:** Aggregates, statements returning nothing and batches each have their own rule.
 - **No wall-clock budgets:** CI runners are slow and busy with other jobs.
-- **Unmeasured statements** (empty relations) end up in the report, not in the passed list. More than 40 fail the phase.
+- **Unmeasured statements** (empty relations) end up in the report, not in the passed list. More than 33 fail the phase.
 - **Tables filled only by users** (stars) get rows through the real API before the check. Values differing per round (commit hash prefixes) are parameter kinds with random draws.
 - **Draws are ordered**, not in heap order. Kinds other than the evaluation take the oldest rows by id.
 - **The evaluation is a copy** of the evaluation naming the most shared builds. That copy is the worst case for evaluation statements.

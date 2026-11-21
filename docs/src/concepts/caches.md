@@ -56,6 +56,44 @@ Use **Test** on an HTTP upstream cache to fetch its `nix-cache-info` over HTTP/1
 
 Some HTTP upstream caches break HTTP/2 transfers. Enable **HTTP/1.1 only** in the add or edit form for such an upstream cache. Declared caches take the value from `http1_only`. These upstream caches show an **HTTP/1.1** badge.
 
+## Upstream Credentials
+
+An HTTP upstream cache holds at most one stored credential. Stored credentials always stay encrypted at rest.
+
+| Scheme | Field | Declared field |
+|---|---|---|
+| `basic` | `user`, `password` | `basic_auth_user`, `basic_auth_password_file` |
+| `bearer` | `token` | `bearer_token_file` |
+
+```json
+{
+  "type": "http",
+  "display_name": "Company cache",
+  "url": "https://cache.example.com",
+  "public_key": "cache.example.com-1:<public key>",
+  "credential": { "scheme": "bearer", "token": "<token>" }
+}
+```
+
+- Add and edit requests accept a `credential` in the `credential` field.
+- Edits that use `"credential": { "scheme": "none" }` delete stored credentials.
+- Declared caches get credentials from fields in [`upstream_caches`](../reference/state.md#cachesname). The server reads the files again on each state apply.
+- Credentials are write-only. API responses contain only `credential_scheme`: `basic`, `bearer`, or `null`.
+- Credentials need a `https://` URL.
+- URL changes to another scheme, host, or port need the same edit to resend the credentials or remove them.
+- Upstream URLs don't allow a username, password, or query. Add, edit, and state apply reject such URLs.
+- Workers never receive an upstream cache with credentials. Only the server can query such an upstream cache, for example pull-through and **Test**.
+
+Previous releases stored the username and password in the URL. The server changes these stored URLs once at startup.
+
+- The username and password disappear from HTTP URLs. Both move to encrypted `basic` credentials.
+- Moved `http://` URLs keep working. The server logs contain one warning.
+- Stored URLs that contain a query go inactive.
+- Upstream caches with stored credentials and a username in the URL become inactive.
+- Gradient Proto URLs that contain a user name or password become inactive.
+- Warnings in the server log show only the upstream cache ID.
+- An upstream cache with this URL can't become active. Correct the URL first.
+
 ## Pull-Through
 
 Pull-through lets a cache serve paths it does not store. On a request for a missing path, the cache fetched the copy from an upstream cache, re-signed it with its own key, and sent it to the client. Clients therefore needed only one URL and one key, no matter where a path came from.

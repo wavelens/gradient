@@ -22,7 +22,7 @@ services.gradient.state = {
 |---|---|---|---|
 | `api_keys` | attrs of submodule | `{ }` | API keys, one entry per key name. |
 | `caches` | attrs of submodule | `{ }` | Caches, one entry per cache name. |
-| `delete` | bool | `true` | Deletion of users, projects and caches absent from this declaration. |
+| `delete` | bool | `true` | Users, projects and caches that the declaration doesn't include undergo deletion by this option. Deleted users become disabled and lose superuser status in `false`. Deletions of API keys always remove those keys. |
 | `git_host_connections` | attrs of submodule | `{ }` | Connections to Git hosts. One entry per connection. |
 | `projects` | attrs of submodule | `{ }` | Projects, one entry per project name. |
 | `roles` | attrs of submodule | `{ }` | Custom roles, one entry per role name. |
@@ -38,6 +38,7 @@ services.gradient.state = {
 |---|---|---|---|
 | `email` | string | - | Email address of the user. |
 | `email_verified` | bool | `true` | Whether the user's email address is verified. |
+| `existing_account_id` | null or string | `null` | Declared users take over an existing account with this UUID (signup, SCIM, external sign-in). The takeover deletes the account's password, sessions, undeclared API keys, external ID links and SCIM external ID. Servers skip this user and log an error on conflict of a username or email with such an account without the option. |
 | `name` | string | `username` | Full name of the user. |
 | `password_file` | null or string | `null` | File containing the hashed password. |
 | `superuser` | bool | `false` | Whether the user is a superuser. |
@@ -54,12 +55,12 @@ services.gradient.state = {
 | `git_https_credentials.*.host` | string | - | A bare hostname with an optional port (for example `github.com` or `git.example.com:8443`). URLs, usernames, paths and IPv6 addresses are invalid. |
 | `git_https_credentials.*.password_file` | string | - | File with a password or access token. Passwords stay encrypted on the server. |
 | `git_https_credentials.*.username` | string | - | The username on the host. Forges that authenticate with a token accept any non-empty name in many cases. Examples include `x-access-token` on GitHub and `oauth2` on GitLab. |
-| `allow_exec_in_build_requests` | bool | `false` | Build requests from `gradient build` and `gradient run` start the exec jobs that match them. The instance and worker switches still apply. |
+| `allow_exec_in_build_requests` | bool | `false` | Build requests from `gradient build` and `gradient run` start exec jobs that match them. Instance and worker switches still apply. These exec jobs get project secrets and project SSH keys. The exception is a build request from an exec job of a pull request from a fork without maintainer approval. |
 | `hide_build_requests` | bool | `false` | Set to `true` to keep the project's automatic `build-request` task out of task listings in the web UI. |
 | `id` | null or string | `null` | UUID of the project. |
 | `members` | list of submodule | `[ ]` | Users that hold a role on the project. |
 | `members.*.role` | string | - | Role assigned to the user: one of the built-in `Admin`, `Write` or `View`, or a custom role declared for this project in `state.roles`. |
-| `members.*.user` | string | - | Name of the user to add as a member. |
+| `members.*.user` | string | - | Name of the user to add as a member, declared in `state.users`. |
 | `name` | string | attribute name | Unique name of the project. |
 | `owner_team` | null or string | `null` | Team with ownership of the project. Grants for that project come from the team's `new_projects` settings. |
 | `private_key_file` | string | - | Path to the SSH private key used for Git access. |
@@ -91,7 +92,7 @@ services.gradient.state = {
 | `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, with one entry per input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |
-| `git_host_connection` | null or string | `null` | Name of the connection for the Git host of a task. Lookup order is the task's project first, then the team for the project, then the instance. Push triggers, pull request triggers and `report_status` use this name. Gradient won't select or link a connection automatically for declared tasks. Declared values override the UI and API. |
+| `git_host_connection` | null or string | `null` | Name of the connection for the Git host of a task. Lookup order is the task's project first, then the team for the project, then the instance. Push triggers, pull request triggers and `report_status` use this name. Team and instance connections get a [repository grant](../concepts/projects-and-tasks.md#repository-grants) for exactly the task repository. The grant and the task disappear at the same time. Gradient won't select or link a connection automatically for declared tasks. Declared values override the UI and API. |
 | `keep_evaluations` | int | `30` | Finished evaluations stay regardless of result, up to this number. Active evaluations don't block GC and don't count toward this number. Aborted evaluations go first during GC, then the oldest evaluations. The most recent evaluation and the most recent completed evaluation always stay, even above this number. Set this number in the range 1 to `eval.maxKeep`. |
 | `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
@@ -117,14 +118,14 @@ services.gradient.state = {
 |---|---|---|---|
 | `access_token_file` | null or path | `null` | Path to a file with an API token for the git host. Needed to post commit statuses and create pull requests. |
 | `account_login` | null or string | `null` | The GitHub user or organization that has the App installed. Required for `git_host_type = "github"`. Only repositories of this account fit this connection. |
-| `base_url` | null or string | `null` | Base URL for the Git host API (for example, `https://gitea.example.com`). |
+| `base_url` | null or string | `null` | Base URL for the Git host API (for example, `https://gitea.example.com`). A GitLab connection without `base_url` uses `https://gitlab.com`. |
 | `created_by` | string | - | Name of the user who created the connection. |
 | `display_name` | null or string | `null` | A human-readable name to display for the connection. |
 | `git_host_type` | one of `gitea` `forgejo` `gitlab` `github` | - | Type of Git host |
 | `id` | null or string | `null` | The UUID of the connection. The webhook URL `/api/v1/hooks/<id>` can end with this value. The server can generate a UUID with `null`. The server can reject a conflicting value for an existing connection of the same name. |
 | `installation_id` | null or int | `null` | The installation ID of the GitHub App. This number shows at the end of the installation URL. The field is required for `git_host_type = "github"` and allowed only with `owner = "instance"`. |
 | `name` | string | attribute name | Name of the connection. Unique per owner. |
-| `owner` | string | - | `instance`, `team/<name>` or `project/<name>`. All projects can use instance connections. A team's projects can use that team's connections. |
+| `owner` | string | - | `instance`, `team/<name>` or `project/<name>`. Tasks can use instance and team connections only with a [repository grant](../concepts/projects-and-tasks.md#repository-grants). Team connections stay limited to projects of the team. A Gitea or Forgejo connection needs `base_url`. |
 | `receives_events` | bool | `true` | Whether the connection can receive webhooks from the Git host with HMAC verification. Triggers for push and pull requests need this. |
 | `reports_status` | null or bool | `null` | Whether the connection can post commit statuses to the Git host. Tasks that use `report_status` need this setting. `null` means `true` on `github` and `false` on other Git hosts. |
 | `secret_file` | null or path | `null` | Path to the file with the secret for HMAC signatures on incoming webhooks. |
@@ -158,7 +159,7 @@ These declarations stop the Nix build during validation. Server-side checks at `
 | `projects` | list of string or submodule | `[ ]` | Projects that subscribe to this cache (project names or submodules). Plain names subscribe with `ReadWrite` and signed outputs. The Web UI and API can't change or delete these subscriptions. |
 | `projects.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Three access modes exist for a subscription. `ReadWrite` can pull and push, while `ReadOnly` can pull only. `WriteOnly` can push only. |
 | `projects.*.name` | string | - | Name of the subscribed project. |
-| `projects.*.sign_outputs` | bool | `true` | Signature with the cache key on outputs that projects push to this cache. External Nix clients don't trust unsigned paths. |
+| `projects.*.sign_outputs` | null or bool | `null` | Use the cache key to sign the outputs that projects push to this cache. External Nix clients don't trust unsigned store paths. Values of `null` take the project mode, with `true` in `ReadWrite` and `WriteOnly` and `false` in `ReadOnly`. Validation rules reject the combination of `ReadOnly` and `true`. |
 | `pull_through` | bool | `true` | Whether this cache serves paths from its upstream caches to Nix clients. |
 | `public` | bool | `false` | Whether every project can use this cache. |
 | `teams` | list of submodule | `[ ]` | Teams with a grant on this cache. Grants declared here but removed from the list get revoked on the next state apply. Grants made through the API remain untouched. |
@@ -169,7 +170,10 @@ These declarations stop the Nix build during validation. Server-side checks at `
 | `roles.*.permissions` | list of string | `[ ]` | Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. |
 | `signing_key_file` | string | - | Path to the file with the Nix cache signing key. |
 | `upstream_caches` | list of submodule | cache.nixos.org | Upstream caches used as substituters: internal Gradient caches or external Nix binary caches. |
-| `upstream_caches.*.active` | boolean | `true` | Whether the upstream cache is in use. Gradient keeps inactive upstream caches but never queries them. The UI can change this value, and the server restores it on the next start. |
+| `upstream_caches.*.active` | boolean | `true` | Whether the upstream cache is in use. Gradient keeps inactive upstream caches but never queries them. The UI can change this value and the server restores it on the next start. |
+| `upstream_caches.*.basic_auth_password_file` | null or string | `null` | A file with the password for HTTP basic auth on an external Nix binary cache. Set it together with `basic_auth_user`. systemd loads it as credential `gradient_cache_upstream_<cache>_<index>_password`. `<index>` is the position in `upstream_caches`. Positions start at 0 and include internal entries. |
+| `upstream_caches.*.basic_auth_user` | null or string | `null` | Username for HTTP basic authentication with an external Nix binary cache. The username cannot include `:`. The username is valid only on `https://` URLs. |
+| `upstream_caches.*.bearer_token_file` | null or string | `null` | A file with a bearer token for an external Nix binary cache, in place of basic auth. Gradient does read the file as a systemd credential `gradient_cache_upstream_<cache>_<index>_bearer_token`. The token is valid only for `https://` URLs. |
 | `upstream_caches.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. All internal upstream caches need this value. |
 | `upstream_caches.*.display_name` | null or string | `null` | Name shown in the UI for the upstream cache. Each external upstream cache needs this value. |
 | `upstream_caches.*.http1_only` | boolean | `false` | Whether requests to the external Nix binary cache use HTTP/1.1 only. Enable this for caches that break HTTP/2 transfers. |
@@ -183,7 +187,7 @@ These declarations stop the Nix build during validation. Server-side checks at `
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | attribute name | Role name. Unique within the project and distinct from the built-in roles `Admin`, `Write` and `View`. |
-| `permissions` | list of string | `[ ]` | Permissions granted by the role. Each entry is a camelCase identifier. |
+| `permissions` | list of string | `[ ]` | Permissions granted by the role. Each entry is a camelCase identifier. Shell, console, port forwarding and SSH logins in exec jobs need `openJobTerminal`. |
 | `project` | string | - | Project that owns the role. |
 
 ## `api_keys.<name>`
@@ -194,7 +198,7 @@ These declarations stop the Nix build during validation. Server-side checks at `
 | `name` | string | attribute name | Name of this API key. |
 | `owned_by` | string | - | Name of the user who own this key. |
 | `cache_permissions` | list of string | `[ ]` | A key can receive cache permissions `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. The key can get these permissions on every cache where the owner of the key has a role. The role of the owner in that cache can limit those permissions. Only keys with `project = null` can have cache permissions. |
-| `permissions` | list of string | `[ ]` | Permissions this key grant, written as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask` or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. Sets of Gradient permissions always contain `viewProject`. The key can create projects through `createProject` only with `project = null`. The key can use the owner's superuser privileges only if `project = null` is present and `superuser = true` is available to the owner. GET, HEAD and OPTIONS requests pass through `readSuperuser`. All other requests pass through `writeSuperuser`. |
+| `permissions` | list of string | `[ ]` | Permissions this key grant, written as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask` or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. Sets of Gradient permissions always contain `viewProject`. The key can create projects through `createProject` only with `project = null`. The key can use the owner's superuser privileges only if `project = null` is present and `superuser = true` is available to the owner. GET, HEAD and OPTIONS requests pass through `readSuperuser`. All other requests pass through `writeSuperuser`. The shell, console and port forward of exec jobs need `openJobTerminal`. |
 | `project` | null or string | `null` | Project to which this key restrict access. `null` mean no restriction. |
 
 ## `teams.<name>`

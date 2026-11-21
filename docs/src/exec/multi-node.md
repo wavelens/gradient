@@ -56,23 +56,24 @@ Nodes connect to each other on their guest addresses. The operator provides the 
 
 | Need | Setup |
 |---|---|
-| Own subnet | A distinct `exec.subnet` on every exec worker |
+| Own subnet | A distinct `exec.subnet.v4` on every exec worker |
 | Routes | A route to the subnet of every other exec worker, via that worker. Static routes or the LAN router both work |
 | Forwarding | No drop rule for traffic between the LAN interface and `exec.bridge` |
 | Ports | The `exec.allow.ports` ports open between the workers |
 
 ```nix
 # configuration.nix of worker a, LAN address 192.168.1.11
-services.gradient.worker.exec.subnet = "10.233.0.0/16";
+services.gradient.worker.exec.subnet.v4 = "10.233.0.0/16";
 networking.interfaces.eth0.ipv4.routes = [
   { address = "10.234.0.0"; prefixLength = 16; via = "192.168.1.12"; } # (1)!
 ];
 ```
 
-1.  Worker b with `exec.subnet = "10.234.0.0/16"` and a route back to `10.233.0.0/16`.
+1.  Worker b with `exec.subnet.v4 = "10.234.0.0/16"` and a route back to `10.233.0.0/16`.
 
 - Worker NATs can hide a guest's source address. Peers see the address of the other worker as source.
-- Two workers on one subnet fail every node with `two nodes have the guest address <address>; give every exec worker its own exec.subnet`.
+- Rules in the guest filter drop new connections from guests to private networks that `exec.allow.allowedPrivateNetworks` doesn't list. List the guest subnets of all other exec workers there on each exec worker. Responses to connections from other workers pass through the filter, even when the source is the private address of another worker. See [Limit the Guest Network](worker.md#guest-network) for details.
+- Two workers on one subnet fail every node with `Two nodes have guest address <address>. Assign a unique exec.subnet.v4 to each exec worker.`
 
 ## 4. Plan for Restarts
 

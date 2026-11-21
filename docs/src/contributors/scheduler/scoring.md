@@ -122,11 +122,11 @@ flowchart LR
 | Some step fits `ram_available_mb` now | The largest such step |
 | No step fits now, some fits once RAM is released | The largest such step, and the build waits for the worker |
 | No step fits | RAM proportional to cores picks the step. Kills take the steps down from there |
-| Not even 1 proportional core fits | 1 core, penalized |
+| Not even 1 proportional core fits | Largest usable worker takes the build with a RAM cap at total RAM. Smaller workers cannot fit the build |
 
 - `EstimatedTimeRule` can score the build time at the chosen cores.
 - The assignment can carry the chosen cores in `BuildSpec.build_cores`. The worker can build with the smaller of that value and its own `max_cores`.
-- `ram_shortage` can use the same choice per worker. Only a build too large at 1 proportional core can reach `fail_build_no_worker_fits`.
+- `largest_usable_worker_ram_mb` is the total RAM of the largest connected worker that the project can use. Only workers that still accept new jobs and report RAM above 0 count. Only build jobs fetch that value.
 - The next attempt after an out-of-memory kill can get at most `next(c)` cores. Here `c` is the fewest cores among its kills.
 
 ## Instance Windows

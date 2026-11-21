@@ -28,7 +28,7 @@ Runtime dependencies live in `derivation_dependency` alongside build dependencie
 | `fetchable` (`fetchable_predicate`) | Terminal success plus a complete closure. A copy from upstream does not count |
 | `.drv` present (`drv_present_predicate`) | The build's own `.drv` NAR exists with a backed `cached_path` row. This marks presence only, not a complete closure |
 
-- **Build start condition:** `blocking_deps = 0` and `.drv` present. `blocking_deps` counts direct dependencies without a set `fetchable` flag. The `fetchable` flags of those dependencies already cover their own closures, so the condition needs no recursion.
+- **Build start condition:** `blocking_deps = 0` and `.drv` present. `blocking_deps` counts direct dependencies without a set `fetchable` flag. The counter also includes direct dependencies whose `unneeded_outputs` hold an output the edge names. A stored copy in any cache counts, with no trust or subscription term ([Trusted Build Outputs](../../reference/upgrade-notes.md#trusted-build-outputs)). The `fetchable` flags of those dependencies already cover their own closures, so the condition needs no recursion.
 - **Passthrough start condition:** shared builds available in a cache can start without either term. Those jobs don't list any direct inputs (`gradient-scheduler/src/loops/build.rs`).
 - **Push:** jobs upload only their own outputs. Everything below them held a complete closure before assignment. A worker therefore need not push a closure for the invariant to hold.
 
@@ -42,7 +42,7 @@ Runtime dependencies live in `derivation_dependency` alongside build dependencie
 4. `seed_runtime_deps` (`gradient-db/src/graph/runtime_can_start.rs`): recount the producers from scratch. Paths with no earlier NAR become `freshly_present`; re-pushing a backed path only triggers a recount.
 5. Spread the newly complete closures to the shared builds that need them at runtime. `ripple_shared_builds_complete` can count down their missing dependencies level by level in one call of `ripple_missing_runtime_deps`, a SQL function. Then `became_fetchable` sets `fetchable` and moves the `blocking_deps` counter.
 6. Run `ripple_shared_builds_incomplete`, then `lost_fetchability`, on shared builds that a new dependency on a missing path left incomplete.
-7. Write a `cached_path_signature` row per target cache and sign each row with the cache's key. The row remains unsigned without a key or when all producing tasks keep the path private. Mark matching `derivation_output` rows cached.
+7. Write a `cached_path_signature` row per target cache and sign each row with the cache's key. These cases leave the row unsigned. No key is in the cache, `sign_outputs` is off in the subscription, or all producing tasks keep the path private. Mark matching `derivation_output` rows cached.
 
 - **Transitions only:** Start the spread only from rows with a state change reported by the seed. Spreading from a state can drive a counter below zero, and a negative counter can never read `= 0` again.
 - **Deadlocks:** the graph writer can retry a transaction that hits `40P01`, `40001` or `25P02` up to `GRAPH_TX_ATTEMPTS` (3) times (`gradient-graph/src/writer.rs`).
@@ -100,7 +100,7 @@ The `cache-maintenance` pass in `gradient-cache/src/schedule.rs` runs on a sched
 | Evaluation GC | Finished evaluations past task `keep_evaluations`. Cancelled first, then oldest | The latest evaluation of the task and the latest successful evaluation remain. Active evaluations remain and don't count toward the limit |
 | Derivation GC | `derivation` rows outside the keep-set, their attempt logs | Created before `gc.orphanDerivationHours` (24) |
 | Stale-path eviction | Each cache's `cached_path_signature` rows on paths outside `live_cached_paths_cte`, then `cached_path` rows left without a claim and their objects | That cache's last fetch (or the claim's creation) older than `max(gc.narTtlHours, gc.narUploadGraceHours)` (336 h). Claims with `pinned_at` set don't expire, so pinned paths stay valid. |
-| Zombie purge | Confirmed rows with the object missing from storage | Storage probe per row. A probe error will preserve the row |
+| Zombie purge | Rows with no object in storage | Storage probe per row. A probe error will preserve the row |
 | Orphan NAR files | Objects without any referencing row | Older than `gc.narUploadGraceHours` (24 h) |
 
 - **Derivation re-check:** the graph writer can delete a listed derivation only if the current rows still leave it unreachable. Any job, entry point or dependent outside the list will keep the derivation and its listed closure alive.
@@ -115,8 +115,8 @@ The `cache-maintenance` pass in `gradient-cache/src/schedule.rs` runs on a sched
 |---|---|
 | `GET /builds/{build}`, `/log`, `/graph`, `/closure`, `/downloads` | The project must be public, the requester must belong to the build's project, or the requester must belong to any project with a `build_job` for the same derivation (`BuildAccessContext::load`, `gradient-web/src/endpoints/builds/mod.rs`) |
 | `GET /builds/{build}/download/{filename}` | The same rule as above, or a download token for the derivation |
-| Narinfo, NAR, `ls` and `serve` on `/cache/{cache}` | A signed `cached_path_signature` row for that cache must exist and the path must carry a `file_hash` (`signed_in_cache`, `gradient-db/src/cached_paths.rs`) |
-| `GET /cache/{cache}/log/{drv}` | The log can be served only if the cache can hand out an output of the derivation under the same rule (`derivation_signed_in_cache`). Otherwise the request fall through to the upstream caches (`caches/build_log.rs`) |
+| Narinfo, NAR, `ls` and `serve` on `/cache/{cache}` | The active cache must hold a signed `cached_path_signature` row for the path. `cache_can_sign_content_variant_sql_condition` must also hold for that row (`cached_path_by_store_hash_subquery_sql`, `gradient-db/src/store_path_content_variant_reader_choice.rs`) |
+| `GET /cache/{cache}/log/{drv}` | The cache can serve the log only if the cache can hand out an output of that derivation under the same rule (`build_attempt_that_produced_derivation_output_served_by_cache` in `gradient-db/src/cached_paths.rs`). Requests fall through to the upstream caches (`caches/build_log.rs`) otherwise |
 
 ## Related
 

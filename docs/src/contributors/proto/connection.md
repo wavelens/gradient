@@ -32,7 +32,7 @@ Four steps make up the handshake:
 | Step | Message | Content |
 |---|---|---|
 | 1 | `InitConnection` | `capabilities`, the worker's persistent `id` |
-| 2 | `AuthChallenge` | The peers that registered this worker ID |
+| 2 | `AuthChallenge` | Peers that registered this worker ID without `url` |
 | 3 | `AuthResponse` | A token for each challenged peer |
 | 4 | `InitAck` or `Reject` | Authorized peers, failed peers with reasons |
 
@@ -82,6 +82,8 @@ A side that refuses the handshake can reply with these codes.
 - Worker URLs on private, loopback, or link-local addresses fail at registration and before every connection unless administrators set `proto.allowWorkerUrlsOnPrivateNetworks`. Server connections go only to addresses that the server inspected.
 - Workers compare the hash in `services.gradient.worker.acceptedServerTokensFile` on each worker with the server token. Discoverable workers with no such file accept all servers. NixOS modules need `services.gradient.worker.allowDiscoverableWithoutAcceptedServerTokensFile`.
 - A server-connected session that reauths receives `AuthUpdate`, never `AuthChallenge`.
+- Sessions for a server connection end with `AuthResponse` from the worker.
+- Registrations and team workers with `url` carry the address that the server can dial. The server can't authenticate incoming connections with those worker IDs and tokens. The server can consider only registrations and team workers without `url` for an incoming handshake and a reauthentication challenge.
 - A reauth that discovers a new registration ends the session. The next connection can carry the new project's token.
 - Projects granting a team's workers join the running session. All of them share the team worker's single token for the team ID.
 - A registration cannot reuse the worker ID of a team worker. Each Gradient.CI worker ID can belong to exactly one registration or team worker.
@@ -212,7 +214,7 @@ A read-only session for one cache is available through the `/cache/{cache}/proto
 | Private cache | The upgrade request needs the header `Authorization: GRAD<key>` |
 | Handshake | The client sends `InitConnection`. The server answers with `InitAck` and no peers, without a challenge |
 | Allowed | Requests permitted here are `CacheQuery` in `Normal` or `Pull` mode, and `NarRequest`. Everything else gets a `403` rejection |
-| Limits | Each IP can hold `proto.anonymousCache.maxConnectionsPerIp` (32) anonymous connections. Every session also counts toward `proto.maxConnections` (256). Each message is limited by `SAFE_INFLIGHT_MESSAGE_SIZE` (2 MiB), which fits a `CacheQuery` with 1000 paths |
+| Limits | Each IP can hold `proto.anonymousCache.maxConnectionsPerIp` (32) anonymous connections. All sessions also count toward `proto.maxConnections` (256). Anonymous sessions also count toward `http.anonymousWebsocketMaxConnectionsPerIp` (256) per address. Anonymous sessions on IPv6 count per /64 network. Each message is limited by `SAFE_INFLIGHT_MESSAGE_SIZE` (2 MiB), which fits a `CacheQuery` with 1000 paths |
 | Idle | The server closes the session after 120 s without a NAR transfer |
 
 ## Implementation

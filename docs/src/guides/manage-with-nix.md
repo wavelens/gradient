@@ -19,7 +19,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   https://gradient.example.com/api/v1/admin/state > state.nix
 ```
 
-All users, projects, tasks, caches, custom roles, API keys, workers and connections to Git hosts sit in file `state.nix`. The format is identical to `services.gradient.state`. Built-in roles and internal `build-request` tasks don't appear in the export. API keys that pin a cache don't appear either. The state format doesn't store a cache pin for keys.
+File `state.nix` holds the users on record in the state file. This file also holds projects, tasks, caches, custom roles, API keys, workers and all connections to Git hosts. The format is the same as `services.gradient.state`. Accounts from registration, SCIM, or external sign-in don't appear in the export. References to those accounts stay blank. Blank `created_by` values retain the creator that the database already saved at apply time for that project, task, cache, or connection to a Git host. Those accounts don't carry over after import of this file. Built-in roles and internal `build-request` tasks don't appear in the export. API keys that pin a cache don't appear either. The state format doesn't save cache pins for keys.
 
 ## 2. Fill In the Secrets
 
@@ -36,7 +36,7 @@ The export stores secrets in hashed or encrypted form. Every `*_file` field come
 | `tasks.<name>.actions.*.config.token_file` | Web request token | `openssl rand -hex 32` |
 
 !!! tip "Superuser Through OIDC"
-    Users with `superuser = true` and without `password_file` become superusers at the first OIDC sign-in. The sign-in can match a username or a verified email address (the `email_verified` claim).
+    A user with `superuser = true` and no `password_file` can become a superuser on first OIDC sign-in. That sign-in can claim the account only with a verified email address (`email_verified` claim) from the provider and a match to the declared `email`. A matching username alone can't claim the account.
 
 ## 3. Apply
 
@@ -51,6 +51,9 @@ The NixOS build runs `state.validate` on the state. This check is on by default.
 
 !!! note
     Upgrade from a release without superuser permissions for API keys. `services.gradient.state` API keys that relied on enumerating all permissions lose superuser access on the next startup. Add `readSuperuser` and `writeSuperuser` to their `permissions`. Logs on the server contain a warning for each such key.
+
+!!! note
+    Upgrade from a release without `openJobTerminal`. The server applies the declared `permissions` for roles and API keys as described on every start. Declared roles and keys with `triggerEvaluation` lose job terminals and SSH logins to jobs. Add `openJobTerminal` to their `permissions` to keep that access.
 
 ## Verify Deployment
 

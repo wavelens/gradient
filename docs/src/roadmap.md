@@ -42,7 +42,7 @@ Exec jobs outside the Nix sandbox and faster evaluation of large flakes.
 
 !!! warning "Upgrade"
 
-    Servers reject workers older than protocol 65. Workers reject servers older than protocol 65. Upgrade both in one maintenance window.
+    Servers reject workers older than protocol 66. Workers reject servers older than protocol 66. Upgrade both in one maintenance window.
 
 </div>
 

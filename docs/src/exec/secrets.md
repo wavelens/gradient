@@ -33,6 +33,8 @@ passthru.gradient = {
 | Repository sops files | Files listed in `sops`, encrypted for the project recipient | Values versioned with the code, never typed into Gradient |
 | Worker sops files | `exec.sops.files` on the worker, see [Workers](../concepts/workers.md#exec-secrets) | Operator values out of reach of the server |
 
+Pull requests from forks don't get secrets before maintainer approval of the head commit. See [Pull Request](../concepts/triggers.md#pull-request) for details. Maintainer approval releases secrets for that commit only.
+
 ## 2. Set Project Secrets
 
 === "UI"
@@ -95,6 +97,7 @@ Jobs with a secret problem fail before the start, without using a retry.
 | `secret "<name>" found in two sources: <first>, <second>` | Two sources hold the name |
 | `secret "<name>" not found in project secrets, repository sops files or worker sops files` | No source holds the name |
 | `sops file <file>: not encrypted for the project key` | A recipient other than the project key |
+| `This job does execute code from a fork pull request that no maintainer approved. ...` | A fork pull request without approval of its head commit |
 
 ## Next Steps
 

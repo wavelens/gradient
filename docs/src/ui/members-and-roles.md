@@ -55,7 +55,7 @@ Each project has three roles. The table below shows what each role allows.
 | Role | Can |
 |---|---|
 | Admin | Everything: settings, members, roles, project deletion |
-| Write | Tasks, triggers, actions, evaluations, Git host connections, workers, webhooks, cache subscriptions |
+| Write | Tasks, triggers, actions, evaluation, job terminals, connections to Git hosts, workers, webhooks, cache subscriptions |
 | View | View the project |
 
 Roles map to individual permissions. Each permission covers one area of the project.
@@ -71,6 +71,10 @@ Roles map to individual permissions. Each permission covers one area of the proj
 | `createTask`, `editTask` | Creating and editing tasks |
 | `manageTriggers`, `manageActions` | Triggers and actions on tasks |
 | `triggerEvaluation` | Starting and aborting evaluations |
+| `openJobTerminal` | Shell, console, port forwarding, SSH login inside a running [exec job](../exec/terminals.md) |
+
+!!! note
+    Custom roles with `triggerEvaluation` and API keys with every project permission get `openJobTerminal` on upgrade from a release without `openJobTerminal`. API keys with a subset of permissions lose access to job terminals until their owner adds `openJobTerminal`. Remove `openJobTerminal` from custom roles that run evaluations but don't open terminals.
 
 ## Cache Roles
 

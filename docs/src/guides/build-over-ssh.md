@@ -79,7 +79,7 @@ nix.gradient-ssh = {
 | Build log | `ssh -p 2222 myproject@ci.example.com nix log /nix/store/...-hello.drv` |
 
 - Read requests can be answered from the caches the project subscribed to.
-- Copied paths enter the project's caches with a signature, like build outputs.
+- Copied paths enter the project cache in the same way as build outputs. Only caches with signing enabled in the subscription add signatures to those paths.
 - All build requests from a user share one evaluation in the project's **Build Requests** task, even across several SSH connections.
 - Each new request adds its entry points to the evaluation already running for that user.
 - Once the evaluation has finished, further requests start a new one.

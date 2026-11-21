@@ -114,7 +114,7 @@ Pull request events from the Git host activate this trigger. Push events don't a
 | `actions` | Action names of the event, by default `opened`, `synchronize`, `reopened`. An empty list fires on every action. |
 | `branches` | The source branch of the pull request, not the target branch |
 | `include_paths`, `exclude_paths` | Files changed between the tip of the target branch and the head of the pull request. See [Path Filters](#path-filters). Empty by default. |
-| `require_approval` | Commits in pull requests from forks wait for maintainer approval by default. Evaluations from Gradient start only after approval. Each new commit must get a new approval. Pull requests from the same repository, or from users with write permission to the repository, start immediately. |
+| `require_approval` | Commits in pull requests from forks wait for maintainer approval by default. Evaluations from Gradient start only after approval. Each new commit must get a new approval. Pull requests from the same repository start immediately. Fork pull requests start immediately only when their authors own the fork and can push to the repository. Fork pull requests on forks that belong to another person or an organization wait. Off: Fork pull requests start immediately without project secrets, project SSH keys, project HTTPS Git logins, or the `open_pr` and `start_evaluation` actions. Merge requests from forks always wait for approval on GitLab, even with the option off. The webhook from GitLab doesn't include the author of the merge request. |
 
 - **Action Names**: GitHub names stay as sent. GitLab names map to `opened`, `synchronize`, `reopened`, `closed` and `merged`.
 - **Missing Event**: Webhooks without a pull request event, or `actions` without `synchronize`, block evaluation for a push to a branch with a pull request.
@@ -123,10 +123,13 @@ Users with write permission to the repository can steer a pull request with comm
 
 | Comment | Effect |
 |---|---|
-| `/gradient run` | Approval and evaluation of the latest commit pending approval. Otherwise, a new evaluation of the current head commit. A commit with a prior evaluation can still receive a new evaluation. |
-| `/gradient run <wildcard>` | The same with a different [wildcard](../reference/wildcards.md) |
-| `/gradient approve` | Approval and evaluation of the latest commit pending approval. |
+| `/gradient run` | New evaluation of the current head commit. Fork pull requests get no evaluation while `require_approval` is on, even when their authors can push. Gradient replies contain `/gradient run <commit>` for the head commit. |
+| `/gradient run <commit>` | Approve and evaluate that commit when approval for that commit is pending. Otherwise, start a new evaluation of that commit when that commit is the current head commit. A commit with a prior evaluation can still get a new evaluation. |
+| `/gradient run [<commit>] <wildcard>` | The same with a different [wildcard](../reference/wildcards.md) |
+| `/gradient approve <commit>` | Approval and evaluation of that commit if its maintainer approval is pending. |
 | `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
+
+A `<commit>` is a full 40-character commit hash. Gradient does not accept short hashes. A brute-force search can identify a short prefix. Commands with a commit target only that commit. A `/gradient approve` comment with no commit approves the head commit only when Gradient recorded that commit at least 60 seconds before the comment. Other `/gradient approve` comments without a commit get no approval. Gradient may have recorded the head commit later, or not at all. Replies from Gradient then contain `/gradient approve <commit>` with the full hash of the head commit. Replies to a rejected command show the command name and the full hash of the current head commit. Approve commands on a pull request with no pending approval get no reply. Approval requests on a commit status show a command with the full hash. Approval reviews on GitHub apply to the commit under review. Approval reviews in Gitea and Forgejo attach to the commit of the reviewer's latest approval review in the review API. See [Gitea and Forgejo](../guides/gitea.md#pull-requests) for details. Later pushes need a new approval. Newer pushes replace pending approval for an older commit. Gradient can't create an evaluation before approval. Approved commits can use project secrets, SSH keys for the project, and all task actions.
 
 `/gradient run` fire pull request triggers with action `synchronize`. Triggers without `synchronize` in `actions`, or with a `branches` filter that does not match, ignore that command.
 
@@ -142,11 +145,15 @@ Users with write permission to the repository can steer a pull request with comm
 | Pull Request | Tip of the target branch | Head of the pull request |
 
 - **Match**: Triggers fire when the changed files include at least one file with a match for a `include_paths` pattern and no match for a `exclude_paths` pattern. All files match an empty `include_paths` list.
-- **Patterns**: Paths are relative to the repository root. Don't add a leading ``/``. ``*`` can match any text. ``/`` can appear inside that match. ``?`` can match exactly one character. An empty pattern is invalid.
+- **Patterns**: Paths are relative to the repository root. Don't add a leading ``/``. ``*`` can match any text. ``/`` can appear inside that match. ``?`` can match exactly one character. Empty patterns are invalid.
+- **Limits**: A trigger can include at most 64 patterns. ``include_paths`` and ``exclude_paths`` share that limit. Each pattern can contain at most 512 characters.
 - **Renames**: Both the old path and the new path of a renamed file count as modified.
 - **Skipped Commits**: Skipped commits do not change the base for comparison. Commits after a skipped commit still compare against the same evaluated commit. Changes from every skipped commit enter that comparison.
-- **Pull Requests**: Pull requests compare the file tree at the tip of the target branch with the file tree at the pull request head, not the merge base. A pull request that is behind the target branch can trigger more often, never less.
-- **Fail Open**: Triggers always fire when Gradient cannot list changed files. Reasons include no previous evaluation on the branch, equal base and head, a fetch failure, a Git error, or a timeout. Timeouts are 30 seconds per polling or POST request. All triggers of one webhook get 8 seconds.
+- **Pull Requests**: Pull requests compare the file tree at the tip of the target branch with the file tree at the pull request head, not the merge base. A pull request behind the target branch can trigger more often. The stored list can miss paths from a newer tip of the target branch for up to 2 minutes. That pull request can trigger less often than a new comparison.
+- **Fork Pull Requests**: Pull requests from forks that need maintainer approval have an approval check even when path filters skip that commit. Path filters apply to the task list after approval. Only matching tasks start. The approval check can show that changed files don't match and no evaluation can start.
+- **Fail Open**: Triggers always fire when Gradient cannot list changed files. Reasons include no previous evaluation on the branch, equal base and head, a fetch failure, a Git error, or a timeout. Timeouts are 30 seconds per polling or POST request. All triggers for one webhook share an 8-second limit.
+- **Fetch Limits**: Triggers of one project and repository share one Git fetch for the list of changed files. That fetch can stop at 120 seconds or 2 GiB of received data. A trigger whose own time limit ends first can fire without waiting for the fetch.
+- **Stored Lists**: Lists of changed files with a commit as base stay for 10 minutes. Lists with a target branch as base stay for 2 minutes. Later triggers with the same base and head reuse that list. They do no Git fetch.
 - **Not Filtered**: Time triggers, manual evaluation, `/gradient run` comments, tag pushes, releases, entries in the merge queue, updates to flake inputs and the first poll after a change to a task's evaluation settings ignore path filters.
 - **Skipped Webhooks**: The webhook response can list each skipped trigger with a reason `no_changed_file_matches_path_filter`.
 

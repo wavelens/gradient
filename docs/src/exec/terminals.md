@@ -27,7 +27,10 @@ apps.x86_64-linux.notebook = {
 
 - Programs of such jobs start on a terminal. `bash` programs wait for input and hold the job up until the shell exits.
 - A job with `ssh = false` provides the guest serial console as its only access.
-- Sessions need the `TriggerEvaluation` permission on the project, see [Members and Roles](../ui/members-and-roles.md).
+- Browser terminals, consoles, port forwarding and SSH logins need the `openJobTerminal` permission for the project. See [Members and Roles](../ui/members-and-roles.md).
+- ``triggerEvaluation`` alone doesn't open a terminal.
+- SSH logins into a job use the project role of the member with the SSH key. API keys have no effect on SSH logins.
+- Only API keys with ``openJobTerminal`` in their permission list can access terminals through the API.
 - New shells start as `gradient` in `/work` with the environment of the program.
 - Interactive programs obey `maxSilent` while **Keep VM running** is off. Input that the terminal echoes is output.
 
@@ -102,5 +105,5 @@ Click **Keep VM running** on the job page to hold the guest up after the program
 ## Next Steps
 
 - [Build over SSH](../guides/build-over-ssh.md): SSH server and key setup
-- [Members and Roles](../ui/members-and-roles.md): the `TriggerEvaluation` permission
+- [Members and Roles](../ui/members-and-roles.md): `openJobTerminal` permission
 - [Spread a Job over Workers](multi-node.md): node logins

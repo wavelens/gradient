@@ -33,9 +33,11 @@ Set `localWorker` and `worker.enable` to register the worker on the same host au
 
 - A stable worker ID, derived from the host name.
 - A token in `/var/lib/gradient-worker/local-token`, generated at first start. Delete the file and restart both services to rotate the token.
-- Membership in the state-declared team `server`, which gives every new project access to the worker. Projects created before the team was added get the worker once they add the `server` team.
+- Membership in a team `server` declared in state. Projects only get workers when admins grant the `server` team with workers on that project. All new projects receive a worker with `grantLocalWorkerToNewProjects` set.
 
-The worker stays in a reconnect backoff of at most 60 s while no project with a cache subscription is available.
+Jobs on the local worker run on the server host. They can access its Nix store and network. Only superusers can create projects by default. Set `permissions.createProject = "everyone"` to allow all signed-in users to create projects again.
+
+Worker connection attempts use backoff capped at 60 seconds. They wait for a project with a cache subscription to grant team `server` the workers flag.
 
 ## Postgres Sizing
 
@@ -44,7 +46,7 @@ With `postgres.enable`, host-independent defaults come from `mkDefault` entries.
 | Setting | Default | Reason |
 |---|---|---|
 | `random_page_cost` | `1.1` | Matches SSD storage and keeps the planner on index-only scans of the graph tables |
-| `max_connections` | `200` | Covers the three server pools (56 connections by default), autovacuum and `psql` |
+| `max_connections` | `200` | Room for three server pools (56 connections by default), a fixed pool of 2 connections for waiting evaluations, autovacuum and `psql` |
 | `max_locks_per_transaction` | `1024` | Graph writes lock every shared build they touch. The server logs warnings below `256` |
 | `wal_compression` | `zstd` | Shrinks the full page images in the write-ahead log |
 | `wal_buffers` | `64MB` | Keeps large graph writes from flushing the write-ahead log mid-transaction |

@@ -131,6 +131,7 @@ Jobs with the fewest qualifying workers go first. Assign each node to a qualifyi
 - Dispatches open an attempt in `exec_job_attempt`. Attempt end reasons are `Completed`, `Failed`, `Timeout`, `Lost` and `Aborted`.
 - `Failed` and `Timeout` lead to a restart while `retries_left > 0`, one retry per restart.
 - `Lost` attempts never use a retry. Ten losses in a row fail the job.
+- Final reasons for these jobs append the failure text the worker reported when every loss in that row reported the same text. Otherwise, those reasons keep the generic text.
 - Late reports for a closed attempt change nothing. Aborted jobs don't restart.
 - Specs with `manual_start` (Nix `autostart = false`) create rows with `waits_for_manual_start`. Those rows stay `Created` and don't queue.
 - Waiting rows stay out of `has_open_exec_jobs` and the consistency check. Evaluation can finish without them.
@@ -300,8 +301,11 @@ Guests never see the host store. Images bring the closure of their own system as
 | Network | Tap `gr-tap-<cid>`, a leased guest address, bridge address as gateway |
 
 - Devices keep their hold until teardown. Held devices don't appear in the advertised inventory.
-- `GuestAddresses` lease the lowest free host above the bridge address of `exec.subnet`. Leases end with the guest teardown or a released cluster hold.
-- Full subnets end the job with `no free guest address in exec.subnet`.
+- `GuestAddresses` lease the lowest free host above the bridge address of `exec.subnet.v4`. Leases end at guest teardown or at a released cluster hold.
+- A call to `AddressLease::network` adds `GuestNetworkIpv6` together with `exec.subnet.v6`. Guest IPv6 addresses use the IPv6 subnet plus the host offset of the IPv4 lease. The first host in the IPv6 subnet is the gateway.
+- The supervisor derives an IPv6 address from the checked IPv4 address in `PrepareTap`. A single `nft` call adds the IPv4 and IPv6 set entries. The supervisor also writes a permanent neighbour entry (`nud permanent`) for the guest on the bridge.
+- Agents for guest protocol 11 turn off router advertisements, duplicate address detection, and link-local addresses before link-up. These agents then configure a static IPv6 address and the IPv6 default route.
+- Full subnets end the job with ``No free guest addresses in `exec.subnet.v4` ``.
 - Guests resolve names through the forwarder on the bridge, or through `exec.nameservers`.
 - Teardown is always an explicit step. Dropped tasks leave the guest running.
 
@@ -317,7 +321,6 @@ Guest sizes follow the device path. `GuestSize { cpus, memory_mb, disk_mb }` tra
 | Fit | `ExecFit::guest` in `fits_exec`, free for placement, total for wait reasons and pre-warm counts |
 
 - Old workers report all-zero capacity. Such workers fit every size.
-- Old servers send all-zero `ExecRequirement.guest`. Workers then boot the image size with the virtiofs `work` share.
 - Warm guests hold a `BudgetHold` of the image size. Refills start only when the budget can hold a boot.
 - `GuestPool::take` can hand out a warm guest only when `cpus` and `memory_mb` match. Other sizes boot cold from `GuestImage::sized`.
 - Missing budgets at boot end the attempt with `the worker has no guest budget left for this job`, a transient error.
