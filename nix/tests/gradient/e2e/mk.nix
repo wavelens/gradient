@@ -2700,7 +2700,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     names = sorted(l["name"] for l in health["supervised"])
     print(names)
     for want in ["graph", "effects", "build-dispatch", "eval-dispatch", "trigger-dispatch",
-                 "cache-maintenance", "sign-sweep", "debug-index",
+                 "cache-maintenance", "sign-sweep", "signature-backfill", "debug-index",
                  "eval-cache-sweep", "retention", "rollup", "outbound-connect"]:
         assert want in names, f"{want} missing from supervised loops: {names}"
     bad = [l for l in health["supervised"] if l["restarts"] or l["pass_timeouts"]]

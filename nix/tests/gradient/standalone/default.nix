@@ -18,7 +18,10 @@ in {
       nix.settings.substituters = lib.mkForce [ ];
       environment.systemPackages = [ pkgs.curl pkgs.git ];
 
-      services.gitDaemon = { enable = true; basePath = "/srv/git"; exportAll = true; };
+      services = {
+        gitDaemon = { enable = true; basePath = "/srv/git"; exportAll = true; };
+        gradient.outbound.allowedNonPublicNetworkTargets = [ "localhost" ];
+      };
       systemd.tmpfiles.rules = [ "d /srv/git 0755 git git" "L+ /srv/flake.nix - - - - ${flake}" ];
     };
 

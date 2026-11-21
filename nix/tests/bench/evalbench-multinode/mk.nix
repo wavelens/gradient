@@ -121,7 +121,10 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
       ];
 
       services = {
-        gradient.postgres.sharedBuffers = lib.mkForce "2GB";
+        gradient = {
+          postgres.sharedBuffers = lib.mkForce "2GB";
+          outbound.allowedNonPublicNetworkTargets = [ "server" ];
+        };
         postgresql.settings = {
           log_min_duration_statement = 5000;
           "auto_explain.log_min_duration" = lib.mkForce 5000;
