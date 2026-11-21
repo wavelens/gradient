@@ -59,6 +59,7 @@
     stopper = "10.233.0.0";
     keeper = "10.234.0.0";
   };
+  guestIpv6SubnetsByWorkerNode.stopper = "fd00:ec2:6::/64";
   restartAgentPort = 5999;
 
   guestImage = self.lib.mkWorkerImage {
@@ -148,11 +149,14 @@
         image = guestImage;
         preWarm = 1;
         labels = [ label "pair" ];
-        subnet = "${guestSubnets.${name}}/16";
+        subnet = {
+          v4 = "${guestSubnets.${name}}/16";
+          v6 = guestIpv6SubnetsByWorkerNode.${name} or null;
+        };
         guestCpus = 32;
         guestDiskMb = 131072;
         inherit maxPreWarm stopGuestsWithWorker sops;
-        mounts = [{ name = "scratch"; path = "/srv/scratch"; perJob = true; }];
+        mounts = [{ name = "scratch"; path = "/srv/scratch"; projects = "all"; perJob = true; }];
         allow = {
           network = true;
           ssh = true;
@@ -160,6 +164,11 @@
           nodes = 2;
           mounts = [ "scratch" ];
           inherit customImages;
+          blockedGlobalIPv6Networks = lib.mkIf (guestIpv6SubnetsByWorkerNode ? ${name}) [ "2001:db8:1::/64" ];
+          allowedPrivateNetworks = [
+            "${guestSubnets.${peer}}/16"
+            "${nodes.server.networking.primaryIPAddress}/32"
+          ];
         };
       };
     };
@@ -177,7 +186,7 @@ in {
 
         virtualisation = {
           cores = 2;
-          memorySize = 2048;
+          memorySize = 3072;
           diskSize = 16384;
           writableStore = true;
           additionalPaths = lib.attrValues programs ++ [ trainerBuildInputs ];
@@ -217,6 +226,7 @@ in {
             domain = "gradient.local";
             useTls = false;
             proto.public = true;
+            outbound.allowedNonPublicNetworkTargets = [ "server" ];
             ssh.enable = true;
             secrets = {
               jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
@@ -348,7 +358,10 @@ in {
         customImages = true;
         memorySize = 6144;
         sops = {
-          files = [ "${sopsFixtures}/worker.yaml" "${clashSops}" ];
+          files = [
+            { path = "${sopsFixtures}/worker.yaml"; projects = "all"; }
+            { path = "${clashSops}"; projects = "all"; }
+          ];
           keyFile = "${sopsFixtures}/ed25519";
         };
       };
@@ -371,6 +384,7 @@ in {
       TRAINER_INPUTS = "${trainerBuildInputs}"
       AGE_RECIPIENT = "${ageRecipient}"
       STOPPER_ID = "${workerIds.stopper}"
+      STOPPER_IPV6_GUEST_SUBNET_CIDR = "${guestIpv6SubnetsByWorkerNode.stopper}"
       RESTART_AGENT_PORT = ${toString restartAgentPort}
     '' + builtins.readFile ./test.py;
   });

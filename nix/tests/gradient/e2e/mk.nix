@@ -75,7 +75,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     networking.firewall.enable = false;
     virtualisation = {
       cores = 4;
-      memorySize = 2048;
+      memorySize = lib.mkDefault 2048;
       diskSize = 8192;
       writableStore = true;
     };
@@ -91,7 +91,10 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
       nix.settings.substituters = lib.mkForce [ ];
 
-      virtualisation.additionalPaths = [ pkgs.busybox.debug ];
+      virtualisation = {
+        additionalPaths = [ pkgs.busybox.debug ];
+        memorySize = 3072;
+      };
 
       security.pki.certificateFiles = [ "${gitHttpsTls}/minica.pem" ];
 
@@ -155,8 +158,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       };
 
       networking.hosts = {
-        # Phase 14's webhook target must resolve to a public address, and the
-        # VM network's `2001:db8::/32` is the only range the outbound guard allows.
+        # The Phase 14 webhook target `hook.local` is the server's own address. The test lists it in the server's `outbound.allowedNonPublicNetworkTargets` setting.
         "127.0.0.1" = [ "gradient.local" ];
         "${config.networking.primaryIPv6Address}" = [ "hook.local" ];
       };
@@ -171,6 +173,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
           };
           domain = "gradient.local";
           proto.public = true;
+          outbound.allowedNonPublicNetworkTargets = [ "hook.local" "server" ];
           secrets = {
             jwtFile =toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
             cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
@@ -567,7 +570,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     }
 
     fixture() {
-      q "INSERT INTO derivation (id, created_at, architecture, hash, name, prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES ('$1', now() AT TIME ZONE 'UTC', 'x86_64-linux', '$2', '$4', false, true, false, false); INSERT INTO derivation_build (id, derivation, status, cache_available, substituted, fetchable, blocking_deps, attempt, created_at, updated_at) VALUES (uuidv7(), '$1', 3, false, false, false, 0, 0, now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC'); INSERT INTO derivation_output (id, derivation, name, hash, package, created_at) VALUES (uuidv7(), '$1', 'out', '$3', '$4-out', now() AT TIME ZONE 'UTC'); INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, confirmed, created_at) VALUES (uuidv7(), '$3', '$4-out', 'sha256:lockrace', 1, 1, 'sha256:lockrace', false, now() AT TIME ZONE 'UTC');"
+      q "INSERT INTO derivation (id, created_at, architecture, hash, name, prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES ('$1', now() AT TIME ZONE 'UTC', 'x86_64-linux', '$2', '$4', false, true, false, false); INSERT INTO derivation_build (id, derivation, status, cache_available, substituted, fetchable, blocking_deps, attempt, created_at, updated_at) VALUES (uuidv7(), '$1', 3, false, false, false, 0, 0, now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC'); INSERT INTO derivation_output (id, derivation, name, hash, package, created_at) VALUES (uuidv7(), '$1', 'out', '$3', '$4-out', now() AT TIME ZONE 'UTC'); INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, file_size, nar_size, nar_hash, created_at) VALUES (uuidv7(), '$3', '$3', '$4-out', 'sha256:lockrace', 1, 1, 'sha256:lockrace', now() AT TIME ZONE 'UTC');"
     }
 
     retire() {
@@ -874,10 +877,10 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
            VALUES (uuidv7(), '$P', 'out', 'lgp', 'p', now()),
                   (uuidv7(), '$DEP', 'out', 'lgd', 'd', now()),
                   (uuidv7(), '$Q', 'out', 'lgq', 'q', now());
-         INSERT INTO cached_path (id, hash, package, file_hash, created_at)
-           VALUES (uuidv7(), 'lgp', 'p', 'sha256:p', now()), (uuidv7(), 'lgq', 'q', 'sha256:q', now());" >/dev/null
+         INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, nar_size, nar_hash, created_at)
+           VALUES (uuidv7(), 'lgp', 'lgp', 'p', 'sha256:p', 1, 'sha256:p', now()), (uuidv7(), 'lgq', 'lgq', 'q', 'sha256:q', 1, 'sha256:q', now());" >/dev/null
       if [ "$1" = present ]; then
-        q "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());" >/dev/null
+        q "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, nar_size, nar_hash, created_at) VALUES (uuidv7(), 'lgd', 'lgd', 'd', 'sha256:d', 1, 'sha256:d', now());" >/dev/null
       fi
       : > $D/a.out
       : > $D/b.out
@@ -910,7 +913,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
     send_b "BEGIN;"
     send_b "$(bind "$LOCK_SHARED_BUILDS" "'{$DEP}'")"
-    send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
+    send_b "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, nar_size, nar_hash, created_at) VALUES (uuidv7(), 'lgd', 'lgd', 'd', 'sha256:d', 1, 'sha256:d', now());"
     idle_tx b "flip-first: the flip never held D"
     send_a "BEGIN;"
     send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
@@ -929,7 +932,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     reset absent
     send_b "BEGIN;"
     send_b "$(bind "$LOCK_SHARED_BUILDS" "'{$DEP}'")"
-    send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
+    send_b "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, nar_size, nar_hash, created_at) VALUES (uuidv7(), 'lgd', 'lgd', 'd', 'sha256:d', 1, 'sha256:d', now());"
     idle_tx b "unguarded: the flip never held D"
     send_a "BEGIN;"
     send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
@@ -956,7 +959,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     send_a "COMMIT;"
     idle a "seed-first: the seed never committed"
     idle_tx b "seed-first: the flip never resumed"
-    send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
+    send_b "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, nar_size, nar_hash, created_at) VALUES (uuidv7(), 'lgd', 'lgd', 'd', 'sha256:d', 1, 'sha256:d', now());"
     send_b "$(bind "$SEED" "'{$DEP}'" "'{t}'")"
     send_b "$(bind "$RIPPLE" "'{$DEP}'" "true")"
     send_b "COMMIT;"
@@ -1681,7 +1684,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
     def nar_object(name):
         h = name.split("-")[0]
-        return f"/var/lib/gradient/nars/{h[:2]}/{h[2:]}.nar.zst"
+        key = sql(
+            f"SELECT nar_object_storage_key FROM cached_path WHERE hash = '{h}' "
+            f"ORDER BY created_at DESC, id DESC LIMIT 1;"
+        )
+        return f"/var/lib/gradient/nars/{key[:2]}/{key[2:]}.nar.zst" if key else None
 
     dep_name = next(
         (n for n in (name.strip() for name in refs)
@@ -1693,9 +1700,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     dep_hash = dep_name.split("-")[0]
     dep_object = nar_object(dep_name)
 
-    if server.execute(f"test -f {dep_object}")[0] != 0:
+    if not dep_object or server.execute(f"test -f {dep_object}")[0] != 0:
         print(f"{dep_path} is complete in the index with no local object; pushing it first")
         server.succeed(f"{CLI} cache upload main {dep_path}")
+        dep_object = nar_object(dep_name)
+    assert dep_object, f"no rows of cached_path point to the NAR object after upload of {dep_path}"
     server.succeed(f"test -f {dep_object}")
 
     siblings = sql(
@@ -1705,7 +1714,10 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"                      WHERE hash = '{dep_hash}') AND o.hash <> '{dep_hash}';"
     ).splitlines()
     for sibling in (s.strip() for s in siblings):
-        if not sibling or server.execute(f"test -f {nar_object(sibling)}")[0] == 0:
+        if not sibling:
+            continue
+        sibling_nar_object_file_path = nar_object(sibling)
+        if sibling_nar_object_file_path and server.execute(f"test -f {sibling_nar_object_file_path}")[0] == 0:
             continue
         if server.execute(f"nix-store --check-validity /nix/store/{sibling} >/dev/null 2>&1")[0] != 0:
             print(f"{sibling} shares the producer, has no object and the store cannot realize its path; "
@@ -2201,8 +2213,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
     for node, unit in fleet_units():
         node.succeed(f"systemctl stop {unit}.service")
-    for h in outputs:
-        server.succeed(f"rm -f {nar_object(h)}")
+    for nar_object_path in filter(None, map(nar_object, outputs)):
+        server.succeed(f"rm -f {nar_object_path}")
     server.succeed(
         f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
         f"{API}/admin/maintenance/deep-gc"
@@ -2438,6 +2450,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     hello_paths = [h for h in (store_hash, drv_hash)
                    if sql(f"SELECT count(*) FROM cached_path WHERE hash = '{h}';") == "1"]
     assert store_hash in hello_paths, "hello's output is not cached; the eviction would prove nothing"
+    hello_output_nar_object_file_path_before_gc = nar_object(store_hash)
+    assert hello_output_nar_object_file_path_before_gc, (
+        "The NAR object for hello's output is absent before GC. A check that GC deleted the object can prove nothing.")
+    server.succeed(f"test -f {hello_output_nar_object_file_path_before_gc}")
+    hello_nar_object_file_paths_before_gc = list(filter(None, map(nar_object, hello_paths)))
 
     sql(f"DELETE FROM build_job WHERE derivation = '{hello_drv}';")
     sql(f"DELETE FROM entry_point WHERE derivation = '{hello_drv}';")
@@ -2449,8 +2466,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     listed = "', '".join(hello_paths)
     poll(f"SELECT count(*) FROM cached_path WHERE hash IN ('{listed}');", "0",
          "hello's paths outlived the only derivation that reached them", timeout=240)
-    for h in hello_paths:
-        server.fail(f"test -e {nar_object(h + '-hello')}")
+    for nar_object_path in hello_nar_object_file_paths_before_gc:
+        server.fail(f"test -e {nar_object_path}")
     assert sql(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';") == "1", \
         "a path its own name still reaches left the cache with hello"
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the GC and the eviction"
@@ -2789,11 +2806,38 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "INSERT INTO exec_job_continuation (exec_job, evaluation, attributes, status, created_at, updated_at) "
         "SELECT id, evaluation, '[]'::jsonb, 2, created_at, created_at FROM exec_job;"
     )
+    sql(
+        "INSERT INTO team (id, name, display_name, created_by, created_at) "
+        "SELECT gen_random_uuid(), 'gate', 'gate', id, now() AT TIME ZONE 'UTC' "
+        "FROM \"user\" ORDER BY created_at LIMIT 1;"
+    )
+    sql(
+        "INSERT INTO team_worker (id, team, worker_id, token_hash, display_name, created_by, created_at) "
+        "SELECT gen_random_uuid(), id, 'gate', 'gate', 'gate', created_by, created_at "
+        "FROM team WHERE name = 'gate' LIMIT 1;"
+    )
+    sql(
+        "INSERT INTO team_project (id, team, project, includes_users, includes_workers, created_at) "
+        "SELECT gen_random_uuid(), t.id, p.id, false, true, t.created_at "
+        "FROM team t JOIN project p ON p.name = 'project' WHERE t.name = 'gate' LIMIT 1;"
+    )
+    sql(
+        "INSERT INTO team_cache (id, team, cache, role, created_at) "
+        "SELECT gen_random_uuid(), t.id, c.id, r.id, t.created_at "
+        "FROM team t JOIN cache c ON c.name = 'main' "
+        "JOIN cache_role r ON r.cache IS NULL OR r.cache = c.id "
+        "WHERE t.name = 'gate' ORDER BY r.name LIMIT 1;"
+    )
+    sql(
+        "INSERT INTO cli_device_authorization (id, device_code_hash, user_code, user_id, created_at, expires_at) "
+        "SELECT gen_random_uuid(), 'gate', 'GATE-GATE', id, created_at, created_at "
+        "FROM \"user\" ORDER BY created_at LIMIT 1;"
+    )
 
     print(server.succeed(
         "${pkgs.gradient.gate}/bin/gradient-sql-gate "
         "--database-url postgresql://postgres@127.0.0.1/gradient "
-        "--max-unmeasured 40 2>/dev/console"
+        "--max-unmeasured 33 2>/dev/console"
     ))
 
     banner("E2E test PASSED")

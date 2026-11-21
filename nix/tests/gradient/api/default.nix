@@ -10,7 +10,10 @@
     globalTimeout = 600;
 
     nodes = {
-      machine = ./shared-test-machine.nix;
+      machine = {
+        imports = [ ./shared-test-machine.nix ];
+        services.gradient.registration.enable = true;
+      };
     };
 
     interactive.nodes = {

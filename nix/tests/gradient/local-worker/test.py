@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# A server and a co-located worker, configured with nothing but two `enable`
-# flags. Proves the module provisions the worker's credentials itself and that
-# a project created afterwards picks the worker up without a registration step.
+# Two `enable` flags and no other settings configure the worker on the same host as the server.
+# These facts prove three points. The module can provision the worker credentials on its own. New
+# projects get no worker. Admins grant team `server` and hand a worker over.
 
 from datetime import timedelta
 import json
@@ -50,7 +50,7 @@ machine.wait_for_open_port(3000)
 machine.wait_for_unit("gradient-worker.service")
 machine.wait_until_succeeds("journalctl -u gradient-server.service | grep -q 'Created team worker'", timeout=timedelta(seconds=60))
 
-banner("A new project enables the worker with no registration step")
+banner("New projects get no local workers without permission.")
 admin = api("POST", "auth/basic/login", body=json.dumps({
     "loginname": "admin", "password": "admin_password"}))
 assert admin, "admin login returned empty token"
@@ -66,17 +66,24 @@ api("PUT", "caches", token=admin, body=json.dumps({
 api("POST", "projects/demo/subscribe/democache", token=admin)
 
 workers = api("GET", "projects/demo/workers", token=admin)
+assert not any(w.get("team") == "server" for w in workers), \
+    "new projects don't acquire local workers without administrator approval"
+
+banner("Admin rights grant the project a local worker.")
+api("POST", "projects/demo/teams", token=admin, body=json.dumps({
+    "team": "server", "users": False, "workers": True}))
+workers = api("GET", "projects/demo/workers", token=admin)
 entry = next((w for w in workers if w.get("team") == "server"), None)
 assert entry is not None, f"local worker missing from the project's worker list: {workers}"
 identity = entry["worker_id"]
 assert len(identity) == 36 and identity.count("-") == 4, \
     f"identity is not a UUID: {identity!r}"
-assert entry["active"], "the server team's worker should serve a new project"
+assert entry["active"], "worker of the server team is active in the allowed project"
 
 banner("Worker authenticates and reports live")
-# Until the project existed the worker was refused (no project granted the
-# server team's workers), so it is sitting in its reconnect backoff. Restart it to retry now
-# rather than making the test wait out a delay it is not asserting on.
+# The server denied the worker until the project had a grant for the server team's worker. The
+# worker entered reconnect backoff. The test made no assertion about that delay. Restart the worker
+# so it can retry now.
 machine.systemctl("restart gradient-worker.service")
 
 

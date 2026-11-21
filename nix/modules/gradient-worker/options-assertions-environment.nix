@@ -14,10 +14,18 @@
     [ "build" "cgroup" ]
   ];
 
+  projectUuidStringOptionType = lib.types.strMatching "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+
+  workerResourceProjectsOption = lib.mkOption {
+    type = lib.types.either (lib.types.enum [ "all" ]) (lib.types.listOf projectUuidStringOptionType);
+    example = "all";
+    description = "Projects with jobs that can use this entry: `\"all\"`, or a list of project UUIDs. This entry is not present for jobs in projects outside the list.";
+  };
+
   workerOptions = import ../options.nix {
     inherit lib;
     specs = builtins.fromJSON (builtins.readFile ../../../backend/gradient-worker/options.json);
-    subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" "sops" ]; };
+    subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" "sops" "subnet" ]; };
     groupSwitches.exec = [ "capabilities" "exec" ];
 
     examples = {
@@ -26,13 +34,13 @@
       serverUrl = "wss://gradient.example.com/proto";
       zone = "fra1";
       log.traceDir = "/var/lib/gradient-worker/trace";
-      exec.sops.files = [ "/etc/gradient/worker-secrets.yaml" ];
     };
 
-    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] [ "guestSupervisor" ] ]
+    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] [ "guestSupervisor" ] [ "exec" "sops" "files" ] ]
       ++ workerOptionPathsOnlyLinuxModuleDeclares;
 
     writtenByHand = workerOptionPathsOnlyLinuxModuleDeclares ++ [
+      [ "exec" "sops" "files" ]
       [ "peers" ]
       [ "sshBin" ]
       [ "evalSubprocess" ]
@@ -52,8 +60,28 @@
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
   environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
 in {
+  inherit workerResourceProjectsOption;
+
   options = lib.recursiveUpdate workerOptions.options {
     enable = lib.mkEnableOption "the Gradient worker";
+
+    exec.sops.files = lib.mkOption {
+      type = lib.types.listOf (lib.types.submodule {
+        options = {
+          path = lib.mkOption {
+            type = lib.types.path;
+            apply = toString;
+            example = "/etc/gradient/worker-secrets.yaml";
+            description = "Path of the sops file on the worker host.";
+          };
+
+          projects = workerResourceProjectsOption;
+        };
+      });
+      default = [ ];
+      example = lib.literalExpression ''[ { path = "/etc/gradient/worker-secrets.yaml"; projects = "all"; } ]'';
+      description = "Sops files that the worker can decrypt with {option}`services.gradient.worker.exec.sops.keyFile`. Exec jobs fetch top-level values from a file by name, but only for jobs of projects in `projects` of that file. Values never reach the server.";
+    };
 
     environmentVariables = lib.mkOption {
       type = with lib.types; lazyAttrsOf (nullOr (oneOf [ bool int str path ]));
@@ -208,5 +236,7 @@ in {
     NIX_REMOTE = "daemon";
     XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
     GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
+  } // lib.optionalAttrs (cfg.capabilities.exec && cfg.exec.sops.files != [ ]) {
+    GRADIENT_WORKER_EXEC_SOPS_FILES = builtins.toJSON cfg.exec.sops.files;
   } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
 }

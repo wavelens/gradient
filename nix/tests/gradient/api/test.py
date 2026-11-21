@@ -10,6 +10,8 @@
 # services (OIDC, SMTP e-mail verification, Git host webhooks, proto websockets,
 # build-request dispatch) have dedicated tests and are out of scope here.
 
+import base64
+import compression.zstd
 import hashlib
 import json
 import time
@@ -26,6 +28,15 @@ machine.wait_for_unit("nginx.service")
 
 def banner(msg):
     print(f"\n=== {msg} ===")
+
+
+def regular_file_contents_to_nar_and_zstd(contents):
+    def encode_nar_string_field(field):
+        return len(field).to_bytes(8, "little") + field + b"\0" * (-len(field) % 8)
+
+    nar = b"".join(encode_nar_string_field(field) for field in (
+        b"nix-archive-1", b"(", b"type", b"regular", b"contents", contents, b")"))
+    return nar, compression.zstd.compress(nar)
 
 
 def curl(method, path, token=None, body=None, headers=None):
@@ -387,26 +398,30 @@ api("DELETE", "projects/myproject/subscribe/maincache", token=token)
 api("POST", "projects/myproject/subscribe/maincache", token=token)
 
 # ── Phase 7: cache NAR upload surface (direct + CLI) ──────────────────────────
-# No nix store is needed: the endpoint validates byte length, store-path shape,
-# and the reported file_hash against the uploaded bytes, so a synthetic NAR whose
-# narinfo carries its real sha256 exercises the whole surface.
+# No Nix store needed. The server can decode the zstd file. It can check NarHash,
+# NarSize and references against the decoded NAR. The test driver can build the
+# actual NAR for one regular file and compress it with zstd.
 banner("Phase 7: cache NAR upload / list / show / stats / delete")
 assert api("GET", "caches/maincache/nars", token=token)["items"] == [], "cache starts empty"
 
 cli_hash = "00000000000000000000000000000000"
-payload = "gradient-test-nar-payload"
-size = len(payload)
-machine.succeed(f"printf '%s' '{payload}' > /tmp/cli.nar")
-file_hash = "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+uploaded_uncompressed_nar_bytes, uploaded_zstd_compressed_nar_bytes = (
+    regular_file_contents_to_nar_and_zstd(b"gradient-test-nar-payload"))
+nar_hash = "sha256:" + hashlib.sha256(uploaded_uncompressed_nar_bytes).hexdigest()
+nar_size_byte_length = len(uploaded_uncompressed_nar_bytes)
+file_hash = "sha256:" + hashlib.sha256(uploaded_zstd_compressed_nar_bytes).hexdigest()
+compressed_nar_file_byte_length = len(uploaded_zstd_compressed_nar_bytes)
+machine.succeed(
+    f"echo {base64.b64encode(uploaded_zstd_compressed_nar_bytes).decode()} | base64 -d > /tmp/cli.nar")
 machine.succeed(
     "cat > /tmp/cli.narinfo <<'EOF'\n"
     f"StorePath: /nix/store/{cli_hash}-test\n"
-    "URL: nar/cli.nar\n"
-    "Compression: none\n"
+    f"URL: nar/{cli_hash}.nar.zst\n"
+    "Compression: zstd\n"
     f"FileHash: {file_hash}\n"
-    f"FileSize: {size}\n"
-    f"NarHash: {file_hash}\n"
-    f"NarSize: {size}\n"
+    f"FileSize: {compressed_nar_file_byte_length}\n"
+    f"NarHash: {nar_hash}\n"
+    f"NarSize: {nar_size_byte_length}\n"
     "References: \n"
     "EOF"
 )
@@ -423,11 +438,11 @@ cli("cache nar stats maincache")
 
 # Second NAR via direct multipart upload.
 direct_hash = "11111111111111111111111111111111"
-machine.succeed(f"printf '%s' '{payload}' > /tmp/direct.nar")
+machine.succeed("cp /tmp/cli.nar /tmp/direct.nar")
 narinfo_json = json.dumps({
     "store_path": f"/nix/store/{direct_hash}-test",
-    "file_hash": file_hash, "file_size": size,
-    "nar_hash": file_hash, "nar_size": size,
+    "file_hash": file_hash, "file_size": compressed_nar_file_byte_length,
+    "nar_hash": nar_hash, "nar_size": nar_size_byte_length,
     "references": [], "deriver": None,
 })
 machine.succeed(f"cat > /tmp/direct.narinfo.json <<'EOF'\n{narinfo_json}\nEOF")
@@ -514,7 +529,9 @@ machine.succeed("su postgres -c 'psql -d gradient -f /tmp/superuser.sql'")
 
 # JSON format returns the full StateConfiguration shape with secrets redacted.
 state = api("GET", "admin/state?format=json", token=token)
-assert "operator" in state["users"], state["users"]
+assert "operator" not in state["users"], state["users"]
+assert {"stateadmin", "statemember"} <= state["users"].keys(), state["users"]
+assert state["projects"]["myproject"]["created_by"] == "", state["projects"]["myproject"]
 assert "myproject" in state["projects"], state["projects"]
 assert "mytask" in state["tasks"], state["tasks"]
 assert "maincache" in state["caches"], state["caches"]
@@ -657,9 +674,10 @@ assert project_connections["state-events"]["owner"] == {"type": "project", "name
 assert project_connections["state-events"]["managed"] is True, project_connections
 assert project_connections["state-events"]["task_count"] == 1, project_connections
 fitted_connections = {c["name"]: c for c in api(
-    "GET", "projects/stateproject/git-host-connections?repository=" + quote(proj["repository"], safe=""), token=sa_token)}
+    "GET", "projects/stateproject/git-host-connections?repository=" + quote("git@github.com:Wavelens/Gradient.git", safe=""), token=sa_token)}
 assert fitted_connections["state-events"]["repository_fit"] == {
-    "fits": False, "can_be_selected": True, "reason": "No host URL"}, fitted_connections
+    "fits": False, "can_be_selected": False,
+    "reason": "Repository host github.com and connection host gitea.example.com differ"}, fitted_connections
 state_repository = api("GET", "tasks/stateproject/statetask/repository", token=sa_token)
 assert state_repository["git_host_connection"]["name"] == "state-events", state_repository
 assert state_repository["chain"]["connection"]["state"], state_repository
@@ -695,19 +713,23 @@ assert "ssh-ng://" in refused, refused
 machine.fail(f"{ssh} unknownproject@localhost nix-daemon --stdio < /dev/null")
 assert api("GET", "user/ssh-keys", token=token)[0]["last_used_at"] is not None
 
-# Copy in and back out through the state project's cache.
+# state project can't read back its ssh-ng upload. Round trip via myproject signed cache.
 sa_pub = machine.succeed(
     "ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/gradient-sa && cat /root/.ssh/gradient-sa.pub"
 ).strip()
 api("POST", "user/ssh-keys", token=sa_token, body=json.dumps({"name": "vm", "public_key": sa_pub}))
 sa_ssh = "NIX_SSHOPTS='-p 2222 -i /root/.ssh/gradient-sa -o StrictHostKeyChecking=no'"
 nix = "nix --extra-experimental-features nix-command"
-store = "ssh-ng://stateproject@localhost"
 copied = machine.succeed("echo ssh-copy > /tmp/ssh-copy && nix-store --add /tmp/ssh-copy").strip()
-machine.succeed(f"{sa_ssh} {nix} copy --to {store} {copied}")
-machine.succeed(f"{sa_ssh} {nix} path-info --store {store} {copied}")
+machine.succeed(f"{sa_ssh} {nix} copy --to ssh-ng://stateproject@localhost {copied}")
+machine.fail(f"{sa_ssh} {nix} path-info --store ssh-ng://stateproject@localhost {copied}")
+api("POST", "caches/maincache/active", token=token)
+user_ssh = sa_ssh.replace("gradient-sa", "gradient")
+store = "ssh-ng://myproject@localhost"
+machine.succeed(f"{user_ssh} {nix} copy --to {store} {copied}")
+machine.succeed(f"{user_ssh} {nix} path-info --store {store} {copied}")
 machine.succeed(f"nix-store --delete {copied}")
-machine.succeed(f"{sa_ssh} {nix} copy --no-check-sigs --from {store} {copied}")
+machine.succeed(f"{user_ssh} {nix} copy --no-check-sigs --from {store} {copied}")
 machine.succeed(f"grep -q ssh-copy {copied}")
 
 # ── Phase 9: logout ───────────────────────────────────────────────────────────

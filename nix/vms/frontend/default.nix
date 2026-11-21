@@ -317,7 +317,7 @@ in {
           };
           exec = {
             image = guestImage;
-            subnet = "10.233.0.0/16";
+            subnet.v4 = "10.233.0.0/16";
           };
         };
       };

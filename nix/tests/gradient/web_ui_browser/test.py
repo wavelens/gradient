@@ -19,7 +19,7 @@ machine.succeed(
 )
 
 status, output = machine.execute(
-    f"cd {VM_PLAYWRIGHT_SPEC_RUN_DIRECTORY} && GRADIENT_WEB_UI_BASE_URL=http://localhost"
+    f"cd {VM_PLAYWRIGHT_SPEC_RUN_DIRECTORY} && GRADIENT_WEB_UI_BASE_URL=http://gradient.local"
     f" PLAYWRIGHT_BROWSERS_PATH={PLAYWRIGHT_CHROMIUM_BROWSERS_STORE_PATH}"
     " PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true"
     " playwright test 2>&1",
