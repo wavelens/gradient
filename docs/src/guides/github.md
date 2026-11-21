@@ -51,7 +51,7 @@ Click **Install on GitHub** in the **GitHub App** section. Select the account th
 
 - Each installation is a connection named `github-<account>` with the instance as owner.
 - Tasks only use that connection, if they have [repository grant](../concepts/projects-and-tasks.md#repository-grants) for their repository. Superusers create grants. Declared tasks get grants from the state file. Connections receive events and report status.
-- Gradient links a new installation to every task that has no connection, a repository in the installation account and a repository grant for that repository.
+- Gradient links a new installation to every task that has no connection, a repository in the installation account and a repository grant for that repository. A new repository grant can link the same task later. That task is unmanaged. The task has no connection and has the target repository of the grant.
 - All installations appear under the App with their account, last event and task count.
 - Deletions of a GitHub installation remove the connection.
 

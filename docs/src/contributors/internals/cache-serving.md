@@ -40,6 +40,7 @@ sequenceDiagram
     - Claims also cover the store paths that the claimed path references. Rows where `references_are_claimed` is set end the walk over references. Values in that column record existing rows for all referenced paths in the same cache.
     - Recorded batches sign the already cached outputs of their jobs into their project's caches. Builds finished earlier for another project qualify too.
     - The sign sweep (`sign_missing_signatures` in `gradient-cache/src/signatures.rs`) fills rows inserted with a later subscription.
+    - Subscriptions that start signing record the request time in `project_cache`. The backfill process for signatures (`signature-backfill` in `gradient-cache/src/signature_backfill_pass.rs`) can write unsigned rows for earlier project outputs. This process can then start the signature sweep. Those rows get their signatures from the sweep.
     - Signatures from the signature sweep also go on unsigned rows that pass `cache_can_sign_content_variant_sql_condition`.
 
 ## Narinfo

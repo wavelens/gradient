@@ -54,6 +54,7 @@ A task can use the connection to the Git host of an instance or team only with a
 - **Team Connections**: Projects outside the team don't get a grant for the team connection.
 - **Host**: The repository URL must point to the host of the connection. Gitea and Forgejo connections need a base URL for this check.
 - **Declarative Tasks**: Tasks declared in `services.gradient.state` get a grant from the state file for exactly their own repository. `open_pr` actions with an instance connection or a team connection also get their own grant from the state file, for exactly the repository of each action. Tasks that leave the state file no longer have a grant.
+- **Linking**: New grants link every task in a project without a connection. The target repositories of the grant define the scope. New grants also link tasks whose connection was removed earlier. Tasks with a connection keep that connection. Tasks declared in the state file don't change. Takeovers of grants in the state file link no tasks. Grant removals leave the links in place. Connections stop acting for those tasks.
 
 A task without a grant:
 
@@ -72,7 +73,7 @@ Grants don't have a UI page yet. Superusers and team admins manage grants throug
 
 - **`repository_name`**: Optional. Omit the field for an owner grant. GitLab subgroups belong in the name. Take owner `group` and name `sub/app`. That grant matches only `group/sub/app`.
 - **`project_name`**: The project name is empty in the team list after the project left the team. Deleting the grant still works.
-- **Takeover**: Create requests for a grant made by the state file or a version upgrade turn that grant into an admin grant. Task removals from the state file leave that admin grant in place.
+- **Takeover**: Creation requests for grants from a state file or a version upgrade turn those grants into admin grants. Takeover doesn't link tasks. Only newly created grants link fitting tasks. A task removal from the state file does not affect the admin grant.
 - **`400`**: An owner that isn't a single path segment. A name with an empty segment, `.` or `..`, or `.git` at the end. An owner or name over 255 characters. A project outside the team.
 - **`404`**: The connection belongs to another owner, or the project doesn't exist.
 - **`409`**: Identical admin grants already exist.

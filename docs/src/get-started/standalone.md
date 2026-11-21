@@ -74,6 +74,14 @@ Set up a cache, a project and a task by following [First Project](first-project.
 !!! tip "Private Repositories"
     On the Git host, register the project's public SSH key from **Settings -> SSH Key** as a deploy key.
 
+!!! tip "Git Hosts on Private Addresses"
+    Gradient can connect only to Git hosts on public addresses. Environment variables in the `/var/lib/gradient-standalone/server-environment` file on the volume define server settings, one `NAME=value` per line. Gradient can read that file at each server start. Add the line below to allow Git hosts on the Docker bridge network `172.17.0.0/16`.
+
+    ```sh
+    docker exec gradient sh -c 'echo GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS=172.17.0.0/16 \
+      >> /var/lib/gradient-standalone/server-environment && systemctl restart gradient-server.service'
+    ```
+
 ## Verify Deployment
 
 - The login page loads at `http://localhost:8080`.
