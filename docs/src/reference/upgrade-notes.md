@@ -298,6 +298,9 @@ Trust rules affect only what a cache can sign and serve to outside readers. A bu
 - The type for NixOS option `services.gradient.state.caches.<cache>.projects.*.sign_outputs` is `null or bool` with default `null` (previously `bool` with default `true`).
 - Read-only subscriptions with `sign_outputs = true` in the NixOS module fail an assertion at evaluation time.
 - Existing read-only subscriptions stop signing outputs during the upgrade.
+- Requests that enable signing return immediately. A background job can fill in signatures for earlier outputs. Time can vary with the number of outputs in the project.
+- Servers backfill missing signed entries once per signing subscription in the background after upgrade. The job can cost ~1.3s per 100k output hashes of a project. The sign sweep can then sign these entries the same way as for a new subscription.
+- Approved subscription requests and subscriptions from the state file now get signatures for earlier outputs. Only subscribe requests and change requests through the REST API added signatures before the upgrade.
 - Stored signatures remain with ``sign_outputs`` off. New outputs stay unsigned.
 - Project members lose the ability to view and download from a private cache when the project subscription to that cache is write-only. Project subscriptions to inactive private caches follow the same rule. Members with their own role in the cache keep that role's permissions.
 - New worker outputs stay unsigned in the cache with signing off for that subscription. New uploads over SSH and build requests over REST also create no signature or upload record in that cache. Signatures from before the upgrade remain.
@@ -598,14 +601,17 @@ Upstream cache narinfos now go through a single strict parser on the server. Nar
 
 ### Destinations in Private Networks
 
-The server connects only to public IP addresses by default for upstream cache URLs, API URLs of Git hosts, action URLs and outbound webhook URLs.
+The server connects only to public IP addresses for upstream cache URLs, Git host API URLs, action URLs, outbound webhook URLs, Git repository URLs of tasks (git, http, https, ssh) and the SSH host key scan by default.
 
 - Gradient does not accept hosts with loopback, private or link-local addresses. Gradient also does not accept hosts with an address of one of the server's own network interfaces.
 - Admins list the allowed targets with the NixOS option `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`). Private targets have no entry in the default value (`[ ]`).
-- Entries accept CIDR ranges, IP addresses, or hostnames that match exactly. Add the API addresses of self-hosted Git hosts and internal caches here.
+- Entries accept a CIDR range, an IP address, or an exact-match hostname. Add the API address and the repository address of self-hosted Git hosts and internal caches here.
 - Existing upstream caches and webhooks with a private address or the server's own address stop working after the upgrade until they appear in this option.
+- Tasks that have repositories on private addresses fail to fetch after the upgrade. Fetch can resume only after that host is in this option. The standalone image can read this option from the `GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS=<targets>` line in `/var/lib/gradient-standalone/server-environment`. HTTPS Git connections share certificate sources with other Gradient connections (system store, `SSL_CERT_FILE`, `SSL_CERT_DIR`) and ignore `NIX_SSL_CERT_FILE`, while server certificates need a subjectAltName host name.
+- Workers apply the allowlist of the Gradient server that they connect to when their jobs open Git connections. Workers receive the allowlist at session start and have no configuration of their own. Git connections from the Gradient server and workers fall under the allowlist, not downloads Nix makes itself, such as flake inputs and fixed-output builds.
 - Refused upstream caches produce one warning each in the log. Changes in the refusal reason produce the warning again. The log fields are `upstream`, `host` and `reason`. The warning prefix is `The server refused to fetch from this upstream cache.`.
 - Rejected webhook deliveries show the text below in `error_message` of `GET .../webhooks/{id}/deliveries`.
+- Rejected repository checks and host key scans display the same text as rejected Webhook deliveries. That text is below.
 - Hosts in `giteaApp.instanceBaseUrl` stay reachable without an entry.
 - The upstream host must resolve at creation time. An HTTP upstream host must also resolve at `PATCH` time for the URL.
 - Hostnames without an address, or with only refused addresses, receive the text below.
