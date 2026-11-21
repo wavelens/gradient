@@ -4,8 +4,9 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (gitHostConnectionOwner().type === 'project') {
-  <app-git-host-oauth-return-banner />
+@let owner = gitHostConnectionOwner();
+@if (owner.type === 'project') {
+  <app-git-host-oauth-return-banner [projectName]="owner.name" (gitHostConnectionCreated)="load()" />
 }
 
 <gr-load-state [loading]="loading()" [error]="loadError()" loadingMessage="Loading Git host connections..."
@@ -87,6 +88,12 @@
                   [attr.aria-label]="'Deliveries of ' + connection.display_name"
                   [attr.aria-expanded]="deliveriesShownFor() === connection.id" (click)="toggleDeliveries(connection)"></button>
               }
+              @if (canCurrentUserListRepositoryGrants(connection)) {
+                <button grButton label="Grants" icon="lock" severity="secondary" size="small"
+                  [attr.aria-label]="'Repository Grants for ' + connection.display_name"
+                  [attr.aria-expanded]="expandedRepositoryGrantsConnectionId() === connection.id"
+                  (click)="toggleRepositoryGrantsVisibility(connection)" data-testid="toggle-repository-grants"></button>
+              }
               @if (canEditRow(connection)) {
                 <button grButton label="Edit" icon="edit" severity="secondary" size="small"
                   [attr.aria-label]="'Edit ' + connection.display_name" [loading]="connectionDialog.openingId() === connection.id"
@@ -104,6 +111,10 @@
             }
             <app-incoming-deliveries [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id"
               [refusedSignature]="latestRefusedDeliveryNewerThanLastAccepted" />
+          }
+          @if (expandedRepositoryGrantsConnectionId() === connection.id && canCurrentUserListRepositoryGrants(connection)) {
+            <app-repository-grants [gitHostConnectionOwner]="connection.owner" [connectionId]="connection.id"
+              [canAddAndRemoveGrants]="writable()" />
           }
         </div>
       }

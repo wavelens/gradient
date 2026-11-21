@@ -35,6 +35,7 @@ import { formatEntityLabel } from '@shared/ui';
 import { GitHostConnectionDialogComponent } from './git-host-connection-dialog.component';
 import { accessTokenState, gitHostConnectionHost, refusedSignatureNewerThanLastDelivery } from './git-host-connection-health';
 import { GitHostOAuthReturnBannerComponent } from './git-host-oauth-return-banner.component';
+import { RepositoryGrantsComponent } from './repository-grants.component';
 
 @Component({
   selector: 'app-git-host-connection-list',
@@ -51,6 +52,7 @@ import { GitHostOAuthReturnBannerComponent } from './git-host-oauth-return-banne
     IncomingDeliveriesComponent,
     GitHostConnectionDialogComponent,
     GitHostOAuthReturnBannerComponent,
+    RepositoryGrantsComponent,
   ],
   templateUrl: './git-host-connection-list.component.html',
   styleUrl: './git-host-connection-list.component.scss',
@@ -89,6 +91,7 @@ export class GitHostConnectionListComponent implements OnInit {
   testingId = signal<string | null>(null);
   linkedId = signal<string | null>(null);
   menuItems = signal<MenuItem[]>([]);
+  expandedRepositoryGrantsConnectionId = signal<string | null>(null);
 
   writable = computed(() => this.accessService.isWritable(this.access()));
   private shownConnections = computed(() => {
@@ -155,6 +158,14 @@ export class GitHostConnectionListComponent implements OnInit {
 
   toggleDeliveries(connection: GitHostConnectionSummary): void {
     this.deliveriesShownFor.update((shown) => (shown === connection.id ? null : connection.id));
+  }
+
+  canCurrentUserListRepositoryGrants(connection: GitHostConnectionSummary): boolean {
+    return (connection.can_manage ?? false) && connection.owner.type !== 'project';
+  }
+
+  toggleRepositoryGrantsVisibility(connection: GitHostConnectionSummary): void {
+    this.expandedRepositoryGrantsConnectionId.update((shown) => (shown === connection.id ? null : connection.id));
   }
 
   toggleTasks(connection: GitHostConnectionSummary): void {

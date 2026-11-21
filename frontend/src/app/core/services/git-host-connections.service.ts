@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
   CreateGitHostConnectionRequest,
+  CreateRepositoryGrantRequest,
   GitHostConnectionOwner,
   GitHostConnectionResponse,
   GitHostConnectionSummary,
@@ -16,6 +17,7 @@ import {
   GitHostConnectionTestResponse,
   IncomingWebhookDeliveryResponse,
   PatchGitHostConnectionRequest,
+  RepositoryGrantResponse,
 } from '@core/models';
 
 export function getOwnerGitHostConnectionsPathPrefix(owner: GitHostConnectionOwner): string {
@@ -64,5 +66,21 @@ export class GitHostConnectionsApi {
 
   test(owner: GitHostConnectionOwner, id: string): Observable<GitHostConnectionTestResponse> {
     return this.api.post<GitHostConnectionTestResponse>(`${getOwnerGitHostConnectionsPathPrefix(owner)}/${id}/test`);
+  }
+
+  getGitHostConnectionRepositoryGrants(owner: GitHostConnectionOwner, id: string): Observable<RepositoryGrantResponse[]> {
+    return this.api.get<RepositoryGrantResponse[]>(`${getOwnerGitHostConnectionsPathPrefix(owner)}/${id}/repository-grants`);
+  }
+
+  addRepositoryGrantToGitHostConnection(
+    owner: GitHostConnectionOwner,
+    id: string,
+    body: CreateRepositoryGrantRequest,
+  ): Observable<RepositoryGrantResponse> {
+    return this.api.put<RepositoryGrantResponse>(`${getOwnerGitHostConnectionsPathPrefix(owner)}/${id}/repository-grants`, body);
+  }
+
+  deleteRepositoryGrantOfGitHostConnection(owner: GitHostConnectionOwner, id: string, grantId: string): Observable<boolean> {
+    return this.api.delete<boolean>(`${getOwnerGitHostConnectionsPathPrefix(owner)}/${id}/repository-grants/${grantId}`);
   }
 }

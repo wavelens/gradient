@@ -31,7 +31,7 @@ import {
   SelectComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, entityToPickerOption, type DisplayNameAndName } from '@shared/ui';
-import { fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
+import { fieldChecks, getUrlOriginOrRawText, injectRevealFirstInvalid } from '@shared/forms';
 import { links } from '@shared/routing';
 
 type FormMode = 'create' | 'edit';
@@ -136,6 +136,13 @@ export class ActionFormComponent implements OnChanges {
   url = signal('');
   tokenValue = signal('');
   homeserver = signal('');
+  initialHomeserverUrl = signal('');
+  accessTokenRequiredBecauseHomeserverUrlChanged = computed(
+    () =>
+      this.mode() === 'edit' &&
+      !!this.initialHomeserverUrl() &&
+      getUrlOriginOrRawText(this.homeserver().trim()) !== getUrlOriginOrRawText(this.initialHomeserverUrl()),
+  );
   roomId = signal('');
   secretValue = signal('');
   gitHostConnectionId = signal('');
@@ -212,7 +219,7 @@ export class ActionFormComponent implements OnChanges {
         (MATRIX_ROOM_ID.test(this.roomId().trim())
           ? null
           : 'Start the room ID with ! and use no spaces (for example !abc:example.org).'),
-      matrixToken: creating ? required(this.secretValue(), 'Enter the access token.') : null,
+      matrixToken: creating || this.accessTokenRequiredBecauseHomeserverUrlChanged() ? required(this.secretValue(), 'Enter the access token.') : null,
       slackUrl: creating
         ? requiredUrl(this.secretValue(), 'Enter the webhook URL.')
         : fieldChecks.httpUrl(this.secretValue()),
@@ -286,6 +293,7 @@ export class ActionFormComponent implements OnChanges {
     this.url.set('');
     this.tokenValue.set('');
     this.homeserver.set('');
+    this.initialHomeserverUrl.set('');
     this.roomId.set('');
     this.secretValue.set('');
     this.gitHostConnectionId.set('');
@@ -325,6 +333,7 @@ export class ActionFormComponent implements OnChanges {
         break;
       case 'send_matrix_message':
         this.homeserver.set(cfg.homeserver);
+        this.initialHomeserverUrl.set(cfg.homeserver);
         this.roomId.set(cfg.room_id);
         break;
       case 'send_slack_message':

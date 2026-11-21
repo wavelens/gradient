@@ -18,6 +18,7 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -31,14 +32,93 @@ import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { WritableDirective, SettingsAccessStateBadgeComponent, AccessService } from '@shared/access';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
-import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
+import {
+  UpstreamCacheItem,
+  CacheSubscriptionMode,
+  HttpUpstreamCredentialRequest,
+  PatchUpstreamRequest,
+  ProtocolProbe,
+} from '@core/models';
 import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache } from '@shared/forms';
 import { links } from '@shared/routing';
 import { SUBSCRIPTION_MODES, subscriptionModeLabel } from '@shared/text';
 import { BinaryCacheSettingsNavigationComponent } from '../cache-settings-navigation/cache-settings-navigation.component';
 
 type UpstreamType = 'internal' | 'gradient_proto' | 'http';
-type UpstreamErrors = Partial<Record<'cache_name' | 'display_name' | 'url' | 'remote_cache' | 'public_key', string | null>>;
+type HttpUpstreamCacheCredentialSelection = 'keep' | 'none' | 'basic' | 'bearer';
+type UpstreamErrors = Partial<
+  Record<
+    'cache_name' | 'display_name' | 'url' | 'remote_cache' | 'public_key' | 'credentialChoice' | 'basicAuthUserName' | 'password' | 'bearerToken',
+    string | null
+  >
+>;
+interface HttpUpstreamCredentialFields {
+  credentialChoice: HttpUpstreamCacheCredentialSelection;
+  basicAuthUserName: string;
+  password: string;
+  bearerToken: string;
+}
+
+const CREDENTIAL_NEEDS_HTTPS = 'Credentials need an https:// address.';
+
+const urlStartsWithPlainHttp = (url: string): boolean => url.trim().toLowerCase().startsWith('http://');
+
+function urlsHaveDifferentOrigins(first: string, second: string): boolean {
+  try {
+    return new URL(first.trim()).origin !== new URL(second.trim()).origin;
+  } catch {
+    return first.trim() !== second.trim();
+  }
+}
+
+function credentialFieldErrors(form: HttpUpstreamCredentialFields, url: string, attempted: boolean): UpstreamErrors {
+  switch (form.credentialChoice) {
+    case 'basic':
+      return {
+        credentialChoice: urlStartsWithPlainHttp(url) ? CREDENTIAL_NEEDS_HTTPS : null,
+        basicAuthUserName:
+          required(form.basicAuthUserName, attempted, 'Enter the user name.') ??
+          (form.basicAuthUserName.includes(':') ? "The user name can't contain a colon." : null),
+        password: attempted && !form.password ? 'Enter the password.' : null,
+      };
+    case 'bearer':
+      return {
+        credentialChoice: urlStartsWithPlainHttp(url) ? CREDENTIAL_NEEDS_HTTPS : null,
+        bearerToken: required(form.bearerToken, attempted, 'Enter a token.'),
+      };
+    default:
+      return {};
+  }
+}
+
+function buildCredentialRequestBody(form: HttpUpstreamCredentialFields): HttpUpstreamCredentialRequest | undefined {
+  switch (form.credentialChoice) {
+    case 'basic':
+      return { scheme: 'basic', user: form.basicAuthUserName.trim(), password: form.password };
+    case 'bearer':
+      return { scheme: 'bearer', token: form.bearerToken.trim() };
+    default:
+      return undefined;
+  }
+}
+
+function clearUpstreamCacheCredentialSecretFields(form: HttpUpstreamCredentialFields): void {
+  form.basicAuthUserName = '';
+  form.password = '';
+  form.bearerToken = '';
+}
+
+function setCredentialKindAndClearSecretsOfOtherKinds(
+  form: HttpUpstreamCredentialFields,
+  credentialChoice: HttpUpstreamCacheCredentialSelection,
+): void {
+  form.credentialChoice = credentialChoice;
+  if (credentialChoice !== 'basic') {
+    form.basicAuthUserName = '';
+    form.password = '';
+  }
+  if (credentialChoice !== 'bearer') form.bearerToken = '';
+}
 
 const DISPLAY_NAME_REQUIRED = 'Enter a display name.';
 const NIX_PUBLIC_KEY = /^[^\s:]+:[A-Za-z0-9+/]+={0,2}$/;
@@ -80,6 +160,7 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
     CheckboxComponent,
     InputDirective,
     LoadStateComponent,
+    MessageBannerComponent,
     WritableDirective,
     SettingsAccessStateBadgeComponent,
     PageLayoutComponent,
@@ -140,6 +221,10 @@ export class UpstreamCachesComponent implements OnInit {
     remote_cache: '',
     api_key: '',
     mode: 'ReadOnly' as CacheSubscriptionMode,
+    credentialChoice: 'none' as HttpUpstreamCacheCredentialSelection,
+    basicAuthUserName: '',
+    password: '',
+    bearerToken: '',
   };
 
   editForm = {
@@ -148,6 +233,10 @@ export class UpstreamCachesComponent implements OnInit {
     url: '',
     public_key: '',
     http1_only: false,
+    credentialChoice: 'keep' as HttpUpstreamCacheCredentialSelection,
+    basicAuthUserName: '',
+    password: '',
+    bearerToken: '',
   };
 
   readonly modes = SUBSCRIPTION_MODES;
@@ -156,6 +245,16 @@ export class UpstreamCachesComponent implements OnInit {
     { label: 'Gradient Proto', value: 'gradient_proto' },
     { label: 'HTTP', value: 'http' },
   ] as const;
+  readonly credentialTypeOptions = [
+    { label: 'None', value: 'none' },
+    { label: 'Basic', value: 'basic' },
+    { label: 'Bearer token', value: 'bearer' },
+  ] as const;
+  protected readonly credentialNeedsHttps = CREDENTIAL_NEEDS_HTTPS;
+  protected readonly credentialSentOnFetchStoredEncryptedAndNeverShownAgainHint =
+    'Upstream cache requests from the server carry this credential. Storage layers keep the value encrypted. Later displays never show the value again.';
+  protected readonly urlStartsWithPlainHttp = urlStartsWithPlainHttp;
+  protected readonly setCredentialKindAndClearSecretsOfOtherKinds = setCredentialKindAndClearSecretsOfOtherKinds;
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
@@ -195,6 +294,7 @@ export class UpstreamCachesComponent implements OnInit {
           display_name: required(form.display_name, attempted, DISPLAY_NAME_REQUIRED),
           url: urlError(form.url, attempted),
           public_key: publicKeyError(form.public_key, attempted),
+          ...credentialFieldErrors(form, form.url, attempted),
         };
     }
   }
@@ -202,9 +302,41 @@ export class UpstreamCachesComponent implements OnInit {
   editErrors(): UpstreamErrors {
     const form = this.editForm;
     const attempted = this.editAttempted();
+    const upstream = this.editingUpstream();
     const errors: UpstreamErrors = { display_name: required(form.display_name, attempted, DISPLAY_NAME_REQUIRED) };
-    if (this.editingUpstream()?.kind !== 'http') return errors;
-    return { ...errors, url: urlError(form.url, attempted), public_key: publicKeyError(form.public_key, attempted) };
+    if (upstream?.kind !== 'http') return errors;
+    const hostChangedWhileKeeping =
+      form.credentialChoice === 'keep' && urlsHaveDifferentOrigins(upstream.url ?? '', form.url);
+    return {
+      ...errors,
+      url: urlError(form.url, attempted),
+      public_key: publicKeyError(form.public_key, attempted),
+      ...credentialFieldErrors(form, form.url, attempted),
+      ...(hostChangedWhileKeeping
+        ? { credentialChoice: 'The address changed to a different host. Re-enter the credential or delete it.' }
+        : {}),
+    };
+  }
+
+  getCredentialChoiceTabOptions(): readonly { label: string; value: HttpUpstreamCacheCredentialSelection }[] {
+    if (!this.editingUpstream()?.credential_scheme) return this.credentialTypeOptions;
+    return [
+      { label: 'Keep', value: 'keep' },
+      { label: 'Basic', value: 'basic' },
+      { label: 'Bearer token', value: 'bearer' },
+      { label: 'Delete', value: 'none' },
+    ];
+  }
+
+  credentialKindLabel(upstream: UpstreamCacheItem): string {
+    switch (upstream.credential_scheme) {
+      case 'basic':
+        return 'Basic credentials';
+      case 'bearer':
+        return 'Bearer token';
+      default:
+        return 'No credentials';
+    }
   }
 
   kindLabel(upstream: UpstreamCacheItem): string {
@@ -238,7 +370,20 @@ export class UpstreamCachesComponent implements OnInit {
 
   openAddDialog(): void {
     this.upstreamType = 'internal';
-    this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', http1_only: false, remote_cache: '', api_key: '', mode: 'ReadOnly' };
+    this.upstreamForm = {
+      cache_name: '',
+      display_name: '',
+      url: '',
+      public_key: '',
+      http1_only: false,
+      remote_cache: '',
+      api_key: '',
+      mode: 'ReadOnly',
+      credentialChoice: 'none',
+      basicAuthUserName: '',
+      password: '',
+      bearerToken: '',
+    };
     this.addError.set(null);
     this.addAttempted.set(false);
     this.showAddDialog.set(true);
@@ -252,10 +397,25 @@ export class UpstreamCachesComponent implements OnInit {
       url: upstream.url ?? '',
       public_key: upstream.public_key ?? '',
       http1_only: upstream.http1_only,
+      credentialChoice: upstream.credential_scheme ? 'keep' : 'none',
+      basicAuthUserName: '',
+      password: '',
+      bearerToken: '',
     };
     this.editError.set(null);
     this.editAttempted.set(false);
     this.showEditDialog.set(true);
+  }
+
+  closeEditDialogAndClearSecrets(): void {
+    this.showEditDialog.set(false);
+    clearUpstreamCacheCredentialSecretFields(this.editForm);
+  }
+
+  closeAddDialogAndClearCredentialSecrets(): void {
+    this.showAddDialog.set(false);
+    clearUpstreamCacheCredentialSecretFields(this.upstreamForm);
+    this.upstreamForm.api_key = '';
   }
 
   saveUpstream(): void {
@@ -270,13 +430,16 @@ export class UpstreamCachesComponent implements OnInit {
       data.url = this.editForm.url.trim();
       data.public_key = this.editForm.public_key.trim();
       data.http1_only = this.editForm.http1_only;
+      const credential = buildCredentialRequestBody(this.editForm);
+      if (credential) data.credential = credential;
+      else if (this.editForm.credentialChoice === 'none' && upstream.credential_scheme) data.credential = { scheme: 'none' };
     } else {
       data.mode = this.editForm.mode;
     }
     this.cachesService.updateUpstream(this.cacheName, upstream.id, data).subscribe({
       next: () => {
         this.savingUpstream.set(false);
-        this.showEditDialog.set(false);
+        this.closeEditDialogAndClearSecrets();
         this.notify.success('Upstream cache saved');
         this.loadUpstreamCaches();
       },
@@ -317,12 +480,13 @@ export class UpstreamCachesComponent implements OnInit {
           url: this.upstreamForm.url,
           public_key: this.upstreamForm.public_key,
           http1_only: this.upstreamForm.http1_only,
+          credential: buildCredentialRequestBody(this.upstreamForm),
         });
     }
     obs.subscribe({
       next: () => {
         this.addingUpstream.set(false);
-        this.showAddDialog.set(false);
+        this.closeAddDialogAndClearCredentialSecrets();
         this.notify.success('Upstream cache added');
         this.loadUpstreamCaches();
       },

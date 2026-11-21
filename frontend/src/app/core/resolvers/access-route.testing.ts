@@ -24,6 +24,7 @@ export const EVERY_PERMISSION: Permission[] = [
   'triggerEvaluation',
   'manageTriggers',
   'manageWebhooks',
+  'openJobTerminal',
 ];
 
 export const EVERY_CACHE_PERMISSION: CachePermission[] = [

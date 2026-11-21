@@ -17,6 +17,8 @@ import {
   gitHostBaseUrl,
   gitHostConnectionFormErrors,
   hasNonDefaultAdvancedSettings,
+  savingEditWithoutNewAccessTokenDeletesStoredAccessTokenRefreshTokenAndWebhookSecret,
+  storedAccessTokenRemainsAfterSave,
 } from './git-host-connection-form';
 import { GitHostOAuthSignInComponent } from './git-host-oauth-sign-in.component';
 
@@ -37,11 +39,12 @@ import { GitHostOAuthSignInComponent } from './git-host-oauth-sign-in.component'
       <input grInput id="connection-base-url" [ngModel]="value().base_url" (ngModelChange)="patch({ base_url: $event })"
         (paste)="takeHostFromPastedUrl($event)" (blur)="normalizeHostUrl()" placeholder="https://git.example.com" />
     </gr-form-field>
-    <gr-form-field label="Access token" for="connection-access-token" [required]="tokenRequired()"
-      [invalid]="!!shownErrors().access_token" [error]="shownErrors().access_token ?? ''">
+    <gr-form-field label="Access token" for="connection-access-token" [required]="tokenRequired() || savingEditWithoutNewAccessTokenDeletesStoredAccessTokenRefreshTokenAndWebhookSecret()"
+      [invalid]="!!shownErrors().access_token" [error]="shownErrors().access_token ?? ''"
+      [warning]="savingEditWithoutNewAccessTokenDeletesStoredAccessTokenRefreshTokenAndWebhookSecret() ? 'Changes to the host type or host address delete the stored token on save. Re-enter the token.' : null">
       <input grInput id="connection-access-token" type="password" autocomplete="off" [ngModel]="value().access_token"
-        (ngModelChange)="patch({ access_token: $event })" [placeholder]="context().editing?.has_access_token ? 'Unchanged' : ''" />
-      @if (context().editing?.access_token_refreshes_automatically) {
+        (ngModelChange)="patch({ access_token: $event })" [placeholder]="storedAccessTokenRemainsAfterSave() ? 'Unchanged' : ''" />
+      @if (context().editing?.access_token_refreshes_automatically && storedAccessTokenRemainsAfterSave()) {
         <gr-badge data-testid="token-refreshes-badge">Automatic renewal</gr-badge>
       }
     </gr-form-field>
@@ -105,7 +108,11 @@ export class GitHostConnectionFormComponent {
 
   name = computed(() => effectiveConnectionName(this.value(), this.context()));
   reportsStatus = computed(() => effectiveReportsStatus(this.value(), this.context()));
-  tokenRequired = computed(() => this.reportsStatus() && !this.context().editing?.has_access_token);
+  storedAccessTokenRemainsAfterSave = computed(() => storedAccessTokenRemainsAfterSave(this.value(), this.context()));
+  savingEditWithoutNewAccessTokenDeletesStoredAccessTokenRefreshTokenAndWebhookSecret = computed(() =>
+    savingEditWithoutNewAccessTokenDeletesStoredAccessTokenRefreshTokenAndWebhookSecret(this.value(), this.context()),
+  );
+  tokenRequired = computed(() => this.reportsStatus() && !this.storedAccessTokenRemainsAfterSave());
   errors = computed(() => gitHostConnectionFormErrors(this.value(), this.context()));
   shownErrors = computed(() => (this.showErrors() ? this.errors() : {}));
   hasErrors = computed(() => Object.keys(this.errors()).length > 0);

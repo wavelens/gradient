@@ -60,3 +60,11 @@ export function firstFieldError(value: unknown, ...checks: FieldCheck[]): string
   }
   return null;
 }
+
+export function getUrlOriginOrRawText(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}

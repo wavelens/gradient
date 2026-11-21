@@ -35,6 +35,7 @@ const httpUpstream = {
   public_key: 'cache.example.org-1:abc',
   http1_only: false,
   active: true,
+  stored_url_has_user_password_or_query: false,
 };
 
 const oneUpstream = [
@@ -48,6 +49,7 @@ const oneUpstream = [
     public_key: null,
     http1_only: false,
     active: true,
+    stored_url_has_user_password_or_query: false,
   },
 ];
 
@@ -102,7 +104,176 @@ describe('UpstreamCachesComponent - badges', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [...oneUpstream, httpUpstream]);
     const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row'));
     const badges = rows.map((row) => Array.from(row.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim()));
-    expect(badges).toEqual([['Internal', 'Read Only'], ['HTTP', 'Read Only']]);
+    expect(badges).toEqual([['Internal', 'Read Only'], ['HTTP', 'Read Only', 'No credentials']]);
+  });
+});
+
+describe('UpstreamCachesComponent - HTTP upstream credential', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  const httpUpstreamWithBasicCredential = { ...httpUpstream, id: 'u4', credential_scheme: 'basic' as const };
+
+  function openAddHttpUpstreamDialogWithValidFields() {
+    const addHttpUpstream = vi.fn(() => of('ok'));
+    const fixture = setup(admin);
+    Object.assign(TestBed.inject(CachesService), { addHttpUpstream });
+    const component = fixture.componentInstance;
+    component.openAddDialog();
+    component.switchUpstreamType('http');
+    Object.assign(component.upstreamForm, {
+      display_name: 'Private',
+      url: 'https://private.example.org',
+      public_key: 'private.example.org-1:abc=',
+    });
+    return { fixture, component, addHttpUpstream };
+  }
+
+  it('adds an HTTP upstream with a basic credential', () => {
+    const { component, addHttpUpstream } = openAddHttpUpstreamDialogWithValidFields();
+    Object.assign(component.upstreamForm, { credentialChoice: 'basic', basicAuthUserName: 'alice', password: 'pw' });
+    component.addUpstream();
+    expect(addHttpUpstream).toHaveBeenCalledWith('demo', expect.objectContaining({
+      credential: { scheme: 'basic', user: 'alice', password: 'pw' },
+    }));
+  });
+
+  it('adds an HTTP upstream with a bearer token', () => {
+    const { component, addHttpUpstream } = openAddHttpUpstreamDialogWithValidFields();
+    Object.assign(component.upstreamForm, { credentialChoice: 'bearer', bearerToken: 'tok' });
+    component.addUpstream();
+    expect(addHttpUpstream).toHaveBeenCalledWith('demo', expect.objectContaining({
+      credential: { scheme: 'bearer', token: 'tok' },
+    }));
+  });
+
+  it('refuses a credential on an http:// address before asking the server', () => {
+    const { fixture, component, addHttpUpstream } = openAddHttpUpstreamDialogWithValidFields();
+    Object.assign(component.upstreamForm, { url: 'http://private.example.org', credentialChoice: 'bearer', bearerToken: 'tok' });
+    component.addUpstream();
+    fixture.detectChanges();
+    expect(document.querySelector('.upstream-form')!.textContent).toContain('Credentials need an https:// address.');
+    expect(addHttpUpstream).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stored credential when the edit leaves it alone', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [httpUpstreamWithBasicCredential], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstreamWithBasicCredential);
+    component.editForm.display_name = 'Renamed';
+    component.saveUpstream();
+    expect(updateUpstream).toHaveBeenCalledTimes(1);
+    expect(updateUpstream.mock.calls[0][2]).not.toHaveProperty('credential');
+  });
+
+  it('replaces the stored credential with a bearer token', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [httpUpstreamWithBasicCredential], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstreamWithBasicCredential);
+    Object.assign(component.editForm, { credentialChoice: 'bearer', bearerToken: 'tok' });
+    component.saveUpstream();
+    expect(updateUpstream).toHaveBeenCalledWith('demo', 'u4', expect.objectContaining({ credential: { scheme: 'bearer', token: 'tok' } }));
+  });
+
+  it('removes the stored credential', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [httpUpstreamWithBasicCredential], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstreamWithBasicCredential);
+    component.editForm.credentialChoice = 'none';
+    component.saveUpstream();
+    expect(updateUpstream).toHaveBeenCalledWith('demo', 'u4', expect.objectContaining({ credential: { scheme: 'none' } }));
+  });
+
+  it('asks for the credential again when the edited address names another host', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [httpUpstreamWithBasicCredential], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstreamWithBasicCredential);
+    component.editForm.url = 'https://mirror.example.net';
+    component.saveUpstream();
+    fixture.detectChanges();
+    expect(document.querySelector('.upstream-form')!.textContent).toContain('The address changed to a different host. Re-enter the credential or delete it.');
+    expect(updateUpstream).not.toHaveBeenCalled();
+  });
+
+  it('never prefills the secret fields of the edit form', () => {
+    const fixture = setup(admin, [httpUpstreamWithBasicCredential]);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstreamWithBasicCredential);
+    component.editForm.credentialChoice = 'basic';
+    fixture.detectChanges();
+    const password = document.querySelector<HTMLInputElement>('#edit-password')!;
+    expect(password.type).toBe('password');
+    expect(password.value).toBe('');
+  });
+
+  it('shows the stored credential kind in the list without the secret', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [
+      httpUpstreamWithBasicCredential,
+      { ...httpUpstream, id: 'u5', credential_scheme: 'bearer' as const },
+    ]);
+    const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row'));
+    expect(rows[0].textContent).toContain('Basic credentials');
+    expect(rows[1].textContent).toContain('Bearer token');
+  });
+
+  it('warns on a row whose stored address still holds a user, password or query', () => {
+    const fixture = setup(admin, [{ ...httpUpstream, stored_url_has_user_password_or_query: true }]);
+    const banner = (fixture.nativeElement as HTMLElement).querySelector('gr-row gr-message-banner');
+    expect(banner?.textContent).toContain('Save once to fix the saved address. Enter credentials in Credentials.');
+  });
+
+  it('Clear the entered username and password after a successful add.', () => {
+    const { component } = openAddHttpUpstreamDialogWithValidFields();
+    Object.assign(component.upstreamForm, { credentialChoice: 'basic', basicAuthUserName: 'alice', password: 'pw' });
+    component.addUpstream();
+    expect(component.upstreamForm).toMatchObject({ basicAuthUserName: '', password: '', bearerToken: '' });
+  });
+
+  it('Clear the entered bearer token after a successful edit.', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [httpUpstreamWithBasicCredential], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstreamWithBasicCredential);
+    Object.assign(component.editForm, { credentialChoice: 'bearer', bearerToken: 'tok' });
+    component.saveUpstream();
+    expect(updateUpstream).toHaveBeenCalledTimes(1);
+    expect(component.editForm).toMatchObject({ basicAuthUserName: '', password: '', bearerToken: '' });
+  });
+
+  it('Clear the entered password on cancel of the add dialog.', () => {
+    const { fixture, component } = openAddHttpUpstreamDialogWithValidFields();
+    Object.assign(component.upstreamForm, { credentialChoice: 'basic', basicAuthUserName: 'alice', password: 'pw' });
+    fixture.detectChanges();
+    const addUpstreamCacheDialogCancelButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.trim() === 'Cancel',
+    )!;
+    addUpstreamCacheDialogCancelButton.click();
+    expect(component.showAddDialog()).toBe(false);
+    expect(component.upstreamForm).toMatchObject({ basicAuthUserName: '', password: '', bearerToken: '' });
+  });
+
+  it('Clear the entered password when the credential choice is no longer basic.', () => {
+    const { fixture, component } = openAddHttpUpstreamDialogWithValidFields();
+    Object.assign(component.upstreamForm, { credentialChoice: 'basic', basicAuthUserName: 'alice', password: 'pw' });
+    fixture.detectChanges();
+    const bearerTokenCredentialOptionElement = Array.from(document.querySelectorAll<HTMLElement>('.upstream-form gr-tab-switch button')).find(
+      (tab) => tab.textContent?.trim() === 'Bearer token',
+    )!;
+    bearerTokenCredentialOptionElement.click();
+    expect(component.upstreamForm).toMatchObject({ credentialChoice: 'bearer', basicAuthUserName: '', password: '' });
+  });
+
+  it('offers no credential for an upstream that is another Gradient cache', () => {
+    const fixture = setup(admin);
+    const component = fixture.componentInstance;
+    component.openAddDialog();
+    component.upstreamForm.credentialChoice = 'basic';
+    component.switchUpstreamType('gradient_proto');
+    fixture.detectChanges();
+    expect(document.querySelector('#up-basic-user')).toBeNull();
+    expect(document.querySelector('.upstream-form')!.textContent).not.toContain('Credentials');
   });
 });
 

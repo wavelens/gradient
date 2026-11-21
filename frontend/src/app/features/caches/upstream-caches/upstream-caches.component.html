@@ -39,6 +39,9 @@
             {{ u.display_name }}
             <gr-badge>{{ kindLabel(u) }}</gr-badge>
             <gr-badge>{{ modeLabel(u.mode) }}</gr-badge>
+            @if (u.kind === 'http') {
+              <gr-badge>{{ credentialKindLabel(u) }}</gr-badge>
+            }
             @if (u.http1_only) {
               <gr-badge severity="neutral">HTTP/1.1</gr-badge>
             }
@@ -49,6 +52,15 @@
               {{ u.url ?? u.upstream_cache_name ?? u.remote_cache ?? '' }}
               @if (upstreamConnectionTestResultByUpstreamId()[u.id]; as result) {
                 <span class="connection-test-result" role="status" [class.failed]="!result.ok">{{ result.message }} {{ result.detail }}</span>
+              }
+              @if (u.stored_url_has_user_password_or_query) {
+                <gr-message-banner type="warning">
+                  @if (u.kind === 'http') {
+                    Parts of the saved address still include a user name, a password, or a query. The server can no longer use this upstream cache. The edit form shows the address without those parts. Save once to fix the saved address. Enter credentials in Credentials.
+                  } @else {
+                    A user, password, or query still remain in the stored address. The server can no longer use this upstream cache. Delete this cache and add it again without those to fix.
+                  }
+                </gr-message-banner>
               }
             </span>
             <div slot="actions">
@@ -107,7 +119,8 @@
 <!-- Edit Upstream Cache Dialog -->
 <gr-dialog
   header="Edit Upstream Cache"
-  [(visible)]="showEditDialog"
+  [visible]="showEditDialog()"
+  (visibleChange)="$event || closeEditDialogAndClearSecrets()"
   [error]="editError()"
   [busy]="savingUpstream()"
   width="480px"
@@ -127,6 +140,26 @@
         <gr-form-field hint="For caches that break HTTP/2 transfers.">
           <gr-checkbox inputId="edit-http1-only" [(ngModel)]="editForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
         </gr-form-field>
+        <gr-form-field
+          label="Credentials"
+          [hint]="urlStartsWithPlainHttp(editForm.url) ? credentialNeedsHttps : credentialSentOnFetchStoredEncryptedAndNeverShownAgainHint"
+          [invalid]="!!editErrors().credentialChoice"
+          [error]="editErrors().credentialChoice ?? ''"
+        >
+          <gr-tab-switch ariaLabel="Credentials" [options]="getCredentialChoiceTabOptions()" [ngModel]="editForm.credentialChoice" (ngModelChange)="setCredentialKindAndClearSecretsOfOtherKinds(editForm, $event)" />
+        </gr-form-field>
+        @if (editForm.credentialChoice === 'basic') {
+          <gr-form-field label="Username" for="edit-basic-user" [invalid]="!!editErrors().basicAuthUserName" [error]="editErrors().basicAuthUserName ?? ''">
+            <input grInput id="edit-basic-user" autocomplete="off" [(ngModel)]="editForm.basicAuthUserName" (keyup.enter)="saveUpstream()" />
+          </gr-form-field>
+          <gr-form-field label="Password" for="edit-password" [invalid]="!!editErrors().password" [error]="editErrors().password ?? ''">
+            <input grInput type="password" id="edit-password" autocomplete="new-password" [(ngModel)]="editForm.password" (keyup.enter)="saveUpstream()" />
+          </gr-form-field>
+        } @else if (editForm.credentialChoice === 'bearer') {
+          <gr-form-field label="Token" for="edit-bearer-token" [invalid]="!!editErrors().bearerToken" [error]="editErrors().bearerToken ?? ''">
+            <input grInput type="password" id="edit-bearer-token" autocomplete="new-password" [(ngModel)]="editForm.bearerToken" (keyup.enter)="saveUpstream()" />
+          </gr-form-field>
+        }
         <small class="text-secondary">HTTP caches are always Read Only.</small>
       } @else {
         <gr-form-field label="Mode" for="edit-mode">
@@ -143,7 +176,7 @@
     </div>
   }
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
+    <button grButton label="Cancel" severity="secondary" (click)="closeEditDialogAndClearSecrets()" [disabled]="savingUpstream()"></button>
     <button grButton label="Save" icon="check" (grSubmit)="saveUpstream()" [loading]="savingUpstream()"></button>
   </div>
 </gr-dialog>
@@ -151,7 +184,8 @@
 <!-- Add Upstream Cache Dialog -->
 <gr-dialog
   header="Add Upstream Cache"
-  [(visible)]="showAddDialog"
+  [visible]="showAddDialog()"
+  (visibleChange)="$event || closeAddDialogAndClearCredentialSecrets()"
   [error]="addError()"
   [busy]="addingUpstream()"
   width="480px"
@@ -233,11 +267,31 @@
       <gr-form-field hint="For caches that break HTTP/2 transfers.">
         <gr-checkbox inputId="up-http1-only" [(ngModel)]="upstreamForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
       </gr-form-field>
+      <gr-form-field
+        label="Credentials"
+        [hint]="urlStartsWithPlainHttp(upstreamForm.url) ? credentialNeedsHttps : credentialSentOnFetchStoredEncryptedAndNeverShownAgainHint"
+        [invalid]="!!addErrors().credentialChoice"
+        [error]="addErrors().credentialChoice ?? ''"
+      >
+        <gr-tab-switch ariaLabel="Credentials" [options]="credentialTypeOptions" [ngModel]="upstreamForm.credentialChoice" (ngModelChange)="setCredentialKindAndClearSecretsOfOtherKinds(upstreamForm, $event)" />
+      </gr-form-field>
+      @if (upstreamForm.credentialChoice === 'basic') {
+        <gr-form-field label="Username" for="up-basic-user" [invalid]="!!addErrors().basicAuthUserName" [error]="addErrors().basicAuthUserName ?? ''">
+          <input grInput id="up-basic-user" autocomplete="off" [(ngModel)]="upstreamForm.basicAuthUserName" (keyup.enter)="addUpstream()" />
+        </gr-form-field>
+        <gr-form-field label="Password" for="up-password" [invalid]="!!addErrors().password" [error]="addErrors().password ?? ''">
+          <input grInput type="password" id="up-password" autocomplete="new-password" [(ngModel)]="upstreamForm.password" (keyup.enter)="addUpstream()" />
+        </gr-form-field>
+      } @else if (upstreamForm.credentialChoice === 'bearer') {
+        <gr-form-field label="Token" for="up-bearer-token" [invalid]="!!addErrors().bearerToken" [error]="addErrors().bearerToken ?? ''">
+          <input grInput type="password" id="up-bearer-token" autocomplete="new-password" [(ngModel)]="upstreamForm.bearerToken" (keyup.enter)="addUpstream()" />
+        </gr-form-field>
+      }
       <small class="text-secondary">HTTP caches are always Read Only.</small>
   }
   </div>
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>
+    <button grButton label="Cancel" severity="secondary" (click)="closeAddDialogAndClearCredentialSecrets()" [disabled]="addingUpstream()"></button>
     <button grButton label="Add" icon="add" (grSubmit)="addUpstream()" [loading]="addingUpstream()"></button>
   </div>
 </gr-dialog>

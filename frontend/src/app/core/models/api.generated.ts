@@ -81,6 +81,7 @@ export type AddUpstreamRequest = {
   url: string;
   public_key: string;
   http1_only?: boolean;
+  credential?: HttpUpstreamCredentialRequest | null;
   type: "http";
 } | {
   url: string;
@@ -285,7 +286,6 @@ export interface BoardHealth {
   draining: boolean;
   supervised: SupervisedLoop[];
   proto_sessions: number;
-  unconfirmed_nars: number;
   pending_deliveries: number;
   failed_deliveries: number;
   hot_nar_cache: HotNarCacheHealth;
@@ -594,6 +594,7 @@ export interface CliDeviceInfoResponse {
   expires_at: string;
   user_agent?: string | null;
   ip?: string | null;
+  cli_and_browser_on_same_network: boolean;
 }
 
 export interface CliDevicePollRequest {
@@ -687,6 +688,16 @@ export interface ComparedEvaluation {
   commit: string;
 }
 
+export interface CompleteGitHostOAuthConnectionRequest {
+  code: string;
+  state: string;
+}
+
+export interface CompletedGitHostOAuthConnection {
+  name: string;
+  webhooks_installed: number;
+}
+
 export type ConcurrencyPolicy = "hard_abort" | "soft_abort" | "all" | "skip" | "auto";
 
 export interface ConnectedLoginProvider {
@@ -775,6 +786,12 @@ export interface CreatePullRequestRequest {
   commit?: string | null;
 }
 
+export interface CreateRepositoryGrantRequest {
+  project: string;
+  repository_owner: string;
+  repository_name?: string | null;
+}
+
 export interface CreateRoleRequest {
   name: IndexName;
   permissions: string[];
@@ -807,6 +824,8 @@ export interface CreatedEntityResponse {
   name: string;
   url: string;
 }
+
+export type CredentialSchemeItem = "basic" | "bearer";
 
 export interface DashboardStats {
   cpu_time_ms?: number | null;
@@ -1482,6 +1501,8 @@ export type GitHostConnectionOwner = {
   type: "project";
 };
 
+export type GitHostConnectionRepositoryGrantId = string;
+
 export type GitHostConnectionResponse = GitHostConnectionSummary & {
   has_secret: boolean;
   has_access_token: boolean;
@@ -1648,6 +1669,15 @@ export interface HttpRouteStat {
   avg_ms: number;
   errors: number;
 }
+
+export type HttpUpstreamCredentialRequest = {
+  user: string;
+  password: string;
+  scheme: "basic";
+} | {
+  token: string;
+  scheme: "bearer";
+};
 
 export type IncomingWebhookDeliveryId = string;
 
@@ -2034,8 +2064,8 @@ export interface NixPathInfo {
   StorePath: string;
   URL: string;
   Compression: string;
-  FileHash: string;
-  FileSize: number;
+  FileHash?: string | null;
+  FileSize?: number | null;
   NarHash: string;
   NarSize: number;
   References: string[];
@@ -2168,6 +2198,17 @@ export interface PatchGitHostConnectionRequest {
   reports_status?: boolean | null;
 }
 
+export type PatchHttpUpstreamCredentialRequest = {
+  user: string;
+  password: string;
+  scheme: "basic";
+} | {
+  token: string;
+  scheme: "bearer";
+} | {
+  scheme: "none";
+};
+
 export interface PatchOperation {
   op: string;
   path?: string | null;
@@ -2231,6 +2272,7 @@ export interface PatchUpstreamRequest {
   public_key?: string | null;
   http1_only?: boolean | null;
   active?: boolean | null;
+  credential?: PatchHttpUpstreamCredentialRequest | null;
 }
 
 export interface PatchUserSettingsRequest {
@@ -2285,7 +2327,7 @@ export interface PendingUserDecisionsResponse {
   team_requests: TeamGrantRequestInboxEntry[];
 }
 
-export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks" | "createProject" | "readSuperuser" | "writeSuperuser";
+export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks" | "openJobTerminal" | "createProject" | "readSuperuser" | "writeSuperuser";
 
 export interface PermissionEntry {
   id: string;
@@ -2554,6 +2596,17 @@ export interface RepositoryFit {
   reason?: string | null;
 }
 
+export interface RepositoryGrantResponse {
+  id: GitHostConnectionRepositoryGrantId;
+  project: ProjectId;
+  project_name?: string | null;
+  repository_owner: string;
+  repository_name?: string | null;
+  source: string;
+  created_by?: UserId | null;
+  created_at: string;
+}
+
 export type RequestKind = "project" | "cache";
 
 export interface RetiredPublicKeyEntry {
@@ -2730,6 +2783,7 @@ export interface SessionInfo {
   expires_at: string;
   remember_me: boolean;
   current: boolean;
+  is_cli_device_sign_in_session: boolean;
 }
 
 export interface SetDrainingRequest {
@@ -3088,7 +3142,7 @@ export interface TeamMemberRequest {
   role: TeamRole;
 }
 
-export type TeamMemberSource = "api" | "state" | "group";
+export type TeamMemberSource = "api" | "state" | "group" | "sign_in_group";
 
 export interface TeamNameAndDisplayName {
   name: string;
@@ -3242,7 +3296,7 @@ export interface UpdateAllWorkersRequest {
 }
 
 export interface UpdateCacheSubscriptionRequest {
-  sign_outputs: boolean;
+  sign_outputs?: boolean | null;
 }
 
 export interface UpdateFlakeInputOverrideRequest {
@@ -3280,6 +3334,8 @@ export interface UpstreamCacheItem {
   remote_cache?: string | null;
   http1_only: boolean;
   active: boolean;
+  stored_url_has_user_password_or_query: boolean;
+  credential_scheme?: CredentialSchemeItem | null;
 }
 
 export interface UpstreamTestResponse {

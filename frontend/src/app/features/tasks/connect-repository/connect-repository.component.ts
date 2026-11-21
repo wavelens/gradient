@@ -168,6 +168,9 @@ export class ConnectRepositoryComponent implements OnInit {
   selectedConnectionId = signal<string | null>(null);
   fittingConnections = computed(() => (this.connections() ?? []).filter((connection) => connection.repository_fit?.fits));
   connectionOptions = computed(() => gitHostConnectionPickerOptions(this.connections() ?? []));
+  selectedConnectionRequiringRepositoryGrant = computed(
+    () => (this.connections() ?? []).find((connection) => connection.id === this.selectedConnectionId() && connection.owner.type !== 'project') ?? null,
+  );
   projectConnectionNames = computed(() =>
     (this.connections() ?? []).filter((connection) => connection.owner.type === 'project').map((connection) => connection.name),
   );

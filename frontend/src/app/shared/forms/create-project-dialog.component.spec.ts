@@ -9,6 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { ProjectsService } from '@core/services/projects.service';
 import { TeamsService } from '@core/services/teams.service';
+import { AuthService } from '@core/services/auth.service';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import type { TeamNameAndDisplayName, TeamSummary } from '@core/models';
@@ -29,11 +30,12 @@ class HostComponent {
 const INFRA: TeamSummary = { name: 'infra', display_name: 'Infra', role: 'member' };
 const WEB: TeamSummary = { name: 'web', display_name: 'Web', role: 'admin' };
 
-async function setup(createProject: () => unknown, options: { teams?: TeamSummary[]; preselected?: TeamNameAndDisplayName; available?: boolean } = {}) {
+async function setup(createProject: () => unknown, options: { teams?: TeamSummary[]; preselected?: TeamNameAndDisplayName; available?: boolean; isSuperuser?: boolean } = {}) {
   TestBed.configureTestingModule({
     providers: [
       { provide: ProjectsService, useValue: { createProject, checkProjectNameAvailable: () => of(options.available ?? true) } },
       { provide: TeamsService, useValue: { list: () => of(options.teams ?? []) } },
+      { provide: AuthService, useValue: { user: () => ({ superuser: options.isSuperuser ?? false }) } },
     ],
   });
   const fixture = TestBed.createComponent(HostComponent);
@@ -116,7 +118,7 @@ describe('CreateProjectDialogComponent', () => {
   });
 
   it('closes on Cancel without asking while only the default owner team is chosen', async () => {
-    const { host, cancel } = await setup(() => of('id'), { teams: [INFRA] });
+    const { host, cancel } = await setup(() => of('id'), { teams: [WEB] });
     await cancel();
     expect(host.visible).toBe(false);
   });
@@ -136,16 +138,45 @@ describe('CreateProjectDialogComponent', () => {
 
   it('preselects the only team of the user as owner team', async () => {
     const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
+    const { type, submit, ownerTeamField } = await setup(createProject, { teams: [WEB] });
+    expect(ownerTeamField()?.textContent).toContain('Web (web)');
+    await type('#project-display-name', 'Acme');
+    await submit();
+    expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ owner_team: 'web' }));
+  });
+
+  it('Hide the field of the owner team and preselect nothing for a plain member of the only team.', async () => {
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
     const { type, submit, ownerTeamField } = await setup(createProject, { teams: [INFRA] });
+    expect(ownerTeamField()).toBeNull();
+    await type('#project-display-name', 'Acme');
+    await submit();
+    expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ owner_team: null }));
+  });
+
+  it('Preselect teams where the user is an Admin. Exclude teams where the user is only a regular member.', async () => {
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
+    const { type, submit, ownerTeamField } = await setup(createProject, { teams: [INFRA, WEB] });
+    expect(ownerTeamField()?.textContent).toContain('Web (web)');
+    document.querySelector<HTMLButtonElement>('#project-owner-team')!.click();
+    await type('#project-display-name', 'Acme');
+    expect(Array.from(document.querySelectorAll('.gr-select__option')).map((option) => option.textContent?.trim())).toEqual(['No team', 'Web (web)']);
+    await submit();
+    expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ owner_team: 'web' }));
+  });
+
+  it('Show and preselect the only team if the superuser is a regular member.', async () => {
+    const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
+    const { type, submit, ownerTeamField } = await setup(createProject, { teams: [INFRA], isSuperuser: true });
     expect(ownerTeamField()?.textContent).toContain('Infra (infra)');
     await type('#project-display-name', 'Acme');
     await submit();
     expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ owner_team: 'infra' }));
   });
 
-  it('leaves the owner team empty when the user belongs to several teams', async () => {
+  it('Leave the owner team empty when the user is an admin of several teams.', async () => {
     const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
-    const { type, submit, ownerTeamField } = await setup(createProject, { teams: [INFRA, WEB] });
+    const { type, submit, ownerTeamField } = await setup(createProject, { teams: [WEB, { ...WEB, name: 'docs', display_name: 'Docs' }] });
     expect(ownerTeamField()?.textContent).toContain('No team');
     await type('#project-display-name', 'Acme');
     await submit();
@@ -163,7 +194,7 @@ describe('CreateProjectDialogComponent', () => {
 
   it('sends no owner team after picking No team', async () => {
     const createProject = vi.fn(() => of({ id: 'id', name: 'acme', url: '' }));
-    const { type, submit, pickOwnerTeam } = await setup(createProject, { teams: [INFRA] });
+    const { type, submit, pickOwnerTeam } = await setup(createProject, { teams: [WEB] });
     await pickOwnerTeam('No team');
     await type('#project-display-name', 'Acme');
     await submit();

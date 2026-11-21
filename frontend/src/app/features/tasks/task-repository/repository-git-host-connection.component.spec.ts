@@ -111,20 +111,20 @@ describe('RepositoryGitHostConnectionComponent', () => {
     expect(current.component.pickerOptions().map((option) => option.value)).toEqual(['', 'c1', 'c2', 'c3']);
   });
 
-  it('lists a connection without host URL after the fitting ones, marked and never offers it as the fitting one', () => {
-    const withoutHostUrl: GitHostConnectionSummary = {
+  it('lists the task connection from another host after fitting connections, labels it with the server reason, and does not offer it as the only fitting connection', () => {
+    const forgejoConnectionOnDifferentHost: GitHostConnectionSummary = {
       ...reporting,
       id: 'c4',
       display_name: 'Forge',
-      base_url: null,
-      repository_fit: { fits: false, can_be_selected: true, reason: 'No host URL' },
+      base_url: 'https://other.example.com',
+      repository_fit: { fits: false, can_be_selected: false, reason: 'Different host' },
     };
     const chain = { ...taskRepositoryStatusRepositoryReadableWithoutGitHostConnection, connection: { state: 'attention' as const, detail: 'Forgejo fits', action: { type: 'select_connection' as const } } };
-    const { component } = render({ available_connections: [withoutHostUrl, reporting], chain });
+    const { component } = render({ available_connections: [forgejoConnectionOnDifferentHost, reporting], chain, git_host_connection: forgejoConnectionOnDifferentHost });
     expect(component.pickerOptions().map((option) => option.label)).toEqual([
       'No connection',
       'Forgejo · forgejo.example.com · Team platform',
-      'Forge · Forgejo · Team platform · No host URL',
+      'Forge · other.example.com · Team platform · Different host',
     ]);
     expect(component.onlyFittingConnection()?.id).toBe('c1');
   });

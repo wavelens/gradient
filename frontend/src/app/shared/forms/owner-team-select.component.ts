@@ -10,6 +10,7 @@ import { FormsModule } from '@angular/forms';
 import { catchError, of } from 'rxjs';
 import { FormFieldComponent, SelectComponent } from '@gradient/ui/ui';
 import { TeamsService } from '@core/services/teams.service';
+import { AuthService } from '@core/services/auth.service';
 import type { TeamNameAndDisplayName, TeamSummary } from '@core/models';
 import { entityToPickerOption } from '@shared/ui';
 
@@ -38,11 +39,17 @@ export class OwnerTeamSelectComponent {
   preselectedOwnerTeam = input<TeamNameAndDisplayName | null>(null);
   selectedOwnerTeam = model<string | null | undefined>(undefined);
 
+  private authService = inject(AuthService);
   protected signedInUserTeams = toSignal(inject(TeamsService).list().pipe(catchError(() => of<TeamSummary[]>([]))), { initialValue: [] });
+
+  private teamsUserMaySetAsOwnerTeam = computed(() => {
+    const teams = this.signedInUserTeams();
+    return this.authService.user()?.superuser === true ? teams : teams.filter((team) => team.role === 'admin');
+  });
 
   protected ownerTeamDropdownOptions = computed(() => {
     const preselected = this.preselectedOwnerTeam();
-    const teams: TeamNameAndDisplayName[] = this.signedInUserTeams();
+    const teams: TeamNameAndDisplayName[] = this.teamsUserMaySetAsOwnerTeam();
     const choices = preselected && !teams.some((team) => team.name === preselected.name) ? [preselected, ...teams] : teams;
     return [{ label: 'No team', value: null as string | null }, ...choices.map((team) => entityToPickerOption(team))];
   });
@@ -52,7 +59,7 @@ export class OwnerTeamSelectComponent {
     if (selected !== undefined) return selected;
     const preselected = this.preselectedOwnerTeam();
     if (preselected) return preselected.name;
-    const teams = this.signedInUserTeams();
+    const teams = this.teamsUserMaySetAsOwnerTeam();
     return teams.length === 1 ? teams[0].name : null;
   });
 }

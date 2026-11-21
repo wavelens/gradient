@@ -6,7 +6,7 @@
 
 import { CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostType, PatchGitHostConnectionRequest } from '@core/models';
 import { knownGitHostType, repositoryHost } from '@shared/git/git-host';
-import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
+import { fieldChecks, getUrlOriginOrRawText, isIpNetwork, splitLines } from '@shared/forms';
 import { slugify } from '@shared/text';
 
 export interface GitHostConnectionFormValue {
@@ -93,6 +93,19 @@ export function effectiveConnectionName(form: GitHostConnectionFormValue, contex
   return form.name ?? gitHostConnectionNameFromHost(form.base_url, context.existingNames);
 }
 
+export function savingEditWithoutNewAccessTokenDeletesStoredAccessTokenRefreshTokenAndWebhookSecret(
+  form: GitHostConnectionFormValue,
+  context: GitHostConnectionFormContext,
+): boolean {
+  const editing = context.editing;
+  if (!editing || form.access_token.trim()) return false;
+  return form.git_host_type !== editing.git_host_type || getUrlOriginOrRawText(gitHostBaseUrl(form.base_url)) !== getUrlOriginOrRawText(editing.base_url ?? '');
+}
+
+export function storedAccessTokenRemainsAfterSave(form: GitHostConnectionFormValue, context: GitHostConnectionFormContext): boolean {
+  return !!context.editing?.has_access_token && !savingEditWithoutNewAccessTokenDeletesStoredAccessTokenRefreshTokenAndWebhookSecret(form, context);
+}
+
 export function effectiveReportsStatus(form: GitHostConnectionFormValue, context: GitHostConnectionFormContext): boolean {
   return form.reports_status ?? (!!form.access_token.trim() || !!context.editing?.has_access_token);
 }
@@ -118,7 +131,7 @@ export function gitHostConnectionFormErrors(form: GitHostConnectionFormValue, co
   }
 
   const reportsStatus = effectiveReportsStatus(form, context);
-  if (reportsStatus && !form.access_token.trim() && !context.editing?.has_access_token) {
+  if (reportsStatus && !form.access_token.trim() && !storedAccessTokenRemainsAfterSave(form, context)) {
     errors.access_token = 'Enter an access token to report status.';
   }
 

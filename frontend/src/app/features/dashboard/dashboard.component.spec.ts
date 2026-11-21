@@ -5,7 +5,8 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 import { NEVER, Observable, map, of, tap, throwError, timer } from 'rxjs';
 import type { Mock } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
@@ -21,7 +22,7 @@ type RailStub = { projects: unknown[]; caches: unknown[] };
 
 let service: Record<'rail' | 'stats' | 'tasks' | 'activity', Mock>;
 
-function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0, recap: YearlyRecapResponse | null = null) {
+function configure(rail: RailStub | Observable<RailStub>, pendingRequests = 0, recap: YearlyRecapResponse | null = null) {
   service = {
     rail: vi.fn(() => (rail instanceof Observable ? rail : of(rail))),
     stats: vi.fn(() => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { used_build_slot_count: 0, total_build_slots: 0 }, queue_wait_p50_ms: 0 })),
@@ -31,7 +32,7 @@ function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0, reca
   TestBed.configureTestingModule({
     imports: [DashboardComponent],
     providers: [
-      provideRouter([]),
+      provideRouter([{ path: '', component: DashboardComponent }]),
       { provide: PendingUserDecisionsService, useValue: { count: () => pendingRequests } },
       { provide: StarsService, useValue: { set: () => of(true), changed$: NEVER } },
       { provide: DashboardService, useValue: service },
@@ -39,10 +40,25 @@ function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0, reca
       { provide: YearlyRecapAutoOpenService, useValue: { recap: signal(recap), reopenRecapSlideShowFromDashboardCard: () => undefined } },
     ],
   });
+}
+
+function render(rail: RailStub | Observable<RailStub>, pendingRequests = 0, recap: YearlyRecapResponse | null = null) {
+  configure(rail, pendingRequests, recap);
   const f = TestBed.createComponent(DashboardComponent);
   f.detectChanges();
   f.detectChanges();
   return f.nativeElement as HTMLElement;
+}
+
+async function renderAtUrl(url: string) {
+  configure({ projects: [], caches: [] });
+  const harness = await RouterTestingHarness.create();
+  const router = TestBed.inject(Router);
+  const navigate = vi.spyOn(router, 'navigate');
+  await harness.navigateByUrl(url, DashboardComponent);
+  harness.detectChanges();
+  await harness.fixture.whenStable();
+  return { root: harness.routeNativeElement as HTMLElement, router, navigate };
 }
 
 describe('DashboardComponent', () => {
@@ -85,14 +101,14 @@ describe('DashboardComponent', () => {
 
   it('counts every request waiting for the user and links to the Requests page', () => {
     const root = render({ projects: [], caches: [] }, 2);
-    const banner = root.querySelector('.pending-requests');
+    const banner = root.querySelector('[data-testid="pending-invitations-and-access-requests-banner"]');
     expect(banner?.textContent?.replace(/\s+/g, ' ')).toContain('2 requests need a decision');
     expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/settings/invites');
   });
 
   it('uses the singular for one waiting request', () => {
     const root = render({ projects: [], caches: [] }, 1);
-    expect(root.querySelector('.pending-requests')?.textContent?.replace(/\s+/g, ' ')).toContain('1 request needs a decision');
+    expect(root.querySelector('[data-testid="pending-invitations-and-access-requests-banner"]')?.textContent?.replace(/\s+/g, ' ')).toContain('1 request needs a decision');
   });
 
   it('reloads stats, tasks, activity and rail while the tab stays open', () => {
@@ -137,8 +153,29 @@ describe('DashboardComponent', () => {
     expect(service.stats).toHaveBeenCalledTimes(1);
   });
 
+  it('shows the expired Git host connection attempt once and removes the parameter from the URL', async () => {
+    const { root, router, navigate } = await renderAtUrl('/?oauth_error=expired');
+    expect(root.querySelector('[data-testid="oauth-error-banner"]')?.textContent).toContain(
+      'The approval took over 10 minutes, or a different browser session approved the connection. Open the project and start the connection again.',
+    );
+    expect(router.url).toBe('/');
+    expect(navigate.mock.calls[0]?.[1]?.replaceUrl).toBe(true);
+  });
+
+  it('shows no message for an unknown oauth_error value and removes it from the URL', async () => {
+    const { root, router } = await renderAtUrl('/?oauth_error=<b>link</b>');
+    expect(root.querySelector('[data-testid="oauth-error-banner"]')).toBeNull();
+    expect(router.url).toBe('/');
+  });
+
+  it('shows no message and changes no URL without an oauth_error parameter', async () => {
+    const { root, navigate } = await renderAtUrl('/');
+    expect(root.querySelector('[data-testid="oauth-error-banner"]')).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('shows no requests banner without pending requests', () => {
-    expect(render({ projects: [], caches: [] }).querySelector('.pending-requests')).toBeNull();
+    expect(render({ projects: [], caches: [] }).querySelector('[data-testid="pending-invitations-and-access-requests-banner"]')).toBeNull();
   });
 
   it('Display the Gradient Wrapped card while a recap is present', () => {
