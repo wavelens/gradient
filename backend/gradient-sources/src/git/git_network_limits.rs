@@ -4,19 +4,126 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::https_credentials_for_operation_host::remote_callbacks_for_url_with_thread_https_credentials;
 use super::url::set_shallow_unless_local;
-use git2::FetchOptions;
+use git2::{FetchOptions, RemoteCallbacks};
 use std::cell::RefCell;
-use std::sync::Once;
+use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
-use tracing::{error, warn};
+use tracing::warn;
 
 const FETCH_DEADLINE: Duration = Duration::from_secs(30 * 60);
 const FETCH_BYTE_LIMIT: usize = 16 * 1024 * 1024 * 1024;
 const PATH_FILTER_FETCH_DEADLINE: Duration = Duration::from_secs(120);
 const PATH_FILTER_FETCH_TOTAL_BYTE_LIMIT: usize = 2 * 1024 * 1024 * 1024;
 pub(super) const STALLED_SERVER_TIMEOUT: Duration = Duration::from_secs(60);
+pub(super) const MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Copy)]
+pub(super) enum RefAdvertisementEnd {
+    RefAdvertisementIsWholeStream,
+    AdvertisementEndsAtFirstFlushPacket,
+    NoRefAdvertisementInStream,
+}
+
+pub(super) struct GitNetworkStreamReadDeadlineAndByteLimitChecker<S> {
+    inner: S,
+    end: RefAdvertisementEnd,
+    byte_limit: usize,
+    counted_bytes: usize,
+    packet_length_digits: Vec<u8>,
+    unread_packet_payload_bytes: usize,
+    advertisement_finished: bool,
+    fetch_operation_limits: BlockingGitFetchOperationLimits,
+    total_bytes_read_from_git_network: usize,
+}
+
+impl<S> GitNetworkStreamReadDeadlineAndByteLimitChecker<S> {
+    pub(super) fn new(inner: S, end: RefAdvertisementEnd) -> Self {
+        Self::with_byte_limit(inner, end, MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT)
+    }
+
+    pub(super) fn with_byte_limit(inner: S, end: RefAdvertisementEnd, byte_limit: usize) -> Self {
+        Self {
+            inner,
+            end,
+            byte_limit,
+            counted_bytes: 0,
+            packet_length_digits: Vec::with_capacity(4),
+            unread_packet_payload_bytes: 0,
+            advertisement_finished: matches!(end, RefAdvertisementEnd::NoRefAdvertisementInStream),
+            fetch_operation_limits:
+                current_thread_blocking_libgit2_fetch_time_and_byte_limits_or_ordinary_fetch_limits(
+                ),
+            total_bytes_read_from_git_network: 0,
+        }
+    }
+
+    fn advertisement_byte_count_in(&mut self, bytes: &[u8]) -> usize {
+        if let RefAdvertisementEnd::RefAdvertisementIsWholeStream = self.end {
+            return bytes.len();
+        }
+        let mut index = 0;
+        while index < bytes.len() && !self.advertisement_finished {
+            if self.unread_packet_payload_bytes > 0 {
+                let step = self.unread_packet_payload_bytes.min(bytes.len() - index);
+                self.unread_packet_payload_bytes -= step;
+                index += step;
+                continue;
+            }
+            self.packet_length_digits.push(bytes[index]);
+            index += 1;
+            if self.packet_length_digits.len() < 4 {
+                continue;
+            }
+            let packet_length = std::str::from_utf8(&self.packet_length_digits)
+                .ok()
+                .and_then(|digits| usize::from_str_radix(digits, 16).ok());
+            self.packet_length_digits.clear();
+            match packet_length {
+                Some(length) if length >= 4 => self.unread_packet_payload_bytes = length - 4,
+                Some(_) => self.advertisement_finished = true,
+                None => self.unread_packet_payload_bytes = usize::MAX,
+            }
+        }
+        index
+    }
+}
+
+impl<S: Read> Read for GitNetworkStreamReadDeadlineAndByteLimitChecker<S> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.total_bytes_read_from_git_network =
+            self.total_bytes_read_from_git_network.saturating_add(read);
+        if let Some(reason) = self
+            .fetch_operation_limits
+            .fetch_deadline_or_byte_limit_exceeded_reason(self.total_bytes_read_from_git_network)
+        {
+            return Err(io::Error::other(reason));
+        }
+        if self.advertisement_finished {
+            return Ok(read);
+        }
+        let counted = self.advertisement_byte_count_in(&buf[..read]);
+        self.counted_bytes = self.counted_bytes.saturating_add(counted);
+        if self.counted_bytes > self.byte_limit {
+            return Err(io::Error::other(format!(
+                "ref advertisement larger than {} MiB",
+                self.byte_limit / (1024 * 1024)
+            )));
+        }
+        Ok(read)
+    }
+}
+
+impl<S: Write> Write for GitNetworkStreamReadDeadlineAndByteLimitChecker<S> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
 
 thread_local! {
     pub(super) static CURRENT_THREAD_BLOCKING_LIBGIT2_FETCH_LIMITS:
@@ -99,7 +206,7 @@ pub(super) fn build_fetch_options_with_time_and_size_limits_and_optional_shallow
     let limits =
         current_thread_blocking_libgit2_fetch_time_and_byte_limits_or_ordinary_fetch_limits();
     let sideband_limits = limits.clone();
-    let mut callbacks = remote_callbacks_for_url_with_thread_https_credentials(url);
+    let mut callbacks = RemoteCallbacks::new();
     callbacks.transfer_progress(move |progress| {
         let Some(reason) =
             limits.fetch_deadline_or_byte_limit_exceeded_reason(progress.received_bytes())
@@ -121,19 +228,4 @@ pub(super) fn build_fetch_options_with_time_and_size_limits_and_optional_shallow
         set_shallow_unless_local(&mut options, url);
     }
     options
-}
-
-pub(super) fn set_libgit2_connect_and_read_timeouts_once() {
-    static SET: Once = Once::new();
-    SET.call_once(|| {
-        let timeout = i32::try_from(STALLED_SERVER_TIMEOUT.as_millis()).unwrap_or(i32::MAX);
-        // SAFETY: the Once runs this before any libgit2 transport of this crate reads the options.
-        let set = unsafe {
-            git2::opts::set_server_connect_timeout_in_milliseconds(timeout)
-                .and_then(|()| git2::opts::set_server_timeout_in_milliseconds(timeout))
-        };
-        if let Err(error) = set {
-            error!(%error, "failed to set the timeout for the libgit2 server");
-        }
-    });
 }

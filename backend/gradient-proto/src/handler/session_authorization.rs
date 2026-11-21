@@ -67,7 +67,10 @@ impl SessionAuthorization {
         self
     }
 
-    pub(crate) fn into_handshake_outcome(self) -> anyhow::Result<AuthOutcome> {
+    pub(crate) fn into_handshake_outcome(
+        self,
+        user_url_destination_allowlist: Vec<String>,
+    ) -> anyhow::Result<AuthOutcome> {
         match self {
             SessionAuthorization::Authorized {
                 projects,
@@ -81,6 +84,7 @@ impl SessionAuthorization {
                     authorized_peers,
                     failed_peers,
                     granted_capabilities: capabilities,
+                    user_url_destination_allowlist,
                 })
             }
             SessionAuthorization::Rejected(rejection) => Ok(AuthOutcome::Reject(rejection)),
@@ -403,6 +407,7 @@ mod tests {
             db: state.worker_db.clone(),
             config: std::sync::Arc::clone(&state.config),
             session: dialed_session(&projects, false),
+            user_url_destination_allowlist: vec![],
         };
         assert!(matches!(
             authority.admit(WORKER_ID, every_capability()).await,

@@ -2256,6 +2256,482 @@ async fn instance_repository_grant_over_a_state_file_or_upgrade_grant_takes_it_o
     s.db.finish().await;
 }
 
+async fn insert_task_and_return_id(
+    s: &RealTestDatabaseHttpServerAndBearerAuthHeader,
+    project: ProjectId,
+    name: &str,
+    repository: &str,
+) -> TaskId {
+    gradient_db::rows::insert::<task::Entity, _>(
+        &s.db.connection(),
+        task::Model {
+            id: TaskId::now_v7(),
+            project,
+            name: name.into(),
+            repository: repository.into(),
+            ..rows::task()
+        },
+    )
+    .await
+    .unwrap()
+    .id
+}
+
+async fn read_git_host_connection_id_from_task_row(
+    s: &RealTestDatabaseHttpServerAndBearerAuthHeader,
+    task: TaskId,
+) -> Option<GitHostConnectionId> {
+    s.db.find::<task::Entity>(task)
+        .await
+        .unwrap()
+        .git_host_connection
+}
+
+#[tokio::test]
+async fn test_superuser_repository_grant_links_task_without_connection_copies_reports_status_and_lists_linked_task_in_create_audit()
+ {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "app" }),
+    )
+    .await
+    .assert_status_ok();
+
+    let task =
+        s.db.find::<task::Entity>(gradient_fixtures::ids::task_id())
+            .await
+            .unwrap();
+    assert_eq!(
+        task.git_host_connection,
+        Some(instance.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+    assert_eq!(task.report_status, instance.reports_status);
+    let linked: Vec<Value> =
+        s.db.rows::<gradient_entity::audit_log::Entity>()
+            .await
+            .into_iter()
+            .filter(|row| row.event == "git_host_connection.repository_grant.create")
+            .map(|row| row.metadata.unwrap()["git_host_connection_linked_task_ids"].clone())
+            .collect();
+    assert_eq!(
+        linked,
+        [json!([gradient_fixtures::ids::task_id().to_string()])],
+        "Audit events for creation list the IDs of linked tasks."
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn owner_wide_grant_links_only_project_tasks_in_repositories_owned_by_grant_owner() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    let lib = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "lib",
+        "git@gitea.example.com:acme/lib.git",
+    )
+    .await;
+    let other_owner = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "other-owner",
+        "git@gitea.example.com:other-owner/x.git",
+    )
+    .await;
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme" }),
+    )
+    .await
+    .assert_status_ok();
+
+    for task in [gradient_fixtures::ids::task_id(), lib] {
+        assert_eq!(
+            read_git_host_connection_id_from_task_row(&s, task).await,
+            Some(instance.id),
+            "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+        );
+    }
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, other_owner).await,
+        None,
+        "A task with a repository outside the grant doesn't keep a connection."
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn owner_wide_grant_links_only_tasks_of_that_project_and_keeps_other_project_task_unconnected()
+ {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    let target = insert_project_named_target_project_and_add_test_user_as_admin_member(&s).await;
+    let other_project = insert_task_and_return_id(
+        &s,
+        target.id,
+        "test-task",
+        "git@gitea.example.com:acme/app.git",
+    )
+    .await;
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme" }),
+    )
+    .await
+    .assert_status_ok();
+
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, gradient_fixtures::ids::task_id()).await,
+        Some(instance.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, other_project).await,
+        None,
+        "A task with a repository outside the grant doesn't keep a connection."
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn named_grant_for_acme_app_connects_task_to_acme_app_and_not_sibling_acme_lib() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    let lib = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "lib",
+        "git@gitea.example.com:acme/lib.git",
+    )
+    .await;
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "app" }),
+    )
+    .await
+    .assert_status_ok();
+
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, gradient_fixtures::ids::task_id()).await,
+        Some(instance.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, lib).await,
+        None,
+        "A task with a repository outside the grant doesn't keep a connection."
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn creating_repository_grant_for_acme_app_links_only_task_on_connection_host() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    let on_connection_host = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "on-connection-host",
+        "git@gitea.example.com:acme/app.git",
+    )
+    .await;
+    let on_other_host = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "on-other-host",
+        "git@forgejo.example.org:acme/app.git",
+    )
+    .await;
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "app" }),
+    )
+    .await
+    .assert_status_ok();
+
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, on_connection_host).await,
+        Some(instance.id),
+        "A grant can link tasks that have a repository on the connected host."
+    );
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, on_other_host).await,
+        None,
+        "The grant does not link a task on another host, even when the owner name and the repository name are the same."
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn creating_grant_keeps_existing_task_connection_and_links_task_without_connection() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    let project_connection = insert_test_git_host_connection(
+        &s,
+        build_gitea_git_host_connection_for_project_with_event_and_status_flags(
+            project_id(),
+            "https://gitea.example.com",
+            true,
+        ),
+    )
+    .await;
+    let with_connection = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "with-connection",
+        "git@gitea.example.com:acme/app.git",
+    )
+    .await;
+    s.db.execute(&format!(
+        "UPDATE task SET git_host_connection = '{}' WHERE id = '{with_connection}'",
+        project_connection.id
+    ))
+    .await;
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "app" }),
+    )
+    .await
+    .assert_status_ok();
+
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, gradient_fixtures::ids::task_id()).await,
+        Some(instance.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, with_connection).await,
+        Some(project_connection.id),
+        "Tasks with an existing connection keep it even after grant creation."
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn managed_task_is_not_linked_by_grant_creation_but_unmanaged_task_with_same_repository_is() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    let managed = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "managed",
+        "git@gitea.example.com:acme/app.git",
+    )
+    .await;
+    s.db.execute(&format!(
+        "UPDATE task SET managed = true WHERE id = '{managed}'"
+    ))
+    .await;
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "app" }),
+    )
+    .await
+    .assert_status_ok();
+
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, gradient_fixtures::ids::task_id()).await,
+        Some(instance.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+    let managed = s.db.find::<task::Entity>(managed).await.unwrap();
+    assert_eq!(
+        managed.git_host_connection, None,
+        "Tasks managed in the state file remain without a connection to a Git host after grant creation."
+    );
+    assert!(!managed.report_status);
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn team_admin_with_view_only_project_role_creates_team_connection_grant_and_task_is_linked() {
+    let s = create_test_database_with_project_membership_for_role(rows::view_role()).await;
+    seed_platform_team_with_test_user_role_as_project_owner(&s, TeamRole::Admin).await;
+    let connection =
+        insert_test_git_host_connection(&s, team_connection_for_task_repository_host()).await;
+
+    send_put_team_repository_grant_request(
+        &s,
+        "platform",
+        connection.id,
+        repository_grant_request_body_for_test_project_task_repository(),
+    )
+    .await
+    .assert_status_ok();
+
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, gradient_fixtures::ids::task_id()).await,
+        Some(connection.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn test_delete_grant_keeps_task_linked_to_connection_and_rejects_new_attach() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    let created = create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "app" }),
+    )
+    .await;
+    created.assert_status_ok();
+    let grant = created.json::<Value>()["message"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, gradient_fixtures::ids::task_id()).await,
+        Some(instance.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+
+    s.server
+        .delete(&format!(
+            "{}/{grant}",
+            instance_repository_grants_path(instance.id)
+        ))
+        .add_header("authorization", &s.auth)
+        .await
+        .assert_status_ok();
+
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, gradient_fixtures::ids::task_id()).await,
+        Some(instance.id),
+        "Grant deletion does not remove the link between the task and the connection."
+    );
+    set_repository_then_attach_connection_to_test_task(
+        &s,
+        instance.id,
+        "git@gitea.example.com:acme/app.git",
+    )
+    .await
+    .assert_status_forbidden();
+    s.db.finish().await;
+}
+
+#[tokio::test]
+async fn taking_over_state_file_grant_through_api_does_not_link_task_but_new_grant_does() {
+    let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
+    set_test_user_as_superuser(&s).await;
+    let instance = insert_test_git_host_connection(
+        &s,
+        make_instance_gitea_connection_for_task_repository_host(),
+    )
+    .await;
+    gradient_db::git_host_connection_repository_grants::insert(
+        &s.db.connection(),
+        gradient_db::git_host_connection_repository_grants::NewGitHostConnectionRepositoryGrant {
+            connection: instance.id,
+            project: project_id(),
+            repository_owner: "acme",
+            repository_name: Some("app"),
+            source:
+                gradient_entity::git_host_connection_repository_grant::RepositoryGrantSource::StateFile,
+            created_by: None,
+        },
+    )
+    .await
+    .unwrap();
+    let lib = insert_task_and_return_id(
+        &s,
+        project_id(),
+        "lib",
+        "git@gitea.example.com:acme/lib.git",
+    )
+    .await;
+    let mut before = s.db.rows::<task::Entity>().await;
+    before.sort_by_key(|task| task.id);
+
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "app" }),
+    )
+    .await
+    .assert_status_ok();
+    let mut after_take_over = s.db.rows::<task::Entity>().await;
+    after_take_over.sort_by_key(|task| task.id);
+    create_instance_repository_grant(
+        &s,
+        instance.id,
+        json!({ "project": "test-project", "repository_owner": "acme", "repository_name": "lib" }),
+    )
+    .await
+    .assert_status_ok();
+
+    assert_eq!(
+        after_take_over, before,
+        "A take-over of a grant from the state file does not change the task row."
+    );
+    assert_eq!(
+        read_git_host_connection_id_from_task_row(&s, lib).await,
+        Some(instance.id),
+        "Create a repository grant for the task repository. Tasks without a connection link to that connection."
+    );
+    s.db.finish().await;
+}
+
 #[tokio::test]
 async fn instance_repository_grant_endpoints_refuse_a_project_connection() {
     let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;

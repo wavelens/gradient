@@ -76,6 +76,7 @@ async fn main() {
             capabilities,
             authorized_peers,
             failed_peers,
+            ..
         } => {
             let version = ws.version().unwrap_or_default();
             eprintln!(

@@ -30,6 +30,7 @@ use crate::executor::{AbortSignal, JobExecutor};
 use crate::exit_clock;
 use crate::proto::credentials::{CredentialStore, JobCredentials};
 use crate::proto::job::JobUpdater;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::AssignmentHandle;
 
@@ -185,6 +186,7 @@ impl MessageLoopState {
         jobs: &Arc<WorkerJobs>,
         config: WorkerConfig,
         executor: JobExecutor,
+        http_client_for_git_urls_limited_to_allowed_destinations: HttpClientForUserSuppliedUrls,
     ) -> Self {
         let channels = ClusterChannels::new(writer.clone());
         Self {
@@ -194,7 +196,9 @@ impl MessageLoopState {
             channels,
             max_eval: config.eval.max_concurrent.get(),
             max_build: config.build.max_concurrent.get(),
-            credentials: CredentialStore::default(),
+            credentials: CredentialStore::new_with_git_connection_http_client(
+                http_client_for_git_urls_limited_to_allowed_destinations,
+            ),
             downloader: Arc::new(SubprocessDownloader(
                 executor.evaluator.resolver().config().clone(),
             )),
@@ -1273,6 +1277,7 @@ pub(super) async fn until_aborted(
 mod tests {
     use super::*;
     use crate::executor::failure::JobAborted;
+    use crate::proto::credentials::parse_allowlist_entries_and_build_http_client;
 
     #[test]
     fn only_a_failure_from_the_stop_abort_is_reported_as_canceled() {
@@ -1381,6 +1386,7 @@ mod tests {
             &jobs,
             config,
             super::super::test_executor(gcroots.path()),
+            parse_allowlist_entries_and_build_http_client(&[]).unwrap(),
         );
         state.downloader = Arc::new(OfflineDownloader);
         let _running = state.jobs.register(
@@ -1429,8 +1435,9 @@ mod tests {
         clippy::disallowed_methods,
         reason = "the test stands in for the server by hand"
     )]
-    async fn start_fake_protocol_server_connect_worker_and_make_message_loop_state()
-    -> (MessageLoopState, tempfile::TempDir) {
+    async fn start_fake_protocol_server_connect_worker_and_make_message_loop_state(
+        user_url_destination_allowlist: &[String],
+    ) -> (MessageLoopState, tempfile::TempDir) {
         let server = gradient_test_support::prelude::MockProtoServer::bind().await;
         let url = server.url().to_owned();
         tokio::spawn(async move {
@@ -1452,14 +1459,41 @@ mod tests {
             &jobs,
             config,
             super::super::test_executor(gcroots.path()),
+            parse_allowlist_entries_and_build_http_client(user_url_destination_allowlist).unwrap(),
         );
         (state, gcroots)
     }
 
     #[tokio::test]
+    async fn test_two_job_assignments_get_session_git_connection_allowlist() {
+        let session_allowlist = vec!["10.0.0.0/8".to_owned(), "git.internal".to_owned()];
+        let (mut state, _gcroots) =
+            start_fake_protocol_server_connect_worker_and_make_message_loop_state(
+                &session_allowlist,
+            )
+            .await;
+
+        let eval =
+            state.take_credentials_for_job_assignment("eval:1", None, Vec::new(), Vec::new());
+        let exec =
+            state.take_credentials_for_job_assignment("exec:2", None, Vec::new(), Vec::new());
+
+        assert_eq!(
+            [&eval, &exec].map(|credentials| {
+                credentials
+                    .git_credentials_for_clone_and_fetch()
+                    .http_client()
+                    .allowlist()
+                    .allowlist_entries_as_strings()
+            }),
+            [session_allowlist.clone(), session_allowlist]
+        );
+    }
+
+    #[tokio::test]
     async fn two_job_assignments_do_not_share_ssh_key_or_git_credential() {
         let (mut state, _gcroots) =
-            start_fake_protocol_server_connect_worker_and_make_message_loop_state().await;
+            start_fake_protocol_server_connect_worker_and_make_message_loop_state(&[]).await;
 
         let first = state.take_credentials_for_job_assignment(
             "build:1",
@@ -1516,6 +1550,7 @@ mod tests {
             &jobs,
             config,
             super::super::test_executor(gcroots.path()),
+            parse_allowlist_entries_and_build_http_client(&[]).unwrap(),
         );
         state.downloader = Arc::new(StalledDownloader);
         let _running = state.jobs.register(

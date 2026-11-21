@@ -59,6 +59,8 @@ ssh-key         = { workspace = true }
 [dev-dependencies]
 gradient-fixtures = { workspace = true }
 gradient-types    = { workspace = true, features = ["test-functions"] }
-rand  = { workspace = true }
+gradient-util     = { workspace = true, features = ["test-functions"] }
+rand = { workspace = true }
+rustls = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "test-util"] }
 tracing-subscriber = { workspace = true }

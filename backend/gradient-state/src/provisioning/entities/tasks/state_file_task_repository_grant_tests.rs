@@ -189,6 +189,55 @@ async fn a_state_file_task_with_an_instance_connection_gets_a_state_file_grant_f
 }
 
 #[tokio::test]
+async fn state_file_managed_task_creates_repository_grant_unmanaged_task_keeps_no_connection_and_unchanged_report_status()
+ {
+    let Setup {
+        database,
+        db,
+        project,
+    } = setup(None).await;
+    let connection = insert_shared_connection(&db, None, GitHostType::GitHub).await;
+    let unmanaged = task::Model {
+        id: TaskId::now_v7(),
+        project: project.id,
+        name: "manual".into(),
+        repository: "https://github.com/acme/app".into(),
+        managed: false,
+        git_host_connection: None,
+        ..rows::task()
+    }
+    .into_active_model()
+    .insert(&db)
+    .await
+    .unwrap();
+
+    apply(&db, &state_tasks(&project, "https://github.com/acme/app"))
+        .await
+        .unwrap();
+
+    let grants = database.rows::<EGitHostConnectionRepositoryGrant>().await;
+    assert_eq!(
+        grants
+            .iter()
+            .map(|grant| (
+                grant.git_host_connection,
+                grant.repository_name.as_deref(),
+                grant.source
+            ))
+            .collect::<Vec<_>>(),
+        [(connection.id, Some("app"), RepositoryGrantSource::StateFile)],
+        "A state file can create a grant for the repository of the managed task."
+    );
+    let after = database.find::<ETask>(unmanaged.id).await.unwrap();
+    assert_eq!(after.git_host_connection, None);
+    assert_eq!(
+        after, unmanaged,
+        "Grants from the state file link no task. The unmanaged task row does not change, no connection and the report status does not change."
+    );
+    database.finish().await;
+}
+
+#[tokio::test]
 async fn a_second_reconciliation_of_the_same_state_file_keeps_the_grant_unchanged() {
     let Setup {
         database,

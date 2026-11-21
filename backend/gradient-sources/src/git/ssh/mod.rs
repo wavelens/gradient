@@ -10,17 +10,21 @@ mod target;
 pub(crate) mod tests;
 
 use super::git_credentials::CURRENT_THREAD_GIT_CREDENTIALS;
+use super::git_network_limits::{
+    GitNetworkStreamReadDeadlineAndByteLimitChecker, RefAdvertisementEnd,
+};
 use connection::SshCommandStream;
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream, Transport};
 use gradient_types::SecretString;
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
 use russh::keys::PublicKey;
-use std::sync::{Arc, Mutex, Once, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use target::SshTarget;
 
 pub use connection::fetch_ssh_host_key;
 
-const SCHEMES: [&str; 3] = ["ssh", "ssh+git", "git+ssh"];
+pub(super) const SCHEMES: [&str; 3] = ["ssh", "ssh+git", "git+ssh"];
 
 #[derive(Clone, Debug)]
 pub struct SshGitPrivateKeyKnownHostsAndObservations {
@@ -74,26 +78,27 @@ impl SshGitPrivateKeyKnownHostsAndObservations {
     }
 }
 
-pub(super) fn register() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        for scheme in SCHEMES {
-            // SAFETY: the Once keeps registration away from transports created by this crate.
-            if let Err(error) = unsafe { git2::transport::register(scheme, transport) } {
-                tracing::error!(%error, scheme, "failed to register the SSH transport");
-            }
-        }
-    });
-}
-
-fn transport(remote: &git2::Remote<'_>) -> Result<Transport, git2::Error> {
-    let credentials = CURRENT_THREAD_GIT_CREDENTIALS
-        .with_borrow(|credentials| credentials.ssh_git_private_key_and_known_hosts.clone());
-    Transport::smart(remote, false, SshSubtransport { credentials })
+pub(super) fn transport(remote: &git2::Remote<'_>) -> Result<Transport, git2::Error> {
+    let (credentials, http_client_with_outbound_address_allowlist) = CURRENT_THREAD_GIT_CREDENTIALS
+        .with_borrow(|credentials| {
+            (
+                credentials.ssh_git_private_key_and_known_hosts.clone(),
+                credentials.http_client().clone(),
+            )
+        });
+    Transport::smart(
+        remote,
+        false,
+        SshSubtransport {
+            credentials,
+            http_client_with_outbound_address_allowlist,
+        },
+    )
 }
 
 struct SshSubtransport {
     credentials: Option<SshGitPrivateKeyKnownHostsAndObservations>,
+    http_client_with_outbound_address_allowlist: HttpClientForUserSuppliedUrls,
 }
 
 impl SmartSubtransport for SshSubtransport {
@@ -119,9 +124,20 @@ impl SmartSubtransport for SshSubtransport {
         let target = SshTarget::parse(url).map_err(|e| git2::Error::from_str(&e.to_string()))?;
         let command = target.command(program);
 
-        SshCommandStream::open(&target, key, command, credentials)
-            .map(|stream| Box::new(stream) as Box<dyn SmartSubtransportStream>)
-            .map_err(|e| git2::Error::from_str(&format!("SSH to {}: {e}", target.host)))
+        SshCommandStream::open(
+            &target,
+            key,
+            command,
+            credentials,
+            &self.http_client_with_outbound_address_allowlist,
+        )
+        .map(|stream| {
+            Box::new(GitNetworkStreamReadDeadlineAndByteLimitChecker::new(
+                stream,
+                RefAdvertisementEnd::AdvertisementEndsAtFirstFlushPacket,
+            )) as Box<dyn SmartSubtransportStream>
+        })
+        .map_err(|e| git2::Error::from_str(&format!("SSH to {}: {e}", target.host)))
     }
 
     fn close(&self) -> Result<(), git2::Error> {

@@ -14,6 +14,9 @@ use gradient_fixtures::test_date;
 use gradient_test_support::web::{bearer, make_test_server, with_auth};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
+use gradient_util::http_validation::{
+    UserUrlDestinationAllowlist, parse_and_check_allowed_outbound_url,
+};
 use sea_orm::MockDatabase;
 use serde_json::json;
 
@@ -105,6 +108,41 @@ async fn saving_a_host_key_lowercases_the_host() {
         .collect();
     assert!(hosts.iter().any(|s| s == "git.elektrat.de"), "{hosts:?}");
     assert!(!hosts.iter().any(|s| s == "Git.Elektrat.de"), "{hosts:?}");
+}
+
+#[tokio::test]
+async fn post_ssh_host_key_scan_for_saved_host_at_private_address_outside_allowlist_returns_allowlist_refusal_not_russh_connection_error()
+ {
+    let saved = project_ssh_host_key_row_for_host_port_and_public_key(
+        "10.255.255.1",
+        22,
+        &ed25519_public_key(),
+    );
+    let (db, auth) = as_admin();
+    let server = make_test_server(
+        db.append_query_results([vec![saved.clone()]])
+            .into_connection(),
+    );
+    let refusal = parse_and_check_allowed_outbound_url(
+        "http://10.255.255.1:22/",
+        &UserUrlDestinationAllowlist::default(),
+    )
+    .unwrap_err()
+    .to_string();
+
+    let res = server
+        .post(&format!(
+            "{PROJECT_GIT_SSH_HOST_KEYS_URL}/{}/scan",
+            saved.id
+        ))
+        .add_header("authorization", auth)
+        .await;
+
+    res.assert_status(StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        res.json::<serde_json::Value>()["message"],
+        format!("failed to read host key: {refusal}")
+    );
 }
 
 #[tokio::test]

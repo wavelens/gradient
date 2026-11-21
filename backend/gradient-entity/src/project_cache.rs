@@ -52,6 +52,8 @@ pub struct Model {
     pub mode: CacheSubscriptionMode,
     pub managed: bool,
     pub sign_outputs: bool,
+    /// Only the trigger `set_sign_backfill_requested_at_on_sign_outputs_change` can write this column. The background pass for signature backfill can clear this column.
+    pub unsigned_signature_backfill_requested_at: Option<DateTime>,
 }
 
 impl Default for Model {
@@ -63,6 +65,7 @@ impl Default for Model {
             mode: CacheSubscriptionMode::default(),
             managed: false,
             sign_outputs: true,
+            unsigned_signature_backfill_requested_at: None,
         }
     }
 }

@@ -15,6 +15,8 @@ use crate::http_validation::{
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+pub const GIT_SERVER_CONNECT_AND_READ_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub const DOWNLOAD_MAX_REDIRECTS: usize = 5;
 
 pub fn user_agent() -> String {
@@ -146,6 +148,7 @@ pub struct HttpClientForUserSuppliedUrls {
     negotiated_download: reqwest::Client,
     http1_download: reqwest::Client,
     http2_download: reqwest::Client,
+    git_smart_http_client: reqwest::Client,
 }
 
 impl std::fmt::Debug for HttpClientForUserSuppliedUrls {
@@ -164,31 +167,50 @@ impl HttpClientForUserSuppliedUrls {
                 .dns_resolver(DestinationRuleDnsResolver(Arc::clone(&allowlist)))
                 .no_proxy()
         };
-        let download = |protocol: HttpProtocolSelection| {
-            let builder = filtered(idle_timed_download_builder(DEFAULT_TIMEOUT)).redirect(
-                download_redirect_policy_refusing_long_downgrade_or_disallowed_hops(Arc::clone(
-                    &allowlist,
-                )),
-            );
-            match protocol {
-                HttpProtocolSelection::Negotiated => builder,
-                HttpProtocolSelection::Http1Only => builder
-                    .use_preconfigured_tls(rustls_config(&[b"http/1.1"]))
-                    .http1_only(),
-                HttpProtocolSelection::Http2PriorKnowledge => builder
-                    .use_preconfigured_tls(rustls_config(&[b"h2"]))
-                    .http2_prior_knowledge(),
-            }
-            .build()
-        };
+        let download =
+            |protocol: HttpProtocolSelection, idle: Duration, redirect_hosts: RedirectHostScope| {
+                let builder = filtered(idle_timed_download_builder(idle)).redirect(
+                    download_redirect_policy_refusing_long_downgrade_or_disallowed_hops(
+                        Arc::clone(&allowlist),
+                        redirect_hosts,
+                    ),
+                );
+                match protocol {
+                    HttpProtocolSelection::Negotiated => builder,
+                    HttpProtocolSelection::Http1Only => builder
+                        .use_preconfigured_tls(rustls_config(&[b"http/1.1"]))
+                        .http1_only(),
+                    HttpProtocolSelection::Http2PriorKnowledge => builder
+                        .use_preconfigured_tls(rustls_config(&[b"h2"]))
+                        .http2_prior_knowledge(),
+                }
+                .build()
+            };
 
         Ok(Self {
             api: filtered(client_builder())
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
-            negotiated_download: download(HttpProtocolSelection::Negotiated)?,
-            http1_download: download(HttpProtocolSelection::Http1Only)?,
-            http2_download: download(HttpProtocolSelection::Http2PriorKnowledge)?,
+            negotiated_download: download(
+                HttpProtocolSelection::Negotiated,
+                DEFAULT_TIMEOUT,
+                RedirectHostScope::AnyHostInAllowlist,
+            )?,
+            http1_download: download(
+                HttpProtocolSelection::Http1Only,
+                DEFAULT_TIMEOUT,
+                RedirectHostScope::AnyHostInAllowlist,
+            )?,
+            http2_download: download(
+                HttpProtocolSelection::Http2PriorKnowledge,
+                DEFAULT_TIMEOUT,
+                RedirectHostScope::AnyHostInAllowlist,
+            )?,
+            git_smart_http_client: download(
+                HttpProtocolSelection::Negotiated,
+                GIT_SERVER_CONNECT_AND_READ_IDLE_TIMEOUT,
+                RedirectHostScope::StayOnFirstRequestedHost,
+            )?,
             allowlist,
         })
     }
@@ -215,14 +237,43 @@ impl HttpClientForUserSuppliedUrls {
         protocol: HttpProtocolSelection,
         credential: Option<&HttpUpstreamCredential>,
     ) -> Result<reqwest::RequestBuilder, DestinationUrlRejectedError> {
-        let url =
-            crate::http_validation::parse_and_check_allowed_outbound_url(url, &self.allowlist)?;
         let client = match protocol {
             HttpProtocolSelection::Negotiated => &self.negotiated_download,
             HttpProtocolSelection::Http1Only => &self.http1_download,
             HttpProtocolSelection::Http2PriorKnowledge => &self.http2_download,
         };
-        let request = client.get(url);
+        self.check_url_against_allowlist_and_build_request_with_optional_credential(
+            client,
+            reqwest::Method::GET,
+            url,
+            credential,
+        )
+    }
+
+    pub fn build_allowed_git_server_request(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        credential: Option<&HttpUpstreamCredential>,
+    ) -> Result<reqwest::RequestBuilder, DestinationUrlRejectedError> {
+        self.check_url_against_allowlist_and_build_request_with_optional_credential(
+            &self.git_smart_http_client,
+            method,
+            url,
+            credential,
+        )
+    }
+
+    fn check_url_against_allowlist_and_build_request_with_optional_credential(
+        &self,
+        client: &reqwest::Client,
+        method: reqwest::Method,
+        url: &str,
+        credential: Option<&HttpUpstreamCredential>,
+    ) -> Result<reqwest::RequestBuilder, DestinationUrlRejectedError> {
+        let url =
+            crate::http_validation::parse_and_check_allowed_outbound_url(url, &self.allowlist)?;
+        let request = client.request(method, url);
         Ok(match credential {
             Some(credential) => credential.authorize(request),
             None => request,
@@ -230,8 +281,19 @@ impl HttpClientForUserSuppliedUrls {
     }
 }
 
+#[derive(Clone, Copy)]
+enum RedirectHostScope {
+    AnyHostInAllowlist,
+    StayOnFirstRequestedHost,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("redirect to another host blocked")]
+struct RedirectToAnotherHostBlockedError;
+
 fn download_redirect_policy_refusing_long_downgrade_or_disallowed_hops(
     allowlist: Arc<UserUrlDestinationAllowlist>,
+    redirect_hosts: RedirectHostScope,
 ) -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() > DOWNLOAD_MAX_REDIRECTS {
@@ -246,9 +308,18 @@ fn download_redirect_policy_refusing_long_downgrade_or_disallowed_hops(
         if from_https && attempt.url().scheme() == "http" {
             return attempt.error(DestinationUrlRejectedError::HttpsToHttpRedirect);
         }
-        match allowlist.check_destination_url_is_allowed(attempt.url()) {
-            Ok(()) => attempt.follow(),
-            Err(refused) => attempt.error(refused),
+        if let Err(refused) = allowlist.check_destination_url_is_allowed(attempt.url()) {
+            return attempt.error(refused);
+        }
+        let leaves_first_requested_host = attempt
+            .previous()
+            .first()
+            .is_some_and(|first| first.host_str() != attempt.url().host_str());
+        match (redirect_hosts, leaves_first_requested_host) {
+            (RedirectHostScope::StayOnFirstRequestedHost, true) => {
+                attempt.error(RedirectToAnotherHostBlockedError)
+            }
+            _ => attempt.follow(),
         }
     })
 }

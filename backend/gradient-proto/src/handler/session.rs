@@ -99,6 +99,14 @@ impl ProtoSession<Opening> {
         })
     }
 
+    fn user_supplied_url_private_destination_allowlist_entries(&self) -> Vec<String> {
+        self.handles
+            .db
+            .user_supplied_url_http_client
+            .allowlist()
+            .allowlist_entries_as_strings()
+    }
+
     async fn accept_worker(&mut self) -> Result<(HandshakeResult, HandshakeProof)> {
         if !self.handles.db.config.proto.discoverable {
             self.socket
@@ -111,6 +119,8 @@ impl ProtoSession<Opening> {
             db: self.handles.db.worker_db.clone(),
             config: Arc::clone(&self.handles.db.config),
             proven_peer_token_hashes: OnceLock::new(),
+            user_url_destination_allowlist: self
+                .user_supplied_url_private_destination_allowlist_entries(),
         };
         let outcome = handshake_fsm::as_authority(&mut self.socket, &authority).await;
         if let Err(error) = &outcome
@@ -132,6 +142,8 @@ impl ProtoSession<Opening> {
             db: self.handles.db.worker_db.clone(),
             config: Arc::clone(&self.handles.db.config),
             session: target.session(),
+            user_url_destination_allowlist: self
+                .user_supplied_url_private_destination_allowlist_entries(),
         };
         let outcome =
             handshake_fsm::as_dialer(&mut self.socket, &target.credentials, &authority).await;
@@ -151,6 +163,7 @@ struct ServerAuthority {
     db: WorkerDb,
     config: Arc<RuntimeConfig>,
     proven_peer_token_hashes: OnceLock<Vec<(String, String)>>,
+    user_url_destination_allowlist: Vec<String>,
 }
 
 impl ServerAuthority {
@@ -201,7 +214,7 @@ impl PeerAuthority for ServerAuthority {
         derive_session_authorization(&self.db, &self.config, claimed, &proof, advertised)
             .await?
             .including_failed_peers(checked.failed_peers)
-            .into_handshake_outcome()
+            .into_handshake_outcome(self.user_url_destination_allowlist.clone())
     }
 }
 
@@ -360,6 +373,7 @@ mod authority_tests {
             db: state.worker_db.clone(),
             config: Arc::clone(&state.config),
             proven_peer_token_hashes: OnceLock::new(),
+            user_url_destination_allowlist: vec![],
         }
     }
 
@@ -631,6 +645,7 @@ mod authority_tests {
                     cache: true,
                     ..GradientCapabilities::default()
                 },
+                user_url_destination_allowlist: vec![],
             }
         );
         db.finish().await;

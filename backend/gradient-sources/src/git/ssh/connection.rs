@@ -7,7 +7,13 @@
 use super::SshGitPrivateKeyKnownHostsAndObservations;
 use super::target::SshTarget;
 use crate::SourceError;
+use crate::git::git_credentials::CURRENT_THREAD_GIT_ALLOWLIST_REFUSAL_TEXT;
 use crate::git::git_network_limits::STALLED_SERVER_TIMEOUT;
+use crate::git::guarded_git_network_connections::{
+    ConnectError, block_on_git_network_runtime_from_blocking_thread,
+    connect_to_allowed_git_server_addresses_with_timeout,
+};
+use gradient_util::http::HttpClientForUserSuppliedUrls;
 use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
 use russh::ChannelStream;
 use russh::client::{self, Handle, Msg};
@@ -16,7 +22,7 @@ use std::borrow::Cow;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, PoisonError};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::runtime::Runtime;
+use tokio::net::TcpStream;
 
 struct ProjectSshHostKeyTrustOnFirstUse {
     host: String,
@@ -65,7 +71,6 @@ impl client::Handler for ProjectSshHostKeyTrustOnFirstUse {
 pub(super) struct SshCommandStream {
     stream: ChannelStream<Msg>,
     _session: Handle<ProjectSshHostKeyTrustOnFirstUse>,
-    runtime: Runtime,
 }
 
 impl SshCommandStream {
@@ -74,7 +79,21 @@ impl SshCommandStream {
         key: PrivateKey,
         command: String,
         credentials: &SshGitPrivateKeyKnownHostsAndObservations,
+        http_client_with_outbound_address_allowlist: &HttpClientForUserSuppliedUrls,
     ) -> io::Result<Self> {
+        let allowlisted_tcp_stream = block_on_git_network_runtime_from_blocking_thread(
+            connect_to_allowed_git_server_addresses_with_timeout(
+                &target.host,
+                target.port,
+                http_client_with_outbound_address_allowlist,
+            ),
+        )
+        .map_err(|error| {
+            if let ConnectError::DestinationRejectedByAdminAllowlist(refusal) = &error {
+                CURRENT_THREAD_GIT_ALLOWLIST_REFUSAL_TEXT.set(Some(refusal.to_string()));
+            }
+            io::Error::other(error)
+        })?;
         let saved = credentials
             .find_parsed_saved_host_public_key_for_host_and_port(&target.host, target.port)
             .map_err(io::Error::other)?;
@@ -84,29 +103,30 @@ impl SshCommandStream {
             saved,
             credentials: credentials.clone(),
         };
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()?;
-        let (session, stream) = runtime
-            .block_on(run(target, key, command, verifier))
-            .map_err(|error| match error {
-                russh::Error::UnknownKey => io::Error::other(format!(
-                    "Host key changed for {}:{}. Check the new key in project settings.",
-                    target.host, target.port
-                )),
-                error => io::Error::other(error),
-            })?;
+        let (session, stream) = block_on_git_network_runtime_from_blocking_thread(run(
+            allowlisted_tcp_stream,
+            target,
+            key,
+            command,
+            verifier,
+        ))
+        .map_err(|error| match error {
+            russh::Error::UnknownKey => io::Error::other(format!(
+                "Host key changed for {}:{}. Check the new key in project settings.",
+                target.host, target.port
+            )),
+            error => io::Error::other(error),
+        })?;
 
         Ok(Self {
             stream,
             _session: session,
-            runtime,
         })
     }
 }
 
 async fn run(
+    allowlisted_tcp_stream: TcpStream,
     target: &SshTarget,
     key: PrivateKey,
     command: String,
@@ -121,7 +141,9 @@ async fn run(
         ..Default::default()
     });
     let mut session = connect_and_record_changed_host_key_if_saved_algorithm_is_unsupported(
-        config, target, verifier,
+        config,
+        allowlisted_tcp_stream,
+        verifier,
     )
     .await?;
 
@@ -141,7 +163,7 @@ async fn run(
 
 async fn connect_and_record_changed_host_key_if_saved_algorithm_is_unsupported(
     config: Arc<client::Config>,
-    target: &SshTarget,
+    allowlisted_tcp_stream: TcpStream,
     verifier: ProjectSshHostKeyTrustOnFirstUse,
 ) -> Result<Handle<ProjectSshHostKeyTrustOnFirstUse>, russh::Error> {
     let narrowed = verifier.saved.is_some();
@@ -150,7 +172,7 @@ async fn connect_and_record_changed_host_key_if_saved_algorithm_is_unsupported(
         port: verifier.port,
     };
     let credentials = verifier.credentials.clone();
-    client::connect(config, (target.host.as_str(), target.port), verifier)
+    client::connect_stream(config, allowlisted_tcp_stream, verifier)
         .await
         .map_err(|error| match error {
             russh::Error::NoCommonAlgo {
@@ -185,7 +207,11 @@ impl client::Handler for PresentedHostKeyCaptureClient {
     }
 }
 
-pub async fn fetch_ssh_host_key(host: &str, port: u16) -> Result<String, SourceError> {
+pub async fn fetch_ssh_host_key(
+    host: &str,
+    port: u16,
+    http_client_with_outbound_address_allowlist: &HttpClientForUserSuppliedUrls,
+) -> Result<String, SourceError> {
     let failed = |reason: String| SourceError::SshHostKeyReadFailed { reason };
     let presented = Arc::new(Mutex::new(None));
     let config = Arc::new(client::Config {
@@ -195,16 +221,29 @@ pub async fn fetch_ssh_host_key(host: &str, port: u16) -> Result<String, SourceE
     let client = PresentedHostKeyCaptureClient {
         presented: presented.clone(),
     };
-    let connection = tokio::time::timeout(
-        STALLED_SERVER_TIMEOUT,
-        client::connect(config, (host, port), client),
-    )
+    let connection = tokio::time::timeout(STALLED_SERVER_TIMEOUT, async {
+        let allowlisted_tcp_stream = connect_to_allowed_git_server_addresses_with_timeout(
+            host,
+            port,
+            http_client_with_outbound_address_allowlist,
+        )
+        .await?;
+        Ok(client::connect_stream(config, allowlisted_tcp_stream, client).await)
+    })
     .await
     .map_err(|_| {
         failed(format!(
             "{host}:{port} did not send a host key within {} seconds",
             STALLED_SERVER_TIMEOUT.as_secs()
         ))
+    })?
+    .map_err(|error| match error {
+        ConnectError::DestinationRejectedByAdminAllowlist(refusal) => {
+            SourceError::GitServerAddressRefusedByAdminAllowlist {
+                reason: refusal.to_string(),
+            }
+        }
+        ConnectError::NoAllowedAddressAcceptedTcpConnection(error) => failed(error.to_string()),
     })?;
     let presented = presented
         .lock()
@@ -221,29 +260,27 @@ pub async fn fetch_ssh_host_key(host: &str, port: u16) -> Result<String, SourceE
 
 impl Read for SshCommandStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.runtime
-            .block_on(tokio::time::timeout(
-                STALLED_SERVER_TIMEOUT,
-                self.stream.read(buf),
-            ))
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    format!(
-                        "SSH server sent nothing for {} seconds",
-                        STALLED_SERVER_TIMEOUT.as_secs()
-                    ),
-                )
-            })?
+        block_on_git_network_runtime_from_blocking_thread(async {
+            tokio::time::timeout(STALLED_SERVER_TIMEOUT, self.stream.read(buf)).await
+        })
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "SSH server sent nothing for {} seconds",
+                    STALLED_SERVER_TIMEOUT.as_secs()
+                ),
+            )
+        })?
     }
 }
 
 impl Write for SshCommandStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.runtime.block_on(self.stream.write(buf))
+        block_on_git_network_runtime_from_blocking_thread(self.stream.write(buf))
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.runtime.block_on(self.stream.flush())
+        block_on_git_network_runtime_from_blocking_thread(self.stream.flush())
     }
 }

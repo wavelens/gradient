@@ -319,7 +319,7 @@ pub async fn post_project_subscribe_cache(
     }
 
     if writes_to_cache {
-        enqueue_backfill_signatures(&state.web_db, project.id, cache.id).await;
+        state.wake.run_signature_backfill_now.notify_one();
     }
     audit
         .write(
@@ -378,16 +378,6 @@ pub fn mode_label(mode: &CacheSubscriptionMode) -> &'static str {
         CacheSubscriptionMode::ReadWrite => "read and write",
         CacheSubscriptionMode::ReadOnly => "read only",
         CacheSubscriptionMode::WriteOnly => "write only",
-    }
-}
-
-async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id: CacheId) {
-    if let Err(e) = gradient_db::store_path_content_variant_trust::insert_unsigned_signature_placeholders_for_trusted_store_path_content_variants(
-        db, project_id, cache_id,
-    )
-    .await
-    {
-        tracing::warn!(%project_id, cache = %cache_id, error = %e, "backfill: placeholder insert failed");
     }
 }
 
@@ -509,12 +499,11 @@ pub async fn patch_project_subscribe_cache(
     if cache_signs_outputs && !subscription_mode_writes_build_outputs {
         return Err(ProjectRefusal::SignOutputsRequestedForReadOnlyCacheSubscription.into());
     }
-    let starts_signing = cache_signs_outputs && !subscription.sign_outputs;
     let mut active = subscription.into_active_model();
     active.sign_outputs = sea_orm::Set(cache_signs_outputs);
     gradient_db::rows::update::<EProjectCache, _>(&db.web_db, active).await?;
-    if starts_signing {
-        enqueue_backfill_signatures(&db.web_db, project.id, cache.id).await;
+    if cache_signs_outputs {
+        db.wake.run_signature_backfill_now.notify_one();
     }
 
     Ok(ok_json("Subscription saved".to_string()))

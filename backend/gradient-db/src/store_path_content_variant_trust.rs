@@ -59,11 +59,12 @@ crate::sql_fn! {
         "claimable.cache = $2",
     ),
         params = [ProjectId, CacheId],
-        tier = Bulk,
-        budget = crate::sql::Budget::bulk().buffers(1_500_000)
-            .because("POST and PATCH /projects/{project}/subscribe/{cache} requests run this one-time backfill inline at signing subscription start. \
-                      The statement can write one unsigned placeholder to the cache for each project output. \
-                      On an amplified dump the statement can read 1.19M buffers and take about 1.3 s per 100k output hashes.");
+        tier = Sweep,
+        budget = crate::sql::Budget::sweep().buffers(1_500_000)
+            .because("The background pass of signature-backfill can run this one-time backfill after the cache subscription starts the signature. \
+                      This statement can write one unsigned placeholder per project output into the cache. \
+                      Buffer reads reach 1.19 million on the amplified dump. \
+                      The cost is about 1.3 seconds per 100k output hashes.");
 
     INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES = || unsigned_placeholders_insert(
         "SELECT DISTINCT pushed.hash, $1::uuid FROM unnest($2::text[]) pushed(hash)",
@@ -101,6 +102,101 @@ pub async fn insert_unsigned_signature_placeholders_for_trusted_store_path_conte
         ]))
         .await?
         .rows_affected())
+}
+
+pub const SUBSCRIPTION_SIGNATURE_BACKFILL_ADVISORY_LOCK_CLASS: i32 = 647;
+
+crate::sql! {
+    SELECT_PROJECT_CACHE_ROWS_THAT_OWE_SIGNATURE_BACKFILL_AFTER_CURSOR_OLDEST_FIRST_WITH_LIMIT =
+        "SELECT id, project, cache, unsigned_signature_backfill_requested_at FROM project_cache \
+         WHERE unsigned_signature_backfill_requested_at IS NOT NULL \
+           AND ($1::timestamp IS NULL \
+                OR (unsigned_signature_backfill_requested_at, id) > ($1::timestamp, $2::uuid)) \
+         ORDER BY unsigned_signature_backfill_requested_at, id \
+         LIMIT $3",
+        params = [Now, NewUuid, Int(100)],
+        tier = Sweep;
+
+    CLEAR_SUBSCRIPTION_BACKFILL_REQUESTED_TIME_IF_STILL_EQUALS_READ_TIME_SQL =
+        "UPDATE project_cache SET unsigned_signature_backfill_requested_at = NULL \
+         WHERE id = $1 AND unsigned_signature_backfill_requested_at = $2",
+        params = [NewUuid, Now],
+        tier = Hot;
+}
+
+crate::sql_fn! {
+    SUBSCRIPTION_BACKFILL_LOCK_TRY = || format!(
+        "SELECT pg_try_advisory_xact_lock({SUBSCRIPTION_SIGNATURE_BACKFILL_ADVISORY_LOCK_CLASS}, hashtext($1::text)) AS locked"
+    ),
+        params = [NewUuid],
+        tier = Hot;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, FromQueryResult)]
+pub struct PendingSignatureBackfillSubscription {
+    pub id: gradient_types::ids::ProjectCacheId,
+    pub project: ProjectId,
+    pub cache: CacheId,
+    pub unsigned_signature_backfill_requested_at: sea_orm::prelude::DateTime,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackfillRowsWrittenOrSkippedForLockHeldElsewhere {
+    BackfillWrotePlaceholderRows(u64),
+    SkippedBecauseAnotherServerHoldsSubscriptionLock,
+}
+
+pub async fn read_subscriptions_owing_signature_backfill_after_cursor<C: ConnectionTrait>(
+    db: &C,
+    after: Option<&PendingSignatureBackfillSubscription>,
+    limit: u64,
+) -> Result<Vec<PendingSignatureBackfillSubscription>, DbErr> {
+    PendingSignatureBackfillSubscription::find_by_statement(
+        SELECT_PROJECT_CACHE_ROWS_THAT_OWE_SIGNATURE_BACKFILL_AFTER_CURSOR_OLDEST_FIRST_WITH_LIMIT
+            .bind([
+                after
+                    .map(|owed| owed.unsigned_signature_backfill_requested_at)
+                    .into(),
+                after.map(|owed| owed.id.into_inner()).into(),
+                i64::try_from(limit).unwrap_or(i64::MAX).into(),
+            ]),
+    )
+    .all(db)
+    .await
+}
+
+pub async fn write_unsigned_signature_placeholders_for_project_earlier_outputs_then_clear_owed_subscription_requested_time_in_locked_transaction_and_commit<
+    C: sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
+>(
+    db: &C,
+    owed: &PendingSignatureBackfillSubscription,
+) -> Result<BackfillRowsWrittenOrSkippedForLockHeldElsewhere, DbErr> {
+    let transaction = db.begin().await?;
+    let locked: bool = SUBSCRIPTION_BACKFILL_LOCK_TRY
+        .scalar(&transaction, [owed.id.into_inner().into()], "locked")
+        .await?;
+    if !locked {
+        transaction.rollback().await?;
+        return Ok(
+            BackfillRowsWrittenOrSkippedForLockHeldElsewhere::SkippedBecauseAnotherServerHoldsSubscriptionLock,
+        );
+    }
+    let written = insert_unsigned_signature_placeholders_for_trusted_store_path_content_variants(
+        &transaction,
+        owed.project,
+        owed.cache,
+    )
+    .await?;
+    transaction
+        .execute_raw(
+            CLEAR_SUBSCRIPTION_BACKFILL_REQUESTED_TIME_IF_STILL_EQUALS_READ_TIME_SQL.bind([
+                owed.id.into_inner().into(),
+                owed.unsigned_signature_backfill_requested_at.into(),
+            ]),
+        )
+        .await?;
+    transaction.commit().await?;
+    Ok(BackfillRowsWrittenOrSkippedForLockHeldElsewhere::BackfillWrotePlaceholderRows(written))
 }
 
 pub async fn insert_unsigned_signature_placeholders_for_trusted_content_variants<
@@ -4004,6 +4100,411 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 sql_text_compares_reference_token_hash_expression_in_join_on_or_exists(&sql, start)
             }),
             "The publish statement does compare the column with the hash of the store path of the reference token inside a JOIN ... ON or EXISTS subquery."
+        );
+    }
+
+    const TRUSTED_PROJECT_OUTPUT_STORE_PATH_HASH: &str = "99999999999999999999999999999999";
+
+    async fn read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(
+        db: &TestDatabase,
+    ) -> Vec<String> {
+        db.texts(
+            "SELECT coalesce(unsigned_signature_backfill_requested_at::text, 'NULL') \
+             FROM project_cache ORDER BY id",
+        )
+        .await
+    }
+
+    async fn count_cached_path_signature_rows_in_cache(db: &TestDatabase, cache: CacheId) -> usize {
+        db.texts(&format!(
+            "SELECT id::text FROM cached_path_signature WHERE cache = '{cache}'"
+        ))
+        .await
+        .len()
+    }
+
+    async fn make_test_database_with_trusted_build_output_and_owed_signing_subscription()
+    -> (TestDatabase, CacheId, PendingSignatureBackfillSubscription) {
+        let cache = CacheId::now_v7();
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&format!("/nix/store/{}-output.drv", "r".repeat(32)))
+            .output(TRUSTED_PROJECT_OUTPUT_STORE_PATH_HASH)
+            .job()
+            .cached_path(TRUSTED_PROJECT_OUTPUT_STORE_PATH_HASH, "output")
+            .into_cache(cache)
+            .keyed("signing-key")
+            .into_database()
+            .await;
+        let owed =
+            read_subscriptions_owing_signature_backfill_after_cursor(&db.connection(), None, 10)
+                .await
+                .expect("the owed subscriptions are read");
+        let [owed] = owed.as_slice() else {
+            panic!("{owed:?}");
+        };
+        let owed = owed.clone();
+        (db, cache, owed)
+    }
+
+    #[tokio::test]
+    async fn test_project_cache_trigger_sets_unsigned_signature_backfill_requested_at_from_sign_outputs_on_insert_and_update()
+     {
+        let db = TestDatabase::create().await;
+        insert_owner_and_project(&db).await;
+        insert_test_cache_with_active_flag_and_project_subscription(
+            &db,
+            CacheSubscriptionMode::ReadOnly,
+            true,
+        )
+        .await;
+        let read_only =
+            read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await;
+        db.execute("DELETE FROM project_cache").await;
+        crate::rows::insert::<EProjectCache, _>(
+            &db.connection(),
+            rows::project_cache_link(
+                ProjectCacheId::now_v7(),
+                project_id(),
+                cache_id(),
+                CacheSubscriptionMode::ReadWrite,
+            ),
+        )
+        .await
+        .expect("Write a cache subscription.");
+        let signing = read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await;
+        db.execute(&format!(
+            "UPDATE project_cache SET mode = {write_only}, sign_outputs = true",
+            write_only = mode(CacheSubscriptionMode::WriteOnly),
+        ))
+        .await;
+        let kept = read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await;
+        db.execute("UPDATE project_cache SET sign_outputs = false")
+            .await;
+        let off = read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await;
+        db.execute("UPDATE project_cache SET sign_outputs = true")
+            .await;
+        let again_is_later = db
+            .texts(&format!(
+                "SELECT (unsigned_signature_backfill_requested_at > '{}'::timestamp)::text \
+                 FROM project_cache",
+                signing[0]
+            ))
+            .await;
+
+        assert_eq!(
+            read_only,
+            vec!["NULL".to_owned()],
+            "A read-only subscription doesn't sign, so there's no owed request."
+        );
+        assert_ne!(
+            signing,
+            vec!["NULL".to_owned()],
+            "New signature subscriptions record the time of the backfill request."
+        );
+        assert_eq!(
+            kept, signing,
+            "Changes that leave signatures on keep the requested time."
+        );
+        assert_eq!(
+            off,
+            vec!["NULL".to_owned()],
+            "Signature disabled: requested time cleared."
+        );
+        assert_eq!(
+            again_is_later,
+            vec!["true".to_owned()],
+            "Enabling signing again can record a later request time."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_backfill_for_owed_signing_subscription_writes_unsigned_placeholder_rows_to_project_output_cache_and_clears_requested_time()
+     {
+        let (db, cache, owed) =
+            make_test_database_with_trusted_build_output_and_owed_signing_subscription().await;
+
+        let outcome = write_unsigned_signature_placeholders_for_project_earlier_outputs_then_clear_owed_subscription_requested_time_in_locked_transaction_and_commit(
+            &db.connection(),
+            &owed,
+        )
+        .await
+        .expect("the backfill runs");
+
+        assert_eq!(
+            (
+                outcome,
+                count_cached_path_signature_rows_in_cache(&db, cache).await,
+                read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await,
+            ),
+            (
+                BackfillRowsWrittenOrSkippedForLockHeldElsewhere::BackfillWrotePlaceholderRows(1),
+                1,
+                vec!["NULL".to_owned()],
+            ),
+            "Backfill can write unsigned placeholders for project outputs to the signature cache. The same step can clear the requested time."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn backfill_keeps_later_requested_time_after_owed_row_read() {
+        let (db, _, owed) =
+            make_test_database_with_trusted_build_output_and_owed_signing_subscription().await;
+        db.execute(
+            "UPDATE project_cache SET unsigned_signature_backfill_requested_at = \
+             unsigned_signature_backfill_requested_at + interval '1 minute'",
+        )
+        .await;
+        let later = read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await;
+
+        write_unsigned_signature_placeholders_for_project_earlier_outputs_then_clear_owed_subscription_requested_time_in_locked_transaction_and_commit(
+            &db.connection(),
+            &owed,
+        )
+        .await
+        .expect("the backfill runs");
+
+        assert_eq!(
+            read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await,
+            later,
+            "Requests made during the backfill stay pending with their later time."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn deleted_subscription_while_owed_backfill_writes_nothing_and_signing_off_clears_requested_time()
+     {
+        let (deleted, cache, owed) =
+            make_test_database_with_trusted_build_output_and_owed_signing_subscription().await;
+        deleted.execute("DELETE FROM project_cache").await;
+        let outcome = write_unsigned_signature_placeholders_for_project_earlier_outputs_then_clear_owed_subscription_requested_time_in_locked_transaction_and_commit(
+            &deleted.connection(),
+            &owed,
+        )
+        .await
+        .expect("the backfill runs");
+        assert_eq!(
+            (
+                outcome,
+                count_cached_path_signature_rows_in_cache(&deleted, cache).await
+            ),
+            (
+                BackfillRowsWrittenOrSkippedForLockHeldElsewhere::BackfillWrotePlaceholderRows(0),
+                0
+            ),
+            "Subscriptions deleted during a pending backfill receive no placeholder and the backfill doesn't fail."
+        );
+        deleted.finish().await;
+
+        let (signing_off, _, _) =
+            make_test_database_with_trusted_build_output_and_owed_signing_subscription().await;
+        signing_off
+            .execute("UPDATE project_cache SET sign_outputs = false")
+            .await;
+        assert_eq!(
+            read_subscriptions_owing_signature_backfill_after_cursor(
+                &signing_off.connection(),
+                None,
+                10
+            )
+            .await
+            .expect("the owed subscriptions are read"),
+            Vec::new(),
+            "Turning signatures off with a backfill pending can clear the requested time. Subscriptions with a pending backfill then don't show in the list."
+        );
+        signing_off.finish().await;
+    }
+
+    #[tokio::test]
+    async fn subscription_backfill_skips_while_subscription_lock_is_held_and_writes_after_release()
+    {
+        use sea_orm::TransactionTrait;
+        let (db, cache, owed) =
+            make_test_database_with_trusted_build_output_and_owed_signing_subscription().await;
+        let requested =
+            read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await;
+        let connection = db.connection();
+        let lock_holder = connection.begin().await.expect("Start a test transaction.");
+        lock_holder
+            .execute_raw(SUBSCRIPTION_BACKFILL_LOCK_TRY.bind([owed.id.into_inner().into()]))
+            .await
+            .expect("the second connection takes the lock");
+
+        let while_held = (
+            write_unsigned_signature_placeholders_for_project_earlier_outputs_then_clear_owed_subscription_requested_time_in_locked_transaction_and_commit(
+                &connection,
+                &owed,
+            )
+            .await
+            .expect("the backfill runs"),
+            count_cached_path_signature_rows_in_cache(&db, cache).await,
+            read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await,
+        );
+        lock_holder
+            .rollback()
+            .await
+            .expect("Roll back the test transaction.");
+        let after_release = (
+            write_unsigned_signature_placeholders_for_project_earlier_outputs_then_clear_owed_subscription_requested_time_in_locked_transaction_and_commit(
+                &connection,
+                &owed,
+            )
+            .await
+            .expect("the backfill runs"),
+            count_cached_path_signature_rows_in_cache(&db, cache).await,
+            read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(&db).await,
+        );
+
+        assert_eq!(
+            while_held,
+            (
+                BackfillRowsWrittenOrSkippedForLockHeldElsewhere::SkippedBecauseAnotherServerHoldsSubscriptionLock,
+                0,
+                requested,
+            ),
+            "Backfill jobs write nothing while another connection is the owner of the lock for that subscription. The subscription is unprocessed."
+        );
+        assert_eq!(
+            after_release,
+            (
+                BackfillRowsWrittenOrSkippedForLockHeldElsewhere::BackfillWrotePlaceholderRows(1),
+                1,
+                vec!["NULL".to_owned()],
+            ),
+            "The backfill wrote a placeholder and cleared the requested time after lock release."
+        );
+        db.finish().await;
+    }
+
+    #[test]
+    fn placeholder_backfill_and_owed_subscription_list_use_sweep_tier_and_background_reason_not_web_request()
+     {
+        let backfill = &INSERT_PLACEHOLDERS_FOR_PROJECT_OUTPUTS_INTO_CACHE;
+        assert_eq!(
+            (
+                backfill.tier,
+                backfill.budget.buffers,
+                backfill.budget.reason.is_some_and(|reason| {
+                    reason.contains("signature-backfill") && !reason.contains("/projects/")
+                }),
+            ),
+            (crate::sql::Tier::Sweep, 1_500_000, true),
+            "Backfill statements execute on a background path on tier Sweep. Those statements name that path, not a web request. The path name is the reason."
+        );
+        assert_eq!(
+            SELECT_PROJECT_CACHE_ROWS_THAT_OWE_SIGNATURE_BACKFILL_AFTER_CURSOR_OLDEST_FIRST_WITH_LIMIT
+                .tier,
+            crate::sql::Tier::Sweep,
+            "Subscriptions with a pending backfill form a list for tier Sweep to execute."
+        );
+    }
+
+    #[test]
+    fn only_migration_and_trust_module_write_unsigned_signature_backfill_requested_at() {
+        let backend = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the crate lies in the backend directory");
+        let unsigned_signature_backfill_requested_at_column_name =
+            "unsigned_signature_backfill_requested_at";
+        let source_text_writes_project_cache_unsigned_signature_backfill_requested_at =
+            |source: &str| {
+                let source_text_without_whitespace: String =
+                    source.chars().filter(|c| !c.is_whitespace()).collect();
+                let whitespace_free_lowercased_source_text =
+                    source_text_without_whitespace.to_lowercase();
+                let raw_sql_statement_start_has_column_before_column_or_set_list_end =
+                    |statement: &str, list_end_markers: &[&str]| {
+                        whitespace_free_lowercased_source_text
+                            .match_indices(statement)
+                            .any(|(start, _)| {
+                                let sql_text_through_set_or_insert_column_list =
+                                    &whitespace_free_lowercased_source_text
+                                        [start + statement.len()..];
+                                let set_or_column_list_end_offset = list_end_markers
+                                    .iter()
+                                    .filter_map(|marker| {
+                                        sql_text_through_set_or_insert_column_list.find(marker)
+                                    })
+                                    .min()
+                                    .unwrap_or(sql_text_through_set_or_insert_column_list.len());
+                                sql_text_through_set_or_insert_column_list
+                                    [..set_or_column_list_end_offset]
+                                    .contains(unsigned_signature_backfill_requested_at_column_name)
+                            })
+                    };
+                let column_is_written_through_active_model_field = source_text_without_whitespace
+                    .match_indices(unsigned_signature_backfill_requested_at_column_name)
+                    .any(|(start, name)| {
+                        let text_after_column_name_occurrence =
+                            &source_text_without_whitespace[start + name.len()..];
+                        let assigned_expression = text_after_column_name_occurrence
+                            .get(1..)
+                            .unwrap_or_default();
+                        let assigned_expression = &assigned_expression[..assigned_expression
+                            .find([',', ';', '}'])
+                            .unwrap_or(assigned_expression.len())];
+                        let is_column_value_member_assignment = text_after_column_name_occurrence
+                            .starts_with('=')
+                            && !text_after_column_name_occurrence.starts_with("==")
+                            && source_text_without_whitespace[..start].ends_with('.');
+                        let is_active_value_set_struct_field_initializer =
+                            text_after_column_name_occurrence.starts_with(':')
+                                && !text_after_column_name_occurrence.starts_with("::")
+                                && ["Set(", "set(", "ActiveValue", "active_value"]
+                                    .iter()
+                                    .any(|setter| assigned_expression.contains(setter));
+                        is_column_value_member_assignment
+                            || is_active_value_set_struct_field_initializer
+                    });
+                source_text_without_whitespace
+                    .contains("Column::UnsignedSignatureBackfillRequestedAt")
+                    || column_is_written_through_active_model_field
+                    || raw_sql_statement_start_has_column_before_column_or_set_list_end(
+                        "updateproject_cache",
+                        &["where", "\"", ";"],
+                    )
+                    || raw_sql_statement_start_has_column_before_column_or_set_list_end(
+                        "insertintoproject_cache",
+                        &[")"],
+                    )
+            };
+        let mut directories: Vec<std::path::PathBuf> = std::fs::read_dir(backend)
+            .expect("the backend directory reads")
+            .filter_map(Result::ok)
+            .map(|crate_directory| crate_directory.path().join("src"))
+            .chain([backend.join("src")])
+            .filter(|source| {
+                source.is_dir() && !source.starts_with(backend.join("gradient-migration"))
+            })
+            .collect();
+        let mut writers = Vec::new();
+        while let Some(directory) = directories.pop() {
+            for entry in std::fs::read_dir(&directory)
+                .expect("the source directory reads")
+                .filter_map(Result::ok)
+            {
+                let path = entry.path();
+                if path.is_dir() {
+                    directories.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "rs")
+                    && !path.ends_with(file!())
+                {
+                    let source = std::fs::read_to_string(&path).unwrap_or_default();
+                    if source_text_writes_project_cache_unsigned_signature_backfill_requested_at(
+                        &source,
+                    ) {
+                        writers.push(path);
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            writers,
+            Vec::<std::path::PathBuf>::new(),
+            "Only database triggers write the column for the request time. The write side of sign_outputs can let the trigger handle the write."
         );
     }
 }

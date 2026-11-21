@@ -38,6 +38,7 @@ pub(super) struct DialedWorkerAuthority {
     pub db: WorkerDb,
     pub config: Arc<RuntimeConfig>,
     pub session: DialedSession,
+    pub user_url_destination_allowlist: Vec<String>,
 }
 
 #[async_trait]
@@ -50,7 +51,7 @@ impl DialerAuthority for DialedWorkerAuthority {
         let proof = HandshakeProof::ServerDialed(self.session.clone());
         derive_session_authorization(&self.db, &self.config, worker_id, &proof, advertised)
             .await?
-            .into_handshake_outcome()
+            .into_handshake_outcome(self.user_url_destination_allowlist.clone())
     }
 }
 

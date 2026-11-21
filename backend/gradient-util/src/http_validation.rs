@@ -230,29 +230,60 @@ impl UserUrlDestinationAllowlist {
         &self,
         url: &reqwest::Url,
     ) -> Result<(), DestinationUrlRejectedError> {
-        match url.scheme() {
-            "http" | "https" => {}
-            s => return Err(DestinationUrlRejectedError::Scheme(s.to_owned())),
-        }
-        let literal_ip_check = |ip: IpAddr| {
-            self.check_outbound_destination_ip_address_is_allowed(ip)
+        check_url_scheme_is_http_or_https(url)?;
+        let host = url
+            .host_str()
+            .ok_or(DestinationUrlRejectedError::MissingHost)?;
+        self.check_host_text_without_dns_for_allowed_ip_literal(host)
+            .map(drop)
+    }
+
+    fn check_host_text_without_dns_for_allowed_ip_literal(
+        &self,
+        host: &str,
+    ) -> Result<Option<IpAddr>, DestinationUrlRejectedError> {
+        let unbracketed = host
+            .strip_prefix('[')
+            .and_then(|inner| inner.strip_suffix(']'))
+            .unwrap_or(host);
+        if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+            return self
+                .check_outbound_destination_ip_address_is_allowed(ip)
+                .map(|()| Some(ip))
                 .map_err(|reason| {
                     tracing::debug!(%reason, "The server rejected an IP address in the URL.");
                     DestinationUrlRejectedError::UnsafeAddress(ip)
-                })
-        };
-        match url.host().ok_or(DestinationUrlRejectedError::MissingHost)? {
-            url::Host::Ipv4(ip) => literal_ip_check(ip.into()),
-            url::Host::Ipv6(ip) => literal_ip_check(ip.into()),
-            url::Host::Domain("") => Err(DestinationUrlRejectedError::EmptyHost),
-            url::Host::Domain(d)
-                if d.eq_ignore_ascii_case("localhost")
-                    && !self.is_host_name_on_admin_allow_list(d) =>
-            {
-                Err(DestinationUrlRejectedError::Localhost)
-            }
-            _ => Ok(()),
+                });
         }
+        if host.is_empty() {
+            return Err(DestinationUrlRejectedError::EmptyHost);
+        }
+        if host.eq_ignore_ascii_case("localhost") && !self.is_host_name_on_admin_allow_list(host) {
+            return Err(DestinationUrlRejectedError::Localhost);
+        }
+        Ok(None)
+    }
+
+    pub async fn allowed_socket_addresses_for_host_and_port(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<Vec<SocketAddr>, DestinationUrlRejectedError> {
+        if let Some(ip) = self.check_host_text_without_dns_for_allowed_ip_literal(host)? {
+            return Ok(vec![SocketAddr::new(ip, port)]);
+        }
+        let resolved = (self.lookup_host_socket_addresses)(host.to_owned(), port)
+            .await
+            .map_err(|error| HostHasNoAllowedAddressError::from_failed_host_lookup(host, &error))?;
+        Ok(self.allowed_socket_addrs_for_host(host, resolved.into_iter())?)
+    }
+
+    pub fn allowlist_entries_as_strings(&self) -> Vec<String> {
+        self.networks
+            .iter()
+            .map(IpNet::to_string)
+            .chain(self.host_names.iter().cloned())
+            .collect()
     }
 
     pub fn allowed_socket_addrs_for_host(
@@ -283,22 +314,24 @@ impl UserUrlDestinationAllowlist {
         base_url: &ValidatedHttpBaseUrl,
     ) -> Result<Vec<SocketAddr>, DestinationUrlRejectedError> {
         let url = reqwest::Url::parse(base_url.as_str())?;
-        self.check_destination_url_is_allowed(&url)?;
+        check_url_scheme_is_http_or_https(&url)?;
+        let host = url
+            .host_str()
+            .ok_or(DestinationUrlRejectedError::MissingHost)?;
         let port = url
             .port_or_known_default()
             .ok_or(DestinationUrlRejectedError::MissingHost)?;
-        match url.host().ok_or(DestinationUrlRejectedError::MissingHost)? {
-            url::Host::Ipv4(ip) => Ok(vec![SocketAddr::new(ip.into(), port)]),
-            url::Host::Ipv6(ip) => Ok(vec![SocketAddr::new(ip.into(), port)]),
-            url::Host::Domain(host) => {
-                let resolved = (self.lookup_host_socket_addresses)(host.to_owned(), port)
-                    .await
-                    .map_err(|error| {
-                        HostHasNoAllowedAddressError::from_failed_host_lookup(host, &error)
-                    })?;
-                Ok(self.allowed_socket_addrs_for_host(host, resolved.into_iter())?)
-            }
-        }
+        self.allowed_socket_addresses_for_host_and_port(host, port)
+            .await
+    }
+}
+
+fn check_url_scheme_is_http_or_https(
+    url: &reqwest::Url,
+) -> Result<(), DestinationUrlRejectedError> {
+    match url.scheme() {
+        "http" | "https" => Ok(()),
+        scheme => Err(DestinationUrlRejectedError::Scheme(scheme.to_owned())),
     }
 }
 
@@ -952,5 +985,55 @@ mod tests {
                 .expect("interface list")
                 .contains(&IpAddr::V4(Ipv4Addr::LOCALHOST))
         );
+    }
+
+    #[test]
+    fn allowlist_entries_text_with_added_git_host_parses_back_to_same_allowlist() {
+        let allowlist = UserUrlDestinationAllowlist::parse(&entries(
+            "10.0.0.0/8,192.168.1.5,::1/128,fd00::/8,git.lan",
+        ))
+        .unwrap()
+        .with_added_allowed_host_or_ip("gitea.example.org");
+
+        let parsed =
+            UserUrlDestinationAllowlist::parse(&allowlist.allowlist_entries_as_strings()).unwrap();
+
+        assert_eq!(parsed.networks, allowlist.networks);
+        assert_eq!(parsed.host_names, allowlist.host_names);
+        assert!(parsed.is_host_name_on_admin_allow_list("gitea.example.org"));
+    }
+
+    #[tokio::test]
+    async fn allowed_socket_addresses_for_host_and_port_rejects_bracketed_ipv6_loopback_private_ipv4_empty_host_and_unlisted_localhost_and_returns_allowed_literal_with_port()
+     {
+        let refused = |host: &'static str| async move {
+            public_only()
+                .allowed_socket_addresses_for_host_and_port(host, 9418)
+                .await
+                .unwrap_err()
+        };
+
+        assert!(matches!(
+            refused("[::1]").await,
+            DestinationUrlRejectedError::UnsafeAddress(ip) if ip == Ipv6Addr::LOCALHOST
+        ));
+        assert!(matches!(
+            refused("10.0.0.5").await,
+            DestinationUrlRejectedError::UnsafeAddress(_)
+        ));
+        assert!(matches!(
+            refused("").await,
+            DestinationUrlRejectedError::EmptyHost
+        ));
+        assert!(matches!(
+            refused("localhost").await,
+            DestinationUrlRejectedError::Localhost
+        ));
+        let allowed = UserUrlDestinationAllowlist::parse(&entries("::1/128"))
+            .unwrap()
+            .allowed_socket_addresses_for_host_and_port("[::1]", 9418)
+            .await
+            .unwrap();
+        assert_eq!(allowed, vec!["[::1]:9418".parse().unwrap()]);
     }
 }

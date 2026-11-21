@@ -9,7 +9,7 @@ use gradient_types::*;
 use sea_orm::sea_query::{Condition, Expr, ExprTrait, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder, QuerySelect,
+    QueryFilter, QueryOrder, QuerySelect, QueryTrait,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,18 +253,22 @@ pub async fn link_tasks_to_connection<C: ConnectionTrait>(
     tasks: &[TaskId],
     connection: GitHostConnectionId,
     report_status: bool,
-) -> Result<(), DbErr> {
+) -> Result<Vec<TaskId>, DbErr> {
     if tasks.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    ETask::update_many()
+    let mut update = ETask::update_many()
         .col_expr(CTask::GitHostConnection, Expr::value(connection))
         .col_expr(CTask::ReportStatus, Expr::value(report_status))
         .filter(CTask::Id.is_in(tasks.iter().copied()))
         .filter(CTask::GitHostConnection.is_null())
-        .exec(db)
-        .await?;
-    Ok(())
+        .into_query();
+    update.returning_col(CTask::Id);
+    db.query_all(&update)
+        .await?
+        .iter()
+        .map(|row| Ok(TaskId::new(row.try_get("", "id")?)))
+        .collect()
 }
 
 pub async fn commit_status_post_attempts_of_task<C: ConnectionTrait>(
@@ -646,6 +650,83 @@ mod tests {
                 "no-repo-path none false".to_owned(),
                 format!("outside {team_connection} true"),
             ]
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_link_tasks_to_connection_returns_only_updated_task_ids() {
+        use gradient_entity::ids::{GitHostConnectionId, TaskId};
+        use gradient_entity::{git_host_connection, project, task, user};
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let connection = db.connection();
+        crate::rows::insert::<user::Entity, _>(&connection, gradient_fixtures::rows::user())
+            .await
+            .expect("user");
+        crate::rows::insert::<project::Entity, _>(&connection, gradient_fixtures::rows::project())
+            .await
+            .expect("project");
+        let existing_connection = GitHostConnectionId::now_v7();
+        let new_connection = GitHostConnectionId::now_v7();
+        for (id, name) in [(existing_connection, "existing"), (new_connection, "new")] {
+            crate::rows::insert::<git_host_connection::Entity, _>(
+                &connection,
+                git_host_connection::Model {
+                    id,
+                    name: name.into(),
+                    display_name: name.into(),
+                    created_by: user_id(),
+                    created_at: gradient_fixtures::test_date(),
+                    base_url: Some("https://gitea.example.com".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("connection");
+        }
+        let without_connection = TaskId::now_v7();
+        let with_connection = TaskId::now_v7();
+        for (id, name, git_host_connection) in [
+            (without_connection, "without", None),
+            (with_connection, "with", Some(existing_connection)),
+        ] {
+            crate::rows::insert::<task::Entity, _>(
+                &connection,
+                task::Model {
+                    id,
+                    project: project_id(),
+                    name: name.into(),
+                    repository: "https://gitea.example.com/acme/app".into(),
+                    git_host_connection,
+                    ..gradient_fixtures::rows::task()
+                },
+            )
+            .await
+            .expect("task");
+        }
+
+        let linked = super::link_tasks_to_connection(
+            &connection,
+            &[without_connection, with_connection],
+            new_connection,
+            true,
+        )
+        .await
+        .expect("link tasks");
+
+        assert_eq!(
+            linked,
+            vec![without_connection],
+            "Only tasks without a connection receive a link. Results include only their IDs."
+        );
+        assert_eq!(
+            db.find::<task::Entity>(with_connection)
+                .await
+                .expect("task remains")
+                .git_host_connection,
+            Some(existing_connection),
+            "Tasks that already have a connection keep that connection."
         );
         db.finish().await;
     }

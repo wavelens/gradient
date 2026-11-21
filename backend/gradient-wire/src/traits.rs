@@ -142,6 +142,7 @@ pub enum AuthOutcome {
         authorized_peers: Vec<String>,
         failed_peers: Vec<FailedPeer>,
         granted_capabilities: GradientCapabilities,
+        user_url_destination_allowlist: Vec<String>,
     },
     Reject(Rejection),
 }

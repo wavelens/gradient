@@ -135,19 +135,27 @@ fn store_path_failure(error: anyhow::Error) -> BuildError {
 }
 
 fn git_failure(error: anyhow::Error) -> BuildError {
-    let fails_on_every_worker = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<git2::Error>())
-        .is_some_and(|git| {
+    let checkout_error_has_git_server_address_refused_by_admin_allowlist =
+        error.chain().any(|cause| {
             matches!(
-                git.class(),
-                ErrorClass::Invalid
-                    | ErrorClass::Repository
-                    | ErrorClass::Reference
-                    | ErrorClass::Object
-                    | ErrorClass::Odb
+                cause.downcast_ref::<gradient_sources::SourceError>(),
+                Some(gradient_sources::SourceError::GitServerAddressRefusedByAdminAllowlist { .. })
             )
         });
+    let fails_on_every_worker = checkout_error_has_git_server_address_refused_by_admin_allowlist
+        || error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<git2::Error>())
+            .is_some_and(|git| {
+                matches!(
+                    git.class(),
+                    ErrorClass::Invalid
+                        | ErrorClass::Repository
+                        | ErrorClass::Reference
+                        | ErrorClass::Object
+                        | ErrorClass::Odb
+                )
+            });
     match fails_on_every_worker {
         true => BuildError::permanent(error),
         false => BuildError::transient(error),
@@ -157,6 +165,9 @@ fn git_failure(error: anyhow::Error) -> BuildError {
 #[cfg(test)]
 mod tests {
     use gradient_sources::GitOperationCredentials;
+    use gradient_util::http_validation::{
+        UserUrlDestinationAllowlist, parse_and_check_allowed_outbound_url,
+    };
     use gradient_wire::messages::BuildFailureKind;
 
     use super::*;
@@ -220,6 +231,35 @@ mod tests {
         );
         let error = anyhow::Error::new(unreachable).context("fetch commit abc from gitea.example");
         assert_eq!(git_failure(error).kind, BuildFailureKind::Transient);
+    }
+
+    #[test]
+    fn checkout_refused_by_git_server_address_allowlist_is_permanent_failure_with_refusal_text() {
+        let public_only = gradient_util::http::HttpClientForUserSuppliedUrls::new(
+            UserUrlDestinationAllowlist::default(),
+        )
+        .unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let error = gradient_sources::checkout_commit_into(
+            work.path(),
+            &"git://127.0.0.1:9/repo".parse().unwrap(),
+            NO_COMMIT,
+            &GitOperationCredentials::default().with_guarded_http_client(public_only),
+        )
+        .unwrap_err();
+        let refusal_text = parse_and_check_allowed_outbound_url(
+            "http://127.0.0.1:9/repo",
+            &UserUrlDestinationAllowlist::default(),
+        )
+        .unwrap_err()
+        .to_string();
+
+        let failure = git_failure(error);
+
+        assert_eq!(
+            (failure.kind, failure.source.to_string()),
+            (BuildFailureKind::Permanent, refusal_text)
+        );
     }
 
     #[test]

@@ -111,6 +111,7 @@ fn main() -> Result<()> {
 
     // The crypto provider, before the first TLS handshake, for rustls 0.23 (#232).
     gradient_util::http::init_crypto_provider();
+    gradient_sources::register_git_transports_once();
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {

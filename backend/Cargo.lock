@@ -3367,6 +3367,7 @@ dependencies = [
  "rand 0.10.3",
  "reqwest",
  "russh",
+ "rustls",
  "sea-orm",
  "serde",
  "serde_json",

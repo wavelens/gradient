@@ -191,6 +191,7 @@ pub async fn handle_cache_socket(
             capabilities: readonly_capabilities(),
             authorized_peers: vec![],
             failed_peers: vec![],
+            user_url_destination_allowlist: vec![],
         })
         .await
         .is_err()

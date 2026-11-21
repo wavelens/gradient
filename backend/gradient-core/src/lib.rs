@@ -109,6 +109,18 @@ pub fn build_user_url_destination_allowlist_from_config(
     })
 }
 
+pub fn build_http_client_for_user_supplied_urls_from_runtime_config_and_set_as_process_git_client(
+    config: &RuntimeConfig,
+) -> Result<HttpClientForUserSuppliedUrls, InitError> {
+    let client = HttpClientForUserSuppliedUrls::new(
+        build_user_url_destination_allowlist_from_config(config)?,
+    )
+    .map_err(|e| InitError::HttpClient(e.into()))?;
+    gradient_sources::set_default_git_http_client(client.clone());
+    gradient_sources::register_git_transports_once();
+    Ok(client)
+}
+
 async fn load_and_check_secret_files_and_external_endpoints_before_database(
     cli: &Cli,
 ) -> Result<ValidatedStartupSettings, InitError> {
@@ -222,10 +234,10 @@ pub async fn init_state(
         effective_options,
         ..RuntimeConfig::from_cli(&cli).map_err(|e| InitError::NetworkConfig(e.to_string()))?
     });
-    let user_supplied_url_http_client = HttpClientForUserSuppliedUrls::new(
-        build_user_url_destination_allowlist_from_config(&config)?,
-    )
-    .map_err(|e| InitError::HttpClient(e.into()))?;
+    let user_supplied_url_http_client =
+        build_http_client_for_user_supplied_urls_from_runtime_config_and_set_as_process_git_client(
+            &config,
+        )?;
     let ValidatedStartupSettings {
         admin_configured_endpoint_http_client,
         jwt_secret,

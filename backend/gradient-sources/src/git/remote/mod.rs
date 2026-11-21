@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod git_protocol;
-
 use super::git_credentials::{
     GitOperationCredentials, run_blocking_libgit2_operation_with_git_credentials,
 };
 use super::git_network_limits::BlockingGitFetchOperationLimits;
-use super::https_credentials_for_operation_host::remote_callbacks_for_url_with_thread_https_credentials;
 use crate::SourceError;
-use git_protocol::list_refs_git_protocol;
 use git2::Direction;
 use gradient_types::{RepositoryUrl, branch_key};
 
@@ -41,10 +37,6 @@ pub(in crate::git) fn list_remote_refs(
     credentials: &GitOperationCredentials,
 ) -> Result<Vec<AdvertisedRef>, SourceError> {
     let url = url.git_connection_url();
-    if url.starts_with("git://") && credentials.ssh_git_private_key_and_known_hosts.is_none() {
-        return list_refs_git_protocol(url);
-    }
-
     run_blocking_libgit2_operation_with_git_credentials(
         credentials,
         BlockingGitFetchOperationLimits::ordinary_fetch_operation_limits(),
@@ -59,11 +51,7 @@ fn list_refs_libgit2(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {
     let mut remote =
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
     let conn = remote
-        .connect_auth(
-            Direction::Fetch,
-            Some(remote_callbacks_for_url_with_thread_https_credentials(url)),
-            None,
-        )
+        .connect_auth(Direction::Fetch, None, None)
         .map_err(git_error)?;
     Ok(advertised(conn.list().map_err(git_error)?))
 }
