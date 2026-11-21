@@ -7,6 +7,11 @@
 { pkgs }: let
   sleep = "${pkgs.coreutils}/bin/sleep";
 
+  logGuestIpv6Addresses = ''
+    while read -r _ _ _ address _; do echo "ipv6-global $address"; done < <(${pkgs.iproute2}/bin/ip -6 -o addr show scope global)
+    while read -r _ _ _ address _; do echo "ipv6-link-local $address"; done < <(${pkgs.iproute2}/bin/ip -6 -o addr show scope link)
+  '';
+
   ticks = name: firstAttempt: pkgs.writeShellScript name ''
     count=${toString firstAttempt}
     [ "$GRADIENT_ATTEMPT" = 1 ] || count=5
@@ -18,6 +23,12 @@
 in {
   fetch = pkgs.writeShellScript "exec-fetch" ''
     echo "job=$GRADIENT_JOB attempt=$GRADIENT_ATTEMPT"
+    ${logGuestIpv6Addresses}
+    read -r _ _ ipv6_default_gateway_address _ < <(${pkgs.iproute2}/bin/ip -6 route show default)
+    if [ -n "$ipv6_default_gateway_address" ]; then
+      ${pkgs.iputils}/bin/ping -6 -c 1 -W 3 "$ipv6_default_gateway_address" > /dev/null 2>&1
+      echo "ipv6-gateway-ping-exit $?"
+    fi
     exec 3<>/dev/tcp/web.exec.test/8080
     printf 'GET / HTTP/1.0\r\nHost: web.exec.test\r\n\r\n' >&3
     while IFS= read -r line <&3; do
@@ -71,6 +82,7 @@ in {
   pair = pkgs.writeShellScript "exec-pair" ''
     echo "master $1"
     echo "peers $GRADIENT_PEERS"
+    ${logGuestIpv6Addresses}
     if [ "$GRADIENT_NODE_INDEX" = 0 ]; then
       exec ${pkgs.socat}/bin/socat -u TCP-LISTEN:"$GRADIENT_MASTER_PORT",reuseaddr STDOUT
     fi

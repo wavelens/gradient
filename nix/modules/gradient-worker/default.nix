@@ -8,17 +8,53 @@
   cfg = config.services.gradient.worker;
   exec = cfg.exec;
 
-  subnetParts = lib.splitString "/" exec.subnet;
+  subnetParts = lib.splitString "/" exec.subnet.v4;
   prefixLength = lib.toInt (lib.last subnetParts);
   addressToInt = address: lib.foldl (sum: octet: sum * 256 + lib.toInt octet) 0 (lib.splitString "." address);
   intToAddress = value: lib.concatMapStringsSep "." (place: toString (lib.mod (value / place) 256)) [ 16777216 65536 256 1 ];
-  subnetSize = lib.foldl (size: _: size * 2) 1 (lib.range 1 (32 - prefixLength));
+  twoToThePowerOf = exponent: lib.foldl (power: _: power * 2) 1 (lib.range 1 exponent);
+  subnetSize = twoToThePowerOf (32 - prefixLength);
   subnetStart = addressToInt (lib.head subnetParts);
   bridgeAddress = intToAddress (subnetStart - lib.mod subnetStart subnetSize + 1);
+  guestIpv6SubnetParts = lib.network.ipv6.fromString exec.subnet.v6;
+  guestSubnetIpv6AddressGroupsAsIntegers = map lib.fromHexString (lib.splitString ":" guestIpv6SubnetParts.address);
+  ipv6GuestSubnetHostBitCountForGroup = groupIndex: lib.max 0 (lib.min 16 (16 * (groupIndex + 1) - guestIpv6SubnetParts.prefixLength));
+  ipv6GuestSubnetHasZeroHostBits = lib.all lib.id (lib.imap0
+    (groupIndex: group: lib.mod group (twoToThePowerOf (ipv6GuestSubnetHostBitCountForGroup groupIndex)) == 0)
+    guestSubnetIpv6AddressGroupsAsIntegers);
+  guestIPv6NetworkAddressText = lib.concatStringsSep ":" (lib.imap0
+    (groupIndex: group: lib.toLower (lib.toHexString (group - lib.mod group (twoToThePowerOf (ipv6GuestSubnetHostBitCountForGroup groupIndex)))))
+    guestSubnetIpv6AddressGroupsAsIntegers);
+  guestIPv6SubnetLongestPrefixLength = 96 + prefixLength;
+  guestBridgeIPv6Address = lib.concatMapStringsSep ":" (group: lib.toLower (lib.toHexString group))
+    (lib.init guestSubnetIpv6AddressGroupsAsIntegers ++ [ (lib.last guestSubnetIpv6AddressGroupsAsIntegers + 1) ]);
+  ipv6NetworkCidrRegularExpressionText = "[0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3}";
   execOptionsSet = lib.any (option: option.highestPrio < (lib.mkOptionDefault null).priority)
     (lib.collect lib.isOption options.services.gradient.worker.exec);
   guestDnsForwarder = exec.allow.network && exec.nameservers == [ ];
   hasDevice = source: lib.any (device: device.${source} != null && device.${source} != [ ]) exec.devices;
+  renderedRulesetTexts = import ./exec-guest-network-filter-nftables-ruleset-texts.nix {
+    inherit lib bridgeAddress;
+    inherit (exec) bridge;
+    inherit (exec.allow) allowedPrivateNetworks guestConnectableHostTcpPorts;
+    guestDnsForwarderEnabled = guestDnsForwarder;
+    execGuestHasIpv6Address = exec.subnet.v6 != null;
+    blockedGlobalIPv6Networks = if exec.allow.blockedGlobalIPv6Networks == null then [ ] else exec.allow.blockedGlobalIPv6Networks;
+  };
+  nftablesServiceLoadsHostFirewall = config.networking.nftables.enable;
+  guestNftablesLoadCommand = pkgs.writeShellScript "gradient-guest-nftables-load" ''
+    export PATH=${lib.makeBinPath [ pkgs.coreutils pkgs.nftables pkgs.iproute2 pkgs.util-linux ]}
+    ${renderedRulesetTexts.reloadGuestNftablesScriptTextKeepingAddressesOfRunningGuests {
+      guestTapAddressRecordDirectory = "/run/gradient-guest-tap-addresses";
+      guestNetworkFilterNftablesScriptFilePath = pkgs.writeText "gradient-guest-nftables-load.nft" renderedRulesetTexts.atomicNftablesTableReloadScriptKeepingGuestAddressSet;
+    }}
+  '';
+  execMountEntriesWithInvalidOrReservedName = lib.filter
+    (mount: builtins.match "[A-Za-z0-9_-]{1,64}" mount.name == null || lib.elem mount.name [ "work" "control" "console" ])
+    exec.mounts;
+  execMountNamesUsedMoreThanOnce = lib.attrNames
+    (lib.filterAttrs (_: count: count > 1)
+      (lib.foldl' (counts: mount: counts // { ${mount.name} = (counts.${mount.name} or 0) + 1; }) { } exec.mounts));
 
   execConfig = lib.mkIf cfg.capabilities.exec {
     security.polkit = {
@@ -65,13 +101,22 @@
 
         "gradient-guest@" = {
           description = "Root supervisor for Gradient guest %i";
-          path = [ pkgs.iproute2 ] ++ lib.optional (hasDevice "usb") cfg.packages.usbip;
+          path = [ pkgs.iproute2 pkgs.nftables ] ++ lib.optional (hasDevice "usb") cfg.packages.usbip;
           environment = lib.filterAttrs (name: _: lib.hasPrefix "GRADIENT_WORKER_EXEC_" name)
             config.systemd.services.gradient-worker.environment;
           bindsTo = [ "gradient-guest-vm@%i.service" ];
+          wants = [ "gradient-guest-nftables.service" ];
+          after = [ "gradient-guest-nftables.service" ];
           unitConfig.CollectMode = "inactive-or-failed";
           serviceConfig = {
             ExecStart = "${lib.getExe' cfg.packages.gradient "gradient-worker"} --guest-supervisor ${cfg.baseDir}/guests/%i";
+            ExecStopPost = "${lib.getExe' cfg.packages.gradient "gradient-worker"} --release-guest-taps %i";
+            # systemd services create `/run/gradient-guests/<guest id>` with owner `root:gradient-worker`
+            # and mode `0750`. Supervisor processes use `UMask 0007` for the sockets and `console.log`
+            # in that directory. The worker and cloud-hypervisor can connect to the sockets but
+            # cannot add or replace files.
+            RuntimeDirectory = "gradient-guests/%i";
+            RuntimeDirectoryMode = "0750";
             Group = "gradient-worker";
             UMask = "0007";
             KillMode = "control-group";
@@ -83,6 +128,33 @@
             ProtectKernelLogs = true;
             RestrictRealtime = true;
             RestrictSUIDSGID = true;
+          };
+        };
+
+        gradient-guest-nftables = {
+          description = "nftables tables that isolate Gradient guest networks";
+          wantedBy = [ "multi-user.target" ] ++ lib.optional nftablesServiceLoadsHostFirewall "nftables.service";
+          after = lib.optional nftablesServiceLoadsHostFirewall "nftables.service";
+          partOf = lib.optional nftablesServiceLoadsHostFirewall "nftables.service";
+          reloadIfChanged = true;
+          unitConfig = lib.mkIf nftablesServiceLoadsHostFirewall { ReloadPropagatedFrom = "nftables.service"; };
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            RuntimeDirectory = "gradient-guest-tap-addresses";
+            RuntimeDirectoryMode = "0700";
+            RuntimeDirectoryPreserve = true;
+            ExecStart = guestNftablesLoadCommand;
+            ExecReload = guestNftablesLoadCommand;
+          };
+        };
+
+        nftables = lib.mkIf (nftablesServiceLoadsHostFirewall && exec.allow.network) {
+          serviceConfig = let
+            guestNftablesReloadCommandsOnHostFirewallStartStop = [ "-${lib.getExe' pkgs.coreutils "timeout"} 10 ${guestNftablesLoadCommand}" ];
+          in {
+            ExecStartPost = lib.mkAfter guestNftablesReloadCommandsOnHostFirewallStartStop;
+            ExecStopPost = guestNftablesReloadCommandsOnHostFirewallStartStop;
           };
         };
 
@@ -105,7 +177,7 @@
             DevicePolicy = "closed";
             DeviceAllow = [ "/dev/kvm rw" "/dev/net/tun rw" "/dev/vfio/vfio rw" "char-vfio rw" ];
             ProtectSystem = "strict";
-            ReadWritePaths = [ "${cfg.baseDir}/guests/%i" ];
+            ReadWritePaths = [ "${cfg.baseDir}/guests/%i" "/run/gradient-guests/%i" ];
             ProtectHome = true;
             PrivateTmp = true;
             ProtectClock = true;
@@ -165,21 +237,36 @@
       SUBSYSTEM=="vfio", GROUP="gradient-worker", MODE="0660"
     '';
 
-    boot.kernelModules = lib.mkIf (hasDevice "usb") [ "usbip-host" ];
+    boot = {
+      kernelModules = lib.mkIf (hasDevice "usb") [ "usbip-host" ];
+
+      kernel.sysctl = lib.mkIf (exec.subnet.v6 != null) {
+        "net.ipv6.conf.${exec.bridge}.accept_ra" = 0;
+        "net.ipv6.conf.${exec.bridge}.accept_dad" = 0;
+      };
+    };
 
     networking = {
       bridges.${exec.bridge}.interfaces = [ ];
-      interfaces.${exec.bridge}.ipv4.addresses = [{
-        address = bridgeAddress;
-        inherit prefixLength;
-      }];
+      interfaces.${exec.bridge} = {
+        macAddress = lib.mkDefault "06:47:52:00:00:01";
+        ipv4.addresses = [{
+          address = bridgeAddress;
+          inherit prefixLength;
+        }];
+        ipv6.addresses = lib.optional (exec.subnet.v6 != null) {
+          address = guestBridgeIPv6Address;
+          inherit (guestIpv6SubnetParts) prefixLength;
+        };
+      };
       nat = lib.mkIf exec.allow.network {
         enable = true;
+        enableIPv6 = exec.subnet.v6 != null;
         internalInterfaces = [ exec.bridge ];
       };
-      firewall.interfaces.${exec.bridge} = lib.mkIf guestDnsForwarder {
-        allowedUDPPorts = [ 53 ];
-        allowedTCPPorts = [ 53 ];
+      firewall.interfaces.${exec.bridge} = {
+        allowedUDPPorts = lib.optional guestDnsForwarder 53;
+        allowedTCPPorts = lib.optional guestDnsForwarder 53 ++ exec.allow.guestConnectableHostTcpPorts;
       };
     };
   };
@@ -281,14 +368,16 @@ in {
               example = "1d6b:0002";
               description = "USB device as `vendor:product`, attached to the guest over USB/IP.";
             };
+
+            projects = sharedWorkerOptionsModule.workerResourceProjectsOption;
           };
         });
         default = [ ];
         example = lib.literalExpression ''
           [
-            { name = "gpu:h100"; vfio = [ "0000:17:00.0" "0000:18:00.0" ]; }
-            { name = "kvm"; dev = "/dev/kvm"; }
-            { name = "camera"; usb = "1d6b:0002"; }
+            { name = "gpu:h100"; vfio = [ "0000:17:00.0" "0000:18:00.0" ]; projects = "all"; }
+            { name = "kvm"; dev = "/dev/kvm"; projects = "all"; }
+            { name = "camera"; usb = "1d6b:0002"; projects = "all"; }
           ]
         '';
         description = ''
@@ -305,6 +394,8 @@ in {
               example = "datasets";
               description = "Mount name that exec jobs ask for. Guests find the mount at {file}`/mnt/<name>`.";
             };
+
+            projects = sharedWorkerOptionsModule.workerResourceProjectsOption;
 
             path = lib.mkOption {
               type = lib.types.path;
@@ -331,20 +422,49 @@ in {
         default = [ ];
         example = lib.literalExpression ''
           [
-            { name = "datasets"; path = "/srv/datasets"; readOnly = true; }
-            { name = "scratch"; path = "/srv/scratch"; perJob = true; }
+            { name = "datasets"; path = "/srv/datasets"; projects = "all"; readOnly = true; }
+            { name = "scratch"; path = "/srv/scratch"; projects = "all"; perJob = true; }
           ]
         '';
         description = "Host directories that exec jobs can ask for.";
       };
 
-      allow.ports = lib.mkOption {
-        type = lib.types.nullOr (lib.types.listOf (lib.types.either lib.types.port (lib.types.listOf lib.types.port)));
-        default = null;
-        example = lib.literalExpression "[ 22 [ 8000 8100 ] 6006 ]";
-        description = ''
-          Guest ports that exec jobs can request. Each entry can be a single port or `[ first last ]` range. No ports pass with an empty list. `null` stands for ports 1024 to 65535.
-        '';
+      allow = {
+        ports = lib.mkOption {
+          type = lib.types.nullOr (lib.types.listOf (lib.types.either lib.types.port (lib.types.listOf lib.types.port)));
+          default = null;
+          example = lib.literalExpression "[ 22 [ 8000 8100 ] 6006 ]";
+          description = ''
+            Guest ports that exec jobs can request. Each entry can be a single port or `[ first last ]` range. No ports pass with an empty list. `null` stands for ports 1024 to 65535.
+          '';
+        };
+
+        allowedPrivateNetworks = lib.mkOption {
+          type = lib.types.listOf (lib.types.strMatching "[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}|${ipv6NetworkCidrRegularExpressionText}");
+          default = [ ];
+          example = [ "10.234.0.0/16" "192.168.10.5/32" "fd00:ec2:7::/64" ];
+          description = ''
+            Use this option to list IPv4 and IPv6 networks in CIDR format. Guest network filters drop private, shared and link-local destinations (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, etc.) and all IPv6 destinations outside 2000::/3. Guests with network access can still reach networks in this list. IPv6 entries have an effect only with exec.subnet.v6. Add the guest subnets of other workers for multi-node jobs. Add private hosts that the job needs, such as package mirrors. Guests on this worker cannot reach each other, even if those subnets appear in the list.
+          '';
+        };
+
+        blockedGlobalIPv6Networks = lib.mkOption {
+          type = lib.types.nullOr (lib.types.listOf (lib.types.strMatching ipv6NetworkCidrRegularExpressionText));
+          default = null;
+          example = [ "2001:db8:1234::/48" ];
+          description = ''
+            IPv6 networks in CIDR form that a guest with network access must not reach belong in this list. Set this option together with `services.gradient.worker.exec.subnet.v6`. The global IPv6 prefixes of the host's own network belong here too (for example the host LAN prefix). Guest network filters block private IPv4 networks. They do not block global IPv6 networks. Values of `[ ]` block nothing. A value in `exec.subnet.v6` and no value in this option cause evaluation to stop. This option is ineffective without `exec.subnet.v6`. The docs for `exec.subnet.v6` describe this next to that option.
+          '';
+        };
+
+        guestConnectableHostTcpPorts = lib.mkOption {
+          type = lib.types.listOf lib.types.port;
+          default = [ ];
+          example = [ 3000 ];
+          description = ''
+            TCP ports on the worker host that a guest with network access can reach on any address of the host. Guest network filters drop all other connections from a guest to the host. A DNS forwarder for guests on the host makes DNS to the bridge address the exception. These ports are also open on the host firewall for the guest bridge. Set this option when the Gradient server and the jobs share a host and the jobs need to reach its API.
+          '';
+        };
       };
 
       sops.keyFile = lib.mkOption {
@@ -465,12 +585,37 @@ in {
         message = "services.gradient.worker.exec.allow.ports: Write each range in the form [ first last ]. Ensure first <= last.";
       }
       {
-        assertion = cfg.capabilities.exec -> exec.subnet != null;
-        message = "services.gradient.worker.exec.subnet: capabilities.exec is on, but this option has no value. Set an IPv4 subnet that no other network on the host uses.";
+        assertion = cfg.capabilities.exec -> exec.subnet.v4 != null;
+        message = "services.gradient.worker.exec.subnet.v4: capabilities.exec is on, but this option has no value. Set an IPv4 subnet that other networks on the host don't use.";
+      }
+      {
+        assertion = exec.subnet.v6 != null -> exec.subnet.v4 != null;
+        message = "A setting of `services.gradient.worker.exec.subnet.v6` without `services.gradient.worker.exec.subnet.v4` is invalid. Guest IPv6 addresses derive from IPv4 addresses. Set `services.gradient.worker.exec.subnet.v4` as well.";
+      }
+      {
+        assertion = exec.subnet.v6 != null && exec.subnet.v4 != null
+          -> guestIpv6SubnetParts.prefixLength >= 64 && guestIpv6SubnetParts.prefixLength <= guestIPv6SubnetLongestPrefixLength;
+        message = "services.gradient.worker.exec.subnet.v6: Use a prefix length between 64 and ${toString guestIPv6SubnetLongestPrefixLength} for subnet ${exec.subnet.v6}.";
+      }
+      {
+        assertion = exec.subnet.v6 != null -> ipv6GuestSubnetHasZeroHostBits;
+        message = "services.gradient.worker.exec.subnet.v6: Host bits in subnet ${exec.subnet.v6} are non-zero. Write the network address ${guestIPv6NetworkAddressText}/${toString guestIpv6SubnetParts.prefixLength}.";
+      }
+      {
+        assertion = exec.subnet.v6 != null -> exec.allow.blockedGlobalIPv6Networks != null;
+        message = "services.gradient.worker.exec.allow.blockedGlobalIPv6Networks: exec.subnet.v6 is set, but this option has no value. List the global IPv6 prefixes of the host's own networks that guests can't reach, for example the host's LAN prefix. Write [ ] to block nothing.";
       }
       {
         assertion = exec.sops.files != [ ] -> exec.sops.keyFile != null;
         message = "services.gradient.worker.exec.sops.files: set without exec.sops.keyFile";
+      }
+      {
+        assertion = execMountEntriesWithInvalidOrReservedName == [ ];
+        message = "services.gradient.worker.exec.mounts: invalid mount name for ${toString (map (mount: mount.name) execMountEntriesWithInvalidOrReservedName)}. Mount names can contain 1 to 64 ASCII letters, digits, -, and _. The names work, control, and console belong to the worker.";
+      }
+      {
+        assertion = execMountNamesUsedMoreThanOnce == [ ];
+        message = "services.gradient.worker.exec.mounts: the mount names ${toString execMountNamesUsedMoreThanOnce} appear on more than one entry. Each mount needs its own name.";
       }
     ];
 

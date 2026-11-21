@@ -97,6 +97,14 @@
   ) cfg.state.projects);
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
+  upstreamCacheCredentialFiles = lib.concatLists (lib.mapAttrsToList (_: cache:
+    lib.concatLists (lib.imap0 (index: upstream:
+      lib.optional (upstream.basic_auth_password_file != null)
+        "gradient_cache_upstream_${cache.name}_${toString index}_password:${upstream.basic_auth_password_file}"
+      ++ lib.optional (upstream.bearer_token_file != null)
+        "gradient_cache_upstream_${cache.name}_${toString index}_bearer_token:${upstream.bearer_token_file}"
+    ) cache.upstream_caches)
+  ) cfg.state.caches);
   workerTokenFiles = lib.mapAttrsToList (_: worker: "gradient_worker_${worker.worker_id}_token:${worker.token_file}") cfg.state.workers;
   gitHostConnectionLoadCredentialEntries = lib.concatLists (lib.mapAttrsToList (label: connection:
     lib.optional (connection.secret_file != null)
@@ -193,9 +201,15 @@ in {
         default = cfg.worker.enable;
         defaultText = lib.literalExpression "config.services.gradient.worker.enable";
         description = ''
-          Whether to register the {option}`services.gradient.worker` on this host automatically,
-          with an ID from the hostname and a token and peers file from the first start.
-          The state-declared team `server` is part of every new project.
+          Whether to automatically register {option}`services.gradient.worker` on this host with an ID based on the hostname, a token from first boot and a peer file. The worker is part of team `server` declared in the state. Jobs for projects on that worker run on the server host and can reach the Nix store and network of that host. Administrators can allow the worker per project, or {option}`services.gradient.grantLocalWorkerToNewProjects` can give the worker to every new project. Only superusers can create projects by default after that. See {option}`services.gradient.permissions.createProject`.
+        '';
+      };
+
+      grantLocalWorkerToNewProjects = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Set whether all new projects receive a local worker on this host. A local worker can access the Nix store, the network, and files that belong to user `gradient-worker` on the server host. Default: `false`. Admins use that default to add a local worker to a project by granting team `server` with the workers flag enabled for that project.
         '';
       };
 
@@ -668,7 +682,7 @@ in {
             Restart = "on-failure";
             RestartSec = 10;
             LimitNOFILE = 65535;
-            RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+            RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_NETLINK" "AF_UNIX" ];
             RestrictNamespaces = true;
             RestrictRealtime = true;
             RestrictSUIDSGID = true;
@@ -697,7 +711,7 @@ in {
               "gradient_ssh_host_key:${cfg.ssh.hostKeyFile}"
             ++ lib.optional (cfg.metrics.tokenFile != null)
               "gradient_metrics_token:${cfg.metrics.tokenFile}"
-            ++ userPasswordFiles ++ projectPrivateKeyFiles ++ projectSecretFiles ++ projectPasswordLoadCredentialEntries ++ cacheSigningKeyFiles ++ apiKeyFiles
+            ++ userPasswordFiles ++ projectPrivateKeyFiles ++ projectSecretFiles ++ projectPasswordLoadCredentialEntries ++ cacheSigningKeyFiles ++ upstreamCacheCredentialFiles ++ apiKeyFiles
               ++ workerTokenFiles ++ gitHostConnectionLoadCredentialEntries
               ++ actionSecretFiles ++ taskPostRequestTriggerSecretFileLoadCredentialEntries;
           };
@@ -743,7 +757,7 @@ in {
         state = {
           teams.server = {
             display_name = "Server";
-            new_projects.workers = true;
+            new_projects.workers = cfg.grantLocalWorkerToNewProjects;
           };
 
           workers.local = {
@@ -753,6 +767,8 @@ in {
             team = "server";
           };
         };
+
+        permissions.createProject = lib.mkDefault "superusers";
 
         worker = {
           id = lib.mkDefault localIdentity;

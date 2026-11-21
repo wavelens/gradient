@@ -117,6 +117,10 @@ def sql(query):
     return server.succeed(f"runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d gradient -At -c {shlex.quote(query)}").strip()
 
 
+def get_text_after_prefix_in_each_line(log, prefix):
+    return [line.removeprefix(prefix) for line in log.splitlines() if line.startswith(prefix)]
+
+
 def subnet_of(address):
     return next(net for net in GUEST_SUBNETS if ipaddress.ip_address(address) in net)
 
@@ -403,6 +407,13 @@ assert end_reasons(fetched) == ["completed"], json.dumps(fetched)
 output = job_log("fetch")
 assert "served to the guest" in output, f"fetch did not reach the server:\n{output}"
 assert f"job={JOBS['fetch']} attempt=1" in output, f"fetch saw no job context:\n{output}"
+ipv6_global_addresses_from_job_log = get_text_after_prefix_in_each_line(output, "ipv6-global ")
+assert len(ipv6_global_addresses_from_job_log) == 1, f"fetch guest has zero or multiple global IPv6 addresses:\n{output}"
+assert ipaddress.ip_interface(ipv6_global_addresses_from_job_log[0]).network == ipaddress.ip_network(STOPPER_IPV6_GUEST_SUBNET_CIDR), \
+    f"the IPv6 address of the fetch guest is outside the IPv6 guest subnet of stopper:\n{output}"
+assert get_text_after_prefix_in_each_line(output, "ipv6-link-local ") == [], f"fetch guest with a link-local IPv6 address:\n{output}"
+assert get_text_after_prefix_in_each_line(output, "ipv6-gateway-ping-exit ") == ["1"], \
+    f"guest fetch got a response from the IPv6 gateway, or ping failed to run:\n{output}"
 
 banner("Phase 7b: a job reports a phase, uploads outputs and builds with its job token")
 produced = wait_status("outputs", "completed")
@@ -447,6 +458,21 @@ peers_line = next((line for line in peer_lines if line.startswith("peers ")), No
 assert peers_line, f"node 1 printed no GRADIENT_PEERS:\n{peer_lines}"
 peers = json.loads(peers_line.removeprefix("peers "))
 assert [(p["index"], p["address"], p["port"]) for p in peers] == [(0, master, master_port), (1, peer, master_port)], peers_line
+for job_node in pair_nodes:
+    node_job_log_text = job_log("pair", node=job_node["node"])
+    global_ipv6_addresses_with_prefix_length = get_text_after_prefix_in_each_line(node_job_log_text, "ipv6-global ")
+    guest_vm_ipv4_address = ipaddress.ip_address(job_node["guest_address"])
+    if subnet_of(guest_vm_ipv4_address) == GUEST_SUBNETS[0]:
+        stopper_ipv6_guest_subnet = ipaddress.ip_network(STOPPER_IPV6_GUEST_SUBNET_CIDR)
+        guest_ipv6_address_from_ipv4_host_offset = stopper_ipv6_guest_subnet.network_address + (
+            int(guest_vm_ipv4_address) - int(GUEST_SUBNETS[0].network_address))
+        assert global_ipv6_addresses_with_prefix_length == [f"{guest_ipv6_address_from_ipv4_host_offset}/{stopper_ipv6_guest_subnet.prefixlen}"], \
+            f"wrong IPv6 address for the node in the stopper pair:\n{node_job_log_text}"
+        assert get_text_after_prefix_in_each_line(node_job_log_text, "ipv6-link-local ") == [], \
+            f"link-local IPv6 address on the node for the stopper pair:\n{node_job_log_text}"
+    else:
+        assert global_ipv6_addresses_with_prefix_length == [], \
+            f"keeper doesn't have exec.subnet.v6, but its peer node has a global IPv6 address:\n{node_job_log_text}"
 
 cluster = sql(
     "SELECT cj.status, count(ca.id) FILTER (WHERE ca.started_at IS NOT NULL) FROM cluster_job cj "

@@ -30,6 +30,7 @@ in {
         enable = true;
         capabilities = { network = true; secrets = true; eval = true; build = true; };
       };
+      grantLocalWorkerToNewProjects = true;
 
       state.users.admin = {
         email = "admin@localhost";

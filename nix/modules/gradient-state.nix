@@ -53,6 +53,32 @@
         '';
       };
 
+      basic_auth_user = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          The username for Basic authentication over HTTP on an external Nix binary cache. Set this option together with `basic_auth_password_file`. Use `https://` for the URL.
+        '';
+      };
+
+      basic_auth_password_file = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "/run/secrets/gradient-upstream-password";
+        description = ''
+          A file with the password for HTTP basic auth on an external Nix binary cache. The server does load it as the systemd credential `''${GRADIENT_CREDENTIALS_DIR}/gradient_cache_upstream_<cache>_<index>_password` and does keep it encrypted. The position of the entry in `upstream_caches` is `<index>`, with a count from 0, internal entries included. Use a string instead of a path literal so the secret doesn't remain in the Nix store.
+        '';
+      };
+
+      bearer_token_file = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "/run/secrets/gradient-upstream-token";
+        description = ''
+          A file with a bearer token for an external Nix binary cache. Set this in place of `basic_auth_user` and `basic_auth_password_file`. Servers read it as systemd credential `''${GRADIENT_CREDENTIALS_DIR}/gradient_cache_upstream_<cache>_<index>_bearer_token` and store it encrypted. Use `https://` in the URL. Use a string rather than a path literal so the secret doesn't enter the Nix store.
+        '';
+      };
+
       http1_only = mkOption {
         type = types.bool;
         default = false;
@@ -98,8 +124,15 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          File containing the hashed password. `null` creates the account without a local
-          password, and an OIDC login with the same email can claim it.
+          A file to store a hashed password. Set `null` to create the account without a local password. The first external sign-in can link to that account only if OIDC or another login provider can report a verified email address equal to `email`.
+        '';
+      };
+
+      existing_account_id = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          UUID of an existing account to take over. Use ``null`` to map a declared user only to an account with the same username in a previous state file. Accounts from another source (registration, SCIM, external sign-in) fall under state management with this option. Servers without this option skip a declared user with a username or email address on one of those accounts and log an error. Takeovers of accounts from another source remove the password, sessions, API keys not declared here, external ID links and SCIM external ID. New passwords come from the declared password_file. Previous owners then lose all access. Servers create a user with that UUID when no accounts with that UUID exist. State exports include this value only for users already in the state file.
         '';
       };
 
@@ -197,7 +230,7 @@
         type = types.bool;
         default = false;
         description = ''
-          Build requests from {command}`gradient build` and {command}`gradient run` start the exec jobs that match them. The instance and worker switches still apply.
+          Build requests from {command}`gradient build` and {command}`gradient run` start the exec jobs that match them. Instance and worker switches still apply. These exec jobs get secrets and SSH keys for the project. Build requests from exec jobs of pull requests from forks without maintainer approval form the exception.
         '';
       };
 
@@ -217,12 +250,9 @@
           ]
         '';
         description = ''
-          Users with roles on this project. An empty list keeps the legacy behaviour, making
-          `created_by` Admin and reconciling no other memberships.
+          Users with a role in this project. Empty lists keep legacy behavior, make `created_by` Admin and leave all other memberships untouched.
 
-          A non-empty list is the source of truth. The next state apply revokes memberships not
-          listed and does not make `created_by` Admin implicitly. Members referring to users that do
-          not exist yet are applied on the user's registration or first OIDC sign-in.
+          A non-empty list is the only source of truth. Memberships outside the list are revoked at the next state apply. `created_by` can never become Admin implicitly. Each member is a user declared in `users`. Declare that user with `email` and without `password_file` to grant a role before first sign-in.
         '';
       };
 
@@ -512,7 +542,7 @@
     };
   });
 
-  gitHostConnectionType = types.submodule ({ config, name, ... }: {
+  gitHostConnectionType = types.submodule ({ name, ... }: {
     options = {
       id = mkOption {
         type = types.nullOr types.str;
@@ -636,7 +666,7 @@
     };
   };
 
-  triggerType = types.submodule ({ name, ... }: {
+  triggerType = types.submodule ({ ... }: {
     options = {
       type = mkOption {
         type = types.enum [ "polling" "reporter_push" "reporter_pull_request" "time" "post_request" ];
@@ -835,10 +865,7 @@
     options = {
       user = mkOption {
         type = types.str;
-        description = ''
-          User name to grant membership to. A membership of a user that does not exist yet is applied
-          on the user's registration or first OIDC sign-in.
-        '';
+        description = "Username to grant membership to. Specify a user declared in `users`.";
       };
       role = mkOption {
         type = types.str;
@@ -978,10 +1005,11 @@
         description = "Subscriptions have an access mode. A project can pull and push in ReadWrite mode. ReadOnly mode: pull only. WriteOnly mode: push only.";
       };
       sign_outputs = mkOption {
-        type = types.bool;
-        default = true;
+        type = types.nullOr types.bool;
+        default = null;
         description = ''
           Projects can push outputs to a cache. This option can set whether those outputs carry a signature with the cache key. Nix clients outside the cache don't trust unsigned paths, so those outputs stay private even in a public cache. Another signing subscription can push a path as well and those paths still get a signature.
+          Omitted values (`null`) follow the mode. `ReadWrite` and `WriteOnly` sign outputs. `ReadOnly` outputs stay unsigned. `ReadOnly` subscriptions cannot set `true`.
         '';
       };
     };
@@ -1278,7 +1306,7 @@
         default = [ ];
         example = [ "viewProject" "triggerEvaluation" ];
         description = ''
-          The key can grant permissions as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask`, or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. All of them appear in `GET /user/keys/permissions`. Permission sets in Gradient always include `viewProject`. The key can create projects through `createProject`, if `project = null` is present and not otherwise. A key can use the superuser permissions of the owner through `readSuperuser` for GET, HEAD, and OPTIONS requests. A key can use those permissions through `writeSuperuser` for all other requests. Both `project = null` on the key and `superuser = true` on the owner are necessary for that use.
+          The key can grant permissions as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask`, or `manageMembers`. Keep at least one of `permissions` and `cache_permissions` non-empty. All of them appear in `GET /user/keys/permissions`. Permission sets in Gradient always include `viewProject`. The key can create projects through `createProject`, if `project = null` is present and not otherwise. A key can use the superuser permissions of the owner through `readSuperuser` for GET, HEAD and OPTIONS requests. A key can use those permissions through `writeSuperuser` for all other requests. Both `project = null` on the key and `superuser = true` on the owner are necessary for that use. The shell, console and port forward of exec jobs need `openJobTerminal`.
         '';
       };
 
@@ -1323,7 +1351,7 @@
         type = types.listOf types.str;
         example = [ "viewProject" "triggerEvaluation" ];
         description = ''
-          Permissions granted by the role, as camelCase identifiers. It must not be empty.
+          Permissions granted by the role, as camelCase identifiers. It must not be empty. Shell, console, port forwarding and SSH logins in exec jobs need `openJobTerminal`.
         '';
       };
     };
@@ -1344,7 +1372,7 @@
       delete = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether to delete users, projects and caches no longer declared here.";
+        description = "Set `false` to choose whether to delete users, projects, and caches that are no longer declared here. Those objects remain in the database with this value. Deleted users become inactive and lose superuser status. Deleted API keys never remain.";
       };
 
       users = mkOption {
@@ -1516,12 +1544,12 @@ in
         }
       '';
       description = ''
-        Declarative Gradient state, written as JSON to the server's state file.
-        The [state reference](https://wavelens.github.io/gradient/reference/state) documents the available fields.
-        Fields naming an entry, such as `name`, `username` and `display_name`, default to its attribute name.
-        Files in `password_file`, `private_key_file`, `signing_key_file`, `key_file`,
-        `token_file`, `secret_file`, `access_token_file` and the secret files of task
-        actions become systemd credentials of the server.
+        Declarative Gradient state. The declared state is JSON in the state file.
+        Source of this JSON is the NixOS module. The state file is input for the server.
+        Available fields are in [state reference](https://wavelens.github.io/gradient/reference/state).
+        Fields that name an entry, such as `name`, `username`, `display_name`, default to the attribute name.
+        Files in `password_file`, `private_key_file`, `signing_key_file`, `key_file`, `token_file`, `secret_file`, `access_token_file`, `basic_auth_password_file`, `bearer_token_file` and secret files of
+        task actions become systemd credentials of the server.
       '';
     };
   };
@@ -1547,11 +1575,18 @@ in
         message = "services.gradient.state.caches.${cacheName}.upstream_caches.${toString index}: An upstream cache of type `${upstream.type}` needs these values. ${concatMapStringsSep ", " (option: "`${option}`") missing}.";
       }) cache.upstream_caches
     ) config.services.gradient.state.caches);
+    readOnlyCacheSubscriptionsWithSignOutputs = flatten (mapAttrsToList (cacheName: cache:
+      map (project: { cache = cacheName; project = project.name; })
+        (filter (project: project.mode == "ReadOnly" && project.sign_outputs == true) cache.projects)
+    ) config.services.gradient.state.caches);
   in upstreamCacheNullFieldAssertions ++ map (b: {
     assertion = false;
     message = ''
       services.gradient.state.tasks.${b.task}.flake_input_overrides.${b.input}: \
       Set either `url` (string) or `keep_url = true`, not both.
     '';
-  }) invalid;
+  }) invalid ++ map (s: {
+    assertion = false;
+    message = "services.gradient.state.caches.${s.cache}.projects (${s.project}): A ReadOnly subscription can't sign outputs. Change the mode to ReadWrite first.";
+  }) readOnlyCacheSubscriptionsWithSignOutputs;
 }

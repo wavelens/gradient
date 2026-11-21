@@ -13,6 +13,7 @@
 
     machine.succeed("""
         ${lib.getExe pkgs.curl} \
+        --fail \
         -X POST \
         -H "Content-Type: application/json" \
         -d '{"username": "test", "name": "Test User", "email": "test@localhost.localdomain", "password": "password"}' \
@@ -20,7 +21,9 @@
     """)
 
     token = machine.succeed("""
+      set -o pipefail
       ${lib.getExe pkgs.curl} \
+        --fail \
         -X POST \
         -H "Content-Type: application/json" \
         -d '{"loginname": "test", "password": "password"}' \
@@ -69,6 +72,8 @@
 
     security.pam.services.sshd.allowNullPassword = true;
     services = {
+      gradient.registration.enable = true;
+
       postgresql = {
         package = pkgs.postgresql_18;
         enableTCPIP = true;
