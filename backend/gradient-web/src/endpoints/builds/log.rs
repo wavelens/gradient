@@ -53,7 +53,7 @@ pub struct BuildLogQuery {
     operation_id = "getBuildLog",
     tag = "builds",
     summary = "Get build log",
-    description = "Return the entire build log. Return an empty string when no log is present. Pick `plain` (drop color codes) or `ansi` (keep color codes) with the `format` query parameter. Requests that specify `Accept: text/plain` return the raw text of the log. The default value is `plain`. Other requests return the log as a JSON string. The default value is `ansi`. Omit the `nix log` hint from Nix in logs of failed builds. That command can run only on the server.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\nThis endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
+    description = "Return the entire build log. Return an empty string when no log is present. Pick `plain` (drop color codes) or `ansi` (keep color codes) with the `format` query parameter. Requests that specify `Accept: text/plain` return the raw text of the log. The default value is `plain`. Other requests return the log as a JSON string. The default value is `ansi`. Failed build logs leave out Nix's hint to run `nix log …` for the full log. That command can only run on the server.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\nThis endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
     params(("build" = BuildJobId, Path), BuildLogQuery, super::BuildLogAttemptQuery),
     responses(
         (status = OK, description = "Build log", content(
@@ -124,15 +124,6 @@ pub(crate) async fn post_build_log(
     Extension(anonymous_open_limit): Extension<Arc<AnonymousWebSocketOpenLimitByIpAddress>>,
     Path(build_id): Path<BuildJobId>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load(
-        &state.web_db,
-        build_id,
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
-    )
-    .await?;
-    let shared_build_id = ctx.shared_build.id;
     let anonymous_log_stream_permit = if maybe_user.is_none() && api_key.0.is_none() {
         Some(
             anonymous_open_limit
@@ -142,6 +133,15 @@ pub(crate) async fn post_build_log(
     } else {
         None
     };
+    let ctx = BuildAccessContext::load(
+        &state.web_db,
+        build_id,
+        Caller::from(&maybe_user),
+        api_key.as_ref(),
+        ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
+    )
+    .await?;
+    let shared_build_id = ctx.shared_build.id;
 
     let stream = stream! {
         let _anonymous_log_stream_permit = anonymous_log_stream_permit;
