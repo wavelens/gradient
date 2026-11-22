@@ -5,7 +5,11 @@
  */
 
 use crate::access::{Caller, ProjectItemAccessRequirement};
-use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::authorization::{
+    AnonymousWebSocketOpenLimitByIpAddress, AnonymousWebsocketConnectionLimitReachedRefusal,
+    MaybeApiKey, MaybeUser,
+};
+use crate::client_ip::{ClientIp, rate_limit_key_for_client_ip};
 use crate::endpoints::accept_header_parsing::request_accepts_media_type;
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
@@ -118,23 +122,35 @@ pub async fn get_build_log(
     params(("build" = BuildJobId, Path)),
     responses((status = OK, description = "NDJSON log stream", body = String, content_type = "application/x-ndjson"), WebError)
 )]
-pub async fn post_build_log(
+pub(crate) async fn post_build_log(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    Extension(ClientIp(client_ip)): Extension<ClientIp>,
+    Extension(anonymous_open_limit): Extension<Arc<AnonymousWebSocketOpenLimitByIpAddress>>,
     Path(build_id): Path<BuildJobId>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(
         &state.web_db,
         build_id,
-        Caller::User(&user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
     )
     .await?;
     let shared_build_id = ctx.shared_build.id;
+    let anonymous_log_stream_permit = if maybe_user.is_none() && api_key.0.is_none() {
+        Some(
+            anonymous_open_limit
+                .try_acquire_open_slot_for_key(rate_limit_key_for_client_ip(client_ip))
+                .ok_or(AnonymousWebsocketConnectionLimitReachedRefusal::ClientAddressAtAnonymousWebSocketLimit)?,
+        )
+    } else {
+        None
+    };
 
     let stream = stream! {
+        let _anonymous_log_stream_permit = anonymous_log_stream_permit;
         use gradient_entity::build::BuildStatus;
 
         let mut sent_any = false;

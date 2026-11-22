@@ -43,9 +43,11 @@ pub use self::provider_flow::{
     ProviderCallback, ProviderPurpose, provider_authorize, provider_callback,
 };
 pub use self::scim::{ScimBearerTokenSha256Digest, authorize_scim};
-pub(crate) use self::websocket_credential_recheck::AnonymousWebSocketOpenLimitByIpAddress;
 pub use self::websocket_credential_recheck::{
     AccessCheckedWebSocketUpgrade, ServeUrlOrigin, WebSocketAuthorizationRecheck,
     WebSocketCredentialRecheckDependencies, WebSocketUpgradeCredentialRecheckRequestExtractor,
     WebsocketCredentialRecheckClosure,
+};
+pub(crate) use self::websocket_credential_recheck::{
+    AnonymousWebSocketOpenLimitByIpAddress, AnonymousWebsocketConnectionLimitReachedRefusal,
 };

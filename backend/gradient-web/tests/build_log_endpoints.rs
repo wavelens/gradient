@@ -10,7 +10,7 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::ids::*;
 use gradient_fixtures::ids::{project_id, task_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{eval_at, public_project};
+use gradient_fixtures::rows::{eval_at, project, public_project};
 use gradient_test_support::log_storage::{InMemoryLogStorage, ReadErrorLogStorage};
 use gradient_test_support::state::TestState;
 use sea_orm::{DatabaseConnection, MockDatabase};
@@ -37,6 +37,13 @@ fn retry_attempt_id() -> BuildAttemptId {
 const FAILED_NIX_LOG: &str = "\x1b[31;1merror:\x1b[0m builder failed\nFor full logs, run:\n  nix log /nix/store/abc-hello.drv\n";
 
 fn mock_database_connection_with_build_access_check_rows(status: BuildStatus) -> MockDatabase {
+    mock_database_connection_with_build_access_check_rows_and_project(status, public_project())
+}
+
+fn mock_database_connection_with_build_access_check_rows_and_project(
+    status: BuildStatus,
+    project: gradient_entity::project::Model,
+) -> MockDatabase {
     mock_db()
         .append_query_results([vec![gradient_entity::build_job::Model {
             id: build_job_id(),
@@ -55,7 +62,7 @@ fn mock_database_connection_with_build_access_check_rows(status: BuildStatus) ->
             project: project_id(),
             ..Default::default()
         }]])
-        .append_query_results([vec![public_project()]])
+        .append_query_results([vec![project]])
 }
 
 fn mock_database_connection_with_build_log_endpoint_rows(
@@ -159,6 +166,48 @@ async fn a_build_log_read_failure_is_a_server_error_not_an_empty_log() {
 
     readable.assert_status_ok();
     assert_eq!(unreadable.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn anonymous_build_log_stream_returns_200_and_log_text_for_public_project_and_404_for_private_project()
+ {
+    let path = format!("/api/v1/builds/{}/log", build_job_id());
+    let logs = InMemoryLogStorage::new();
+    logs.seed(attempt_id(), "built\n");
+    let public = TestState::new()
+        .web_db(
+            mock_database_connection_with_build_access_check_rows(BuildStatus::Completed)
+                .append_query_results([vec![gradient_entity::derivation_build::Model {
+                    id: shared_build_id(),
+                    status: BuildStatus::Completed,
+                    ..Default::default()
+                }]])
+                .append_query_results([vec![gradient_entity::build_attempt::Model {
+                    id: attempt_id(),
+                    derivation_build: shared_build_id(),
+                    ..Default::default()
+                }]])
+                .into_connection(),
+        )
+        .log_storage(Arc::new(logs))
+        .server()
+        .post(&path)
+        .await;
+    let private = TestState::new()
+        .web_db(
+            mock_database_connection_with_build_access_check_rows_and_project(
+                BuildStatus::Completed,
+                project(),
+            )
+            .into_connection(),
+        )
+        .server()
+        .post(&path)
+        .await;
+
+    public.assert_status_ok();
+    assert_eq!(public.text(), "\"built\\n\"\n");
+    assert_eq!(private.status_code(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

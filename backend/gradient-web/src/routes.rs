@@ -283,7 +283,6 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(exec_jobs::terminal::get_exec_job_console))
                 .routes(routes!(exec_jobs::terminal::get_exec_job_shell))
                 .routes(routes!(exec_jobs::terminal::get_exec_job_forward))
-                .routes(routes!(builds::log::post_build_log))
                 .routes(routes!(builds::downloads::get_build_download_token))
                 .routes(routes!(build_requests::manifest::post_manifest))
                 .routes(limited(
@@ -471,7 +470,10 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(board::get_eval_flake_graph))
                 .routes(routes!(builds::closure::get_eval_runtime_closure))
                 .routes(routes!(builds::query::get_build))
-                .routes(routes!(builds::log::get_build_log))
+                .routes(routes!(
+                    builds::log::get_build_log,
+                    builds::log::post_build_log
+                ))
                 .routes(routes!(builds::attempts::list_build_attempts))
                 .routes(routes!(builds::log_chunks::get_build_log_chunks))
                 .routes(routes!(builds::log_chunks::get_build_log_chunk))

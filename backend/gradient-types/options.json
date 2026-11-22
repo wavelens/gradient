@@ -480,7 +480,7 @@
     "flag": "http-anonymous-websocket-max-connections-per-ip",
     "env": "GRADIENT_HTTP_ANONYMOUS_WEBSOCKET_MAX_CONNECTIONS_PER_IP",
     "type": "NonZeroUsize",
-    "description": "Maximum number of WebSocket connections that a visitor without an account or API key can\nkeep open at the same time from one client IP. IPv6 limits use a /64 network. Connection\nlimits impose an upper bound on the number of database access checks that one address can\ntrigger. These WebSocket connections repeat one access check every minute. Browser tabs open\nat most two WebSocket connections. Additional connections receive a 429 response until open\nconnections from that address drop below the limit. Reverse proxy setups need an entry for\nthe proxy in {option}`services.gradient.http.trustedProxies`. Without that entry, all\nvisitors share the proxy address.",
+    "description": "The maximum number of simultaneously open connections from one client IP for a visitor\nwithout an account or API key. WebSocket connections and streams of build logs both count\ntoward this limit. IPv6 addresses use the /64 network for this limit. The connection limit\ncan put a ceiling on the number of database queries one address can cause. WebSocket\nconnections repeat an access check once per minute. Streams of build logs poll the build\ntwice per second. Browser tabs open at most two WebSocket connections and one stream of\nbuild logs. Extra connections get a 429 response. That response lasts until open\nconnections from the address drop below the limit. Add the proxy entry to\n{option}`services.gradient.http.trustedProxies` for a reverse proxy setup. All visitors\nshare the proxy address without that entry.",
     "default": "256",
     "values": []
   },
