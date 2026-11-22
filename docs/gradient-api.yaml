@@ -3364,6 +3364,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
+      - {}
       - bearerAuth: []
   /api/v1/builds/{build}/log/chunk/{index}:
     get:
