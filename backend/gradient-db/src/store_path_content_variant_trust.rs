@@ -72,9 +72,10 @@ crate::sql_fn! {
     ),
         params = [ProjectId, CachedPathHashes(64)],
         tier = Bulk,
-        budget = crate::sql::Budget::bulk().buffers(400_000)
-            .because("A single push can require the reference closure for every pushed path. \
-                      Each closure path can cost about 20 buffers to select one trusted variant.");
+        budget = crate::sql::Budget::bulk().buffers(800_000)
+            .because("One push can need the reference closure of every pushed path. \
+                      Each path in that closure needs about 20 buffers to pick one trusted variant. \
+                      64 pushed paths with overlapping closures measured 540k buffers on the amplified end-to-end dump.");
 }
 
 fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
