@@ -663,7 +663,7 @@ in {
 
         gradient-worker = {
           wantedBy = [ "multi-user.target" ];
-          after = [ "network.target" ];
+          after = [ "network.target" "nix-daemon.socket" "nix-daemon.service" ];
           path = [
             cfg.packages.git
             cfg.packages.ssh

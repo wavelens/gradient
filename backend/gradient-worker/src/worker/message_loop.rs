@@ -1251,7 +1251,9 @@ async fn run_job(
 
 fn failure_kind_reported_to_server(kind: BuildFailureKind, stopping: bool) -> BuildFailureKind {
     match (kind, stopping) {
-        (BuildFailureKind::Aborted, true) => BuildFailureKind::Canceled,
+        (BuildFailureKind::Aborted | BuildFailureKind::Transient, true) => {
+            BuildFailureKind::Canceled
+        }
         (kind, _) => kind,
     }
 }
@@ -1280,10 +1282,19 @@ mod tests {
     use crate::proto::credentials::parse_allowlist_entries_and_build_http_client;
 
     #[test]
-    fn only_a_failure_from_the_stop_abort_is_reported_as_canceled() {
+    fn stopping_worker_reports_aborted_and_transient_failures_as_canceled_keeps_permanent_failures_and_does_not_remap_when_not_stopping()
+     {
         assert_eq!(
             failure_kind_reported_to_server(BuildFailureKind::Aborted, true),
             BuildFailureKind::Canceled
+        );
+        assert_eq!(
+            failure_kind_reported_to_server(BuildFailureKind::Transient, true),
+            BuildFailureKind::Canceled
+        );
+        assert_eq!(
+            failure_kind_reported_to_server(BuildFailureKind::Transient, false),
+            BuildFailureKind::Transient
         );
         assert_eq!(
             failure_kind_reported_to_server(BuildFailureKind::Permanent, true),
