@@ -166,6 +166,7 @@ Access to this stream ended.
 - Superusers need a project role for Terminals, Run and Retry. Superusers can abort without a project role.
 - Legacy API keys and custom project roles that have action permissions but no `ViewProject` receive `404` on actions and job terminals of private projects.
 - Downloads from the cache over the proto socket need the `ReadStore` permission.
+- Requests to a missing cache name now need credentials, same as requests to a private cache. Requests without valid credentials return `401`. Signed-in users get `404`.
 - Cache creators who have no cache role no longer see that cache in listings, the dashboard sidebar, or the tile that shows the cache size.
 - Creators still see the cache through a project subscribed to the cache.
 - Caches from direct cache roles now count in the tile that shows cache size.
@@ -353,7 +354,7 @@ The commit failed. The uploaded object didn't exist in storage when the commit s
 - Re-enabled capabilities come back without a reconnect, but only if the worker reported them at connect time.
 - Worker sessions close after three database read failures in a row within about 3 minutes.
 - SSH keys, SSH host keys and logins for HTTPS Git of a project travel inside `AssignJob`. No separate credential messages remain.
-- Workers and the server use wire protocol 66. The server can't accept workers at version 2.0.1 and older, plus workers built from main before this change. Upgrade server and workers together.
+- Workers and the server communicate over wire protocol 67. The server cannot accept workers at version 2.0.1 or earlier. The server cannot accept workers built from main before this change. Upgrade the server and workers together.
 - Jobs and input fetches of a fork pull request without approval never receive the logins for HTTPS Git of the project, also with `require_approval: false`. Such fetches run without credentials.
 - Fetches of this kind that fail produce a message that the server withheld credentials. These messages carry the comment `/gradient run <full 40-character commit hash>`.
 - SSH inputs on such a pull request fail immediately with the same message.
@@ -406,6 +407,7 @@ Can't check the output path of <drv>. The input has no known output path.
 - Restore that backup, the only rollback.
 - NAR files that release 2.1 uploaded have no database rows after the restore. Storage sweep jobs in release 2.0.1 delete those files after the upload grace period.
 - The steps in migration `m20261221_000001` take an ACCESS EXCLUSIVE lock on `cached_path` inside one transaction. Multiple full scans of the table occur in that transaction. The lock is in place until the end of the migration on the first server start after the upgrade. Large instances see a delayed server start. Requests get no response from the cache during that time.
+- Migration `m20261221_000001` must rewrite the stored path table (`cached_path`) and its signatures once. The server can start only after that rewrite. A test machine with 128 cores and the database in RAM took about 2.3 minutes per million stored paths. Expect a longer time with a disk-based database. Plan for free disk space about the size of the stored path table. Table size can double until the next vacuum. Measurements show 782 MB to 1563 MB per million stored paths.
 - Several migrations read or rewrite all rows of a table. Migrations `m20261221_000001`, `m20261222_000000`, `m20261223_000000`, `m20261226_000000`, `m20261227_000000`, `m20261230_000001`, `m20261231_000000`, `m20270101_000000` run in one transaction each. Migrations `m20261221_000002`, `m20261230_000003`, `m20270102_000000` run each statement separately, outside a transaction. The statements follow.
     - `m20261221_000001`: UPDATE of `cached_path.nar_object_storage_key`, INSERT of one legacy row per `cached_path` row into `store_path_content_producer`, UPDATE of `cached_path_signature.store_path_hash`.
     - `m20261221_000002`: DELETE of duplicate `cached_path_signature` rows.

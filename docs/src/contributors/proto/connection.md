@@ -184,7 +184,7 @@ Running builds and evaluations survive a lost connection and a server restart. Q
 - The agreed version is the lower of both newest versions. Every later frame is for that version.
 - Two ranges without overlap can end the session with close code `1002` and `no shared protocol version: ours 30..=30, peer 31..=32`.
 - A first frame without `GRAD` came from protocol 26 or older. The session can end with `peer protocol is older than 30`.
-- Supported versions start at 65. A peer older than 65 doesn't share a version with the other side. That session can end with close code `1002`.
+- Supported versions start at 67. Peers older than 67 share no version with the other side. The session can end with close code `1002`.
 - Both sides are logging the reason at the `warn` level.
 - A server connecting to a worker can keep the reason as the worker's offline reason.
 - `gradient_wire::PROTO_VERSIONS` is the supported range, computed from the `#[proto]` annotations.

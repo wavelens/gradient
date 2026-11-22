@@ -27,9 +27,9 @@ sequenceDiagram
 |---|---|
 | `POST /api/v1/hooks/github` | `X-Hub-Signature-256` checked against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`. `503` until the App is fully configured |
 | `POST /api/v1/hooks/{connection_id}` | Gitea / Forgejo / GitLab connections. UUID for each. `gitea` / `forgejo`: HMAC from `X-Forgejo-Signature`, then `X-Gitea-Signature`. `gitlab`: constant-time comparison of `X-Gitlab-Token`. GitHub App connections respond with `404`. |
-| `POST /api/v1/hooks/{git_host}/{project}/{connection_name}` | The alias for the project connection that `(project, name)` identifies. Values in the `git_host` segment select the payload format. Segment values equal to `github` return `400`. |
+| `POST /api/v1/hooks/{git_host}/{project}/{connection_name}` | The alias for the project connection that `(project, name)` identifies. The connection type selects the signature check and the payload format. The `git_host` segment must match the connection type: `gitea` and `forgejo` match Gitea and Forgejo connections, `gitlab` matches GitLab connections. A segment that does not match returns `404`. GitHub App connections return `404`, other GitHub connections return `400`. |
 
-- Route `/api/v1/hooks/{connection_id}` can use the connection's `git_host_type` for the payload format.
+- Both routes use the connection's `git_host_type` for signature checks and payload format.
 - Connections with `receives_events` off and unknown connections return `404`.
 - The crypt file can decrypt secrets on the server.
 - Requests from other sources fail at `allowed_ips` with `403`.
