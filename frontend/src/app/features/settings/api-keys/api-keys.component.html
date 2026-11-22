@@ -64,6 +64,13 @@
                   ></button>
                   <button
                     grButton
+                    label="Regenerate"
+                    icon="refresh"
+                    severity="secondary"
+                    (click)="regenerateApiKey(key)"
+                  ></button>
+                  <button
+                    grButton
                     label="Revoke"
                     icon="block"
                     severity="danger"
@@ -221,12 +228,12 @@
 
 <!-- Show Created Key Dialog -->
 <gr-dialog
-  header="API Key Created"
+  header="New API Key"
   [(visible)]="showKeyDialog"
   [closable]="false"
   width="500px"
 >
-  <p>Your new API key has been created. Copy it now - it will not be shown again.</p>
+  <p>Copy the new API key now. The key doesn't appear again.</p>
   <gr-copy-field label="New API key" [value]="createdKeyValue()" />
   @if (cacheClientSetupTexts(); as setup) {
     <gr-divider />

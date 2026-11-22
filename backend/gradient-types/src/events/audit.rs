@@ -41,6 +41,7 @@ actions! {
     ApiKeyCreate => "api_key.create",
     ApiKeyUpdate => "api_key.update",
     ApiKeyRevoke => "api_key.revoke",
+    ApiKeyRegenerateSecret => "api_key.regenerate",
     ApiKeyDelete => "api_key.delete",
     SshKeyCreate => "ssh_key.create",
     SshKeyDelete => "ssh_key.delete",
@@ -174,6 +175,7 @@ impl Action {
                 | ApiKeyCreate
                 | ApiKeyUpdate
                 | ApiKeyRevoke
+                | ApiKeyRegenerateSecret
                 | ApiKeyDelete
                 | SshKeyCreate
                 | SshKeyDelete

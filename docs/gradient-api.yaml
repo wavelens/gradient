@@ -14650,6 +14650,38 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/user/keys/{api_id}/regenerate:
+    post:
+      tags:
+      - user
+      summary: Regenerate an API key
+      description: Replace the key secret. The name, permissions, pins, allowed IPs and expiry stay the same. Requests with the old secret fail right away. Clients receive the new full key (with the ``GRAD`` prefix) one time. Requests to regenerate revoked keys, expired keys or state-managed keys fail. Calls that use API key authentication cannot reach this endpoint. Use a session instead.
+      operationId: regenerateUserKey
+      parameters:
+      - name: api_id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ApiId'
+      responses:
+        '200':
+          description: New API key
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/user/keys/{api_id}/revoke:
     post:
       tags:
