@@ -12,10 +12,11 @@ use gradient_derive::config_group;
 #[config_group("upload")]
 #[derive(Args, Debug, Clone)]
 pub struct UploadArgs {
-    /// The number of uploads over 1 MiB (NAR and eval cache segments) that run concurrently across
-    /// all workers, REST clients and SSH `nix copy` clients. Smaller uploads have a dedicated pool
-    /// of 128 slots. Uploads count against this limit until the object reaches storage. Other
-    /// uploads wait for free capacity during that time.
+    /// The number of uploads over 1 MiB (NAR and eval cache segments) that run at the same time.
+    /// All workers, REST clients and SSH `nix copy` clients share this limit. Smaller uploads have
+    /// a dedicated pool of 128 slots. Uploads count against this limit until their objects reach
+    /// storage. Other uploads then wait for free capacity. A single `nix copy` can take at most
+    /// half of these slots, with a minimum of one.
     #[arg(default_value = "8")]
     pub concurrency: NonZeroUsize,
 

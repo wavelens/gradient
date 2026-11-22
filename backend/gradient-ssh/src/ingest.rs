@@ -537,6 +537,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_upload_waits_for_the_permit_holder_to_store_the_path_and_then_returns_pending_known_without_uploading()
+     {
+        let key = "0123456789abcdfghijklmnpqrsvwxyz";
+        let stored_by_holder = MCachedPath {
+            hash: key.into(),
+            nar_object_storage_key: key.into(),
+            package: "hello".into(),
+            nar_hash: gradient_util::nix_hash::normalize_nar_hash(
+                &NarHash::digest(NAR).as_sri().to_string(),
+            ),
+            file_hash: "sha256-x".into(),
+            server_computed_hashes_and_sizes: true,
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([Vec::new(), vec![stored_by_holder]])
+            .into_connection();
+        let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
+        let info = info(NAR);
+        let upload_admission = Arc::clone(&session.handles.upload_admission);
+        let (holder, mut admitted) = upload_admission.open_session("holder");
+        holder.request(1, ObjectKey::Nar(info.path.hash().to_owned()), 1, false);
+        let Some(Admitted { permit, .. }) = admitted.recv().await else {
+            panic!("the holder leads the path");
+        };
+        let mut upload = NAR;
+
+        let staged = {
+            let waiting = stage(&session, &info, &mut upload);
+            tokio::pin!(waiting);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), &mut waiting)
+                    .await
+                    .is_err(),
+                "the upload waits while another upload holds the path"
+            );
+            session
+                .handles
+                .db
+                .storage
+                .nar_storage
+                .put(key, b"stored".to_vec())
+                .await
+                .unwrap();
+            drop(permit);
+            waiting.await.expect("the holder stored the path")
+        };
+
+        assert!(matches!(staged, Pending::Known(row) if row.hash == key));
+        assert!(upload.is_empty(), "the NAR bytes are drained");
+        assert_eq!(upload_admission.stats().in_flight, 0);
+    }
+
+    #[tokio::test]
     async fn ssh_upload_of_already_cached_path_with_upload_concurrency_one_and_only_slot_held_by_other_upload_succeeds_without_taking_slot()
      {
         let key = "0123456789abcdfghijklmnpqrsvwxyz";

@@ -602,7 +602,7 @@
     "flag": "upload-concurrency",
     "env": "GRADIENT_UPLOAD_CONCURRENCY",
     "type": "NonZeroUsize",
-    "description": "The number of uploads over 1 MiB (NAR and eval cache segments) that run concurrently across\nall workers, REST clients and SSH `nix copy` clients. Smaller uploads have a dedicated pool\nof 128 slots. Uploads count against this limit until the object reaches storage. Other\nuploads wait for free capacity during that time.",
+    "description": "The number of uploads over 1 MiB (NAR and eval cache segments) that run at the same time.\nAll workers, REST clients and SSH `nix copy` clients share this limit. Smaller uploads have\na dedicated pool of 128 slots. Uploads count against this limit until their objects reach\nstorage. Other uploads then wait for free capacity. A single `nix copy` can take at most\nhalf of these slots, with a minimum of one.",
     "default": "8",
     "values": []
   },

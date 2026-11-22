@@ -88,7 +88,9 @@ pub(crate) fn new_cache_store_for_session(session: Arc<Session>) -> CacheStore {
     }
 }
 
-const CONCURRENT_COMMITS: usize = 8;
+fn concurrent_commits_per_upload_session(upload_concurrency: std::num::NonZeroUsize) -> usize {
+    (upload_concurrency.get() / 2).max(1)
+}
 
 fn joined(result: Option<Result<anyhow::Result<()>, tokio::task::JoinError>>) -> DaemonResult<()> {
     match result {
@@ -353,6 +355,9 @@ impl DaemonStore for CacheStore {
         async move {
             let mut stream = std::pin::pin!(stream);
             let mut commits = JoinSet::new();
+            let commit_limit = concurrent_commits_per_upload_session(
+                self.session.handles.db.config.upload.concurrency,
+            );
             while let Some(item) = stream.next().await {
                 let AddToStoreItem { info, reader } = item?;
                 let info = self.stored_info(&info)?;
@@ -366,7 +371,7 @@ impl DaemonStore for CacheStore {
                     .map_err(err)?;
                 let session = self.session.clone();
                 commits.spawn(async move { crate::ingest::commit(&session, &info, pending).await });
-                while commits.len() >= CONCURRENT_COMMITS {
+                while commits.len() >= commit_limit {
                     joined(commits.join_next().await)?;
                 }
             }
@@ -490,6 +495,17 @@ mod tests {
     use tokio::task::JoinSet;
 
     const HASH: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+
+    #[test]
+    fn ssh_nix_copy_per_session_parallel_commit_limit_is_half_server_upload_concurrency_with_minimum_one()
+     {
+        let limit = |concurrency| {
+            concurrent_commits_per_upload_session(
+                std::num::NonZeroUsize::new(concurrency).expect("non-zero"),
+            )
+        };
+        assert_eq!((limit(8), limit(3), limit(1)), (4, 1, 1));
+    }
 
     type TestClient = harmonia_store_remote::DaemonClient<
         tokio::io::ReadHalf<tokio::io::DuplexStream>,
