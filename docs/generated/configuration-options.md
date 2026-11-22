@@ -333,9 +333,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `upload.bytesBudget` | positive int | `8589934592` | `GRADIENT_UPLOAD_BYTES_BUDGET` | Total size in bytes of admitted uploads. Uploads that exceed the remaining budget wait. An upload larger than the whole budget can run alone once nothing else is in flight. |
-| `upload.concurrency` | positive int | `8` | `GRADIENT_UPLOAD_CONCURRENCY` | Number of uploads over 1 MiB (NARs and eval cache segments) admitted at once across all workers and REST clients. Smaller uploads have a window of 128 of their own. Uploads hold their permit until the object is in storage. Other uploads wait for a permit in the meantime. |
+| `upload.concurrency` | positive int | `8` | `GRADIENT_UPLOAD_CONCURRENCY` | The number of uploads over 1 MiB (NAR and eval cache segments) that run concurrently across all workers, REST clients and SSH `nix copy` clients. Smaller uploads have a dedicated pool of 128 slots. Uploads count against this limit until the object reaches storage. Other uploads wait for free capacity during that time. |
 | `upload.leaseIdleSecs` | positive int | `300` | `GRADIENT_UPLOAD_LEASE_IDLE_SECS` | Seconds granted worker uploads can go without data before they lose their permit and their workers receive a request to retry. |
-| `upload.restWaitSecs` | positive int | `30` | `GRADIENT_UPLOAD_REST_WAIT_SECS` | Seconds NAR uploads to the cache upload endpoint wait for a permit before getting a 503 answer with `Retry-After`. |
+| `upload.restWaitSecs` | positive int | `30` | `GRADIENT_UPLOAD_REST_WAIT_SECS` | Seconds that uploads of NARs to the upload endpoint of the cache and new store paths sent over SSH with `nix copy` wait for a permit. The upload endpoint can return a 503 answer with `Retry-After` once the wait time is over. `nix copy` can fail with "upload capacity exhausted, retry later". Store paths in the cache need no permit. |
 
 ## `worker`
 

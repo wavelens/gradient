@@ -30,10 +30,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 pub enum Pending {
-    Known {
-        cached_path: MCachedPath,
-        permit: HeldPermit,
-    },
+    Known(MCachedPath),
     New(Staged),
 }
 
@@ -63,51 +60,29 @@ pub async fn stage(
         session.project.name
     );
 
+    if let Some(known) =
+        find_verified_cached_path_with_existing_nar_for_upload(session, info).await?
+    {
+        return check_uploaded_nar_matches_stored_path(reader, info, known).await;
+    }
+
     let handles = &session.handles;
-    let hash = info.path.hash();
     let claim = claim_path(
         &handles.db.config,
         &handles.upload_admission,
-        hash,
+        info.path.hash(),
         info.nar_size,
     )
     .await?;
-    let announced = info.nar_hash.as_sri().to_string();
-    let known = find_verified_cached_path_by_store_hash(
-        &handles.db.web_db,
-        hash,
-        &announced,
-        &join_sorted_deduplicated_references_with_spaces(info.stated.references()),
-        info.stated.checked_content_address_text(),
-    )
-    .await?;
-    let known = match known {
-        Some(row)
-            if handles
-                .db
-                .storage
-                .nar_storage
-                .exists(&row.nar_object_storage_key)
-                .await? =>
-        {
-            Some(row)
-        }
-        _ => None,
-    };
-    if let Some(known) = known {
-        let (nar_hash, nar_size) =
-            read_nar_stream_and_return_hash_and_size_without_storing(reader, info.nar_size).await?;
-        anyhow::ensure!(
-            nar_size == info.nar_size && nar_hash == info.nar_hash,
-            "NAR hash of {} does not match",
-            info.original
-        );
-        return Ok(Pending::Known {
-            cached_path: known,
-            permit: claim,
-        });
+    // Another upload of this path can commit it during this upload's wait for its turn.
+    if let Some(known) =
+        find_verified_cached_path_with_existing_nar_for_upload(session, info).await?
+    {
+        drop(claim);
+        return check_uploaded_nar_matches_stored_path(reader, info, known).await;
     }
 
+    let announced = info.nar_hash.as_sri().to_string();
     let dir = handles.db.config.server.nar_upload_partial_dir();
     tokio::fs::create_dir_all(&dir).await?;
     let file = tempfile::NamedTempFile::new_in(&dir)?;
@@ -157,12 +132,9 @@ pub async fn commit(
 ) -> anyhow::Result<()> {
     let handles = &session.handles;
     let signed = match pending {
-        Pending::Known {
-            cached_path,
-            permit,
-        } => {
+        Pending::Known(cached_path) => {
             let producer = get_ssh_nar_upload_stored_content_producer(session);
-            let committed = handles
+            handles
                 .graph
                 .commit_nar(NarCommit {
                     store_path: info.path.full(),
@@ -175,9 +147,8 @@ pub async fn commit(
                         .map(str::to_owned),
                     producer,
                 })
-                .await?;
-            drop(permit);
-            committed.signed
+                .await?
+                .signed
         }
         Pending::New(staged) => {
             let producer = get_ssh_nar_upload_stored_content_producer(session);
@@ -217,6 +188,48 @@ fn get_ssh_nar_upload_stored_content_producer(session: &Session) -> StoredConten
         user: session.user.id,
         channel: CacheUploadChannel::SshNixStoreUpload,
     }
+}
+
+async fn find_verified_cached_path_with_existing_nar_for_upload(
+    session: &Session,
+    info: &StoredPathInfo,
+) -> anyhow::Result<Option<MCachedPath>> {
+    let db = &session.handles.db;
+    let row = find_verified_cached_path_by_store_hash(
+        &db.web_db,
+        info.path.hash(),
+        &info.nar_hash.as_sri().to_string(),
+        &join_sorted_deduplicated_references_with_spaces(info.stated.references()),
+        info.stated.checked_content_address_text(),
+    )
+    .await?;
+    match row {
+        Some(row)
+            if db
+                .storage
+                .nar_storage
+                .exists(&row.nar_object_storage_key)
+                .await? =>
+        {
+            Ok(Some(row))
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn check_uploaded_nar_matches_stored_path(
+    reader: impl AsyncRead + Unpin + Send,
+    info: &StoredPathInfo,
+    known: MCachedPath,
+) -> anyhow::Result<Pending> {
+    let (nar_hash, nar_size) =
+        read_nar_stream_and_return_hash_and_size_without_storing(reader, info.nar_size).await?;
+    anyhow::ensure!(
+        nar_size == info.nar_size && nar_hash == info.nar_hash,
+        "NAR hash of {} does not match",
+        info.original
+    );
+    Ok(Pending::Known(known))
 }
 
 async fn claim_path(
@@ -305,7 +318,7 @@ mod tests {
     use crate::session::SshHandles;
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH};
     use gradient_fixtures::mock::{empty_db, mock_db};
-    use gradient_storage::admission::Admitted;
+    use gradient_storage::admission::{Admitted, Limits};
     use gradient_test_support::content_address_and_store_path::{
         compute_derivation_store_path_and_text_content_address,
         flat_fixed_output_store_path_and_content_address_from_file_name_and_bytes,
@@ -322,8 +335,21 @@ mod tests {
     const NAR: &[u8] = b"nix-archive-1 stand-in bytes";
 
     async fn session(db: DatabaseConnection, permissions: i64) -> Arc<Session> {
+        let state = TestState::new().web_db(db).build();
+        let upload_admission = Arc::clone(&state.memory.upload_admission);
+        session_with_upload_admission(state, permissions, upload_admission).await
+    }
+
+    async fn session_with_upload_admission(
+        state: Arc<gradient_core::ServerState>,
+        permissions: i64,
+        upload_admission: Arc<UploadAdmission>,
+    ) -> Arc<Session> {
         let session = Session::open(
-            SshHandles::for_tests(&TestState::new().web_db(db).build()),
+            SshHandles {
+                upload_admission,
+                ..SshHandles::for_tests(&state)
+            },
             gradient_fixtures::rows::user(),
             gradient_fixtures::rows::project(),
             permissions,
@@ -358,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn a_nar_with_a_wrong_hash_is_rejected_before_any_row() {
         let db = mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let mut info = info(NAR);
@@ -375,7 +401,7 @@ mod tests {
     #[tokio::test]
     async fn a_nar_shorter_than_announced_is_rejected() {
         let db = mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
         let mut info = info(NAR);
@@ -401,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn a_stream_longer_than_announced_stops_early() {
         let db = mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
         let mut info = info(NAR);
@@ -422,7 +448,7 @@ mod tests {
             ..Default::default()
         };
         let db = mock_db()
-            .append_query_results([vec![existing]])
+            .append_query_results([vec![existing.clone()], vec![existing]])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let mut upload = NAR;
@@ -438,8 +464,8 @@ mod tests {
         let log = db.into_transaction_log();
         assert_eq!(
             log.len(),
-            1,
-            "The database received one query only. That query looked up the cached path. Project uploads name the project as the producer and don't query the caches. {log:?}"
+            2,
+            "The database received only two queries. Both queries looked up the cached path before and after the upload turn. Project uploads name the project as the producer and don't query the cache. The queries are {log:?}."
         );
     }
 
@@ -455,7 +481,7 @@ mod tests {
             ..Default::default()
         };
         let db = mock_db()
-            .append_query_results([vec![existing]])
+            .append_query_results([vec![existing.clone()], vec![existing]])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let forged = vec![b'?'; NAR.len()];
@@ -466,7 +492,7 @@ mod tests {
 
         assert!(e.to_string().contains("NAR hash"), "{e}");
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 1, "only the lookup, nothing signed: {log:?}");
+        assert_eq!(log.len(), 2, "Two lookups only, no signatures: {log:?}");
     }
 
     #[tokio::test]
@@ -480,7 +506,7 @@ mod tests {
             ..Default::default()
         };
         let db = mock_db()
-            .append_query_results([vec![existing]])
+            .append_query_results([vec![existing.clone()], vec![existing]])
             .append_query_results([
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
             ])
@@ -511,7 +537,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ssh_nar_upload_of_stored_path_stays_claimed_until_hash_check_fails_and_next_upload_is_granted()
+    async fn ssh_upload_of_already_cached_path_with_upload_concurrency_one_and_only_slot_held_by_other_upload_succeeds_without_taking_slot()
      {
         let key = "0123456789abcdfghijklmnpqrsvwxyz";
         let existing = MCachedPath {
@@ -526,9 +552,18 @@ mod tests {
             ..Default::default()
         };
         let db = mock_db()
-            .append_query_results([vec![existing]])
+            .append_query_results([vec![existing.clone()], vec![existing]])
             .into_connection();
-        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
+        let upload_admission = UploadAdmission::new(Limits {
+            concurrency: 1,
+            bytes: u64::MAX,
+        });
+        let session = session_with_upload_admission(
+            TestState::new().web_db(db.clone()).build(),
+            mask_from(&[Permission::TriggerEvaluation]),
+            Arc::clone(&upload_admission),
+        )
+        .await;
         session
             .handles
             .db
@@ -537,37 +572,35 @@ mod tests {
             .put(key, b"stored".to_vec())
             .await
             .unwrap();
+        let (other, mut other_admissions) = upload_admission.open_session("other");
+        other.request(1, ObjectKey::Nar(OTHER_ORIGINAL_HASH.to_owned()), 1, false);
+        let _held = other_admissions.recv().await;
         let info = info(NAR);
-        let (mut client, server) = tokio::io::duplex(64);
 
-        let staging = stage(&session, &info, server);
-        tokio::pin!(staging);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(200), &mut staging)
-                .await
-                .is_err(),
-            "the server has not finished reading the stream yet"
-        );
-        let (other, mut other_admissions) = session.handles.upload_admission.open_session("other");
-        other.request(1, ObjectKey::Nar(info.path.hash().to_owned()), 1, false);
-        assert!(
-            other_admissions.try_recv().is_err(),
-            "Paths stay claimed during a stream read."
-        );
-
-        client.write_all(&vec![b'?'; NAR.len()]).await.unwrap();
-        drop(client);
-        let Err(e) = staging.await else {
-            panic!("The stream doesn't contain the stored content.");
-        };
-
+        let forged = vec![b'?'; NAR.len()];
+        let e = tokio::time::timeout(
+            Duration::from_secs(1),
+            stage(&session, &info, forged.as_slice()),
+        )
+        .await
+        .expect("A stored path doesn't use an upload slot.")
+        .err()
+        .expect("the upload does not hold the stored content");
         assert!(e.to_string().contains("NAR hash"), "{e}");
-        assert!(
-            matches!(other_admissions.try_recv(), Ok(Admitted { id: 1, .. })),
-            "The next upload of that path can upload its own bytes."
+        let staged = tokio::time::timeout(Duration::from_secs(1), stage(&session, &info, NAR))
+            .await
+            .expect("A stored path doesn't use an upload slot.")
+            .unwrap();
+
+        assert!(matches!(staged, Pending::Known(row) if row.hash == key));
+        let stats = upload_admission.stats();
+        assert_eq!(
+            (stats.in_flight, stats.granted_total),
+            (1, 1),
+            "The other upload is still the only upload in flight."
         );
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 1, "only the lookup, nothing recorded: {log:?}");
+        assert_eq!(log.len(), 2, "Two lookups only, no signatures: {log:?}");
     }
 
     const OTHER_ORIGINAL_HASH: &str = "abcdfghijklmnpqrsvwxyz0123456789";
@@ -639,7 +672,7 @@ mod tests {
 
     fn mock_database_with_no_cached_path_and_no_producer_cache() -> DatabaseConnection {
         mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .append_query_results([
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
             ])
@@ -650,7 +683,7 @@ mod tests {
     async fn an_ssh_upload_with_a_claimed_reference_that_does_not_occur_in_the_nar_is_rejected_before_any_store_or_record()
      {
         let db = mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let nar = single_file_nar(b"no references", false);
@@ -677,7 +710,7 @@ mod tests {
             0
         );
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 1, "only the lookup, nothing recorded: {log:?}");
+        assert_eq!(log.len(), 2, "Only two lookups, no records: {log:?}");
     }
 
     #[tokio::test]
@@ -771,7 +804,7 @@ mod tests {
             0
         );
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 1, "only the lookup, nothing recorded: {log:?}");
+        assert_eq!(log.len(), 2, "Only two lookups, no records: {log:?}");
     }
 
     fn test_derivation_with_changed_system_and_real_paths() -> (Vec<u8>, String, String) {
@@ -789,7 +822,7 @@ mod tests {
     async fn ssh_upload_rejects_drv_with_altered_text_stating_original_content_address_and_stores_nothing()
      {
         let db = mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let (changed, own, input) = test_derivation_with_changed_system_and_real_paths();
@@ -819,7 +852,7 @@ mod tests {
     async fn test_ssh_upload_rejects_drv_without_content_address_when_path_does_not_follow_from_text()
      {
         let db = mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let (changed, own, input) = test_derivation_with_changed_system_and_real_paths();
@@ -843,7 +876,7 @@ mod tests {
     async fn ssh_upload_rejects_fixed_output_path_with_mismatched_content_address_hash_and_stores_nothing()
      {
         let db = mock_db()
-            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
         let claimed = flat_fixed_output_store_path_and_content_address_from_file_name_and_bytes(
