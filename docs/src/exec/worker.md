@@ -80,10 +80,6 @@ services.gradient.worker.exec = {
 1. A random, unique local `/64` from `fd00::/8`.
 2. The global IPv6 prefix of the host LAN.
 
-```text
-services.gradient.worker.exec.allow.blockedGlobalIPv6Networks: exec.subnet.v6 is set, but this option has no value. List the global IPv6 prefixes of the host's own networks that guests can't reach, for example the host's LAN prefix. Write [ ] to block nothing.
-```
-
 - `exec.subnet.v6` and `exec.allow.network` enable IPv6 forwarding and masquerading for the whole host through `networking.nat.enableIPv6`. All interfaces also get `accept_ra = 2` from the same option. Hosts with static IPv6 addresses now accept router advertisements. They ignored them before. Hosts that get addresses through kernel SLAAC keep a default route only with value 2.
 - Rebuild the guest image for IPv6. Rebuilt guest images use guest protocol 11. Old images still work with IPv4 only. They have no IPv6 at all. The bridge filter can drop their IPv6 frames. The worker can write the line below to the job log once per job.
 

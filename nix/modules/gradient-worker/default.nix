@@ -36,10 +36,9 @@
   renderedRulesetTexts = import ./exec-guest-network-filter-nftables-ruleset-texts.nix {
     inherit lib bridgeAddress;
     inherit (exec) bridge;
-    inherit (exec.allow) allowedPrivateNetworks guestConnectableHostTcpPorts;
+    inherit (exec.allow) allowedPrivateNetworks blockedGlobalIPv6Networks guestConnectableHostTcpPorts;
     guestDnsForwarderEnabled = guestDnsForwarder;
     execGuestHasIpv6Address = exec.subnet.v6 != null;
-    blockedGlobalIPv6Networks = if exec.allow.blockedGlobalIPv6Networks == null then [ ] else exec.allow.blockedGlobalIPv6Networks;
   };
   nftablesServiceLoadsHostFirewall = config.networking.nftables.enable;
   guestNftablesLoadCommand = pkgs.writeShellScript "gradient-guest-nftables-load" ''
@@ -455,8 +454,8 @@ in {
         };
 
         blockedGlobalIPv6Networks = lib.mkOption {
-          type = lib.types.nullOr (lib.types.listOf (lib.types.strMatching ipv6NetworkCidrRegularExpressionText));
-          default = null;
+          type = lib.types.listOf (lib.types.strMatching ipv6NetworkCidrRegularExpressionText);
+          default = [ ];
           example = [ "2001:db8:1234::/48" ];
           description = ''
             IPv6 networks that a guest is forbidden to connect to.
@@ -614,10 +613,6 @@ in {
       {
         assertion = exec.subnet.v6 != null -> ipv6GuestSubnetHasZeroHostBits;
         message = "services.gradient.worker.exec.subnet.v6: Host bits in subnet ${exec.subnet.v6} are non-zero. Write the network address ${guestIPv6NetworkAddressText}/${toString guestIpv6SubnetParts.prefixLength}.";
-      }
-      {
-        assertion = exec.subnet.v6 != null -> exec.allow.blockedGlobalIPv6Networks != null;
-        message = "services.gradient.worker.exec.allow.blockedGlobalIPv6Networks: exec.subnet.v6 is set, but this option has no value. List the global IPv6 prefixes of the host's own networks that guests can't reach, for example the host's LAN prefix. Write [ ] to block nothing.";
       }
       {
         assertion = exec.sops.files != [ ] -> exec.sops.keyFile != null;

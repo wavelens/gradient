@@ -944,11 +944,7 @@ Two nodes have guest address <address>. Assign a unique exec.subnet.v4 to each e
 The guest image is too old for IPv6. The protocol of the guest agent in this image is <version>. The first protocol with IPv6 support is 11. IPv4 is the only option for this job. Rebuild the guest image to provide IPv6 for the job.
 ```
 
-- Set `exec.allow.blockedGlobalIPv6Networks` for `exec.subnet.v6`. Write `[ ]` to block nothing. Add the host's own LAN prefix to this list. Missing values stop evaluation with the message below.
-
-```text
-services.gradient.worker.exec.allow.blockedGlobalIPv6Networks: exec.subnet.v6 is set, but this option has no value. List the global IPv6 prefixes of the host's own networks that guests can't reach, for example the host's LAN prefix. Write [ ] to block nothing.
-```
+- Set `exec.allow.blockedGlobalIPv6Networks` for `exec.subnet.v6`. Add the host's own LAN prefix to this list.
 
 - `exec.subnet.v6` and `exec.allow.network` together enable IPv6 forwarding and masquerade host-wide via `networking.nat.enableIPv6`. All interfaces also get `accept_ra = 2` from the same option. Hosts with static IPv6 addressing now accept router advertisements that they ignored before. Hosts that get addresses via kernel SLAAC keep the default route only because of value 2.
 - Hosts that obtain their own IPv6 address through kernel SLAAC need to check the default route after the switch.
