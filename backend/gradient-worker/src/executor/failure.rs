@@ -116,7 +116,7 @@ pub(super) fn looks_like_oom(msg: &str) -> bool {
     })
 }
 
-/// These signatures describe the store or the daemon, not the derivation.
+/// These signatures mark a failure outside the derivation, namely a broken store, a lost nix-daemon, or a builder killed by a stopped nix-daemon.
 /// A `Permanent` failure can never re-thaw, so that class can strand the build.
 /// Everything wanting that build can then cascade to `DependencyFailed`.
 const INFRA_FAILURE_SIGNATURES: &[&str] = &[
@@ -128,6 +128,10 @@ const INFRA_FAILURE_SIGNATURES: &[&str] = &[
     "input/output error",
     "connection reset by peer",
     "broken pipe",
+    "failed due to signal 1 (",
+    "failed due to signal 2 (",
+    "failed due to signal 9 (",
+    "failed due to signal 15 (",
 ];
 
 pub(super) fn looks_like_infra_failure(msg: &str) -> bool {
@@ -264,6 +268,34 @@ mod tests {
             BuildFailureKind::Transient,
             "a counted OOM kill stays retryable whatever the message"
         );
+    }
+
+    #[test]
+    fn an_externally_killed_builder_is_transient_but_a_crashing_builder_is_permanent() {
+        for signal in [
+            "1 (Hangup)",
+            "2 (Interrupt)",
+            "9 (Killed)",
+            "15 (Terminated)",
+        ] {
+            let msg = format!(
+                "Cannot build '/nix/store/x-y.drv'.\nReason: builder failed due to signal {signal}."
+            );
+            assert_eq!(
+                classify_build_error(&msg, Some(0)),
+                BuildFailureKind::Transient,
+                "{msg}"
+            );
+        }
+        for signal in ["6 (Aborted)", "11 (Segmentation fault)"] {
+            let msg =
+                format!("error: builder for '/nix/store/x-y.drv' failed due to signal {signal}");
+            assert_eq!(
+                classify_build_error(&msg, Some(0)),
+                BuildFailureKind::Permanent,
+                "{msg}"
+            );
+        }
     }
 
     #[test]

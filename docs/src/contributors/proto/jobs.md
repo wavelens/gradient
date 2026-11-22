@@ -235,7 +235,7 @@ sequenceDiagram
 ```
 
 - Workers first release the cluster members that they hold. They then send `Draining` and abort all running jobs. Exec jobs keep running with `stopGuestsWithWorker = false` and resume after a restart.
-- Aborted jobs report `JobFailed { Canceled }` with their phase timeline. Failures during a stop all report as `Canceled`.
+- Canceled jobs report `JobFailed { Canceled }` together with the phase timeline. Transient failures during shutdown (a lost nix-daemon connection, for example) also report as `Canceled`. All other failures keep their kind.
 - Workers wait up to 5 s for these reports.
 - Jobs without a report within the 5 s re-queue with the closed session, as for a lost worker.
 - Canceled builds return to `Queued`. Their attempts close as `Aborted` and stay out of `build.maxAttempts` and the substitution miss count.
