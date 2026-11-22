@@ -9,30 +9,34 @@
 $left-settings-navigation-column-width: 15rem;
 
 .page-layout {
+  --page-layout-max-width: #{$content-width-detail};
   margin: 0 auto;
   padding: $spacing-md;
-  max-width: $content-width-detail;
+  max-width: var(--page-layout-max-width);
 
-  &--form { max-width: $content-width-form; }
-  &--settings { max-width: $content-width-settings; }
-  &--full { max-width: none; }
+  &--form { --page-layout-max-width: #{$content-width-form}; }
+  &--settings { --page-layout-max-width: #{$content-width-settings}; }
+  &--full { --page-layout-max-width: 100%; }
 
+  // The outer columns split the leftover space equally. Content can stay centered on the page, with navigation on the left.
   &:has(> .page-layout__settings-navigation nav) {
     display: grid;
-    grid-template-columns: $left-settings-navigation-column-width minmax(0, 1fr);
+    grid-template-columns:
+      minmax(calc(#{$left-settings-navigation-column-width} + #{$spacing-xl}), 1fr)
+      minmax(0, calc(var(--page-layout-max-width) - 2 * #{$spacing-md}))
+      minmax(0, 1fr);
     grid-template-areas:
-      'crumbs crumbs'
-      'navigation main';
-    column-gap: $spacing-xl;
+      '. crumbs .'
+      'navigation main .';
+    max-width: none;
     align-items: start;
-  }
-
-  &--settings:has(> .page-layout__settings-navigation nav) {
-    max-width: calc(#{$left-settings-navigation-column-width} + #{$spacing-xl} + #{$content-width-settings});
   }
 
   &__settings-navigation {
     grid-area: navigation;
+    justify-self: end;
+    width: $left-settings-navigation-column-width;
+    margin-right: $spacing-xl;
 
     &:not(:has(nav)) { display: none; }
   }
@@ -141,6 +145,9 @@ gr-breadcrumb {
   }
 
   .page-layout__settings-navigation {
+    justify-self: stretch;
+    width: auto;
+    margin-right: 0;
     margin-bottom: $spacing-lg;
   }
 }
