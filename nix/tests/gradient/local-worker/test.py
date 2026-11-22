@@ -97,6 +97,10 @@ def worker_is_live():
 with machine.nested("waiting for the worker to connect"):
     retry(lambda _: worker_is_live(), timeout_seconds=60)
 
+banner("The server and worker units can read the addresses of their network interfaces.")
+for unit in ["gradient-server", "gradient-worker"]:
+    machine.fail(f'journalctl -u {unit}.service --no-pager | grep -F "read the addresses of the network interfaces"')
+
 banner("A removed grant stays removed across a restart")
 api("DELETE", "projects/demo/teams/server", token=admin)
 machine.systemctl("restart gradient-server.service")
