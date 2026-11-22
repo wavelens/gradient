@@ -12,10 +12,10 @@ use gradient_derive::config_group;
 #[config_group("upload")]
 #[derive(Args, Debug, Clone)]
 pub struct UploadArgs {
-    /// Number of uploads over 1 MiB (NARs and eval cache segments) admitted at once across all
-    /// workers and REST clients. Smaller uploads have a window of 128 of their own. Uploads
-    /// hold their permit until the object is in storage. Other uploads wait for a permit in
-    /// the meantime.
+    /// The number of uploads over 1 MiB (NAR and eval cache segments) that run concurrently across
+    /// all workers, REST clients and SSH `nix copy` clients. Smaller uploads have a dedicated pool
+    /// of 128 slots. Uploads count against this limit until the object reaches storage. Other
+    /// uploads wait for free capacity during that time.
     #[arg(default_value = "8")]
     pub concurrency: NonZeroUsize,
 
@@ -29,8 +29,10 @@ pub struct UploadArgs {
     #[arg(default_value = "300")]
     pub lease_idle_secs: NonZeroU64,
 
-    /// Seconds NAR uploads to the cache upload endpoint wait for a permit before getting a 503
-    /// answer with `Retry-After`.
+    /// Seconds that uploads of NARs to the upload endpoint of the cache and new store paths sent
+    /// over SSH with `nix copy` wait for a permit. The upload endpoint can return a 503 answer with
+    /// `Retry-After` once the wait time is over. `nix copy` can fail with "upload capacity
+    /// exhausted, retry later". Store paths in the cache need no permit.
     #[arg(default_value = "30")]
     pub rest_wait_secs: NonZeroU64,
 }

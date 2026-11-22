@@ -602,7 +602,7 @@
     "flag": "upload-concurrency",
     "env": "GRADIENT_UPLOAD_CONCURRENCY",
     "type": "NonZeroUsize",
-    "description": "Number of uploads over 1 MiB (NARs and eval cache segments) admitted at once across all\nworkers and REST clients. Smaller uploads have a window of 128 of their own. Uploads\nhold their permit until the object is in storage. Other uploads wait for a permit in\nthe meantime.",
+    "description": "The number of uploads over 1 MiB (NAR and eval cache segments) that run concurrently across\nall workers, REST clients and SSH `nix copy` clients. Smaller uploads have a dedicated pool\nof 128 slots. Uploads count against this limit until the object reaches storage. Other\nuploads wait for free capacity during that time.",
     "default": "8",
     "values": []
   },
@@ -632,7 +632,7 @@
     "flag": "upload-rest-wait-secs",
     "env": "GRADIENT_UPLOAD_REST_WAIT_SECS",
     "type": "NonZeroU64",
-    "description": "Seconds NAR uploads to the cache upload endpoint wait for a permit before getting a 503\nanswer with `Retry-After`.",
+    "description": "Seconds that uploads of NARs to the upload endpoint of the cache and new store paths sent\nover SSH with `nix copy` wait for a permit. The upload endpoint can return a 503 answer with\n`Retry-After` once the wait time is over. `nix copy` can fail with \"upload capacity\nexhausted, retry later\". Store paths in the cache need no permit.",
     "default": "30",
     "values": []
   },

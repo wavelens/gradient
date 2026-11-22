@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use gradient_util::sync::Mutex;
+use gradient_wire::messages::is_small_upload;
 use tokio::sync::mpsc;
 
 use super::core::{AdmissionCore, Limits, ObjectKey, Request, SessionId};
@@ -116,7 +117,7 @@ impl UploadAdmission {
         wait: Duration,
     ) -> Option<HeldPermit> {
         let (session, mut admitted) = self.open_session(label);
-        session.request(0, object, size, false);
+        session.request(0, object, size, is_small_upload(size));
         match tokio::time::timeout(wait, admitted.recv()).await {
             Ok(Some(Admitted { permit, .. })) => Some(HeldPermit {
                 _permit: permit,
@@ -313,6 +314,27 @@ mod tests {
             "a stale permit of a gone session frees nothing twice"
         );
         drop(held);
+    }
+
+    #[tokio::test]
+    async fn small_upload_is_admitted_when_all_regular_upload_slots_are_taken() {
+        let admission = admission(1);
+        let large = gradient_wire::messages::SMALL_UPLOAD_BYTES + 1;
+        let _held = admission
+            .admit("test", nar("a"), large, Duration::from_secs(1))
+            .await;
+        assert!(
+            admission
+                .admit("test", nar("b"), large, Duration::from_millis(50))
+                .await
+                .is_none()
+        );
+        assert!(
+            admission
+                .admit("test", nar("c"), 1, Duration::from_millis(50))
+                .await
+                .is_some()
+        );
     }
 
     #[tokio::test]

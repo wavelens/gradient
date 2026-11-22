@@ -79,18 +79,27 @@ mod tests {
     #[tokio::test]
     async fn a_rest_upload_waits_for_a_permit_and_gives_up_busy() {
         let state = test_state(empty_db());
+        let large = gradient_wire::messages::SMALL_UPLOAD_BYTES + 1;
         let mut held = Vec::new();
-        while let Ok(permit) =
-            admit_within(&state.memory.upload_admission, 1, Duration::from_millis(50)).await
+        while let Ok(permit) = admit_within(
+            &state.memory.upload_admission,
+            large,
+            Duration::from_millis(50),
+        )
+        .await
         {
             held.push(permit);
         }
         assert_eq!(held.len(), 16, "the test state admits 16 uploads");
         held.pop();
         assert!(
-            admit_within(&state.memory.upload_admission, 1, Duration::from_secs(1))
-                .await
-                .is_ok()
+            admit_within(
+                &state.memory.upload_admission,
+                large,
+                Duration::from_secs(1)
+            )
+            .await
+            .is_ok()
         );
     }
 
