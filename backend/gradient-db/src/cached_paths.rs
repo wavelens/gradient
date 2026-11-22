@@ -215,16 +215,22 @@ impl NarFilter<'_> {
 #[derive(Debug, Clone, Copy)]
 pub enum NarOrder {
     CreatedAt,
+    PackageName,
     NarSize,
+    FileSize,
     LastFetchedAt,
+    PinnedAt,
 }
 
 impl NarOrder {
     fn column(self) -> &'static str {
         match self {
             Self::CreatedAt => "cp.created_at",
+            Self::PackageName => "cp.package",
             Self::NarSize => "cp.nar_size",
+            Self::FileSize => "cp.file_size",
             Self::LastFetchedAt => "cps.last_fetched_at",
+            Self::PinnedAt => "cps.pinned_at",
         }
     }
 }

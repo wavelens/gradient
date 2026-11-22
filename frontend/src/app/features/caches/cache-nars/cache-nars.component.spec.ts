@@ -235,3 +235,28 @@ describe('CacheNarsComponent paging', () => {
     expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { page: 1 } }));
   });
 });
+
+describe('CacheNarsComponent sorting', () => {
+  it.each([
+    { label: 'Package', sort: 'package', order: 'asc' },
+    { label: 'Uncompressed size', sort: 'nar_size', order: 'desc' },
+    { label: 'Compressed size', sort: 'file_size', order: 'desc' },
+    { label: 'Created', sort: 'created_at', order: 'asc' },
+    { label: 'Last fetched', sort: 'last_fetched_at', order: 'desc' },
+    { label: 'Pinned', sort: 'pinned_at', order: 'desc' },
+  ])('sorts rows by $label header in $order order', ({ label, sort, order }) => {
+    const { root } = render(() => of(PAGE));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const header = Array.from(root.querySelectorAll<HTMLButtonElement>('th .gr-th-sort')).find(
+      (button) => button.textContent?.trim().startsWith(label),
+    )!;
+    header.click();
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: expect.objectContaining({ sort, order }) }));
+  });
+
+  it('does not show a sort button in the hash column header of the cached NAR packages table', () => {
+    const { root } = render(() => of(PAGE));
+    const labels = Array.from(root.querySelectorAll('th .gr-th-sort')).map((button) => button.textContent?.trim());
+    expect(labels).not.toContain('Hash');
+  });
+});

@@ -68,34 +68,25 @@
       </colgroup>
       <thead>
         <tr>
-          <th>Package</th>
+          <th [attr.aria-sort]="ariaSort('package')">
+            <ng-container *ngTemplateOutlet="sortableHeaderCellContent; context: { $implicit: 'package', label: 'Package' }" />
+          </th>
           <th>Hash</th>
           <th class="num" [attr.aria-sort]="ariaSort('nar_size')">
-            <button class="gr-th-sort" type="button" (click)="sortBy('nar_size')">
-              Uncompressed size
-              @if (sort() === 'nar_size') {
-                <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
-              }
-            </button>
+            <ng-container *ngTemplateOutlet="sortableHeaderCellContent; context: { $implicit: 'nar_size', label: 'Uncompressed size' }" />
           </th>
-          <th class="num">Compressed size</th>
+          <th class="num" [attr.aria-sort]="ariaSort('file_size')">
+            <ng-container *ngTemplateOutlet="sortableHeaderCellContent; context: { $implicit: 'file_size', label: 'Compressed size' }" />
+          </th>
           <th [attr.aria-sort]="ariaSort('created_at')">
-            <button class="gr-th-sort" type="button" (click)="sortBy('created_at')">
-              Created
-              @if (sort() === 'created_at') {
-                <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
-              }
-            </button>
+            <ng-container *ngTemplateOutlet="sortableHeaderCellContent; context: { $implicit: 'created_at', label: 'Created' }" />
           </th>
           <th [attr.aria-sort]="ariaSort('last_fetched_at')">
-            <button class="gr-th-sort" type="button" (click)="sortBy('last_fetched_at')">
-              Last fetched
-              @if (sort() === 'last_fetched_at') {
-                <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
-              }
-            </button>
+            <ng-container *ngTemplateOutlet="sortableHeaderCellContent; context: { $implicit: 'last_fetched_at', label: 'Last fetched' }" />
           </th>
-          <th>Pinned</th>
+          <th [attr.aria-sort]="ariaSort('pinned_at')">
+            <ng-container *ngTemplateOutlet="sortableHeaderCellContent; context: { $implicit: 'pinned_at', label: 'Pinned' }" />
+          </th>
           <th><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -186,3 +177,12 @@
   (changed)="refresh()"
   (closed)="pinDialogPackageRow.set(null)"
 />
+
+<ng-template #sortableHeaderCellContent let-key let-label="label">
+  <button class="gr-th-sort" type="button" (click)="sortBy(key)">
+    {{ label }}
+    @if (sort() === key) {
+      <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
+    }
+  </button>
+</ng-template>

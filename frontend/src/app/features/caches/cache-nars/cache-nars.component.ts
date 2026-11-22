@@ -34,7 +34,7 @@ import { BINARY_CACHE_STAT_TILE_VALUE_EXPLANATIONS } from '../cache-storage-stat
 import { NarSummary, NarStats, Paginated } from '@core/models';
 import { links } from '@shared/routing';
 
-type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
+type SortKey = 'package' | 'nar_size' | 'file_size' | 'created_at' | 'last_fetched_at' | 'pinned_at';
 type SortOrder = 'asc' | 'desc';
 type PackagePinFilter = 'all' | 'pinned' | 'unpinned';
 
@@ -213,7 +213,7 @@ export class CacheNarsComponent implements OnInit {
       this.order.set(this.order() === 'asc' ? 'desc' : 'asc');
     } else {
       this.sort.set(key);
-      this.order.set('desc');
+      this.order.set(key === 'package' ? 'asc' : 'desc');
     }
     this.applyFilters();
   }
