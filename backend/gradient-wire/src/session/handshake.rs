@@ -690,6 +690,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_worker_dialed_handshake_fails_with_the_refusal_text_when_server_announces_only_version_66()
+     {
+        use futures::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let url = format!("ws://{}", listener.local_addr().expect("local addr"));
+        let server = async {
+            let (tcp, _) = listener.accept().await.expect("accept");
+            let mut ws = tokio_tungstenite::accept_async(tcp).await.expect("upgrade");
+            ws.send(Message::Binary(crate::codec::agreement::version_frame(
+                &(66..=66),
+            )))
+            .await
+            .expect("send the version frame");
+            ws.next().await;
+            ws.next().await;
+        };
+        let worker = async {
+            let mut socket = crate::client::dial(&url).await.expect("dial");
+            let outcome = as_peer(&mut socket, &Worker("w1"), &Worker("w1")).await;
+            (outcome.is_err(), socket.refusal().map(str::to_owned))
+        };
+
+        let ((), (failed, refusal)) = tokio::join!(server, worker);
+        assert!(failed);
+        assert_eq!(
+            refusal.as_deref(),
+            Some("no shared protocol version: ours 67..=67, peer 66..=66")
+        );
+    }
+
+    #[tokio::test]
     async fn an_unknown_worker_id_is_rejected_with_401() {
         let (mut accepted, mut dialing) = loopback().await;
         let (credentials, authority) = (credentials(), Admits(vec![]));

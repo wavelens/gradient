@@ -4,7 +4,7 @@
  */
 
 use super::admit::{admit, admit_nar};
-use super::refusal::CacheRefusal;
+use super::refusal::{CacheRefusal, ensure_cache_enabled};
 use crate::api_spec::{Binary, CachePath};
 use crate::audit::Audit;
 use crate::authorization::RateLimitBucketOwner;
@@ -80,6 +80,7 @@ pub async fn nars_upload(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> WebResult<impl IntoResponse> {
+    let cache = ensure_cache_enabled(cache)?;
     let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
     let declared = headers
         .get(header::CONTENT_LENGTH)
@@ -420,6 +421,7 @@ pub async fn nar_chunk(
     Query(NarChunkQuery { offset }): Query<NarChunkQuery>,
     body: Bytes,
 ) -> WebResult<impl IntoResponse> {
+    let cache = ensure_cache_enabled(cache)?;
     let store_hash = parse_upload_path_to_store_hash(
         &params.param::<String>("hash")?,
         &state.cache_mapper(cache.id),
@@ -479,6 +481,7 @@ pub async fn nar_finalize(
     audit: Audit,
     JsonBody(narinfo): JsonBody<NarinfoPart>,
 ) -> WebResult<impl IntoResponse> {
+    let cache = ensure_cache_enabled(cache)?;
     let mapper = state.cache_mapper(cache.id);
     let store_hash = parse_upload_path_to_store_hash(&params.param::<String>("hash")?, &mapper)?;
     let upload = MappedUpload::new(narinfo, &mapper)?;

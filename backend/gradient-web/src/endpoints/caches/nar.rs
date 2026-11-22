@@ -187,17 +187,20 @@ fn upstream_nar_path(path: &str, query: Option<&str>) -> Result<String, CacheRef
     let file = path
         .strip_prefix("nar/")
         .ok_or(CacheRefusal::InvalidNarFilePath)?;
-    if file.is_empty()
-        || file
-            .split('/')
-            .any(|seg| seg.is_empty() || seg == ".." || seg == ".")
-    {
+    if !file.split('/').all(is_valid_nar_path_segment) {
         return Err(CacheRefusal::InvalidNarFilePath);
     }
     Ok(match query {
         Some(q) if !q.is_empty() => format!("{path}?{q}"),
         _ => path.to_owned(),
     })
+}
+
+fn is_valid_nar_path_segment(segment: &str) -> bool {
+    !matches!(segment, "" | "." | "..")
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-'))
 }
 
 #[cfg(test)]
@@ -315,6 +318,10 @@ mod tests {
             "nar/../admin",
             "nar//x",
             "nar/./x",
+            "nar/%2e%2e/admin",
+            "nar/..\\admin",
+            "nar/\\admin.nar",
+            "nar/x.nar?hash=y",
         ] {
             assert!(upstream_nar_path(path, None).is_err(), "{path}");
         }

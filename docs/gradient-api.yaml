@@ -7558,7 +7558,7 @@ paths:
       tags:
       - git-host-webhooks
       summary: Receive Git host webhook
-      description: Old webhook address can still serve requests. Gradient can find the connection for the project's Git host by name and handle requests like `POST /hooks/{connection}`. Path segment `git_host` can select the payload format.
+      description: Legacy webhook address for a project connection. The project name and connection name identify the connection. Signature verification and payload format depend on the connection type. The path segment `git_host` must match the connection type. `gitea` and `forgejo` match a Gitea connection and a Forgejo connection. Segments that don't match return `404`.
       operationId: gitHostWebhook
       parameters:
       - name: git_host

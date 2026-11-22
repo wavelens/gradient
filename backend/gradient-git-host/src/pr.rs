@@ -148,7 +148,10 @@ pub(crate) mod github {
 
         let updated = gh
             .patch(
-                &format!("/repos/{owner}/{repo}/git/refs/heads/{branch}"),
+                &format!(
+                    "/repos/{owner}/{repo}/git/refs/heads/{}",
+                    percent_encode_branch_name_path_segments(branch)
+                ),
                 &UpdateRefReq {
                     sha: &new_commit.sha,
                     force: true,
@@ -191,10 +194,12 @@ pub(crate) mod github {
     ) -> Result<super::PrRef> {
         let gh = client.with_user_agent("gradient");
 
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("state", "open")
+            .append_pair("head", &format!("{owner}:{head}"))
+            .finish();
         let existing: Vec<PullObject> = gh
-            .get_json(&format!(
-                "/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head}"
-            ))
+            .get_json(&format!("/repos/{owner}/{repo}/pulls?{query}"))
             .await?;
 
         if let Some(pr) = existing.into_iter().next() {
@@ -317,7 +322,8 @@ pub(crate) mod github {
     mod tests {
         use super::*;
         use crate::client::http_client_allow_loopback;
-        use wiremock::MockServer;
+        use wiremock::matchers::{any, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         #[tokio::test]
         async fn upsert_branch_percent_encodes_each_base_branch_path_segment_in_ref_get() {
@@ -345,6 +351,88 @@ pub(crate) mod github {
 
                 let requests = server.received_requests().await.expect("recorded requests");
                 assert_eq!(requests[0].url.path(), ref_path, "{base}");
+            }
+        }
+
+        #[tokio::test]
+        async fn upsert_branch_percent_encodes_each_head_branch_path_segment_in_ref_patch_and_returns_new_commit_sha()
+         {
+            for (branch, ref_path) in [
+                ("fix#12", "/repos/acme/infra/git/refs/heads/fix%2312"),
+                (
+                    "update/nixpkgs",
+                    "/repos/acme/infra/git/refs/heads/update/nixpkgs",
+                ),
+            ] {
+                let server = MockServer::start().await;
+                Mock::given(any())
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "object": { "sha": "base" },
+                        "tree": { "sha": "tree" },
+                        "sha": "new",
+                    })))
+                    .mount(&server)
+                    .await;
+                let client = HostClient::github(
+                    http_client_allow_loopback(),
+                    server.uri().parse().expect("base url"),
+                    "tok",
+                );
+                let commit = super::super::BranchCommit {
+                    message: "update".into(),
+                    author: None,
+                    files: Vec::new(),
+                };
+
+                let head = upsert_branch(&client, "acme", "infra", branch, "main", &commit)
+                    .await
+                    .expect("branch updated");
+
+                assert_eq!(head, "new", "{branch}");
+                let requests = server.received_requests().await.expect("recorded requests");
+                let patched: Vec<&str> = requests
+                    .iter()
+                    .filter(|request| request.method == wiremock::http::Method::PATCH)
+                    .map(|request| request.url.path())
+                    .collect();
+                assert_eq!(patched, [ref_path], "{branch}");
+            }
+        }
+
+        #[tokio::test]
+        async fn open_or_update_pr_lists_open_pull_requests_with_form_urlencoded_owner_branch_head_query()
+         {
+            for (head, query) in [
+                ("a&b", "state=open&head=acme%3Aa%26b"),
+                ("update/nixpkgs", "state=open&head=acme%3Aupdate%2Fnixpkgs"),
+            ] {
+                let server = MockServer::start().await;
+                Mock::given(method("GET"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+                    .mount(&server)
+                    .await;
+                Mock::given(method("POST"))
+                    .respond_with(
+                        ResponseTemplate::new(201)
+                            .set_body_json(serde_json::json!({ "number": 1 })),
+                    )
+                    .mount(&server)
+                    .await;
+                let client = HostClient::github(
+                    http_client_allow_loopback(),
+                    server.uri().parse().expect("base url"),
+                    "tok",
+                );
+
+                let opened =
+                    open_or_update_pr(&client, "acme", "infra", head, "main", "title", "body")
+                        .await
+                        .expect("pull request opened");
+
+                assert_eq!(opened.number, 1, "{head}");
+                let requests = server.received_requests().await.expect("recorded requests");
+                assert_eq!(requests[0].url.path(), "/repos/acme/infra/pulls", "{head}");
+                assert_eq!(requests[0].url.query(), Some(query), "{head}");
             }
         }
     }
@@ -482,10 +570,12 @@ pub(crate) mod gitlab {
         body: &str,
     ) -> Result<super::PrRef> {
         let project = project_path(owner, repo);
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("state", "opened")
+            .append_pair("source_branch", head)
+            .finish();
         let open: Vec<Mr> = client
-            .get_json(&format!(
-                "{project}/merge_requests?state=opened&source_branch={head}"
-            ))
+            .get_json(&format!("{project}/merge_requests?{query}"))
             .await?;
 
         if let Some(mr) = open.into_iter().next() {
@@ -579,7 +669,53 @@ pub(crate) mod gitlab {
 
     #[cfg(test)]
     mod tests {
-        use super::{project_id, project_path};
+        use super::{open_or_update_pr, project_id, project_path};
+        use crate::client::{HostClient, http_client_allow_loopback};
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        #[tokio::test]
+        async fn open_or_update_pr_lists_open_merge_requests_with_form_urlencoded_source_branch_query_parameter()
+         {
+            for (head, query) in [
+                ("a&b", "state=opened&source_branch=a%26b"),
+                (
+                    "update/nixpkgs",
+                    "state=opened&source_branch=update%2Fnixpkgs",
+                ),
+            ] {
+                let server = MockServer::start().await;
+                Mock::given(method("GET"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+                    .mount(&server)
+                    .await;
+                Mock::given(method("POST"))
+                    .respond_with(
+                        ResponseTemplate::new(201).set_body_json(serde_json::json!({ "iid": 1 })),
+                    )
+                    .mount(&server)
+                    .await;
+                let client = HostClient::gitlab(
+                    http_client_allow_loopback(),
+                    server.uri().parse().expect("base url"),
+                    "tok",
+                );
+
+                let opened =
+                    open_or_update_pr(&client, "acme", "infra", head, "main", "title", "body")
+                        .await
+                        .expect("merge request opened");
+
+                assert_eq!(opened.number, 1, "{head}");
+                let requests = server.received_requests().await.expect("recorded requests");
+                assert_eq!(
+                    requests[0].url.path(),
+                    "/api/v4/projects/acme%2Finfra/merge_requests",
+                    "{head}"
+                );
+                assert_eq!(requests[0].url.query(), Some(query), "{head}");
+            }
+        }
 
         #[test]
         fn project_path_addresses_the_projects_endpoint_by_encoded_path() {

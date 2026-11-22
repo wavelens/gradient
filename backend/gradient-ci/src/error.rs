@@ -16,6 +16,8 @@ pub enum ActionError {
     InvalidEvaluationId,
     #[error("could not parse owner/repo from {repository}")]
     RepositoryUnparsable { repository: String },
+    #[error("The pull request branch {branch} does not match the rules for git branch names")]
+    InvalidPullRequestBranchName { branch: String },
     #[error("URL rejected: {cause}")]
     UrlRejected { cause: DestinationUrlRejectedError },
     #[error("loading crypt key: {cause}")]

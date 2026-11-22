@@ -32,6 +32,7 @@ pub enum ServerMessage {
         capabilities: GradientCapabilities,
         authorized_peers: Vec<String>,
         failed_peers: Vec<FailedPeer>,
+        #[proto(67)]
         user_url_destination_allowlist: Vec<String>,
     },
 

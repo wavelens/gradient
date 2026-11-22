@@ -334,7 +334,7 @@ async fn route_github_app_release(
     operation_id = "gitHostWebhook",
     tag = "git-host-webhooks",
     summary = "Receive Git host webhook",
-    description = "Old webhook address can still serve requests. Gradient can find the connection for the project's Git host by name and handle requests like `POST /hooks/{connection}`. Path segment `git_host` can select the payload format.",
+    description = "Legacy webhook address for a project connection. The project name and connection name identify the connection. Signature verification and payload format depend on the connection type. The path segment `git_host` must match the connection type. `gitea` and `forgejo` match a Gitea connection and a Forgejo connection. Segments that don't match return `404`.",
     params(("git_host" = String, Path), ("project" = String, Path), ("connection_name" = String, Path)),
     request_body(content = serde_json::Value, content_type = "application/json"),
     responses((status = OK, description = "Webhook processed (may include zero queued evaluations)", body = IncomingWebhookResponse), WebError)
@@ -388,21 +388,15 @@ pub async fn git_host_connection_webhook(
             .await
             .context("internal error")
         {
-            Ok(Some(connection)) if connection.github_installation_id.is_none() => {
-                let git_host_type = connection.git_host_type;
+            Ok(Some(connection)) => {
                 verify_webhook_signature_and_ip_allowlist_then_trigger_event_evaluations(
-                    &ci,
-                    &scheduler,
-                    peer,
-                    git_host_type,
-                    connection,
-                    &headers,
-                    &body,
-                    &mut log,
+                    &ci, &scheduler, peer, connection, &headers, &body, &mut log,
                 )
                 .await
             }
-            Ok(_) => Err(GitHostHookRefusal::GitHostConnectionNotFoundOrNotReceivingEvents.into()),
+            Ok(None) => {
+                Err(GitHostHookRefusal::GitHostConnectionNotFoundOrNotReceivingEvents.into())
+            }
             Err(e) => Err(e.into()),
         };
     log.record(&state.web_db, &result).await;
@@ -433,18 +427,23 @@ async fn handle_git_host_webhook(
     )
     .await
     .context("internal error")?
+    .filter(|connection| git_host_types_are_compatible(git_host_type, connection.git_host_type))
     .ok_or(GitHostHookRefusal::GitHostConnectionNotFoundOrNotReceivingEvents)?;
     verify_webhook_signature_and_ip_allowlist_then_trigger_event_evaluations(
-        ci,
-        scheduler,
-        peer,
-        git_host_type,
-        connection,
-        headers,
-        body,
-        log,
+        ci, scheduler, peer, connection, headers, body, log,
     )
     .await
+}
+
+fn git_host_types_are_compatible(path_segment: GitHostType, connection: GitHostType) -> bool {
+    path_segment == connection
+        || matches!(
+            (path_segment, connection),
+            (
+                GitHostType::Gitea | GitHostType::Forgejo,
+                GitHostType::Gitea | GitHostType::Forgejo
+            )
+        )
 }
 
 #[allow(
@@ -455,15 +454,15 @@ async fn verify_webhook_signature_and_ip_allowlist_then_trigger_event_evaluation
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     peer: Option<std::net::SocketAddr>,
-    git_host_type: GitHostType,
     connection: MGitHostConnection,
     headers: &HeaderMap,
     body: &Bytes,
     log: &mut DeliveryLog,
 ) -> WebResult<IncomingWebhookResponse> {
-    if !connection.receives_events {
+    if !connection.receives_events || connection.github_installation_id.is_some() {
         return Err(GitHostHookRefusal::GitHostConnectionNotFoundOrNotReceivingEvents.into());
     }
+    let git_host_type = connection.git_host_type;
     let Some(provider) = ci.git_host.get(git_host_type).cloned() else {
         warn!(
             git_host = git_host_type.as_path_segment(),

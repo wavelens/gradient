@@ -629,7 +629,8 @@ fn test_failure(error: anyhow::Error) -> WebError {
     match error.downcast_ref::<gradient_ci::ActionError>() {
         Some(
             gradient_ci::ActionError::UrlRejected { .. }
-            | gradient_ci::ActionError::RepositoryUnparsable { .. },
+            | gradient_ci::ActionError::RepositoryUnparsable { .. }
+            | gradient_ci::ActionError::InvalidPullRequestBranchName { .. },
         ) => WebError::BadRequest(ErrorCode::VALIDATION, format!("{error:#}")),
         Some(
             gradient_ci::ActionError::CryptKeyUnreadable { .. }

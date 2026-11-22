@@ -285,6 +285,9 @@ pub async fn commit_status_post_attempts_of_task<C: ConnectionTrait>(
 }
 
 #[cfg(test)]
+mod legacy_gitea_connection_without_base_url_update_tests;
+
+#[cfg(test)]
 mod tests {
     use gradient_fixtures::ids::{project_id, task_id, user_id};
     use sea_orm_migration::MigratorTrait;
@@ -401,10 +404,18 @@ mod tests {
 
         let db = gradient_fixtures::database::TestDatabase::create().await;
         let connection = db.connection();
-        let migration = gradient_migration::Migrator::migrations()
-            .into_iter()
+        let migrations = gradient_migration::Migrator::migrations();
+        let migration = migrations
+            .iter()
             .find(|m| m.name().starts_with("m20261228_000000_"))
             .expect("register the migration that requires a base URL of git host connections");
+        migrations
+            .iter()
+            .find(|m| m.name().starts_with("m20270107_000000_"))
+            .expect("register the migration to remove the check on the base URL")
+            .down(&SchemaManager::new(&connection))
+            .await
+            .expect("the check of the base URL returned");
         migration
             .down(&SchemaManager::new(&connection))
             .await

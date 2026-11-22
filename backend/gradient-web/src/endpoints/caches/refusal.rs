@@ -4,10 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::ErrorCode;
+use crate::error::{ErrorCode, WebResult};
 use crate::permissions::CachePermission;
 use crate::refusal::{Refusal, RefusalStatus};
+use gradient_types::MCache;
 use gradient_util::upstream_cache_credential::UpstreamCacheCredentialError;
+
+pub(crate) fn ensure_cache_enabled(cache: MCache) -> WebResult<MCache> {
+    if cache.active {
+        Ok(cache)
+    } else {
+        Err(CacheRefusal::CacheDisabled.into())
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CacheRefusal {

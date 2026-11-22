@@ -141,6 +141,15 @@ const GITHUB_PUSH_BODY: &str = r#"{
     "installation": { "id": 9999 }
 }"#;
 
+const GITLAB_PUSH_BODY: &str = r#"{
+    "ref": "refs/heads/main",
+    "after": "abcdef0123456789abcdef0123456789abcdef01",
+    "project": {
+        "http_url": "https://gitea.example.com/test-org/repo",
+        "ssh_url": "git@gitea.example.com:test-org/repo.git"
+    }
+}"#;
+
 fn project_row(name: &str) -> gradient_entity::project::Model {
     gradient_entity::project::Model {
         id: project_id(),
@@ -697,6 +706,183 @@ async fn a_delivery_with_an_invalid_signature_is_not_logged() {
         !statements.contains("incoming_webhook_delivery"),
         "{statements}"
     );
+}
+
+async fn post_webhook_to_legacy_address_and_get_status_and_executed_statements(
+    connection: gradient_entity::git_host_connection::Model,
+    crypt_path: String,
+    address: &str,
+    headers: [(&str, String); 2],
+    body: &'static str,
+) -> (u16, String) {
+    let db = mock_db()
+        .append_query_results([vec![project_row("test-project")]])
+        .append_query_results([vec![connection]])
+        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
+        .append_exec_results([
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            },
+        ])
+        .into_connection();
+    let log = db.clone();
+
+    let server =
+        TestServer::new(create_router(make_state(db, Some(crypt_path), None)).expect("router"));
+    let mut request = server.post(address).bytes(body.as_bytes().into());
+    for (name, value) in headers {
+        request = request.add_header(name, value);
+    }
+    let status = request.await.status_code().as_u16();
+    drop(server);
+
+    (status, format!("{:?}", log.into_transaction_log()))
+}
+
+#[tokio::test]
+async fn legacy_webhook_with_mismatched_git_host_returns_not_found_and_starts_no_evaluation() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    let (status, statements) =
+        post_webhook_to_legacy_address_and_get_status_and_executed_statements(
+            test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext),
+            crypt_path,
+            "/api/v1/hooks/gitlab/test-project/my-hook",
+            [
+                ("X-Gitlab-Event", "Push Hook".to_owned()),
+                ("X-Gitlab-Token", plaintext_secret.to_owned()),
+            ],
+            GITLAB_PUSH_BODY,
+        )
+        .await;
+
+    assert_eq!(status, 404, "{statements}");
+    assert!(!statements.contains("task_trigger"), "{statements}");
+    assert!(
+        !statements.contains("incoming_webhook_delivery"),
+        "{statements}"
+    );
+}
+
+#[tokio::test]
+async fn github_app_installation_connection_old_webhook_address_returns_not_found() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+    let connection = gradient_entity::git_host_connection::Model {
+        project: Some(project_id()),
+        name: "my-hook".into(),
+        secret: Some(ciphertext),
+        ..build_instance_wide_git_host_connection_row_for_github_app_installation()
+    };
+    let body = GITHUB_PUSH_BODY;
+
+    let (status, statements) =
+        post_webhook_to_legacy_address_and_get_status_and_executed_statements(
+            connection,
+            crypt_path,
+            "/api/v1/hooks/github/test-project/my-hook",
+            [
+                ("X-GitHub-Event", "push".to_owned()),
+                (
+                    "X-Hub-Signature-256",
+                    github_signature(plaintext_secret, body.as_bytes()),
+                ),
+            ],
+            body,
+        )
+        .await;
+
+    assert_eq!(status, 404, "{statements}");
+    assert!(!statements.contains("task_trigger"), "{statements}");
+}
+
+async fn post_signed_gitea_push_to_legacy_address_with_git_host_path_for_connection_without_triggers_and_get_status_and_json_body(
+    connection_git_host_type: GitHostType,
+    git_host_path_segment: &str,
+    signing_secret: &str,
+) -> (u16, Value) {
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, "test-secret-plaintext").expect("encrypt");
+    let connection = gradient_entity::git_host_connection::Model {
+        git_host_type: connection_git_host_type,
+        ..test_project_gitea_connection_row_for_webhook_events_with_encrypted_secret(&ciphertext)
+    };
+    let db = mock_db()
+        .append_query_results([vec![project_row("test-project")]])
+        .append_query_results([vec![connection]])
+        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
+        .into_connection();
+    let server =
+        TestServer::new(create_router(make_state(db, Some(crypt_path), None)).expect("router"));
+
+    let body = GITEA_PUSH_BODY.as_bytes();
+    let response = server
+        .post(&format!(
+            "/api/v1/hooks/{git_host_path_segment}/test-project/my-hook"
+        ))
+        .add_header("X-Gitea-Event", "push")
+        .add_header("X-Gitea-Signature", gitea_signature(signing_secret, body))
+        .bytes(body.into())
+        .await;
+
+    (response.status_code().as_u16(), response.json())
+}
+
+#[tokio::test]
+async fn push_to_old_webhook_url_with_forgejo_path_for_gitea_connection_with_connection_secret_signature_is_accepted()
+ {
+    let (status, json) =
+        post_signed_gitea_push_to_legacy_address_with_git_host_path_for_connection_without_triggers_and_get_status_and_json_body(
+            GitHostType::Gitea,
+            "forgejo",
+            "test-secret-plaintext",
+        )
+        .await;
+
+    assert_eq!(status, 200, "{json}");
+    assert_eq!(json["error"], false);
+    assert_eq!(json["message"]["event"], "push");
+    assert_eq!(json["message"]["tasks_scanned"], 0);
+}
+
+#[tokio::test]
+async fn push_to_old_webhook_url_with_gitea_path_for_forgejo_connection_returns_200_and_handles_push_event()
+ {
+    let (status, json) =
+        post_signed_gitea_push_to_legacy_address_with_git_host_path_for_connection_without_triggers_and_get_status_and_json_body(
+            GitHostType::Forgejo,
+            "gitea",
+            "test-secret-plaintext",
+        )
+        .await;
+
+    assert_eq!(status, 200, "{json}");
+    assert_eq!(json["error"], false);
+    assert_eq!(json["message"]["event"], "push");
+    assert_eq!(json["message"]["tasks_scanned"], 0);
+}
+
+#[tokio::test]
+async fn push_with_wrong_signature_to_old_forgejo_webhook_url_for_gitea_connection_returns_401_invalid_webhook_signature()
+ {
+    let (status, json) =
+        post_signed_gitea_push_to_legacy_address_with_git_host_path_for_connection_without_triggers_and_get_status_and_json_body(
+            GitHostType::Gitea,
+            "forgejo",
+            "wrong-secret",
+        )
+        .await;
+
+    assert_eq!(status, 401, "{json}");
+    assert_eq!(json["message"], "invalid webhook signature");
 }
 
 #[tokio::test]

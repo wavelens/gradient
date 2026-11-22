@@ -8,7 +8,9 @@ use crate::gateway_user::parse_login;
 use crate::session::{Session, SshHandles};
 use crate::store::SshBackend;
 use gradient_db::lookup::by_id;
-use gradient_types::permissions::PermissionMask;
+use gradient_types::permissions::{
+    PermissionMask, api_key_without_cache_pin_can_read_project_caches,
+};
 use gradient_types::*;
 use russh::keys::{HashAlg, PublicKey};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
@@ -224,16 +226,17 @@ async fn load_project_store_backend_record_for_api_key(
     else {
         return Ok(None);
     };
+    let permissions = permissions & key_mask;
+    if !api_key_without_cache_pin_can_read_project_caches(permissions, cache_pin) {
+        return Ok(None);
+    }
 
-    let caches = gradient_db::cache_paths::project_read_caches(&handles.db.web_db, project.id)
-        .await?
-        .into_iter()
-        .filter(|cache| cache_pin.is_none_or(|pinned| pinned == *cache))
-        .collect();
+    let caches =
+        gradient_db::cache_paths::project_read_caches(&handles.db.web_db, project.id).await?;
     Ok(Some(ApiKeyUserProjectAccessRecord {
         user,
         project,
-        permissions: permissions & key_mask,
+        permissions,
         caches,
     }))
 }
@@ -384,6 +387,54 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn open_project_store_for_api_key_returns_no_store_without_project_view_permission() {
+        use gradient_types::permissions::{Permission, mask_from};
+        let user = gradient_fixtures::rows::user();
+        let project = gradient_fixtures::rows::project();
+        let role = MRole {
+            id: RoleId::now_v7(),
+            permission: i64::MAX,
+            ..Default::default()
+        };
+        let access = MProjectAccess {
+            project: project.id,
+            user: user.id,
+            role: role.id,
+            ..Default::default()
+        };
+        let cache = CacheId::now_v7();
+        for (key_mask, cache_pin) in [
+            (mask_from(&[Permission::TriggerEvaluation]), None),
+            (0, None),
+            (PermissionMask::MAX, Some(cache)),
+        ] {
+            let db = mock_db()
+                .append_query_results([vec![user.clone()]])
+                .append_query_results([vec![project.clone()]])
+                .append_query_results([vec![access.clone()]])
+                .append_query_results([vec![role.clone()]])
+                .append_query_results([vec![BTreeMap::from([(
+                    "cache".to_owned(),
+                    Value::from(cache.into_inner()),
+                )])]])
+                .into_connection();
+            let state = TestState::new().web_db(db).build();
+
+            let backend = open_project_store_backend_for_api_key(
+                SshHandles::for_tests(&state),
+                user.id,
+                project.id,
+                key_mask,
+                cache_pin,
+            )
+            .await
+            .unwrap();
+
+            assert!(backend.is_none(), "{key_mask:#x} {cache_pin:?}");
+        }
     }
 
     #[tokio::test]

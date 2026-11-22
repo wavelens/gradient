@@ -10,14 +10,16 @@ use axum::http::Method;
 use axum::response::Response;
 use std::sync::Arc;
 
-use super::refusal::CacheRefusal;
+use super::refusal::{CacheRefusal, ensure_cache_enabled};
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::authorization::{
-    MaybeApiKey, MaybeUser, WebSocketUpgradeCredentialRecheckRequestExtractor,
+    ApiKeyContext, MaybeApiKey, MaybeUser, WebSocketUpgradeCredentialRecheckRequestExtractor,
 };
 use crate::client_ip::ClientIp;
 use crate::error::{WebError, WebResult};
 use gradient_core::ServerState;
+use gradient_db::DbContext;
+use gradient_types::MCache;
 use gradient_wire::session::frame::SAFE_INFLIGHT_MESSAGE_SIZE;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
 
@@ -51,24 +53,22 @@ pub async fn cache_proto(
     }
 
     let db = state.db();
-    let cache_id = load_cache(
+    let cache_id = load_cache_for_downloading_and_refuse_if_disabled(
         &db,
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache.clone(),
-        CacheAccess::ReadStoreAllowed,
     )
     .await?
     .id;
     let guard = credentials.watch_caller_access_with_recheck(Method::GET, move |user, api_key| {
         let (db, cache) = (db.clone(), cache.clone());
         async move {
-            load_cache(
+            load_cache_for_downloading_and_refuse_if_disabled(
                 &db,
                 Caller::from(&user),
                 api_key.as_ref(),
                 cache,
-                CacheAccess::ReadStoreAllowed,
             )
             .await
             .map(drop)
@@ -108,4 +108,63 @@ pub async fn cache_proto(
                 })
                 .await;
         }))
+}
+
+async fn load_cache_for_downloading_and_refuse_if_disabled(
+    db: &DbContext,
+    caller: Caller<'_>,
+    api_key: Option<&ApiKeyContext>,
+    cache: String,
+) -> WebResult<MCache> {
+    load_cache(db, caller, api_key, cache, CacheAccess::ReadStoreAllowed)
+        .await
+        .and_then(ensure_cache_enabled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use gradient_fixtures::mock::mock_db;
+    use gradient_test_support::state::TestState;
+
+    #[tokio::test]
+    async fn open_session_access_check_fails_once_the_cache_is_turned_off() {
+        let public_cache = MCache {
+            public: true,
+            ..gradient_fixtures::rows::cache()
+        };
+        let turned_off_cache = MCache {
+            active: false,
+            ..public_cache.clone()
+        };
+        let db = TestState::new()
+            .web_db(
+                mock_db()
+                    .append_query_results([vec![public_cache.clone()]])
+                    .append_query_results([vec![turned_off_cache]])
+                    .into_connection(),
+            )
+            .build()
+            .db();
+
+        load_cache_for_downloading_and_refuse_if_disabled(
+            &db,
+            Caller::Anon,
+            None,
+            public_cache.name.clone(),
+        )
+        .await
+        .expect("The active public cache is still readable.");
+        let refusal = load_cache_for_downloading_and_refuse_if_disabled(
+            &db,
+            Caller::Anon,
+            None,
+            public_cache.name,
+        )
+        .await
+        .expect_err("Disabled caches fail the recheck");
+        assert_eq!(refusal.into_response().status(), StatusCode::BAD_REQUEST);
+    }
 }

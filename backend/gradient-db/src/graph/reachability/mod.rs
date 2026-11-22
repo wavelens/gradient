@@ -22,4 +22,5 @@ pub use build_jobs::{
 pub use outputs::{
     derivations_with_hashes, inherit_names, private_output_hashes, producers_of_hashes,
     producers_of_hashes_with_output_not_in_shared_build_unneeded_outputs,
+    sql_condition_for_output_that_must_not_be_signed,
 };

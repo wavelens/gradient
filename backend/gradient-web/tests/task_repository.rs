@@ -980,10 +980,6 @@ async fn store_gitea_connection_without_base_url_call_task_install_endpoint_and_
     let crypt = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
     std::fs::write(&crypt, "this-is-a-32-byte-crypt-key!!!!").unwrap();
     let crypt = crypt.to_string_lossy().into_owned();
-    s.db.execute(
-        "ALTER TABLE git_host_connection DROP CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url",
-    )
-    .await;
     let connection = insert_test_git_host_connection(
         &s,
         git_host_connection::Model {
@@ -996,11 +992,6 @@ async fn store_gitea_connection_without_base_url_call_task_install_endpoint_and_
                 true,
             )
         },
-    )
-    .await;
-    s.db.execute(
-        "ALTER TABLE git_host_connection ADD CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url \
-         CHECK (git_host_type NOT IN (0, 1, 2) OR base_url IS NOT NULL) NOT VALID",
     )
     .await;
     s.db.execute(&format!(
@@ -1465,18 +1456,9 @@ async fn gitea_connection_without_base_url_is_refused_and_no_access_token_is_sen
     let base_url = base_url.replace("127.0.0.1", "localhost");
     let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
     let crypt = create_temporary_encryption_key_file();
-    s.db.execute(
-        "ALTER TABLE git_host_connection DROP CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url",
-    )
-    .await;
     let instance = insert_test_git_host_connection(
         &s,
         build_instance_gitea_connection_row_with_encrypted_token_webhook_secret_and_optional_base_url(&crypt, None),
-    )
-    .await;
-    s.db.execute(
-        "ALTER TABLE git_host_connection ADD CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url \
-         CHECK (git_host_type NOT IN (0, 1, 2) OR base_url IS NOT NULL) NOT VALID",
     )
     .await;
     insert_project_git_host_repository_grant(&s, instance.id, project_id(), None).await;
@@ -1578,10 +1560,6 @@ async fn deploy_key_and_webhook_install_sends_no_request_when_task_repository_ho
 async fn an_instance_gitlab_connection_without_base_url_is_accepted_for_a_gitlab_com_task_repository_and_refused_for_another_host_and_an_instance_gitea_connection_without_base_url_is_refused()
  {
     let s = create_test_database_with_project_membership_for_role(rows::admin_role()).await;
-    s.db.execute(
-        "ALTER TABLE git_host_connection DROP CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url",
-    )
-    .await;
     let legacy_gitlab = insert_test_git_host_connection(
         &s,
         git_host_connection::Model {
@@ -1597,11 +1575,6 @@ async fn an_instance_gitlab_connection_without_base_url_is_accepted_for_a_gitlab
             base_url: None,
             ..build_instance_owned_gitea_connection_with_base_url("https://unused.example")
         },
-    )
-    .await;
-    s.db.execute(
-        "ALTER TABLE git_host_connection ADD CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url \
-         CHECK (git_host_type NOT IN (0, 1, 2) OR base_url IS NOT NULL) NOT VALID",
     )
     .await;
     for connection in [legacy_gitlab.id, legacy_gitea.id] {

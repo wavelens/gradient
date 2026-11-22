@@ -5,7 +5,7 @@
  */
 
 use crate::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
-use crate::ids::RoleId;
+use crate::ids::{CacheId, RoleId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize, utoipa::ToSchema)]
@@ -184,6 +184,13 @@ impl Permission {
 #[inline]
 pub const fn mask_grants(mask: PermissionMask, permission: Permission) -> bool {
     mask & permission.bit() != 0
+}
+
+pub const fn api_key_without_cache_pin_can_read_project_caches(
+    key_project_mask: PermissionMask,
+    cache_pin: Option<CacheId>,
+) -> bool {
+    cache_pin.is_none() && mask_grants(key_project_mask, Permission::ViewProject)
 }
 
 pub fn mask_from(perms: &[Permission]) -> PermissionMask {
@@ -408,6 +415,27 @@ pub fn is_builtin_cache_role(role_id: RoleId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_api_key_pin_and_view_project_determine_subscribed_cache_read_access() {
+        let view = mask_from(&[Permission::ViewProject]);
+        let trigger_only = mask_from(&[Permission::TriggerEvaluation]);
+        let pin = Some(CacheId::now_v7());
+        for (mask, cache_pin, expected) in [
+            (view, None, true),
+            (PermissionMask::MAX, None, true),
+            (trigger_only, None, false),
+            (0, None, false),
+            (view, pin, false),
+            (0, pin, false),
+        ] {
+            assert_eq!(
+                api_key_without_cache_pin_can_read_project_caches(mask, cache_pin),
+                expected,
+                "{mask:#x} {cache_pin:?}"
+            );
+        }
+    }
 
     #[test]
     fn permission_bits_are_unique_and_wire_names_round_trip() {

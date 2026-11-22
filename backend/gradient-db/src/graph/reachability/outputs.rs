@@ -91,17 +91,23 @@ crate::sql_fn! {
     /// Always substitute those outputs on the submitting client.
     PRIVATE_OUTPUT_HASHES = || format!(
         "SELECT DISTINCT o.hash FROM derivation_output o \
-         WHERE o.hash = ANY($1) \
-           AND EXISTS (SELECT 1 FROM build_job b WHERE b.derivation = o.derivation) \
-           AND NOT EXISTS (SELECT 1 FROM derivation_output s \
-               JOIN build_job b ON b.derivation = s.derivation \
-               JOIN evaluation e ON e.id = b.evaluation \
-               JOIN task t ON t.id = e.task \
-               WHERE s.hash = o.hash AND (t.name = 'build-request' OR t.project IN (SELECT pc.project \
-                   FROM project_cache pc WHERE {signing})))",
-        signing = crate::store_path_content_variant_trust::signing_subscription("pc"),
+         WHERE o.hash = ANY($1) AND {private}",
+        private = sql_condition_for_output_that_must_not_be_signed("o"),
     ),
         params = [CachedPathHashes(64)];
+}
+
+pub fn sql_condition_for_output_that_must_not_be_signed(output: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM build_job b WHERE b.derivation = {output}.derivation) \
+         AND NOT EXISTS (SELECT 1 FROM derivation_output s \
+             JOIN build_job b ON b.derivation = s.derivation \
+             JOIN evaluation e ON e.id = b.evaluation \
+             JOIN task t ON t.id = e.task \
+             WHERE s.hash = {output}.hash AND (t.name = 'build-request' OR t.project IN (SELECT pc.project \
+                 FROM project_cache pc WHERE {signing})))",
+        signing = crate::store_path_content_variant_trust::signing_subscription("pc"),
+    )
 }
 
 pub async fn private_output_hashes<C: ConnectionTrait>(

@@ -15,6 +15,7 @@ use crate::pull_requests::{
 use anyhow::{Context, Result, anyhow};
 use gradient_db::exec_jobs::outputs;
 use gradient_db::lookup::by_id;
+use gradient_sources::git::is_valid_branch_name;
 use gradient_types::{ETask, ExecJobId, GitHostConnectionId, TaskActionId, TaskId};
 use gradient_wire::types::TREE_PATCH_OUTPUT;
 use serde_json::Value as JsonValue;
@@ -47,6 +48,9 @@ pub(crate) async fn execute_exec_tree_pr(
     };
 
     let branch = branch_pattern.replace("{entry_point}", entry_point);
+    if !is_valid_branch_name(&branch) {
+        return Err(ActionError::InvalidPullRequestBranchName { branch }.into());
+    }
     if !update_existing && has_open_pr(ctx, action_id, &branch).await? {
         return Ok(no_op());
     }

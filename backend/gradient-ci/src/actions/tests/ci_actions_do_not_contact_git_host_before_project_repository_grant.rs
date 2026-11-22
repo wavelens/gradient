@@ -29,8 +29,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const GIT_HOST_CONNECTION_MISSING_TASK_REPOSITORY_GRANT_REFUSAL_TEXT: &str =
     "This connection has no grant for this repository in the task's project.";
 
-struct InstanceOwnedGitHostConnectionTestFixture {
-    database: TestDatabase,
+pub(super) struct InstanceOwnedGitHostConnectionTestFixture {
+    pub(super) database: TestDatabase,
     db: DatabaseConnection,
     ctx: CiContext,
     git_host: MockServer,
@@ -41,7 +41,7 @@ struct InstanceOwnedGitHostConnectionTestFixture {
 }
 
 impl InstanceOwnedGitHostConnectionTestFixture {
-    async fn create() -> Self {
+    pub(super) async fn create() -> Self {
         let database = TestDatabase::create().await;
         let db = database.connection();
         rows::insert::<user::Entity, _>(&db, gradient_fixtures::rows::user())
@@ -110,7 +110,7 @@ impl InstanceOwnedGitHostConnectionTestFixture {
         }
     }
 
-    async fn insert_repository_grant_for_acme_infra(&self) {
+    pub(super) async fn insert_repository_grant_for_acme_infra(&self) {
         insert(
             &self.db,
             NewGitHostConnectionRepositoryGrant {
@@ -129,6 +129,14 @@ impl InstanceOwnedGitHostConnectionTestFixture {
     async fn test_insert_open_pull_request_task_action_using_instance_connection(
         &self,
     ) -> task_action::Model {
+        self.insert_open_pull_request_task_action_with_branch_pattern("gradient/update-{input}")
+            .await
+    }
+
+    pub(super) async fn insert_open_pull_request_task_action_with_branch_pattern(
+        &self,
+        branch_pattern: &str,
+    ) -> task_action::Model {
         rows::insert::<task_action::Entity, _>(
             &self.db,
             task_action::Model {
@@ -141,7 +149,7 @@ impl InstanceOwnedGitHostConnectionTestFixture {
                     generator: Default::default(),
                     granularity: Default::default(),
                     verify_gate: Default::default(),
-                    branch_pattern: "gradient/update-{input}".into(),
+                    branch_pattern: branch_pattern.into(),
                     title_template: None,
                     body_template: None,
                     update_existing: true,
@@ -159,7 +167,7 @@ impl InstanceOwnedGitHostConnectionTestFixture {
         .expect("open_pr action")
     }
 
-    async fn insert_commit_queued_evaluation_and_bumped_nixpkgs_flake_input_update_returning_evaluation_id(
+    pub(super) async fn insert_commit_queued_evaluation_and_bumped_nixpkgs_flake_input_update_returning_evaluation_id(
         &self,
     ) -> EvaluationId {
         let commit = rows::insert::<commit::Entity, _>(
@@ -194,7 +202,7 @@ impl InstanceOwnedGitHostConnectionTestFixture {
         evaluation.id
     }
 
-    async fn mock_git_host_received_http_request_count(&self) -> usize {
+    pub(super) async fn mock_git_host_received_http_request_count(&self) -> usize {
         self.git_host
             .received_requests()
             .await
@@ -202,7 +210,9 @@ impl InstanceOwnedGitHostConnectionTestFixture {
             .len()
     }
 
-    async fn all_recorded_task_action_delivery_error_messages(&self) -> Vec<Option<String>> {
+    pub(super) async fn all_recorded_task_action_delivery_error_messages(
+        &self,
+    ) -> Vec<Option<String>> {
         task_action_delivery::Entity::find()
             .all(&self.db)
             .await
@@ -212,7 +222,7 @@ impl InstanceOwnedGitHostConnectionTestFixture {
             .collect()
     }
 
-    async fn run_open_pull_request_action_for_completed_evaluation_ignoring_result(
+    pub(super) async fn run_open_pull_request_action_for_completed_evaluation_ignoring_result(
         &self,
         action: &task_action::Model,
         evaluation: EvaluationId,

@@ -38,7 +38,21 @@ struct ServedRow {
     ca: Option<String>,
     references: Option<String>,
     cache_name: String,
-    signature: Vec<u8>,
+    signature: Option<Vec<u8>>,
+    previous_signing_key_signature: Option<Vec<u8>>,
+}
+
+impl ServedRow {
+    fn take_present_cache_signatures(&mut self) -> Vec<(String, Vec<u8>)> {
+        [
+            self.signature.take(),
+            self.previous_signing_key_signature.take(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|signature| (self.cache_name.clone(), signature))
+        .collect()
+    }
 }
 
 #[derive(FromQueryResult)]
@@ -49,7 +63,8 @@ struct ServedHash {
 crate::sql_fn! {
     SERVED_PATH = || format!(
         "SELECT chosen.id, chosen.hash, chosen.package, chosen.nar_hash, chosen.nar_size, chosen.nar_object_storage_key, \
-                chosen.deriver, chosen.ca, chosen.\"references\", c.name AS cache_name, s.signature \
+                chosen.deriver, chosen.ca, chosen.\"references\", c.name AS cache_name, s.signature, \
+                s.previous_signing_key_signature \
          FROM cache c \
          CROSS JOIN LATERAL ({choice}) chosen \
          JOIN cached_path_signature s ON s.cached_path = chosen.id AND s.cache = c.id \
@@ -141,13 +156,13 @@ pub async fn served_path<C: ConnectionTrait>(
         .await?;
 
     let mut rows = rows.into_iter();
-    let Some(first) = rows.next() else {
+    let Some(mut first) = rows.next() else {
         return Ok(None);
     };
 
     let variant = first.id;
     let mut path = ServedPath {
-        signatures: vec![(first.cache_name, first.signature)],
+        signatures: first.take_present_cache_signatures(),
         referenced_store_paths: crate::graph::runtime_closure::tokens(first.references),
         hash: first.hash,
         package: first.package,
@@ -159,7 +174,7 @@ pub async fn served_path<C: ConnectionTrait>(
     };
     path.signatures.extend(
         rows.filter(|r| r.id == variant)
-            .map(|r| (r.cache_name, r.signature)),
+            .flat_map(|mut r| r.take_present_cache_signatures()),
     );
 
     Ok(Some(path))
@@ -244,6 +259,10 @@ mod tests {
             ("ca".to_owned(), Value::from(None::<String>)),
             ("cache_name".to_owned(), Value::from(cache_name)),
             ("signature".to_owned(), Value::from(vec![1_u8, 2, 3])),
+            (
+                "previous_signing_key_signature".to_owned(),
+                Value::from(None::<Vec<u8>>),
+            ),
         ])
     }
 
@@ -335,6 +354,37 @@ mod tests {
             untrusted.len(),
             1,
             "The cache can supply the hash of the only variant that it signed, even when zero subscribed projects trust a producer."
+        );
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn test_served_path_returns_previous_key_signature_after_rotation() {
+        use gradient_fixtures::store_path_content_variants::{
+            SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+        };
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        let one = readers.cache_one;
+        let conn = readers.db.connection();
+        let before_rotation = served_path(&conn, &[one], SHARED)
+            .await
+            .expect("query")
+            .expect("served");
+        readers
+            .db
+            .execute(&format!(
+                "UPDATE cached_path_signature \
+                 SET previous_signing_key_signature = signature, signature = NULL \
+                 WHERE cache = '{one}'"
+            ))
+            .await;
+
+        let during_rotation = served_path(&conn, &[one], SHARED).await;
+
+        assert_eq!(
+            during_rotation.ok().flatten().map(|path| path.signatures),
+            Some(before_rotation.signatures),
+            "The cache can serve that path with the signature from the previous key during key rotation, before the sweep can sign it again with the new key."
         );
         readers.db.finish().await;
     }

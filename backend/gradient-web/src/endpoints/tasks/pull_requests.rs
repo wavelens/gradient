@@ -148,15 +148,10 @@ pub async fn post_task_pull_request(
 }
 
 fn check_branch_name_has_safe_ref_characters(branch: &str) -> Result<(), PullRequestRefusal> {
-    let valid = branch.split('/').all(|segment| {
-        !segment.is_empty()
-            && !segment.starts_with('.')
-            && !segment.ends_with(".lock")
-            && !segment.contains("..")
-            && segment
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-    });
+    let valid = gradient_sources::git::is_valid_branch_name(branch)
+        && branch
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'));
     if valid {
         Ok(())
     } else {
