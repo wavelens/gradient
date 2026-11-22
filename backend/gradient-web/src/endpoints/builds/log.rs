@@ -53,7 +53,7 @@ pub struct BuildLogQuery {
     operation_id = "getBuildLog",
     tag = "builds",
     summary = "Get build log",
-    description = "Return the full build log. Return an empty string when no log is present yet. Use a query parameter, `format`, to choose `plain` (remove color codes) or `ansi` (keep color codes). Requests that specify `Accept: text/plain` get the raw text of the log. The default value is `plain`. Other requests get the log as a JSON string. The default value is `ansi`. Logs of failed builds end with `Full log: <url>`. That line is a link to the web page of this build. That line is a replacement for the `nix log` command from nix. That command can run only on the server.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\nThis endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
+    description = "Return the entire build log. Return an empty string when no log is present. Pick `plain` (drop color codes) or `ansi` (keep color codes) with the `format` query parameter. Requests that specify `Accept: text/plain` return the raw text of the log. The default value is `plain`. Other requests return the log as a JSON string. The default value is `ansi`. Omit the `nix log` hint from Nix in logs of failed builds. That command can run only on the server.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\nThis endpoint can return the log of the latest attempt, unless the request can set `attempt` to an earlier attempt (see `GET /builds/{build}/attempts`). Retries create a new attempt. The log of the first attempt is still readable.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
     params(("build" = BuildJobId, Path), BuildLogQuery, super::BuildLogAttemptQuery),
     responses(
         (status = OK, description = "Build log", content(
@@ -86,13 +86,7 @@ pub async fn get_build_log(
     };
 
     if ctx.shared_build.status.is_failure() {
-        let link = frontend_page_urls::build_log(
-            &state.config.server.frontend_url,
-            &ctx.project.name,
-            ctx.build_job.evaluation,
-            build_id,
-        );
-        log = gradient_sources::replace_nix_log_pointer_with_web_log_link(&log, &link);
+        log = gradient_sources::strip_nix_log_pointer_from_build_log(&log);
     }
 
     let wants_text = request_accepts_media_type(&headers, "text/plain");

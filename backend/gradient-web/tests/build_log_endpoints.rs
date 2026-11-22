@@ -133,16 +133,7 @@ fn server_with_failed_build_log() -> axum_test::TestServer {
             BuildStatus::FailedPermanent,
         ))
         .log_storage(Arc::new(logs))
-        .config(|c| c.server.frontend_url = "https://ci.example/".into())
         .server()
-}
-
-fn web_log_link() -> String {
-    format!(
-        "Full log: https://ci.example/project/test-project/log/{}?build={}\n",
-        evaluation_id(),
-        build_job_id()
-    )
 }
 
 #[tokio::test]
@@ -211,7 +202,7 @@ async fn anonymous_build_log_stream_returns_200_and_log_text_for_public_project_
 }
 
 #[tokio::test]
-async fn plain_text_log_of_a_failed_build_has_no_colour_codes_and_ends_with_the_web_link() {
+async fn text_plain_build_log_for_failed_build_has_no_colour_codes_and_no_nix_log_pointer() {
     let res = server_with_failed_build_log()
         .get(&format!("/api/v1/builds/{}/log", build_job_id()))
         .add_header("accept", "text/plain")
@@ -224,10 +215,7 @@ async fn plain_text_log_of_a_failed_build_has_no_colour_codes_and_ends_with_the_
             .unwrap_or_default()
             .starts_with("text/plain")
     );
-    assert_eq!(
-        res.text(),
-        format!("error: builder failed\n{}", web_log_link())
-    );
+    assert_eq!(res.text(), "error: builder failed\n");
 }
 
 #[tokio::test]
@@ -240,18 +228,12 @@ async fn json_log_keeps_colour_codes_unless_plain_format_is_requested() {
         .await
         .json();
 
-    assert_eq!(
-        ansi["message"],
-        format!("\x1b[31;1merror:\x1b[0m builder failed\n{}", web_log_link())
-    );
-    assert_eq!(
-        plain["message"],
-        format!("error: builder failed\n{}", web_log_link())
-    );
+    assert_eq!(ansi["message"], "\x1b[31;1merror:\x1b[0m builder failed\n");
+    assert_eq!(plain["message"], "error: builder failed\n");
 }
 
 #[tokio::test]
-async fn log_of_a_successful_build_has_no_web_link() {
+async fn successful_build_log_is_returned_exactly_as_stored() {
     let logs = InMemoryLogStorage::new();
     logs.seed(attempt_id(), "built\n");
     let res = TestState::new()
