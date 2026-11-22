@@ -247,6 +247,48 @@ describe('CacheDetailComponent traffic cards', () => {
   });
 });
 
+describe('CacheDetailComponent chart time windows', () => {
+  it('independent time window for traffic chart after switch of storage chart to minutes', () => {
+    const storagePoint = { time: '2026-11-10T09:58:00', bytes: 1, packages: 1 };
+    const trafficPoint = { time: '2026-11-10T09:00:00', bytes: 1, requests: 1 };
+    const stats = {
+      total_packages: 1,
+      total_bytes: 1,
+      total_nar_bytes: 1,
+      storage_minutes: [storagePoint],
+      storage_hours: [storagePoint, storagePoint],
+      storage_days: [],
+      storage_weeks: [],
+      minutes: [trafficPoint],
+      hours: [trafficPoint, trafficPoint, trafficPoint],
+      days: [],
+      weeks: [],
+    };
+    TestBed.configureTestingModule({
+      imports: [CacheDetailComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: CachesService, useValue: { getCacheStats: () => of(stats), getSubscribers: () => NEVER } },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
+            parent: { data: of({ cacheAccess: { cache: { name: 'main', public: true } } }) },
+          },
+        },
+      ],
+    });
+    const component = TestBed.createComponent(CacheDetailComponent).componentInstance;
+    component.ngOnInit();
+    component.setStorageChartTimeWindow('minutes');
+
+    expect(component.storageCategories().length).toBe(1);
+    expect(component.trafficCategories().length).toBe(3);
+  });
+});
+
 describe('CacheDetailComponent header', () => {
   function render(authenticated: boolean, permissions: string[] = [], role: string | null = null, superuser = false) {
     const starred = vi.fn(() => of(true));

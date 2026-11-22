@@ -126,7 +126,8 @@ export class CacheDetailComponent implements OnInit {
     { key: 'total', label: 'Total' },
     { key: 'external', label: 'External' },
   ];
-  activeWindow = queryParamSignal<Window>('window', 'hours', oneOf(this.windows.map((w) => w.key)));
+  storageChartTimeWindow = queryParamSignal<Window>('storageWindow', 'hours', oneOf(this.windows.map((w) => w.key)));
+  trafficChartTimeWindow = queryParamSignal<Window>('trafficChartTimeWindow', 'hours', oneOf(this.windows.map((w) => w.key)));
   traffic = queryParamSignal<TrafficKind>('traffic', 'total', oneOf(this.trafficOptions.map((o) => o.key)));
   starred = signal(false);
   subscribers = signal<CacheSubscribersResponse | null>(null);
@@ -136,8 +137,12 @@ export class CacheDetailComponent implements OnInit {
   protected readonly plural = plural;
   pendingSubscriptionRequestCount = injectPendingSubscriptionRequestCount();
 
-  setWindow(value: unknown): void {
-    this.activeWindow.set(value as Window);
+  setStorageChartTimeWindow(value: unknown): void {
+    this.storageChartTimeWindow.set(value as Window);
+  }
+
+  setTrafficChartTimeWindow(value: unknown): void {
+    this.trafficChartTimeWindow.set(value as Window);
   }
 
   setTraffic(value: unknown): void {
@@ -168,7 +173,7 @@ export class CacheDetailComponent implements OnInit {
   activePoints = computed<CacheMetricPoint[]>(() => {
     const s = this.stats();
     if (!s) return [];
-    return s[this.activeWindow()];
+    return s[this.trafficChartTimeWindow()];
   });
 
   last60MinutesTrafficTotals = computed(() =>
@@ -181,12 +186,12 @@ export class CacheDetailComponent implements OnInit {
   activeStoragePoints = computed<StorageMetricPoint[]>(() => {
     const s = this.stats();
     if (!s) return [];
-    const key = `storage_${this.activeWindow()}` as keyof CacheStatsResponse;
+    const key = `storage_${this.storageChartTimeWindow()}` as keyof CacheStatsResponse;
     return s[key] as StorageMetricPoint[];
   });
 
   trafficCategories = computed(() =>
-    this.activePoints().map((p) => this.formatTime(p.time, this.activeWindow()))
+    this.activePoints().map((p) => this.formatTime(p.time, this.trafficChartTimeWindow()))
   );
   trafficSeries = computed<MetricSeries[]>(() => [
     { name: 'Bytes served', data: this.activePoints().map((p) => p.bytes) },
@@ -194,7 +199,7 @@ export class CacheDetailComponent implements OnInit {
   ]);
 
   storageCategories = computed(() =>
-    this.activeStoragePoints().map((p) => this.formatTime(p.time, this.activeWindow()))
+    this.activeStoragePoints().map((p) => this.formatTime(p.time, this.storageChartTimeWindow()))
   );
   storageSeries = computed<MetricSeries[]>(() => [
     { name: 'Bytes added', data: this.activeStoragePoints().map((p) => p.bytes) },

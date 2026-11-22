@@ -58,14 +58,6 @@
   <div class="section">
     <div class="section-head">
       <h2>Storage</h2>
-      <gr-tab-switch
-        ariaLabel="Time window of the storage and traffic charts"
-        [options]="windows"
-        optionLabel="label"
-        optionValue="key"
-        [ngModel]="activeWindow()"
-        (ngModelChange)="setWindow($event)"
-        />
     </div>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
       <gr-stat-card label="Packages" [valueExplanation]="binaryCacheStatTileValueExplanations.packages" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
@@ -82,14 +74,34 @@
         [colors]="storageColors"
         [valueFormatter]="formatBytes"
         [secondary]="storageSecondary"
-      />
+      >
+        <gr-tab-switch
+          slot="actions"
+          ariaLabel="Time window of the storage chart"
+          [options]="windows"
+          optionLabel="label"
+          optionValue="key"
+          [ngModel]="storageChartTimeWindow()"
+          (ngModelChange)="setStorageChartTimeWindow($event)"
+          />
+      </gr-metric-chart>
   </div>
 
   <div class="section">
-    <h2>Traffic</h2>
+    <div class="section-head">
+      <h2>Traffic</h2>
+      <gr-tab-switch
+        ariaLabel="Traffic shown in cards and chart"
+        [options]="trafficOptions"
+        optionLabel="label"
+        optionValue="key"
+        [ngModel]="traffic()"
+        (ngModelChange)="setTraffic($event)"
+        />
+    </div>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
-      <gr-stat-card label="Requests last 60 minutes" valueExplanation="The number of package files this cache sent to clients. The Total and External options on the chart below can change this number." [value]="statsLoading() ? null : formatCount(last60MinutesTrafficTotals().requests)" />
-      <gr-stat-card label="Traffic last 60 minutes" valueExplanation="Total bytes of package files that this cache sent. The Total / External switch on the chart below can change the number." [value]="statsLoading() ? null : formatBytes(last60MinutesTrafficTotals().bytes)" />
+      <gr-stat-card label="Requests last 60 minutes" valueExplanation="The number of package files this cache sent to clients." [value]="statsLoading() ? null : formatCount(last60MinutesTrafficTotals().requests)" />
+      <gr-stat-card label="Traffic last 60 minutes" valueExplanation="Total bytes of package files that this cache sent." [value]="statsLoading() ? null : formatBytes(last60MinutesTrafficTotals().bytes)" />
     </gr-card-grid>
 
     <gr-metric-chart title="Traffic over time"
@@ -104,12 +116,12 @@
       >
         <gr-tab-switch
           slot="actions"
-          ariaLabel="Traffic"
-          [options]="trafficOptions"
+          ariaLabel="Time window of the traffic chart"
+          [options]="windows"
           optionLabel="label"
           optionValue="key"
-          [ngModel]="traffic()"
-          (ngModelChange)="setTraffic($event)"
+          [ngModel]="trafficChartTimeWindow()"
+          (ngModelChange)="setTrafficChartTimeWindow($event)"
           />
       </gr-metric-chart>
   </div>
