@@ -911,17 +911,7 @@ tap "<name>" with no guest IPv4 address
 
 ### Guest IPv6
 
-- `exec.subnet` is now `exec.subnet.v4`. The old string form doesn't have an alias. NixOS evaluations stop with the error below.
-
-```text
-error: In module `<file>', you're trying to define a value of type `string'
-rather than an attribute set for the option
-`services.gradient.worker.exec.subnet'!
-
-This usually happens if `services.gradient.worker.exec.subnet' has option
-definitions inside that are not matched. Please check how to properly define
-this option by e.g. referring to `man 5 configuration.nix'!
-```
+- `exec.subnet` is now an attribute set with `v4` and optional `v6` keys.
 
 - The variable `GRADIENT_WORKER_EXEC_SUBNET` is now `GRADIENT_WORKER_EXEC_SUBNET_V4`. The new `GRADIENT_WORKER_EXEC_SUBNET_V6` is optional.
 - The old `GRADIENT_WORKER_EXEC_SUBNET` variable can remain in the worker environment, for example through `environmentVariables`. Workers with that variable stop at startup with the error below.
