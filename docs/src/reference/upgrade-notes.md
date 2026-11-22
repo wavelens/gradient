@@ -617,7 +617,7 @@ The server connects only to public IP addresses for upstream cache URLs, Git hos
 - Hosts in `giteaApp.instanceBaseUrl` stay reachable without an entry.
 - The upstream host must resolve at creation time. An HTTP upstream host must also resolve at `PATCH` time for the URL.
 - Hostnames without an address, or with only refused addresses, receive the text below.
-- Failed reads of the network interfaces block every destination. Units written by hand need `AF_NETLINK` in `RestrictAddressFamilies`.
+- A failed read of the addresses of the network interfaces can block every destination. Manual server units and worker units need `AF_NETLINK` in `RestrictAddressFamilies`.
 
 ```text
 The server cannot connect to <host>. The name does not resolve, or the server administrator does not allow that address.
