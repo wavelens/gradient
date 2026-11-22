@@ -33,18 +33,6 @@ pub fn evaluation(frontend_url: &str, project: &str, evaluation: impl Display) -
     format!("{}/project/{project}/log/{evaluation}", base(frontend_url))
 }
 
-pub fn build_log(
-    frontend_url: &str,
-    project: &str,
-    evaluation: impl Display,
-    build: impl Display,
-) -> String {
-    format!(
-        "{}?build={build}",
-        self::evaluation(frontend_url, project, evaluation)
-    )
-}
-
 pub fn cache(frontend_url: &str, cache: &str) -> String {
     let cache = utf8_percent_encode(cache, NON_UNRESERVED_URL_BYTES_PERCENT_ENCODE_SET);
     format!("{}/caches/{cache}", base(frontend_url))
@@ -73,8 +61,8 @@ mod tests {
             "https://ci.example/project/p/workers"
         );
         assert_eq!(
-            build_log(base, "p", "e", "b"),
-            "https://ci.example/project/p/log/e?build=b"
+            evaluation(base, "p", "e"),
+            "https://ci.example/project/p/log/e"
         );
         assert_eq!(cache(base, "c"), "https://ci.example/caches/c");
         assert_eq!(

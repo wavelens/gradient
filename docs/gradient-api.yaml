@@ -3282,7 +3282,7 @@ paths:
       - builds
       summary: Get build log
       description: |-
-        Return the full build log. Return an empty string when no log is present yet. Use a query parameter, `format`, to choose `plain` (remove color codes) or `ansi` (keep color codes). Requests that specify `Accept: text/plain` get the raw text of the log. The default value is `plain`. Other requests get the log as a JSON string. The default value is `ansi`. Logs of failed builds end with `Full log: <url>`. That line is a link to the web page of this build. That line is a replacement for the `nix log` command from nix. That command can run only on the server.
+        Return the entire build log. Return an empty string when no log is present. Pick `plain` (drop color codes) or `ansi` (keep color codes) with the `format` query parameter. Requests that specify `Accept: text/plain` return the raw text of the log. The default value is `plain`. Other requests return the log as a JSON string. The default value is `ansi`. Omit the `nix log` hint from Nix in logs of failed builds. That command can run only on the server.
 
         A `Substituted` build (its outputs came from a cache) has no log of its
         own, so the log of the most recent prior build of the same derivation is

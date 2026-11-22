@@ -27,13 +27,8 @@ pub fn strip_nix_log_tail(message: &str) -> String {
     rejoin(message, without_nix_log_pointer(out))
 }
 
-pub fn replace_nix_log_pointer_with_web_log_link(log: &str, link: &str) -> String {
-    let mut replaced = rejoin(log, without_nix_log_pointer(log.lines().collect()));
-    if !replaced.is_empty() && !replaced.ends_with('\n') {
-        replaced.push('\n');
-    }
-    replaced.push_str(&format!("Full log: {link}\n"));
-    replaced
+pub fn strip_nix_log_pointer_from_build_log(log: &str) -> String {
+    rejoin(log, without_nix_log_pointer(log.lines().collect()))
 }
 
 pub fn strip_ansi_escape_sequences(text: &str) -> String {
@@ -132,24 +127,21 @@ Output paths:
     }
 
     #[test]
-    fn replaces_a_coloured_nix_log_pointer_with_the_web_link() {
+    fn strips_coloured_nix_log_pointer_lines_and_keeps_other_lines() {
         let log = "building\nerror: boom\nFor full logs, run:\n  \x1b[35;1mnix log /nix/store/x-fail.drv\x1b[0m\n";
         assert_eq!(
-            replace_nix_log_pointer_with_web_log_link(log, "https://ci/project/p/log/e?build=b"),
-            "building\nerror: boom\nFull log: https://ci/project/p/log/e?build=b\n"
+            strip_nix_log_pointer_from_build_log(log),
+            "building\nerror: boom\n"
         );
     }
 
     #[test]
-    fn appends_the_web_link_to_a_log_without_pointer_or_final_newline() {
+    fn leaves_a_build_log_without_a_nix_log_pointer_unchanged() {
         assert_eq!(
-            replace_nix_log_pointer_with_web_log_link("error: boom", "u"),
-            "error: boom\nFull log: u\n"
+            strip_nix_log_pointer_from_build_log("error: boom"),
+            "error: boom"
         );
-        assert_eq!(
-            replace_nix_log_pointer_with_web_log_link("", "u"),
-            "Full log: u\n"
-        );
+        assert_eq!(strip_nix_log_pointer_from_build_log(""), "");
     }
 
     #[test]
