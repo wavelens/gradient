@@ -13,7 +13,7 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 |---|---|---|
 | `Authenticate` | Open a server-dialed session with this first message | `worker_id`, `tokens` |
 | `AuthChallenge` | Peers that registered this worker | `peers` |
-| `InitAck` | Handshake accepted | `capabilities`, `authorized_peers`, `failed_peers` |
+| `InitAck` | Handshake accepted. The entries in `user_url_destination_allowlist` are the private networks and host names that Git connections of jobs can reach. | `capabilities`, `authorized_peers`, `failed_peers`, `user_url_destination_allowlist` |
 | `AuthUpdate` | Outcome of a reauth | `authorized_peers`, `failed_peers` |
 | `Reject` | Decline the session and close it | `code`, `reason` |
 | `Error` | Protocol error | `code`, `message` |
