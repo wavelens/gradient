@@ -7,6 +7,8 @@
 mod chat;
 mod ci_actions_do_not_contact_git_host_before_project_repository_grant;
 pub(crate) mod fixtures;
+mod open_pull_request_ci_action_refuses_invalid_head_branch_name;
+mod open_pull_request_from_exec_job_tree_patch_refuses_invalid_head_branch_name;
 mod summary;
 mod webhook_and_send_request_refuse_loopback_and_record_refusal;
 

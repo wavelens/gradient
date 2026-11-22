@@ -47,6 +47,10 @@ pub(super) fn nar_key(store_path: &str) -> Option<String> {
         .map(|path| path.hash().to_owned())
 }
 
+fn max_passthrough_upload_bytes_for_declared_size(size: u64) -> u64 {
+    size.saturating_add(size / 128).saturating_add(1024 * 1024)
+}
+
 fn partial_token(key: &ObjectKey) -> String {
     match key {
         ObjectKey::Nar(s) | ObjectKey::EvalCache(s) => s.clone(),
@@ -345,7 +349,7 @@ impl InboundContext<'_> {
                 final_seen,
                 ..
             }) => {
-                let bound = *size + *size / 128 + 1024 * 1024;
+                let bound = max_passthrough_upload_bytes_for_declared_size(*size);
                 if offset != writer.len() {
                     Err(format!(
                         "chunk at offset {offset} follows {} bytes",
@@ -428,6 +432,7 @@ impl InboundContext<'_> {
             },
             transfer: granted.transfer,
             metadata,
+            server_granted_upload_size_bytes: granted.size,
             permit: granted.permit,
         };
         self.handles.db.shutdown.spawn(commit::run(c));
@@ -1081,6 +1086,39 @@ mod tests {
 
         rejection(sent.try_recv().unwrap());
         assert_eq!(state.memory.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn upload_with_size_near_u64_max_does_not_wrap_passthrough_chunk_limit() {
+        let state = test_state(empty_db());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let (key, job) = running_exec_job(&session);
+        let (mut ctx, uploads) = session.split();
+        let chunk = vec![0u8; 2 * 1024 * 1024];
+
+        for (request_id, size) in [(1, u64::MAX), (2, u64::MAX - 1), (3, u64::MAX / 129 * 128)] {
+            let object = exec_output(&job, &format!("model/w{request_id}.bin"));
+            ctx.on_upload_request(key.clone(), request_id, object, size, uploads)
+                .await;
+            ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+                .await;
+            assert!(matches!(
+                decode(sent.try_recv().unwrap()),
+                ServerMessage::UploadGrant {
+                    target: GrantTarget::Passthrough { resume_offset: 0 },
+                    ..
+                }
+            ));
+
+            ctx.on_upload_chunk(request_id, 0, &chunk, false, uploads)
+                .await;
+            assert!(
+                sent.try_recv().is_err(),
+                "the chunk of size {size} is staged"
+            );
+            ctx.on_upload_cancel(request_id, uploads).await;
+            assert_eq!(state.memory.upload_admission.in_flight(), 0);
+        }
     }
 
     const FINGERPRINT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

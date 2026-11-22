@@ -83,20 +83,22 @@ async fn require_cache_auth(
     last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
     client_ip: IpAddr,
-    cache: &MCache,
-) -> WebResult<()> {
-    if cache.public {
-        return Ok(());
-    }
+    cache: Option<MCache>,
+) -> WebResult<MCache> {
+    let cache = match cache {
+        Some(cache) if cache.public => return Ok(cache),
+        cache => cache,
+    };
 
     let Some((user, decoded)) =
         try_authenticate_basic(db, jwt_secret, last_used_stamps, headers, client_ip).await?
     else {
         return Err(CacheRefusal::AuthenticationRequired.into());
     };
+    let cache = cache.or_not_found(Resource::Cache)?;
     let api_key = decoded.api_key_context();
     if can_read_store(db, user.id, cache.id, api_key).await? {
-        return Ok(());
+        return Ok(cache);
     }
     Err(CacheRefusal::ReadCachePermissionRequired.into())
 }
@@ -201,15 +203,13 @@ impl CacheContext {
         client_ip: IpAddr,
         cache_name: String,
     ) -> WebResult<Self> {
-        let cache = gradient_db::caches::by_name(db, &cache_name)
-            .await?
-            .or_not_found(Resource::Cache)?;
+        let cache = gradient_db::caches::by_name(db, &cache_name).await?;
+        let cache =
+            require_cache_auth(db, jwt_secret, last_used_stamps, headers, client_ip, cache).await?;
 
         if !cache.active {
             return Err(CacheRefusal::CacheDisabled.into());
         }
-
-        require_cache_auth(db, jwt_secret, last_used_stamps, headers, client_ip, &cache).await?;
 
         Ok(Self { cache })
     }

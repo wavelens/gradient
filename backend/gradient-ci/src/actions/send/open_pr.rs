@@ -12,6 +12,7 @@ use anyhow::{Context, Result, anyhow};
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::parse_owner_repo;
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
+use gradient_sources::git::is_valid_branch_name;
 use gradient_types::{
     AOpenPrState, CEvaluationInputUpdate, COpenPrState, ECommit, EEvaluation,
     EEvaluationInputUpdate, EOpenPrState, ETask, EvaluationId, GitHostConnectionId, OpenPrStateId,
@@ -84,6 +85,12 @@ pub(crate) async fn execute_open_pr(
             repository: task.repository.clone(),
         })?;
 
+    let primary_input = bumps.first().map(|b| b.name.as_str()).unwrap_or("inputs");
+    let branch = branch_pattern.replace("{input}", primary_input);
+    if !is_valid_branch_name(&branch) {
+        return Err(ActionError::InvalidPullRequestBranchName { branch }.into());
+    }
+
     let reporter = build_task_repository_reporter_if_git_host_connection_allowed(
         ctx,
         &task,
@@ -94,9 +101,6 @@ pub(crate) async fn execute_open_pr(
         .default_branch(&owner, &repo)
         .await
         .context("resolve repository default branch")?;
-
-    let primary_input = bumps.first().map(|b| b.name.as_str()).unwrap_or("inputs");
-    let branch = branch_pattern.replace("{input}", primary_input);
 
     let title = render_template(title_template, &bumps).unwrap_or_else(|| default_title(&bumps));
     let body = render_template(body_template, &bumps).unwrap_or_else(|| default_body(&bumps));

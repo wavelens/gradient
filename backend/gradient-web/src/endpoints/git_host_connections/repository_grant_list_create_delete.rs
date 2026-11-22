@@ -227,7 +227,20 @@ pub(crate) async fn create(
             .map_err(|err| {
                 WebError::from_db_err(err, Resource::GitHostConnectionRepositoryGrant)
             })?;
-            let candidates = gradient_db::tasks::of_project(project.id).all(&txn).await?;
+            let candidates: Vec<MTask> = gradient_db::tasks::of_project(project.id)
+                .all(&txn)
+                .await?
+                .into_iter()
+                .filter(|task| {
+                    grants::check_git_host_connection_task_repository_access_with_grants(
+                        &connection,
+                        &project,
+                        &task.repository,
+                        std::slice::from_ref(&grant),
+                    )
+                    .is_ok()
+                })
+                .collect();
             let linked =
                 link_fitting_tasks_with_repository_grant(&txn, &connection, candidates).await?;
             (grant, None, linked)

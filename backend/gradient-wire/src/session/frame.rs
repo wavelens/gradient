@@ -1393,6 +1393,25 @@ mod agreement_tests {
         assert_eq!(server.refusal(), Some(expected.as_str()));
     }
 
+    #[tokio::test]
+    async fn a_server_websocket_session_at_protocol_version_67_closes_a_worker_announcing_only_protocol_version_66_with_the_refusal_text()
+     {
+        let (mut server, mut client) = raw_peer().await;
+        client
+            .send(TungsteniteMessage::Binary(version_frame(&(66..=66))))
+            .await
+            .expect("send");
+
+        assert_eq!(
+            server.send_msg(&ServerMessage::Draining).await,
+            Err(SendError::Closed)
+        );
+        assert_eq!(
+            server.refusal(),
+            Some("no shared protocol version: ours 67..=67, peer 66..=66")
+        );
+    }
+
     async fn close_frame(
         client: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> TungsteniteCloseFrame {

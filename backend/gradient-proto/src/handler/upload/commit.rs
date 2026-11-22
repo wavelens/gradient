@@ -48,6 +48,7 @@ pub(super) struct Commit {
     pub object: CommittedUpload,
     pub transfer: Transfer,
     pub metadata: UploadMetadata,
+    pub server_granted_upload_size_bytes: u64,
     pub permit: UploadPermit,
 }
 
@@ -81,6 +82,7 @@ pub(super) async fn run(c: Commit) {
         &c.object,
         c.transfer,
         &c.metadata,
+        c.server_granted_upload_size_bytes,
     )
     .await;
     let outcome = match placed {
@@ -130,6 +132,7 @@ async fn map_upload_metadata_to_stored_form_and_place_upload(
     object: &CommittedUpload,
     transfer: Transfer,
     sent: &UploadMetadata,
+    server_granted_upload_size_bytes: u64,
 ) -> Result<
     (
         Option<CheckedUploadedStorePathReferencesDeriverAndContentAddress>,
@@ -182,6 +185,7 @@ async fn map_upload_metadata_to_stored_form_and_place_upload(
             &client_original_store_path,
             transfer,
             sent,
+            server_granted_upload_size_bytes,
         )
         .await?;
         Ok((stated, placement))
@@ -249,6 +253,7 @@ async fn place(
     client_original_store_path: &str,
     transfer: Transfer,
     metadata: &UploadMetadata,
+    server_granted_upload_size_bytes: u64,
 ) -> Result<UploadPlacementResult, UploadOutcome> {
     match (object, metadata) {
         (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
@@ -303,15 +308,28 @@ async fn place(
             let ObjectKey::EvalCache(key) = key else {
                 return Err(rejected("the upload holds no eval cache key".into()));
             };
-            place_eval_cache(&db.storage.nar_storage, key, transfer, *size_bytes)
-                .await
-                .map(|()| UploadPlacementResult::EvalCacheSegment)
+            place_eval_cache(
+                &db.storage.nar_storage,
+                key,
+                transfer,
+                *size_bytes,
+                server_granted_upload_size_bytes,
+            )
+            .await
+            .map(|()| UploadPlacementResult::EvalCacheSegment)
         }
         (UploadObject::ExecOutput { job, path }, UploadMetadata::ExecOutput { size_bytes }) => {
             let job = exec_job_id(job)?;
-            place_exec_output(&db.storage.nar_storage, job, path, transfer, *size_bytes)
-                .await
-                .map(UploadPlacementResult::ExecOutput)
+            place_exec_output(
+                &db.storage.nar_storage,
+                job,
+                path,
+                transfer,
+                *size_bytes,
+                server_granted_upload_size_bytes,
+            )
+            .await
+            .map(UploadPlacementResult::ExecOutput)
         }
         _ => Err(rejected("metadata does not match the upload object".into())),
     }
@@ -572,15 +590,18 @@ async fn place_eval_cache(
     key: &str,
     transfer: Transfer,
     size_bytes: u64,
+    server_granted_upload_size_bytes: u64,
 ) -> Result<(), UploadOutcome> {
     match transfer {
         Transfer::Passthrough(writer) => {
             let staged = (*writer).finish().await.map_err(retry)?;
-            if staged.len != size_bytes {
-                return Err(rejected(format!(
-                    "received {} bytes, reported {size_bytes}",
-                    staged.len
-                )));
+            if let Err(outcome) = check_staged_upload_size_within_grant_and_matches_reported_size(
+                &staged,
+                size_bytes,
+                server_granted_upload_size_bytes,
+            ) {
+                let _ = tokio::fs::remove_file(&staged.path).await;
+                return Err(outcome);
             }
             let bytes = tokio::fs::read(&staged.path).await.map_err(retry)?;
             let _ = tokio::fs::remove_file(&staged.path).await;
@@ -606,12 +627,15 @@ async fn place_exec_output(
     path: &str,
     transfer: Transfer,
     size_bytes: u64,
+    server_granted_upload_size_bytes: u64,
 ) -> Result<Option<ContinueFile>, UploadOutcome> {
     let Transfer::Passthrough(writer) = transfer else {
         return Err(rejected("exec outputs pass through the server".into()));
     };
     let staged = (*writer).finish().await.map_err(retry)?;
-    let continue_file = match check_staged_output(&staged, path, size_bytes).await {
+    let checked =
+        check_staged_output(&staged, path, size_bytes, server_granted_upload_size_bytes).await;
+    let continue_file = match checked {
         Ok(continue_file) => continue_file,
         Err(outcome) => {
             let _ = tokio::fs::remove_file(&staged.path).await;
@@ -630,13 +654,13 @@ async fn check_staged_output(
     staged: &StagedFile,
     path: &str,
     size_bytes: u64,
+    server_granted_upload_size_bytes: u64,
 ) -> Result<Option<ContinueFile>, UploadOutcome> {
-    if staged.len != size_bytes {
-        return Err(rejected(format!(
-            "received {} bytes, reported {size_bytes}",
-            staged.len
-        )));
-    }
+    check_staged_upload_size_within_grant_and_matches_reported_size(
+        staged,
+        size_bytes,
+        server_granted_upload_size_bytes,
+    )?;
     if path != CONTINUE_OUTPUT {
         return Ok(None);
     }
@@ -645,6 +669,26 @@ async fn check_staged_output(
     ContinueFile::parse(&bytes)
         .map(Some)
         .map_err(|e| rejected(e.to_string()))
+}
+
+fn check_staged_upload_size_within_grant_and_matches_reported_size(
+    staged: &StagedFile,
+    size_bytes: u64,
+    server_granted_upload_size_bytes: u64,
+) -> Result<(), UploadOutcome> {
+    if staged.len > server_granted_upload_size_bytes {
+        return Err(rejected(format!(
+            "received {} bytes, but the allowed size is {server_granted_upload_size_bytes} bytes",
+            staged.len
+        )));
+    }
+    if staged.len != size_bytes {
+        return Err(rejected(format!(
+            "received {} bytes, reported {size_bytes}",
+            staged.len
+        )));
+    }
+    Ok(())
 }
 
 async fn record_exec_output(
@@ -748,6 +792,7 @@ mod tests {
             },
             transfer: Transfer::Passthrough(Box::new(writer)),
             metadata,
+            server_granted_upload_size_bytes: 3,
             permit,
         })
         .await;
@@ -799,6 +844,7 @@ mod tests {
                 ca: None,
                 multipart: None,
             })),
+            server_granted_upload_size_bytes: 3,
             permit,
         })
         .await;
@@ -860,6 +906,7 @@ mod tests {
                 temporary_nar_storage_key: key.clone(),
             },
             &metadata,
+            3,
         )
         .await;
 
@@ -898,6 +945,7 @@ mod tests {
             &format!("/nix/store/{hash}-p"),
             Transfer::Passthrough(Box::new(writer)),
             &metadata,
+            3,
         )
         .await;
 
@@ -960,6 +1008,7 @@ mod tests {
                 temporary_nar_storage_key: key.clone(),
             },
             &metadata,
+            3,
         )
         .await
         .unwrap_or_else(|outcome| panic!("{outcome:?}"));
@@ -991,6 +1040,7 @@ mod tests {
                 temporary_nar_storage_key: key.clone(),
             },
             &metadata,
+            3,
         )
         .await
         .unwrap_or_else(|outcome| panic!("{outcome:?}"));
@@ -1093,6 +1143,7 @@ mod tests {
             &format!("/nix/store/{hash}-p"),
             Transfer::Passthrough(Box::new(writer)),
             &metadata,
+            3,
         )
         .await
         .unwrap_or_else(|outcome| panic!("the upload settles: {outcome:?}"));
@@ -1136,6 +1187,7 @@ mod tests {
             &format!("/nix/store/{hash}-p"),
             Transfer::Passthrough(Box::new(writer)),
             &metadata,
+            3,
         )
         .await
         else {
@@ -1194,6 +1246,7 @@ mod tests {
             &format!("/nix/store/{hash}-p"),
             Transfer::Passthrough(Box::new(first_producer_partial_file_writer)),
             &metadata,
+            3,
         )
         .await;
         assert!(matches!(first, Ok(UploadPlacementResult::Nar(_))));
@@ -1217,6 +1270,7 @@ mod tests {
             &format!("/nix/store/{hash}-p"),
             Transfer::Passthrough(Box::new(second_producer_partial_file_writer)),
             &metadata,
+            3,
         )
         .await
         else {
@@ -1266,6 +1320,7 @@ mod tests {
             },
             transfer: Transfer::Passthrough(Box::new(writer)),
             metadata,
+            server_granted_upload_size_bytes: 3,
             permit,
         });
         tokio::pin!(commit);
@@ -1325,6 +1380,7 @@ mod tests {
             },
             transfer: Transfer::Passthrough(Box::new(writer)),
             metadata,
+            server_granted_upload_size_bytes: 3,
             permit,
         })
         .await;
@@ -1372,6 +1428,7 @@ mod tests {
             &UploadMetadata::ExecOutput {
                 size_bytes: body.len() as u64,
             },
+            body.len() as u64,
         )
         .await;
 
@@ -1416,6 +1473,177 @@ mod tests {
         assert!(
             values.contains("BigInt(Some(3))") && values.contains("application/octet-stream"),
             "{values}"
+        );
+    }
+
+    async fn commit_exec_output(
+        state: &Arc<ServerState>,
+        job: ExecJobId,
+        body: &[u8],
+        server_granted_upload_size_bytes: u64,
+    ) -> UploadOutcome {
+        let (_session, permit) = granted_permit(state).await;
+        let dir = tempfile::TempDir::new().unwrap();
+        let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
+        let mut writer = partials.open_writer("peer/o", "o", 0, 0).await.unwrap();
+        writer.append(0, body).await.unwrap();
+        let (writer_out, mut sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
+
+        run(Commit {
+            writer: writer_out,
+            handles: SessionHandles::from_state(state),
+            peer_id: "w1".into(),
+            request_id: 1,
+            project: ProjectId::nil(),
+            dispatched_job: None,
+            key: ObjectKey::Rest(gradient_storage::exec_output_key(
+                job.into_inner(),
+                "model/w.bin",
+            )),
+            segment_cache: None,
+            object: CommittedUpload::Other(UploadObject::ExecOutput {
+                job: job.to_string(),
+                path: "model/w.bin".into(),
+            }),
+            transfer: Transfer::Passthrough(Box::new(writer)),
+            metadata: UploadMetadata::ExecOutput {
+                size_bytes: body.len() as u64,
+            },
+            server_granted_upload_size_bytes,
+            permit,
+        })
+        .await;
+
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+        match gradient_wire::codec::from_bytes::<ServerMessage>(
+            sent.try_recv().unwrap(),
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .unwrap()
+        {
+            ServerMessage::UploadCommitted {
+                request_id: 1,
+                outcome,
+            } => outcome,
+            other => panic!("expected the commit outcome, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn commit_rejects_exec_job_output_file_staged_length_larger_than_granted_size_and_stores_nothing()
+     {
+        let state = test_state(empty_db());
+        let job = ExecJobId::now_v7();
+        let body = [7u8; 64];
+
+        let outcome = commit_exec_output(&state, job, &body, 63).await;
+
+        let UploadOutcome::Rejected { reason } = outcome else {
+            panic!("expected a rejection, got {outcome:?}")
+        };
+        assert!(reason.contains("63"), "{reason}");
+        assert!(
+            state
+                .nar_storage
+                .get_exec_output(job.into_inner(), "model/w.bin", body.len())
+                .await
+                .unwrap()
+                .is_none(),
+            "nothing is adopted"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_job_output_file_staged_length_equal_to_granted_size_is_stored_at_commit() {
+        let state = test_state(
+            mock_db()
+                .append_exec_results([gradient_fixtures::mock::exec_ok()])
+                .into_connection(),
+        );
+        let job = ExecJobId::now_v7();
+        let body = [7u8; 64];
+
+        let outcome = commit_exec_output(&state, job, &body, 64).await;
+
+        assert!(matches!(outcome, UploadOutcome::Ok), "{outcome:?}");
+        assert!(
+            state
+                .nar_storage
+                .get_exec_output(job.into_inner(), "model/w.bin", body.len())
+                .await
+                .unwrap()
+                .is_some(),
+            "the output is adopted"
+        );
+    }
+
+    async fn stage_bytes_and_place_eval_cache_segment_with_upload_size(
+        state: &Arc<ServerState>,
+        body: &[u8],
+        server_granted_upload_size_bytes: u64,
+    ) -> (Result<UploadPlacementResult, UploadOutcome>, String) {
+        let key = format!("eval-cache/{}", uuid::Uuid::now_v7());
+        let dir = tempfile::TempDir::new().unwrap();
+        let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
+        let mut writer = partials.open_writer("peer/s", "s", 0, 0).await.unwrap();
+        writer.append(0, body).await.unwrap();
+
+        let placed = place(
+            &state.db(),
+            &ObjectKey::EvalCache(key.clone()),
+            &UploadObject::EvalCacheSegment {
+                fingerprint: "f".into(),
+            },
+            "",
+            Transfer::Passthrough(Box::new(writer)),
+            &UploadMetadata::EvalCache {
+                size_bytes: body.len() as u64,
+            },
+            server_granted_upload_size_bytes,
+        )
+        .await;
+        (placed, key)
+    }
+
+    #[tokio::test]
+    async fn commit_rejects_eval_cache_segment_staged_length_larger_than_granted_size_and_stores_nothing()
+     {
+        let state = test_state(empty_db());
+        let body = [7u8; 64];
+
+        let (placed, key) =
+            stage_bytes_and_place_eval_cache_segment_with_upload_size(&state, &body, 63).await;
+
+        let Err(UploadOutcome::Rejected { reason }) = placed else {
+            panic!("expected a rejection, got {placed:?}")
+        };
+        assert!(reason.contains("allowed size is 63"), "{reason}");
+        assert!(
+            state
+                .nar_storage
+                .get_eval_cache(&key)
+                .await
+                .unwrap()
+                .is_none(),
+            "nothing is stored"
+        );
+    }
+
+    #[tokio::test]
+    async fn eval_cache_segment_staged_length_equal_to_granted_upload_size_is_stored_at_commit() {
+        let state = test_state(empty_db());
+        let body = [7u8; 64];
+
+        let (placed, key) =
+            stage_bytes_and_place_eval_cache_segment_with_upload_size(&state, &body, 64).await;
+
+        assert!(
+            matches!(placed, Ok(UploadPlacementResult::EvalCacheSegment)),
+            "{placed:?}"
+        );
+        assert_eq!(
+            state.nar_storage.get_eval_cache(&key).await.unwrap(),
+            Some(body.to_vec())
         );
     }
 
@@ -1465,6 +1693,7 @@ mod tests {
                 temporary_nar_storage_key: key,
             },
             &metadata,
+            3,
         )
         .await;
 
@@ -1514,6 +1743,7 @@ mod tests {
                 temporary_nar_storage_key: key,
             },
             &metadata,
+            3,
         )
         .await;
 
@@ -1548,6 +1778,7 @@ mod tests {
                 temporary_nar_storage_key: key,
             },
             &metadata,
+            3,
         )
         .await;
 
@@ -1601,6 +1832,7 @@ mod tests {
                 temporary_nar_storage_key: key,
             },
             &metadata,
+            3,
         )
         .await
     }
@@ -1646,6 +1878,7 @@ mod tests {
             },
             transfer: Transfer::Passthrough(Box::new(writer)),
             metadata,
+            server_granted_upload_size_bytes: 3,
             permit,
         })
         .await;
@@ -1773,6 +2006,7 @@ mod tests {
                     temporary_nar_storage_key: key,
                 },
                 &metadata,
+                3,
             )
             .await;
             match placed {
@@ -2006,6 +2240,7 @@ mod tests {
                 temporary_nar_storage_key: key,
             },
             &metadata,
+            3,
         )
         .await
     }

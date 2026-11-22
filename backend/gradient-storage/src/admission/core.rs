@@ -44,7 +44,7 @@ pub struct AdmissionCore {
     budget_returned: HashMap<(SessionId, u64), ObjectKey>,
     leaders: HashSet<ObjectKey>,
     followers: HashMap<ObjectKey, Vec<Request>>,
-    bytes_in_flight: u64,
+    bytes_in_flight: u128,
     small_in_flight: usize,
 }
 
@@ -68,7 +68,7 @@ impl AdmissionCore {
     }
 
     pub fn bytes_in_flight(&self) -> u64 {
-        self.bytes_in_flight
+        u64::try_from(self.bytes_in_flight).unwrap_or(u64::MAX)
     }
 
     pub fn queued(&self, session: SessionId) -> usize {
@@ -131,7 +131,7 @@ impl AdmissionCore {
             return;
         };
 
-        self.bytes_in_flight -= request.size;
+        self.bytes_in_flight -= u128::from(request.size);
         if request.priority {
             self.small_in_flight -= 1;
         }
@@ -168,7 +168,7 @@ impl AdmissionCore {
             if self.ring.front() == Some(&head.session) {
                 self.ring.rotate_left(1);
             }
-            self.bytes_in_flight += head.size;
+            self.bytes_in_flight += u128::from(head.size);
             if head.priority {
                 self.small_in_flight += 1;
             }
@@ -212,7 +212,8 @@ impl AdmissionCore {
             )
         };
         in_flight == 0
-            || (in_flight < window && self.bytes_in_flight + request.size <= self.limits.bytes)
+            || (in_flight < window
+                && self.bytes_in_flight + u128::from(request.size) <= u128::from(self.limits.bytes))
     }
 
     fn push_back(&mut self, request: Request) {
@@ -299,6 +300,41 @@ mod tests {
         let over = SMALL_UPLOADS_IN_FLIGHT as u64;
         assert_eq!(granted(&core.enqueue(small_req(1, over, "over"))), vec![]);
         assert_eq!(granted(&core.release(1, 0)), vec![(1, over)]);
+    }
+
+    #[test]
+    fn a_priority_upload_is_granted_beside_an_ordinary_grant_of_u64_max() {
+        let mut core = core(2, GIB);
+        assert_eq!(
+            granted(&core.enqueue(req(1, 1, "a", u64::MAX))),
+            vec![(1, 1)]
+        );
+        assert_eq!(granted(&core.enqueue(small_req(2, 2, "b"))), vec![(2, 2)]);
+        assert_eq!(core.bytes_in_flight(), u64::MAX);
+    }
+
+    #[test]
+    fn a_one_byte_upload_is_queued_while_a_u64_max_upload_grant_is_active() {
+        let mut core = core(2, GIB);
+        assert_eq!(
+            granted(&core.enqueue(req(1, 1, "a", u64::MAX))),
+            vec![(1, 1)]
+        );
+        assert_eq!(granted(&core.enqueue(req(2, 2, "b", 1))), vec![]);
+        assert_eq!(core.queued(2), 1);
+        assert_eq!(granted(&core.release(1, 1)), vec![(2, 2)]);
+    }
+
+    #[test]
+    fn in_flight_byte_count_returns_to_zero_after_max_and_one_byte_grants_and_next_request_is_granted()
+     {
+        let mut core = core(2, GIB);
+        core.enqueue(req(1, 1, "a", u64::MAX));
+        core.enqueue(small_req(2, 2, "b"));
+        assert!(core.release(1, 1).is_empty());
+        assert!(core.release(2, 2).is_empty());
+        assert_eq!(core.bytes_in_flight(), 0);
+        assert_eq!(granted(&core.enqueue(req(3, 3, "c", GIB))), vec![(3, 3)]);
     }
 
     fn granted(grants: &[Request]) -> Vec<(SessionId, u64)> {

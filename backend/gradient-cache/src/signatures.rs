@@ -5,6 +5,7 @@
  */
 
 use gradient_db::WorkerDb;
+use gradient_db::graph::reachability::sql_condition_for_output_that_must_not_be_signed;
 use gradient_db::lookup::by_ids;
 use gradient_db::store_path_content_variant_trust::{
     build_sql_for_content_variants_needing_signature_from_store_hash_project_seeds,
@@ -112,11 +113,20 @@ ON CONFLICT DO NOTHING
         params = [Int(1000)],
         tier = Sweep;
 
+    /// Use OFFSET 0 to keep the check for outputs that get no signature inside a subquery. Such subqueries run once per candidate row, so batch cost is proportional to batch size.
     PENDING_SIGNATURES_THE_CACHE_MAY_SIGN = || format!(
         "SELECT s.* FROM cached_path_signature s \
          WHERE s.signature IS NULL AND {accepted} \
+           AND EXISTS (SELECT 1 FROM cache keyed_cache \
+                       WHERE keyed_cache.id = s.cache AND keyed_cache.private_key <> '') \
+           AND NOT EXISTS (SELECT 1 FROM cached_path pending_path \
+                           JOIN derivation_output pending_output ON pending_output.hash = pending_path.hash \
+                           WHERE pending_path.id = s.cached_path AND {must_not_be_signed} \
+                           OFFSET 0) \
+         ORDER BY s.id \
          LIMIT $1",
         accepted = cache_can_sign_content_variant_sql_condition("s.cached_path", "s.cache"),
+        must_not_be_signed = sql_condition_for_output_that_must_not_be_signed("pending_output"),
     ),
         params = [Int(1000)],
         tier = Sweep;
@@ -221,6 +231,10 @@ impl SignSweep {
     }
 
     async fn sign(&self) -> anyhow::Result<()> {
+        self.sign_pending_signature_batch(SIGN_SWEEP_BATCH).await
+    }
+
+    async fn sign_pending_signature_batch(&self, batch_size: u64) -> anyhow::Result<()> {
         if let Err(e) = self.repair_orphan_claims().await {
             warn!(error = %e, "sign sweep: orphan claim repair failed");
         }
@@ -228,7 +242,7 @@ impl SignSweep {
         let pending = ECachedPathSignature::find()
             .from_raw_sql(
                 PENDING_SIGNATURES_THE_CACHE_MAY_SIGN
-                    .bind([sea_orm::Value::BigInt(Some(SIGN_SWEEP_BATCH as i64))]),
+                    .bind([sea_orm::Value::BigInt(Some(batch_size as i64))]),
             )
             .all(&self.db)
             .await?;
@@ -236,9 +250,7 @@ impl SignSweep {
         if pending.is_empty() {
             return Ok(());
         }
-        if pending.len() as u64 == SIGN_SWEEP_BATCH {
-            self.wake.notify_one();
-        }
+        let batch_was_full = pending.len() as u64 == batch_size;
 
         let signed = self
             .sign_pending_signature_rows_without_lock(pending)
@@ -252,6 +264,9 @@ impl SignSweep {
         };
         if stored > 0 {
             tracing::info!(count = stored, "sign sweep: signatures filled");
+            if batch_was_full {
+                self.wake.notify_one();
+            }
         }
 
         Ok(())
@@ -278,15 +293,6 @@ impl SignSweep {
 
         let cached_paths: HashMap<CachedPathId, MCachedPath> =
             by_ids::<ECachedPath, _>(&self.db, &cached_path_ids).await?;
-
-        let hashes: Vec<String> = cached_paths.values().map(|cp| cp.hash.clone()).collect();
-        let private =
-            gradient_db::graph::reachability::private_output_hashes(&self.db, &hashes).await?;
-        let skipped: HashSet<CachedPathId> = cached_paths
-            .values()
-            .filter(|cp| private.contains(&cp.hash))
-            .map(|cp| cp.id)
-            .collect();
 
         let mut signers: HashMap<CacheId, Option<CacheSigner>> = HashMap::new();
         for (cache_id, cache) in &caches {
@@ -322,15 +328,6 @@ impl SignSweep {
                 continue;
             };
             let store_path = cp.store_path();
-
-            if skipped.contains(&row.cached_path) {
-                debug!(
-                    store_path = %store_path,
-                    cache = %cache.id,
-                    "Sign sweep: skip (no subscription of the originating project to sign outputs)"
-                );
-                continue;
-            }
 
             let refs: Vec<String> = cp
                 .references
@@ -796,6 +793,248 @@ mod sign_sweep_pending_signature_query_tests {
             .expect("signing key")
             .0;
         (secret, secret_path, private_key)
+    }
+
+    const FORBIDDEN_OUTPUT_DERIVATION_STORE_PATH: &str =
+        "56565656565656565656565656565656-forbidden.drv";
+    const FORBIDDEN_OUTPUT_STORE_PATH_HASH: &str = "77777777777777777777777777777777";
+    const UNKEYED_CACHE_STORE_PATH_HASH: &str = "88888888888888888888888888888888";
+    const SIGNABLE_STORE_PATH_HASHES: [&str; 2] = [
+        "99999999999999999999999999999999",
+        "12121212121212121212121212121212",
+    ];
+
+    async fn database_with_forbidden_unkeyed_and_signable_pending_signatures(
+        signable_rows: usize,
+    ) -> (
+        gradient_fixtures::database::TestDatabase,
+        super::SignSweep,
+        impl Sized,
+    ) {
+        use gradient_entity::build::BuildStatus;
+        use gradient_storage::NarStore;
+
+        let (secret, secret_path, private_key) =
+            write_new_cache_signing_key_to_temporary_secret_file();
+        let (keyed_cache, unkeyed_cache) = (CacheId::now_v7(), CacheId::now_v7());
+        let mut seed = shape()
+            .evaluation(EvaluationId::now_v7())
+            .cached_path(FORBIDDEN_OUTPUT_STORE_PATH_HASH, "forbidden")
+            .into_cache(keyed_cache)
+            .keyed(private_key.clone())
+            .with_legacy_cached_path_before_producer_tracking()
+            .derivation(FORBIDDEN_OUTPUT_DERIVATION_STORE_PATH)
+            .walked()
+            .probed()
+            .drv_cached()
+            .entry_point("forbidden")
+            .job()
+            .output(FORBIDDEN_OUTPUT_STORE_PATH_HASH)
+            .build_status(BuildStatus::Completed)
+            .evaluation(EvaluationId::now_v7())
+            .cached_path(UNKEYED_CACHE_STORE_PATH_HASH, "unkeyed")
+            .into_cache(unkeyed_cache)
+            .with_legacy_cached_path_before_producer_tracking();
+        for hash in &SIGNABLE_STORE_PATH_HASHES[..signable_rows] {
+            seed = seed
+                .evaluation(EvaluationId::now_v7())
+                .cached_path(hash, "signable")
+                .into_cache(keyed_cache)
+                .keyed(private_key.clone())
+                .with_legacy_cached_path_before_producer_tracking();
+        }
+        let db = seed.into_database().await;
+        db.execute(
+            "UPDATE project_cache SET mode = 1, sign_outputs = false; \
+             UPDATE cached_path_signature \
+                 SET signature = NULL, previous_signing_key_signature = decode('01', 'hex');",
+        )
+        .await;
+        let nar_dir = tempfile::tempdir().expect("tempdir");
+        let state = crate::test_support::build_test_server_state_with_running_graph_writer(
+            NarStore::local(nar_dir.path()).expect("store"),
+            db.connection(),
+            move |config| config.secrets.crypt_file = secret_path,
+        )
+        .await;
+        let sweep =
+            build_sign_sweep_from_test_server_state(&state, std::time::Duration::from_secs(60));
+        (db, sweep, (secret, nar_dir, state))
+    }
+
+    fn sweep_wake_has_stored_notification(sweep: &super::SignSweep) -> bool {
+        tokio_test::task::spawn(sweep.wake.notified())
+            .poll()
+            .is_ready()
+    }
+
+    #[tokio::test]
+    async fn signature_sweep_batch_with_no_rows_it_can_sign_does_not_wake_again() {
+        let (db, sweep, _guards) =
+            database_with_forbidden_unkeyed_and_signable_pending_signatures(0).await;
+
+        sweep
+            .sign_pending_signature_batch(2)
+            .await
+            .expect("the sign sweep runs");
+
+        assert!(
+            !sweep_wake_has_stored_notification(&sweep),
+            "A batch with only rows the sweep cannot sign can end its run without a new sweep run."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn sweep_signs_pending_signable_row_after_unsignable_rows_without_external_wake() {
+        let (db, sweep, _guards) =
+            database_with_forbidden_unkeyed_and_signable_pending_signatures(1).await;
+
+        sweep
+            .sign_pending_signature_batch(2)
+            .await
+            .expect("the sign sweep runs");
+        let mut runs_after_own_wake = 0;
+        while runs_after_own_wake < 3 && sweep_wake_has_stored_notification(&sweep) {
+            sweep
+                .sign_pending_signature_batch(2)
+                .await
+                .expect("the sign sweep runs");
+            runs_after_own_wake += 1;
+        }
+
+        let signatures = db.signatures(SIGNABLE_STORE_PATH_HASHES[0]).await;
+        assert!(
+            !signatures.is_empty() && signatures.iter().all(|row| row.signature.is_some()),
+            "A sweep can sign signable rows after rows that can't be signed. No wake can come from outside the sweep."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn full_batch_of_pending_signature_rows_stores_signatures_and_wakes_sweep_immediately() {
+        let (db, sweep, _guards) =
+            database_with_forbidden_unkeyed_and_signable_pending_signatures(2).await;
+
+        sweep
+            .sign_pending_signature_batch(1)
+            .await
+            .expect("the sign sweep runs");
+
+        let mut signed_rows = 0;
+        for hash in SIGNABLE_STORE_PATH_HASHES {
+            signed_rows += db
+                .signatures(hash)
+                .await
+                .iter()
+                .filter(|row| row.signature.is_some())
+                .count();
+        }
+        assert_eq!(
+            (signed_rows, sweep_wake_has_stored_notification(&sweep)),
+            (1, true),
+            "Full batches of signable rows save the signatures and make the sweep rerun right away."
+        );
+        db.finish().await;
+    }
+
+    const PREVIOUS_PENDING_SIGNATURE_SQL_TEMPLATE_WITHOUT_OFFSET: &str = "SELECT s.* FROM cached_path_signature s \
+         WHERE s.signature IS NULL AND {accepted} \
+           AND EXISTS (SELECT 1 FROM cache keyed_cache \
+                       WHERE keyed_cache.id = s.cache AND keyed_cache.private_key <> '') \
+           AND NOT EXISTS (SELECT 1 FROM cached_path pending_path \
+                           JOIN derivation_output pending_output ON pending_output.hash = pending_path.hash \
+                           WHERE pending_path.id = s.cached_path AND {must_not_be_signed}) \
+         ORDER BY s.id \
+         LIMIT $1";
+
+    async fn run_pending_signature_query_with_limit_and_get_cached_path_signature_ids(
+        db: &gradient_fixtures::database::TestDatabase,
+        sql: String,
+        limit: i64,
+    ) -> Vec<CachedPathSignatureId> {
+        ECachedPathSignature::find()
+            .from_raw_sql(
+                PENDING_SIGNATURES_THE_CACHE_MAY_SIGN
+                    .bind_built(sql, [sea_orm::Value::BigInt(Some(limit))]),
+            )
+            .all(&db.connection())
+            .await
+            .expect("pending signatures are readable")
+            .into_iter()
+            .map(|row| row.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn pending_signature_query_without_offset_returns_same_rows_in_same_order_as_with_offset()
+    {
+        let previous_text = PREVIOUS_PENDING_SIGNATURE_SQL_TEMPLATE_WITHOUT_OFFSET
+            .replace(
+                "{accepted}",
+                &super::cache_can_sign_content_variant_sql_condition("s.cached_path", "s.cache"),
+            )
+            .replace(
+                "{must_not_be_signed}",
+                &super::sql_condition_for_output_that_must_not_be_signed("pending_output"),
+            );
+        let states = [
+            (
+                "Private output and cache without key, no signable row",
+                0,
+                false,
+            ),
+            (
+                "Two signable rows after the private output and the keyless cache",
+                2,
+                false,
+            ),
+            (
+                "One signable row already signed. Another row still pending.",
+                2,
+                true,
+            ),
+        ];
+        for (state, signable_rows, first_signable_row_signed) in states {
+            let (db, _sweep, _guards) =
+                database_with_forbidden_unkeyed_and_signable_pending_signatures(signable_rows)
+                    .await;
+            if first_signable_row_signed {
+                db.execute(&format!(
+                    "UPDATE cached_path_signature SET signature = decode('02', 'hex') \
+                     WHERE cached_path IN (SELECT id FROM cached_path WHERE hash = '{}');",
+                    SIGNABLE_STORE_PATH_HASHES[0]
+                ))
+                .await;
+            }
+            for limit in [1, 2, 3, 10] {
+                let current =
+                    run_pending_signature_query_with_limit_and_get_cached_path_signature_ids(
+                        &db,
+                        PENDING_SIGNATURES_THE_CACHE_MAY_SIGN.text().into_owned(),
+                        limit,
+                    )
+                    .await;
+                assert_eq!(
+                    run_pending_signature_query_with_limit_and_get_cached_path_signature_ids(
+                        &db,
+                        previous_text.clone(),
+                        limit,
+                    )
+                    .await,
+                    current,
+                    "The previous and current queries for pending signatures return the same rows in the same order. Both use state {state} and limit {limit}."
+                );
+                if signable_rows > 0 && limit == 1 {
+                    assert_eq!(
+                        current.len(),
+                        1,
+                        "The current query for pending signatures with LIMIT 1 can return a signable row after non-signable rows."
+                    );
+                }
+            }
+            db.finish().await;
+        }
     }
 
     fn add_queued_project_p_build_waiting_on_project_q_stored_output(

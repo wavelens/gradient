@@ -8,8 +8,8 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::permissions::{
-    CachePermission, Permission, PermissionMask, cache_mask_grants, cache_mask_to_vec, mask_grants,
-    mask_to_vec,
+    CachePermission, Permission, PermissionMask, api_key_without_cache_pin_can_read_project_caches,
+    cache_mask_grants, cache_mask_to_vec, mask_grants, mask_to_vec,
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
@@ -549,7 +549,7 @@ async fn is_cache_project_subscriber(
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
     if api_key.is_some_and(|key| {
-        key.cache_pin.is_some() || !mask_grants(key.mask, Permission::ViewProject)
+        !api_key_without_cache_pin_can_read_project_caches(key.mask, key.cache_pin)
     }) {
         return Ok(false);
     }
@@ -2113,6 +2113,58 @@ mod tests {
             )
             .await
             .expect_err("reading through a project subscription needs View project on the key");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn test_load_cache_readable_key_without_view_project_returns_not_found() {
+        run(async {
+            let user = user_fixture();
+            let api_key = ApiKeyContext {
+                mask: mask_from(&[Permission::TriggerEvaluation]),
+                ..api_key_context_for_fixed_test_project()
+            };
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![project_id_only_mock_row()]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await
+            .expect_err("reading through a project subscription needs View project on the key");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn api_key_pinned_to_cache_cannot_read_cache_over_http_without_cache_role_even_when_project_subscribes()
+     {
+        run(async {
+            let user = user_fixture();
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
+                .append_query_results([vec![project_id_only_mock_row()]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&cache_view_api_key()),
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await
+            .expect_err("A cache-pinned key can only read through the owner's cache role.");
             assert!(matches!(err, WebError::NotFound(..)));
         });
     }

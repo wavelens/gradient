@@ -12,7 +12,7 @@ use gradient_db::git_host_connection_repository_grants::{
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::ids::{team_id, user_id};
 use gradient_fixtures::rows;
-use sea_orm::{ConnectionTrait, DatabaseConnection, TransactionTrait};
+use sea_orm::{DatabaseConnection, TransactionTrait};
 
 const TASK_NAME: &str = "deploy";
 
@@ -340,18 +340,7 @@ async fn a_gitea_connection_without_a_base_url_stops_the_reconciliation_and_stor
         db,
         project,
     } = setup(None).await;
-    db.execute_unprepared(
-        "ALTER TABLE git_host_connection DROP CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url",
-    )
-    .await
-    .unwrap();
     insert_shared_connection(&db, None, GitHostType::Gitea).await;
-    db.execute_unprepared(
-        "ALTER TABLE git_host_connection ADD CONSTRAINT git_host_connection_gitea_forgejo_and_gitlab_need_base_url \
-         CHECK (git_host_type NOT IN (0, 1, 2) OR base_url IS NOT NULL) NOT VALID",
-    )
-    .await
-    .unwrap();
 
     let error = apply(
         &db,

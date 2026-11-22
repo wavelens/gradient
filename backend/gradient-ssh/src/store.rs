@@ -617,6 +617,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn view_project_api_key_reads_path_info_from_subscribed_cache() {
+        use gradient_types::permissions::{Permission, mask_from};
+        use gradient_types::{MProjectAccess, MRole, RoleId};
+        let user = gradient_fixtures::rows::user();
+        let project = gradient_fixtures::rows::project();
+        let role = MRole {
+            id: RoleId::now_v7(),
+            permission: i64::MAX,
+            ..Default::default()
+        };
+        let access = MProjectAccess {
+            project: project.id,
+            user: user.id,
+            role: role.id,
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![user.clone()]])
+            .append_query_results([vec![project.clone()]])
+            .append_query_results([vec![access]])
+            .append_query_results([vec![role]])
+            .append_query_results([vec![BTreeMap::from([(
+                "cache".to_owned(),
+                Value::from(CacheId::now_v7().into_inner()),
+            )])]])
+            .append_query_results([vec![served_row()]])
+            .into_connection();
+        let state = TestState::new().web_db(db).build();
+        let backend = crate::auth::open_project_store_backend_for_api_key(
+            SshHandles::for_tests(&state),
+            user.id,
+            project.id,
+            mask_from(&[Permission::ViewProject]),
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("store backend opens");
+        let (_server, mut client) = connect(Arc::clone(&backend.session)).await;
+
+        let info = client
+            .query_path_info(&hello())
+            .await
+            .expect("info")
+            .expect("served");
+        assert_eq!(info.nar_size, 42);
+    }
+
+    #[tokio::test]
     async fn a_path_outside_the_project_caches_is_invalid() {
         let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
