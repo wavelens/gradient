@@ -62,25 +62,39 @@
 in {
   inherit workerResourceProjectsOption;
 
-  options = lib.recursiveUpdate workerOptions.options {
+  options = lib.recursiveUpdateUntil (path: _: _: path == [ "exec" "subnet" ]) workerOptions.options {
     enable = lib.mkEnableOption "the Gradient worker";
 
-    exec.sops.files = lib.mkOption {
-      type = lib.types.listOf (lib.types.submodule {
-        options = {
-          path = lib.mkOption {
-            type = lib.types.path;
-            apply = toString;
-            example = "/etc/gradient/worker-secrets.yaml";
-            description = "Path of the sops file on the worker host.";
-          };
+    exec = {
+      subnet = lib.mkOption {
+        type = lib.types.coercedTo lib.types.str
+          (_: throw "services.gradient.worker.exec.subnet uses the old string format. Change it to services.gradient.worker.exec.subnet.v4.")
+          (lib.types.submodule {
+            options = {
+              inherit (workerOptions.options.exec.subnet) v4 v6;
+            };
+          });
+        default = { };
+        description = "Guest bridge subnets. Set `v4` and optionally `v6`.";
+      };
 
-          projects = workerResourceProjectsOption;
-        };
-      });
-      default = [ ];
-      example = lib.literalExpression ''[ { path = "/etc/gradient/worker-secrets.yaml"; projects = "all"; } ]'';
-      description = "Sops files that the worker can decrypt with {option}`services.gradient.worker.exec.sops.keyFile`. Exec jobs fetch top-level values from a file by name, but only for jobs of projects in `projects` of that file. Values never reach the server.";
+      sops.files = lib.mkOption {
+        type = lib.types.listOf (lib.types.submodule {
+          options = {
+            path = lib.mkOption {
+              type = lib.types.path;
+              apply = toString;
+              example = "/etc/gradient/worker-secrets.yaml";
+              description = "Path of the sops file on the worker host.";
+            };
+
+            projects = workerResourceProjectsOption;
+          };
+        });
+        default = [ ];
+        example = lib.literalExpression ''[ { path = "/etc/gradient/worker-secrets.yaml"; projects = "all"; } ]'';
+        description = "Sops files that the worker can decrypt with {option}`services.gradient.worker.exec.sops.keyFile`. Exec jobs fetch top-level values from a file by name, but only for jobs of projects in `projects` of that file. Values never reach the server.";
+      };
     };
 
     environmentVariables = lib.mkOption {
