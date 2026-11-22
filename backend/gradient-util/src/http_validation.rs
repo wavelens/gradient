@@ -442,7 +442,7 @@ pub fn read_network_interface_addresses_and_log_error_on_failure() {
     if let Err(error) = get_local_network_interface_addresses() {
         tracing::error!(
             %error,
-            "The server can't read the addresses of its network interfaces. The server rejects all outgoing requests to addresses that the server administrator did not allow. This rejection continues until the server can read those addresses. Allow the AF_NETLINK address family for the server process."
+            "This process can't read the addresses of the network interfaces of its own host. All outgoing requests to addresses that the server administrator doesn't allow fail. The refusal is active until the process can read those addresses. Allow the AF_NETLINK address family for this process."
         );
     }
 }

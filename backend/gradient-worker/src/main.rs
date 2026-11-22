@@ -106,6 +106,7 @@ fn main() -> Result<()> {
     }
 
     config.memory_guard()?;
+    gradient_util::http_validation::read_network_interface_addresses_and_log_error_on_failure();
     let server_url = config.outbound_server_url()?;
     exit_clock::clock();
 
