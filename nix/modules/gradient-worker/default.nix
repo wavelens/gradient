@@ -444,7 +444,13 @@ in {
           default = [ ];
           example = [ "10.234.0.0/16" "192.168.10.5/32" "fd00:ec2:7::/64" ];
           description = ''
-            Use this option to list IPv4 and IPv6 networks in CIDR format. Guest network filters drop private, shared and link-local destinations (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, etc.) and all IPv6 destinations outside 2000::/3. Guests with network access can still reach networks in this list. IPv6 entries have an effect only with exec.subnet.v6. Add the guest subnets of other workers for multi-node jobs. Add private hosts that the job needs, such as package mirrors. Guests on this worker cannot reach each other, even if those subnets appear in the list.
+            Use this option to allow specific private IPv4 and IPv6 networks.
+            Guest network filters drop per default private, shared and link-local destinations (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, etc.) and all IPv6 destinations outside 2000::/3.
+            Guests with network access can still reach networks explicitly allowed in this option.
+            IPv6 entries only have an effect when exec.subnet.v6 is set.
+            Add the guest subnets of other workers for multi-node jobs.
+            Add private hosts that the job needs.
+            Guests on this worker cannot reach each other, even if those subnets appear in the list.
           '';
         };
 
@@ -453,7 +459,11 @@ in {
           default = null;
           example = [ "2001:db8:1234::/48" ];
           description = ''
-            IPv6 networks in CIDR form that a guest with network access must not reach belong in this list. Set this option together with `services.gradient.worker.exec.subnet.v6`. The global IPv6 prefixes of the host's own network belong here too (for example the host LAN prefix). Guest network filters block private IPv4 networks. They do not block global IPv6 networks. Values of `[ ]` block nothing. A value in `exec.subnet.v6` and no value in this option cause evaluation to stop. This option is ineffective without `exec.subnet.v6`. The docs for `exec.subnet.v6` describe this next to that option.
+            IPv6 networks that a guest is forbidden to connect to.
+            Set this option together with `exec.subnet.v6`.
+            The global IPv6 prefixes of the host's own network (eg: the hosts LAN prefix) should be set here, too.
+            The default of `[ ]` blocks nothing.
+            This option is ineffective without `exec.subnet.v6`.
           '';
         };
 
@@ -462,7 +472,11 @@ in {
           default = [ ];
           example = [ 3000 ];
           description = ''
-            TCP ports on the worker host that a guest with network access can reach on any address of the host. Guest network filters drop all other connections from a guest to the host. A DNS forwarder for guests on the host makes DNS to the bridge address the exception. These ports are also open on the host firewall for the guest bridge. Set this option when the Gradient server and the jobs share a host and the jobs need to reach its API.
+            TCP ports on the worker host that a guest with network access can reach.
+            Guest network filters drop all other connections from a guest to the host.
+            A DNS forwarder for guests on the host makes DNS to the bridge address the exception.
+            These ports are also open on the host firewall for the guest bridge.
+            Set this option when the Gradient server and the jobs share a host and the jobs need to reach its API.
           '';
         };
       };
