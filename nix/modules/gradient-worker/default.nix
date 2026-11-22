@@ -31,6 +31,10 @@
   ipv6NetworkCidrRegularExpressionText = "[0-9a-fA-F:]*:[0-9a-fA-F:]*/[0-9]{1,3}";
   execOptionsSet = lib.any (option: option.highestPrio < (lib.mkOptionDefault null).priority)
     (lib.collect lib.isOption options.services.gradient.worker.exec);
+  execAllowPortsAsIntegerRangePairs = map (entry:
+    if lib.isInt entry then [ entry entry ]
+    else if lib.isString entry then let bounds = map lib.toIntBase10 (lib.splitString "-" entry); in [ (lib.head bounds) (lib.last bounds) ]
+    else entry) (if exec.allow.ports == null then [ ] else exec.allow.ports);
   guestDnsForwarder = exec.allow.network && exec.nameservers == [ ];
   hasDevice = source: lib.any (device: device.${source} != null && device.${source} != [ ]) exec.devices;
   renderedRulesetTexts = import ./exec-guest-network-filter-nftables-ruleset-texts.nix {
@@ -430,11 +434,15 @@ in {
 
       allow = {
         ports = lib.mkOption {
-          type = lib.types.nullOr (lib.types.listOf (lib.types.either lib.types.port (lib.types.listOf lib.types.port)));
+          type = lib.types.nullOr (lib.types.listOf (lib.types.oneOf [
+            (lib.types.strMatching "[0-9]{1,5}(-[0-9]{1,5})?")
+            lib.types.port
+            (lib.types.listOf lib.types.port)
+          ]));
           default = null;
-          example = lib.literalExpression "[ 22 [ 8000 8100 ] 6006 ]";
+          example = [ "22" "8000-8100" "6006" ];
           description = ''
-            Guest ports that exec jobs can request. Each entry can be a single port or `[ first last ]` range. No ports pass with an empty list. `null` stands for ports 1024 to 65535.
+            Exec jobs can request guest ports. Each entry is a port like `"22"` or a range like `"8000-8100"`. Older forms `22` and `[ 8000 8100 ]` remain valid. No ports pass with an empty list. `null` is the range 1024 to 65535.
           '';
         };
 
@@ -594,8 +602,8 @@ in {
         message = "The services.gradient.worker.exec options depend on capabilities.exec. Enable capabilities.exec or unset services.gradient.worker.exec.";
       }
       {
-        assertion = exec.allow.ports == null || lib.all (entry: !lib.isList entry || (lib.length entry == 2 && lib.head entry <= lib.last entry)) exec.allow.ports;
-        message = "services.gradient.worker.exec.allow.ports: Write each range in the form [ first last ]. Ensure first <= last.";
+        assertion = lib.all (range: lib.length range == 2 && lib.all (port: port <= 65535) range && lib.head range <= lib.last range) execAllowPortsAsIntegerRangePairs;
+        message = "Each entry in `services.gradient.worker.exec.allow.ports` can use the form `\"port\"` or `\"first-last\"`. Every port can fall between 0 and 65535. The first value can't exceed the last.";
       }
       {
         assertion = cfg.capabilities.exec -> exec.subnet.v4 != null;
@@ -726,7 +734,7 @@ in {
           } // lib.optionalAttrs (cfg.capabilities.exec && exec.sops.keyFile != null) {
             GRADIENT_WORKER_EXEC_SOPS_KEY_FILE = "%d/gradient_worker_exec_sops_key";
           } // lib.optionalAttrs (cfg.capabilities.exec && exec.allow.ports != null) {
-            GRADIENT_WORKER_EXEC_ALLOW_PORTS = lib.concatMapStringsSep "," (entry: if lib.isList entry then "${toString (lib.head entry)}-${toString (lib.last entry)}" else toString entry) exec.allow.ports;
+            GRADIENT_WORKER_EXEC_ALLOW_PORTS = lib.concatMapStringsSep "," (range: "${toString (lib.head range)}-${toString (lib.last range)}") execAllowPortsAsIntegerRangePairs;
           } // lib.optionalAttrs (cfg.build.cgroup != null) {
             GRADIENT_WORKER_BUILD_CGROUP = cfg.build.cgroup;
           } // sharedWorkerOptionsModule.environment;
