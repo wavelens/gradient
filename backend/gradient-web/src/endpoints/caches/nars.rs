@@ -162,8 +162,11 @@ pub async fn list(
 
     let ascending = matches!(q.order.as_deref(), Some("asc"));
     let order = match q.sort.as_deref().unwrap_or("created_at") {
+        "package" => NarOrder::PackageName,
         "nar_size" => NarOrder::NarSize,
+        "file_size" => NarOrder::FileSize,
         "last_fetched_at" => NarOrder::LastFetchedAt,
+        "pinned_at" => NarOrder::PinnedAt,
         _ => NarOrder::CreatedAt,
     };
     let mapper = db.cache_mapper(cache.id);
