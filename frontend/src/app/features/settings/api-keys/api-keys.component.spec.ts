@@ -136,6 +136,7 @@ describe('ApiKeysComponent - managed-key gating', () => {
     expect(root.textContent).not.toContain('Expires:');
     expect(buttonsByText(root, 'edit').length).toBe(0);
     expect(buttonsByText(root, 'revoke').length).toBe(0);
+    expect(buttonsByText(root, 'regenerate').length).toBe(0);
     expect(buttonsByText(root, 'delete').length).toBe(1);
   });
 
@@ -527,6 +528,7 @@ describe('ApiKeysComponent - dialogs', () => {
 describe('ApiKeysComponent - row actions', () => {
   it.each([
     { action: 'revoke', title: 'Revoke API key', method: 'revokeApiKey', sent: 'k1', toast: 'API key revoked' },
+    { action: 'regenerate', title: 'Regenerate API key', method: 'regenerateApiKey', sent: 'k1', toast: 'API key regenerated' },
     { action: 'delete', title: 'Delete API key', method: 'deleteApiKey', sent: 'CI key', toast: 'API key deleted' },
   ])('asks before the $action, naming the key', ({ action, title, method, sent, toast }) => {
     const request = vi.fn(() => of('ok'));
@@ -554,13 +556,26 @@ describe('ApiKeysComponent - row actions', () => {
     expect(document.activeElement).toBe(expected(root));
   });
 
-  it.each(['revoke', 'delete'])('sends no %s when the confirmation is cancelled', (action) => {
+  it('shows the new key once in the dialog after confirming Regenerate', () => {
+    const fixture = setup([unmanagedKey], { regenerateApiKey: vi.fn(() => of('GRADnew')) });
+    const component = fixture.componentInstance;
+    buttonsByText(fixture.nativeElement, 'regenerate')[0].click();
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ consequence: expect.stringContaining('Do you really want to regenerate the API Token?') }),
+    );
+    expect(component.createdKeyValue()).toBe('GRADnew');
+    expect(component.showKeyDialog()).toBe(true);
+  });
+
+  it.each(['revoke', 'regenerate', 'delete'])('sends no %s when the confirmation is cancelled', (action) => {
     const revokeApiKey = vi.fn(() => of('ok'));
+    const regenerateApiKey = vi.fn(() => of('ok'));
     const deleteApiKey = vi.fn(() => of('ok'));
-    const fixture = setup([unmanagedKey], { revokeApiKey, deleteApiKey });
+    const fixture = setup([unmanagedKey], { revokeApiKey, regenerateApiKey, deleteApiKey });
     confirm.mockImplementation(() => EMPTY);
     buttonsByText(fixture.nativeElement, action)[0].click();
     expect(revokeApiKey).not.toHaveBeenCalled();
+    expect(regenerateApiKey).not.toHaveBeenCalled();
     expect(deleteApiKey).not.toHaveBeenCalled();
   });
 });

@@ -434,6 +434,7 @@ pub(crate) fn browser_session_account_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(user::post_keys, user::delete_keys))
                 .routes(routes!(user::patch_key))
                 .routes(routes!(user::post_key_revoke))
+                .routes(routes!(user::post_key_regenerate))
                 .routes(routes!(user_ssh_keys::post_ssh_key))
                 .routes(routes!(user_ssh_keys::delete_ssh_key))
                 .routes(routes!(user::patch_settings))

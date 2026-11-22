@@ -487,6 +487,28 @@ export class ApiKeysComponent implements OnInit {
     this.errorMessage.set(apiErrorMessage(err, fallback));
   }
 
+  regenerateApiKey(key: ApiKeyInfo): void {
+    this.confirm
+      .confirm({
+        title: 'Regenerate API key',
+        target: key.name,
+        consequence:
+          'Do you really want to regenerate the API Token? The current token is invalid right away. Scripts and pipelines that use that token have no access until they get a new token.',
+        confirmLabel: 'Regenerate',
+        failure: 'Regenerating the API key failed.',
+        severity: 'danger',
+        action: () => this.userService.regenerateApiKey(key.id),
+      })
+      .subscribe((keyValue) => {
+        this.notify.success('API key regenerated');
+        this.createdKeyValue.set(keyValue);
+        this.cacheClientSetupTexts.set(null);
+        if (key.cache) this.fetchCacheSigningKeyAndSetApiKeyUsageInstructions(key.cache, keyValue);
+        this.showKeyDialog.set(true);
+        this.loadKeys();
+      });
+  }
+
   revokeKey(key: ApiKeyInfo): void {
     this.confirm
       .confirm({

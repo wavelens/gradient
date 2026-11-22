@@ -70,6 +70,17 @@ pub async fn stamp_last_used<C: ConnectionTrait>(
     Ok(())
 }
 
+pub async fn set_api_key_secret_hash_and_clear_last_used_at<C: ConnectionTrait>(
+    db: &C,
+    api_key: MApi,
+    key_hash: String,
+) -> Result<MApi, DbErr> {
+    let mut active = api_key.into_active_model();
+    active.key = Set(key_hash);
+    active.last_used_at = Set(*consts::NULL_TIME);
+    active.update(db).await
+}
+
 pub async fn revoke<C: ConnectionTrait>(
     db: &C,
     api_key: MApi,

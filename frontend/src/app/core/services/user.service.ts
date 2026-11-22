@@ -100,6 +100,10 @@ export class UserService {
     return this.api.post<string>(`user/keys/${id}/revoke`, {});
   }
 
+  regenerateApiKey(id: string): Observable<string> {
+    return this.api.post<string>(`user/keys/${id}/regenerate`, {});
+  }
+
   getRequestsAwaitingUserDecision(): Observable<PendingUserDecisionsResponse> {
     return this.api.get<PendingUserDecisionsResponse>('user/requests');
   }

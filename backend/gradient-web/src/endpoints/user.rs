@@ -69,6 +69,8 @@ enum UserRefusal {
     NoPermissionsSelected,
     #[error("Set API key expiry to at least 1 day.")]
     ApiKeyExpiryShorterThanOneDay,
+    #[error("The API can't regenerate a revoked or expired key. Create a new key instead.")]
+    ApiKeySecretRegenerationForRevokedOrExpiredKey,
     #[error("API key cannot grant cache permissions you do not hold.")]
     GrantUnheldCachePermissions(Vec<CachePermission>),
     #[error("API key cannot grant project permissions that the owner does not have.")]
@@ -113,6 +115,7 @@ impl Refusal for UserRefusal {
             | Self::PinToProjectAndCache
             | Self::NoPermissionsSelected
             | Self::ApiKeyExpiryShorterThanOneDay
+            | Self::ApiKeySecretRegenerationForRevokedOrExpiredKey
             | Self::InvalidVersion { .. } => RefusalStatus::BadRequest,
         }
     }
@@ -1223,6 +1226,65 @@ pub async fn post_key_revoke(
         .await;
 
     Ok(ok_json("API-Key revoked".to_string()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/user/keys/{api_id}/regenerate",
+    operation_id = "regenerateUserKey",
+    tag = "user",
+    summary = "Regenerate an API key",
+    description = "Replace the key secret. The name, permissions, pins, allowed IPs and expiry stay the same. Requests with the old secret fail right away. Clients receive the new full key (with the ``GRAD`` prefix) one time. Requests to regenerate revoked keys, expired keys or state-managed keys fail. Calls that use API key authentication cannot reach this endpoint. Use a session instead.",
+    params(("api_id" = ApiId, Path)),
+    responses((status = OK, description = "New API key", body = String, content_type = "application/json"), WebError)
+)]
+pub async fn post_key_regenerate(
+    state: State<Arc<ServerState>>,
+    audit: Audit,
+    Extension(user): Extension<MUser>,
+    Extension(session): Extension<MSession>,
+    Path(api_id): Path<ApiId>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let api_key = require::<EApi>(&state.web_db, api_id).await?;
+    if api_key.owned_by != user.id {
+        return Err(WebError::not_found(Resource::ApiKey));
+    }
+    if api_key.managed {
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::ApiKey).into());
+    }
+    if !api_key.is_usable_at(gradient_types::now()) {
+        return Err(UserRefusal::ApiKeySecretRegenerationForRevokedOrExpiredKey.into());
+    }
+
+    let raw_key = generate_api_key();
+    let key_hash = hash_api_key(&raw_key);
+    gradient_db::users::insert_credential_after_locking_user_row_and_rechecking_authorisation(
+        state.web_db.inner(),
+        user.id,
+        gradient_db::users::VerifiedFactForSessionOrCredentialCreation::ExistingSignInSession(
+            session.id,
+        ),
+        |tx| {
+            Box::pin(async move {
+                gradient_db::api_keys::set_api_key_secret_hash_and_clear_last_used_at(
+                    tx, api_key, key_hash,
+                )
+                .await
+            })
+        },
+    )
+    .await
+    .map_err(|e| credential_insert_error_to_http_error(e, WebError::from))?;
+
+    audit
+        .write(
+            Action::ApiKeyRegenerateSecret,
+            EventOwner::default(),
+            serde_json::json!({ "api_key_id": api_id.to_string() }),
+        )
+        .await;
+
+    Ok(ok_json(format!("GRAD{raw_key}")))
 }
 
 type PaginatedSessionInfo = Paginated<SessionInfo>;

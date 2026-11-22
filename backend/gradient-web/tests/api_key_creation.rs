@@ -411,3 +411,78 @@ async fn key_permission_catalogue_hides_use_superuser_rights_from_non_superuser_
         vec!["createProject", "readSuperuser", "writeSuperuser"]
     );
 }
+
+fn api_key_of_test_user(id: ApiId) -> api::Model {
+    api::Model {
+        id,
+        owned_by: gradient_fixtures::ids::user_id(),
+        name: "deploy".into(),
+        key: "old-hash".into(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn regenerating_api_key_updates_same_row_without_insert_and_returns_grad_prefixed_key_once() {
+    let session_id = SessionId::now_v7();
+    let api_id = ApiId::now_v7();
+    let conn = with_auth(mock_db(), session_id)
+        .append_query_results([vec![api_key_of_test_user(api_id)]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![live_session(session_id)]])
+        .append_query_results([vec![api_key_of_test_user(api_id)]])
+        .append_exec_results([exec_ok()])
+        .into_connection();
+
+    let res = make_test_server(conn.clone())
+        .post(&format!("/api/v1/user/keys/{api_id}/regenerate"))
+        .add_header("authorization", bearer(session_id))
+        .await;
+
+    res.assert_status_ok();
+    let key = res.json::<Value>()["message"]
+        .as_str()
+        .expect("the new key is returned")
+        .to_owned();
+    assert!(key.starts_with("GRAD"), "{key}");
+    let statements = all_statements(conn.into_transaction_log());
+    let update = statements
+        .iter()
+        .find(|statement| statement.sql.starts_with("UPDATE \"api\""))
+        .expect("the key row is updated");
+    let stored = update.values.clone().expect("update has values").0;
+    assert!(
+        !stored.contains(&SqlValue::String(Some("old-hash".into()))),
+        "{stored:?}"
+    );
+    assert!(
+        statements
+            .iter()
+            .all(|statement| !statement.sql.starts_with("INSERT INTO \"api\""))
+    );
+}
+
+#[tokio::test]
+async fn regenerating_revoked_api_key_is_refused_with_400_and_does_not_write_to_api_table() {
+    let session_id = SessionId::now_v7();
+    let api_id = ApiId::now_v7();
+    let revoked = api::Model {
+        revoked_at: Some(gradient_fixtures::test_date()),
+        ..api_key_of_test_user(api_id)
+    };
+    let conn = with_auth(mock_db(), session_id)
+        .append_query_results([vec![revoked]])
+        .into_connection();
+
+    let res = make_test_server(conn.clone())
+        .post(&format!("/api/v1/user/keys/{api_id}/regenerate"))
+        .add_header("authorization", bearer(session_id))
+        .await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert!(
+        all_statements(conn.into_transaction_log())
+            .iter()
+            .all(|statement| !statement.sql.starts_with("UPDATE \"api\""))
+    );
+}

@@ -17,6 +17,7 @@ const AUDIT_ACTIONS_ON_OWN_ACCOUNT_THAT_CHANGE_ACCESS: &[Action] = &[
     Action::UserUpdateAccountSettings,
     Action::ApiKeyUpdate,
     Action::ApiKeyRevoke,
+    Action::ApiKeyRegenerateSecret,
     Action::ApiKeyDelete,
     Action::SessionRevoke,
 ];

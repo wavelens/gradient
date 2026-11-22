@@ -14,8 +14,8 @@ async function createApiKeyThroughDialogAndReadSecret(page: Page, name: string):
   await createDialog.getByRole('textbox', { name: 'Name' }).fill(name);
   await createDialog.getByRole('button', { name: 'Create' }).click();
 
-  const createdDialog = page.getByRole('dialog', { name: 'API Key Created' });
-  await expect(createdDialog).toContainText('it will not be shown again');
+  const createdDialog = page.getByRole('dialog', { name: 'New API Key' });
+  await expect(createdDialog).toContainText("doesn't appear again");
   const secret = createdDialog.getByRole('textbox', { name: 'New API key' });
   await expect(secret).toHaveValue(/^GRAD\S{20,}$/);
   const value = await secret.inputValue();
