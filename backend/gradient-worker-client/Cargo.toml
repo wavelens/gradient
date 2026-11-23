@@ -42,6 +42,7 @@ zstd                = { workspace = true }
 
 [dev-dependencies]
 gradient-wire = { workspace = true, features = ["testing"] }
+socket2       = { workspace = true }
 tempfile      = { workspace = true }
 tokio         = { workspace = true, features = ["macros", "rt", "test-util"] }
 wiremock      = { workspace = true }

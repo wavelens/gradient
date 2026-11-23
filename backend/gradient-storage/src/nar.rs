@@ -18,7 +18,9 @@ use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use gradient_types::ids::{CacheId, ProjectId};
 use gradient_util::telemetry::{GAUGES, STATS};
-use gradient_wire::constants::{BULK_CHUNK_SIZE, MULTIPART_NAR_BYTES, PRESIGN_TTL};
+use gradient_wire::constants::{
+    BULK_CHUNK_SIZE, MULTIPART_NAR_BYTES, PRESIGN_TTL, WRITE_STALL_TIMEOUT,
+};
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
 use std::io::SeekFrom;
@@ -45,7 +47,6 @@ impl Default for S3Timeouts {
 
 const TEMPORARY_NAR_UPLOADS: &str = "nar-uploads";
 const S3_COPY_OBJECT_MAX_SIZE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
-const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// A temporary NAR object that only the server can write. Clients never get a link to that key.
 /// The server verifies the bytes there. Those bytes then move to the final key.

@@ -6,10 +6,23 @@
 
 use std::sync::OnceLock;
 
-use gradient_util::http::{DEFAULT_TIMEOUT, DOWNLOAD_MAX_REDIRECTS, idle_timed_download_builder};
+use gradient_util::http::{
+    DEFAULT_TIMEOUT, DOWNLOAD_MAX_REDIRECTS, idle_timed_download_builder, untimed_client_builder,
+};
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static UPLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+pub fn presigned_object_upload_client() -> &'static reqwest::Client {
+    UPLOAD_CLIENT.get_or_init(|| {
+        untimed_client_builder()
+            .connect_timeout(DEFAULT_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("failed to build the HTTP client for object uploads")
+    })
+}
 
 pub fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
