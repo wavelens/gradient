@@ -102,6 +102,13 @@ pub fn upstream_cache_url_for_display_without_username_password_query_and_fragme
     })
 }
 
+pub fn presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(
+    url: &str,
+) -> String {
+    upstream_cache_url_for_display_without_username_password_query_and_fragment(url)
+        .map_or_else(|| "unparseable URL".to_owned(), |shown| shown.url)
+}
+
 pub fn remove_user_name_and_password_from_urls_in_error_text(text: &str) -> String {
     text.split_inclusive(char::is_whitespace)
         .map(|word| {

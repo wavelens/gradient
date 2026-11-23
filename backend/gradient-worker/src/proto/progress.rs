@@ -309,7 +309,7 @@ pub(crate) async fn stage_body(
     let mut received = 0u64;
     loop {
         tokio::select! {
-            chunk = response.chunk() => match chunk? {
+            chunk = response.chunk() => match chunk.map_err(reqwest::Error::without_url)? {
                 Some(chunk) => {
                     received += chunk.len() as u64;
                     buffered.extend_from_slice(&chunk);

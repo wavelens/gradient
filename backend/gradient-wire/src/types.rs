@@ -317,11 +317,24 @@ pub enum QueryMode {
     Push,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
+#[derive(Proto, Clone, PartialEq)]
 pub struct PresignedMultipart {
     pub upload_id: String,
     pub part_size: u64,
     pub part_urls: Vec<String>,
+}
+
+impl std::fmt::Debug for PresignedMultipart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PresignedMultipart")
+            .field("upload_id", &self.upload_id)
+            .field("part_size", &self.part_size)
+            .field(
+                "part_urls",
+                &format_args!("{} presigned URLs", self.part_urls.len()),
+            )
+            .finish()
+    }
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -349,12 +362,29 @@ pub enum UploadObject {
     },
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
+#[derive(Proto, Clone, PartialEq)]
 pub enum GrantTarget {
     Skip,
     Passthrough { resume_offset: u64 },
     Put { url: String },
     Multipart(PresignedMultipart),
+}
+
+impl std::fmt::Debug for GrantTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Skip => f.write_str("Skip"),
+            Self::Passthrough { resume_offset } => f
+                .debug_struct("Passthrough")
+                .field("resume_offset", resume_offset)
+                .finish(),
+            Self::Put { url } => f
+                .debug_struct("Put")
+                .field("url", &gradient_util::http_base_url::presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url))
+                .finish(),
+            Self::Multipart(multipart) => f.debug_tuple("Multipart").field(multipart).finish(),
+        }
+    }
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -831,7 +861,26 @@ pub enum BuildFailureKind {
 
 #[cfg(test)]
 mod tests {
-    use super::JobPhase;
+    use super::{GrantTarget, JobPhase, PresignedMultipart};
+
+    #[test]
+    fn grant_debug_output_does_not_contain_presigned_url_signature_or_credential() {
+        let url = "https://s3.example.com/bucket/nar-uploads/obj?X-Amz-Credential=secret-key&X-Amz-Signature=secret-signature";
+        for grant in [
+            GrantTarget::Put {
+                url: url.to_owned(),
+            },
+            GrantTarget::Multipart(PresignedMultipart {
+                upload_id: "upload".to_owned(),
+                part_size: 64 << 20,
+                part_urls: vec![url.to_owned(), format!("{url}&partNumber=2")],
+            }),
+        ] {
+            let printed = format!("{grant:?}");
+            assert!(!printed.contains("secret-key"), "{printed}");
+            assert!(!printed.contains("secret-signature"), "{printed}");
+        }
+    }
 
     #[test]
     fn every_stored_phase_discriminant_is_listed() {

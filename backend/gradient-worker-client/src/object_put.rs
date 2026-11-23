@@ -116,7 +116,10 @@ async fn try_put(
     }
     let resp = tokio::select! {
         response = request.send() => response.map_err(|e| PutError::Retryable {
-            error: anyhow::Error::new(e).context("send the object PUT"),
+            error: anyhow::Error::new(e.without_url()).context(format!(
+                "send the object PUT to {presigned_url_without_query_string}",
+                presigned_url_without_query_string = gradient_util::http_base_url::presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url)
+            )),
             retry_after: None,
         })?,
         () = wait_for_no_progress_for_stall_window(write_stall_timeout, body_bytes_uploaded_watch.clone()) => {
@@ -403,6 +406,32 @@ mod tests {
             format!("{err:#}").contains(&format!("{len} of {len} bytes")),
             "{err:#}"
         );
+    }
+
+    #[tokio::test]
+    async fn object_put_connection_refused_error_chain_has_no_signature_or_credential_value() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .expect("free port")
+            .port();
+        let url = format!(
+            "http://127.0.0.1:{port}/nar-uploads/obj?X-Amz-Signature=secret-signature&X-Amz-Credential=secret-key"
+        );
+
+        let err = put_with(
+            &SINGLE_ATTEMPT_BACKOFF,
+            WRITE_STALL_TIMEOUT,
+            &url,
+            Bytes::from_static(b"nar"),
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        let message = format!("{err:#}");
+        assert!(message.contains("/nar-uploads/obj"), "{message}");
+        assert!(!message.contains("secret-signature"), "{message}");
+        assert!(!message.contains("secret-key"), "{message}");
     }
 
     #[tokio::test]
