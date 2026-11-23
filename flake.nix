@@ -37,6 +37,10 @@
         type = "app";
         program = "${(pkgs.nixos [ ./nix/standalone/vm.nix ]).config.system.build.vm}/bin/run-gradient-vm";
       };
+      evalbench-multinode-local = {
+        type = "app";
+        program = pkgs.lib.getExe (import ./nix/tests/bench/evalbench-multinode/evalbench-multinode-local.nix { inherit self pkgs; });
+      };
     };
     checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
       clippy = self.packages.${system}.gradient.clippy;
