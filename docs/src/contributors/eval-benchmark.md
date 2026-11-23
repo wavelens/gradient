@@ -60,7 +60,9 @@ cat result/summary.txt
 | Large flake | `hydraJobs.perl` and `hydraJobs.python` from nixpkgs, task wildcard `hydraJobs.**` |
 | Small flake | The e2e hello flake |
 
-- Cost estimates come from a warm-up evaluation of the large flake on a single worker.
+- A warm-up evaluation of a large flake on a single worker records a cost estimate. The warm-up doesn't run if the database already has a cost estimate for that flake.
+- Server spans for each measured evaluation go into `spans-<task>-<N>.jsonl`. Worker spans go into `spans-<task>-<N>-<worker>.jsonl` for each active worker, including the eval subprocess. The log can print a table of span totals per process, ordered by total time.
+- Names for all job phases appear in the log, for example `eval_flake` and `nar_push`.
 - Measured rounds commit a changed comment, wipe the worker eval caches, collect garbage, then stop the surplus workers.
 - Wall clock measures the first start to the last end of the `eval_flake` and `eval_derivations` phases across all jobs.
 - Statements come from `pg_stat_statements` calls of the `gradient` role, reset before each evaluation.
@@ -73,6 +75,27 @@ cat result/summary.txt
 - A missed target can fail the test. The failure can only occur after `summary.txt` and `evalbench-multinode.tar.gz` exist.
 - Set at least 20 CPUs on the builder. QEMU threads of each VM pin to separate cores. Fewer CPUs trigger an immediate test failure.
 - The report check can run with `nix build .#checks.x86_64-linux.evalbench-multinode-report`.
+
+### Local Runs
+
+The app `evalbench-multinode-local` can start the same VMs outside the Nix sandbox and keep their disks between runs.
+
+```sh
+MULTINODE_EVAL_WORKER_COUNTS=1,4 MEASURE_SMALL_FLAKE_BENCHMARK=0 nix run .#evalbench-multinode-local
+```
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MULTINODE_EVAL_WORKER_COUNTS` | `1,2,3,4` | Worker counts measured on the large flake |
+| `MEASURE_SMALL_FLAKE_BENCHMARK` | `1` | `0` skips the small flake |
+| `LOCAL_BENCHMARK_VM_STATE_DIR` | `/tmp/evalbench-multinode` | VM disks and driver sockets, kept between runs. Keep the path short, unix socket paths allow at most 108 bytes |
+| `BENCHMARK_RESULT_DIRECTORY` | `<state>/results-<time>` | `summary.txt`, span files and the report |
+
+- The second run reused the disk. It skipped the repository seed, the nixpkgs unpack on the workers and the warm-up.
+- Local VMs keep a writable Nix store on the VM disk, not in RAM. The VMs also read their own store image with only their closure, not the whole host store, as in the sandbox. These form the only differences from sandboxed builds.
+- Remove the state directory to get a fresh setup.
+- Summary lines list only elapsed time when `1` is absent from `MULTINODE_EVAL_WORKER_COUNTS`. They don't check the speedup target.
+- Arguments after `--` go to `nixos-test-driver` (for example: `--interactive`).
 
 ## Report
 

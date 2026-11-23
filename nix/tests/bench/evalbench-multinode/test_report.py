@@ -45,6 +45,11 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(verdicts(runs, small), [])
         self.assertNotIn("small flake", render(runs, small))
 
+    def test_unmeasured_one_worker_run_has_no_speedup_verdict_and_lists_all_measured_wall_clocks(self):
+        runs = {4: run(90_000, jobs=1)}
+        self.assertEqual(verdicts(runs), [])
+        self.assertEqual(render(runs, {}), "N=4      90.0 s      500 statements     4 shards  1 job\n")
+
     def test_targets_met_report_nothing_and_render_every_run(self):
         runs = {n: run(100_000 // n, jobs=n) for n in range(1, 5)}
         small = {"standalone": run(10_000), "multinode": run(10_500)}

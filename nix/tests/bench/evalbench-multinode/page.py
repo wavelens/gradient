@@ -133,7 +133,7 @@ def costs_table(costs):
                    f"{c['median_ms']} ms", f"{c['max_ms']} ms"] for c in costs])
 
 
-def load_spans(out_dir, name):
+def load_spans(out_dir, name, span_writer_process_label="server"):
     path = pathlib.Path(out_dir) / name if out_dir and name else None
     if not path or not path.exists():
         return []
@@ -141,11 +141,11 @@ def load_spans(out_dir, name):
     for line in path.read_text().splitlines():
         if line.startswith("{"):
             raw = json.loads(line)
-            spans.append(Span(f"server {raw['target'].split('::')[0]}", 0, raw["name"], raw["ts_us"], raw["dur_us"], raw["fields"]))
+            spans.append(Span(f"{span_writer_process_label} {raw['target'].split('::')[0]}", 0, raw["name"], raw["ts_us"], raw["dur_us"], raw["fields"]))
     return spans
 
 
-def span_section(spans):
+def span_section(spans, span_section_heading_text):
     if not spans:
         return ""
     totals = {}
@@ -156,7 +156,7 @@ def span_section(spans):
             for name, (total, count, longest) in sorted(totals.items(), key=lambda item: -item[1][0])[:20]]
     timeline = svg.timeline([s for s in spans if s.dur_us >= TIMELINE_MIN_US])
     return (
-        f"<h3>Server Spans</h3><div class=\"card\">{table(['Span', 'Calls', 'Total', 'Max'], rows)}"
+        f"<h3>{escape(span_section_heading_text)}</h3><div class=\"card\">{table(['Span', 'Calls', 'Total', 'Max'], rows)}"
         f"<details><summary>Timeline</summary>{timeline}</details>"
         f"<details><summary>Flame graph</summary>{svg.icicle(fold(spans))}</details></div>"
     )
@@ -197,7 +197,9 @@ def run_section(title, run, out_dir):
         parts.append(f"<h3>Heaviest Statements</h3><div class=\"card\">{statements_table(run['top_statements'])}</div>")
     if run.get("abort_statements"):
         parts.append(f"<h3>Statements during the Abort</h3><div class=\"card\">{statements_table(run['abort_statements'])}</div>")
-    parts.append(span_section(load_spans(out_dir, run.get("spans_file"))))
+    parts.append(span_section(load_spans(out_dir, run.get("spans_file")), "Server Spans"))
+    for worker, name in sorted(run.get("worker_vm_name_to_spans_file_name", {}).items()):
+        parts.append(span_section(load_spans(out_dir, name, worker), f"{worker} Spans"))
     if run.get("costs"):
         parts.append(f"<h3>Learned Costs after the Run</h3><div class=\"card\">{costs_table(run['costs'])}</div>")
     return "".join(parts)

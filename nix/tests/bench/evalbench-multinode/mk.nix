@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ self, pkgs, topology }: let
+{ self, pkgs, topology, useLocalVmNixStoreImageAndDiskWritableStore ? false }: let
   DELAY_MS = 40;
   RATE = "100mbit";
   WORKER_CORES = 4;
@@ -58,6 +58,7 @@
 
     services.gradient.worker = {
       enable = true;
+      log.traceDir = "/var/lib/gradient-worker/trace";
       eval.maxConcurrent = 1;
       capabilities = {
         eval = true;
@@ -94,6 +95,8 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
     virtualisation = {
       diskSize = 8192;
       writableStore = true;
+      writableStoreUseTmpfs = !useLocalVmNixStoreImageAndDiskWritableStore;
+      useNixStoreImage = useLocalVmNixStoreImageAndDiskWritableStore;
     };
     # The test framework boots on acpi_pm, where every clock read traps to the hypervisor.
     boot.kernelParams = lib.mkAfter [ "clocksource=kvm-clock" ];

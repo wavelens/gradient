@@ -9,8 +9,26 @@ from datetime import timedelta
 EVALUATED = {"Building", "Waiting", "Completed"}
 EVAL_TIMEOUT = 900
 POSTGRES_LOG = "/var/lib/postgresql/18/log/postgresql.log"
-SERVER_SPANS = "/var/lib/gradient/trace/server-*.jsonl"
+server_trace_directory = "/var/lib/gradient/trace"
+worker_trace_directory = "/var/lib/gradient-worker/trace"
 CPUS = sorted(os.sched_getaffinity(0))
+WORKER_COUNTS_TO_MEASURE = [int(n) for n in os.environ.get(
+    "MULTINODE_EVAL_WORKER_COUNTS", ",".join(str(n) for n in range(1, len(WORKER_NODES) + 1))
+).split(",")]
+MEASURE_SMALL_FLAKE = os.environ.get("MEASURE_SMALL_FLAKE_BENCHMARK", "1") != "0"
+assert all(1 <= n <= len(WORKER_NODES) for n in WORKER_COUNTS_TO_MEASURE), (
+    f"MULTINODE_EVAL_WORKER_COUNTS lists worker counts outside the range 1 to {len(WORKER_NODES)}: {WORKER_COUNTS_TO_MEASURE}"
+)
+JOB_PHASE_NUMBER_TO_NAME = {
+    0: "fetch", 1: "push_inputs", 2: "eval_flake", 3: "eval_derivations", 4: "eval_cache_pull",
+    5: "eval_cache_push", 6: "known_derivations_wait", 7: "drv_closure_push", 8: "prefetch",
+    9: "substitute_passthrough", 10: "build", 11: "compress", 12: "nar_push", 13: "cache_query_wait",
+    14: "substitute_fetch", 15: "download", 16: "nar_fetch", 17: "nar_import", 18: "upload_wait",
+}
+PHASE_NUMBER_TO_PHASE_NAME_SQL_CASE = (
+    "CASE p.phase " + " ".join(f"WHEN {n} THEN '{name}'" for n, name in JOB_PHASE_NUMBER_TO_NAME.items())
+    + " ELSE 'unknown_' || p.phase END"
+)
 
 
 def assert_enough_cpus():
@@ -75,6 +93,8 @@ def assert_shaped_links():
 
 def seed(repo):
     path = f"/var/lib/git/{repo}"
+    if server.execute(f"test -d {path}/.git")[0] == 0:
+        return
     server.succeed(f"{GIT} init {path} && cp /var/lib/git/{repo}.nix {path}/flake.nix"
                    f" && cp /var/lib/git/{repo}.lock {path}/flake.lock")
     server.succeed(f"sed -i 's#\\[hash\\]#{NIXPKGS_HASH}#g' {path}/flake.lock")
@@ -90,10 +110,13 @@ def bump(repo):
 
 def keep_nixpkgs():
     unpack = "nix-prefetch-url --unpack --name source --print-path http://server/nixpkgs.tar.gz"
-    for node in WORKER_NODES:
+    worker_vms_without_nixpkgs_gc_root = [
+        node for node in WORKER_NODES if node.execute("test -e /nix/var/nix/gcroots/nixpkgs")[0] != 0
+    ]
+    for node in worker_vms_without_nixpkgs_gc_root:
         node.succeed("rm -f /tmp/nixpkgs.done")
-        node.execute(f"({unpack} > /tmp/nixpkgs.out 2> /tmp/nixpkgs.log; touch /tmp/nixpkgs.done) &")
-    for node in WORKER_NODES:
+        node.execute(f"({unpack} > /tmp/nixpkgs.out 2> /tmp/nixpkgs.log; touch /tmp/nixpkgs.done) > /dev/null 2>&1 &")
+    for node in worker_vms_without_nixpkgs_gc_root:
         node.wait_until_succeeds("test -e /tmp/nixpkgs.done", timeout=timedelta(seconds=600))
         path = node.succeed("tail -1 /tmp/nixpkgs.out").strip()
         assert path.startswith("/nix/store/"), f"{node.name} did not unpack nixpkgs:\n" + node.succeed("cat /tmp/nixpkgs.log")
@@ -107,7 +130,7 @@ def reset_workers():
     for node in WORKER_NODES:
         node.systemctl("stop gradient-worker.service")
         node.succeed("rm -rf /var/lib/gradient-worker/eval-cache /var/lib/gradient-worker/www/.cache/nix /tmp/gc.done")
-        node.execute("(nix-collect-garbage > /tmp/gc.log 2>&1; touch /tmp/gc.done) &")
+        node.execute("(nix-collect-garbage > /tmp/gc.log 2>&1; touch /tmp/gc.done) > /dev/null 2>&1 &")
     for node in WORKER_NODES:
         node.wait_until_succeeds("test -e /tmp/gc.done", timeout=timedelta(seconds=600))
         print(node.succeed("grep -v \"^deleting '\" /tmp/gc.log || true"))
@@ -140,7 +163,7 @@ def evaluation_rows(query, eval_id):
 def eval_phases(eval_id):
     return evaluation_rows(
         "SELECT CASE p.phase WHEN 2 THEN 'eval_flake' WHEN 3 THEN 'eval_derivations' ELSE 'other' END AS phase,"
-        " left(dj.id::text, 8) AS job, p.start_ms, p.end_ms,"
+        " right(dj.id::text, 8) AS job, p.start_ms, p.end_ms,"
         " (extract(epoch FROM dj.dispatched_at - min(dj.dispatched_at) OVER ()) * 1000)::bigint AS offset_ms"
         " FROM dispatched_job_phase p JOIN dispatched_job dj ON dj.id = p.dispatched_job"
         " WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0",
@@ -165,13 +188,13 @@ def shard_timings(eval_id):
 
 def save_job_phases(label, eval_id):
     text = psql(
-        "SELECT left(dj.id::text, 8) || ' ' || p.phase || ': ' || count(*) || ' x, '"
+        f"SELECT right(dj.id::text, 8) || ' ' || {PHASE_NUMBER_TO_PHASE_NAME_SQL_CASE} || ': ' || count(*) || ' x, '"
         " || sum(p.end_ms - p.start_ms) || ' ms, from +' || min(p.start_ms) || ' to +' || max(p.end_ms)"
         " FROM dispatched_job_phase p JOIN dispatched_job dj ON dj.id = p.dispatched_job"
         f" WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0"
         " GROUP BY dj.id, p.phase ORDER BY dj.id, p.phase"
     )
-    print(f"job phases of {label} (fetch 0, eval_flake 2, eval_derivations 3, known_wait 6, closure_push 7):\n{text}")
+    print(f"Job phases for {label}:\n{text}")
 
 
 def save_shards(label, eval_id):
@@ -215,15 +238,31 @@ def save_slow_statements(label):
     return heaviest_statements()
 
 
-spans_seen = 0
+def get_span_trace_file_sizes(node):
+    directory = server_trace_directory if node is server else worker_trace_directory
+    listing = node.succeed(f"stat -c '%s %n' {directory}/*.jsonl 2>/dev/null || true")
+    return {path: int(size) for size, path in (line.split(" ", 1) for line in listing.splitlines())}
 
 
-def unseen_spans():
-    global spans_seen
-    text = server.succeed(f"awk 1 {SERVER_SPANS} | tail -n +{spans_seen + 1}")
-    complete = text.split("\n")[:-1]
-    spans_seen += len(complete)
-    return [span for span in map(parsed_span, complete) if span]
+def copy_spans_after_snapshot(node, sizes, name):
+    tails = "".join(f"tail -c +{sizes.get(path, 0) + 1} {path}; " for path in get_span_trace_file_sizes(node))
+    node.succeed(f"{{ {tails}true; }} > /tmp/{name}")
+    node.copy_from_machine(f"/tmp/{name}")
+    path = pathlib.Path(node.out_dir) / name
+    spans = [span for span in map(parsed_span, path.read_text().splitlines()) if span]
+    path.write_text("\n".join(json.dumps(span) for span in spans))
+    return spans
+
+
+def format_top_span_table(spans):
+    by_name = {}
+    for span in spans:
+        total, count, longest = by_name.get(span["name"], (0, 0, 0))
+        by_name[span["name"]] = (total + span["dur_us"], count + 1, max(longest, span["dur_us"]))
+    return "\n".join(
+        f"{total // 1000} ms total, {count} calls, {longest // 1000} ms max: {name}"
+        for name, (total, count, longest) in sorted(by_name.items(), key=lambda item: -item[1][0])[:25]
+    )
 
 
 SPAN_KEYS = {"name", "target", "ts_us", "dur_us", "fields"}
@@ -237,27 +276,38 @@ def parsed_span(line):
     return span if isinstance(span, dict) and SPAN_KEYS <= span.keys() else None
 
 
-def save_slow_spans(label):
-    spans = unseen_spans()
-    (pathlib.Path(server.out_dir) / f"spans-{label}.jsonl").write_text(
-        "\n".join(json.dumps(span) for span in spans)
-    )
-    by_name = {}
-    for span in spans:
-        total, count, longest = by_name.get(span["name"], (0, 0, 0))
-        by_name[span["name"]] = (total + span["dur_us"], count + 1, max(longest, span["dur_us"]))
-    heaviest = "\n".join(
-        f"{total // 1000} ms total, {count} calls, {longest // 1000} ms max: {name}"
-        for name, (total, count, longest) in sorted(by_name.items(), key=lambda item: -item[1][0])[:25]
-    )
+def save_slow_spans(label, sizes):
+    spans = copy_spans_after_snapshot(server, sizes, f"spans-{label}.jsonl")
     first = min((span["ts_us"] for span in spans), default=0)
     timeline = "\n".join(
         f"+{(span['ts_us'] - first) // 1000:>7} ms {span['dur_us'] // 1000:>6} ms {span['name']} {json.dumps(span['fields'])}"
         for span in sorted(spans, key=lambda span: span["ts_us"])
         if span["dur_us"] >= 1_000_000 and span["target"].startswith(("gradient_graph", "gradient_db"))
     )
-    print(f"spans by total time since the previous run, {label}:\n{heaviest}\n\nspans over a second:\n{timeline}")
+    print(f"Spans ordered by total time in {label}:\n{format_top_span_table(spans)}\n\nSpans over one second:\n{timeline}")
     return f"spans-{label}.jsonl"
+
+
+def save_and_print_worker_vm_spans(label, nodes, sizes):
+    worker_vm_name_to_spans_file_name = {}
+    for node in nodes:
+        name = f"spans-{label}-{node.name}.jsonl"
+        spans = copy_spans_after_snapshot(node, sizes[node.name], name)
+        print(f"Spans for {node.name} in {label} (by total time):\n{format_top_span_table(spans)}")
+        worker_vm_name_to_spans_file_name[node.name] = name
+    return worker_vm_name_to_spans_file_name
+
+
+def has_warm_up_eval_cost_rows_for_task(task):
+    return psql(
+        "SELECT EXISTS (SELECT 1 FROM eval_set_cost s JOIN task t ON t.id = s.task"
+        f" JOIN eval_subtree_cost c ON c.task = t.id WHERE t.name = '{task}');"
+    ) == "t"
+
+
+def sync_vm_disks():
+    for node in [server] + WORKER_NODES:
+        node.succeed("sync")
 
 
 def save_eval_costs(label):
@@ -323,6 +373,7 @@ def measure(token, task):
     psql("SELECT pg_stat_statements_reset();")
     server.succeed(f": > {POSTGRES_LOG}")
     load_before = {node.name: cpu_seconds(node) for node in [server] + WORKER_NODES}
+    span_sizes = {node.name: get_span_trace_file_sizes(node) for node in [server] + WORKER_NODES[:workers]}
     eval_id = api("POST", f"tasks/project/{task}/evaluate", token, body={})["id"]
     label = f"{task}-{workers}"
     captured = {}
@@ -332,7 +383,10 @@ def measure(token, task):
     finally:
         captured["load"] = save_vm_load(label, load_before)
         captured["top_statements"] = save_slow_statements(label)
-        captured["spans_file"] = save_slow_spans(label)
+        captured["spans_file"] = save_slow_spans(label, span_sizes[server.name])
+        captured["worker_vm_name_to_spans_file_name"] = save_and_print_worker_vm_spans(
+            label, WORKER_NODES[:workers], span_sizes
+        )
         captured["costs"] = save_eval_costs(label)
         save_job_phases(label, eval_id)
         save_shards(label, eval_id)
@@ -359,22 +413,23 @@ def measure(token, task):
         **captured,
     }
     if status != "Completed":
+        span_sizes[server.name] = get_span_trace_file_sizes(server)
         psql("SELECT pg_stat_statements_reset();")
         api("POST", f"evals/{eval_id}", token, body={"method": "abort"})
         try:
             wait_until_settled(eval_id)
         finally:
             result["abort_statements"] = save_slow_statements(f"{label}-abort")
-            save_slow_spans(f"{label}-abort")
+            save_slow_spans(f"{label}-abort", span_sizes[server.name])
     return result
 
 
 def write_summary(runs, small):
     out = pathlib.Path(server.out_dir)
     (out / "summary.json").write_text(json.dumps({"runs": runs, "small": small}, indent=2))
-    text = report.render(runs, small) if 1 in runs else ""
+    text = report.render(runs, small)
     (out / "summary.txt").write_text(text)
-    failed = report.verdicts(runs, small) if 1 in runs else []
+    failed = report.verdicts(runs, small)
     (out / "report").mkdir(exist_ok=True)
     (out / "report" / "index.html").write_text(page.render(runs, small, failed, out))
     print(text)
@@ -382,7 +437,7 @@ def write_summary(runs, small):
 
 def measure_large(token):
     runs = {}
-    for n in range(1, len(WORKER_NODES) + 1):
+    for n in WORKER_COUNTS_TO_MEASURE:
         bump("large")
         reset_workers()
         use_workers(token, n)
@@ -424,12 +479,18 @@ seed("small")
 psql("CREATE EXTENSION IF NOT EXISTS pg_stat_statements;")
 token = login()
 
-banner("record the costs of the large flake")
-use_workers(token, 1)
-measure(token, "large")
+try:
+    banner("record the costs of the large flake")
+    if has_warm_up_eval_cost_rows_for_task("large"):
+        print("Cost estimates for the large flake already exist from an earlier warm-up. Skip the warm-up.")
+    else:
+        use_workers(token, 1)
+        measure(token, "large")
 
-runs = measure_large(token)
-small = measure_small(token, runs)
+    runs = measure_large(token)
+    small = measure_small(token, runs) if MEASURE_SMALL_FLAKE else {}
+finally:
+    sync_vm_disks()
 out = pathlib.Path(server.out_dir)
 publish(out, out / "report" / "index.html", name="evalbench-multinode")
 failed = report.verdicts(runs, small)

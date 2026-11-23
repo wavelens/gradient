@@ -30,6 +30,9 @@ def jobs_text(jobs):
 
 
 def speedup_verdicts(runs):
+    if 1 not in runs:
+        return []
+
     failed = []
     for n in sorted(n for n in runs if n > 1):
         if speedup(runs, n) < target(n):
@@ -65,7 +68,8 @@ def verdicts(runs, small=None):
 
 def run_line(runs, n):
     run = runs[n]
-    return (f"N={n}  {run['wall_ms'] / 1000:8.1f} s  {speedup(runs, n):5.2f}x"
+    formatted_speedup_column_text = f"  {speedup(runs, n):5.2f}x" if 1 in runs else ""
+    return (f"N={n}  {run['wall_ms'] / 1000:8.1f} s{formatted_speedup_column_text}"
             f"  {run['statements']:7} statements  {run['shards']:4} shards  {jobs_text(run['jobs'])}")
 
 
