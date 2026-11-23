@@ -11,6 +11,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
+use gradient_util::http_base_url::presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
     EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, GitSshHostKeyObservation, JobPhase,
@@ -213,16 +214,23 @@ async fn inline_segment(pending: &mut PendingPull, size_bytes: u64) -> Result<Ve
 }
 
 async fn download_segment(url: &str) -> Result<Vec<u8>> {
+    let presigned_url_without_query_string =
+        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url);
     Ok(gradient_worker_client::http::client()
         .get(url)
         .send()
         .await
-        .with_context(|| format!("eval-cache GET {url}"))?
+        .map_err(reqwest::Error::without_url)
+        .with_context(|| format!("eval-cache GET {presigned_url_without_query_string}"))?
         .error_for_status()
-        .with_context(|| format!("eval-cache GET {url} returned non-2xx"))?
+        .map_err(reqwest::Error::without_url)
+        .with_context(|| {
+            format!("eval-cache GET {presigned_url_without_query_string} returned non-2xx")
+        })?
         .bytes()
         .await
-        .with_context(|| format!("read eval-cache body of {url}"))?
+        .map_err(reqwest::Error::without_url)
+        .with_context(|| format!("read eval-cache body of {presigned_url_without_query_string}"))?
         .to_vec())
 }
 
@@ -412,7 +420,12 @@ impl JobUpdater {
             GrantTarget::Put { url } => {
                 gradient_worker_client::object_put::put_object(&url, bytes.to_vec().into(), None)
                     .await
-                    .with_context(|| format!("eval-cache PUT {url}"))?;
+                    .with_context(|| {
+                        format!(
+                            "eval-cache PUT {}",
+                            presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(&url)
+                        )
+                    })?;
                 Ok(())
             }
             other => bail!("an eval-cache upload cannot use {other:?}"),

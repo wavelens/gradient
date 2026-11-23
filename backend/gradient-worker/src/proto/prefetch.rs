@@ -23,6 +23,7 @@ use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::{holds_claimed_nar, import_received_nar};
 use crate::proto::progress::{Progress, ProgressSink, Tally, stage_body};
+use gradient_util::http_base_url::presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder;
 use gradient_worker_client::compression::resolve_compression;
 use gradient_worker_client::nar_recv::{DownloadSink, NarPayload, NarReceiver};
 use gradient_worker_client::shared_download::SharedDownloads;
@@ -175,6 +176,8 @@ pub(crate) async fn stage_one_presigned(
     progress: &mut Progress<impl ProgressSink>,
 ) -> Result<StagedFetch> {
     let url = cp.url.clone().expect("by_url entries have a URL");
+    let presigned_url_without_query_string =
+        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(&url);
     let path = cp.path.clone();
     let mut backoff = PRESIGNED_RETRY_BASE;
 
@@ -192,21 +195,22 @@ pub(crate) async fn stage_one_presigned(
                     return Ok((path, None));
                 }
                 if presigned_status_is_retryable(status) {
-                    anyhow::anyhow!("HTTP {status} from {url}")
+                    anyhow::anyhow!("HTTP {status} from {presigned_url_without_query_string}")
                 } else if !resp.status().is_success() {
                     return Err(anyhow::anyhow!(
-                        "HTTP {status} from {url} (path {path}) is not a usable NAR response"
+                        "HTTP {status} from {presigned_url_without_query_string} (path {path}) is not a usable NAR response"
                     ));
                 } else {
                     let mut sink = staging.open(&path).await?;
                     stage_body(resp, &mut sink, progress)
                         .await
-                        .with_context(|| format!("read body of {url}"))?;
+                        .with_context(|| {
+                            format!("read body of {presigned_url_without_query_string}")
+                        })?;
                     let received = sink.len();
-                    let body = sink
-                        .finish()
-                        .await
-                        .with_context(|| format!("stage body of {url}"))?;
+                    let body = sink.finish().await.with_context(|| {
+                        format!("stage body of {presigned_url_without_query_string}")
+                    })?;
                     if !body_holds_the_nar(&body, &cp).await {
                         warn!(
                             %path,
@@ -221,7 +225,9 @@ pub(crate) async fn stage_one_presigned(
                     return Ok((path, Some((body, cp))));
                 }
             }
-            Err(e) => anyhow::Error::new(e).context(format!("send HTTP GET {url} (path {path})")),
+            Err(e) => anyhow::Error::new(e.without_url()).context(format!(
+                "send HTTP GET {presigned_url_without_query_string} (path {path})"
+            )),
         };
 
         if attempt < PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
