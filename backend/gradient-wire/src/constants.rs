@@ -14,3 +14,4 @@ pub const PRESIGN_TTL: Duration = Duration::from_secs(3600);
 /// A single S3 PUT is capped at 5 GiB. NARs above this size are going through a presigned multipart
 /// upload.
 pub const MULTIPART_NAR_BYTES: u64 = 1024 * 1024 * 1024;
+pub const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(120);

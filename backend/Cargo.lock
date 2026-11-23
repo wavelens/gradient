@@ -3822,6 +3822,7 @@ dependencies = [
  "rand 0.10.3",
  "reqwest",
  "sha2 0.11.1",
+ "socket2",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.30.0",
