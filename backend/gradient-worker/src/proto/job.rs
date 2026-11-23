@@ -216,8 +216,9 @@ async fn inline_segment(pending: &mut PendingPull, size_bytes: u64) -> Result<Ve
 async fn download_segment(url: &str) -> Result<Vec<u8>> {
     let presigned_url_without_query_string =
         presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url);
-    Ok(gradient_worker_client::http::client()
+    Ok(gradient_worker_client::http::download_client()
         .get(url)
+        .timeout(gradient_util::http::DEFAULT_TIMEOUT)
         .send()
         .await
         .map_err(reqwest::Error::without_url)
