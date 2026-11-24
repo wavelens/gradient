@@ -654,17 +654,16 @@ impl NarStore {
     }
 
     pub async fn delete_expired_temporary_nar_uploads(&self) -> Result<u64> {
-        let cutoff = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .saturating_sub(2 * PRESIGN_TTL)
-            .as_secs();
+        let now = std::time::SystemTime::now();
         let prefix = Path::from(format!("{}{TEMPORARY_NAR_UPLOADS}", self.prefix));
         let mut listing = self.inner.list(Some(&prefix));
         let mut removed = 0;
         while let Some(item) = listing.next().await {
             let meta = item.context("list temporary NAR uploads")?;
-            if u64::try_from(meta.last_modified.timestamp()).unwrap_or(0) < cutoff {
+            if crate::multipart::is_temporary_nar_upload_old_enough_to_delete(
+                meta.last_modified.into(),
+                now,
+            ) {
                 self.delete_object(&meta.location).await?;
                 removed += 1;
             }

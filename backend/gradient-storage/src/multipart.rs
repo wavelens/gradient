@@ -20,6 +20,8 @@ const MIB: u64 = 1024 * 1024;
 const MIN_PART_BYTES: u64 = 64 * MIB;
 const MAX_PARTS: u64 = 10_000;
 const MAX_SIGV4_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
+const MINIMUM_TEMPORARY_NAR_UPLOAD_OBJECT_AGE_BEFORE_GARBAGE_COLLECTION: Duration =
+    Duration::from_secs(2 * MAX_SIGV4_TTL.as_secs());
 const COMPLETE_BUDGET: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +50,14 @@ pub(crate) fn presigned_nar_upload_and_lease_duration(nar_size: u64) -> Duration
         compressed_bound(nar_size) / crate::nar::MIN_WRITE_THROUGHPUT_BYTES_PER_SEC,
     );
     (gradient_wire::constants::PRESIGN_TTL + transfer).min(MAX_SIGV4_TTL)
+}
+
+pub(crate) fn is_temporary_nar_upload_old_enough_to_delete(
+    last_modified: std::time::SystemTime,
+    now: std::time::SystemTime,
+) -> bool {
+    now.duration_since(last_modified)
+        .is_ok_and(|age| age > MINIMUM_TEMPORARY_NAR_UPLOAD_OBJECT_AGE_BEFORE_GARBAGE_COLLECTION)
 }
 
 async fn timed<T>(
@@ -193,6 +203,24 @@ mod tests {
             presigned_nar_upload_and_lease_duration(1024 * 1024 * GIB),
             MAX_SIGV4_TTL
         );
+    }
+
+    #[test]
+    fn test_gc_age_keeps_temporary_nar_upload_at_longest_lease_and_deletes_older() {
+        let now = std::time::SystemTime::now();
+        assert!(!is_temporary_nar_upload_old_enough_to_delete(
+            now - MAX_SIGV4_TTL,
+            now
+        ));
+        assert!(!is_temporary_nar_upload_old_enough_to_delete(
+            now + Duration::from_secs(60),
+            now
+        ));
+        assert!(is_temporary_nar_upload_old_enough_to_delete(
+            now - MINIMUM_TEMPORARY_NAR_UPLOAD_OBJECT_AGE_BEFORE_GARBAGE_COLLECTION
+                - Duration::from_secs(1),
+            now
+        ));
     }
 
     fn leaked_stats() -> &'static MinuteStats {
