@@ -37,13 +37,25 @@ def by_job(spans, process, name, kind=None):
     return grouped
 
 
+def expand_eval_result_span_into_combined_report_slots(received):
+    return [
+        slot
+        for span in received
+        for slot in [span] + [None] * (span["fields"].get("combined_report_count", 1) - 1)
+    ]
+
+
 def upstream_delays(spans):
     sent = by_job(spans, "worker", "report_eval_result")
     received = by_job(spans, "server", "job_event", kind="eval_result")
     return [
         (recv["ts_us"] - recv["fields"].get("queue_wait_us", 0)) - send["ts_us"]
         for job_id, sends in sent.items()
-        for send, recv in zip(sends, received.get(job_id, []))
+        for send, recv in zip(
+            sends,
+            expand_eval_result_span_into_combined_report_slots(received.get(job_id, [])),
+        )
+        if recv is not None
     ]
 
 

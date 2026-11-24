@@ -1017,3 +1017,70 @@ async fn b23_recorded_evaluation_batch_writes_timeout_and_max_silent_limits_to_d
     case.zero_drift("step 2").await;
     case.finish().await;
 }
+
+async fn read_comparable_graph_summary_for_derivation_paths(
+    case: &Case,
+    evaluation: EvaluationId,
+    paths: &[&str],
+) -> (
+    Vec<(SharedBuild, bool, i32)>,
+    Vec<Option<EdgeKind>>,
+    BTreeSet<String>,
+    [i64; 5],
+) {
+    let mut builds = Vec::new();
+    for path in paths {
+        builds.push((
+            shared_build(case, path).await,
+            named(case, evaluation, path).await,
+            unwalked_inputs(case, path).await,
+        ));
+    }
+    let mut edges = Vec::new();
+    for pair in paths.windows(2) {
+        edges.push(case.edge_kind(pair[0], pair[1]).await);
+    }
+    let entry_points = case
+        .entry_points(evaluation)
+        .await
+        .into_iter()
+        .map(|entry_point| entry_point.eval)
+        .collect();
+
+    (builds, edges, entry_points, case.counters(evaluation).await)
+}
+
+#[tokio::test]
+async fn b24_recording_three_derivations_in_one_combined_batch_leaves_the_same_shared_build_states_jobs_edges_entry_points_and_evaluation_counters_as_two_separate_batches()
+ {
+    let dependencies_first = || vec![walked(C, C_OUT, &[]), walked(B, B_OUT, &[C])];
+    let (separate_evaluation, combined_evaluation) =
+        (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let separate = Case::start(shape().evaluation(separate_evaluation)).await;
+    let combined = Case::start(shape().evaluation(combined_evaluation)).await;
+
+    walk(&separate, separate_evaluation, dependencies_first()).await;
+    walk(&separate, separate_evaluation, vec![a_above_b()]).await;
+    let mut all = dependencies_first();
+    all.push(a_above_b());
+    walk(&combined, combined_evaluation, all).await;
+
+    assert_eq!(
+        read_comparable_graph_summary_for_derivation_paths(
+            &combined,
+            combined_evaluation,
+            &[A, B, C]
+        )
+        .await,
+        read_comparable_graph_summary_for_derivation_paths(
+            &separate,
+            separate_evaluation,
+            &[A, B, C]
+        )
+        .await,
+    );
+    separate.zero_drift("separate").await;
+    combined.zero_drift("combined").await;
+    separate.finish().await;
+    combined.finish().await;
+}
