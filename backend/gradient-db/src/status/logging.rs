@@ -215,6 +215,10 @@ pub async fn insert_worker_message<C: ConnectionTrait>(
     message: String,
     source: String,
 ) -> Result<(), sea_orm::DbErr> {
+    let message =
+        gradient_util::http_base_url::remove_user_name_and_password_from_urls_in_error_text(
+            &message,
+        );
     insert_evaluation_message(db, evaluation_id, level, message, Some(source)).await
 }
 

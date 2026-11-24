@@ -22,7 +22,7 @@ use sea_orm::EntityTrait;
 use tracing::info;
 
 use crate::messages::{ClusterNext, ExecNodeEnd};
-use crate::policy::MAX_WORKER_LOSSES;
+use crate::policy::{MAX_WORKER_LOSSES, strip_url_credentials_and_truncate_failure_message};
 
 const TOO_MANY_LOSSES: &str = "the exec job lost its worker too many times in a row";
 
@@ -170,6 +170,9 @@ pub(crate) async fn attempt_ended(
     reason: AttemptEndReason,
     message: Option<String>,
 ) -> Result<()> {
+    let message = message
+        .as_deref()
+        .map(strip_url_credentials_and_truncate_failure_message);
     let Some((job, closed)) =
         attempts::close(&ctx.worker_db, attempt, reason, message.clone()).await?
     else {
@@ -238,14 +241,18 @@ pub(crate) async fn cluster_settled(
 async fn close_node_attempts(ctx: &DbContext, ends: Vec<ExecNodeEnd>) -> Result<Vec<ClosedNode>> {
     let mut closed = Vec::new();
     for end in ends {
+        let message = end
+            .message
+            .as_deref()
+            .map(strip_url_credentials_and_truncate_failure_message);
         if let Some((job, _)) =
-            attempts::close(&ctx.worker_db, end.attempt, end.reason, end.message.clone()).await?
+            attempts::close(&ctx.worker_db, end.attempt, end.reason, message.clone()).await?
         {
             closed.push(ClosedNode {
                 job,
                 attempt: end.attempt,
                 reason: end.reason,
-                message: end.message,
+                message,
             });
         }
     }
@@ -375,6 +382,7 @@ pub(crate) async fn fail_before_start(
     exec_job: ExecJobId,
     message: &str,
 ) -> Result<()> {
+    let message = &strip_url_credentials_and_truncate_failure_message(message);
     let Some(job) = settle::fail_open(&ctx.worker_db, exec_job, message).await? else {
         info!(%exec_job, "failure for an exec job past dispatch; ignored");
         return Ok(());

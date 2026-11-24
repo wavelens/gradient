@@ -185,6 +185,38 @@ mod tests {
     }
 
     #[test]
+    fn exported_failure_message_omits_presigned_s3_url_credentials_and_store_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("r.db");
+        let conn = open_report(&path).expect("open");
+        let redactor = Redactor::new(opts(true, true));
+        let spec = spec("build_attempt");
+        create_table(&conn, spec).expect("ddl");
+        let failure_message = format!(
+            "upload of {STORE_PATH} failed: error sending request for url (https://s3.example.com/bucket/nar-uploads/a.nar.zst?X-Amz-Credential=AKIAEXAMPLE%2F20260101&X-Amz-Signature=0123abcd)"
+        );
+        let row = row_with(spec, &[("failure_message", &failure_message)]);
+        write_rows(&conn, spec, &[redact_row(spec, &redactor, &row)]).expect("write");
+        drop(conn);
+
+        let conn = rusqlite::Connection::open(&path).expect("reopen");
+        for needle in [
+            "X-Amz-Signature",
+            "X-Amz-Credential",
+            "AKIAEXAMPLE",
+            "0123abcd",
+            "clap_complete",
+        ] {
+            assert_eq!(
+                count_occurrences(&conn, needle),
+                0,
+                "the exported failure message still contains {needle}"
+            );
+        }
+        assert_eq!(count_occurrences(&conn, "https://s3.example.com/bucket"), 1);
+    }
+
+    #[test]
     fn packages_can_be_kept_while_identities_are_hidden() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("r.db");

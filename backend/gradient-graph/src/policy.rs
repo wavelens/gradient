@@ -201,7 +201,12 @@ pub(crate) fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u3
 }
 
 pub(crate) fn failure_log_entry(message: &str) -> String {
-    format!("\nerror: build failed: {}\n", message.trim())
+    format!(
+        "\nerror: build failed: {}\n",
+        gradient_util::http_base_url::remove_user_name_and_password_from_urls_in_error_text(
+            message.trim()
+        )
+    )
 }
 
 pub(crate) fn retry_failed_eval(kind: BuildFailureKind, attempts: u64, max_attempts: u32) -> bool {
@@ -219,10 +224,12 @@ pub fn retry_backoff_elapsed(
     (now - failed_at).num_seconds() >= window as i64
 }
 
-pub(crate) fn truncate_failure_message(error: &str) -> String {
+pub(crate) fn strip_url_credentials_and_truncate_failure_message(error: &str) -> String {
     const MAX: usize = 8 * 1024;
+    let error =
+        gradient_util::http_base_url::remove_user_name_and_password_from_urls_in_error_text(error);
     if error.len() <= MAX {
-        return error.to_string();
+        return error;
     }
 
     let end = (0..=MAX)
@@ -246,7 +253,8 @@ mod tests {
         attempt_reason_for, decide_failure_outcome, failure_log_entry, history_sample,
         inputs_unavailable_circuit_open, out_of_memory, out_of_memory_outcome, retried_as,
         retry_backoff_elapsed, retry_failed_eval, spends_substitute_budget,
-        terminal_success_outcome, terminal_success_status, truncate_failure_message,
+        strip_url_credentials_and_truncate_failure_message, terminal_success_outcome,
+        terminal_success_status,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -631,10 +639,33 @@ mod tests {
     }
 
     #[test]
+    fn strip_url_credentials_and_truncate_failure_message_removes_presigned_s3_query_and_truncates_long_text()
+     {
+        let stored = strip_url_credentials_and_truncate_failure_message(
+            "error sending request for url (https://s3.example.com/bucket/nars/a.nar.zst?X-Amz-Credential=AKIAEXAMPLE&X-Amz-Signature=secret-signature)",
+        );
+        assert_eq!(
+            stored,
+            "error sending request for url (https://s3.example.com/bucket/nars/a.nar.zst)"
+        );
+        let url_across_the_cut = format!(
+            "{} https://s3.example.com/k?X-Amz-Credential=AKIAEXAMPLE&X-Amz-Signature=secret-signature {}",
+            "x".repeat(8 * 1024 - 40),
+            "y".repeat(1024)
+        );
+        let stored = strip_url_credentials_and_truncate_failure_message(&url_across_the_cut);
+        assert!(stored.ends_with(" [truncated]"));
+        assert!(!stored.contains("X-Amz"), "{stored}");
+    }
+
+    #[test]
     fn truncate_failure_message_bounds_long_input_on_char_boundary() {
-        assert_eq!(truncate_failure_message("short error"), "short error");
+        assert_eq!(
+            strip_url_credentials_and_truncate_failure_message("short error"),
+            "short error"
+        );
         let long = "é".repeat(8 * 1024);
-        let out = truncate_failure_message(&long);
+        let out = strip_url_credentials_and_truncate_failure_message(&long);
         assert!(out.len() <= 8 * 1024 + " [truncated]".len());
         assert!(out.ends_with(" [truncated]"));
         assert!(std::str::from_utf8(out.as_bytes()).is_ok());
