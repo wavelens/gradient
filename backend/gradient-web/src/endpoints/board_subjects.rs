@@ -170,6 +170,7 @@ async fn repositories<C: ConnectionTrait>(
 }
 
 /// A worker's display name comes only from registrations and team workers in projects the caller can see.
+#[derive(Default)]
 pub struct WorkerNames(HashMap<String, String>);
 
 impl WorkerNames {
