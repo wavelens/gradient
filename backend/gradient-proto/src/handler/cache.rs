@@ -300,7 +300,7 @@ async fn extend_with_persisted_upstream(
             cached: true,
             file_size: row.file_size.map(|v| v as u64),
             nar_size: row.nar_size.map(|v| v as u64),
-            url: Some(url),
+            url: Some(url.into()),
             nar_hash: row.nar_hash.clone(),
             file_hash: row.file_hash.clone(),
             references: expand_references(row.references.as_deref()),
@@ -924,7 +924,7 @@ mod tests {
             vec![
                 (
                     "a",
-                    Some(format!("https://upstream.invalid/nar/{A_OUT}.nar"))
+                    Some(format!("https://upstream.invalid/nar/{A_OUT}.nar").into())
                 ),
                 ("b", None),
                 ("c", None),
@@ -975,7 +975,7 @@ mod tests {
                 && pulled[0].nar_hash.as_deref() == Some("sha256:second")
                 && pulled[0]
                     .url
-                    .as_deref()
+                    .as_ref().map(gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query)
                     .is_some_and(|url| url.contains(&SECOND_KEY[2..])),
             "Project B trusts only its own variant of the shared hash, so the answer carries the NAR hash and the download link of that variant: {pulled:?}"
         );

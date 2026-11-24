@@ -665,11 +665,7 @@ pub fn cached_path_from_upstream_narinfo(
         cached: true,
         file_size: path_info.file_size,
         nar_size: Some(path_info.nar_size),
-        url: Some(format!(
-            "{}/{}",
-            base_url.trim_end_matches('/'),
-            path_info.url
-        )),
+        url: Some(format!("{}/{}", base_url.trim_end_matches('/'), path_info.url).into()),
         nar_hash: Some(path_info.nar_hash),
         file_hash: path_info.file_hash,
         references: Some(
@@ -1045,7 +1041,9 @@ mod tests {
         );
         assert!(cp.cached);
         assert_eq!(
-            cp.url.as_deref(),
+            cp.url.as_ref().map(
+                gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query
+            ),
             Some("https://upstream.example/nar/abc.nar.xz")
         );
         assert_eq!(cp.nar_size, Some(102760));
@@ -1116,7 +1114,12 @@ mod tests {
             "/nix/store/aa-x",
             narinfo_with_required_fields_and_one_signature(),
         );
-        assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar.xz"));
+        assert_eq!(
+            cp.url.as_ref().map(
+                gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query
+            ),
+            Some("https://up.example/nar/x.nar.xz")
+        );
     }
 
     const SIGNED_HASH: &str = "brj5bb4pny8pnngq3qdymkllwql6z29j";
@@ -1214,7 +1217,12 @@ mod tests {
         let (body, key) = signed_narinfo(SIGNED_PATH);
         let cp = verified_narinfo(&ep_with_key(Some(key)), SIGNED_HASH, SIGNED_PATH, &body)
             .expect("verified");
-        assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar.xz"));
+        assert_eq!(
+            cp.url.as_ref().map(
+                gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query
+            ),
+            Some("https://up.example/nar/x.nar.xz")
+        );
     }
 
     #[test]

@@ -1080,7 +1080,7 @@ mod tests {
                 cached: false,
                 file_size: Some(1),
                 nar_size: Some(1),
-                url: Some(format!("https://s3.example.com{p}?{}", "x".repeat(512))),
+                url: Some(format!("https://s3.example.com{p}?{}", "x".repeat(512)).into()),
                 nar_hash: Some(format!("sha256:{}", "y".repeat(52))),
                 file_hash: Some(format!("sha256:{}", "z".repeat(52))),
                 references: None,

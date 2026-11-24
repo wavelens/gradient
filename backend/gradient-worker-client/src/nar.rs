@@ -342,7 +342,7 @@ async fn send_nar(
         GrantTarget::Put { url } => {
             debug!(store_path, "presigned NAR upload");
             let (compressed, meta) = pack_compress(nar, threads, nar_read).await?;
-            http_put(&url, compressed).await?;
+            http_put(url.as_presigned_url_with_secret_query(), compressed).await?;
             Ok((meta, None))
         }
         GrantTarget::Multipart(grant) => {
@@ -951,16 +951,21 @@ mod tests {
         let path = dir.to_str().unwrap().to_owned();
         let (http_url, http_task) = one_shot_http_server().await;
 
-        let served = served(GrantTarget::Put { url: http_url }, async |uploads| {
-            upload_nar(
-                uploads,
-                "job-xyz",
-                &path,
-                NarSource::Path { meta: None },
-                &mut |_| {},
-            )
-            .await
-        })
+        let served = served(
+            GrantTarget::Put {
+                url: http_url.into(),
+            },
+            async |uploads| {
+                upload_nar(
+                    uploads,
+                    "job-xyz",
+                    &path,
+                    NarSource::Path { meta: None },
+                    &mut |_| {},
+                )
+                .await
+            },
+        )
         .await;
 
         assert!(
@@ -996,7 +1001,10 @@ mod tests {
         let grant = gradient_wire::types::PresignedMultipart {
             upload_id: "up-1".into(),
             part_size: 16,
-            part_urls: (1..=4096).map(|i| format!("{}/{i:05}", s3.uri())).collect(),
+            part_urls: (1..=4096)
+                .map(|i| format!("{}/{i:05}", s3.uri()))
+                .map(Into::into)
+                .collect(),
         };
 
         let served = served(GrantTarget::Multipart(grant), async |uploads| {
@@ -1125,22 +1133,27 @@ mod tests {
         let ca = "fixed:r:sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s";
         let (http_url, _http_task) = one_shot_http_server().await;
 
-        let served = served(GrantTarget::Put { url: http_url }, async |uploads| {
-            let source = NarSource::Raw {
-                nar: b"abc".to_vec(),
-                references: vec![],
-                deriver: None,
-                ca: Some(ca.to_owned()),
-            };
-            upload_nar(
-                uploads,
-                "job-ca",
-                &store_path("hello-2.12"),
-                source,
-                &mut |_| {},
-            )
-            .await
-        })
+        let served = served(
+            GrantTarget::Put {
+                url: http_url.into(),
+            },
+            async |uploads| {
+                let source = NarSource::Raw {
+                    nar: b"abc".to_vec(),
+                    references: vec![],
+                    deriver: None,
+                    ca: Some(ca.to_owned()),
+                };
+                upload_nar(
+                    uploads,
+                    "job-ca",
+                    &store_path("hello-2.12"),
+                    source,
+                    &mut |_| {},
+                )
+                .await
+            },
+        )
         .await;
 
         assert_eq!(served.nar().ca.as_deref(), Some(ca));
@@ -1151,22 +1164,27 @@ mod tests {
         let raw = b"verbatim upstream nar payload".to_vec();
         let (http_url, http_task) = one_shot_http_server().await;
 
-        let served = served(GrantTarget::Put { url: http_url }, async |uploads| {
-            let source = NarSource::Raw {
-                nar: raw.clone(),
-                references: vec![],
-                deriver: None,
-                ca: None,
-            };
-            upload_nar(
-                uploads,
-                "job-verbatim",
-                &store_path("verbatim"),
-                source,
-                &mut |_| {},
-            )
-            .await
-        })
+        let served = served(
+            GrantTarget::Put {
+                url: http_url.into(),
+            },
+            async |uploads| {
+                let source = NarSource::Raw {
+                    nar: raw.clone(),
+                    references: vec![],
+                    deriver: None,
+                    ca: None,
+                };
+                upload_nar(
+                    uploads,
+                    "job-verbatim",
+                    &store_path("verbatim"),
+                    source,
+                    &mut |_| {},
+                )
+                .await
+            },
+        )
         .await;
 
         assert_eq!(served.nar().nar_hash, sha256_nix32(&raw));

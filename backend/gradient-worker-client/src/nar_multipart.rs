@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
+use gradient_wire::types::{CompletedMultipart, PresignedMultipart, RedactedPresignedS3Url};
 use tokio::task::JoinSet;
 
 const MAX_INFLIGHT_PARTS: usize = 2;
@@ -77,8 +77,8 @@ impl PartSink for PartUploader<'_> {
     }
 }
 
-async fn put_part(url: String, body: Bytes) -> Result<String> {
-    crate::object_put::put_object(&url, body, None)
+async fn put_part(url: RedactedPresignedS3Url, body: Bytes) -> Result<String> {
+    crate::object_put::put_object(url.as_presigned_url_with_secret_query(), body, None)
         .await?
         .context("multipart part response carried no ETag")
 }
@@ -93,7 +93,10 @@ mod tests {
         PresignedMultipart {
             upload_id: "up-1".into(),
             part_size: 4,
-            part_urls: (1..=parts).map(|i| format!("{base}/part{i}")).collect(),
+            part_urls: (1..=parts)
+                .map(|i| format!("{base}/part{i}"))
+                .map(Into::into)
+                .collect(),
         }
     }
 

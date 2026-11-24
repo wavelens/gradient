@@ -108,7 +108,7 @@ pub(crate) async fn sign_parts(
     upload_id: &str,
     part_count: u64,
     ttl: Duration,
-) -> Result<Vec<String>> {
+) -> Result<Vec<gradient_wire::types::RedactedPresignedS3Url>> {
     let mut urls =
         Vec::with_capacity(usize::try_from(part_count).context("count multipart parts")?);
     for part_number in 1..=part_count {
@@ -120,7 +120,7 @@ pub(crate) async fn sign_parts(
             .signed_url_opts(reqwest::Method::PUT, path, ttl, &options)
             .await
             .context("presign multipart part")?;
-        urls.push(url.to_string());
+        urls.push(url.to_string().into());
     }
     Ok(urls)
 }
@@ -166,6 +166,7 @@ pub(crate) async fn abort(s3: &AmazonS3, path: &Path, upload_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_wire::types::RedactedPresignedS3Url;
 
     const GIB: u64 = 1024 * MIB;
 
@@ -283,7 +284,11 @@ mod tests {
         assert_eq!(grant.upload_id, "up-1");
         assert_eq!(grant.part_size, layout(2 * GIB).part_size);
         assert_eq!(grant.part_urls.len() as u64, layout(2 * GIB).part_count);
-        assert!(grant.part_urls[0].contains("partNumber=1"));
+        assert!(
+            grant.part_urls[0]
+                .as_presigned_url_with_secret_query()
+                .contains("partNumber=1")
+        );
         assert_eq!(latencies(stats, "multipart_create"), 1);
     }
 
@@ -351,7 +356,11 @@ mod tests {
         .await
         .expect("sign");
         assert_eq!(urls.len(), 3);
-        for (i, url) in urls.iter().enumerate() {
+        for (i, url) in urls
+            .iter()
+            .map(RedactedPresignedS3Url::as_presigned_url_with_secret_query)
+            .enumerate()
+        {
             assert!(url.contains(&format!("partNumber={}", i + 1)), "{url}");
             assert!(url.contains("uploadId=up-1"), "{url}");
             assert!(url.contains("X-Amz-Signature="), "{url}");
