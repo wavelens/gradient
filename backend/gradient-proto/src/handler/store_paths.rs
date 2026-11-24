@@ -142,6 +142,12 @@ fn inbound_update(
                 }
                 paths.paths(&mut derivation.dependencies)?;
                 paths.paths(&mut derivation.input_sources)?;
+                if let Some(exec) = &mut derivation.exec {
+                    exec.program = paths.mapper.inbound_if_store_path(&exec.program)?;
+                    if let Some(image) = &mut exec.image {
+                        *image = paths.mapper.inbound_if_store_path(image)?;
+                    }
+                }
             }
         }
         JobUpdateKind::EvalStats(report) => {
@@ -318,7 +324,7 @@ mod tests {
     use gradient_wire::messages::ServerMessage;
     use gradient_wire::types::{
         BuildJob, BuildOutput, BuildProduct, BuildSpec, DerivationOutput, DiscoveredDerivation,
-        ExecJob, Job, JobContext, JobUpdateKind, NarUploadMetadata, UploadMetadata,
+        ExecJob, ExecSpec, Job, JobContext, JobUpdateKind, NarUploadMetadata, UploadMetadata,
     };
     use std::sync::Arc;
 
@@ -376,6 +382,39 @@ mod tests {
             derivations[0].input_sources,
             vec![format!("/nix/store/{S}-src")]
         );
+    }
+
+    #[test]
+    fn eval_result_maps_discovered_derivation_exec_program_and_exec_image_from_inbound_to_stored() {
+        let derivation = DiscoveredDerivation {
+            attr: "a".into(),
+            drv_path: format!("/nix/store/{O}-a.drv"),
+            exec: Some(ExecSpec {
+                program: format!("/nix/store/{O}-app/bin/app"),
+                image: Some(format!("/nix/store/{O}-img")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let msg = ClientMessage::JobUpdate {
+            job_id: "j1".into(),
+            assignment_id: "a1".into(),
+            update: JobUpdateKind::EvalResult {
+                derivations: vec![derivation],
+                warnings: vec![],
+                errors: vec![],
+            },
+        };
+        let ClientMessage::JobUpdate {
+            update: JobUpdateKind::EvalResult { derivations, .. },
+            ..
+        } = inbound_message(msg, &mapper()).unwrap()
+        else {
+            panic!("an EvalResult stays an EvalResult")
+        };
+        let exec = derivations[0].exec.as_ref().unwrap();
+        assert_eq!(exec.program, format!("/nix/store/{S}-app/bin/app"));
+        assert_eq!(exec.image, Some(format!("/nix/store/{S}-img")));
     }
 
     #[test]
