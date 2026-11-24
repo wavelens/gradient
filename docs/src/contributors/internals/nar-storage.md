@@ -53,7 +53,7 @@ Stored paths keep one `cached_path` row per stored content. Storage keys are uni
 !!! warning "Bucket Requirements"
     - No object versioning, object lock or replication. Object lock and replication force versioning.
     - Versioned buckets retain a copy of every deleted NAR. No S3 GC can reclaim those copies.
-    - Configure an `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days). NARs over 1 GiB upload as multipart. A worker dying mid-upload leaves the parts behind.
+    - Configure an `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days). NARs over 256 MiB upload as multipart. A worker dying mid-upload leaves the parts behind.
 
 ## Build Logs
 
