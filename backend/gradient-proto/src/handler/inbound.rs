@@ -781,7 +781,7 @@ impl<'a> InboundContext<'a> {
     async fn on_exec_metrics(&self, job_id: String, metrics: ExecMetrics) {
         if self.active.exec_attempt(&job_id).is_none() || !self.owns_handed_dispatch(&job_id).await
         {
-            debug!(peer_id = %self.peer_id, %job_id, "usage window for an exec job this session does not run. discard");
+            debug!(peer_id = %self.peer_id, %job_id, "usage window discarded: no exec job for this session");
             return;
         }
         self.job_events
