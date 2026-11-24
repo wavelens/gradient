@@ -275,10 +275,18 @@ async fn drain(mut rx: mpsc::Receiver<QueuedEvent>, peer_id: String, handler: im
         let Some((received, mut event, applied)) = next else {
             break;
         };
+        let mut combined_report_awaited_senders: Vec<_> = applied.into_iter().collect();
+        let mut combined_report_count: u32 = 1;
         while let Ok((arrived, following, following_applied)) = rx.try_recv() {
-            if let Some(following) = event.absorb(following) {
-                held = Some((arrived, following, following_applied));
-                break;
+            match event.absorb(following) {
+                Some(following) => {
+                    held = Some((arrived, following, following_applied));
+                    break;
+                }
+                None => {
+                    combined_report_count += 1;
+                    combined_report_awaited_senders.extend(following_applied);
+                }
             }
         }
 
@@ -287,11 +295,12 @@ async fn drain(mut rx: mpsc::Receiver<QueuedEvent>, peer_id: String, handler: im
             "job_event",
             %job_id,
             kind = event.kind(),
+            combined_report_count,
             queue_wait_us = u64::try_from(received.elapsed().as_micros()).unwrap_or(u64::MAX),
         );
         let started = Instant::now();
         handler.apply(event).instrument(span).await;
-        if let Some(applied) = applied {
+        for applied in combined_report_awaited_senders {
             let _ = applied.send(());
         }
         let took = started.elapsed();
@@ -663,6 +672,36 @@ mod tests {
         .await;
 
         assert_eq!(order, ["a:1", "b:1", "a:1"]);
+    }
+
+    #[tokio::test]
+    async fn eval_results_of_a_job_do_not_merge_across_a_non_eval_result_event() {
+        let order = drained(vec![
+            eval_result("j", 1),
+            eval_result("j", 2),
+            update("j"),
+            eval_result("j", 4),
+            eval_result("j", 8),
+        ])
+        .await;
+
+        assert_eq!(order, ["j:3", "j", "j:12"]);
+    }
+
+    #[tokio::test]
+    async fn two_awaited_reports_in_one_batch_signal_applied_after_batch_applied() {
+        let (events, _applied, gate) = lane();
+        events.push(update("blocked")).await;
+        let first = events.push_awaited(eval_result("j", 1)).await;
+        let second = events.push_awaited(eval_result("j", 1)).await;
+
+        gate.notify_one();
+        for done in [first, second] {
+            tokio::time::timeout(Duration::from_secs(1), done)
+                .await
+                .expect("signalled after the apply")
+                .expect("the apply sends the signal");
+        }
     }
 
     #[tokio::test]

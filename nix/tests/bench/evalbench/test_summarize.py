@@ -24,6 +24,19 @@ class Summarize(unittest.TestCase):
     def test_the_worker_clock_skew_is_recovered_from_paired_messages(self):
         self.assertEqual(summarize.clock_offset(self.skewed), (250_000, True))
 
+    def test_a_job_event_that_combined_two_worker_reports_pairs_with_the_first_report_and_the_next_job_event_pairs_with_the_third_report(self):
+        def span(process, name, ts_us, **fields):
+            return {"process": process, "name": name, "ts_us": ts_us, "fields": {"job_id": "j", **fields}}
+
+        spans = [
+            span("worker", "report_eval_result", 100),
+            span("worker", "report_eval_result", 200),
+            span("worker", "report_eval_result", 300),
+            span("server", "job_event", 1_000, kind="eval_result", queue_wait_us=850, combined_report_count=2),
+            span("server", "job_event", 2_000, kind="eval_result", queue_wait_us=1_650),
+        ]
+        self.assertEqual(summarize.upstream_delays(spans), [50, 50])
+
     def test_a_run_without_pairs_stays_unaligned(self):
         lonely = summarize.load_spans(FIXTURES / "lonely" / "trace")
         self.assertEqual(summarize.clock_offset(lonely), (0, False))
