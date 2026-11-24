@@ -22,7 +22,8 @@ use gradient_wire::guest::{
     GuestNetwork, GuestSecret, RunJob, WorkerToAgent,
 };
 use gradient_wire::types::{
-    BuildFailureKind, DeviceRequest, ExecJob, GuestSize, MAX_PHASE_PAYLOAD, UploadObject,
+    BuildFailureKind, DeviceRequest, ExecJob, ExecMetrics, GuestSize, MAX_PHASE_PAYLOAD,
+    UploadObject,
 };
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -74,6 +75,7 @@ pub trait ExecReport: Send {
     async fn output_dropped(&mut self, bytes: u64) -> Result<()>;
     async fn phase(&mut self, name: String, payload: Vec<u8>) -> Result<()>;
     async fn note(&mut self, line: &str) -> Result<()>;
+    async fn send_usage_window(&mut self, metrics: ExecMetrics);
     async fn channel_data(&mut self, channel_id: u64, data: Vec<u8>);
     async fn channel_closed(
         &mut self,
@@ -126,6 +128,12 @@ impl ExecReport for JobUpdater {
 
     async fn note(&mut self, line: &str) -> Result<()> {
         self.send_log_note(line).await
+    }
+
+    async fn send_usage_window(&mut self, metrics: ExecMetrics) {
+        if let Err(e) = self.send_exec_metrics(metrics).await {
+            debug!(error = %e, "Discarded usage window of exec job");
+        }
     }
 
     async fn channel_data(&mut self, channel_id: u64, data: Vec<u8>) {
@@ -701,7 +709,7 @@ async fn forward<R: ExecReport>(
         }
         AgentToWorker::JobSecrets { .. } => debug!("job secrets from the guest agent dropped"),
         AgentToWorker::GuestShutdown => debug!("guest shutdown after the program end dropped"),
-        AgentToWorker::ResourceUsageWindow(_) => {}
+        AgentToWorker::ResourceUsageWindow(m) => reporter.send_usage_window(m).await,
         AgentToWorker::UploadStart { upload_id, .. }
         | AgentToWorker::UploadChunk { upload_id, .. }
         | AgentToWorker::UploadEnd { upload_id } => {
@@ -1127,6 +1135,7 @@ mod tests {
         Note(String),
         ChannelData(u64, Vec<u8>),
         ChannelClosed(u64, Option<i32>),
+        UsageWindow(ExecMetrics),
     }
 
     type Uploaded = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
@@ -1182,6 +1191,10 @@ mod tests {
         async fn note(&mut self, line: &str) -> Result<()> {
             self.0.push(Reported::Note(line.to_owned()));
             Ok(())
+        }
+
+        async fn send_usage_window(&mut self, metrics: ExecMetrics) {
+            self.0.push(Reported::UsageWindow(metrics));
         }
 
         async fn channel_data(&mut self, channel_id: u64, data: Vec<u8>) {
@@ -1947,6 +1960,32 @@ mod tests {
             reported,
             [Reported::Phase("small".into()), Reported::Exited(0)]
         );
+    }
+
+    #[tokio::test]
+    async fn usage_windows_are_forwarded_to_the_reporter() {
+        let window = ExecMetrics {
+            sequence: 3,
+            window_ms: 10_000,
+            cpu_avg: 1.5,
+            cpu_max: 2.0,
+            ram_avg_bytes: 100,
+            ram_max_bytes: 200,
+            ram_total_bytes: 400,
+            disk_max_bytes: 50,
+            disk_total_bytes: 500,
+        };
+        let mut recorder = Recorder::default();
+
+        let followed = forward(
+            AgentToWorker::ResourceUsageWindow(window.clone()),
+            &mut recorder,
+        )
+        .await
+        .unwrap();
+
+        assert!(followed.is_none());
+        assert_eq!(recorder.0, [Reported::UsageWindow(window)]);
     }
 
     #[test]
