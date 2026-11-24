@@ -975,7 +975,7 @@ mod tests {
                 && pulled[0].nar_hash.as_deref() == Some("sha256:second")
                 && pulled[0]
                     .url
-                    .as_ref().map(gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query)
+                    .as_ref().map(gradient_wire::types::UrlWithSecretQuery::as_full_url_with_access_credential_query)
                     .is_some_and(|url| url.contains(&SECOND_KEY[2..])),
             "Project B trusts only its own variant of the shared hash, so the answer carries the NAR hash and the download link of that variant: {pulled:?}"
         );

@@ -13,7 +13,7 @@ use gradient_derivation::parse_drv;
 use gradient_util::store_path::nix_store_path;
 use gradient_wire::CachedPathInfo;
 use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode, Realisation};
-use gradient_wire::types::{BuildProgressPhase, JobPhase, RedactedPresignedS3Url};
+use gradient_wire::types::{BuildProgressPhase, JobPhase, UrlWithSecretQuery};
 use tracing::{debug, error, warn};
 
 use crate::count::clamp_to_u32;
@@ -177,13 +177,13 @@ pub(crate) async fn stage_one_presigned(
 ) -> Result<StagedFetch> {
     let url = cp.url.clone().expect("by_url entries have a URL");
     let presigned_url_without_query_string =
-        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url.as_presigned_url_with_secret_query());
+        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url.as_full_url_with_access_credential_query());
     let path = cp.path.clone();
     let mut backoff = PRESIGNED_RETRY_BASE;
 
     for attempt in 1..=PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
         let attempt_err = match http
-            .get(url.as_presigned_url_with_secret_query())
+            .get(url.as_full_url_with_access_credential_query())
             .send()
             .await
         {
@@ -588,7 +588,7 @@ impl<'a> InputPrefetcher<'a> {
                     &bytes,
                     meta.url
                         .as_ref()
-                        .map(RedactedPresignedS3Url::as_presigned_url_with_secret_query),
+                        .map(UrlWithSecretQuery::as_full_url_with_access_credential_query),
                 );
                 for seed in drv_closure_seeds_from_compressed_nar(&bytes, compression, path).await {
                     if !queried.contains(&seed) {

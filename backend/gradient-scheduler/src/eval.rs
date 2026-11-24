@@ -119,7 +119,7 @@ pub async fn probe_outputs(
                 url: cp
                     .url
                     .as_ref()
-                    .map(|url| url.as_presigned_url_with_secret_query().to_owned()),
+                    .map(|url| url.as_full_url_with_access_credential_query().to_owned()),
                 verified_by: Some(found.verified_by),
                 nar_hash: cp.nar_hash.clone(),
                 file_hash: cp.file_hash.clone(),

@@ -137,7 +137,7 @@ async fn fetch_one(
         upstream
             .url
             .as_ref()
-            .map(|url| url.as_presigned_url_with_secret_query().to_owned()),
+            .map(|url| url.as_full_url_with_access_credential_query().to_owned()),
     ));
     let digest = digest_of(Arc::clone(&nar))
         .await
