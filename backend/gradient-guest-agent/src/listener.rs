@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -56,6 +56,7 @@ struct Agent {
     kill: CancellationToken,
     shell: Mutex<Option<ShellContext>>,
     job_secrets: Mutex<Option<JobSecrets>>,
+    next_resource_usage_window_sequence_number: Arc<AtomicU32>,
     tasks: Shutdown,
 }
 
@@ -112,6 +113,7 @@ pub async fn listen(
         kill: CancellationToken::new(),
         shell: Mutex::new(None),
         job_secrets: Mutex::new(None),
+        next_resource_usage_window_sequence_number: Arc::new(AtomicU32::new(0)),
         tasks,
     });
     let listener = VsockListener::bind(VsockAddr::new(VMADDR_CID_ANY, AGENT_VSOCK_PORT))
@@ -263,6 +265,9 @@ fn start_job(agent: &Arc<Agent>, job: Box<RunJob>) -> Option<AgentToWorker> {
         .job_secrets
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(secrets);
+    agent
+        .next_resource_usage_window_sequence_number
+        .store(0, Ordering::SeqCst);
 
     let job_agent = Arc::clone(agent);
     agent.tasks.spawn(async move {
@@ -311,6 +316,7 @@ fn spawn_streamer(
         outgoing,
         agent.tasks.clone(),
         version >= GUEST_USAGE_WINDOW_MESSAGE_AGENT_TO_WORKER_SINCE,
+        Arc::clone(&agent.next_resource_usage_window_sequence_number),
     )))
 }
 
@@ -320,6 +326,7 @@ async fn stream_to_worker(
     outgoing: mpsc::Sender<AgentToWorker>,
     tasks: Shutdown,
     sends_usage_windows: bool,
+    next_resource_usage_window_sequence_number: Arc<AtomicU32>,
 ) {
     let mut sent_started = false;
     let mut output_done = reader.is_none();
@@ -347,6 +354,7 @@ async fn stream_to_worker(
                     sample_and_send_exec_metrics_windows_until_shutdown(
                         progress.clone(),
                         outgoing.clone(),
+                        Arc::clone(&next_resource_usage_window_sequence_number),
                     ),
                 )));
             }
@@ -391,14 +399,85 @@ async fn next_chunk(reader: Option<&mut OutputReader>) -> Option<OutputChunk> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
     use std::time::Duration;
 
     use gradient_util::shutdown::Shutdown;
     use gradient_wire::guest::AgentToWorker;
     use tokio::sync::{mpsc, watch};
+    use tokio_util::task::AbortOnDropHandle;
 
     use super::{Outcome, Progress, initial_progress, stream_to_worker};
     use crate::output::OutputLog;
+
+    async fn collect_resource_usage_window_sequence_numbers(
+        mut sent: mpsc::Receiver<AgentToWorker>,
+    ) -> Vec<u32> {
+        let mut sequence_numbers = Vec::new();
+        while let Some(message) = sent.recv().await {
+            if let AgentToWorker::ResourceUsageWindow(window) = message {
+                sequence_numbers.push(window.sequence);
+            }
+        }
+        sequence_numbers
+    }
+
+    #[tokio::test]
+    async fn a_reattached_worker_continues_usage_window_sequence_numbers_instead_of_restarting_at_zero()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = OutputLog::create(&dir.path().join("output.log"), 1024)
+            .await
+            .expect("create");
+        tokio::time::pause();
+        let (progress, receiver) = watch::channel(Progress {
+            started: true,
+            outcome: None,
+        });
+        let next_resource_usage_window_sequence_number = Arc::new(AtomicU32::new(0));
+        let tasks = Shutdown::new();
+
+        let (outgoing, first_worker_connection_message_receiver) = mpsc::channel(16);
+        let first_worker_connection_streamer_abort_on_drop_handle =
+            AbortOnDropHandle::new(tasks.spawn(stream_to_worker(
+                receiver.clone(),
+                Some(log.readers().reader_from(0)),
+                outgoing,
+                tasks.clone(),
+                true,
+                Arc::clone(&next_resource_usage_window_sequence_number),
+            )));
+        tokio::time::sleep(Duration::from_millis(10_500)).await;
+        drop(first_worker_connection_streamer_abort_on_drop_handle);
+
+        let (outgoing, second_worker_receiver_after_reattach) = mpsc::channel(16);
+        let streamer = tasks.spawn(stream_to_worker(
+            receiver,
+            Some(log.readers().reader_from(0)),
+            outgoing,
+            tasks.clone(),
+            true,
+            next_resource_usage_window_sequence_number,
+        ));
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        progress.send_modify(|p| p.outcome = Some(Outcome::Exited(0)));
+        log.close();
+        streamer.await.expect("streamer");
+
+        assert_eq!(
+            collect_resource_usage_window_sequence_numbers(
+                first_worker_connection_message_receiver
+            )
+            .await,
+            [0]
+        );
+        assert_eq!(
+            collect_resource_usage_window_sequence_numbers(second_worker_receiver_after_reattach)
+                .await,
+            [1]
+        );
+    }
 
     async fn collect_worker_messages_until_program_exits(
         sends_usage_windows: bool,
@@ -421,6 +500,7 @@ mod tests {
             outgoing,
             tasks.clone(),
             sends_usage_windows,
+            Arc::new(AtomicU32::new(0)),
         ));
         tokio::time::sleep(Duration::from_millis(1500)).await;
         progress.send_modify(|p| p.outcome = Some(Outcome::Exited(0)));
@@ -439,7 +519,15 @@ mod tests {
         let (_progress, receiver) = watch::channel(initial_progress(true));
         let (outgoing, mut sent) = mpsc::channel(4);
 
-        stream_to_worker(receiver, None, outgoing, Shutdown::new(), true).await;
+        stream_to_worker(
+            receiver,
+            None,
+            outgoing,
+            Shutdown::new(),
+            true,
+            Arc::new(AtomicU32::new(0)),
+        )
+        .await;
 
         assert_eq!(sent.recv().await, Some(AgentToWorker::JobLost));
         assert_eq!(sent.recv().await, None);
