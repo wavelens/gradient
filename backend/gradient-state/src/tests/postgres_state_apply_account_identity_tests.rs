@@ -19,12 +19,12 @@ use tempfile::TempDir;
 const PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$dGVzdA";
 const OTHER_PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$b3RoZXJzYWx0$b3RoZXI";
 
-struct TemporaryCredentialsDirectoryAndCryptSecretWithStateApply {
+pub(super) struct TemporaryCredentialsDirectoryAndCryptSecretWithStateApply {
     credentials: TempDir,
 }
 
 impl TemporaryCredentialsDirectoryAndCryptSecretWithStateApply {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let credentials = TempDir::new().unwrap();
         fs::write(
             credentials.path().join("crypt_secret"),
@@ -34,7 +34,7 @@ impl TemporaryCredentialsDirectoryAndCryptSecretWithStateApply {
         Self { credentials }
     }
 
-    fn write(&self, kind: &str, name: &str, suffix: &str, contents: &str) {
+    pub(super) fn write(&self, kind: &str, name: &str, suffix: &str, contents: &str) {
         fs::write(
             self.credentials
                 .path()
@@ -44,7 +44,7 @@ impl TemporaryCredentialsDirectoryAndCryptSecretWithStateApply {
         .unwrap();
     }
 
-    fn write_project_private_key(&self, project: &str) {
+    pub(super) fn write_project_private_key(&self, project: &str) {
         let key = PrivateKey::from(Ed25519Keypair::from_seed(&[7; 32]));
         self.write(
             "project",
@@ -54,7 +54,7 @@ impl TemporaryCredentialsDirectoryAndCryptSecretWithStateApply {
         );
     }
 
-    async fn apply(
+    pub(super) async fn apply(
         &self,
         db: &DatabaseConnection,
         state_json: &str,

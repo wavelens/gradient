@@ -7,7 +7,10 @@
 use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{
-    load_git_host_connections_usable_by_project_by_name, lookup_id, read_credential,
+    choose_row_to_update_from_declared_id_and_name,
+    load_git_host_connections_usable_by_project_by_name, lookup_id,
+    order_state_entries_with_declared_id_first, parse_optional_uuid_string_as_typed_id,
+    read_credential,
 };
 use crate::config::*;
 use anyhow::{Context, Result};
@@ -40,7 +43,9 @@ impl<'a> StateApplicator<'a> {
         let mut projects: HashMap<ProjectId, MProject> = HashMap::new();
         let mut implied_grants: HashSet<StateFileRepositoryGrant> = HashSet::new();
 
-        for state_task in state_tasks.values() {
+        for state_task in
+            order_state_entries_with_declared_id_first(state_tasks.values(), |t| (&t.id, &t.name))
+        {
             let project_id = lookup_id(&project_map, &state_task.project, "Project")?;
             let project = match projects.entry(project_id) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -80,11 +85,37 @@ impl<'a> StateApplicator<'a> {
             )?);
             let connection_id = connection.map(|connection| connection.id);
 
-            let existing_task = task::Entity::find()
+            let declared_id = parse_optional_uuid_string_as_typed_id::<TaskId>(
+                "Task",
+                &state_task.name,
+                state_task.id.as_deref(),
+            )?;
+            let row_with_declared_id = match declared_id {
+                Some(id) => task::Entity::find_by_id(id).one(self.db).await?,
+                None => None,
+            };
+            if let Some(pinned) = &row_with_declared_id
+                && pinned.project != project_id
+            {
+                return Err(format!(
+                    "Task '{}' can't use id {}. A task in another project already claimed that id. A task can't move between projects.",
+                    state_task.name, pinned.id
+                )
+                .into());
+            }
+            let row_with_name = task::Entity::find()
                 .filter(task::Column::Name.eq(&state_task.name))
                 .filter(task::Column::Project.eq(project_id))
                 .one(self.db)
                 .await?;
+            let existing_task = choose_row_to_update_from_declared_id_and_name(
+                "Task",
+                &state_task.name,
+                declared_id,
+                row_with_declared_id,
+                row_with_name,
+                |task| task.id,
+            )?;
             let created_by_id = state_users.resolve_creator_username_to_state_account_id(
                 &state_task.created_by,
                 &format!("task '{}'", state_task.name),
@@ -97,7 +128,7 @@ impl<'a> StateApplicator<'a> {
             let task_row = if let Some(existing) = existing_task {
                 let task_id = existing.id;
                 let mut proj: task::ActiveModel = existing.into();
-                proj.project = Set(project_id);
+                proj.name = Set(state_task.name.clone());
                 proj.active = Set(state_task.active);
                 proj.display_name = Set(state_task.display_name.clone());
                 proj.description = Set(state_task.description.clone().unwrap_or_default());
@@ -124,7 +155,7 @@ impl<'a> StateApplicator<'a> {
                     .ok_or_else(|| format!("Task '{}' vanished after update", state_task.name))?
             } else {
                 let proj = task::Model {
-                    id: TaskId::now_v7(),
+                    id: declared_id.unwrap_or_else(TaskId::now_v7),
                     project: project_id,
                     name: state_task.name.clone(),
                     active: state_task.active,

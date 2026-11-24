@@ -81,6 +81,8 @@ pub struct StateTask {
     pub project: String,
     pub display_name: String,
     #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
     pub repository: String,
     #[serde(default = "default_wildcard")]
@@ -242,6 +244,8 @@ impl StateGitHostConnection {
 pub struct StateCache {
     pub name: String,
     pub display_name: String,
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default = "default_true")]

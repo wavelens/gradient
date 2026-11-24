@@ -12,6 +12,8 @@ use gradient_entity::*;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::str::FromStr;
 
 pub(crate) fn lookup_id<T: Copy>(
     map: &HashMap<String, T>,
@@ -21,6 +23,71 @@ pub(crate) fn lookup_id<T: Copy>(
     map.get(name)
         .copied()
         .ok_or_else(|| format!("{} '{}' not found", kind, name).into())
+}
+
+/// Renamed entries with a declared id release the old name first. Entries that take over that old
+/// name apply later.
+pub(crate) fn order_state_entries_with_declared_id_first<'e, E>(
+    entries: impl Iterator<Item = &'e E>,
+    declared_id_and_name: impl Fn(&E) -> (&Option<String>, &str),
+) -> Vec<&'e E> {
+    let mut ordered: Vec<&E> = entries.collect();
+    ordered.sort_by_key(|entry| {
+        let (declared_id, name) = declared_id_and_name(entry);
+        (declared_id.is_none(), name)
+    });
+    ordered
+}
+
+pub(crate) fn parse_optional_uuid_string_as_typed_id<I>(
+    kind: &str,
+    name: &str,
+    id: Option<&str>,
+) -> Result<Option<I>, DynError>
+where
+    I: FromStr,
+    I::Err: Display,
+{
+    id.map(|id| {
+        id.trim()
+            .parse::<I>()
+            .map_err(|e| format!("{kind} '{name}' has an invalid id '{id}': {e}").into())
+    })
+    .transpose()
+}
+
+pub(crate) fn choose_row_to_update_from_declared_id_and_name<M, I>(
+    kind: &str,
+    name: &str,
+    declared_id: Option<I>,
+    row_with_declared_id: Option<M>,
+    row_with_name: Option<M>,
+    id_of: impl Fn(&M) -> I,
+) -> Result<Option<M>, DynError>
+where
+    I: PartialEq + Display,
+{
+    if let Some(pinned) = row_with_declared_id {
+        if let Some(other) = row_with_name.filter(|other| id_of(other) != id_of(&pinned)) {
+            return Err(format!(
+                "{kind} '{name}' declared id {}. Another {kind} with id {} already used that name.",
+                id_of(&pinned),
+                id_of(&other)
+            )
+            .into());
+        }
+        return Ok(Some(pinned));
+    }
+
+    if let (Some(declared), Some(row)) = (declared_id, &row_with_name) {
+        return Err(format!(
+            "The state file assigned id {declared} to {kind} '{name}', but a row with that name is present with id {}. The id can't change.",
+            id_of(row)
+        )
+        .into());
+    }
+
+    Ok(row_with_name)
 }
 
 pub(crate) async fn load_git_host_connections_usable_by_project_by_name<C: ConnectionTrait>(

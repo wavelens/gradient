@@ -15,10 +15,17 @@ use gradient_util::upstream_cache_credential::trim_and_validate_basic_auth_user_
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
+    let mut cache_ids_seen = HashSet::new();
     for cache in lookup.config.caches.values() {
         errors.record_input_error_at_field(
             format!("caches.{}.name", cache.name),
             check_index_name(&cache.name),
+        );
+        errors.validate_optional_declared_uuid_and_record_duplicate_error(
+            format!("caches.{}.id", cache.name),
+            "cache",
+            cache.id.as_deref(),
+            &mut cache_ids_seen,
         );
         if !lookup.creator_is_blank_or_user_exists(&cache.created_by) {
             errors.push(

@@ -57,7 +57,7 @@ services.gradient.state = {
 | `git_https_credentials.*.username` | string | - | The username on the host. Forges that authenticate with a token accept any non-empty name in many cases. Examples include `x-access-token` on GitHub and `oauth2` on GitLab. |
 | `allow_exec_in_build_requests` | bool | `false` | Build requests from `gradient build` and `gradient run` start exec jobs that match them. Instance and worker switches still apply. These exec jobs get project secrets and project SSH keys. The exception is a build request from an exec job of a pull request from a fork without maintainer approval. |
 | `hide_build_requests` | bool | `false` | Set to `true` to keep the project's automatic `build-request` task out of task listings in the web UI. |
-| `id` | null or string | `null` | UUID of the project. |
+| `id` | null or string | `null` | UUID of the project. Declared values allow a rename of the existing project on a name change. Missing values lead to removal of the old project and creation of a new project on the server. Values that conflict with an existing project of the same name meet rejection from the server. |
 | `members` | list of submodule | `[ ]` | Users that hold a role on the project. |
 | `members.*.role` | string | - | Role assigned to the user: one of the built-in `Admin`, `Write` or `View`, or a custom role declared for this project in `state.roles`. |
 | `members.*.user` | string | - | Name of the user to add as a member, declared in `state.users`. |
@@ -93,6 +93,7 @@ services.gradient.state = {
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |
 | `git_host_connection` | null or string | `null` | Name of the connection for the Git host of a task. Lookup order is the task's project first, then the team for the project, then the instance. Push triggers, pull request triggers and `report_status` use this name. Team and instance connections get a [repository grant](../concepts/projects-and-tasks.md#repository-grants) for exactly the task repository. The grant and the task disappear at the same time. Gradient won't select or link a connection automatically for declared tasks. Declared values override the UI and API. |
+| `id` | null or string | `null` | UUID of the task. Declare a value to rename an existing task by changing its name. Evaluation and triggers carry over. Keep the task in that project. |
 | `keep_evaluations` | int | `30` | Finished evaluations stay regardless of result, up to this number. Active evaluations don't block GC and don't count toward this number. Aborted evaluations go first during GC, then the oldest evaluations. The most recent evaluation and the most recent completed evaluation always stay, even above this number. Set this number in the range 1 to `eval.maxKeep`. |
 | `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
@@ -148,6 +149,7 @@ These declarations stop the Nix build during validation. Server-side checks at `
 | `created_by` | string | - | Name of the user who created the cache. |
 | `description` | null or string | `null` | Cache description. |
 | `display_name` | string | `name` | Name shown in the UI for this cache. |
+| `id` | null or string | `null` | Cache UUID. Renames that use an existing UUID preserve the cache and stored paths. Renames with a new UUID create a new cache instead. The cache URL and the name of the signing key change with the name. |
 | `local_priority` | null or int | `null` | Priority written to `nix-cache-info` for clients inside `http.localIps`. |
 | `max_storage_gb` | int | `0` | Storage limit for the cache, in GB. |
 | `members` | list of submodule | `[ ]` | Users with a direct role on this cache. |

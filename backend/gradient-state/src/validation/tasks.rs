@@ -18,10 +18,17 @@ use std::collections::{HashMap, HashSet};
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let config = lookup.config;
     let mut pinned_trigger_uuids_across_tasks = HashMap::new();
+    let mut task_ids_seen = HashSet::new();
     for task in config.tasks.values() {
         errors.record_input_error_at_field(
             format!("tasks.{}.name", task.name),
             check_task_name(&task.name),
+        );
+        errors.validate_optional_declared_uuid_and_record_duplicate_error(
+            format!("tasks.{}.id", task.name),
+            "task",
+            task.id.as_deref(),
+            &mut task_ids_seen,
         );
         if !lookup.project_exists(&task.project) {
             errors.push(

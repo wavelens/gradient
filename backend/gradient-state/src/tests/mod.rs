@@ -6,6 +6,7 @@
 
 mod fixtures;
 mod postgres_state_apply_account_identity_tests;
+mod postgres_state_apply_twice_keeps_ids_changes_names_tests;
 
 use super::StateConfiguration;
 use fixtures::{

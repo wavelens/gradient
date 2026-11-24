@@ -12,7 +12,7 @@ use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let config = lookup.config;
-    let mut project_ids_seen: HashSet<String> = HashSet::new();
+    let mut project_ids_seen = HashSet::new();
     for project in config.projects.values() {
         errors.record_input_error_at_field(
             format!("projects.{}.name", project.name),
@@ -25,22 +25,12 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        if let Some(id) = &project.id {
-            match id.trim().parse::<uuid::Uuid>() {
-                Ok(parsed) => {
-                    if !project_ids_seen.insert(parsed.to_string()) {
-                        errors.push(
-                            format!("projects.{}.id", project.name),
-                            format!("Duplicate project id '{}'", id),
-                        );
-                    }
-                }
-                Err(_) => errors.push(
-                    format!("projects.{}.id", project.name),
-                    format!("Invalid UUID '{}'", id),
-                ),
-            }
-        }
+        errors.validate_optional_declared_uuid_and_record_duplicate_error(
+            format!("projects.{}.id", project.name),
+            "project",
+            project.id.as_deref(),
+            &mut project_ids_seen,
+        );
 
         let declared_project_role_names: HashSet<&str> = config
             .roles
