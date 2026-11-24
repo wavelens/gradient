@@ -655,6 +655,82 @@ pub async fn list_parent_build_derivation_ids_with_dependency_outputs_to_sign_pa
     ))
 }
 
+crate::sql_fn! {
+    SQL_LIST_REQUESTED_PARENT_BUILD_DERIVATION_IDS_WITH_DEPENDENCY_OUTPUTS_TO_SIGN = || {
+        build_parent_builds_with_unsigned_dependency_outputs_query("p.derivation = ANY($1::uuid[])")
+    },
+        params = [DerivationIds(500)],
+        tier = Bulk;
+
+    PARENT_DERIVATION_IDS_BY_DEPENDENCY_DERIVATION_IDS_SQL = || {
+        "SELECT DISTINCT e.derivation FROM derivation_dependency e \
+         WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2)"
+            .to_owned()
+    },
+        params = [DerivationIds(500)],
+        tier = Bulk;
+
+    SELECT_DERIVATION_IDS_OF_BUILD_JOB_ROWS_CREATED_IN_CURRENT_DATABASE_TRANSACTION = || {
+        "SELECT DISTINCT derivation FROM build_job WHERE created_at >= (now() AT TIME ZONE 'UTC')"
+            .to_owned()
+    },
+        params = [],
+        tier = Hot;
+}
+
+pub async fn list_parent_build_derivation_ids_with_dependency_outputs_to_sign<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    parent_builds: &[DerivationId],
+) -> Result<Vec<DerivationId>, DbErr> {
+    query_derivation_ids_for_derivation_ids(
+        db,
+        &SQL_LIST_REQUESTED_PARENT_BUILD_DERIVATION_IDS_WITH_DEPENDENCY_OUTPUTS_TO_SIGN,
+        parent_builds,
+    )
+    .await
+}
+
+pub async fn list_parent_derivations_using_any_dependency<C: ConnectionTrait>(
+    db: &C,
+    dependencies: &[DerivationId],
+) -> Result<Vec<DerivationId>, DbErr> {
+    query_derivation_ids_for_derivation_ids(
+        db,
+        &PARENT_DERIVATION_IDS_BY_DEPENDENCY_DERIVATION_IDS_SQL,
+        dependencies,
+    )
+    .await
+}
+
+pub async fn list_build_job_derivation_ids_created_in_current_transaction<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<DerivationId>, DbErr> {
+    Ok(crate::graph::promotion::returned_derivations(
+        db.query_all_raw(
+            SELECT_DERIVATION_IDS_OF_BUILD_JOB_ROWS_CREATED_IN_CURRENT_DATABASE_TRANSACTION
+                .bind([]),
+        )
+        .await?,
+    ))
+}
+
+async fn query_derivation_ids_for_derivation_ids<C: ConnectionTrait>(
+    db: &C,
+    query: &crate::sql::Query,
+    derivations: &[DerivationId],
+) -> Result<Vec<DerivationId>, DbErr> {
+    let mut found = Vec::new();
+    for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        found.extend(crate::graph::promotion::returned_derivations(
+            db.query_all_raw(query.bind([ids.into()])).await?,
+        ));
+    }
+    Ok(found)
+}
+
 pub(crate) const STORE_PATH_HASH_FROM_REFERENCE_TOKEN_SQL_EXPRESSION: &str =
     "split_part(regexp_replace(r.token, '^/nix/store/', ''), '-', 1)";
 
@@ -5053,6 +5129,20 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 .tier,
             crate::sql::Tier::Sweep,
             "Subscriptions with a pending backfill form a list for tier Sweep to execute."
+        );
+    }
+
+    #[test]
+    fn requested_parent_build_filter_is_the_page_query_with_an_id_list_in_place_of_the_page_range()
+    {
+        assert_eq!(
+            SQL_LIST_REQUESTED_PARENT_BUILD_DERIVATION_IDS_WITH_DEPENDENCY_OUTPUTS_TO_SIGN.text(),
+            SQL_LIST_PARENT_BUILD_DERIVATION_IDS_WITH_DEPENDENCY_OUTPUTS_TO_SIGN_PAGE
+                .text()
+                .replace(
+                    "p.derivation > $1 AND p.derivation <= $2 ORDER BY p.derivation LIMIT $3",
+                    "p.derivation = ANY($1::uuid[])",
+                )
         );
     }
 

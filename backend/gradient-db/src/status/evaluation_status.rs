@@ -188,7 +188,7 @@ async fn update_evaluation_status_only_if_changed(
         status,
         EvaluationStatus::Completed | EvaluationStatus::Failed
     ) {
-        ctx.request_signature_sweep_wake();
+        ctx.queue_request_signature_sweep_to_check_all_parent_builds();
     }
 
     let updated_eval = EEvaluation::find_by_id(evaluation.id)

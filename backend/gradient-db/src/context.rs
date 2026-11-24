@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::{Notify, mpsc};
 
@@ -94,35 +93,85 @@ impl ProbeRequests {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct SignatureSweepWakeRequestedInsideTransaction {
-    staged: Option<Arc<AtomicBool>>,
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DependencyOutputSigningRequest {
+    pub parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign: HashSet<DerivationId>,
+    pub dependency_derivation_ids_with_new_outputs: HashSet<DerivationId>,
+    pub full_parent_build_check_requested: bool,
 }
 
-impl SignatureSweepWakeRequestedInsideTransaction {
-    pub fn request(&self, sweep: &Notify) {
+impl DependencyOutputSigningRequest {
+    pub fn is_empty(&self) -> bool {
+        !self.full_parent_build_check_requested
+            && self
+                .parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign
+                .is_empty()
+            && self.dependency_derivation_ids_with_new_outputs.is_empty()
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign
+            .extend(other.parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign);
+        self.dependency_derivation_ids_with_new_outputs
+            .extend(other.dependency_derivation_ids_with_new_outputs);
+        self.full_parent_build_check_requested |= other.full_parent_build_check_requested;
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DependencyOutputPublishRequests {
+    pending: Arc<Mutex<DependencyOutputSigningRequest>>,
+    staged: Option<Arc<Mutex<DependencyOutputSigningRequest>>>,
+}
+
+impl DependencyOutputPublishRequests {
+    pub fn request(&self, sweep: &Notify, request: DependencyOutputSigningRequest) {
+        if request.is_empty() {
+            return;
+        }
+
         match &self.staged {
-            Some(requested) => requested.store(true, Ordering::Relaxed),
-            None => sweep.notify_one(),
+            Some(staged) => lock(staged).merge(request),
+            None => {
+                lock(&self.pending).merge(request);
+                sweep.notify_one();
+            }
         }
     }
 
     pub fn staged(&self) -> Self {
         Self {
             staged: Some(self.staged.clone().unwrap_or_default()),
+            ..self.clone()
         }
     }
 
     pub fn unstaged(&self) -> Self {
-        Self { staged: None }
+        Self {
+            staged: None,
+            ..self.clone()
+        }
     }
 
     pub fn publish(&self, sweep: &Notify) {
-        if let Some(requested) = &self.staged
-            && requested.swap(false, Ordering::Relaxed)
-        {
-            sweep.notify_one();
+        if let Some(staged) = &self.staged {
+            let request = std::mem::take(&mut *lock(staged));
+            if !request.is_empty() {
+                lock(&self.pending).merge(request);
+                sweep.notify_one();
+            }
         }
+    }
+
+    pub fn drain_pending_requests(&self) -> DependencyOutputSigningRequest {
+        std::mem::take(&mut *lock(&self.pending))
+    }
+
+    pub fn put_back_unfinished_requests_without_waking_sweep(
+        &self,
+        unfinished: DependencyOutputSigningRequest,
+    ) {
+        lock(&self.pending).merge(unfinished);
     }
 }
 
@@ -191,7 +240,7 @@ pub struct DbMemory {
     pub probe_requests: ProbeRequests,
     pub startable_set: StartableSet,
     pub held_evaluations: HeldEvaluations,
-    pub signature_sweep_wake_requested: SignatureSweepWakeRequestedInsideTransaction,
+    pub dependency_output_publish_requests: DependencyOutputPublishRequests,
 }
 
 impl DbMemory {
@@ -199,7 +248,7 @@ impl DbMemory {
         Self {
             startable_set: self.startable_set.staged(),
             probe_requests: self.probe_requests.staged(),
-            signature_sweep_wake_requested: self.signature_sweep_wake_requested.staged(),
+            dependency_output_publish_requests: self.dependency_output_publish_requests.staged(),
             ..self.clone()
         }
     }
@@ -208,7 +257,7 @@ impl DbMemory {
         Self {
             startable_set: self.startable_set.unstaged(),
             probe_requests: self.probe_requests.unstaged(),
-            signature_sweep_wake_requested: self.signature_sweep_wake_requested.unstaged(),
+            dependency_output_publish_requests: self.dependency_output_publish_requests.unstaged(),
             ..self.clone()
         }
     }
@@ -267,10 +316,42 @@ impl DbContext {
         self.wake.delivery.notify_one();
     }
 
-    pub fn request_signature_sweep_wake(&self) {
-        self.memory
-            .signature_sweep_wake_requested
-            .request(&self.wake.run_signature_sweep_now);
+    pub fn request_signature_sweep_to_check_parent_build_derivations(
+        &self,
+        parent_builds: impl IntoIterator<Item = DerivationId>,
+    ) {
+        self.memory.dependency_output_publish_requests.request(
+            &self.wake.run_signature_sweep_now,
+            DependencyOutputSigningRequest {
+                parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign: parent_builds
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            },
+        );
+    }
+
+    pub fn request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(
+        &self,
+        dependencies: impl IntoIterator<Item = DerivationId>,
+    ) {
+        self.memory.dependency_output_publish_requests.request(
+            &self.wake.run_signature_sweep_now,
+            DependencyOutputSigningRequest {
+                dependency_derivation_ids_with_new_outputs: dependencies.into_iter().collect(),
+                ..Default::default()
+            },
+        );
+    }
+
+    pub fn queue_request_signature_sweep_to_check_all_parent_builds(&self) {
+        self.memory.dependency_output_publish_requests.request(
+            &self.wake.run_signature_sweep_now,
+            DependencyOutputSigningRequest {
+                full_parent_build_check_requested: true,
+                ..Default::default()
+            },
+        );
     }
 
     pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
@@ -329,5 +410,43 @@ mod tests {
         requests.staged().publish();
 
         assert!(inbox.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn a_dependency_output_signing_request_waits_for_the_commit_and_a_rollback_drops_it() {
+        let requests = DependencyOutputPublishRequests::default();
+        let sweep = Notify::new();
+        let parent_build = DerivationId::now_v7();
+        let request = DependencyOutputSigningRequest {
+            parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign: HashSet::from([
+                parent_build,
+            ]),
+            ..Default::default()
+        };
+
+        requests.staged().request(&sweep, request.clone());
+        requests.staged().publish(&sweep);
+        let rolled_back = requests.drain_pending_requests();
+
+        let transaction = requests.staged();
+        transaction.request(&sweep, request.clone());
+        let before_commit = requests.drain_pending_requests();
+        transaction.publish(&sweep);
+        tokio::time::timeout(std::time::Duration::from_secs(1), sweep.notified())
+            .await
+            .expect("the commit wakes the signature sweep");
+
+        assert_eq!(
+            (
+                rolled_back,
+                before_commit,
+                requests.drain_pending_requests()
+            ),
+            (
+                DependencyOutputSigningRequest::default(),
+                DependencyOutputSigningRequest::default(),
+                request
+            )
+        );
     }
 }

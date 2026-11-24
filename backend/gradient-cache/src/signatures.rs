@@ -142,6 +142,8 @@ pub(crate) struct SignSweep {
     pub(crate) last_signing_pass_handled_parent_build_derivation_id: Mutex<Option<DerivationId>>,
     pub(crate) last_signing_started_at: Mutex<Option<Instant>>,
     pub(crate) last_complete_sweep_finished_at: Mutex<Option<Instant>>,
+    pub(crate) last_full_parent_builds_publish_round_start: Mutex<Option<Instant>>,
+    pub(crate) dependency_output_publish_requests: gradient_db::DependencyOutputPublishRequests,
     pub(crate) publish_start_and_scheduled_delayed_wake: SignatureSweepPublishStartAndPendingWake,
 }
 
@@ -174,7 +176,7 @@ impl Pass for SignSweep {
             .publish_start_and_scheduled_delayed_wake
             .try_start_publish_or_schedule_next_publish_wake(woken, &self.wake)
         {
-            self.publish_dependency_outputs_and_save_cursor().await
+            self.publish_pending_requests().await
         } else {
             Ok(())
         };
@@ -196,6 +198,49 @@ impl Pass for SignSweep {
 }
 
 impl SignSweep {
+    async fn publish_pending_requests(&self) -> anyhow::Result<()> {
+        let request = self
+            .dependency_output_publish_requests
+            .drain_pending_requests();
+        let full_round_due = request.full_parent_build_check_requested
+            || self
+                .last_full_parent_builds_publish_round_start
+                .lock()
+                .is_none_or(|started| started.elapsed() >= self.period());
+        if full_round_due {
+            *self.last_full_parent_builds_publish_round_start.lock() = Some(Instant::now());
+            let full_round = self.publish_dependency_outputs_and_save_cursor().await;
+            if full_round.is_err() {
+                self.dependency_output_publish_requests
+                    .put_back_unfinished_requests_without_waking_sweep(
+                        gradient_db::DependencyOutputSigningRequest {
+                            full_parent_build_check_requested: false,
+                            ..request
+                        },
+                    );
+            }
+            return full_round;
+        }
+        if request.is_empty() {
+            return Ok(());
+        }
+        match self
+            .graph
+            .sign_and_publish_dependency_outputs_for_requested_parent_builds_and_parent_builds_of_requested_dependencies_until_read_failure(
+                request,
+                gradient_db::caches::demotion::MAX_PUBLISHED_PARENT_BUILDS_PER_SIGNING_PASS,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(failed) => {
+                self.dependency_output_publish_requests
+                    .put_back_unfinished_requests_without_waking_sweep(failed.unfinished);
+                Err(failed.error)
+            }
+        }
+    }
+
     async fn publish_dependency_outputs_and_save_cursor(&self) -> anyhow::Result<()> {
         let start = *self
             .last_signing_pass_handled_parent_build_derivation_id
@@ -767,6 +812,12 @@ mod sign_sweep_pending_signature_query_tests {
             last_signing_pass_handled_parent_build_derivation_id: Default::default(),
             last_signing_started_at: Default::default(),
             last_complete_sweep_finished_at: Default::default(),
+            last_full_parent_builds_publish_round_start: Default::default(),
+            dependency_output_publish_requests: state
+                .memory
+                .db
+                .dependency_output_publish_requests
+                .clone(),
             publish_start_and_scheduled_delayed_wake:
                 super::SignatureSweepPublishStartAndPendingWake::new(state.shutdown.clone()),
         }
@@ -1111,6 +1162,122 @@ mod sign_sweep_pending_signature_query_tests {
                 .iter()
                 .any(|row| row.cache == signing_cache && row.signature.is_some()),
             "One sign sweep run publishes the signed dependency output of project Q into cache S of project P."
+        );
+        db.finish().await;
+    }
+
+    async fn seed_queued_parent_build_waiting_on_dependency_output_and_build_sign_sweep_with_empty_request_queue(
+        last_full_round_start: Option<std::time::Instant>,
+    ) -> (
+        gradient_fixtures::database::TestDatabase,
+        std::sync::Arc<gradient_core::ServerState>,
+        super::SignSweep,
+        CacheId,
+        (tempfile::NamedTempFile, tempfile::TempDir),
+    ) {
+        use gradient_storage::NarStore;
+
+        let (secret, secret_path, private_key) =
+            write_new_cache_signing_key_to_temporary_secret_file();
+        let signing_cache = CacheId::now_v7();
+        let db = add_queued_project_p_build_waiting_on_project_q_stored_output(
+            shape(),
+            signing_cache,
+            &private_key,
+        )
+        .into_database()
+        .await;
+        let nar_dir = tempfile::tempdir().expect("tempdir");
+        let state = crate::test_support::build_test_server_state_with_running_graph_writer(
+            NarStore::local(nar_dir.path()).expect("store"),
+            db.connection(),
+            move |config| {
+                config.secrets.crypt_file = secret_path;
+                config.metrics_args.graph_consistency_interval_secs = 0;
+            },
+        )
+        .await;
+        state
+            .graph
+            .run_consistency_checks()
+            .await
+            .expect("the seed settles");
+        let sweep =
+            build_sign_sweep_from_test_server_state(&state, std::time::Duration::from_secs(3600));
+        *sweep.last_full_parent_builds_publish_round_start.lock() = last_full_round_start;
+        sweep
+            .dependency_output_publish_requests
+            .drain_pending_requests();
+        (db, state, sweep, signing_cache, (secret, nar_dir))
+    }
+
+    async fn dependency_output_has_signed_row_in_cache(
+        db: &gradient_fixtures::database::TestDatabase,
+        cache: CacheId,
+    ) -> bool {
+        db.signatures(DEPENDENCY_OUTPUT_STORE_PATH_HASH)
+            .await
+            .iter()
+            .any(|row| row.cache == cache && row.signature.is_some())
+    }
+
+    #[tokio::test]
+    async fn publish_step_signs_requested_dependency_output_into_parent_project_cache_without_full_round_when_last_full_round_is_recent()
+     {
+        let (db, state, sweep, signing_cache, _files) =
+            seed_queued_parent_build_waiting_on_dependency_output_and_build_sign_sweep_with_empty_request_queue(Some(
+                std::time::Instant::now(),
+            ))
+            .await;
+
+        sweep
+            .publish_pending_requests()
+            .await
+            .expect("The publish step can run.");
+        let signed_without_request =
+            dependency_output_has_signed_row_in_cache(&db, signing_cache).await;
+        state
+            .db()
+            .request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs([db
+                .id_of(DEPENDENCY_BUILD_DERIVATION_STORE_PATH)
+                .await]);
+        sweep
+            .publish_pending_requests()
+            .await
+            .expect("The publish step can run.");
+
+        assert_eq!(
+            (
+                signed_without_request,
+                dependency_output_has_signed_row_in_cache(&db, signing_cache).await,
+                sweep
+                    .dependency_output_publish_requests
+                    .drain_pending_requests()
+                    .is_empty(),
+            ),
+            (false, true, true),
+            "Publish steps without requests sign no output with the latest full round still new. The next publish step can sign the output of Q and store it in cache S of project P after a request for dependency Q. No requests remain in the queue."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn pending_request_lost_is_recovered_by_full_publish_round_over_all_parent_builds_after_300_second_timer()
+     {
+        let (db, _state, sweep, signing_cache, _files) =
+            seed_queued_parent_build_waiting_on_dependency_output_and_build_sign_sweep_with_empty_request_queue(
+                std::time::Instant::now().checked_sub(super::SIGN_SWEEP_MAXIMUM_WAIT_BETWEEN_RUNS),
+            )
+            .await;
+
+        sweep
+            .publish_pending_requests()
+            .await
+            .expect("The publish step can run.");
+
+        assert!(
+            dependency_output_has_signed_row_in_cache(&db, signing_cache).await,
+            "A lost request doesn't leave the output unsigned. A full round across all parent builds can sign the output of Q and store it in cache S of project P after a 300-second timer."
         );
         db.finish().await;
     }

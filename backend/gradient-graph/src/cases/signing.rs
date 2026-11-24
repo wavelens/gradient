@@ -2869,6 +2869,136 @@ async fn dependency_output_commit_writes_no_signature_row_queues_parent_build_wa
 }
 
 #[tokio::test]
+async fn nar_commit_of_dependency_output_queues_derivation_with_new_outputs_for_signature_sweep_and_targeted_publish_signs_output_into_parent_project_signing_cache()
+ {
+    let (stored_dependency_outputs_owner_evaluation_id, c1) =
+        (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = start_case_with_queued_parent_build_using_signing_cache_waiting_on_dependency_output_from_other_project(
+        stored_dependency_outputs_owner_evaluation_id,
+        c1,
+    )
+    .await;
+    case.ctx
+        .memory
+        .dependency_output_publish_requests
+        .drain_pending_requests();
+
+    commit_dependency_output_uploaded_by_other_project_worker(
+        &case,
+        stored_dependency_outputs_owner_evaluation_id,
+    )
+    .await
+    .expect("The commit of F_OUT is successful.");
+    let request = case
+        .ctx
+        .memory
+        .dependency_output_publish_requests
+        .drain_pending_requests();
+    let round = case
+        .graph
+        .sign_and_publish_dependency_outputs_for_requested_parent_builds_and_parent_builds_of_requested_dependencies_until_read_failure(
+            request.clone(),
+            64,
+        )
+        .await
+        .expect("The target publish succeeds.");
+
+    assert_eq!(
+        (
+            request
+                .dependency_derivation_ids_with_new_outputs
+                .contains(&case.db.id_of(F).await),
+            round.insert_messages_sent_to_graph_writer > 0,
+            case.signatures(F_OUT)
+                .await
+                .iter()
+                .any(|row| row.cache == c1 && row.signature.is_some()),
+        ),
+        (true, true, true),
+        "The commit of F_OUT queues F as a dependency with new outputs. A targeted publish of that request signs F_OUT into cache C1 of project G without a full round."
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn record_batch_queues_parent_builds_in_signature_sweep_request_queue_and_publish_with_nothing_to_sign_succeeds()
+ {
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .derivation(B)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .build_status(BuildStatus::Completed)
+            .cached_output(B),
+    )
+    .await;
+    case.ctx
+        .memory
+        .dependency_output_publish_requests
+        .drain_pending_requests();
+
+    walk_above_b(&case, e1, A, A_OUT, "pkg.a").await;
+    let request = case
+        .ctx
+        .memory
+        .dependency_output_publish_requests
+        .drain_pending_requests();
+    let round = case
+        .graph
+        .sign_and_publish_dependency_outputs_for_requested_parent_builds_and_parent_builds_of_requested_dependencies_until_read_failure(
+            request.clone(),
+            64,
+        )
+        .await
+        .expect("The target publish succeeds.");
+
+    assert_eq!(
+        (
+            request
+                .parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign
+                .contains(&case.db.id_of(A).await),
+            round.failed_page_count,
+        ),
+        (true, 0),
+        "A record batch can queue A as the parent build for the check. A publish for the target of that request can complete without failure."
+    );
+    case.zero_drift("after the publish").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn retry_evaluation_repair_requests_one_full_signature_sweep_publish_round_over_all_parent_builds_because_copied_build_jobs_are_outside_graph_writer_transaction()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1)).await;
+    case.ctx
+        .memory
+        .dependency_output_publish_requests
+        .drain_pending_requests();
+
+    case.transition(crate::messages::Transition::Repair {
+        scope: gradient_db::graph::repair::RepairScope::Retry(e1),
+    })
+    .await;
+
+    assert!(
+        case.ctx
+            .memory
+            .dependency_output_publish_requests
+            .drain_pending_requests()
+            .full_parent_build_check_requested,
+        "Repairs of a retried evaluation require one full publish round. The retry copied build jobs outside the transaction of the graph writer."
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn dependency_commit_wakes_signature_sweep_while_cache_inserts_fail_then_publish_signs_after_inserts_allowed()
  {
     let (stored_dependency_outputs_owner_evaluation_id, c1) =

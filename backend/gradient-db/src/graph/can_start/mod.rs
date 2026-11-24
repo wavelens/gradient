@@ -19,7 +19,10 @@ mod repair;
 #[cfg(test)]
 mod test_rows;
 
-pub use fetchable::{advance_fetchable, became_fetchable, lost_fetchability, seed_blocking_deps};
+pub use fetchable::{
+    FetchableStatusChangesAndNewlyMarkedDerivations, advance_fetchable, became_fetchable,
+    lost_fetchability, seed_blocking_deps,
+};
 pub use lock::{SeedLock, SharedBuildLock, lock_seed_shared_builds, lock_shared_builds};
 pub(crate) use lock::{ids, lock_unavailable};
 pub use need::{

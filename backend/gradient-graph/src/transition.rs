@@ -1554,7 +1554,7 @@ async fn find_or_create_build_job(
         ..Default::default()
     }
     .into_active_model();
-    if let Err(e) = EBuildJob::insert(row)
+    match EBuildJob::insert(row)
         .on_conflict(
             OnConflict::columns([CBuildJob::Evaluation, CBuildJob::Derivation])
                 .do_nothing()
@@ -1563,7 +1563,11 @@ async fn find_or_create_build_job(
         .exec_without_returning(&ctx.worker_db)
         .await
     {
-        warn!(error = %e, "build_job upsert failed");
+        Ok(0) => {}
+        Ok(_) => {
+            ctx.request_signature_sweep_to_check_parent_build_derivations([shared_build.derivation])
+        }
+        Err(e) => warn!(error = %e, "build_job upsert failed"),
     }
 
     match EBuildJob::find()
