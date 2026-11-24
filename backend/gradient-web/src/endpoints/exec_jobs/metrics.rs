@@ -58,7 +58,8 @@ pub async fn get_exec_job_metrics(
         ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
     )
     .await?;
-    let attempts = &ctx.node(query.node)?.attempts;
+    let node = ctx.node(query.node)?;
+    let attempts = &node.attempts;
     let attempt = match query.attempt {
         Some(number) => attempts.iter().find(|a| a.number == number),
         None => attempts.iter().max_by_key(|a| a.number),
@@ -76,7 +77,7 @@ pub async fn get_exec_job_metrics(
         }
         None => ExecAttemptResourceUsageResult::default(),
     };
-    let guest = spec_of(&ctx.detail.job).guest;
+    let guest = spec_of(&node.job).guest;
     Ok(ok_json(ExecJobMetricsResponse {
         attempt: attempt.number,
         attempt_open: attempt.ended_at.is_none(),
