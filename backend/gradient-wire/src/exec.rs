@@ -30,6 +30,8 @@ use crate::port_ranges::PortRanges;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use uuid::Uuid;
 
+pub const EXEC_METRICS_SINCE: u16 = 68;
+
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub struct ExecMetrics {
     pub sequence: u32,
