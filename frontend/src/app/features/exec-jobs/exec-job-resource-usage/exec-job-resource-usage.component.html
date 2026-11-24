@@ -1,0 +1,65 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-load-state
+  [loading]="isAwaitingFirstResourceUsageResponse()"
+  [error]="loadError()"
+  [empty]="!execJobMetricsResponse()?.points?.length"
+  loadingMessage="Loading metrics..."
+  errorTitle="Failed to Load Metrics"
+  emptyIcon="show_chart"
+  emptyTitle="No metrics recorded for this attempt"
+  emptyMessage="Metrics appear a few seconds into the program run. Older versions of the worker and guest agent send no metrics."
+  flat
+  (retry)="retryLoadResourceUsageMetrics()"
+>
+  <div class="peak-summary-tiles-row">
+    @for (tile of resourceUsageSummaryTiles(); track tile.resourcePeakTitle) {
+      <div class="resource-peak-summary-tile">
+        <span class="tile-title">{{ tile.resourcePeakTitle }}</span>
+        <span class="tile-big-value">{{ tile.peakAgainstSizeText }}</span>
+        <span class="tile-part-secondary-line">{{ tile.peakPercentOfUsableCapacityText }}</span>
+        @if (tile.averageUsageText; as average) {
+          <span class="tile-part-secondary-line">{{ average }}</span>
+        }
+      </div>
+    }
+  </div>
+
+  <gr-metric-chart
+    title="CPUs in use"
+    type="line"
+    [height]="200"
+    [series]="cpuInUseChartSeries()"
+    [categories]="elapsedTimeAxisLabels()"
+    [colors]="averagePeakUsableSizeSeriesColors"
+    [inset]="sharedChartMargins"
+    [valueFormatter]="formatCpuCountToOneDecimal"
+  />
+
+  <gr-metric-chart
+    title="RAM Usage"
+    explanationText="Memory that the guest uses (page cache excluded). The kernel can free that cache at any time."
+    type="line"
+    [height]="200"
+    [series]="ramUsedBytesAveragePeakAndUsableMemoryChartSeries()"
+    [categories]="elapsedTimeAxisLabels()"
+    [colors]="averagePeakUsableSizeSeriesColors"
+    [inset]="sharedChartMargins"
+    [valueFormatter]="formatBytes"
+  />
+
+  <gr-metric-chart
+    title="Disk in Use at /work"
+    type="line"
+    [height]="200"
+    [series]="workDiskUsedBytesChartSeries()"
+    [categories]="elapsedTimeAxisLabels()"
+    [colors]="diskChartPeakAndUsableSizeColors"
+    [inset]="sharedChartMargins"
+    [valueFormatter]="formatBytes"
+  />
+</gr-load-state>

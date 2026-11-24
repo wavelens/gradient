@@ -14,6 +14,9 @@ export const metricSeriesChartColorTokenNames = {
   closureSize: '--gr-chart-purple',
   runtimeClosure: '--gr-chart-cyan',
   deps: '--gr-chart-teal',
+  averageUsageLine: '--gr-chart-cyan',
+  peakUsageLineColor: '--gr-chart-purple',
+  guestUsableSizeLineColor: '--gr-chart-orange',
 };
 
 export function formatDependencyCount(count: number): string {

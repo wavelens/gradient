@@ -116,6 +116,7 @@ interface Setup {
   logAfter: ReturnType<typeof vi.fn>;
   keepVmRunning: ReturnType<typeof vi.fn>;
   letVmStop: ReturnType<typeof vi.fn>;
+  getJobAttemptMetrics: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.spyOn>;
   signedIn: ReturnType<typeof signal<boolean>>;
 }
@@ -133,6 +134,7 @@ function setup(
   const logAfter = vi.fn(() => of(fullLog(LOG)));
   const keepVmRunning = vi.fn(() => of('Success'));
   const letVmStop = vi.fn(() => of('Success'));
+  const getJobAttemptMetrics = vi.fn(() => EMPTY);
   const route = {
     snapshot: {
       paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }),
@@ -156,6 +158,7 @@ function setup(
           run,
           keepVmRunning,
           letVmStop,
+          getJobAttemptMetrics,
         },
       },
       { provide: ConfirmService, useValue: { confirm } },
@@ -166,7 +169,7 @@ function setup(
   vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockImplementation(() => signedIn());
   const fixture = TestBed.createComponent(ExecJobPageComponent);
   fixture.detectChanges();
-  return { fixture, abort, confirm, run, logAfter, keepVmRunning, letVmStop, navigate, signedIn };
+  return { fixture, abort, confirm, run, logAfter, keepVmRunning, letVmStop, getJobAttemptMetrics, navigate, signedIn };
 }
 
 function toasts() {
@@ -431,10 +434,29 @@ describe('ExecJobPageComponent', () => {
     const row = (fixture.nativeElement as HTMLElement).querySelector('.phone-breadcrumb-and-view-tabs-row') as HTMLElement;
     expect(row.querySelector('.breadcrumb-current')?.textContent?.trim()).toBe('apps.x86_64-linux.train');
     const tabs = Array.from(row.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(['Log', 'Info', 'Timeline', 'Terminal']);
+    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(['Log', 'Info', 'Timeline', 'Metrics', 'Terminal']);
     tabs[1].click();
     fixture.detectChanges();
     expect(fixture.componentInstance.view()).toBe('info');
+  });
+
+  it('offers a Metrics view', () => {
+    const { fixture } = setup('completed', null);
+    expect(fixture.componentInstance.views().map((option) => option.value)).toContain('metrics');
+  });
+
+  it('loads the metrics of the selected node and attempt from a link with view=metrics', () => {
+    const response: ExecJobResponse = {
+      ...twoNodeJob('running'),
+      node_jobs: [
+        { node: 0, id: 'j1', status: 'running', worker: 'w1', attempts: [] },
+        { node: 1, id: 'j1n1', status: 'running', worker: 'w2', attempts: [{ number: 3, worker: 'w2', started_at: '2026-01-01T00:00:01' }] },
+      ],
+    };
+    const { fixture, getJobAttemptMetrics } = setup('running', SSH, { view: 'metrics', node: '1' }, response);
+    expect(fixture.componentInstance.view()).toBe('metrics');
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-exec-job-resource-usage')).not.toBeNull();
+    expect(getJobAttemptMetrics).toHaveBeenLastCalledWith('j1', 3, 1);
   });
 
   it('keeps the chosen view in the URL and opens it again from there', () => {

@@ -236,6 +236,12 @@
           <div class="timeline">
             <gr-job-timeline [phases]="job.timeline" [jobFinished]="!open()" />
           </div>
+        } @else if (view() === 'metrics') {
+          <div class="log-header">
+            <span class="log-header-title">Resource Usage</span>
+          </div>
+          <gr-exec-job-resource-usage [job]="job.id" [node]="node()"
+                                      [attempt]="pickedOrHighestNumberedAttemptForSelectedNode()?.number ?? null" />
         } @else {
           <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker">
             <span logTitle class="log-header-title">Log</span>
