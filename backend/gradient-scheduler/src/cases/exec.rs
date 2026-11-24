@@ -12,12 +12,13 @@ use gradient_entity::exec_job::{self, ExecJobStatus};
 use gradient_entity::exec_job_attempt;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_entity::exec_job_continuation::{self, ContinuationStatus};
+use gradient_entity::exec_job_metric;
 use gradient_entity::ids::{DispatchedJobId, EvaluationId, ProjectId};
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::WaitingReason;
 use gradient_types::exec::{DISABLED_FOR_TASK, ExecInventory, ExecSpec, Phase, SopsFile};
-use gradient_wire::types::BuildFailureKind;
+use gradient_wire::types::{BuildFailureKind, ExecMetrics};
 use gradient_wire::types::{DiscoveredDerivation, FlakeSource, Job, JobKind};
 use gradient_wire::worker_store_path_bloom_filter::decode_store_path_hash_into_two_u64_words;
 
@@ -1041,6 +1042,60 @@ async fn a_requeued_job_carries_its_last_phase_to_the_next_attempt() {
             2
         ),
         "after 1: the second attempt starts from the phase"
+    );
+    case.finish().await;
+}
+
+fn sample_resource_usage_window_message(sequence: u32) -> ExecMetrics {
+    ExecMetrics {
+        sequence,
+        window_ms: 10_000,
+        cpu_avg: 1.5,
+        cpu_max: 2.0,
+        ram_avg_bytes: 1 << 20,
+        ram_max_bytes: 2 << 20,
+        ram_total_bytes: 8 << 20,
+        disk_max_bytes: 3 << 20,
+        disk_total_bytes: 16 << 20,
+    }
+}
+
+#[tokio::test]
+async fn a_usage_window_for_the_running_attempt_is_stored() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(e1, spec()).await;
+    let (key, _) = dispatched(&case).await;
+
+    case.scheduler
+        .record_exec_usage_window(W1, &key, sample_resource_usage_window_message(0))
+        .await;
+
+    let windows = case.db.rows::<exec_job_metric::Entity>().await;
+    let attempt = the_attempt(&case).await;
+    assert_eq!(
+        windows
+            .iter()
+            .map(|w| (w.attempt, w.exec_job, w.sequence, w.cpu_max))
+            .collect::<Vec<_>>(),
+        vec![(attempt.id, attempt.exec_job, 0, 2.0)],
+        "after 1: one window of the attempt"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_usage_window_from_another_worker_is_dropped() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(e1, spec()).await;
+    let (key, _) = dispatched(&case).await;
+
+    case.scheduler
+        .record_exec_usage_window(W2, &key, sample_resource_usage_window_message(0))
+        .await;
+
+    assert!(
+        case.db.rows::<exec_job_metric::Entity>().await.is_empty(),
+        "after 1: nothing stored"
     );
     case.finish().await;
 }

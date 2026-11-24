@@ -27,7 +27,7 @@ use gradient_wire::messages::{
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
-    EvalShardOutcome, MAX_PHASE_PAYLOAD,
+    EvalShardOutcome, ExecMetrics, MAX_PHASE_PAYLOAD,
 };
 use gradient_wire::worker_store_path_bloom_filter::{
     BloomFilterBitArrayChunk, WorkerStorePathBloomFilterChunkCollector,
@@ -732,7 +732,10 @@ impl<'a> InboundContext<'a> {
                 .await;
                 true
             }
-            ClientMessage::ExecMetrics { .. } => true,
+            ClientMessage::ExecMetrics { job_id, metrics } => {
+                self.on_exec_metrics(job_id, metrics).await;
+                true
+            }
         }
     }
 
@@ -772,6 +775,17 @@ impl<'a> InboundContext<'a> {
                 name,
                 payload,
             })
+            .await;
+    }
+
+    async fn on_exec_metrics(&self, job_id: String, metrics: ExecMetrics) {
+        if self.active.exec_attempt(&job_id).is_none() || !self.owns_handed_dispatch(&job_id).await
+        {
+            debug!(peer_id = %self.peer_id, %job_id, "usage window for an exec job this session does not run. discard");
+            return;
+        }
+        self.job_events
+            .push(JobEvent::ExecUsageWindow { job_id, metrics })
             .await;
     }
 
