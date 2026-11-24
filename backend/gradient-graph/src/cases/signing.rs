@@ -539,6 +539,69 @@ async fn k14_signed_row_with_unclaimed_references_is_expanded_by_reference_claim
     case.finish().await;
 }
 
+async fn start_test_case_with_claimed_b_above_x_above_y_in_c1(
+    e1: EvaluationId,
+    c1: CacheId,
+) -> Case {
+    let case = Case::start(b_above_x_above_y(e1, c1)).await;
+    for hash in [B_OUT, X_OUT, Y_OUT] {
+        case.seed_signature_with_references_claimed(hash, c1, None)
+            .await;
+    }
+    case
+}
+
+async fn assert_references_are_claimed_false_for_b_and_true_for_y_after_removing_x_claim(
+    case: &Case,
+    c1: CacheId,
+) {
+    assert!(
+        !references_are_claimed(case, B_OUT, c1, "after 1: B").await,
+        "After 1: B in C1 referenced deleted X and lost references_are_claimed"
+    );
+    assert!(
+        references_are_claimed(case, Y_OUT, c1, "after 1: Y").await,
+        "After 1: Y in C1 does not reference the removed path. references_are_claimed is still true."
+    );
+}
+
+#[tokio::test]
+async fn demoting_cache_claim_clears_references_are_claimed_on_rows_referencing_path() {
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = start_test_case_with_claimed_b_above_x_above_y_in_c1(e1, c1).await;
+
+    case.demote(Demotion::CacheClaim {
+        cache: c1,
+        hash: X_OUT.into(),
+    })
+    .await;
+
+    assert_references_are_claimed_false_for_b_and_true_for_y_after_removing_x_claim(&case, c1)
+        .await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn retiring_cached_path_clears_references_are_claimed_on_referencing_rows_and_keeps_it_on_non_referencing_rows()
+ {
+    let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
+    let case = start_test_case_with_claimed_b_above_x_above_y_in_c1(e1, c1).await;
+
+    case.gc(GcRequest::RetireCachedPathsWithMissingNarFiles {
+        ids: vec![case.cached_path(X_OUT).await.id],
+    })
+    .await;
+
+    assert_eq!(
+        case.find_cached_path(X_OUT).await,
+        None,
+        "after 1: X retired"
+    );
+    assert_references_are_claimed_false_for_b_and_true_for_y_after_removing_x_claim(&case, c1)
+        .await;
+    case.finish().await;
+}
+
 #[tokio::test]
 async fn k15_walked_path_references_are_claimed_only_after_all_references_are_stored() {
     let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());

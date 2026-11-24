@@ -195,16 +195,33 @@ crate::sql_fn! {
         params = [CachedPathHashes(64)];
 }
 
-crate::sql! {
-    DELETE_CACHED_PATHS_BY_ID_RETURNING_UNREFERENCED_OBJECT_KEYS = "WITH deleted AS ( \
+fn delete_cached_paths_by_id_returning_unreferenced_object_keys_sql() -> String {
+    format!(
+        "WITH deleted AS ( \
              DELETE FROM cached_path cp WHERE cp.id = ANY($1::uuid[]) \
-             RETURNING cp.nar_object_storage_key) \
+             RETURNING cp.nar_object_storage_key), \
+         deleted_cached_path_signatures AS MATERIALIZED ( \
+             SELECT s.id, s.cache, cp.hash, cp.package FROM cached_path_signature s \
+             JOIN cached_path cp ON cp.id = s.cached_path \
+             WHERE s.cached_path = ANY($1::uuid[])), \
+         cleared AS ({clear}) \
          SELECT DISTINCT d.nar_object_storage_key FROM deleted d \
          WHERE NOT EXISTS (SELECT 1 FROM cached_path kept \
                            WHERE kept.nar_object_storage_key = d.nar_object_storage_key \
                              AND kept.id <> ALL($1::uuid[]))",
-        params = [CachedPathIds(64)];
+        clear = crate::store_path_content_variant_trust::sql_text_clearing_references_are_claimed_for_cached_path_signature_rows_in_same_cache_referencing_deleted_signature_rows(
+            "deleted_cached_path_signatures"
+        ),
+    )
+}
 
+crate::sql_fn! {
+    DELETE_CACHED_PATHS_BY_ID_RETURNING_UNREFERENCED_OBJECT_KEYS =
+        delete_cached_paths_by_id_returning_unreferenced_object_keys_sql,
+        params = [CachedPathIds(64)];
+}
+
+crate::sql! {
     SQL_SELECT_STORE_HASHES_WITH_NO_CACHED_PATH_OUTSIDE_ROW_IDS = "SELECT h.hash \
          FROM unnest($1::text[]) AS h(hash) \
          WHERE NOT EXISTS (SELECT 1 FROM cached_path cp \

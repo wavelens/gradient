@@ -80,14 +80,29 @@ gradient_db::sql_fn! {
         flags = [Walk];
 }
 
-gradient_db::sql! {
-    GC_DELETE_STALE_CLAIMS = "DELETE FROM cached_path_signature s USING cached_path cp \
+fn delete_stale_claims_sql() -> String {
+    format!(
+        "WITH deleted_cached_path_signatures AS ( \
+             DELETE FROM cached_path_signature s USING cached_path cp \
              WHERE s.cached_path = cp.id AND cp.hash = ANY($1::text[]) \
                AND s.pinned_at IS NULL \
-               AND coalesce(s.last_fetched_at, s.created_at) < $2",
+               AND coalesce(s.last_fetched_at, s.created_at) < $2 \
+             RETURNING s.id, s.cache, cp.hash, cp.package), \
+         cleared AS ({clear}) \
+         SELECT count(*) AS deleted_claim_row_count FROM deleted_cached_path_signatures",
+        clear = gradient_db::store_path_content_variant_trust::sql_text_clearing_references_are_claimed_for_cached_path_signature_rows_in_same_cache_referencing_deleted_signature_rows(
+            "deleted_cached_path_signatures"
+        ),
+    )
+}
+
+gradient_db::sql_fn! {
+    GC_DELETE_STALE_CLAIMS = delete_stale_claims_sql,
         params = [CachedPathHashes(64), Now],
         tier = Sweep;
+}
 
+gradient_db::sql! {
     SELECT_CACHED_PATH_IDS_WITHOUT_CACHE_SIGNATURE_BEFORE_CUTOFF = "SELECT cp.id FROM cached_path cp \
              WHERE cp.hash = ANY($1::text[]) AND cp.created_at < $2 \
                AND NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)",
@@ -308,12 +323,13 @@ async fn delete_unused_claims(
 
     let unused_since = Value::ChronoDateTime(Some(unused_since));
     let deleted_claim_row_count = db
-        .execute_raw(
+        .query_one_raw(
             GC_DELETE_STALE_CLAIMS.bind([still_stale.clone().into(), unused_since.clone()]),
         )
         .await
         .context("GC: delete the cache claims unused since the cutoff")?
-        .rows_affected();
+        .and_then(|r| r.try_get::<i64>("", "deleted_claim_row_count").ok())
+        .map_or(0, |count| count.unsigned_abs());
 
     let unclaimed: Vec<CachedPathId> = db
         .query_all_raw(

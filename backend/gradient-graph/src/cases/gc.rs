@@ -20,7 +20,7 @@ use gradient_entity::derivation_build;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::{CacheId, EvaluationId};
 use gradient_fixtures::shape::shape;
-use sea_orm::EntityTrait;
+use sea_orm::{ConnectionTrait, EntityTrait};
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, Case, D, F, F_OUT, N, N_OUT, O, O_OUT, O2, O2_OUT, X, X_OUT, Y,
@@ -721,5 +721,73 @@ async fn c13_pinned_claim_keeps_shared_path_until_unpinned_then_gc_retires_path(
         "after 2: cached_path(O_OUT) retired"
     );
     case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn c14_unused_claim_deleted_clears_references_are_claimed_in_same_cache_only() {
+    let (e1, c1, c2) = (EvaluationId::now_v7(), CacheId::now_v7(), CacheId::now_v7());
+    let case = Case::start(
+        chain_done(e1)
+            .derivation(O)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(O_OUT)
+            .build_status(BuildStatus::Completed)
+            .cached_output(O)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .into_cache(c2)
+            .keyed(Case::key()),
+    )
+    .await;
+    let fetched_at = t0() + Duration::hours(1);
+    for hash in [O_OUT, B_OUT] {
+        case.insert_cache_claim(hash, c1, None, None).await;
+        case.insert_cache_claim(hash, c2, None, Some(fetched_at))
+            .await;
+    }
+    case.insert_cache_claim(drv_hash(O), c1, None, None).await;
+    case.ctx
+        .worker_db
+        .execute_unprepared(&format!(
+            "UPDATE cached_path SET \"references\" = \
+                 (SELECT hash || '-' || package FROM cached_path WHERE hash = '{O_OUT}') \
+             WHERE hash = '{B_OUT}'; \
+             UPDATE cached_path_signature SET references_are_claimed = true"
+        ))
+        .await
+        .expect("B references O and every claim is marked");
+
+    let report = gc_unused_cache_claims(&case, t0()).await;
+
+    assert_eq!(report.deleted_claim_row_count, 1, "after 1: report");
+    assert_eq!(
+        case.signature(O_OUT, c1).await,
+        None,
+        "after 1: claim(O_OUT, C1)"
+    );
+    let case_ref = &case;
+    let marked = |hash, cache| async move {
+        case_ref
+            .signature(hash, cache)
+            .await
+            .expect("the claim survives")
+            .references_are_claimed
+    };
+    assert!(
+        !marked(B_OUT, c1).await,
+        "B in C1 can reference the removed claim of O after step 1 and lose references_are_claimed."
+    );
+    assert!(
+        marked(B_OUT, c2).await,
+        "After 1: B in C2 retained references_are_claimed. The claim on O in C2 persisted."
+    );
+    assert!(
+        marked(drv_hash(O), c1).await,
+        "after 1: O.drv in C1 references no deleted claim and keeps references_are_claimed"
+    );
+    case.zero_drift("step 1").await;
     case.finish().await;
 }

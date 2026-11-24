@@ -784,6 +784,34 @@ fn cached_path_signature_references_are_claimed_condition(alias: &str) -> String
     format!("{alias}.references_are_claimed")
 }
 
+pub fn sql_text_clearing_references_are_claimed_for_cached_path_signature_rows_in_same_cache_referencing_deleted_signature_rows(
+    deleted_cached_path_signatures: &str,
+) -> String {
+    format!(
+        r#"UPDATE cached_path_signature cached_path_signature_row_referencing_deleted_path
+    SET references_are_claimed = false
+    WHERE cached_path_signature_row_referencing_deleted_path.id = ANY(ARRAY(
+        SELECT claimed_cached_path_referencing_deleted.id
+        FROM {deleted_cached_path_signatures} deleted
+        CROSS JOIN LATERAL (
+            SELECT cached_path_referencing_deleted_store_path.id
+            FROM cached_path cached_path_referencing_deleted_store_path
+            WHERE string_to_array(cached_path_referencing_deleted_store_path."references", ' ')
+                  && ARRAY[deleted.hash || '-' || deleted.package, '/nix/store/' || deleted.hash || '-' || deleted.package]
+            OFFSET 0) cached_path_referencing_deleted_store_path
+        CROSS JOIN LATERAL (
+            SELECT claimed_cached_path_referencing_deleted.id
+            FROM cached_path_signature claimed_cached_path_referencing_deleted
+            WHERE claimed_cached_path_referencing_deleted.cached_path = cached_path_referencing_deleted_store_path.id
+              AND claimed_cached_path_referencing_deleted.cache = deleted.cache
+              AND claimed_cached_path_referencing_deleted.references_are_claimed
+            OFFSET 0) claimed_cached_path_referencing_deleted
+        WHERE NOT EXISTS (SELECT 1 FROM {deleted_cached_path_signatures} also_deleted
+                          WHERE also_deleted.id = claimed_cached_path_referencing_deleted.id)))
+      AND cached_path_signature_row_referencing_deleted_path.references_are_claimed"#
+    )
+}
+
 fn build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_cache_and_store_path_hash(
     seeds: &str,
     target_subscription: &str,
