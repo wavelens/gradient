@@ -58,6 +58,15 @@ async fn switch_exec_jobs_on(case: &Case) {
     case.sql("UPDATE task SET exec_enabled = true").await;
 }
 
+async fn add_active_webhook_for_each_project(case: &Case) {
+    case.sql(
+        "INSERT INTO webhook (id, scope, project, name, url, secret, events, active, created_by, \
+         created_at, updated_at) SELECT uuidv7(), 0, id, 'exec-job-reports', 'http://127.0.0.1/', \
+         '', '[\"*\"]'::jsonb, true, created_by, now(), now() FROM project",
+    )
+    .await;
+}
+
 async fn messages(case: &Case, evaluation: EvaluationId) -> Vec<(String, Option<String>)> {
     case.db
         .rows::<evaluation_message::Entity>()
@@ -211,6 +220,7 @@ async fn walked_exec(spec: ExecSpec) -> (Case, EvaluationId) {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(shape().evaluation(e1)).await;
     switch_exec_jobs_on(&case).await;
+    add_active_webhook_for_each_project(&case).await;
     case.walk(case.tasked(e1, vec![exec_root_with(spec)]).await)
         .await;
     case.transition(Transition::EvalStreamCompleted { evaluation: e1 })

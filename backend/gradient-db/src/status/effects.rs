@@ -352,6 +352,10 @@ mod tests {
                 derivation: d,
                 ..Default::default()
             }]])
+            .append_query_results([vec![std::collections::BTreeMap::from([(
+                "id".to_owned(),
+                sea_orm::Value::from(evaluation.into_inner()),
+            )])]])
             .append_query_results(vec![
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new();
                 3

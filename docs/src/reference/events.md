@@ -65,6 +65,7 @@ Manage webhooks under **Webhooks** in the project settings, on the cache page or
 - `events` is a list of globs (`build.*`, `task.star`). With an empty list, the webhook receives everything in scope.
 - The API exposes the signing secret exactly once, on create and on `rotate-secret`.
 - Gradient retries a failed delivery (transport error or non-2xx) up to 6 times in total. Backoff starts at 30 s and caps at 8 min. After the last attempt, Gradient dead-letters the delivery.
+- Gradient can store `build.<status>` and `exec_job.<status>` events only if consumers already exist for the evaluation task at the time of event recording. These consumers are active task actions and status reports for commits to the Git host. Active webhooks for a project or an instance also count. A webhook or task action created later can get no such events for builds and exec jobs that were reported before that webhook or task action existed.
 - `POST .../{id}/test` dispatches a `webhook.ping` immediately and gives back the recorded delivery.
 
 **Request Headers**

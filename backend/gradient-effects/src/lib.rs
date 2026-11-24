@@ -27,6 +27,7 @@ use deliver::{DbStore, DeliverJob, Deliverer, EffectsCtx, FactoryHandoff};
 /// A mass status wave is firing one event per shared build. Unbounded execution exhausted the DB
 /// pool.
 pub const EFFECTS_WORKERS: usize = 8;
+pub const MAX_IN_FLIGHT_PENDING_DELIVERY_ROWS: usize = EFFECTS_WORKERS * 8;
 /// A lost wake is costing this much latency, never a delivery.
 pub const TICK: Duration = Duration::from_secs(30);
 
@@ -90,7 +91,7 @@ async fn spawn(
         EffectsArgs {
             store: DbStore::new(state.worker_db.clone()),
             hand_off: Arc::new(FactoryHandoff { factory }),
-            capacity: EFFECTS_WORKERS,
+            capacity: MAX_IN_FLIGHT_PENDING_DELIVERY_ROWS,
             tick: TICK,
             health: Some(Arc::clone(&child.health)),
         },

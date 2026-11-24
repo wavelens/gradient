@@ -1574,7 +1574,7 @@ async fn t30_a_post_request_while_a_firing_is_in_flight_creates_another_firing_a
     enqueue_or_increment_trigger_fire_for_post_request(db, &fire)
         .await
         .expect("the post request firing is queued");
-    pending::mark(db, in_flight, &Outcome::Delivered)
+    pending::mark(db, &[(in_flight.clone(), Outcome::Delivered)])
         .await
         .expect("the firing is marked");
 
